@@ -1275,6 +1275,7 @@ impl State {
             wake(at);
         }
         moving |= self.tick_switcher(now, &mut wake);
+        moving |= self.tick_ink(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {

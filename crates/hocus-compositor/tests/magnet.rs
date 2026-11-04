@@ -7,7 +7,9 @@ mod common;
 
 use anyhow::Context;
 
-use common::{BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTMETA, chord, compositor, open, wait_for_rect};
+use common::{
+    BTN_LEFT, KEY_2, KEY_DOWN, KEY_LEFTALT, KEY_LEFTMETA, chord, compositor, open, wait_for_rect,
+};
 use hocus_compositor::{
     Headless,
     model::{GAP, Rect},
@@ -16,19 +18,19 @@ use hocus_compositor::{
 /// The work area of the headless 1920×1080 output.
 const AREA: Rect = Rect::new(8, 8, 1700, 1064);
 
-/// Starts moving the window at `rect` with `Super`, held at its middle;
+/// Starts moving the window at `rect` with `Alt`, held at its middle;
 /// the pointer's place then.
 fn grab(hp: &mut Headless, rect: Rect) -> (f64, f64) {
     let at = rect.centre();
     hp.pointer_move(at.0, at.1);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     at
 }
 
 fn release(hp: &mut Headless) {
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
 }
 
 /// Moves the window at `rect` so that its corner would be at (`x`, `y`)

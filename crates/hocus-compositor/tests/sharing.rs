@@ -11,7 +11,8 @@
 //! cancel response; the shared screen gets its ring, never in its
 //! stream's frames; the bar shows the sign, whose popover stops the share
 //! and ends the session; notifications are held while sharing and summed
-//! up at its end; a shared window closing ends its share. And the hard
+//! up at its end; a shared window closing ends its share; the strokes
+//! drawn on the screen are in its frames (docs/design/ink.md). And the hard
 //! rule's budget, counted: frames of 2560 × 1600 reach the stream with
 //! none of their bytes copied on the loop (their pixels are lent). How
 //! long a hand-over took the loop is only printed, as timings are.
@@ -830,6 +831,93 @@ fn the_shared_screen_has_its_ring_never_in_its_stream() -> anyhow::Result<()> {
     let at = (540 * w as usize + 300) * 4;
     let same = u32::from_be_bytes([0xff, pixels[at + 2], pixels[at + 1], pixels[at]]);
     assert_eq!(same & 0xffffff, screen & 0xffffff);
+    Ok(())
+}
+
+/// A share's frame: its size and its BGRx pixels.
+type Frame = ((u32, u32), Vec<u8>);
+
+/// A share's frame once a stroke drawn across the shared screen shows in
+/// it (docs/design/ink.md), and where the stroke runs.
+fn shared_stroke(bed: &mut Bed) -> anyhow::Result<(Frame, [(usize, usize); 3])> {
+    use common::{BTN_LEFT, KEY_LEFTMETA};
+    let (_, started) = bed.share_screen()?;
+    bed.idle(Duration::from_millis(300))?;
+    let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
+    // `Super`+drag across the screen, and the pointer out of the way.
+    bed.hp.key(KEY_LEFTMETA, true);
+    bed.hp.pointer_move(300.0, 700.0);
+    bed.hp.button(BTN_LEFT, true);
+    for i in 1..=150 {
+        let t = f64::from(i) / 150.0;
+        bed.hp.pointer_move(300.0 + 1000.0 * t, 700.0 - 400.0 * t);
+    }
+    bed.hp.button(BTN_LEFT, false);
+    bed.hp.key(KEY_LEFTMETA, false);
+    bed.hp.pointer_move(100.0, 1000.0);
+    let on = [(400, 660), (800, 500), (1200, 340)];
+    let is_red = |pixels: &[u8], w: u32, (x, y): (usize, usize)| {
+        let at = (y * w as usize + x) * 4;
+        let (b, g, r) = (pixels[at], pixels[at + 1], pixels[at + 2]);
+        r > 200 && g < 140 && b < 150
+    };
+    let start = Instant::now();
+    loop {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(15),
+            "no frame with the stroke came (frames sent: {})",
+            bed.hp.share_frames()
+        );
+        bed.idle(Duration::from_millis(50))?;
+        while let Ok(((w, h), pixels)) = consumer.frames.try_recv() {
+            if pixels.len() >= (w * h * 4) as usize && on.iter().all(|p| is_red(&pixels, w, *p)) {
+                return Ok((((w, h), pixels), on));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_strokes_are_in_the_shared_screens_frames() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    let (((w, h), _), on) = shared_stroke(&mut bed)?;
+    assert_eq!((w, h), SCREEN);
+    // As on the screen.
+    for (x, y) in on {
+        let [_, r, g, b] = bed.pixel(x, y)?.to_be_bytes();
+        assert!(r > 200 && g < 140 && b < 150, "{:?}", (r, g, b));
+    }
+    Ok(())
+}
+
+/// The pull request's screenshot of a share's frame showing a stroke,
+/// written to `$HOCUS_SHOTS` when it names a folder. Run by hand
+/// (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshot"]
+fn screenshot_of_a_shared_stroke_for_the_pull_request() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    let (((w, h), pixels), _) = shared_stroke(&mut bed)?;
+    let rgba: Vec<u8> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .take((w * h) as usize)
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w, h, rgba)
+        .ok_or_else(|| anyhow::anyhow!("a frame of the wrong size"))?;
+    std::fs::create_dir_all(&out)?;
+    image.save(out.join("share-frame.png"))?;
     Ok(())
 }
 

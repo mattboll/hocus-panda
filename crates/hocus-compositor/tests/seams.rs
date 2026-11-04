@@ -8,8 +8,8 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, Shows, WINDOW_COLOUR, chord, compositor, open,
-    open_showing, rect_of, wait, wait_for_rect,
+    BTN_LEFT, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_RIGHT, Shows, WINDOW_COLOUR, chord,
+    compositor, open, open_showing, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -20,16 +20,16 @@ use smithay::input::pointer::CursorIcon;
 /// The work area of the headless 1920×1080 output.
 const AREA: Rect = Rect::new(8, 8, 1700, 1064);
 
-/// Moves the window at `rect` with `Super`, held at its middle, so that
+/// Moves the window at `rect` with `Alt`, held at its middle, so that
 /// its corner would be at (`x`, `y`) without the magnet, and lets it go.
 fn drag_to(hp: &mut Headless, rect: Rect, x: i32, y: i32) {
     let at = rect.centre();
     hp.pointer_move(at.0, at.1);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     hp.pointer_move(at.0 + f64::from(x - rect.x), at.1 + f64::from(y - rect.y));
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
 }
 
 /// Presses at (`x`, `y`), drags by `dx` across, and lets go.

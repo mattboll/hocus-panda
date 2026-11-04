@@ -1,9 +1,11 @@
 //! Moving and resizing windows with the pointer (docs/design/windows.md
-//! §6–§9): a client's header, `Super`+drag (`Alt+Super` nested) or the
-//! grip moves a window, wobbling, its edges sticking to others' (see
-//! `magnet`), and snaps it where the preview shows;
-//! the band around a window, a client's own resize request or
-//! `Super`+right-drag resizes it, a snapped neighbour following.
+//! §6–§9): a client's header, `Alt`+drag or the grip moves a window,
+//! wobbling, its edges sticking to others' (see `magnet`), and snaps it
+//! where the preview shows; the band around a window, a client's own
+//! resize request or `Super`+right-drag (`Alt+Super` nested) resizes it, a
+//! snapped neighbour following. And drawing on the screen
+//! (docs/design/ink.md): the pointer is the compositor's until the
+//! release.
 //!
 //! The grab structure follows smithay's examples (MIT).
 
@@ -301,6 +303,147 @@ impl PointerGrab<State> for MoveGrab {
             state.snap_from(self.id, zone, self.floating, Some(output));
         }
         state.redraw = true;
+    }
+}
+
+/// Draws on the screen until the button is released (docs/design/ink.md):
+/// no client sees the pointer meanwhile, not even its relative motion.
+#[derive(Debug)]
+pub struct InkGrab {
+    start_data: GrabStartData<State>,
+}
+
+impl InkGrab {
+    pub fn new(start_data: GrabStartData<State>) -> Self {
+        Self { start_data }
+    }
+}
+
+impl PointerGrab<State> for InkGrab {
+    fn motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(<State as SeatHandler>::PointerFocus, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        handle.motion(state, None, event);
+        state.ink_to(event.location);
+    }
+
+    fn relative_motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(<State as SeatHandler>::PointerFocus, Point<f64, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        handle.relative_motion(state, None, event);
+    }
+
+    fn button(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
+    ) {
+        handle.button(state, event);
+        if !handle.current_pressed().contains(&self.start_data.button) {
+            handle.unset_grab(self, state, event.serial, event.time, true);
+        }
+    }
+
+    fn axis(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
+        handle.axis(state, details);
+    }
+
+    fn frame(&mut self, state: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(state);
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        handle.gesture_swipe_begin(state, event);
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        handle.gesture_swipe_update(state, event);
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        handle.gesture_swipe_end(state, event);
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        handle.gesture_pinch_begin(state, event);
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        handle.gesture_pinch_update(state, event);
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        handle.gesture_pinch_end(state, event);
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        handle.gesture_hold_begin(state, event);
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        handle.gesture_hold_end(state, event);
+    }
+
+    fn start_data(&self) -> &GrabStartData<State> {
+        &self.start_data
+    }
+
+    fn unset(&mut self, state: &mut State) {
+        state.ink_end();
     }
 }
 

@@ -44,6 +44,9 @@ const CROSS_TIP: f64 = 11.0;
 const CROSS_HEAD: f64 = 6.5;
 const CROSS_HEAD_HALF: f64 = 4.0;
 const CROSS_SHAFT_HALF: f64 = 2.2;
+/// The crosshair's arms, thin to see what is under them.
+const CROSSHAIR_ARM: f64 = 10.0;
+const CROSSHAIR_HALF: f64 = 1.6;
 
 /// The shapes the compositor draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,6 +62,8 @@ pub enum Shape {
     Falling,
     /// Four ways: moving a window.
     Move,
+    /// A thin cross: drawing on the screen (docs/design/ink.md).
+    Crosshair,
 }
 
 impl Shape {
@@ -70,6 +75,7 @@ impl Shape {
             C::NeResize | C::SwResize | C::NeswResize => Self::Rising,
             C::NwResize | C::SeResize | C::NwseResize => Self::Falling,
             C::Move | C::AllScroll | C::Grab | C::Grabbing => Self::Move,
+            C::Crosshair | C::Cell => Self::Crosshair,
             _ => Self::Arrow,
         }
     }
@@ -84,6 +90,7 @@ impl Shape {
             Self::Rising => double_arrow(-FRAC_PI_4, DIAGONAL_TIP, DIAGONAL_HEAD),
             Self::Falling => double_arrow(FRAC_PI_4, DIAGONAL_TIP, DIAGONAL_HEAD),
             Self::Move => cross(),
+            Self::Crosshair => crosshair(),
         }
     }
 
@@ -138,6 +145,21 @@ fn cross() -> Vec<(f64, f64)> {
     for turn in 0..4 {
         for &(x, y) in &arm {
             // A quarter turn, `turn` times: (x, y) to (-y, x).
+            let (x, y) = (0..turn).fold((x, y), |(x, y), _| (-y, x));
+            points.push((MIDDLE.0 + x, MIDDLE.1 + y));
+        }
+    }
+    points
+}
+
+/// A plus through the middle, its arms `CROSSHAIR_ARM` long and
+/// `CROSSHAIR_HALF` thick each side: one arm, turned a quarter at a time.
+fn crosshair() -> Vec<(f64, f64)> {
+    let (s, arm) = (CROSSHAIR_HALF, CROSSHAIR_ARM);
+    let one = [(s, -s), (arm, -s), (arm, s)];
+    let mut points = Vec::with_capacity(4 * one.len());
+    for turn in 0..4 {
+        for &(x, y) in &one {
             let (x, y) = (0..turn).fold((x, y), |(x, y), _| (-y, x));
             points.push((MIDDLE.0 + x, MIDDLE.1 + y));
         }

@@ -1,4 +1,5 @@
-//! What an output shows, front first: the cursor, the layer surfaces above
+//! What an output shows, front first: the cursor, the ink drawn on the
+//! screen (`crate::ink`), the layer surfaces above
 //! the windows, a fullscreen window, the snap preview, windows leaving,
 //! the windows with their grips, rims and shadows (opening, settling and
 //! wobbling as they go), the bar's own surfaces and its glass unless the
@@ -89,6 +90,8 @@ render_elements! {
     /// The capture's darkening and its flash (5.8); a password manager's
     /// window in a capture.
     Solid = SolidColorRenderElement,
+    /// The strokes and the laser drawn on a screen (docs/design/ink.md).
+    Ink = crate::ink::InkElement<R>,
 }
 
 /// What an output's elements are drawn for.
@@ -650,6 +653,10 @@ impl State {
             }
             bar_at
         };
+        // The strokes and the laser over the windows and the shell's
+        // surfaces, under what the compositor shows to share, record or
+        // capture: in a share's, a recording's or a capture's frames too.
+        self.ink_elements(renderer, output, now, &mut elements);
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
         // The launcher's toast over the launcher fading out; never in a

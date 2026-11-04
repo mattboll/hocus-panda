@@ -66,7 +66,7 @@ render_elements! {
 /// The shapes the compositor shows itself, asked of the theme together
 /// the first time a size is: none is drawn before the theme's while the
 /// pointer crosses a frame.
-const OWN: [CursorIcon; 7] = [
+const OWN: [CursorIcon; 8] = [
     CursorIcon::Default,
     CursorIcon::EwResize,
     CursorIcon::NsResize,
@@ -74,6 +74,7 @@ const OWN: [CursorIcon; 7] = [
     CursorIcon::NeswResize,
     CursorIcon::Grab,
     CursorIcon::Grabbing,
+    CursorIcon::Crosshair,
 ];
 
 /// The cursor's images: the theme's as they come, and the drawn ones.
