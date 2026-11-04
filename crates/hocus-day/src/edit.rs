@@ -6,12 +6,10 @@
 //!
 //! The file is written whole or not at all (beside it, then renamed over
 //! it), through a symbolic link to where it really is, with the mode it
-//! had. Blocking: from a thread of its own, never the shell's loop.
+//! had ([`hocus_config`], which the Settings share). Blocking: from a
+//! thread of its own, never the shell's loop.
 
-use std::{
-    io::Write as _,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, value};
 
@@ -131,61 +129,13 @@ fn fill_planka(entry: &mut Table, planka: &PlankaChoice) {
 }
 
 /// `choice` written into the configuration file at `path` (none yet: one
-/// made with it alone), whole or not at all.
-pub fn write(path: &Path, choice: &Choice) -> Result<(), String> {
-    let at = |err: std::io::Error| format!("{}: {err}", path.display());
-    // Through a link, to the file it names: the link stays.
-    let real = match std::fs::canonicalize(path) {
-        Ok(real) => real,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
-        Err(err) => return Err(at(err)),
-    };
-    let (text, mode) = match std::fs::read_to_string(&real) {
-        Ok(text) => {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode = std::fs::metadata(&real).map_err(at)?.permissions().mode();
-            (text, Some(mode))
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
-        Err(err) => return Err(at(err)),
-    };
-    let written = apply(&text, choice)?;
-    replace(&real, written.as_bytes(), mode).map_err(at)
-}
-
-/// `bytes` in `file`: written beside it, then renamed over it, with `mode`
-/// (else the umask's).
-fn replace(file: &Path, bytes: &[u8], mode: Option<u32>) -> std::io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-    let dir = file
-        .parent()
-        .ok_or_else(|| std::io::Error::other("no folder"))?;
-    std::fs::create_dir_all(dir)?;
-    let name = file
-        .file_name()
-        .ok_or_else(|| std::io::Error::other("no file name"))?;
-    let mut beside = std::ffi::OsString::from(".");
-    beside.push(name);
-    beside.push(format!(".{}.new", std::process::id()));
-    let beside: PathBuf = dir.join(beside);
-    let written = (|| {
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(mode.unwrap_or(0o644) & 0o7777)
-            .open(&beside)?;
-        if let Some(mode) = mode {
-            out.set_permissions(std::fs::Permissions::from_mode(mode & 0o7777))?;
-        }
-        out.write_all(bytes)?;
-        out.sync_all()?;
-        std::fs::rename(&beside, file)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&beside);
-    }
-    written
+/// made with it alone), whole or not at all ([`hocus_config::edit`]).
+pub fn write(path: &Path, choice: &Choice) -> Result<String, String> {
+    let read = hocus_config::read(path)?;
+    let written = apply(&read.text, choice)?;
+    hocus_config::replace(&read.real, written.as_bytes(), read.mode)
+        .map_err(|err| format!("{}: {err}", read.real.display()))?;
+    Ok(written)
 }
 
 #[cfg(test)]

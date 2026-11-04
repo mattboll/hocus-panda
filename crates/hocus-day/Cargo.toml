@@ -10,6 +10,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# The configuration file read and written back in place, as the Settings
+# do.
+hocus-config = { path = "../hocus-config", version = "0.2.0" }
 # Times: instants, dates and the system's time zones; serde for the cache.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
