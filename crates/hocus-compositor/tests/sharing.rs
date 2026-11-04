@@ -40,7 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, KEY_ESC, WINDOW_COLOUR};
+use common::{KEY_ESC, WINDOW_COLOUR};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, ShareInfo};
 use hocus_link::ShareSource;
 use zbus::{MatchRule, MessageStream, OwnedObjectPath, OwnedVariant, Variant};
@@ -69,47 +69,6 @@ fn ready() -> Option<PathBuf> {
         return None;
     }
     Some(shell)
-}
-
-/// A D-Bus daemon of the test's own in `dir`, and its address.
-fn private_bus(dir: &Path) -> anyhow::Result<(Child, String)> {
-    let socket = dir.join("bus");
-    let config = dir.join("bus.conf");
-    std::fs::write(
-        &config,
-        format!(
-            "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
-             \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
-             <policy context=\"default\"><allow send_destination=\"*\"/>\
-             <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
-            socket.display()
-        ),
-    )?;
-    let bus = Command::new("dbus-daemon")
-        .arg(format!("--config-file={}", config.display()))
-        .arg("--nofork")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    wait_file(&socket)?;
-    Ok((bus, format!("unix:path={}", socket.display())))
-}
-
-fn wait_file(path: &Path) -> anyhow::Result<()> {
-    let start = Instant::now();
-    while !path.exists() {
-        anyhow::ensure!(
-            start.elapsed() < Duration::from_secs(10),
-            "{} never came",
-            path.display()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok(())
 }
 
 /// A PipeWire of the test's own, in a short runtime directory of its own
@@ -144,7 +103,7 @@ impl Pipewire {
         };
         let daemon = spawn("pipewire")?;
         let socket = run.join("pipewire-0");
-        wait_file(&socket)?;
+        common::wait_accepts(&socket)?;
         Ok(Self {
             daemon,
             socket,
@@ -197,7 +156,7 @@ fn start_on(shell: &Path, size: (u32, u32), renderer: RendererChoice) -> anyhow:
     for sub in [&home, &state.join("hocuspanda")] {
         std::fs::create_dir_all(sub)?;
     }
-    let (bus, address) = private_bus(dir.path())?;
+    let (bus, address) = common::private_bus(dir.path())?;
     let pipewire = Pipewire::start(&address)?;
     let log = dir.path().join("shell.log");
     let script = dir.path().join("shell");
@@ -481,10 +440,10 @@ impl Bed {
         anyhow::bail!("the shell did not log {what:?}:\n{}", self.log())
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     /// A screen shared (Enter on the chooser of a monitors' request).
@@ -991,7 +950,7 @@ fn the_bars_sign_shows_and_stopping_ends_the_session() -> anyhow::Result<()> {
     bed.click((
         f64::from(sign.x + sign.width / 2),
         f64::from(sign.y + sign.height / 2),
-    ));
+    ))?;
     let open = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {
         !hp.popover_surfaces().is_empty()
     })?;
@@ -1007,7 +966,7 @@ fn the_bars_sign_shows_and_stopping_ends_the_session() -> anyhow::Result<()> {
     bed.click((
         f64::from(popover.x + popover.width / 2),
         f64::from(popover.y + popover.height - 13 - 16),
-    ));
+    ))?;
     bed.closed(&session)?;
     let gone = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {
         hp.shares().is_empty() && hp.layer_rects(hocus_link::IN_USE_NAMESPACE).is_empty()

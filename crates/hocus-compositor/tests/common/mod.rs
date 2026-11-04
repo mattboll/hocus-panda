@@ -150,6 +150,92 @@ pub fn shell_script(
     Ok(script)
 }
 
+/// How long a test waits for a private daemon (D-Bus, PipeWire) to take
+/// connections: generous, as it only fails when the daemon never does.
+pub const DAEMON_WAIT: Duration = Duration::from_secs(30);
+
+/// A D-Bus daemon of the test's own, its socket `bus` in `dir` (its
+/// configuration beside it), and its address, once it takes connections.
+///
+/// Its socket's file comes as the daemon binds it, a moment before it
+/// listens: a connection then is refused. It prints its address
+/// (`--print-address`) once it listens, which this waits for.
+pub fn private_bus(dir: &Path) -> anyhow::Result<(std::process::Child, String)> {
+    use std::{
+        io::BufRead,
+        process::{Command, Stdio},
+    };
+    let socket = dir.join("bus");
+    let config = dir.join("bus.conf");
+    std::fs::write(
+        &config,
+        format!(
+            "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
+             \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
+             <busconfig><type>session</type><listen>unix:path={}</listen>\
+             <policy context=\"default\"><allow send_destination=\"*\"/>\
+             <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
+            socket.display()
+        ),
+    )?;
+    let mut bus = Command::new("dbus-daemon")
+        .arg(format!("--config-file={}", config.display()))
+        .args(["--nofork", "--print-address=1"])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("dbus-daemon")?;
+    let out = bus.stdout.take().context("dbus-daemon's output")?;
+    // Read off the test's thread: a daemon that hangs fails the test
+    // after a while rather than holding it.
+    let (said, heard) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let read = std::io::BufReader::new(out).read_line(&mut line);
+        let _ = said.send(read.map(|_| line));
+    });
+    let address = match heard.recv_timeout(DAEMON_WAIT) {
+        Ok(Ok(line)) if !line.trim().is_empty() => line.trim().to_owned(),
+        Ok(read) => {
+            let _ = bus.kill();
+            let _ = bus.wait();
+            anyhow::bail!("dbus-daemon ended without listening: {read:?}");
+        }
+        Err(_) => {
+            let _ = bus.kill();
+            let _ = bus.wait();
+            anyhow::bail!("dbus-daemon did not listen within {DAEMON_WAIT:?}");
+        }
+    };
+    anyhow::ensure!(
+        address.contains(&socket.display().to_string()),
+        "dbus-daemon listens at {address}, not {}",
+        socket.display()
+    );
+    Ok((bus, format!("unix:path={}", socket.display())))
+}
+
+/// Waits until the Unix socket at `path` takes connections, as a daemon's
+/// does once it listens: its file alone comes a moment before (bound, not
+/// listening yet), and a connection then is refused.
+pub fn wait_accepts(path: &Path) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        match UnixStream::connect(path) {
+            Ok(_) => return Ok(()),
+            Err(err) => anyhow::ensure!(
+                start.elapsed() < DAEMON_WAIT,
+                "{} never took a connection: {err}",
+                path.display()
+            ),
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// The render node for the tests that need a GPU (the shell's motion on
 /// wgpu, timings): the one `HOCUS_TEST_GPU` names, never one found by
 /// itself, which may be the GPU of the session the tests run in (#534);
@@ -1261,7 +1347,10 @@ pub fn over(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Resul
         hp.pointer_move(at.0 - 1.0, at.1);
         hp.pointer_move(at.0, at.1);
         wait(hp, Duration::from_millis(30))?;
-        if hp.pointer_layer().as_deref() == Some(namespace) {
+        // Drawn at its size too: a surface resized takes the pointer with
+        // its old buffer, its parts not where they will be.
+        if hp.pointer_layer().as_deref() == Some(namespace) && hp.undrawn_at(at.0, at.1).is_empty()
+        {
             return Ok(());
         }
         anyhow::ensure!(
@@ -1270,6 +1359,97 @@ pub fn over(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Resul
             hp.pointer_layer()
         );
     }
+}
+
+/// The pointer moved to `at` (twice: the first move may only enter a
+/// surface), once every shell surface placed there shows what was asked of
+/// it ([`Headless::undrawn_at`]): a layer surface has its place before its
+/// buffer, and on a loaded machine the shell draws it long after.
+pub fn point(hp: &mut Headless, (x, y): (f64, f64)) -> anyhow::Result<()> {
+    let drawn = hp.dispatch_until(WAIT, |hp| hp.undrawn_at(x, y).is_empty())?;
+    anyhow::ensure!(
+        drawn,
+        "at {:?}, never drawn: {:?}",
+        (x, y),
+        hp.undrawn_at(x, y)
+    );
+    hp.pointer_move(x - 1.0, y);
+    hp.pointer_move(x, y);
+    Ok(())
+}
+
+/// A click at `at` ([`point`]).
+pub fn click(hp: &mut Headless, at: (f64, f64)) -> anyhow::Result<()> {
+    point(hp, at)?;
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    Ok(())
+}
+
+/// A click at `at` on the shell's surface of `namespace`, once it takes
+/// the pointer there ([`over`]).
+pub fn click_on(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Result<()> {
+    over(hp, at, namespace)?;
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    Ok(())
+}
+
+/// The shell's surfaces of `namespace`, once one at least shows what was
+/// asked of it ([`Headless::drawn_layers`]): where they are.
+pub fn drawn(hp: &mut Headless, namespace: &str) -> anyhow::Result<Vec<(String, Rect)>> {
+    let done = hp.dispatch_until(WAIT, |hp| !hp.drawn_layers(namespace).is_empty())?;
+    anyhow::ensure!(
+        done,
+        "{namespace} never drawn: placed {:?}",
+        hp.layer_rects(namespace)
+    );
+    Ok(hp.drawn_layers(namespace))
+}
+
+/// Where the shell's popovers are, those drawn there only
+/// ([`Headless::drawn_layers`]): one not drawn yet takes no click.
+pub fn drawn_popovers(hp: &Headless) -> Vec<Rect> {
+    hp.drawn_layers(hocus_link::POPOVER_NAMESPACE)
+        .into_iter()
+        .map(|(_, r)| r)
+        .collect()
+}
+
+/// A screen's refresh, as the tests step the held clock: 60 Hz.
+pub const STEP: Duration = Duration::from_millis(16);
+
+/// What `look` reads at each frame for `time`, the motions' clock held
+/// and stepped a refresh at a time ([`Headless::step`]), with the time of
+/// each since the first step's start. The frames come at the same moments
+/// of the motions however slowly a loaded machine draws them. Once nothing
+/// moves as of a frame, the frames after would show the same: it stops
+/// there. The clock stays held: the caller lets it go.
+pub fn sample<T>(
+    hp: &mut Headless,
+    time: Duration,
+    mut look: impl FnMut(&Headless) -> T,
+) -> anyhow::Result<Vec<(Duration, T)>> {
+    hp.hold_clock();
+    let start = hp.now();
+    let mut out = Vec::new();
+    while hp.now() - start < time {
+        hp.step(STEP)?;
+        out.push((hp.now() - start, look(hp)));
+        if hp.still() {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Runs the compositor until the last frame drawn shows everything at rest
+/// ([`Headless::at_rest`]): what the screen shows is then where the
+/// motions end, however late a loaded machine draws it.
+pub fn at_rest(hp: &mut Headless) -> anyhow::Result<()> {
+    let still = hp.dispatch_until(WAIT, Headless::at_rest)?;
+    anyhow::ensure!(still, "the compositor never came to rest");
+    Ok(())
 }
 
 impl Dispatch<ZwpTextInputManagerV3, ()> for Client {

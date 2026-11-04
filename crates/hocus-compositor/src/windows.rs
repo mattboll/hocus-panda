@@ -331,8 +331,12 @@ fn descends_from(pid: u32, ancestor: u32) -> bool {
 }
 
 impl State {
+    /// The motions' time: `CLOCK_MONOTONIC`, unless a test holds it.
     pub fn now(&self) -> Duration {
-        self.clock.now().into()
+        match self.held_clock {
+            Some(held) => held,
+            None => Duration::from(self.clock.now()) + self.clock_ahead,
+        }
     }
 
     /// Whether motion is reduced (§16): the configuration's.
@@ -1198,9 +1202,11 @@ impl State {
         // gets a frame at its end, not left a step short (a panel at 97 %).
         // A frame long gone (nothing drawn: a paused session) is not waited
         // for.
-        let now = match (self.now(), self.drawn_at.get()) {
-            (now, Some(drawn)) if drawn <= now && now - drawn < Duration::from_secs(1) => drawn,
-            (now, _) => now,
+        let (now, as_of_frame) = match (self.now(), self.drawn_at.get()) {
+            (now, Some(drawn)) if drawn <= now && now - drawn < Duration::from_secs(1) => {
+                (drawn, true)
+            }
+            (now, _) => (now, false),
         };
         let mut moving = false;
         let mut next: Option<Duration> = None;
@@ -1296,6 +1302,7 @@ impl State {
         if let Some(at) = self.cursor_next_frame(now) {
             wake(at);
         }
+        self.still = !moving && as_of_frame;
         if moving {
             self.redraw = true;
         } else if let Some(at) = next {

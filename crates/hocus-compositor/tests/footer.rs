@@ -84,9 +84,9 @@ impl Bed {
             log,
             screen: (width, height),
         };
-        let up = bed
-            .hp
-            .dispatch_until(WAIT, |hp| hp.bell_surfaces().len() == 1)?;
+        let up = bed.hp.dispatch_until(WAIT, |hp| {
+            hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
+        })?;
         anyhow::ensure!(up, "no footer");
         bed.logged("the footer shows it")?;
         bed.hp.pointer_move(400.0, 300.0);
@@ -123,7 +123,8 @@ impl Bed {
 
     /// The footer's surface, on the screen.
     fn footer(&self) -> Rect {
-        self.hp.bell_surfaces()[0].1
+        // As drawn: its place before its first buffer is not its own.
+        self.hp.drawn_layers(hocus_link::BELL_NAMESPACE)[0].1
     }
 
     /// The full form's button `i` (from the left), its centre: 40 × 34,
@@ -134,8 +135,9 @@ impl Bed {
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (x, y))?;
         wait(&mut self.hp, Duration::from_millis(60))?;
         self.hp.button(BTN_LEFT, true);
         self.hp.button(BTN_LEFT, false);
@@ -151,9 +153,10 @@ impl Bed {
     fn popover(&mut self) -> anyhow::Result<Rect> {
         let open = self
             .hp
-            .dispatch_until(WAIT, |hp| hp.popover_surfaces().len() == 1)?;
-        anyhow::ensure!(open, "no popover");
-        wait(&mut self.hp, Duration::from_millis(200))?;
+            .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).len() == 1)?;
+        anyhow::ensure!(open, "no popover: {:?}", self.hp.popover_surfaces());
+        // Its fade in over in the frame the screen shows.
+        common::at_rest(&mut self.hp)?;
         Ok(self.hp.popover_surfaces()[0].1)
     }
 

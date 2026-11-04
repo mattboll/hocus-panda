@@ -822,8 +822,9 @@ impl ShellBed {
     }
 
     fn click(&mut self, x: i32, y: i32) -> anyhow::Result<()> {
-        self.hp.pointer_move(f64::from(x) - 1.0, f64::from(y));
-        self.hp.pointer_move(f64::from(x), f64::from(y));
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (f64::from(x), f64::from(y)))?;
         wait(&mut self.hp, Duration::from_millis(120))?;
         self.hp.button(common::BTN_LEFT, true);
         self.hp.button(common::BTN_LEFT, false);
@@ -949,7 +950,7 @@ fn the_toolbar_in_video_has_the_switch_son_micro_and_demarrer() -> anyhow::Resul
     let started = bed.hp.dispatch_until(SLOW, |hp| {
         hp.recording().is_some_and(|r| r.started) && hp.record_frames() > 0
     })?;
-    assert!(started);
+    assert!(started, "not started: {:?}", bed.hp.record_failures());
     bed.hp.record_ask(RecordAsk::Stop);
     bed.thumbnail()?;
     Ok(())

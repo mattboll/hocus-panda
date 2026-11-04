@@ -266,11 +266,10 @@ impl Bed {
         (f64::from(s.x + s.width / 2), f64::from(s.y) + middle - 0.5)
     }
 
-    fn click(&mut self, (x, y): (f64, f64)) {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
-        self.hp.button(BTN_LEFT, true);
-        self.hp.button(BTN_LEFT, false);
+    /// A click there, once the shell's surfaces there are drawn
+    /// ([`common::click`]).
+    fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::click(&mut self.hp, at)
     }
 
     fn press(&mut self, key: u32) {
@@ -289,12 +288,14 @@ impl Bed {
     /// Waits until the popover is at `rect`, or gone.
     fn popover_is(&mut self, rect: Option<Rect>) -> anyhow::Result<()> {
         let want: Vec<Rect> = rect.into_iter().collect();
+        // Drawn there too: else a click on it is lost.
         let done = self.hp.dispatch_until(WAIT, |hp| {
             hp.popover_surfaces()
                 .into_iter()
                 .map(|(_, r)| r)
                 .collect::<Vec<_>>()
                 == want
+                && common::drawn_popovers(hp) == want
         })?;
         anyhow::ensure!(done, "popovers {:?}, not {want:?}", self.popovers());
         Ok(())
@@ -319,6 +320,21 @@ impl Bed {
             .hp
             .dispatch_until(WAIT, |_| plain(&log).contains(text))?;
         anyhow::ensure!(done, "the shell never logged {text:?}");
+        Ok(())
+    }
+
+    /// Waits until the shell's log has `times` lines with `text`.
+    fn logged_times(&mut self, text: &str, times: usize) -> anyhow::Result<()> {
+        let Some(log) = self.log.clone() else {
+            anyhow::bail!("no log kept");
+        };
+        let count = |log: &Path| plain(log).matches(text).count();
+        let done = self.hp.dispatch_until(WAIT, |_| count(&log) >= times)?;
+        anyhow::ensure!(
+            done,
+            "the shell logged {text:?} {} times, not {times}",
+            count(&log)
+        );
         Ok(())
     }
 
@@ -402,7 +418,7 @@ impl Bed {
         self.click((
             f64::from(rect.x + rect.width / 2),
             f64::from(rect.y + rect.height / 2),
-        ));
+        ))?;
         wait(&mut self.hp, Duration::from_millis(100))?;
         client.commands.send(Command::Copy(clip))?;
         let copied = self.hp.dispatch_until(WAIT, |_| {
@@ -427,10 +443,10 @@ impl Bed {
     /// Opens the popover, `rows` networks, and unfolds row `i`'s field.
     fn unfold(&mut self, rows: usize, i: usize) -> anyhow::Result<Rect> {
         let item = self.item();
-        self.click(item);
+        self.click(item)?;
         let rect = popover(height(&[], rows, 0.0));
         self.popover_is(Some(rect))?;
-        self.click(row(rect, &[], i));
+        self.click(row(rect, &[], i))?;
         self.popover_is(Some(popover(height(&[], rows, FORM))))?;
         // Drawn unfolded, so that the keys find the field.
         wait(&mut self.hp, Duration::from_millis(300))?;
@@ -543,11 +559,11 @@ fn the_row_says_offline_off_connecting_a_cable_and_a_sign_in_page() -> anyhow::R
     bed.bars(0)?;
     // The sign-in page: joined, its dot on the icon, orange.
     let (x, y) = bed.item();
-    bed.click((x, y));
+    bed.click((x, y))?;
     let rect = popover(height(&[], 8, 0.0));
     bed.popover_is(Some(rect))?;
     // The Livebox first, the SNCF's second.
-    bed.click(row(rect, &[], 1));
+    bed.click(row(rect, &[], 1))?;
     bed.asked(&Call::Activate {
         ssid: SNCF.to_owned(),
     })?;
@@ -595,18 +611,18 @@ fn a_click_opens_it_asks_for_a_scan_and_lists_the_networks_once_each() -> anyhow
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     // Two rows, then three once the scan asked as it opened is done.
     bed.popover_is(Some(popover(height(&[], 2, 0.0))))?;
     bed.asked(&Call::Scan)?;
     bed.popover_is(Some(popover(height(&[], 3, 0.0))))?;
     // A second click on the row closes it; a click opens it again.
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(None)?;
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(Some(popover(height(&[], 3, 0.0))))?;
     // A click outside closes it.
-    bed.click((600.0, 400.0));
+    bed.click((600.0, 400.0))?;
     bed.popover_is(None)?;
     Ok(())
 }
@@ -627,7 +643,7 @@ fn past_six_networks_the_list_scrolls_and_a_saved_one_joins_in_a_click() -> anyh
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let blocks = [CURRENT];
     let rect = popover(height(&blocks, 7, 0.0));
     bed.popover_is(Some(rect))?;
@@ -639,7 +655,7 @@ fn past_six_networks_the_list_scrolls_and_a_saved_one_joins_in_a_click() -> anyh
     wait(&mut bed.hp, Duration::from_millis(200))?;
     // Scrolled to its end: the last row's bottom on the list's.
     let bottom = f64::from(rect.y) + list_top(&blocks) + 236.0;
-    bed.click((first.0, bottom - ROW / 2.0));
+    bed.click((first.0, bottom - ROW / 2.0))?;
     bed.asked(&Call::Activate {
         ssid: "Maison-5G".to_owned(),
     })?;
@@ -682,11 +698,11 @@ fn a_password_typed_on_a_french_keyboard_reaches_networkmanager_exactly() -> any
     };
     let mut bed = start(&shell, setup, true)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[], 8, 0.0));
     bed.popover_is(Some(rect))?;
     // The Freebox, third: protected, not saved: its field unfolds.
-    bed.click(row(rect, &[], 2));
+    bed.click(row(rect, &[], 2))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     assert_eq!(
         bed.popovers(),
@@ -757,10 +773,10 @@ fn a_wrong_password_is_said_and_kept_and_esc_folds_then_closes() -> anyhow::Resu
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[], 2, 0.0));
     bed.popover_is(Some(rect))?;
-    bed.click(row(rect, &[], 1));
+    bed.click(row(rect, &[], 1))?;
     let unfolded = popover(height(&[], 2, FORM));
     bed.popover_is(Some(unfolded))?;
     // Esc folds it; a second Esc closes the popover, the row keeps the
@@ -776,7 +792,7 @@ fn a_wrong_password_is_said_and_kept_and_esc_folds_then_closes() -> anyhow::Resu
     // Enter opens it again; the field again; a wrong password.
     bed.press(KEY_ENTER);
     bed.popover_is(Some(rect))?;
-    bed.click(row(rect, &[], 1));
+    bed.click(row(rect, &[], 1))?;
     bed.popover_is(Some(unfolded))?;
     bed.type_password();
     bed.press(KEY_ENTER);
@@ -823,11 +839,11 @@ fn a_saved_network_whose_password_is_refused_unfolds_its_field() -> anyhow::Resu
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[], 2, 0.0));
     bed.popover_is(Some(rect))?;
     // One click: NetworkManager tries the saved one, which fails.
-    bed.click(row(rect, &[], 1));
+    bed.click(row(rect, &[], 1))?;
     bed.asked(&Call::Activate {
         ssid: FREEBOX.to_owned(),
     })?;
@@ -869,10 +885,14 @@ fn a_tab_in_the_frame_a_row_unfolds_in_goes_to_its_eye() -> anyhow::Result<()> {
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[], 2, 0.0));
     bed.popover_is(Some(rect))?;
-    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // Holding the keyboard: the keys typed next are its.
+    let held = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+    })?;
+    assert!(held, "the keyboard is on {:?}", bed.hp.keyboard_layer());
     // The switch, the SNCF's row, the Freebox's.
     for _ in 0..3 {
         bed.press(KEY_TAB);
@@ -899,8 +919,13 @@ fn a_tab_in_the_frame_a_row_unfolds_in_goes_to_its_eye() -> anyhow::Result<()> {
     bed.type_password();
     let middle = f64::from(unfolded.y) + list_top(&[]) + ROW_STEP + ROW + 2.0 + 17.0;
     let band = (unfolded.x + 53, middle as i32 - 5);
-    wait(&mut bed.hp, Duration::from_millis(500))?;
-    let letters = bed.ink(band, 150)?;
+    // Drawn once the shell has read the keys.
+    let start = Instant::now();
+    let mut letters = bed.ink(band, 150)?;
+    while letters < 5 && start.elapsed() < WAIT {
+        wait(&mut bed.hp, Duration::from_millis(50))?;
+        letters = bed.ink(band, 150)?;
+    }
     assert!(letters >= 5, "light pixels above the dots: {letters}");
     bed.press(KEY_ENTER);
     bed.asked(&Call::AddAndActivate {
@@ -927,7 +952,7 @@ fn a_row_unfolded_by_the_keyboard_scrolls_only_what_the_grown_list_needs() -> an
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(Some(popover(height(&[], 5, 0.0))))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     // The switch, then the rows down to the third; Enter unfolds it.
@@ -966,7 +991,7 @@ fn the_switch_disconnect_and_the_sign_in_page() -> anyhow::Result<()> {
     };
     let mut bed = start(&shell, setup, false)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let blocks = [SIGN_IN_CURRENT, PORTAL];
     let rect = popover(height(&blocks, 7, 0.0));
     bed.popover_is(Some(rect))?;
@@ -975,7 +1000,7 @@ fn the_switch_disconnect_and_the_sign_in_page() -> anyhow::Result<()> {
         f64::from(rect.x) + 140.0,
         f64::from(rect.y) + HEADER_END + GAP + SIGN_IN_CURRENT + GAP + PORTAL / 2.0,
     );
-    bed.click(button);
+    bed.click(button)?;
     let opened = bed.fakes.dir.path().join("opened");
     let done = bed.hp.dispatch_until(WAIT, |_| {
         std::fs::read_to_string(&opened).is_ok_and(|o| o.trim() == "http://check.hocus.test/portal")
@@ -986,18 +1011,18 @@ fn the_switch_disconnect_and_the_sign_in_page() -> anyhow::Result<()> {
         f64::from(rect.x + 280 - 15 - 20),
         f64::from(rect.y) + HEADER_END + GAP + CURRENT / 2.0,
     );
-    bed.click(disconnect);
+    bed.click(disconnect)?;
     bed.asked(&Call::Disconnect)?;
     bed.popover_is(Some(popover(height(&[], 8, 0.0))))?;
     // The switch: off, then on again.
     let rect = popover(height(&[], 8, 0.0));
     let switch = (f64::from(rect.x + 245), f64::from(rect.y + 29));
-    bed.click(switch);
+    bed.click(switch)?;
     bed.asked(&Call::Enable(false))?;
     let off = popover((HEADER_END + GAP + NOTE + 15.0).round() as i32);
     bed.popover_is(Some(off))?;
     let switch = (switch.0, f64::from(off.y + 1 + 12 + 16));
-    bed.click(switch);
+    bed.click(switch)?;
     bed.asked(&Call::Enable(true))?;
     let back = bed.hp.dispatch_until(WAIT, |_| bed.nm.enabled())?;
     assert!(back);
@@ -1034,9 +1059,9 @@ fn in_the_mini_form_hovering_the_button_opens_it() -> anyhow::Result<()> {
     bed.popover_is(None)?;
     // A click opens it as in the full form; a protected row's field takes
     // the keyboard.
-    bed.click((x, y));
+    bed.click((x, y))?;
     bed.popover_is(Some(rect))?;
-    bed.click(row(rect, &[], 2));
+    bed.click(row(rect, &[], 2))?;
     let held = bed.hp.dispatch_until(WAIT, |hp| {
         hp.keyboard_layer().as_deref() == Some("hocus-bar-popover")
     })?;
@@ -1116,7 +1141,7 @@ fn nothing_draws_at_rest_and_each_change_draws_its_own_surface() -> anyhow::Resu
     );
     // Open, the pointer in it and still: nothing draws.
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[CURRENT], 7, 0.0));
     bed.popover_is(Some(rect))?;
     bed.hp
@@ -1152,7 +1177,7 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     let mut bed = start(&shell, setup, true)?;
     bed.logged("link=Offline")?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     bed.popover_is(Some(popover(
         (HEADER_END + GAP + NOTE + 15.0).round() as i32
     )))?;
@@ -1192,6 +1217,9 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     Ok(())
 }
 
+/// What the shell logs as a paste lands in the password's field.
+const PASTED: &str = "the clipboard's text pasted into the field";
+
 /// What the copying client offers: text, with the line break a password
 /// copied from a file ends with.
 const COPIED: Clip = Clip {
@@ -1213,7 +1241,7 @@ fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
     let mut bed = start(&shell, setup, true)?;
     let _copier = bed.copy(COPIED)?;
     let item = bed.item();
-    bed.click(item);
+    bed.click(item)?;
     let rect = popover(height(&[], 8, 0.0));
     bed.popover_is(Some(rect))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -1221,7 +1249,7 @@ fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
     wait(&mut bed.hp, Duration::from_millis(300))?;
     // The Freebox's field; then the eye holds the keyboard: nothing either.
-    bed.click(row(rect, &[], 2));
+    bed.click(row(rect, &[], 2))?;
     bed.popover_is(Some(popover(height(&[], 8, FORM))))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     bed.press(KEY_TAB);
@@ -1241,10 +1269,10 @@ fn a_password_pasted_with_ctrl_v_reaches_networkmanager_without_its_line_break()
     let band = (field.x + 53, middle as i32 - 5);
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let dots = bed.ink(band, 150)?;
-    bed.click(eye);
+    bed.click(eye)?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     let letters = bed.ink(band, 150)?;
-    bed.click(eye);
+    bed.click(eye)?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     let hidden = bed.ink(band, 150)?;
     assert!(
@@ -1289,25 +1317,18 @@ fn shift_insert_pastes_too_and_clears_a_wrong_password() -> anyhow::Result<()> {
         ],
         ..Setup::default()
     };
-    let mut bed = start(&shell, setup, false)?;
+    let mut bed = start(&shell, setup, true)?;
     let _copier = bed.copy(Clip {
         text: "azerty&1@ê\r\n",
         ..COPIED
     })?;
     bed.unfold(2, 1)?;
     chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_INSERT]);
-    // Enter as soon as it is there.
-    let mut tried = false;
-    let start = Instant::now();
-    while !tried && start.elapsed() < WAIT {
-        bed.press(KEY_ENTER);
-        wait(&mut bed.hp, Duration::from_millis(100))?;
-        tried = bed
-            .nm
-            .calls()
-            .iter()
-            .any(|c| matches!(c, Call::AddAndActivate { .. }));
-    }
+    // Enter once it is there: the shell reads the clipboard off its loop.
+    // (One Enter only: a second while the first is under way would try
+    // that connection again.)
+    bed.logged_times(PASTED, 1)?;
+    bed.press(KEY_ENTER);
     bed.asked(&Call::AddAndActivate {
         ssid: FREEBOX.to_owned(),
         psk: Some(PASSWORD.to_owned()),
@@ -1317,6 +1338,7 @@ fn shift_insert_pastes_too_and_clears_a_wrong_password() -> anyhow::Result<()> {
     let refused = popover(height(&[], 2, FORM + ERROR));
     bed.popover_is(Some(refused))?;
     chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_INSERT]);
+    bed.logged_times(PASTED, 2)?;
     bed.popover_is(Some(popover(height(&[], 2, FORM))))?;
     bed.press(KEY_ENTER);
     bed.asked(&Call::AddAndActivate {

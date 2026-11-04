@@ -425,8 +425,9 @@ impl Bed {
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(x - 1.0, y);
-        self.hp.pointer_move(x, y);
+        // Once the shell's surfaces there are drawn: else the press goes
+        // to what is under them.
+        common::point(&mut self.hp, (x, y))?;
         wait(&mut self.hp, Duration::from_millis(100))?;
         self.hp.button(BTN_LEFT, true);
         self.hp.button(BTN_LEFT, false);
@@ -700,8 +701,7 @@ fn the_wheel_scrolls_the_grid_by_rows() -> anyhow::Result<()> {
     };
     let shows = bed.open()?;
     assert!(shows.contains("offset=0 mark=true"), "{shows}");
-    bed.hp.pointer_move(960.0, 500.0);
-    wait(&mut bed.hp, Duration::from_millis(100))?;
+    common::over(&mut bed.hp, (960.0, 500.0), hocus_link::LAUNCHER_NAMESPACE)?;
     let from = bed.mark();
     bed.hp.wheel(1);
     let shows = bed.shows_after(from, "offset=1 ")?;
@@ -713,22 +713,35 @@ fn the_wheel_scrolls_the_grid_by_rows() -> anyhow::Result<()> {
     let from = bed.mark();
     bed.hp.wheel(-3);
     bed.shows_after(from, "offset=0 ")?;
-    // Down to the end, and no further.
-    for _ in 0..10 {
+    // Down to the end, a notch at a time: the grid's ten rows (two
+    // headings, the frequent row, seven rows of 50 applications) 738 px
+    // high, its last four rows fill it from row 6.
+    const END: usize = 6;
+    for offset in 1..=END {
+        let from = bed.mark();
         bed.hp.wheel(1);
+        bed.shows_after(from, &format!("offset={offset} "))?;
     }
+    // And no further: a notch more, then one back, ends a row up from the
+    // end, never past it on the way. Had the first gone past it, the
+    // second would end on it.
     let from = bed.mark();
     bed.hp.wheel(1);
-    wait(&mut bed.hp, Duration::from_millis(300))?;
-    let last = bed.plain();
-    let offsets: Vec<&str> = last
+    bed.hp.wheel(-1);
+    let shows = bed.shows_after(from, &format!("offset={} ", END - 1))?;
+    let after = bed.plain();
+    let offsets: Vec<&str> = after
+        .get(from..)
+        .unwrap_or_default()
         .lines()
         .filter(|l| l.contains("the launcher shows it"))
         .filter_map(|l| l.split("offset=").nth(1)?.split(' ').next())
         .collect();
     assert!(
-        offsets.last().is_some_and(|o| *o != "0"),
-        "{offsets:?} from {from}"
+        offsets
+            .iter()
+            .all(|o| o.parse::<usize>().is_ok_and(|o| o <= END)),
+        "{offsets:?}: {shows}"
     );
     Ok(())
 }
@@ -844,11 +857,13 @@ fn a_calculation_shows_in_a_card_and_enter_copies_it_with_a_toast() -> anyhow::R
     assert!(copied, "{:?}", bed.hp.clipboard());
     let said = bed.logged_after(from, "the launcher's toast shows it")?;
     assert!(said.contains("Copié") && said.contains(": 84"), "{said}");
+    // Timed from its first frame, as the compositor saw it: a loaded
+    // machine's test sees it come late, and go late.
     let shown = bed
         .hp
-        .dispatch_until(WAIT, |hp| hp.launcher_toast_surfaces().len() == 1)?;
+        .dispatch_until(WAIT, |hp| hp.launcher_toast_since().is_some())?;
     assert!(shown, "no toast");
-    let since = Instant::now();
+    let since = bed.hp.launcher_toast_since().unwrap_or_default();
     let (output, rect) = bed.hp.launcher_toast_surfaces()[0].clone();
     assert_eq!(output, "HEADLESS-1");
     // 60 px up, 19.5 px text 15 px from its top and bottom (× 1.5).
@@ -860,7 +875,7 @@ fn a_calculation_shows_in_a_card_and_enter_copies_it_with_a_toast() -> anyhow::R
         .hp
         .dispatch_until(WAIT, |hp| hp.launcher_toast_surfaces().is_empty())?;
     assert!(gone, "the toast stayed");
-    let lasted = since.elapsed();
+    let lasted = bed.hp.now().saturating_sub(since);
     assert!(lasted > Duration::from_millis(1400), "{lasted:?}");
     Ok(())
 }
