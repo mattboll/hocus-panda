@@ -35,7 +35,7 @@ pipewire = { version = "0.10.1", features = ["v0_3_77"] }
 # CLOCK_MONOTONIC's microseconds, systemd's timestamps' clock (#538); the
 # recording's sound pipe, a FIFO, and its ffmpeg stopped when it stalls
 # (5.10).
-rustix = { version = "1.1.6", features = ["fs", "process", "time"] }
+rustix = { version = "1.1.6", features = ["fs", "process", "rand", "time"] }
 serde = { version = "1.0.229", features = ["derive"] }
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",

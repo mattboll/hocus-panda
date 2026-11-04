@@ -4,7 +4,9 @@
 //!
 //! Asked on the editor's thread for it: whether a portal is there (owned,
 //! or started on demand) is asked within [`ASK`], and so is the call;
-//! then the user chooses for as long as they like. Without a bus, without
+//! then the user chooses for as long as they like. The editor is the
+//! chooser's parent (`parent_window`, [`crate::foreign`]): the chooser
+//! comes in front of the windows with the keyboard (#595). Without a bus, without
 //! a portal, or a portal without a file chooser, the caller saves beside
 //! the capture instead ([`Chosen::NoPortal`]).
 
@@ -80,7 +82,8 @@ async fn choose(
         if !there(&connection).await? {
             return Ok(None);
         }
-        let request = ask(&connection, title, name, folder).await?;
+        let parent = crate::foreign::parent_window(hocus_link::CAPTURE_EDITOR_NAMESPACE).await;
+        let request = ask(&connection, &parent, title, name, folder).await?;
         Ok::<_, zbus::Error>(Some((connection, request)))
     };
     let (connection, mut responses) = match tokio::time::timeout(ASK, asked).await {
@@ -146,6 +149,7 @@ async fn there(connection: &Connection) -> zbus::Result<bool> {
 /// asked.
 async fn ask(
     connection: &Connection,
+    parent: &str,
     title: &str,
     name: &str,
     folder: &Path,
@@ -183,7 +187,7 @@ async fn ask(
             PATH,
             Some(CHOOSER),
             "SaveFile",
-            &("", title, options),
+            &(parent, title, options),
         )
         .await?;
     let handle: OwnedObjectPath = reply.body().deserialize()?;

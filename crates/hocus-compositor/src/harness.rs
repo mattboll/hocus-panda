@@ -662,6 +662,12 @@ impl Headless {
         self.layer_rects(hocus_link::CAPTURE_THUMB_NAMESPACE)
     }
 
+    /// The xdg-foreign handle made for the shell's surface of `namespace`,
+    /// as the shell asks for it before a portal's dialog (#595).
+    pub fn export_for_shell(&mut self, namespace: &str) -> Option<String> {
+        self.app.state.export_for_shell(namespace)
+    }
+
     /// The capture's editor's surfaces (5.9).
     pub fn capture_editor_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::CAPTURE_EDITOR_NAMESPACE)

@@ -59,6 +59,22 @@ open on), agents' badges on windows (slice 3).
   click on an application's tray icon is the user's too: its application
   may focus one window within 2 s, asking or opening it (bar.md, as
   built, 5.14b).
+- **Dialogs** (#595): a window that is another's dialog opens just
+  above its parent and stays above it when the parent is raised. Its
+  parent is its xdg parent (`xdg_toplevel.set_parent`, from its own
+  client) or one set through xdg-foreign (`zxdg_importer_v2`), as the
+  desktop portal's backend makes its file chooser the child of the
+  window that asked for it (`parent_window`, `wayland:HANDLE`). It takes
+  the focus when its parent has it, and asking for the focus then
+  (xdg-activation, with a token of its own made from no input, as the
+  portal's backend does) brings it forward; a dialog of a window
+  without the focus opens above its parent, under the focused window,
+  and pulses. The shell's surfaces are layer surfaces, which the
+  protocol cannot export: the shell asks over its link for a handle of
+  one (`export ASK NAMESPACE`), and a dialog of that handle (the
+  capture's editor's "Enregistrer sous…") comes in front with the
+  keyboard, whatever window had the focus. A handle made for the shell
+  lasts a minute; one that names nothing is said `destroyed` at once.
 - Focus moves with Alt+Tab (section 11) and the pointer. Focusing the
   window on a side is an action of `[shortcuts]` (`focus-left`,
   `focus-right`, `focus-up`, `focus-down`) with no default key:
