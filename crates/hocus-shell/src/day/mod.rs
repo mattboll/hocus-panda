@@ -30,9 +30,9 @@ struct Service {
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
-/// The views' wakers ([`on_change`]): kept apart from the service, so that
-/// a view registering before the day's thread started it is woken all the
-/// same.
+
+/// The views' wakers ([`on_change`]): kept apart from the service, which
+/// the day's thread makes, so that a view may ask before it is there.
 static WAKERS: Mutex<Vec<Waker>> = Mutex::new(Vec::new());
 
 /// How long the shell, ending, waits for each account's worker to finish
@@ -93,7 +93,12 @@ fn start_workers() -> Option<mpsc::Receiver<Update>> {
         day: Mutex::new(Arc::new(day)),
         workers: Mutex::new(workers),
     };
-    SERVICE.set(service).is_ok().then_some(snapshots)
+    let started = SERVICE.set(service).is_ok();
+    // The accounts as they start (loading): what the views asked before.
+    if started {
+        wake_all();
+    }
+    started.then_some(snapshots)
 }
 
 /// The configuration file the compositor names (none when it names an
@@ -145,20 +150,18 @@ fn publish(update: Update) {
         "the day holds {}",
         self::snapshot().summary(&crate::notifications::wall())
     );
-    wake_views();
+    wake_all();
 }
 
-/// Each view's waker called, those that return `false` dropped.
-fn wake_views() {
-    WAKERS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .retain_mut(|wake| wake());
+/// Every view's waker, those that are done dropped.
+fn wake_all() {
+    let mut wakers = WAKERS.lock().unwrap_or_else(PoisonError::into_inner);
+    wakers.retain_mut(|wake| wake());
 }
 
-/// From now on, a change of the day calls `wake` (until it returns
-/// `false`), beside the other views' wakers; it is called once now, for
-/// what came before.
+/// From now on, a change of the day calls `wake` (on the day's thread,
+/// until it returns `false`); it is called once now, for what came before.
+/// It may be asked before the day has started.
 pub fn on_change(wake: impl FnMut() -> bool + Send + 'static) {
     let mut wake: Waker = Box::new(wake);
     if wake() {

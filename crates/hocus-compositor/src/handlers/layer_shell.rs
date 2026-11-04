@@ -169,6 +169,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::CLOCK_NAMESPACE => state.panel.clock_commits += 1,
             hocus_link::LEVELS_NAMESPACE => state.panel.levels_commits += 1,
             hocus_link::IN_USE_NAMESPACE => state.panel.in_use_commits += 1,
+            hocus_link::MEETING_NAMESPACE => state.panel.meeting_commits += 1,
             hocus_link::CONNECTIONS_NAMESPACE => state.panel.connections_commits += 1,
             hocus_link::DESKTOPS_NAMESPACE => state.panel.desktops_commits += 1,
             hocus_link::AGENTS_NAMESPACE => state.agents.commits += 1,

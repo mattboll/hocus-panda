@@ -124,8 +124,8 @@ impl Concern {
     }
 }
 
-/// How near the next meeting is: the calendar's way into the halo, with
-/// "Your day" (not built yet).
+/// How near the next meeting is: the calendar's way into the halo, as the
+/// shell says it (`meeting`, Day.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Meeting {
     /// In 10 min or less.
@@ -525,7 +525,7 @@ impl State {
         self.arm_reminder();
     }
 
-    /// The next meeting is `near`, or not (the calendar's, not built yet).
+    /// The next meeting is `near`, or not, as the shell says (Day.2).
     pub fn meeting_near(&mut self, near: Option<Meeting>) {
         let (now, motion) = (self.now(), self.halo_motion());
         if self.halo.meeting(near, now, motion) {

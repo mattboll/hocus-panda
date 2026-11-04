@@ -47,6 +47,7 @@ pub mod desktop;
 pub mod history;
 pub mod in_use;
 pub mod kit;
+pub mod meeting;
 pub mod session;
 pub mod sound;
 pub mod tasks;
@@ -61,8 +62,8 @@ use std::{
 
 use hocus_link::{
     AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
-    Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH,
-    TASKS_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
+    Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE,
+    POPOVER_WIDTH, TASKS_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -121,6 +122,13 @@ pub enum Item {
     /// A tray icon (5.14), by its item's key: its menu, read before it
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
+    /// The next meeting's card (Day.2): a click, or `Enter`, opens the
+    /// meeting (its page in its calendar until Day.5).
+    Meeting,
+    /// The card's join button: a click, or `Enter`, joins its video call.
+    Join,
+    /// The mini form's meeting mark: its popover, by a hover or a click.
+    MeetingMark,
     /// The mini form's to-do item (Day.4): the tasks' popover.
     Tasks,
     /// The group's "+ N autres" (Day.4): the same popover, every task.
@@ -144,6 +152,8 @@ impl Item {
                 | Self::Agent(_)
                 | Self::Menu
                 | Self::Tray(_)
+                | Self::Meeting
+                | Self::Join
                 | Self::TaskAdd
                 | Self::Task(_)
         )
@@ -167,7 +177,12 @@ impl Item {
             Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User | Self::InUse => {
                 true
             }
-            Self::Keyboard | Self::Agent(_) | Self::Menu | Self::Tray(_) => false,
+            Self::Keyboard
+            | Self::Agent(_)
+            | Self::Menu
+            | Self::Tray(_)
+            | Self::Meeting
+            | Self::Join => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
@@ -185,6 +200,7 @@ impl Item {
             Self::User => session::WIDTH,
             Self::InUse => in_use::WIDTH,
             Self::Tray(_) => tray::WIDTH,
+            Self::MeetingMark => meeting::WIDTH,
             Self::Tasks | Self::TasksMore => tasks::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
@@ -209,11 +225,14 @@ impl Item {
             Self::User => session::height(),
             Self::InUse => in_use::height(),
             Self::Tray(key) => tray::height(key),
+            Self::MeetingMark => meeting::height(),
             Self::Tasks | Self::TasksMore => tasks::height(),
             Self::Keyboard
             | Self::Decline
             | Self::Agent(_)
             | Self::Menu
+            | Self::Meeting
+            | Self::Join
             | Self::TaskAdd
             | Self::Task(_) => 0,
         }
@@ -239,6 +258,7 @@ impl Item {
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
             Self::Menu | Self::User | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
+            Self::Meeting | Self::Join | Self::MeetingMark => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
         }
@@ -262,6 +282,9 @@ impl Item {
             | Self::User
             | Self::InUse
             | Self::Tray(_)
+            | Self::Meeting
+            | Self::Join
+            | Self::MeetingMark
             | Self::TaskAdd
             | Self::Task(_)
             | Self::Clipboard => {}
@@ -289,6 +312,7 @@ impl Item {
             }
             (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
+            (Self::Meeting | Self::Join | Self::MeetingMark, _) => MEETING_NAMESPACE,
             (Self::Tasks | Self::TasksMore | Self::TaskAdd | Self::Task(_), _) => TASKS_NAMESPACE,
             (
                 Self::Sources
@@ -314,6 +338,7 @@ impl Item {
                 | Self::Secretary
                 | Self::InUse
                 | Self::Tray(_)
+                | Self::MeetingMark
                 | Self::Tasks
                 | Self::TasksMore
         ) && !self.agents()
@@ -328,6 +353,7 @@ impl Item {
             AGENTS_NAMESPACE => place.agents,
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
+            MEETING_NAMESPACE => place.meeting.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
             TASKS_NAMESPACE => place.tasks.unwrap_or(place.levels),
             _ => place.connections,
@@ -361,6 +387,8 @@ pub struct Place {
     pub in_use: Option<window::Id>,
     /// The tray's (5.14), while icons show.
     pub tray: Option<window::Id>,
+    /// The next meeting's (Day.2), while one is left today.
+    pub meeting: Option<window::Id>,
     /// The to-do list's (Day.4), once the bar has told it.
     pub tasks: Option<window::Id>,
 }
@@ -656,6 +684,7 @@ impl Controller {
         let footer = self.bars.get(bar).and_then(|p| p.footer);
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let tray = self.bars.get(bar).and_then(|p| p.tray);
+        let meeting = self.bars.get(bar).and_then(|p| p.meeting);
         let tasks = self.bars.get(bar).and_then(|p| p.tasks);
         let place = Place {
             form,
@@ -668,6 +697,7 @@ impl Controller {
             footer,
             in_use,
             tray,
+            meeting,
             tasks,
         };
         self.bars.insert(bar.to_owned(), place);
@@ -694,6 +724,23 @@ impl Controller {
         }
         if in_use.is_none() {
             self.items.remove(&(bar.to_owned(), IN_USE_NAMESPACE));
+        }
+    }
+
+    /// Bar `bar`'s next meeting's surface is `meeting` (none: it went).
+    pub fn set_meeting(&mut self, bar: &str, meeting: Option<window::Id>) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.meeting = meeting;
+        }
+        if meeting.is_none() {
+            self.items.remove(&(bar.to_owned(), MEETING_NAMESPACE));
+            if self
+                .focused
+                .as_ref()
+                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == MEETING_NAMESPACE)
+            {
+                self.focused = None;
+            }
         }
     }
 
@@ -1310,6 +1357,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
         Item::Menu => Some(Effect::ToggleLauncher(bar)),
         Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
+        Item::Meeting => crate::meeting::open_page(),
+        Item::Join => crate::meeting::join(),
         Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),
         Item::Task(slot) => Some(Effect::Tasks(crate::tasks::Act::Toggle { bar, slot })),
         Item::Sound
@@ -1325,6 +1374,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Clipboard
         | Item::User
         | Item::InUse
+        | Item::MeetingMark
         | Item::Tasks
         | Item::TasksMore => None,
     }
@@ -1675,6 +1725,12 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
             }
         }
     })
+}
+
+/// `effects` as iced's messages, for a task to run in its order: a bar's
+/// surfaces opened after its own, so that they are in front of it.
+pub fn messages(effects: Vec<Effect>) -> Vec<crate::Message> {
+    effects.into_iter().flat_map(carry_out).collect()
 }
 
 /// Wider than any surface: a region as large as can be.
@@ -2400,6 +2456,7 @@ mod tests {
             footer: None,
             in_use: None,
             tray: None,
+            meeting: None,
             tasks: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
@@ -2429,6 +2486,7 @@ mod tests {
             footer: None,
             in_use: None,
             tray: None,
+            meeting: None,
             tasks: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2673,6 +2731,63 @@ mod tests {
                 row: row(0.0)
             }]
         );
+    }
+
+    #[test]
+    fn tab_reaches_the_meetings_card_then_its_button_then_the_agents_group() {
+        let mut c = Controller::default();
+        let agents = window::Id::unique();
+        let card = window::Id::unique();
+        c.place(
+            BAR,
+            Form::Full,
+            window::Id::unique(),
+            (
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+                agents,
+            ),
+        );
+        c.set_meeting(BAR, Some(card));
+        c.motion = false;
+        let t = Instant::now();
+        let card_rect = Rectangle::new(Point::new(-185.0, 100.0), Size::new(172.0, 44.0));
+        let join = Rectangle::new(Point::new(-50.0, 107.0), Size::new(30.0, 30.0));
+        let sources = Rectangle::new(Point::new(-60.0, 158.0), Size::new(45.0, 16.0));
+        // As the card's surface tells them, the button first.
+        c.set_items(
+            BAR,
+            MEETING_NAMESPACE,
+            vec![(Item::Join, join), (Item::Meeting, card_rect)],
+        );
+        c.set_items(BAR, AGENTS_NAMESPACE, vec![(Item::Sources, sources)]);
+        // Neither opens a popover: they act.
+        assert!(!Item::Meeting.clicks() && !Item::Join.clicks());
+        assert!(!Item::Meeting.hovers(Form::Full) && !Item::Join.hovers(Form::Full));
+        assert!(Item::MeetingMark.clicks() && Item::MeetingMark.hovers(Form::Mini));
+        // The keyboard on Sources (Esc in its popover), back up: the card,
+        // which its surface takes, then its button, then Sources again.
+        c.handle(
+            Event::ItemPress {
+                bar: BAR.to_owned(),
+                item: Item::Sources,
+                rect: sources,
+            },
+            t,
+        );
+        c.handle(Event::Escape, t);
+        let effects = c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Meeting));
+        assert!(effects.contains(&Effect::Keyboard(card, KeyboardInteractivity::Exclusive)));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Join));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Sources));
+        // The card gone, its items go with it.
+        c.set_meeting(BAR, None);
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Sources));
     }
 
     #[test]

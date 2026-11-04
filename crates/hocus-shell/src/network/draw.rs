@@ -495,6 +495,9 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::User
                             | Item::InUse
                             | Item::Tray(_)
+                            | Item::Meeting
+                            | Item::Join
+                            | Item::MeetingMark
                             | Item::Tasks
                             | Item::TasksMore
                             | Item::TaskAdd

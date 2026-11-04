@@ -712,7 +712,7 @@ fn search_web(id: window::Id) {
 /// The browser opens `url`: `xdg-open`, started by the compositor as the
 /// applications are, off its loop. The program is looked for in the
 /// shell's `PATH` and sent whole.
-fn browse(url: &str) -> Option<Effect> {
+pub(crate) fn browse(url: &str) -> Option<Effect> {
     let Some(opener) = program("xdg-open") else {
         tracing::warn!("no xdg-open in PATH: the address does not open");
         return None;
