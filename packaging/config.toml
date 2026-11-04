@@ -226,6 +226,17 @@
 #   done = "DONE"                        # default DONE, else the last
 #   add = ""                             # where + adds: the tasks' column
 #
+# A Planka board (kind "planka"): its address, or the server's and the
+# board's id; its columns by name. Its token is pasted once with
+# `hocus day planka-token` (in Planka, once signed in: the browser's
+# tools, Storage, Cookies, accessToken):
+#
+#   [[day.tasks]]
+#   kind = "planka"
+#   address = "https://planka.example.org/boards/1234"
+#   tasks = "TODO"
+#   done = "DONE"
+#
 # Google calendars come from GNOME Online Accounts (add the Google
 # account in Settings > Online Accounts, its calendar on): nothing of the
 # account is kept here, its token is asked of Online Accounts.
@@ -235,7 +246,3 @@
 #   account = "alex@example.org"         # none: every Google account there
 #   shown = ["Travail"]
 #   colors = { "Travail" = "#6CC287" }
-#
-# Planka boards (kind "planka", with the server's address and the board's
-# address or id) are read, and show as not supported until their adapter
-# lands.

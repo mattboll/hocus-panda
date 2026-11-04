@@ -427,6 +427,9 @@ impl Worker {
                     self.snapshot.board = Some(board);
                     self.snapshot.tasks = tasks;
                     self.columns = Some(columns);
+                    if self.snapshot.login.is_none() {
+                        self.snapshot.login = source.login();
+                    }
                 })
             }
         };

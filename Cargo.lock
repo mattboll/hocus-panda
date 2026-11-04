@@ -1620,9 +1620,12 @@ dependencies = [
 name = "hocus-cli"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "clap",
  "hocus-agents",
+ "hocus-day",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

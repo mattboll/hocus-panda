@@ -11,8 +11,10 @@ pub mod config;
 pub mod fixture;
 pub mod goa;
 pub mod google;
+mod http;
 pub mod local;
 pub mod model;
+pub mod planka;
 pub mod secrets;
 pub mod snapshot;
 pub mod source;
@@ -30,7 +32,7 @@ use jiff::Zoned;
 pub use crate::{
     config::Config,
     snapshot::{
-        Account, Change, ChangeId, Day, Holds, Kind, Pending, Shown, Snapshot, State, Update,
+        Account, Change, ChangeId, Day, Holds, Kind, Login, Pending, Shown, Snapshot, State, Update,
     },
     source::{CalendarSource, KanbanSource, SourceError},
 };
@@ -230,7 +232,7 @@ impl Workers {
                         },
                     )
                 }
-                config::TaskKind::Planka => Err(not_yet(account)),
+                config::TaskKind::Planka => planka_plan(account, entry, env),
             });
         }
         let local = env.state_dir.as_ref().map(|dir| dir.join("tasks.json"));
@@ -325,12 +327,28 @@ impl Workers {
     }
 }
 
-fn not_yet(account: Account) -> Box<Snapshot> {
-    let kind = account.kind.name();
-    Box::new(Snapshot::failed(
+/// A Planka board's worker: its server and board from the entry, its token
+/// from the secrets when it first reads.
+fn planka_plan(
+    account: Account,
+    entry: &config::TaskEntry,
+    env: &Env,
+) -> Result<Plan, Box<Snapshot>> {
+    let (server, board) = match planka::address(&entry.address, &entry.board) {
+        Ok(found) => found,
+        Err(error) => return Err(Box::new(Snapshot::failed(account, error))),
+    };
+    let (id, secrets, names) = (account.id.clone(), env.secrets.clone(), entry.columns());
+    Ok(Plan {
         account,
-        SourceError::Invalid(format!("{kind} accounts are not supported yet")),
-    ))
+        make: Box::new(move || Source::Tasks {
+            source: Box::new(planka::Planka::new(server, board, id, secrets)),
+            names,
+        }),
+        every: None,
+        cache: None,
+        watch: None,
+    })
 }
 
 /// A fixture's worker, its source made by `make` from its file.

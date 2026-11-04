@@ -14,7 +14,6 @@
 
 use std::{
     collections::HashMap,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -89,23 +88,11 @@ impl std::fmt::Debug for GoogleCalendar {
 impl GoogleCalendar {
     /// `account`'s calendars at `base` ([`api`]), with `tokens`.
     pub fn new(account: AccountId, tokens: Box<dyn AccessToken>, base: String) -> Self {
-        let tls = ureq::tls::TlsConfig::builder()
-            .provider(ureq::tls::TlsProvider::Rustls)
-            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-            .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .build();
-        let agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(TIMEOUT))
-            .user_agent(concat!("hocuspanda/", env!("CARGO_PKG_VERSION")))
-            .tls_config(tls)
-            .build()
-            .new_agent();
         Self {
             account,
             tokens,
             token: None,
-            agent,
+            agent: crate::http::agent(TIMEOUT),
             base,
             defaults: HashMap::new(),
         }
@@ -137,18 +124,9 @@ impl GoogleCalendar {
             for (key, value) in query {
                 request = request.query(key, value);
             }
-            let mut response = request
-                .call()
-                .map_err(|err| SourceError::Offline(format!("Google Calendar: {err}")))?;
-            let status = response.status().as_u16();
+            let (status, body) = crate::http::read(request.call(), "Google Calendar", LARGEST)?;
             match status {
                 200..=299 => {
-                    let body = response
-                        .body_mut()
-                        .with_config()
-                        .limit(LARGEST)
-                        .read_to_string()
-                        .map_err(|err| SourceError::Offline(format!("Google Calendar: {err}")))?;
                     return serde_json::from_str(&body).map_err(|err| {
                         SourceError::Refused(format!(
                             "Google Calendar's answer does not read: {err}"
