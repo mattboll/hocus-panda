@@ -8,6 +8,7 @@ use anyhow::Context;
 use smithay::{
     backend::input::{ButtonState, KeyState},
     input::keyboard::Keycode,
+    output::Output,
     reexports::calloop::EventLoop,
     utils::{IsAlive, Point},
     wayland::seat::WaylandFocus,
@@ -108,6 +109,18 @@ impl Headless {
         shell: Option<std::path::PathBuf>,
         bus: Option<String>,
     ) -> anyhow::Result<Self> {
+        Self::start_on_buses(headless, config, shell, bus, None)
+    }
+
+    /// The same, the system bus at `system` (`--system-bus`) too: logind's
+    /// sleeps and UPower's power source are read there (7.2).
+    pub fn start_on_buses(
+        headless: HeadlessConfig,
+        config: Config,
+        shell: Option<std::path::PathBuf>,
+        bus: Option<String>,
+        system: Option<String>,
+    ) -> anyhow::Result<Self> {
         // A GPU only when the developer named one (#534).
         let headless = crate::test_gpu::resolve(headless)?;
         let started = crate::start(Options {
@@ -119,6 +132,7 @@ impl Headless {
             config,
             shell,
             session_bus: bus,
+            system_bus: system,
         })?;
         let shell = ShellEnd(started.app.state.shell.running.clone());
         Ok(Self {
@@ -818,6 +832,8 @@ impl Headless {
         // What falls due on the way: the idle countdown runs on this
         // clock, its timer on the real one.
         state.idle_check();
+        // The curtain, the lock after it and the screens off (7.2) too.
+        state.away_check();
         // The lock's wait counts on this clock, its timer on the real one.
         state.lock_wait_tick();
         state.redraw = true;
@@ -833,6 +849,89 @@ impl Headless {
     /// Locks the session now, as `Super+L` or the idle will (7.1).
     pub fn lock(&mut self) {
         self.app.state.lock_now();
+    }
+
+    /// Where the session is, away from its user: the curtain, the screens
+    /// off unlocked (7.2).
+    pub fn away(&self) -> crate::away::Shown {
+        self.app.state.away()
+    }
+
+    /// The curtain's work so far, and the sleeps let go.
+    pub fn away_counts(&self) -> crate::away::Counts {
+        self.app.state.away_counts()
+    }
+
+    /// The screens that are on, by name, in their order.
+    pub fn screens_on(&self) -> Vec<String> {
+        let state = &self.app.state;
+        let mut names: Vec<String> = state
+            .space
+            .outputs()
+            .filter(|o| state.output_powered(o))
+            .map(Output::name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The dim's opacity on the screen now, if the curtain draws one.
+    pub fn curtain_dim(&self) -> Option<f32> {
+        let state = &self.app.state;
+        let since = state.curtain_since()?;
+        let (dim, _) = state.curtain_looks(since, None, state.now());
+        Some(dim)
+    }
+
+    /// The pill's surfaces the compositor takes as the shell's and draws,
+    /// by screen.
+    pub fn curtain_surfaces(&self) -> Vec<(String, Rect)> {
+        let state = &self.app.state;
+        let Some((pill, _)) = state.curtain_pill() else {
+            return Vec::new();
+        };
+        state
+            .space
+            .outputs()
+            .filter_map(|output| {
+                let layer = state.curtain_layer(output, pill)?;
+                let origin = state.space.output_geometry(output)?.loc;
+                let g = smithay::desktop::layer_map_for_output(output).layer_geometry(&layer)?;
+                Some((
+                    output.name(),
+                    Rect {
+                        x: origin.x + g.loc.x,
+                        y: origin.y + g.loc.y,
+                        width: g.size.w,
+                        height: g.size.h,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// The lid closes, or opens (a laptop's switch).
+    pub fn lid(&mut self, closed: bool) {
+        self.app.state.lid(closed);
+    }
+
+    /// Output `name` is a laptop's own screen: the lid closes over it.
+    pub fn set_internal(&mut self, name: &str) {
+        if let Some(output) = self.app.state.space.outputs().find(|o| o.name() == name) {
+            output
+                .user_data()
+                .insert_if_missing(|| crate::away::Internal);
+        }
+    }
+
+    /// Whether logind's sleep inhibitor is held.
+    pub fn sleep_inhibited(&self) -> bool {
+        self.app.state.sleep_inhibited()
+    }
+
+    /// Whether UPower says the machine is on battery.
+    pub fn on_battery(&self) -> bool {
+        self.app.state.on_battery()
     }
 
     /// Where the lock is.
@@ -1127,14 +1226,32 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
-        self.app.state.idle_input();
+        let from = self
+            .app
+            .state
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let by = Point::from((x, y)) - from;
+        if !self.app.state.felt(crate::away::Felt::Motion(by)) {
+            return;
+        }
         self.time += 10;
         let time = self.time;
         self.app.state.pointer_motion(Point::from((x, y)), time);
     }
 
     pub fn button(&mut self, button: u32, pressed: bool) {
-        self.app.state.idle_input();
+        use crate::away::{Felt, Pressed};
+        let felt = if pressed {
+            Felt::Press(Pressed::Button(button))
+        } else {
+            Felt::Release(Pressed::Button(button))
+        };
+        if !self.app.state.felt(felt) {
+            return;
+        }
         self.time += 10;
         let state = if pressed {
             ButtonState::Pressed
@@ -1167,7 +1284,9 @@ impl Headless {
         v120: Option<i32>,
     ) {
         use smithay::{backend::input::Axis, input::pointer::AxisFrame};
-        self.app.state.idle_input();
+        if !self.app.state.felt(crate::away::Felt::Other) {
+            return;
+        }
         self.time += 10;
         let mut frame = AxisFrame::new(self.time)
             .source(source)
@@ -1184,7 +1303,16 @@ impl Headless {
 
     /// A key by its evdev code.
     pub fn key(&mut self, code: u32, pressed: bool) {
-        self.app.state.idle_input();
+        use crate::away::{Felt, Pressed};
+        // XKB keycodes are evdev's plus 8.
+        let felt = if pressed {
+            Felt::Press(Pressed::Key(code + 8))
+        } else {
+            Felt::Release(Pressed::Key(code + 8))
+        };
+        if !self.app.state.felt(felt) {
+            return;
+        }
         self.time += 10;
         let state = if pressed {
             KeyState::Pressed

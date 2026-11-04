@@ -420,7 +420,7 @@ fn changing_the_delay_writes_idle_delay_at_once_keeping_the_rest() -> anyhow::Re
     assert_eq!(shown["source"], "ac");
     assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "5 min");
     // 15 min, the menu's fifth choice.
-    bed.choose("power.screen-off", 4)?;
+    bed.choose("power.screen-off", 5)?;
     let text = bed.written(|t| t.contains("delay = 900"))?;
     assert_eq!(text, FILE.replace("delay = 300 #", "delay = 900 #"));
     assert!(kept(FILE, &text, &["delay ="]));
@@ -449,7 +449,7 @@ fn annuler_and_ctrl_z_take_the_value_back() -> anyhow::Result<()> {
     };
     bed.open()?;
     bed.power()?;
-    bed.choose("power.screen-off", 4)?;
+    bed.choose("power.screen-off", 5)?;
     bed.written(|t| t.contains("delay = 900"))?;
     bed.shows(|s| s["toast_action"] == "undo")?;
     // The toast's "Annuler": the file as it was.
@@ -462,7 +462,7 @@ fn annuler_and_ctrl_z_take_the_value_back() -> anyhow::Result<()> {
     );
     assert_eq!(shown["lit"], "power.screen-off");
     // Ctrl+Z, the same.
-    bed.choose("power.screen-off", 3)?;
+    bed.choose("power.screen-off", 4)?;
     bed.written(|t| t.contains("delay = 600"))?;
     bed.shows(|s| s["undo"] == 1)?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
@@ -700,7 +700,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     // Past the toast's rise.
     wait(&mut bed.hp, Duration::from_millis(300))?;
     shoot(&mut bed, "toast.png")?;
-    bed.choose("power.screen-off", 4)?;
+    bed.choose("power.screen-off", 5)?;
     bed.shows(|s| s["menu"].is_null())?;
     bed.click("control:power.lid")?;
     bed.shows(|s| s["menu"] == "power.lid")?;

@@ -254,6 +254,9 @@ pub struct State {
     pub layout_codes: Vec<String>,
     /// The lock screen (7.1, docs/design/lock.md).
     pub lock: crate::lock::Lock,
+    /// Locking on idle and before sleep, the curtain and the screens off
+    /// (7.2).
+    pub away: crate::away::Away,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
 }
@@ -422,6 +425,7 @@ impl State {
             kept_keys: HashSet::new(),
             layout_codes,
             lock: crate::lock::Lock::new(dh),
+            away: crate::away::Away::default(),
             ending: None,
         })
     }

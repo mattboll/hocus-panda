@@ -415,6 +415,7 @@ impl State {
             self.tell_recording();
         }
         self.lock_shell_connected();
+        self.away_shell_connected();
     }
 
     /// The shell's connection ended.

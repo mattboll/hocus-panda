@@ -852,9 +852,25 @@ fn draw_avatar(f: &mut Frame, rect: Rectangle) {
     }
 }
 
+/// The panda's eyes: open (lit), half closed, closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Eyes {
+    Open,
+    Half,
+    Closed,
+}
+
 /// The panda's face, `size` px at `at` (the mockup's 30-unit box): awake
 /// (its eyes lit) or asleep (its eyes closed).
 fn panda(f: &mut Frame, at: Point, size: f32, asleep: bool, alpha: f32) {
+    let eyes = if asleep { Eyes::Closed } else { Eyes::Open };
+    panda_eyes(f, at, size, eyes, alpha);
+}
+
+/// The panda's face with its eyes `eyes` (the curtain's panda falling
+/// asleep, 7.2).
+pub(crate) fn panda_eyes(f: &mut Frame, at: Point, size: f32, eyes: Eyes, alpha: f32) {
+    let asleep = eyes == Eyes::Closed;
     let s = size / 30.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
     let dark = faded(PANDA_DARK, alpha);
@@ -894,6 +910,29 @@ fn panda(f: &mut Frame, at: Point, size: f32, asleep: bool, alpha: f32) {
                 line_cap: LineCap::Round,
                 ..Stroke::default().with_color(light).with_width(0.9 * s)
             },
+        );
+    } else if eyes == Eyes::Half {
+        // The lids half down: lower, smaller lights under a line.
+        let lids = Path::new(|b| {
+            b.move_to(p(9.4, 15.6));
+            b.quadratic_curve_to(p(11.0, 15.0), p(12.6, 15.6));
+            b.move_to(p(17.4, 15.6));
+            b.quadratic_curve_to(p(19.0, 15.0), p(20.6, 15.6));
+        });
+        f.stroke(
+            &lids,
+            Stroke {
+                line_cap: LineCap::Round,
+                ..Stroke::default().with_color(light).with_width(0.8 * s)
+            },
+        );
+        f.fill(
+            &Path::circle(p(11.1, 16.6), 0.7 * s),
+            faded(Color::WHITE, alpha),
+        );
+        f.fill(
+            &Path::circle(p(18.9, 16.6), 0.7 * s),
+            faded(Color::WHITE, alpha),
         );
     } else {
         f.fill(

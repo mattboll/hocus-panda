@@ -31,6 +31,7 @@ mod bluetooth;
 mod capture;
 mod clipboard;
 mod clock;
+mod curtain;
 mod day;
 mod desktops;
 mod emoji;
@@ -759,6 +760,14 @@ impl Shell {
                 let effects = lock::end();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
+            ToShell::Curtain(shown) => {
+                let effects = curtain::set(shown);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
+            }
+            ToShell::CurtainEnd => {
+                let effects = curtain::end();
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
+            }
         }
     }
 
@@ -1440,6 +1449,23 @@ impl Shell {
         Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
     }
 
+    /// The curtain's pill (7.2), if its surface is `id`.
+    fn curtain_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !curtain::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(curtain::draw::View {
+                id,
+                words: curtain::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The authentication dialog (7.5), if its surface is `id`.
     fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !auth::is_surface(id) {
@@ -1767,6 +1793,7 @@ impl Shell {
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
                 .or_else(|| self.lock_view(id))
+                .or_else(|| self.curtain_view(id))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))

@@ -75,13 +75,59 @@ fn digit_key(code: smithay::input::keyboard::Keycode) -> Option<Keysym> {
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        use crate::away::{Felt, Pressed};
         // Any of the user's input, devices added and removed aside, is
-        // activity (7.3): it only notes the time.
-        if !matches!(
-            event,
-            InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }
-        ) {
-            self.idle_input();
+        // activity (7.3): it only notes the time. What lifts the curtain,
+        // or wakes the screens of a session not locked, goes no further
+        // (7.2).
+        let felt = match &event {
+            InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. } => None,
+            InputEvent::SwitchToggle { event } => {
+                use bi::{Switch, SwitchState, SwitchToggleEvent};
+                if event.switch() == Some(Switch::Lid) {
+                    self.lid(event.state() == SwitchState::On);
+                }
+                return;
+            }
+            InputEvent::Keyboard { event } => {
+                let code = event.key_code().raw();
+                Some(match event.state() {
+                    KeyState::Pressed => Felt::Press(Pressed::Key(code)),
+                    KeyState::Released => Felt::Release(Pressed::Key(code)),
+                })
+            }
+            InputEvent::PointerMotion { event } => Some(Felt::Motion(event.delta())),
+            InputEvent::PointerMotionAbsolute { event } => {
+                let from = self
+                    .seat
+                    .get_pointer()
+                    .map(|p| p.current_location())
+                    .unwrap_or_default();
+                let to = self.absolute_location::<I>(event).unwrap_or(from);
+                Some(Felt::Motion(to - from))
+            }
+            InputEvent::PointerButton { event } => {
+                let code = event.button_code();
+                Some(match event.state() {
+                    ButtonState::Pressed => Felt::Press(Pressed::Button(code)),
+                    ButtonState::Released => Felt::Release(Pressed::Button(code)),
+                })
+            }
+            InputEvent::GestureSwipeBegin { .. }
+            | InputEvent::GesturePinchBegin { .. }
+            | InputEvent::GestureHoldBegin { .. } => Some(Felt::Press(Pressed::Gesture)),
+            InputEvent::GestureSwipeEnd { .. }
+            | InputEvent::GesturePinchEnd { .. }
+            | InputEvent::GestureHoldEnd { .. } => Some(Felt::Release(Pressed::Gesture)),
+            InputEvent::GestureSwipeUpdate { .. } | InputEvent::GesturePinchUpdate { .. } => {
+                Some(Felt::GestureUpdate)
+            }
+            _ => Some(Felt::Other),
+        };
+        if let Some(felt) = felt
+            && !self.felt(felt)
+        {
+            return;
         }
         match event {
             InputEvent::Keyboard { event } => {
@@ -351,16 +397,23 @@ impl State {
         &mut self,
         event: &I::PointerMotionAbsoluteEvent,
     ) {
-        let Some(area) = self
+        let Some(location) = self.absolute_location::<I>(event) else {
+            return;
+        };
+        self.pointer_motion(location, event.time_msec());
+    }
+
+    /// Where an absolute motion goes: its surface spans every output.
+    fn absolute_location<I: InputBackend>(
+        &self,
+        event: &I::PointerMotionAbsoluteEvent,
+    ) -> Option<Point<f64, Logical>> {
+        let area = self
             .space
             .outputs()
             .filter_map(|o| self.space.output_geometry(o))
-            .reduce(|a, b| a.merge(b))
-        else {
-            return;
-        };
-        let location = event.position_transformed(area.size) + area.loc.to_f64();
-        self.pointer_motion(location, event.time_msec());
+            .reduce(|a, b| a.merge(b))?;
+        Some(event.position_transformed(area.size) + area.loc.to_f64())
     }
 
     /// The nearest point of the outputs to `to`.

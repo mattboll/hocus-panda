@@ -106,6 +106,11 @@ pub struct Lock {
     pub(crate) halves: [Id; 2],
     /// The screens that drew a locked frame since it locked.
     pub(crate) drawn_on: std::cell::RefCell<HashSet<String>>,
+    /// The screens that drew the lock itself (its surface, not only
+    /// black), and those of them that presented such a frame since: what
+    /// the machine waits for before it sleeps (7.2).
+    pub(crate) full_on: std::cell::RefCell<HashSet<String>>,
+    pub(crate) presented_on: std::cell::RefCell<HashSet<String>>,
     /// Commits of the shell's lock surfaces, and checks run, for tests.
     pub commits: u64,
     pub checks: u64,
@@ -141,6 +146,8 @@ pub(crate) struct Locked {
     pub(crate) since: Duration,
     /// Every screen drew it.
     drawn: bool,
+    /// Up at once, without its fade (before the machine sleeps, 7.2).
+    at_once: bool,
 }
 
 /// Who holds the lock.
@@ -229,6 +236,8 @@ impl Lock {
             black: Id::new(),
             halves: [Id::new(), Id::new()],
             drawn_on: std::cell::RefCell::default(),
+            full_on: std::cell::RefCell::default(),
+            presented_on: std::cell::RefCell::default(),
             commits: 0,
             checks: 0,
         }
@@ -307,7 +316,32 @@ impl State {
     /// `Super+L`): from this call on, no client gets input, and none is
     /// drawn from the next frame on. Locked already, nothing changes.
     pub fn lock_now(&mut self) {
-        self.lock_with(Holder::Own);
+        self.lock_with(Holder::Own, false);
+    }
+
+    /// Locks the session now, its lock up at once on every screen, without
+    /// its fade (before the machine sleeps, 7.2).
+    pub fn lock_at_once(&mut self) {
+        self.lock_with(Holder::Own, true);
+    }
+
+    /// When the session locked, while it is.
+    pub(crate) fn lock_since(&self) -> Option<Duration> {
+        self.lock.locked_state().map(|l| l.since)
+    }
+
+    /// Whether every screen that is on presented a frame of the lock
+    /// itself since it locked (its surface, or black when there is none
+    /// to wait for): what the machine waits for before it sleeps (7.2).
+    pub fn lock_presented(&self) -> bool {
+        if !self.lock_drawn() {
+            return false;
+        }
+        let presented = self.lock.presented_on.borrow();
+        self.space
+            .outputs()
+            .filter(|o| self.output_powered(o))
+            .all(|o| presented.contains(&o.name()))
     }
 
     /// Whether the session is locked (the lock opening is not).
@@ -335,7 +369,7 @@ impl State {
 
     // --- Locking and unlocking --------------------------------------------------
 
-    pub(crate) fn lock_with(&mut self, holder: Holder) {
+    pub(crate) fn lock_with(&mut self, holder: Holder, at_once: bool) {
         if self.locked() {
             tracing::debug!("locked already");
             return;
@@ -363,11 +397,14 @@ impl State {
         let mut password = Zeroizing::new(String::new());
         password.reserve_exact(PASSWORD_MOST);
         self.lock.drawn_on.borrow_mut().clear();
+        self.lock.full_on.borrow_mut().clear();
+        self.lock.presented_on.borrow_mut().clear();
         // The desktop's last frame, for the shell's lock to fade in over:
         // only when the shell is there to draw it soon. An external locker
         // (whose `locked` waits for screens showing nothing of the
         // session) and a lock without the shell come over black.
         let frozen = if matches!(holder, Holder::Own)
+            && !at_once
             && self.shell_linked()
             && self.space.outputs().next().is_some()
         {
@@ -389,10 +426,13 @@ impl State {
             shown_at: HashMap::new(),
             since: now,
             drawn: false,
+            at_once,
         }));
         self.lock_input_cut();
         self.tell_lock();
         self.redraw = true;
+        // The screens go off in a while (7.2).
+        self.away_locked();
     }
 
     /// Before locking: grabs end, menus close, the switcher, the capture
@@ -448,6 +488,7 @@ impl State {
             self.loop_handle.remove(timer);
         }
         drop(locked);
+        self.away_unlocked();
         let motion = self.popover_motion();
         let shell_lock = self
             .space
@@ -511,7 +552,9 @@ impl State {
 
     /// How long the lock fades in.
     pub(crate) fn lock_fade(&self) -> Duration {
-        if self.popover_motion() {
+        if self.lock.locked_state().is_some_and(|l| l.at_once) {
+            Duration::ZERO
+        } else if self.popover_motion() {
             hocus_link::LOCK_FADE
         } else {
             hocus_link::LOCK_FADE_REDUCED
@@ -522,12 +565,20 @@ impl State {
     /// them (an external locker's `locked`).
     pub(crate) fn lock_after_turn(&mut self) {
         self.external_after_turn();
-        let names: Vec<String> = self.space.outputs().map(Output::name).collect();
+        // A screen that is off (7.2) shows nothing of the session: it
+        // waits for none.
+        let any = self.space.outputs().next().is_some();
+        let names: Vec<String> = self
+            .space
+            .outputs()
+            .filter(|o| self.output_powered(o))
+            .map(Output::name)
+            .collect();
         let drawn_on = self.lock.drawn_on.borrow().clone();
         let Some(locked) = self.lock.locked_mut() else {
             return;
         };
-        if locked.drawn || names.is_empty() || !names.iter().all(|n| drawn_on.contains(n)) {
+        if locked.drawn || !any || !names.iter().all(|n| drawn_on.contains(n)) {
             return;
         }
         locked.drawn = true;
@@ -602,6 +653,8 @@ impl State {
         if let Some(locked) = self.lock.locked_mut() {
             tracing::warn!("the shell went while locked: the screens stay locked, black");
             locked.shown_at.clear();
+            self.lock.full_on.borrow_mut().clear();
+            self.lock.presented_on.borrow_mut().clear();
             self.redraw = true;
         }
     }
@@ -1083,10 +1136,30 @@ impl State {
         Some(locked.form.password.chars().count())
     }
 
-    /// The screens' names that drew the lock since it locked.
-    pub(crate) fn lock_drew_on(&self, output: &Output) {
+    /// The screens' names that drew the lock since it locked; `full`: the
+    /// lock itself, not only black.
+    pub(crate) fn lock_drew_on(&self, output: &Output, full: bool) {
         if self.locked() {
             self.lock.drawn_on.borrow_mut().insert(output.name());
+            if full {
+                self.lock.full_on.borrow_mut().insert(output.name());
+            }
+        }
+    }
+
+    /// A frame of `output` was presented: if it showed the lock itself, the
+    /// screen shows it now.
+    pub(crate) fn lock_presented_on(&self, output: &Output) {
+        if self.locked() && self.lock.full_on.borrow().contains(&output.name()) {
+            self.lock.presented_on.borrow_mut().insert(output.name());
+        }
+    }
+
+    /// The machine woke up locked (7.2): the field holds the keyboard.
+    pub(crate) fn lock_woke(&mut self) {
+        if let Some(form) = self.own_form() {
+            form.focus = LockFocus::Field;
+            self.tell_lock();
         }
     }
 

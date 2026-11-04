@@ -1,16 +1,23 @@
-# Idle, held by applications and full screen (7.3)
+# Idle, held by applications and full screen (7.3), and locking on idle and before sleep (7.2)
 
-Status: a technical ticket (issue #414), built 2026-11-04. It is the core
-that the lock screen (7.1, #412) and locking on idle (7.2, #413) will use;
-it shows nothing by itself. Video players and calls keep the screen on, and
-the countdown starts again when they let go.
+Status: 7.3 is a technical ticket (issue #414), built 2026-11-04: the
+core that says when the session is idle. Video players and calls keep the
+screen on, and the countdown starts again when they let go. 7.2 (issue
+#413, approved 2026-11-04, variant A, mockup
+<https://claude.ai/artifact/KPGJCSEhwRTPLq4rQ1Vo4A>) is what being idle
+does: the curtain, the lock, the screens off; and the lock before the
+machine sleeps. Built 2026-11-04; the approved spec is the issue's last
+comment, this page says how it is built (below, "Locking on idle and
+before sleep").
 
 ## What it does
 
 - **A countdown since the user's last input.** Any input from a device
-  counts: keys, pointer motion, buttons, scrolling, touchpad gestures.
-  Its length is `[idle] delay` in the configuration, in seconds, from 1 to
-  86400, or `"off"`. It is off by default until 7.2 picks a delay:
+  counts: keys, buttons, scrolling, touchpad gestures, and pointer motion
+  of 4 px or more all told (a mouse on a shaking desk moves less). Its
+  length on AC is `[idle] delay` in the configuration, in seconds, from 1
+  to 86400, or `"off"`; five minutes by default (7.2). On battery it is
+  `[power.battery] screen-off` (below), three minutes by default:
 
   ```toml
   [idle]
@@ -66,13 +73,22 @@ held-by fullscreen org.mozilla.firefox
 An inhibitor names its window's app id, else its layer's namespace, else
 its process. The tests read the same state through `Headless::idle()`.
 
-## For 7.2: where to hook
+`hocus msg idle` also says, after those lines, where 7.2 is:
+
+```
+away here                 # curtain locking, curtain, dark (screens off, unlocked)
+screens on                # or: screens off eDP-1 HDMI-A-1
+power ac                  # or: power battery (UPower's OnBattery)
+sleep-inhibitor held      # or: none (logind's delay inhibitor)
+```
+
+## Where 7.2 hooks
 
 `State::idle_event(Idle)` in `crates/hocus-compositor/src/idle/mod.rs` is
-called on the loop when idle is reached (`Idle::Reached`) and when the
-user comes back after it (`Idle::Resumed`). For now it only logs. The lock
-goes there, and the delay 7.2 chooses becomes `[idle] delay`'s default
-(`packaging/config.toml` lists it).
+called on the loop when idle is reached (`Idle::Reached`), which brings
+the curtain (`crate::away`), and when the user comes back after it
+(`Idle::Resumed`), which is only logged: the user's input lifts the
+curtain as it comes, before it reaches anything (`State::felt`).
 
 ## How it is built
 
@@ -108,14 +124,13 @@ goes there, and the delay 7.2 chooses becomes `[idle] delay`'s default
 ## Not done here
 
 - **logind's `idle` inhibitors** (`systemd-inhibit --what=idle`): the
-  compositor does not read logind over D-Bus (it takes its seat through
-  libseat). Reading them is left for when it does, read only.
+  compositor reads logind's sleeps over D-Bus since 7.2 (below), not its
+  inhibitors' list yet.
 - **The desktop portal's `Inhibit`** (`org.freedesktop.portal.Inhibit`,
   used by Flatpak applications through xdg-desktop-portal) needs the
   portal backend's `org.freedesktop.impl.portal.Inhibit`. Not served yet.
 - **The screen saver's other methods** (`GetActive`, `Lock`,
-  `GetSessionIdleTime`): nothing locks yet.
-- **What being idle does** (blanking the screens, locking): 7.1 and 7.2.
+  `GetSessionIdleTime`): not served yet.
 
 ## Tests
 
@@ -124,7 +139,7 @@ with test clients and a private `dbus-daemon`:
 
 - `idle_is_reached_after_the_delay`
 - `input_starts_the_countdown_again`
-- `off_by_default`
+- `five_minutes_by_default_and_never_when_off`
 - `a_shown_surfaces_inhibitor_holds_it_and_a_hidden_ones_does_not`
 - `the_countdown_starts_from_zero_when_the_last_hold_goes`
 - `the_focused_fullscreen_window_holds_it`
@@ -133,3 +148,165 @@ with test clients and a private `dbus-daemon`:
 - `hocus_msg_idle_says_who_holds_it`
 - `idle_notifications_honour_holds_except_input_ones`
 - `at_rest_one_timer_and_no_wakeup_beyond_it`
+
+## Locking on idle and before sleep (7.2), as built
+
+The crate's `src/away/` module (`mod.rs` the timeline, `draw.rs` the
+curtain on screen, `system.rs` the system bus); the shell's
+`src/curtain/` (the pill).
+
+### The timeline
+
+- **Idle** (the countdown above: 5 min on AC, 3 min on battery) brings the
+  **curtain**: every screen dims over 10 s (`hocus_link::CURTAIN`), the
+  shell's pill on the screen under the pointer.
+- **Its end locks** the session (`State::lock_now`), the lock fading in
+  over the curtain's last look: the picture the lock takes of the desktop
+  as it locks (7.1) is drawn with the curtain at its end, the dim and the
+  pill, so the screen never brightens between them.
+- **The screens go off** 30 s after the lock with no input
+  (`away::SCREEN_OFF_LOCKED`), whatever locked it (`Super+L`, `hocus msg
+  lock`, an ext-session-lock client): an input turns them on, still
+  locked (a key goes to the lock's field), and the 30 s start again.
+- **What holds idle off** (an inhibitor on a shown surface, a screen
+  saver `Inhibit`, the focused window in full screen) holds all of it: no
+  curtain, so no lock and no screen off.
+
+### The Settings' keys
+
+The Énergie page's rows (docs/design/settings.md), read as the compositor
+starts (it does not read the file again while it runs; 6.10):
+
+| Key | Means | Default |
+|---|---|---|
+| `[idle] delay` | idle on AC, seconds or `"off"` | `300` |
+| `[power.battery] screen-off` | idle on battery, `"3m"`… or `"never"` | `"3m"` |
+| `[power.ac] lock-after`, `[power.battery] lock-after` | when the session locks once idle | `"0s"` |
+
+`lock-after` is `"0s"` (the spec's timeline: the curtain, then the lock,
+then the screens off 30 s after), a delay (the screens go off as the
+curtain ends, the session locks that long after), or `"never"` (the
+screens only go off; the spec's "idle while locking is off"). A curtain
+that does not end in the lock has no pill (it would say "Verrouillage
+dans 7 s"): the dim alone. A value that does not read takes its default,
+the rest of the file kept. The power source is UPower's `OnBattery`, read
+by the compositor itself (below), not through the shell: on AC until it
+says otherwise, and on AC without UPower.
+
+### The curtain (variant A)
+
+- **The dim**, drawn by the compositor over everything but the cursor
+  (windows, the bar, its popovers, every screen): `rgba(4,6,10,0)` to
+  `rgba(4,6,10,0.74)` along `p^1.15`. It draws a frame a tenth of a second
+  (`CURTAIN_FRAME`, through the motions' wake-up, no timer of its own),
+  and with reduced motion a frame a second, the dim in steps.
+- **The pill**, drawn by the shell on a layer surface of its own
+  connection only (`hocus-curtain`, 300 × 64, anchored to the top of the
+  screen the compositor names, its top at 64 % of the screen's height,
+  centred across; it takes neither the pointer nor the keys): the glass
+  (`rgba(22,27,42,0.86)` to `rgba(14,17,28,0.92)`, opaque on the CPU), a
+  1 px rim, the panda (42 px) falling asleep, "Verrouillage dans 7 s" over
+  "Bouge la souris pour rester", and the countdown's line. The shell
+  draws it at most ten times a second (`request_redraw_at`), and nothing
+  once it is gone. The compositor draws its shadow (the popovers'), fades
+  and rises it 10 px in over 250 ms from its first frame (at once with
+  reduced motion or a shell on the CPU, whose buffers are cut to its
+  corners).
+- **The panda falling asleep**: the lock's panda (its face of the
+  mockup's 30-unit box), its eyes open for the first third, half closed
+  for the second, closed with a "z" for the last; its head tilting from
+  0° to 16° (none with reduced motion).
+- **Lifted**: the dim and the pill fade out over 150 ms (`ease-in`), then
+  the shell is told `curtain-end` and removes the pill.
+- **Never in a capture**, a share or a recording.
+- The line: `curtain ELAPSED LENGTH TOP motion|still OUTPUT`, and
+  `curtain-end` (`hocus_link::CurtainShown`); told again as the shell
+  connects while the curtain is up.
+
+### What lifts it, swallowed
+
+`State::felt` sees every input from a device (and the tests' own) before
+it goes anywhere. While the curtain is up, or the screens are off with the
+session unlocked, the input that lifts it goes no further: a press of a
+key, a button or a gesture is kept from every client, its release too; a
+motion moves nothing; a wheel scrolls nothing. The next input goes as
+usual. A motion of less than 4 px all told since the last input that
+counted is nobody's: it neither counts nor lifts. Locked, input goes to
+the lock as usual (the screens come on with it).
+
+### Before sleep
+
+- **The system bus**, on a thread of its own with its runtime (zbus),
+  never on the loop: the machine's on a virtual terminal, or the one
+  given (`--system-bus ADDRESS`); nested or headless without one, none,
+  so that a test never reaches the machine's logind. On it:
+  - logind's `Inhibit("sleep", "Hocuspanda", …, "delay")`, taken as it
+    starts (once `PrepareForSleep` is listened to) and again after each
+    sleep: its file descriptor is held on the loop;
+  - `PrepareForSleep(true|false)`, handed to the loop;
+  - UPower's `OnBattery`, read as it starts, again on `PropertiesChanged`
+    and when UPower comes back.
+- **`PrepareForSleep(true)`**: the curtain goes, the session locks at
+  once (`State::lock_at_once`: no curtain, no fade, no picture of the
+  desktop), and the inhibitor is closed once every screen that is on has
+  presented a frame of the lock itself (`State::lock_presented`: the
+  shell's surface fully in, or black without a shell; a screen off counts
+  as shown, nothing of the session being on it), or 2 s after at most
+  (`away::SLEEP_WAIT`, logged).
+- **`PrepareForSleep(false)`**: a new inhibitor; the lock's field holds
+  the keyboard; the waking counts as the user's input (the screens on, the
+  30 s from then).
+- **The lid**: libinput's lid switch. Closed, the laptop's own screens
+  (eDP, LVDS, DSI connectors) go off; opened, on, as the user's input.
+  The compositor never locks for the lid itself: logind sleeps (and the
+  lock comes as above), or, docked (`HandleLidSwitchDocked=ignore`, an
+  external screen there), does not, and nothing locks.
+
+### The screens off
+
+- On a virtual terminal, DPMS through DRM: the CRTC cleared
+  (`DrmCompositor::clear`), nothing drawn; on again, its state reset and a
+  frame drawn afresh, which lights it. Back from another terminal, a
+  screen that was off is turned off again.
+- Headless and nested, a screen off draws black (no element, not even
+  the cursor); `State::output_powered` and `Headless::screens_on` say it.
+- `wlr-output-power-management` is not served: nothing to tell.
+
+### Choices made here (to confirm on the machine)
+
+- `lock-after` other than `"0s"`: the screens go off as the curtain ends,
+  before the lock (the Settings' "Une fois l'écran éteint"); with
+  `"0s"`, the spec's order (the lock, then the screens off 30 s after).
+- A curtain that does not end in the lock shows the dim without the pill.
+- The lock before sleep has no key of its own: the session always locks
+  before the machine sleeps.
+- The power source and the delays are read as the compositor starts
+  (UPower's changes are followed; the file's are not, until 6.10).
+- A lid closed turns the laptop's screens off even without an external
+  screen (logind sleeps then, or the user asked it not to).
+- On the lid closed, windows stay on the laptop's screen (the several
+  screens' slice moves them).
+
+### Tests
+
+`crates/hocus-compositor/tests/away.rs`, headless, the clock held, a
+private `dbus-daemon` as the system bus with a fake logind (its
+inhibitors' other ends kept, to see them closed) and a fake UPower, the
+real shell on the CPU where the pill is drawn:
+
+| Test | Checks |
+|---|---|
+| `idle_brings_the_curtain_then_the_lock_then_the_screens_off` | The curtain at 5 min, its dim at 5 s, locked at 10 s, the screens off 30 s after; a key: on, still locked, typed in the field; off again; the password opens |
+| `what_lifts_the_curtain_is_swallowed` | A click, a move, a key lift it and reach no window; the next click does; less than 4 px does not lift it |
+| `a_lock_delay_turns_the_screens_off_first` | `lock-after = "1m"`: off at the curtain's end, locked a minute after; `"never"`: off, never locked, a move turns them on |
+| `on_battery_its_own_delay` | UPower on battery: 3 min; back on AC: 5 min |
+| `an_inhibitor_or_a_focused_fullscreen_window_holds_it_all_off` | 20 min with either: no curtain, no lock, the screens on |
+| `prepare_for_sleep_locks_and_lets_go_once_the_lock_shows` | The inhibitor held; `PrepareForSleep(true)`: locked without a curtain, the inhibitor closed once shown; the wake-up takes a new one |
+| `before_sleep_the_shells_lock_is_waited_for_two_seconds_at_most` | The shell's lock on screen first; a held shell: let go at 2 s, not before |
+| `the_lid_closed_docked_on_ac_does_not_lock` | The laptop's screen off, the other on, nothing locked; opened, both on |
+| `at_rest_no_wakeup_beyond_the_idle_timer` | Nothing armed at rest but the idle countdown; a frame a tenth of a second while it dims; locked and off, nothing armed, nothing drawn |
+| `the_shell_draws_the_pill_on_the_screen_under_the_pointer` | The pill on the pointer's screen, 300 × 64, centred, at 64 %; gone once lifted |
+
+The screenshots of the pull request: `tests/away_shots.rs`
+(`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test away_shots
+--run-ignored only`).

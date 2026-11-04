@@ -46,6 +46,7 @@ use std::{fmt, str::FromStr, time::Duration};
 mod auth;
 pub mod backdrop;
 mod capture;
+mod curtain;
 mod lock;
 mod record;
 mod share;
@@ -58,6 +59,11 @@ pub use capture::{
     CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
     CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
     CaptureMode, Captured,
+};
+pub use curtain::{
+    CURTAIN, CURTAIN_DIM, CURTAIN_DIM_ALPHA, CURTAIN_DIM_POWER, CURTAIN_FRAME, CURTAIN_LIFT,
+    CURTAIN_NAMESPACE, CurtainShown, PILL_HEIGHT, PILL_IN, PILL_RADIUS, PILL_RISE, PILL_TOP,
+    PILL_WIDTH,
 };
 pub use lock::{
     LOCK_FADE, LOCK_FADE_REDUCED, LOCK_NAMESPACE, LOCK_PART, LOCK_SHAKE, LOCK_WAIT, LockAsk,
@@ -525,6 +531,13 @@ pub enum ToShell {
     /// The lock opened and its motion ended: its surfaces go. Written
     /// `unlocked`.
     Unlocked,
+    /// The curtain before the lock is up (7.2, [`CurtainShown`]): the
+    /// pill's surface on the screen told. Sent as it comes, and as the
+    /// shell connects while it is up.
+    Curtain(CurtainShown),
+    /// The curtain was lifted, or ended: the pill's surface goes. Written
+    /// `curtain-end`.
+    CurtainEnd,
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1572,6 +1585,8 @@ impl fmt::Display for ToShell {
             Self::Recorded(recorded) => recorded.write(f),
             Self::Lock(shown) => shown.write(f),
             Self::Unlocked => f.write_str("unlocked"),
+            Self::Curtain(shown) => shown.write(f),
+            Self::CurtainEnd => f.write_str("curtain-end"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -1843,6 +1858,8 @@ impl FromStr for ToShell {
             Some("recording-end") => Ok(Self::RecordingEnd),
             Some("lock") => LockShown::read(&mut words).map(Self::Lock),
             Some("unlocked") => Ok(Self::Unlocked),
+            Some("curtain") => CurtainShown::read(&mut words).map(Self::Curtain),
+            Some("curtain-end") => Ok(Self::CurtainEnd),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
@@ -2483,6 +2500,21 @@ mod tests {
                 output: "HDMI-A-1".into(),
             }),
             ToShell::Unlocked,
+            ToShell::Curtain(CurtainShown {
+                elapsed: 0,
+                length: 10_000,
+                top: 1010,
+                motion: true,
+                output: "eDP-1".into(),
+            }),
+            ToShell::Curtain(CurtainShown {
+                elapsed: 4_250,
+                length: 10_000,
+                top: 922,
+                motion: false,
+                output: "HDMI-A-1".into(),
+            }),
+            ToShell::CurtainEnd,
         ];
         let desktops = [
             ToShell::Desktops(Desktops {

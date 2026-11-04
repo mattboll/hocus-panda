@@ -79,6 +79,14 @@ struct Args {
     /// taken.
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
+
+    /// The system bus logind's sleeps and UPower's power source are read
+    /// on (locking before sleep, the idle delay on battery): an address.
+    /// Without it, only the session on a virtual terminal reads them, on
+    /// the machine's own; nested or headless, none is read, so that the
+    /// machine's logind never waits for a test.
+    #[arg(long, value_name = "ADDRESS")]
+    system_bus: Option<String>,
 }
 
 /// The shell's program.
@@ -179,6 +187,7 @@ fn main() -> ExitCode {
         config,
         shell,
         session_bus: args.session_bus,
+        system_bus: args.system_bus,
     };
     match hocus_compositor::run(options) {
         Ok(()) => ExitCode::SUCCESS,

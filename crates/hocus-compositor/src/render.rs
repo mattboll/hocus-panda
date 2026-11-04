@@ -503,6 +503,10 @@ impl State {
         let origin = area.loc.to_f64();
         let scale = output.current_scale().fractional_scale();
         let sc = Scale::from(scale);
+        // A screen off (7.2) shows nothing, not even the cursor.
+        if purpose.screen() && !self.output_powered(output) {
+            return elements;
+        }
         if purpose.cursor() {
             elements.extend(
                 self.cursor_elements(renderer, output)
@@ -524,6 +528,9 @@ impl State {
             let mut parting = self.lock_parting_elements(renderer, output, now);
             elements.append(&mut parting);
         }
+        // The curtain before the lock over everything but the cursor
+        // (7.2): on the screen, and in the lock's last look at the desktop.
+        self.curtain_elements(renderer, output, purpose, now, &mut elements);
         // The authentication dialog and its dim over everything but the
         // cursor (7.5): on the screen only.
         if purpose.screen() {
@@ -580,6 +587,7 @@ impl State {
                 if matches!(
                     layer.namespace(),
                     hocus_link::LOCK_NAMESPACE
+                        | hocus_link::CURTAIN_NAMESPACE
                         | hocus_link::PEEK_NAMESPACE
                         | hocus_link::LAUNCHER_NAMESPACE
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
@@ -1469,5 +1477,8 @@ impl State {
                 Refresh::Fixed(Duration::from_secs_f64(1000.0 / f64::from(m.refresh)))
             });
         feedback.presented::<_, Monotonic>(time, refresh, seq, Kind::Vsync);
+        // The lock on screen: what the machine waits for before it sleeps
+        // (7.2).
+        self.lock_presented_on(output);
     }
 }

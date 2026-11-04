@@ -59,13 +59,16 @@ impl SessionLockHandler for State {
         }
         let lock = confirmation.ext_session_lock().clone();
         let client = lock.client().map(|c| c.id());
-        self.lock_with(LockHolder::External(Holder {
-            lock,
-            client,
-            confirm: Some(confirmation),
-            surfaces: Vec::new(),
-            unlock_asked: false,
-        }));
+        self.lock_with(
+            LockHolder::External(Holder {
+                lock,
+                client,
+                confirm: Some(confirmation),
+                surfaces: Vec::new(),
+                unlock_asked: false,
+            }),
+            false,
+        );
         // Already drawn locked (no screen): told at once.
         self.lock_after_turn();
     }

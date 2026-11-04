@@ -98,21 +98,24 @@ The mockup's page, its rows and choices. The keys:
 | Économie d'énergie automatique | `[power] auto-saver` | |
 | Sous ce niveau de batterie | `[power] auto-saver-below` (5 to 50) | |
 
-- **Coordination with 7.3** (docs/design/idle.md): the screen's delay is
-  the first countdown without input, which is what `[idle] delay` is. It
-  has one value, whatever the power source, and `[idle]` takes no other
-  key (the compositor refuses unknown keys there). So the AC side writes
-  `[idle] delay`, and the battery side keeps its value in
-  `[power.battery] screen-off` until 6.10 has the compositor choose by the
-  power source. The other keys are the mockup's proposal for 6.10: nothing
-  reads them yet.
+- **Coordination with 7.3 and 7.2** (docs/design/idle.md): the screen's
+  delay is the first countdown without input, which is what `[idle] delay`
+  is, after which the curtain dims the screens, then the session locks.
+  `[idle]` takes no other key (the compositor refuses unknown keys there),
+  so the AC side writes `[idle] delay` and the battery side
+  `[power.battery] screen-off`; the compositor takes the one of the power
+  source UPower says (7.2). "Verrouiller la session" is `[power.*]
+  lock-after`, which the compositor reads too: "Aussitôt" (`"0s"`) locks
+  as the curtain ends, a delay that long after the screens went off,
+  "Jamais" never. The other keys are the mockup's proposal for 6.10:
+  nothing reads them yet. The compositor reads them as it starts.
 - The delays of `[power.*]` are written `"0s"`, `"5m"`, `"1h"`, `"never"`.
 - The segmented control starts on the power source in use (the kernel's
   supplies, `/sys/class/power_supply`; `HOCUS_POWER_SUPPLY_DIR` in tests),
   on AC without a battery.
-- What applies without a key is shown as the value: `[idle] delay`'s
-  default is off ("Jamais"), the compositor's; the others are the
-  mockup's.
+- What applies without a key is shown as the value: the screen's delay
+  is the compositor's, 5 min on AC and 3 min on battery (7.2; the menu
+  has a "3 min"); the others are the mockup's.
 
 ## Saving
 
@@ -267,8 +270,8 @@ file.
 
 ## Not built here
 
-- What the desktop does with `[power]` (6.10), and the compositor
-  following the file's changes live (each setting's ticket).
+- What the desktop does with the rest of `[power]` (6.10), and the
+  compositor following the file's changes live (each setting's ticket).
 - The other sixteen pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
