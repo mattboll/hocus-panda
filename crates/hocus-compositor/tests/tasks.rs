@@ -96,9 +96,12 @@ impl Bed {
         };
         let dir = tempfile::tempdir()?;
         let root = dir.path();
-        for sub in ["home", "config", "cache", "state", "data"] {
+        for sub in ["home", "config", "cache", "state/hocuspanda", "data"] {
             std::fs::create_dir_all(root.join(sub))?;
         }
+        // Day.1's first-run card, which takes the list's place without a
+        // source, set aside ("Plus tard"): these tests measure the list.
+        std::fs::write(root.join("state/hocuspanda/day-sources"), "later\n")?;
         let settings = root.join("config").join("config.toml");
         std::fs::write(&settings, config)?;
         let fixture_file = root.join("config").join("day.toml");

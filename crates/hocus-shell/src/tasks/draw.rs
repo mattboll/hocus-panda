@@ -143,6 +143,8 @@ struct Laid {
     more: Option<(String, Rectangle)>,
     /// The mini item's count (none: no item).
     mini: Option<usize>,
+    /// Day.1's first-run card, in the group's place (full form).
+    card: Option<crate::setup::card::Card>,
 }
 
 /// The group's `+`, from the group's top left.
@@ -170,7 +172,16 @@ fn lay_out(
     field: bool,
     words: Words,
     mut width: impl FnMut(&str, f32) -> f32,
+    card: Option<crate::setup::card::Card>,
 ) -> Laid {
+    if let Some(card) = card {
+        return Laid {
+            height: card.height,
+            mini: lines.shows.then(|| lines.open()),
+            card: Some(card),
+            ..Laid::default()
+        };
+    }
     if !lines.shows {
         return Laid::default();
     }
@@ -250,6 +261,7 @@ fn lay_out(
         empty,
         more,
         mini: Some(lines.open()),
+        card: None,
     }
 }
 
@@ -775,7 +787,7 @@ impl Group {
             return Vec::new();
         }
         if form == Form::Mini {
-            if size.height + 0.5 < MINI.height + 2.0 * ROOM {
+            if laid.mini.is_none() || size.height + 0.5 < MINI.height + 2.0 * ROOM {
                 return Vec::new();
             }
             return vec![(Item::Tasks, Rectangle::new(self.mini_origin(size), MINI))];
@@ -785,6 +797,12 @@ impl Group {
         }
         let o = self.origin(size);
         let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
+        if let Some(card) = &laid.card {
+            return vec![
+                (Item::DayChoose, at(card.choose)),
+                (Item::DayLater, at(card.later)),
+            ];
+        }
         let mut items = vec![(Item::TaskAdd, at(add_rect()))];
         let boxes = laid.rows.iter().filter(|r| r.acts());
         for (slot, row) in (0..=u8::MAX).zip(boxes) {
@@ -831,14 +849,22 @@ impl Group {
     /// What it shows, laid out from `lines`.
     fn lay(&self, lines: &Lines) -> Laid {
         let field = super::field().is_some_and(|f| f.at == At::Group(self.bar.clone()));
+        // The mini form shows no card (Day.5's calendar carries the offer).
+        let card =
+            crate::setup::card_shows() && self.forms.iter().any(|(form, _)| *form == Form::Full);
+        let card_words = crate::setup::Words::new(crate::clock::time::Lang::of_messages());
         let fonts = iced::advanced::graphics::text::font_system().write();
         match fonts {
-            Ok(mut system) => lay_out(lines, field, self.words, |t, size| {
-                kit::measure_in(system.raw(), t, size, MANROPE)
-            }),
-            Err(_) => lay_out(lines, field, self.words, |t, size| {
-                t.chars().count() as f32 * size * 0.55
-            }),
+            Ok(mut system) => {
+                let mut width = |t: &str, size| kit::measure_in(system.raw(), t, size, MANROPE);
+                let card = card.then(|| crate::setup::card::lay(card_words, &mut width));
+                lay_out(lines, field, self.words, width, card)
+            }
+            Err(_) => {
+                let width = |t: &str, size| t.chars().count() as f32 * size * 0.55;
+                let card = card.then(|| crate::setup::card::lay(card_words, width));
+                lay_out(lines, field, self.words, width, card)
+            }
         }
     }
 
@@ -858,9 +884,10 @@ impl Group {
             })
             .collect();
         let said = format!(
-            "form={} shows={} add=«{}» rows=[{}] more={} empty={} count={} item=«{}»",
+            "form={} shows={} card={} add=«{}» rows=[{}] more={} empty={} count={} item=«{}»",
             form.map_or("switching", Form::name),
             laid.height > 0.0,
+            laid.card.is_some(),
             self.words.add(),
             rows.join("; "),
             laid.more.as_ref().map_or("none", |(m, _)| m.as_str()),
@@ -925,6 +952,18 @@ impl Group {
     fn group(&self, f: &mut Frame, laid: &Laid, o: Point, state: &State, alpha: f32) {
         let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
         let focused = |item| popover::with(|c| c.focused(&self.bar, item));
+        if let Some(card) = &laid.card {
+            let open = popover::with(|c| c.shows(&self.bar, Item::DayChoose));
+            let lit = crate::setup::card::Lit {
+                choose: open || state.hover == Some(Item::DayChoose),
+                later: state.hover == Some(Item::DayLater),
+                choose_ring: focused(Item::DayChoose),
+                later_ring: focused(Item::DayLater),
+            };
+            let words = crate::setup::Words::new(crate::clock::time::Lang::of_messages());
+            crate::setup::card::draw(f, card, words, o, lit, alpha);
+            return;
+        }
         // The header: its label, spaced, and the `+`.
         let mut x = o.x;
         for ch in self.words.header().chars() {
@@ -1136,7 +1175,7 @@ impl canvas::Program<Message> for Group {
                 let laid = self.lay(&lines);
                 let heights = Heights {
                     full: resting_height(&laid),
-                    mini: laid.height > 0.0,
+                    mini: laid.mini.is_some(),
                 };
                 // Its surface to the group's height, if it changed.
                 let resized = places(|places| {
@@ -1291,6 +1330,7 @@ mod tests {
             field,
             Words::new(crate::clock::time::Lang::French),
             |t, size| t.chars().count() as f32 * size * 0.5,
+            None,
         )
     }
 
@@ -1318,6 +1358,7 @@ mod tests {
             false,
             Words::new(crate::clock::time::Lang::French),
             |_, _| 0.0,
+            None,
         );
         assert_eq!(none.height, 0.0);
     }

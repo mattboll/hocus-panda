@@ -90,6 +90,17 @@ pub fn address(address: &str, board: &str) -> Result<(Server, String)> {
             )));
         }
     };
+    let server = checked(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(invalid(format!("{id:?}: not a board's id")));
+    }
+    Ok((server, id))
+}
+
+/// `server` as a server's address: `https` (or `http` to this computer),
+/// a host, no user in it.
+fn checked(server: String) -> Result<Server> {
+    let invalid = |why: String| SourceError::Invalid(why);
     let lower = server.to_ascii_lowercase();
     let rest = if let Some(rest) = lower.strip_prefix("https://") {
         rest
@@ -111,10 +122,7 @@ pub fn address(address: &str, board: &str) -> Result<(Server, String)> {
     if host.is_empty() || host.contains('@') {
         return Err(invalid(format!("{server}: no server in this address")));
     }
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err(invalid(format!("{id:?}: not a board's id")));
-    }
-    Ok((Server(server), id))
+    Ok(Server(server))
 }
 
 /// `https://host[/path]/boards/ID[/…][?…]`: the server and the id.
@@ -189,6 +197,156 @@ pub fn check(server: &Server, token: &Token) -> Result<String> {
     let client = Client::new(server.clone());
     let me: Answer<User> = client.get("/api/users/me", Some(&credentials), Not::Found)?;
     Ok(me.item.shown())
+}
+
+/// What Day.1's popover finds at an address with a pasted token: the
+/// server, who the token signs in, and the board, or the boards the user
+/// has when the address is a server's alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub server: Server,
+    /// The user, as `GET /api/users/me` names them.
+    pub user: String,
+    pub board: Option<FoundBoard>,
+    /// The user's boards (`GET /api/projects`), when no board was named.
+    pub boards: Vec<Listed>,
+}
+
+/// A board read for Day.1's popover.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoundBoard {
+    pub board: TaskBoard,
+    /// How many cards each column holds, in the columns' order.
+    pub cards: Vec<usize>,
+}
+
+/// A board of the user's, by its project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub id: String,
+    pub name: String,
+    pub project: String,
+}
+
+impl Found {
+    /// The board's address, `https://host/boards/ID`, as the configuration
+    /// keeps it.
+    pub fn address(&self) -> Option<String> {
+        let board = self.board.as_ref()?;
+        Some(format!("{}/boards/{}", self.server, board.board.id))
+    }
+}
+
+/// What `address` (a board's, `https://host/boards/ID`, or a server's)
+/// gives with `token`: the token checked with `GET /api/users/me`, then
+/// the board read, or the user's boards listed. Blocking: from a thread
+/// of its own.
+pub fn find(address: &str, token: &Token) -> Result<Found> {
+    let text = address.trim();
+    let (server, board) = match board_address(text) {
+        Some(_) => {
+            let (server, board) = self::address(text, "")?;
+            (server, Some(board))
+        }
+        None => (checked(text.trim_end_matches('/').to_owned())?, None),
+    };
+    let user = check(&server, token)?;
+    let mut found = Found {
+        server: server.clone(),
+        user,
+        board: None,
+        boards: Vec::new(),
+    };
+    match board {
+        Some(board) => found.board = Some(find_board(&server, &board, token)?),
+        None => found.boards = boards(&server, token)?,
+    }
+    Ok(found)
+}
+
+/// Board `board` on `server`, read with `token`: its columns and how many
+/// cards each holds.
+pub fn find_board(server: &Server, board: &str, token: &Token) -> Result<FoundBoard> {
+    let credentials = Credentials::from_token(token)
+        .ok_or_else(|| SourceError::SignIn("this is not a token".to_owned()))?;
+    let mut planka = Planka::new(
+        server.clone(),
+        board.to_owned(),
+        AccountId::new(""),
+        Secrets::default(),
+    );
+    planka.credentials = Some(credentials);
+    let read = planka.board()?;
+    let cards = read
+        .columns
+        .iter()
+        .map(|c| planka.columns.get(&c.id).map_or(0, Vec::len))
+        .collect();
+    Ok(FoundBoard { board: read, cards })
+}
+
+/// The boards `token`'s user has on `server`, by project.
+fn boards(server: &Server, token: &Token) -> Result<Vec<Listed>> {
+    #[derive(Deserialize)]
+    struct Projects {
+        #[serde(default)]
+        items: Vec<Named>,
+        #[serde(default)]
+        included: ProjectsIncluded,
+    }
+    #[derive(Deserialize, Default)]
+    struct ProjectsIncluded {
+        #[serde(default)]
+        boards: Vec<Board>,
+    }
+    #[derive(Deserialize)]
+    struct Named {
+        id: Id,
+        #[serde(default)]
+        name: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Board {
+        id: Id,
+        #[serde(default)]
+        name: String,
+        project_id: Id,
+        #[serde(default)]
+        position: Option<f64>,
+    }
+    let credentials = Credentials::from_token(token)
+        .ok_or_else(|| SourceError::SignIn("this is not a token".to_owned()))?;
+    let client = Client::new(server.clone());
+    let answer: Projects = client.get("/api/projects", Some(&credentials), Not::Found)?;
+    let mut boards: Vec<(usize, f64, Listed)> = answer
+        .included
+        .boards
+        .into_iter()
+        .map(|b| {
+            let at = answer
+                .items
+                .iter()
+                .position(|p| p.id.0 == b.project_id.0)
+                .unwrap_or(usize::MAX);
+            let project = answer
+                .items
+                .get(at)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            (
+                at,
+                b.position.unwrap_or(f64::MAX),
+                Listed {
+                    id: b.id.0,
+                    name: b.name,
+                    project,
+                },
+            )
+        })
+        .collect();
+    boards.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    Ok(boards.into_iter().map(|(_, _, b)| b).collect())
 }
 
 /// A Planka board.

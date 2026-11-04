@@ -499,3 +499,180 @@ pub fn calendar(id: &str, summary: &str, colour: &str, role: &str, selected: boo
         "defaultReminders": [{"method": "popup", "minutes": 10}],
     })
 }
+
+// --- Planka ----------------------------------------------------------------------------
+
+/// A fake Planka board's state, set by the test.
+pub struct Planka {
+    /// The token it takes.
+    pub token: String,
+    /// The boards the token's user is shared: their ids.
+    pub shared: Vec<String>,
+    /// Its lists: id, name, position.
+    pub lists: Vec<(String, String, f64)>,
+    /// Its cards: id, list, name, position.
+    pub cards: Vec<(String, String, String, f64)>,
+    /// What it was asked: `METHOD path`.
+    pub asked: Vec<String>,
+}
+
+/// A fake Planka server on 127.0.0.1, with Planka's answers' shapes: one
+/// board, "1", named Sprint, its lists Backlog, TODO and Done; until
+/// dropped.
+pub struct FakePlanka {
+    pub address: String,
+    pub state: Arc<Mutex<Planka>>,
+}
+
+impl FakePlanka {
+    pub fn start(token: &str) -> anyhow::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let address = format!("http://{}", listener.local_addr()?);
+        let list = |id: &str, name: &str, position: f64| (id.to_owned(), name.to_owned(), position);
+        let card = |id: &str, list: &str, name: &str, position: f64| {
+            (id.to_owned(), list.to_owned(), name.to_owned(), position)
+        };
+        let state = Arc::new(Mutex::new(Planka {
+            token: token.to_owned(),
+            shared: vec!["1".to_owned()],
+            lists: vec![
+                list("10", "Backlog", 65536.0),
+                list("11", "TODO", 131072.0),
+                list("12", "Done", 196608.0),
+            ],
+            cards: vec![
+                card("c1", "11", "Relire la spec", 65536.0),
+                card("c2", "11", "Écrire le ticket", 131072.0),
+                card("c3", "10", "Un jour", 65536.0),
+                card("c4", "12", "Fait", 65536.0),
+            ],
+            asked: Vec::new(),
+        }));
+        let served = state.clone();
+        std::thread::Builder::new()
+            .name("fake planka".to_owned())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let state = served.clone();
+                    std::thread::spawn(move || planka_serve(stream, &state));
+                }
+            })?;
+        Ok(Self { address, state })
+    }
+
+    pub fn with<T>(&self, f: impl FnOnce(&mut Planka) -> T) -> T {
+        f(&mut self.state.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    pub fn asked(&self) -> Vec<String> {
+        self.with(|p| p.asked.clone())
+    }
+}
+
+/// An address where nothing answers: a port bound, then let go.
+pub fn nothing_there() -> anyhow::Result<String> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let address = format!("http://{}", listener.local_addr()?);
+    drop(listener);
+    Ok(address)
+}
+
+fn planka_serve(mut stream: TcpStream, state: &Mutex<Planka>) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let Ok(reader) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() {
+        return;
+    }
+    let mut words = line.split_whitespace();
+    let (method, path) = (
+        words.next().unwrap_or("").to_owned(),
+        words.next().unwrap_or("").to_owned(),
+    );
+    let (mut bearer, mut length) = (String::new(), 0usize);
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).is_err() || header.trim().is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "authorization" => {
+                    bearer = value.trim().trim_start_matches("Bearer ").to_owned();
+                }
+                "content-length" => length = value.trim().parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    let mut body = vec![0; length];
+    if reader.read_exact(&mut body).is_err() {
+        return;
+    }
+    let (status, answer) = planka_answer(state, &method, &path, &bearer);
+    let text = answer.to_string();
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status} X\r\nContent-Type: application/json; charset=utf-8\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{text}",
+        text.len()
+    );
+}
+
+fn planka_answer(state: &Mutex<Planka>, method: &str, path: &str, bearer: &str) -> (u16, Value) {
+    let mut planka = state.lock().unwrap_or_else(PoisonError::into_inner);
+    planka.asked.push(format!("{method} {path}"));
+    let not_found = || (404, json!({"code": "E_NOT_FOUND"}));
+    if method == "GET" && path == "/api/bootstrap" {
+        return (200, json!({"item": {"oidc": null, "version": "2.0.0"}}));
+    }
+    if bearer != planka.token {
+        return (401, json!({"code": "E_UNAUTHORIZED"}));
+    }
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match (method, segments.as_slice()) {
+        ("GET", ["api", "users", "me"]) => (
+            200,
+            json!({"item": {"id": "100", "name": "Alex", "username": "alex"}}),
+        ),
+        ("GET", ["api", "projects"]) => {
+            let boards: Vec<Value> = planka
+                .shared
+                .iter()
+                .map(|id| json!({"id": id, "projectId": "2", "position": 65536, "name": "Sprint"}))
+                .collect();
+            (
+                200,
+                json!({"items": [{"id": "2", "name": "Équipe"}], "included": {"boards": boards}}),
+            )
+        }
+        ("GET", ["api", "boards", id]) if planka.shared.iter().any(|s| s == id) => {
+            let lists: Vec<Value> = planka
+                .lists
+                .iter()
+                .map(|(id, name, position)| {
+                    json!({"id": id, "boardId": "1", "type": "active", "position": position, "name": name})
+                })
+                .collect();
+            let cards: Vec<Value> = planka
+                .cards
+                .iter()
+                .map(|(id, list, name, position)| {
+                    json!({"id": id, "boardId": "1", "listId": list, "type": "project",
+                           "position": position, "name": name, "dueDate": null})
+                })
+                .collect();
+            (
+                200,
+                json!({
+                    "item": {"id": id, "projectId": "2", "name": "Sprint", "defaultCardType": "project"},
+                    "included": {"lists": lists, "cards": cards},
+                }),
+            )
+        }
+        _ => not_found(),
+    }
+}

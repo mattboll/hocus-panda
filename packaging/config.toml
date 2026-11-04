@@ -209,7 +209,9 @@
 # (~/.local/state/hocuspanda/tasks.json). Read by the bar as it starts.
 # No secret goes here: an account's token is kept in the session's
 # keyring, else in ~/.local/state/hocuspanda/accounts/, readable by you
-# alone. Each account is a section of its own, and the bar's tasks are
+# alone. The bar's "Choisir…" (shown while none is set) writes these
+# sections for you, keeping the rest of this file as it is. Each
+# account is a section of its own, and the bar's tasks are
 # the first tasks' account's. For example, a day from a file (for tests
 # and screenshots; its format: docs/design/day.md), read as it changes:
 #
@@ -227,9 +229,10 @@
 #   add = ""                             # where + adds: the tasks' column
 #
 # A Planka board (kind "planka"): its address, or the server's and the
-# board's id; its columns by name. Its token is pasted once with
-# `hocus day planka-token` (in Planka, once signed in: the browser's
-# tools, Storage, Cookies, accessToken):
+# board's id; its columns by name. Its token is pasted once in the
+# bar's popover, or with `hocus day planka-token` (in Planka, once signed
+# in: the browser's tools, Storage, Cookies, accessToken and
+# httpOnlyToken):
 #
 #   [[day.tasks]]
 #   kind = "planka"

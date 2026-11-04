@@ -8,6 +8,7 @@
 //! holds the day; the adapters live here, each in its own module.
 
 pub mod config;
+pub mod edit;
 pub mod fixture;
 pub mod goa;
 pub mod google;
@@ -172,6 +173,10 @@ pub struct Workers {
     /// The bar's tasks' account ([`Day::tasks`]).
     tasks: Option<AccountId>,
     next: u64,
+    /// What they were started with, for [`Self::reconfigure`].
+    env: Env,
+    /// Online Accounts followed, while a Google entry is set.
+    goa: Option<goa::Watch>,
 }
 
 impl Workers {
@@ -182,60 +187,8 @@ impl Workers {
     /// accounts come from Online Accounts as it lists them, later, each
     /// with its worker ([`goa`]).
     pub fn start(config: &Config, env: &Env, out: &mpsc::Sender<Update>) -> (Self, Day) {
-        let base = env.config_dir.as_deref();
-        let mut taken = vec![config::local_account().id];
-        let mut plans: Vec<Result<Plan, Box<Snapshot>>> = Vec::new();
-        let google: Vec<config::CalendarEntry> = config
-            .calendars
-            .iter()
-            .filter(|e| e.kind == config::CalendarKind::Google)
-            .cloned()
-            .collect();
-        for entry in &config.calendars {
-            if entry.kind == config::CalendarKind::Google {
-                continue;
-            }
-            let account = entry.account(base, &mut taken);
-            plans.push(match entry.kind {
-                config::CalendarKind::Fixture => {
-                    let (shown, colours) = (entry.shown.clone(), entry.colors.clone());
-                    fixture_plan(
-                        account,
-                        entry.file.as_deref(),
-                        env,
-                        move |file, id, clock| Source::Calendars {
-                            source: Box::new(fixture::FixtureCalendars::new(file, id, clock)),
-                            shown,
-                            colours,
-                        },
-                    )
-                }
-                config::CalendarKind::Google => continue,
-            });
-        }
-        for (i, entry) in config.tasks.iter().enumerate() {
-            if i > 0 {
-                tracing::warn!("only the first [[day.tasks]] is used: the others are left out");
-                break;
-            }
-            let account = entry.account(base, &mut taken);
-            plans.push(match entry.kind {
-                config::TaskKind::Fixture => {
-                    let names = entry.columns();
-                    fixture_plan(
-                        account,
-                        entry.file.as_deref(),
-                        env,
-                        move |file, id, clock| Source::Tasks {
-                            source: Box::new(fixture::FixtureTasks::new(file, id, clock)),
-                            names,
-                        },
-                    )
-                }
-                config::TaskKind::Planka => planka_plan(account, entry, env),
-            });
-        }
         let local = env.state_dir.as_ref().map(|dir| dir.join("tasks.json"));
+        let mut plans = plans(config, env);
         plans.push(Ok(Plan {
             account: config::local_account(),
             make: Box::new(move || Source::Tasks {
@@ -266,21 +219,7 @@ impl Workers {
                 Err(failed) => accounts.push(*failed),
             }
         }
-        if !google.is_empty() {
-            match &env.session_bus {
-                Some(bus) => goa::watch(
-                    goa::Google {
-                        entries: google,
-                        bus: bus.clone(),
-                        api: env.google_api.clone(),
-                    },
-                    launcher.clone(),
-                ),
-                None => {
-                    tracing::info!("no session bus, so no Online Accounts: no Google calendars")
-                }
-            }
-        }
+        let goa = follow_google(config, env, &launcher);
         let day = Day::new(accounts);
         let tasks = day.tasks().map(|s| s.account.id.clone());
         (
@@ -288,9 +227,69 @@ impl Workers {
                 launcher,
                 tasks,
                 next: 0,
+                env: env.clone(),
+                goa,
             },
             day,
         )
+    }
+
+    /// The accounts of `config` from now on (Day.1's choices written): every
+    /// worker but the local list's stopped, each account said gone, then
+    /// `config`'s started, as [`Self::start`] does. Their caches are kept:
+    /// an account that stays shows its last day at once. Blocking (Online
+    /// Accounts' thread is waited for): off the loop.
+    pub fn reconfigure(&mut self, config: &Config) {
+        if let Some(goa) = self.goa.take() {
+            goa.end();
+        }
+        let local = config::local_account().id;
+        let running: Vec<AccountId> = self
+            .launcher
+            .handles()
+            .iter()
+            .map(|h| h.account.clone())
+            .filter(|id| *id != local)
+            .collect();
+        for id in &running {
+            self.launcher.stop(id, false);
+        }
+        let mut tasks = None;
+        for plan in plans(config, &self.env) {
+            match plan {
+                Ok(plan) => {
+                    if plan.account.holds == Holds::Tasks {
+                        tasks.get_or_insert_with(|| plan.account.id.clone());
+                    }
+                    let _ = self
+                        .launcher
+                        .out
+                        .send(Update::Snapshot(Box::new(Snapshot::loading(
+                            plan.account.clone(),
+                        ))));
+                    self.launcher.launch(plan);
+                }
+                Err(failed) => {
+                    if failed.account.holds == Holds::Tasks {
+                        tasks.get_or_insert_with(|| failed.account.id.clone());
+                    }
+                    let _ = self.launcher.out.send(Update::Snapshot(failed));
+                }
+            }
+        }
+        self.tasks = Some(tasks.unwrap_or(local));
+        self.goa = follow_google(config, &self.env, &self.launcher);
+        tracing::info!(
+            stopped = running.len(),
+            "the day's accounts started again from the configuration"
+        );
+    }
+
+    /// Online Accounts no longer followed by these workers: the watch, for
+    /// the caller to end where waiting for it blocks nothing (its Google
+    /// workers stay until [`Self::reconfigure`]).
+    pub fn take_online_accounts(&mut self) -> Option<goa::Watch> {
+        self.goa.take()
     }
 
     /// `change` to the bar's tasks' account, at once: its number, or
@@ -323,6 +322,88 @@ impl Workers {
             if !handle.flush(within) {
                 tracing::info!(account = %handle.account, "an account of the day did not finish in time");
             }
+        }
+    }
+}
+
+/// The workers `config`'s accounts need, the local list's aside, in the
+/// configuration's order; those that cannot be read at all as their
+/// snapshot. Only the first `[[day.tasks]]` is used; Google's come from
+/// Online Accounts ([`follow_google`]).
+fn plans(config: &Config, env: &Env) -> Vec<Result<Plan, Box<Snapshot>>> {
+    let base = env.config_dir.as_deref();
+    let mut taken = vec![config::local_account().id];
+    let mut plans: Vec<Result<Plan, Box<Snapshot>>> = Vec::new();
+    for entry in &config.calendars {
+        if entry.kind == config::CalendarKind::Google {
+            continue;
+        }
+        let account = entry.account(base, &mut taken);
+        plans.push(match entry.kind {
+            config::CalendarKind::Fixture => {
+                let (shown, colours) = (entry.shown.clone(), entry.colors.clone());
+                fixture_plan(
+                    account,
+                    entry.file.as_deref(),
+                    env,
+                    move |file, id, clock| Source::Calendars {
+                        source: Box::new(fixture::FixtureCalendars::new(file, id, clock)),
+                        shown,
+                        colours,
+                    },
+                )
+            }
+            config::CalendarKind::Google => continue,
+        });
+    }
+    for (i, entry) in config.tasks.iter().enumerate() {
+        if i > 0 {
+            tracing::warn!("only the first [[day.tasks]] is used: the others are left out");
+            break;
+        }
+        let account = entry.account(base, &mut taken);
+        plans.push(match entry.kind {
+            config::TaskKind::Fixture => {
+                let names = entry.columns();
+                fixture_plan(
+                    account,
+                    entry.file.as_deref(),
+                    env,
+                    move |file, id, clock| Source::Tasks {
+                        source: Box::new(fixture::FixtureTasks::new(file, id, clock)),
+                        names,
+                    },
+                )
+            }
+            config::TaskKind::Planka => planka_plan(account, entry, env),
+        });
+    }
+    plans
+}
+
+/// Online Accounts followed for `config`'s Google entries, if it has any.
+fn follow_google(config: &Config, env: &Env, launcher: &Launcher) -> Option<goa::Watch> {
+    let google: Vec<config::CalendarEntry> = config
+        .calendars
+        .iter()
+        .filter(|e| e.kind == config::CalendarKind::Google)
+        .cloned()
+        .collect();
+    if google.is_empty() {
+        return None;
+    }
+    match &env.session_bus {
+        Some(bus) => goa::watch(
+            goa::Google {
+                entries: google,
+                bus: bus.clone(),
+                api: env.google_api.clone(),
+            },
+            launcher.clone(),
+        ),
+        None => {
+            tracing::info!("no session bus, so no Online Accounts: no Google calendars");
+            None
         }
     }
 }
@@ -479,6 +560,57 @@ mod tests {
         until(&mut day, &snapshots, |d| {
             let s = d.summary(&now);
             s.contains("16:00 «Revue»") && !s.contains("Point produit") && s.contains("tasks=0")
+        })?;
+        workers.flush(Duration::from_secs(10));
+        Ok(())
+    }
+
+    #[test]
+    fn reconfigured_the_new_accounts_start_and_the_local_list_stays() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(
+            dir.path().join("day.toml"),
+            "[tasks]\n[[tasks.cards]]\ntitle = \"Relire\"\n",
+        )?;
+        let env = env(dir.path());
+        let (out, snapshots) = mpsc::channel();
+        let (mut workers, mut day) = Workers::start(&Config::default(), &env, &out);
+        let now = env.clock.now();
+        until(&mut day, &snapshots, |d| {
+            d.summary(&now).contains("local fresh")
+        })?;
+        // Day.1's choice written: the board's account starts, and is the
+        // bar's tasks; the local list goes on.
+        let config = config::from_toml("[[day.tasks]]\nkind = \"fixture\"\nfile = \"day.toml\"\n")
+            .map_err(anyhow::Error::msg)?;
+        workers.reconfigure(&config);
+        until(&mut day, &snapshots, |d| {
+            let s = d.summary(&now);
+            s.contains("fixture-tasks-day fresh")
+                && s.contains("local fresh")
+                && s.contains("«Relire»")
+        })?;
+        assert!(
+            workers
+                .change(Change::Add {
+                    title: "Nouvelle".to_owned()
+                })
+                .is_some()
+        );
+        until(&mut day, &snapshots, |d| {
+            d.tasks().is_some_and(|t| {
+                t.account.id.as_str() == "fixture-tasks-day"
+                    && t.tasks.first().is_some_and(|t| t.title == "Nouvelle")
+            })
+        })?;
+        // And back to none: the board's account is gone.
+        workers.reconfigure(&Config::default());
+        until(&mut day, &snapshots, |d| {
+            d.accounts()
+                .iter()
+                .map(|s| s.account.id.as_str())
+                .collect::<Vec<_>>()
+                == ["local"]
         })?;
         workers.flush(Duration::from_secs(10));
         Ok(())

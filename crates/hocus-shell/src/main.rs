@@ -47,6 +47,7 @@ mod paste;
 mod pointer;
 mod popover;
 mod renderer;
+mod setup;
 mod share;
 mod tasks;
 mod today;
@@ -131,6 +132,8 @@ fn main() -> ExitCode {
     meeting::start();
     today::start();
     tasks::start();
+    // After the day: whether the first-run card shows.
+    setup::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
@@ -1563,6 +1566,15 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::DayChoose => canvas(popover::setup::Panel {
+                id,
+                words: setup::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+                motion: self.look.motion && !self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::MeetingMark => canvas(popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
@@ -1597,7 +1609,8 @@ impl Shell {
             | popover::Item::TodayLine(_)
             | popover::Item::TodayMore
             | popover::Item::TaskAdd
-            | popover::Item::Task(_) => {
+            | popover::Item::Task(_)
+            | popover::Item::DayLater => {
                 return None;
             }
         };

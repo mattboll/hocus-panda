@@ -503,7 +503,9 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Tasks
                             | Item::TasksMore
                             | Item::TaskAdd
-                            | Item::Task(_),
+                            | Item::Task(_)
+                            | Item::DayChoose
+                            | Item::DayLater,
                             _,
                         ) => {}
                     }
