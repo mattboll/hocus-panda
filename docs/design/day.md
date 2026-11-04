@@ -275,9 +275,11 @@ local list last.
 - `day::snapshot() -> Arc<Day>`: what a view reads, as often as it draws;
   cheap (an `Arc`).
 - `day::on_change(wake)`: `wake` is called (on the day's thread) each time
-  the day changes, until it returns `false`, and once at once. A view
-  wakes its own surface from it, as the connections do; the shell's loop is
-  never woken otherwise.
+  the day changes, until it returns `false`, and once at once; every
+  view's waker is kept, a view registering before the day's thread
+  started is woken all the same. A view wakes its own surface from it, as
+  the connections do; the shell's loop is never woken otherwise (the
+  to-do list, Day.4, only when its tasks changed).
 - `day::change(Change)`: a change of the bar's tasks, to their account,
   at once. The view keeps its own 1.5 s ticked state (Day.4) and reads the
   outcome in the next snapshots: the task gone from `tasks`, or its change
