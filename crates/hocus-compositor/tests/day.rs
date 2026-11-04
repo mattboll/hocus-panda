@@ -313,6 +313,12 @@ fn the_local_list_survives_a_restart_of_the_shell() -> anyhow::Result<()> {
     assert!(!line.contains("Acheter du pain"), "{line}");
     let again = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
     assert_ne!(again, pid);
+    // The new shell's day may be read before it is linked to the
+    // compositor, which drops what it tells no shell: wait for the link.
+    let linked = bed
+        .hp
+        .dispatch_until(common::WAIT, |hp| hp.shell_connected())?;
+    anyhow::ensure!(linked, "the shell started again never linked");
     // Ticked before the restart, it is in the done column still: unticked,
     // it comes back (at the top: where it was went with the shell).
     let mark = bed.mark();
