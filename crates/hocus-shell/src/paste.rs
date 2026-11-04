@@ -61,12 +61,24 @@ pub fn asks(key: &Key, modifiers: Modifiers) -> bool {
     }
 }
 
+/// How a field takes the clipboard's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clean {
+    /// Its line breaks and other control characters dropped: a password
+    /// (3.5b).
+    Dropped,
+    /// On one line: its line breaks and runs of white space one space, its
+    /// ends trimmed, its other control characters dropped: a task's title
+    /// (Day.4b).
+    Spaced,
+}
+
 /// Reads the clipboard's text off the loop, then hands it to `done` on the
-/// reader's thread: cleaned of control characters, or `None` when it could
-/// not be read in time, is too long or is not UTF-8. The text lives only
-/// for the call. `false` when there is nothing to read (no clipboard, no
-/// text in it): `done` is then never called.
-pub fn request(done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
+/// reader's thread: cleaned as `clean` says, or `None` when it could not
+/// be read in time, is too long or is not UTF-8. The text lives only for
+/// the call. `false` when there is nothing to read (no clipboard, no text
+/// in it): `done` is then never called.
+pub fn request(clean: Clean, done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
     let pipe = {
         let mut clipboard = CLIPBOARD.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(clipboard) = clipboard.as_mut() else {
@@ -83,7 +95,7 @@ pub fn request(done: impl FnOnce(Option<&str>) + Send + 'static) -> bool {
     };
     let reader = std::thread::Builder::new()
         .name("paste".to_owned())
-        .spawn(move || read(pipe, done));
+        .spawn(move || read(pipe, clean, done));
     if let Err(err) = reader {
         tracing::warn!(%err, "could not read the clipboard");
         return false;
@@ -191,14 +203,17 @@ impl Clipboard {
 
 /// Reads `pipe` and hands the text to `done`; both buffers are zeroed
 /// after.
-fn read(pipe: PipeReader, done: impl FnOnce(Option<&str>)) {
+fn read(pipe: PipeReader, how: Clean, done: impl FnOnce(Option<&str>)) {
     let mut raw = Wiped([0; ROOM]);
     let mut clean = Wiped([0; ROOM]);
     let read = read_until(&pipe, &mut raw.0, Instant::now() + WAIT);
     drop(pipe);
     let text = match read {
         Ok(len) => match std::str::from_utf8(&raw.0[..len]) {
-            Ok(text) => Some(without_controls(text, &mut clean.0)),
+            Ok(text) => Some(match how {
+                Clean::Dropped => without_controls(text, &mut clean.0),
+                Clean::Spaced => on_one_line(text, &mut clean.0),
+            }),
             Err(_) => {
                 tracing::debug!("the clipboard's text is not UTF-8: nothing pasted");
                 None
@@ -254,6 +269,26 @@ fn without_controls<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
         len += c.encode_utf8(&mut into[len..]).len();
     }
     // Whole characters only were written.
+    std::str::from_utf8(&into[..len]).unwrap_or_default()
+}
+
+/// `text` on one line, written into `into` (as long as `text` at least):
+/// each run of white space (line breaks, tabs) one space, none at its
+/// ends; its other control characters dropped.
+fn on_one_line<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
+    let mut len = 0;
+    let mut space = false;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            space = len > 0;
+        } else if !c.is_control() {
+            if space {
+                len += ' '.encode_utf8(&mut into[len..]).len();
+                space = false;
+            }
+            len += c.encode_utf8(&mut into[len..]).len();
+        }
+    }
     std::str::from_utf8(&into[..len]).unwrap_or_default()
 }
 
@@ -386,6 +421,17 @@ mod tests {
             "a bc"
         );
         assert_eq!(without_controls("\n", &mut into), "");
+    }
+
+    #[test]
+    fn on_one_line_line_breaks_and_runs_of_space_are_one_space_its_ends_trimmed() {
+        let mut into = [0; 64];
+        assert_eq!(on_one_line("Appeler\nInès\n", &mut into), "Appeler Inès");
+        assert_eq!(
+            on_one_line("  \tRelire \r\n\n la\u{7f} spec\u{85} ", &mut into),
+            "Relire la spec"
+        );
+        assert_eq!(on_one_line("\n \t", &mut into), "");
     }
 
     #[test]

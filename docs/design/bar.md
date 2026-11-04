@@ -3191,9 +3191,10 @@ spec (issue #428).
   field; empty, it adds nothing. `Esc` closes it; a click elsewhere closes
   it when empty, else keeps it and its text and lets the keyboard go; a
   click in it takes the keyboard again. `Ctrl+V` and `Shift+Insert` paste
-  the clipboard's text at its end, its line breaks and other control
-  characters dropped, whole or not at all (200 characters at most), as
-  3.5b. A task added shows at the top, its box inert, until the source
+  the clipboard's text at its end on one line (Day.4b, #574): each line
+  break or run of white space one space, its ends trimmed, its other
+  control characters dropped; whole or not at all (200 characters at
+  most). A task added shows at the top, its box inert, until the source
   made its card; with 3 tasks shown, the third goes into "+ N".
 - **The mini item**: 44 × 34, radius 10, the mockup's 16 px box and check
   (`text.dim`), 5 px before how many tasks are open (Martian Mono 11 px,
@@ -3242,8 +3243,8 @@ spec (issue #428).
   "+ 5 autres", `Esc`, a click elsewhere on an empty field and on one
   with text, a click back in it
   (`enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_field`);
-  `Ctrl+V` from a window's clipboard, its line breaks dropped
-  (`ctrl_v_pastes_the_clipboards_text_into_the_field_without_its_line_breaks`);
+  `Ctrl+V` from a window's clipboard, "Appeler\nInès\n" pasted as
+  "Appeler Inès" (`ctrl_v_pastes_the_clipboards_text_into_the_field_on_one_line`);
   the mini item 44 × 34 counting 7, its popover after a 150 ms hover as
   the shell measured it, a box ticked there counting 6, the pointer
   leaving closing it
@@ -3267,6 +3268,8 @@ spec (issue #428).
   box inert, until its card is made; past 6 in the popover, "+ N autres"
   counts those past the first six and the wheel scrolls; the tooltip
   shows only for a title that is cut; an untick refused ticks the box
-  again with "Pas enregistré"; the field takes 200 characters at most.
+  again with "Pas enregistré"; the field takes 200 characters at most; a
+  pasted line break is a space, not dropped as in the Wi-Fi's password
+  (Day.4b, #574).
 - **Not built**: names for screen readers (§11); the motion of the
   line's close is drawn only on a GPU, so the tests check its CPU path.
