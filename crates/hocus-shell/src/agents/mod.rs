@@ -1,13 +1,15 @@
-//! The agents' group in the bar (bar.md §4 group 3; 4.0, 4.1, 4.6): at its
+//! The agents' group in the bar (bar.md §4 group 3; 4.0, 4.1, 4.6), last
+//! of the bar's column, under the to-do list (`crate::column`): at its
 //! head the secretary (§7 B), her ear in the moment's colour, "AGENTS" and
 //! how many run over her line; a click on her opens her briefing, where
 //! "Sources" is. Under her one row per agent (4.1): its panda, its name,
 //! and what it is doing, in the order of what concerns the user first, at
-//! most five and a line for the rest. Before any tool is plugged in, the card that proposes to plug in
+//! most five (fewer on a short bar: they give way last) and a line for
+//! the rest. Before any tool is plugged in, the card that proposes to plug in
 //! the tools found; with the tools followed and no agent, "Aucun agent en
 //! cours.". With no tool followed and none to propose, it does not show at
-//! all (variant B). In the mini form, an item under the clock holds her
-//! head, a badge with how many need the user and how many work (4.7).
+//! all (variant B). In the mini form, an item under the to-do item holds
+//! her head, a badge with how many need the user and how many work (4.7).
 //!
 //! The compositor owns the agents and the tools: it says which tools are
 //! there and what each is (`agent-tools`), and which agents run
@@ -21,7 +23,10 @@
 pub mod draw;
 pub mod peek;
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{
+    Mutex, PoisonError,
+    atomic::{AtomicU32, Ordering},
+};
 
 use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, Note, ToolState};
 use iced::{Color, Font, Point, Rectangle, Size};
@@ -119,7 +124,11 @@ impl Said {
             (false, _, _) => Shows::Card(to_plug),
             (true, true, true) => Shows::Hidden,
             (true, false, true) => Shows::Idle(followed),
-            (true, _, false) => Shows::Lines(Lines::of(&self.agents, now)),
+            (true, _, false) => Shows::Lines(Lines::of_at_most(
+                &self.agents,
+                now,
+                rows_that_fit(self.agents.len(), rows_room()),
+            )),
         }
     }
 }
@@ -155,6 +164,41 @@ impl Look {
 /// The rows shown, at most.
 pub const MOST_ROWS: usize = 5;
 
+/// How many of `agents` agents' rows show in `room` px (the group's whole
+/// height): all of them, five at most, when they fit, else as many as fit
+/// over "+ N", none at the least (the header and "+ N" alone).
+pub fn rows_that_fit(agents: usize, room: f32) -> usize {
+    let head = HEADER + GAP;
+    let all = agents.min(MOST_ROWS);
+    let more = if agents > all { MORE } else { 0.0 };
+    if head + all as f32 * AGENT_ROW + more <= room {
+        return MOST_ROWS;
+    }
+    let fit = ((room - head - MORE) / AGENT_ROW).floor().max(0.0);
+    (fit as usize).min(MOST_ROWS)
+}
+
+/// The room the bar's column leaves the group's rows, as last measured
+/// (`draw::fit_rows`): unbounded until a bar measured it.
+static ROWS_ROOM: AtomicU32 = AtomicU32::new(f32::INFINITY.to_bits());
+
+pub fn rows_room() -> f32 {
+    f32::from_bits(ROWS_ROOM.load(Ordering::Relaxed))
+}
+
+/// The rows' room is `room` now: whether that changes how many rows the
+/// agents running now show.
+pub fn set_rows_room(room: f32) -> bool {
+    let before = f32::from_bits(ROWS_ROOM.swap(room.to_bits(), Ordering::Relaxed));
+    let agents = said().agents.len();
+    rows_that_fit(agents, before) != rows_that_fit(agents, room)
+}
+
+/// How many rows the agents running now show at most.
+pub fn rows_shown() -> usize {
+    rows_that_fit(said().agents.len(), rows_room())
+}
+
 /// The agents' rows, as the group shows them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lines {
@@ -181,21 +225,27 @@ impl Lines {
     /// `agents` in their rows' order at `now`: waiting (the longest first),
     /// stuck, to see, working, resting, in the order they came otherwise;
     /// the first five shown.
+    #[cfg(test)]
     pub fn of(agents: &[AgentShown], now: u64) -> Self {
+        Self::of_at_most(agents, now, MOST_ROWS)
+    }
+
+    /// The same, the first `most` shown.
+    pub fn of_at_most(agents: &[AgentShown], now: u64, most: usize) -> Self {
         let mut ordered: Vec<(Look, &AgentShown)> =
             agents.iter().map(|a| (Look::of(&a.state), a)).collect();
         ordered.sort_by_key(|(look, a)| {
             let waited = if *look == Look::Waiting { a.since } else { 0 };
             (*look, waited, a.id)
         });
-        let hidden = &ordered[ordered.len().min(MOST_ROWS)..];
+        let hidden = &ordered[ordered.len().min(most)..];
         Self {
             total: agents.len(),
             hidden: hidden.len(),
             hidden_rest: hidden.iter().all(|(look, _)| *look == Look::Resting),
             rows: ordered
                 .iter()
-                .take(MOST_ROWS)
+                .take(most)
                 .map(|(look, a)| Line {
                     id: a.id,
                     look: *look,
@@ -1024,9 +1074,6 @@ pub fn layout(
 
 // --- The mini form's item (4.7, variant A: the secretary), at ×1 ---------------
 
-/// Its top under the bar's: 12 px of padding, the clock's two lines of
-/// 19 px at 1.1 (41.8 px), and the 14 px between the mini form's items.
-pub const MINI_TOP: f32 = 68.0;
 /// A button 48 px wide, radius 10, 4 px in above and 6 px under: her 40 px
 /// head, 4 px over how many work.
 pub const MINI_ITEM: f32 = 48.0;
@@ -1422,6 +1469,25 @@ mod tests {
         };
         assert_eq!(fr.word(&working(12)), "12\u{a0}min");
         assert_eq!(fr.word(&working(65)), "1\u{a0}h\u{a0}05");
+    }
+
+    #[test]
+    fn on_a_short_bar_the_rows_fold_into_the_rest_as_many_as_fit() {
+        // The header (44) and its 6 px, 34 px a row, 20 for "+ N".
+        let head = 44.0 + 6.0;
+        // Room for all: five at most, "+ N" for the rest.
+        assert_eq!(rows_that_fit(3, f32::INFINITY), MOST_ROWS);
+        assert_eq!(rows_that_fit(3, head + 3.0 * 34.0), MOST_ROWS);
+        assert_eq!(rows_that_fit(8, head + 5.0 * 34.0 + 20.0), MOST_ROWS);
+        // Three that do not all fit: two over "+ 1".
+        assert_eq!(rows_that_fit(3, head + 3.0 * 34.0 - 1.0), 2);
+        assert_eq!(rows_that_fit(8, head + 5.0 * 34.0 + 19.0), 4);
+        // At the least, the header and "+ N" alone.
+        assert_eq!(rows_that_fit(3, head + 20.0), 0);
+        assert_eq!(rows_that_fit(3, 0.0), 0);
+        let agents: Vec<AgentShown> = (1..=3).map(|i| shown(i, "working", 0, "a")).collect();
+        let lines = Lines::of_at_most(&agents, 0, rows_that_fit(3, head + 2.0 * 34.0 + 20.0));
+        assert_eq!((lines.rows.len(), lines.hidden), (2, 1));
     }
 
     #[test]

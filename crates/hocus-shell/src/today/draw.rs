@@ -1,4 +1,5 @@
-//! Today's surface (Day.3, variant A), 14 px under the agents' group.
+//! Today's surface (Day.3, variant A), first of the day's groups under the
+//! card and the sign of what is in use.
 //!
 //! - **The header**: 18 px, "AUJOURD'HUI" / "TODAY" (Manrope 700, 11.5
 //!   px, spaced 0.1 em, `text.dim`), as "AGENTS".

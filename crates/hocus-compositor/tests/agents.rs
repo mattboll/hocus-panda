@@ -234,6 +234,11 @@ fn start(shell: &Path, hocus: &Path, machine: &Machine) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
     std::fs::create_dir_all(home.join("bin"))?;
+    // Day.1's first-run card, which takes the day's groups' place over the
+    // agents' group without a source (#599), set aside ("Plus tard"):
+    // these tests measure the group where it starts, under the clock.
+    std::fs::create_dir_all(home.join(".local/state/hocuspanda"))?;
+    std::fs::write(home.join(".local/state/hocuspanda/day-sources"), "later\n")?;
     if machine.claude {
         std::fs::create_dir_all(home.join(".claude"))?;
         std::fs::write(home.join(".claude/settings.json"), ORIGINAL)?;

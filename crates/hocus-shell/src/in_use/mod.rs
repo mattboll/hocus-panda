@@ -22,8 +22,8 @@
 //!
 //! The sign shows under the clock while something is in use, in both
 //! forms: a surface of its own on each bar, opened when the first use
-//! starts and removed when the last one has lingered; the agents' group
-//! moves under it ([`room`]). One tile per kind in use ([`draw`]); hovering
+//! starts and removed when the last one has lingered; the column under it
+//! moves down by its [`room`] (`crate::column`). One tile per kind in use ([`draw`]); hovering
 //! it (150 ms) or a click opens its popover ([`crate::popover::in_use`]).
 
 pub mod cameras;
@@ -296,20 +296,20 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     }
     let mut effects = Vec::new();
     if was.is_empty() != is.is_empty() {
-        // The sign comes or goes on every bar, the agents move.
+        // The sign comes or goes on every bar, the column under it moves.
         places(|places| {
             for (bar, place) in places.iter_mut() {
                 effects.extend(place.show(bar, !is.is_empty()));
             }
         });
-        crate::agents::draw::moved();
+        crate::column::moved();
         if is.is_empty() && popover::with(|c| c.open_item()) == Some(Item::InUse) {
             popover::event(popover::Event::Chosen);
         }
     } else if draw::size(Form::Mini, &was) != draw::size(Form::Mini, &is)
         || draw::size(Form::Full, &was) != draw::size(Form::Full, &is)
     {
-        // Another size: its surfaces and the agents follow.
+        // Another size: its surfaces and the column under it follow.
         effects.extend(places(|places| {
             places
                 .values()
@@ -324,7 +324,7 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
                 })
                 .collect::<Vec<_>>()
         }));
-        crate::agents::draw::moved();
+        crate::column::moved();
     }
     effects.push(Effect::Wake(IN_USE_NAMESPACE));
     popover::send(effects);

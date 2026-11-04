@@ -30,8 +30,9 @@ clock of what uses the microphone, the camera or the screen, and its
 popover (5.12, issue #445), and the next meeting's card under the clock,
 its mark in the mini form and the halo's meeting states (section 4 group
 2, section 5, section 6; Day.2, issue #426), and Today, the list of
-today's events after it (section 4 group 4; Day.3, issue #427): see [as
-built](#as-built).
+today's events after it (section 4 group 4; Day.3, issue #427), and the
+column's order, the agents' group under the to-do list in both forms
+(sections 4 and 5; issue #599): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -85,7 +86,7 @@ there.
 | Form | Width | Shows without a click |
 |---|---|---|
 | Full | 196 px | everything in section 4 |
-| Mini | 56 px | clock, next meeting mark, the agents' item (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, the bell with its count, the user's avatar (5.5) |
+| Mini | 56 px | clock, next meeting mark, the to-do item (Day.4), the agents' item under it (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, the bell with its count, the user's avatar (5.5) |
 
 Default form per output: **full** when the output's usable width (logical,
 without the bar) is at least 1600 px, **mini** otherwise. With these
@@ -125,15 +126,29 @@ The user's choice overrides the default and is remembered per output
 
 Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 
+Top to bottom (asked by the maintainer on 2026-11-04, issue #599): the
+clock (group 1), the next meeting's card (2), the sign of what is in use
+(5.12), Today (4), To do (5), the agents' group (3: its header, its rows
+and "+ N autres"), the spacer (6), the desktops (8), the connections (9),
+the levels (10), the footer (11). The groups keep their numbers, which
+the rest of this document and the code use; the table lists them in that
+order. A group that does not show takes no room, nor its 14 px. On a
+short bar the groups over the spacer give way in this order: Today first
+(its lines, then the group, #572), then To do's lines (into its "+ N",
+its header staying), then the agents' rows (into "+ N"). The peek (§7 C),
+the halo (§6) and the secretary's briefing (§7 B) stay with the agents'
+group where it is.
+
 | # | Group | Contents | Size |
 |---|---|---|---|
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card (Day.2, variant B): 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`; a click opens the meeting, a button joins its call. Hidden when nothing remains today (as built, Day.2) | 44 px |
-| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
+| — | In use | The sign of what uses the microphone, the camera or the screen, under the card (5.12, as built): a tile a kind in use; none when nothing is | 36 px |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
-| 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines, each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
+| 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
+| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
-| 7 | Secretary | Moved to the head of group 3 (4.6, variant B) | — |
+| 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
@@ -315,7 +330,14 @@ Clicks:
 Width 56 px, padding 12 px top, 10 px bottom, items centred, 14 px apart:
 clock on two lines, hours over minutes, no seconds (Martian Mono 400,
 19 px, line height 1.1, in cells as in §4.1, with the same motion), next meeting mark (30×4 px,
-blue, glowing when under 10 min), the agents' item (approved 2026-10-30,
+blue, glowing when under 10 min), the to-do item (approved 2026-11-04, issue #428, variant C; as built,
+Day.4), 14 px under the meeting's mark (or the sign of what is in use,
+or the clock), over the agents' item (#599): 44 × 34, radius 10, a 16 px box
+(`text.dim`) and how many tasks are open (Martian Mono 11 px; no number
+at 0), lit `0.06` under the pointer and `0.08` while its popover shows; a
+150 ms hover or a click opens the tasks' popover (§9); no board and no
+local task, no item;
+then, 14 px under it, the agents' item (approved 2026-10-30,
 issue #390, variant A: the secretary; it replaces the waiting tile, the
 working count and the secretary further down): a button 48 px wide,
 radius 10, 4 px in above and 6 px under, holding her 40 px head (her ear
@@ -333,12 +355,6 @@ when) and "AU REPOS" / "RESTING" (each name); each line goes to its
 agent. The group's rules hold: no item when the group is hidden (4.0); in
 the card's place, she is alone with a green "+" badge, and opens Sources.
 The halo and the peek work as in the full form, the peek at her head;
-the to-do item (approved 2026-11-04, issue #428, variant C; as built,
-Day.4), 14 px under the agents' item: 44 × 34, radius 10, a 16 px box
-(`text.dim`) and how many tasks are open (Martian Mono 11 px; no number
-at 0), lit `0.06` under the pointer and `0.08` while its popover shows; a
-150 ms hover or a click opens the tasks' popover (§9); no board and no
-local task, no item;
 spacer, the desktops (3.9, variant
 A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
 above the connections' buttons: the current one filled with the accent,
@@ -1753,7 +1769,9 @@ nothing to propose, the group is its header alone.
   card, and the group, back for itself. Plugging a declined tool in from
   Sources clears its refusal.
 - **The group's surface** (`hocus-bar-agents`), under the clock: its top
-  100 px under the bar's (14 px of padding, the clock's 72 px, 14 px),
+  100 px under the bar's (14 px of padding, the clock's 72 px, 14 px;
+  since #599 the column's last, under the to-do list: see "The column's
+  order" below),
   194 px wide and as tall as what it shows plus the keyboard ring's room;
   one pixel high, taking no pointer, when it shows nothing or in the mini
   form. Its text is measured as it draws, and a change of height resizes
@@ -2119,7 +2137,8 @@ issue #388): it stays out 8 s, and also comes out when an agent finishes.
 - **The shell draws it once**, on a layer surface of its own
   (`hocus-bar-peek`) beside each bar, anchored to the screen's top right:
   the panda's box 18 px from the bar, its middle on the agent's row's
-  middle as the group lays the rows out (the secretary's middle when the
+  middle as the group lays the rows out, where the bar's column puts the
+  group (#599: it follows the group as it moves; the secretary's middle when the
   agent has no row shown: under "+ N"; in the mini form, which has no
   rows, her head's in the mini item since 4.7). On a GPU the surface is transparent and holds the shadows:
   the bubble's `box-shadow`, a blur outside its box only (as CSS draws
@@ -2294,7 +2313,8 @@ with Day.2.
 
 - **The item** is the agents' group's surface's, in the mini form: 68 px
   under the bar's top (12 px of padding, the clock's two lines of 19 px at
-  1.1, 14 px), a button 48 px wide centred in the bar, radius 10: her 40 px
+  1.1, 14 px; since #599 under the meeting's mark and the to-do item when
+  they show), a button 48 px wide centred in the bar, radius 10: her 40 px
   head 4 px in, then 4 px under her how many work, "3" over "au travail"
   / "at work" (Manrope 600, 11 px, line height 1.25; `text.dim`, then
   `#7C8698`), 6 px under it: 81.5 px. The surface is 54 px wide and as
@@ -2643,7 +2663,8 @@ maintainer's spec (issue #396).
 ### 5.11, the sign of what is shared (2026-11-03)
 
 While the screen is shared, a sign shows under the clock (48 wide, in
-both forms, where the agents' group or item was, which move under it) and
+both forms, under the meeting's card or mark; the column under it moves
+down, #599) and
 its popover stops the share: [sharing.md](sharing.md), as built. 5.12
 groups it with the microphone and the camera (issue #445), below.
 
@@ -2656,8 +2677,9 @@ the machine).
 
 - **The sign** (`crates/hocus-shell/src/in_use/draw.rs`): a surface of
   its own on each bar (`hocus-bar-in-use`, never in a capture, a share or
-  a recording), where the agents' group (the full form) or the agents'
-  item (the mini) was, centred; they move under it and 14 px. 48 wide,
+  a recording), under the next meeting's card or mark (Day.2), else right
+  under the clock, centred; the column under it (Today, To do, the
+  agents' group or their items, #599) moves under it and 14 px. 48 wide,
   radius 12, `rgba(255,255,255,0.05)` (`0.10` under the pointer and while
   its popover shows), 6 px in above and under its tiles: a 30 × 24 tile a
   kind in use (radius 7, 4 px apart), its 16 px icon (the mockup's
@@ -2968,8 +2990,9 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   after, right under the clock (100 px under the bar's top in the full
   form, 68 in the mini), opened after the bar's own surfaces so that it
   is in front of the bar's. The sign of what is in use (5.12) and the
-  agents' group move under it: 58 px lower (the card and its 14 px) in
-  the full form, 30 (the mark's button and its 14 px) in the mini. 172 ×
+  column under it (Today, To do, the agents' group, #599) move under it:
+  58 px lower (the card and its 14 px) in the full form, 30 (the mark's
+  button and its 14 px) in the mini. 172 ×
   44, radius 10, its fill and 1 px border by how near the meeting is:
   `rgba(255,255,255,0.05)` / `0.06`; 10 min or less `rgba(143,179,255,0.12)`
   / `0.30`; 2 min or less `0.18` / `0.55`; in progress `0.09` / `0.22`. Its
@@ -3048,7 +3071,8 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   button's), all-day, declined, free, cancelled and ended events skipped;
   its surface 194 × 54 under the clock, the stripe in the calendar's
   colour, the card's and the button's fills read on the screen, the
-  agents' group 58 px lower; "dans 1 h 05"; within 10 min the card blue
+  agents' group 58 px lower (since #599 under Today, which is 14 px
+  under the card); "dans 1 h 05"; within 10 min the card blue
   (its fill on the screen), the button `#5B8DEF` and the halo
   `MeetingSoon`, at the minute's change within 2 min, its fill stronger
   and the halo `MeetingNow`; in progress "fin dans 18 min", the line blue
@@ -3083,14 +3107,16 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
   in it. Nothing after the card: no group. The mini form: nothing.
 - **Where**: a surface of its own on each bar (`hocus-bar-today`),
   opened while it lists something and removed after, 14 px under the
-  agents' group (where that group starts when it does not show: under
-  the card, or the sign of what is in use). Its room is what the spacer
-  would have: down to 14 px over the desktops' group. When the lines do
+  card, or the sign of what is in use (since #599 the first of the day's
+  groups, To do and the agents' group under it; it was under the agents'
+  group). Its room is what the spacer would have: down to 14 px over the
+  desktops' group, less what To do and the agents' group take. When the lines do
   not fit, the last line that fits says how many more: "+ 5 autres
   aujourd'hui" / "+ 5 more today", "+ 1 autre aujourd'hui" / "+ 1 more
   today"; with no room for even one line (18 + 20 px), no group: Today
-  gives way first (§4). It follows the agents' group's height, the card
-  and the sign coming or going, the desktops' rows and the bar's height.
+  gives way first (§4). It follows To do's and the agents' group's
+  heights, the card and the sign coming or going, the desktops' rows and
+  the bar's height.
 - **The group** (`today/draw.rs`): its 18 px header "AUJOURD'HUI" /
   "TODAY" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`), then 20 px
   lines, 6 px past the group's sides (radius 6, 6 px in): the start in
@@ -3122,7 +3148,7 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
   real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`, its
   `xdg-open` the test's own: the three events after the card in order,
   their names, all-day, declined, free, cancelled and ended skipped, its
-  194 × 88 surface 14 px under where the agents' group starts, each dot in
+  194 × 88 surface 14 px under the card (#599), each dot in
   its calendar's colour on the screen; nothing after the card, no group;
   40 events: the first ones, then "+ N" counting the rest, its bottom 14
   px or more over the desktops' group and one more line not fitting; on a
@@ -3146,16 +3172,17 @@ form, an item and its popover in the mini form), with the maintainer's
 spec (issue #428).
 
 - **Its place**: the full form's group 14 px under Today (Day.3) when it
-  lists something, else under the agents' group, or where that group
-  would be when it does not show; Today keeps the group's room under it
-  as it fits its lines; the mini form's item 14 px under the agents' item, or in
-  its place. Its surface (`hocus-bar-tasks`, under the windows with the
+  lists something, else where Today would be (under the card, the sign of
+  what is in use, or the clock); the agents' group 14 px under it (#599;
+  it was over it); Today keeps the room of the groups under it as it fits
+  its lines; the mini form's item 14 px under the meeting's mark (or the
+  sign, or the clock), the agents' item under it (#599). Its surface (`hocus-bar-tasks`, under the windows with the
   bar's others, 5.13) is the bar inside its rim, 5 px around what it
   draws for the keyboard's ring, as tall as the group (18 px, 22 px a
   line, 20 px for "+ N", 30 px for the field) or the item (34 px), one
-  pixel taking no pointer when nothing shows. Today or the agents' group
-  laid out again (or the meeting card, the sign of what is in use coming)
-  moves it. While the bar
+  pixel taking no pointer when nothing shows. Today laid out again (or
+  the meeting card, the sign of what is in use coming) moves it, and the
+  agents' group under it. While the bar
   switches its form, it holds both forms, the two cross-fading.
 - **What shows**: the day's tasks' account (`Day::tasks()`, docs/design/
   day.md): the cards of the board's tasks' column chosen in Day.1, else
@@ -3229,7 +3256,8 @@ spec (issue #428).
 - **Measured headless** (`crates/hocus-compositor/tests/tasks.rs`), the
   real shell on the CPU, a fixture's board of the test's own, in French:
   three tasks in the column's order and "+ 4 autres", the surface 18 + 3 ×
-  22 + 20 px (and 5 px around) 14 px under the agents' place, a cut
+  22 + 20 px (and 5 px around) right under the clock (no meeting, no
+  event, no agent; the agents' group under it since #599), a cut
   title whole in the tooltip, "+ 4 autres" opening the popover (6 rows,
   "+ 1 autre", 280 wide, its top on the line)
   (`the_group_shows_three_tasks_in_the_columns_order_and_the_rest_in_its_popover`);
@@ -3583,7 +3611,8 @@ are not part of it.
   `[day]` sets no `[[day.calendars]]` nor `[[day.tasks]]` and the user has
   not said "Plus tard", in the full form, where the day's groups go
   (Today and To do give it their place: it is drawn on the to-do list's
-  surface, `hocus-bar-tasks`, 14 px under the agents' group). 172 px, radius 10,
+  surface, `hocus-bar-tasks`, where Today would start; the agents' group
+  under it, #599). 172 px, radius 10,
   `rgba(255,255,255,0.05)`, a 1 px `0.08` rim, padding 10, 8 px gaps: the
   18 px calendar in `#8FB3FF` and "Ta journée ici" (13.5 px, 700); "Branche
   ton agenda et tes tâches : la barre montrera tes réunions et ce qu'il
@@ -3719,6 +3748,74 @@ are not part of it.
 - **Not built**: the Settings page (sprint 6); Planka's own sign-in by
   user name and password; CalDAV and `.ics`; names for screen readers
   given to them (§11).
+
+### The column's order, the agents under To do (2026-11-04)
+
+Asked by the maintainer (issue #599): in the bar, everything about the
+agents goes under the to-do list, in both forms.
+
+- **The order** (`crates/hocus-shell/src/column.rs`): one list, top to
+  bottom, of the bar's surfaces under the clock: in the full form the
+  next meeting's card (Day.2), the sign of what is in use (5.12), Today
+  (Day.3), To do (Day.4), the agents' group (4.0 to 4.6); in the mini
+  form the meeting's mark, the sign, the to-do item, the agents' item
+  (4.7). Every surface's top is the column's start (100 px under the
+  bar's top in the full form, 68 in the mini) and what the surfaces
+  above it in that list take, each its height and 14 px, none for one
+  that does not show; no surface places itself from the one above it.
+  When one of them comes, goes or changes height, or the bar changes
+  height or form, the column puts every one of them in its place again,
+  in an order where each reads what it depends on (`column::moved`).
+- **Room on a short bar** (`column::room`): the column ends 14 px over
+  the desktops' group. The groups give way in the list `GIVES_WAY`:
+  Today first (its lines, then the group, as in Day.3), then To do's
+  lines (into its "+ N autres", its header staying: at the least its
+  header and "+ N", or "Rien à faire."), then the agents' rows (into
+  "+ N autres", at the least the header and "+ N"). Today's room is what
+  To do and the agents' group leave; To do's ignores Today and counts the
+  agents' group as it is; the agents' ignores Today and counts To do at
+  its least.
+- **What follows the group**: the peek's panda (4.5) comes out beside
+  its agent's row where the column puts the group, and moves with it
+  while out; the secretary's briefing (4.6, 4.7) opens with its top on
+  her row (or her mini item), as before; Sources and the consent popover
+  keep their place beside the group, as high above its top as the
+  mockup had them (62 px under the bar's top with the group at 100).
+- **On the CPU** the agents' and the to-do list's surfaces fill with the
+  bar's colour where the column has them as they draw, and draw again as
+  they move (they used to keep the colour of where they first drew).
+- **Choices the issue did not settle** (to confirm on the machine): the
+  sign of what is in use stays right under the card, over Today (the
+  issue's order); the agents' group is laid out once for every bar, so
+  that on several screens the shortest bar in the full form sets how many
+  rows show; the group numbers of §4 stay as they were (the code and the
+  other documents name them), the table now in the column's order;
+  without a calendar or a task source, Day.1's first-run card, in the
+  day's groups' place, has the agents' group under it too.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_order.rs`),
+  the real shell on the CPU, in French, a fixture's day and tasks,
+  `HOCUS_CLOCK_AT`, its agents said with `hocus agent`, in a home of the
+  test's own: the card, Today, To do and the agents' group in that order,
+  14 px apart, each at its height, the desktops further down
+  (`the_full_form_goes_card_today_to_do_then_the_agents_14_px_apart`);
+  without a meeting, To do and the agents under the clock
+  (`without_a_meeting_to_do_and_the_agents_start_under_the_clock`); an
+  empty Today (`with_an_empty_today_the_agents_come_under_to_do_under_the_card`);
+  no task source (`with_no_task_source_the_agents_come_under_today`); the
+  mini form's mark, to-do item and agents' item, 14 px apart, with and
+  without a meeting and with no task source
+  (`the_mini_form_goes_mark_to_do_item_then_the_agents_item`); a waiting
+  agent's row heading the group and the peek's panda on its middle,
+  beside the bar (`the_peek_comes_out_beside_its_agents_row_under_to_do`);
+  her briefing's top on her row
+  (`her_briefing_opens_beside_the_agents_group_under_to_do`); on a 1920 ×
+  590 screen no Today, To do's three lines and the agents' three rows, on
+  a 1920 × 470 one To do's header and "+ 5 autres" and the agents' rows
+  as many as fit over "+ N", 14 px or more over the desktops
+  (`on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows`).
+  Unit tests: the order, the tops and the room shared (`column`), the
+  agents' rows and To do's lines that fit. On the CPU, the screenshots of
+  the pull request (`HOCUS_SHOTS=dir`).
 
 ### 7.4, the session menu (2026-11-04)
 

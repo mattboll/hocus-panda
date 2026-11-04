@@ -1,11 +1,13 @@
 //! The to-do list's surface (Day.4, bar.md §4 group 5, §5), as the
 //! approved mockup's variant C draws it, at ×1.
 //!
-//! - **The full form's group**, 14 px under the agents' group (or where it
-//!   would be): an 18 px header, "À FAIRE" (Manrope 700, 11.5 px, spaced
-//!   0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, its
+//! - **The full form's group**, 14 px under Today (or where it would be),
+//!   the agents' group under it (`crate::column`): an 18 px header, "À
+//!   FAIRE" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its
+//!   right the `+` (22 × 18, radius 6, its
 //!   14 px plus `text.dim`, lit `0.06` under the pointer); a 22 px line per
-//!   task, at most 3: its 14 px box (radius 4, a 1.5 px `0.38` border) in
+//!   task, at most 3 (fewer on a short bar, once Today gave way: the
+//!   column's room): its 14 px box (radius 4, a 1.5 px `0.38` border) in
 //!   a 22 × 22 button 4 px past the group's left, lit under the pointer,
 //!   then 4 px and the title (13 px, `text`, cut with an ellipsis; resting
 //!   600 ms on a cut title shows it whole in a tooltip); past 3, a 20 px
@@ -16,7 +18,8 @@
 //! - A ticked box fills with `#6CC287` and shows a dark check (`#0b1020`),
 //!   its title `text.faint` and struck through; "Pas enregistré" (12 px,
 //!   `#F7A77A`) takes the title's place for 3 s when the source refused.
-//! - **The mini form's item**, 14 px under the agents' item: 44 × 34,
+//! - **The mini form's item**, 14 px under the meeting's mark (or the
+//!   sign of what is in use), over the agents' item: 44 × 34,
 //!   radius 10, a 16 px box (`text.dim`) and how many tasks are open
 //!   (Martian Mono 11 px), lit `0.06` under the pointer and `0.08` while
 //!   the popover shows; a 150 ms hover or a click opens it.
@@ -170,6 +173,7 @@ fn title_x() -> f32 {
 fn lay_out(
     lines: &Lines,
     field: bool,
+    most: usize,
     words: Words,
     mut width: impl FnMut(&str, f32) -> f32,
     card: Option<crate::setup::card::Card>,
@@ -192,8 +196,8 @@ fn lay_out(
         rect
     });
     let room = WIDTH - title_x();
-    // The lines that stay, at most 3, with those going among them; one
-    // coming in under them fades in as they close.
+    // The lines that stay, at most `most`, with those going among them;
+    // one coming in under them fades in as they close.
     let going: Vec<f32> = lines.lines.iter().filter_map(|l| l.going).collect();
     let closing = going
         .iter()
@@ -204,7 +208,7 @@ fn lay_out(
     let mut staying = 0;
     for line in &lines.lines {
         let goes = line.going.is_some();
-        if !goes && staying == GROUP_LINES {
+        if !goes && staying == most {
             continue;
         }
         let (height, alpha) = match line.going {
@@ -212,7 +216,7 @@ fn lay_out(
                 let t = bezier(EASE_IN, t);
                 (LINE * (1.0 - t), 1.0 - t)
             }
-            None if staying + going.len() >= GROUP_LINES => (LINE, closing.max(0.0)),
+            None if staying + going.len() >= most => (LINE, closing.max(0.0)),
             None => (LINE, 1.0),
         };
         // One coming in shows as the others close: fully once they did.
@@ -233,17 +237,18 @@ fn lay_out(
         });
         y += height;
     }
-    let mut empty = None;
-    if rows.is_empty() && field.is_none() {
-        empty = Some(y + LINE / 2.0);
-        y += LINE;
-    }
     let rest = lines
         .lines
         .iter()
         .filter(|l| l.going.is_none())
         .count()
-        .saturating_sub(GROUP_LINES);
+        .saturating_sub(most);
+    // Nothing to do (not every line gone into "+ N" on a short bar).
+    let mut empty = None;
+    if rows.is_empty() && field.is_none() && rest == 0 {
+        empty = Some(y + LINE / 2.0);
+        y += LINE;
+    }
     let more = (rest > 0).then(|| {
         let said = words.more(rest);
         let w = width(&said, MORE_TEXT);
@@ -274,43 +279,81 @@ fn resting_height(laid: &Laid) -> f32 {
     laid.height + laid.rows.iter().map(|r| LINE - r.height).sum::<f32>()
 }
 
+/// The least the group takes once its lines gave way (`laid` laid out
+/// with them): its header, the field if open, and its last line, "+ N"
+/// (or "Rien à faire."); Day.1's card, all of it.
+fn least_of(laid: &Laid) -> f32 {
+    if laid.card.is_some() || laid.height <= 0.0 {
+        return laid.height;
+    }
+    let field = laid.field.map_or(0.0, |_| FIELD + 2.0 * FIELD_MARGIN);
+    let last = if laid.empty.is_some() {
+        LINE
+    } else if !laid.rows.is_empty() || laid.more.is_some() {
+        MORE
+    } else {
+        0.0
+    };
+    HEADER + field + last
+}
+
+/// How many of `open` tasks' lines show in `room` (the field over them if
+/// `field`), at most 3: all of them when they fit, else as many as fit
+/// over "+ N", none at the least. The to-do list gives way after Today
+/// (§4, `crate::column`).
+pub fn lines_that_fit(open: usize, field: bool, room: f32) -> usize {
+    let head = HEADER
+        + if field {
+            FIELD + 2.0 * FIELD_MARGIN
+        } else {
+            0.0
+        };
+    if open <= GROUP_LINES && head + open as f32 * LINE <= room {
+        return GROUP_LINES;
+    }
+    let fit = ((room - head - MORE) / LINE).floor().max(0.0);
+    (fit as usize).min(GROUP_LINES)
+}
+
 // --- Where the surface goes ------------------------------------------------------------
 
-/// Bar `bar`'s group's top under the bar's, in the full form: 14 px under
-/// Today (Day.3) when it lists something there, else under the agents'
-/// group, or where it would be.
+/// Bar `bar`'s group's top under the bar's, in its column (full form):
+/// under Today, or where it would be.
 fn group_top(bar: &str) -> f32 {
-    let (rows, top) = crate::today::shown(bar);
-    if rows.is_empty() {
-        crate::agents::draw::next_top(Form::Full)
-    } else {
-        top + crate::today::height(&rows) + crate::today::GAP
-    }
+    crate::column::top(bar, Form::Full, crate::column::Part::Tasks)
+}
+
+/// Bar `bar`'s mini item's top under the bar's, in its column.
+fn item_top(bar: &str) -> f32 {
+    crate::column::top(bar, Form::Mini, crate::column::Part::Tasks)
 }
 
 /// Bar `bar`'s group's top as last placed.
 pub fn full_top(bar: &str) -> f32 {
-    places(|places| places.get(bar).map(|p| p.top))
-        .unwrap_or_else(|| crate::agents::draw::next_top(Form::Full))
+    places(|places| places.get(bar).map(|p| p.top)).unwrap_or_else(|| group_top(bar))
 }
 
-/// What the group takes of bar `bar`'s column under Today: its height and
-/// the 14 px over it, when it shows in the full form.
-pub fn room_taken(bar: &str) -> f32 {
+/// Bar `bar`'s mini item's top as last placed.
+fn mini_top(bar: &str) -> f32 {
+    places(|places| places.get(bar).map(|p| p.mini_top)).unwrap_or_else(|| item_top(bar))
+}
+
+/// The height bar `bar`'s group (the full form) or item (the mini) takes,
+/// as last laid out: 0 when nothing shows.
+pub fn height(bar: &str, form: Form) -> f32 {
     places(|places| {
-        places.get(bar).map_or(0.0, |p| {
-            if p.heights.full > 0.0 {
-                p.heights.full + crate::today::GAP
-            } else {
-                0.0
-            }
+        places.get(bar).map_or(0.0, |p| match form {
+            Form::Full => p.heights.full,
+            Form::Mini if p.heights.mini => MINI.height,
+            Form::Mini => 0.0,
         })
     })
 }
 
-/// The mini item's top under the bar's: 14 px under the agents' item.
-pub fn mini_top() -> f32 {
-    crate::agents::draw::next_top(Form::Mini)
+/// The least bar `bar`'s group takes in the full form, its lines gone
+/// into "+ N": 0 when it does not show.
+pub fn least(bar: &str) -> f32 {
+    places(|places| places.get(bar).map_or(0.0, |p| p.heights.least))
 }
 
 /// A layer surface's margins: top, right, bottom, left.
@@ -325,15 +368,19 @@ struct Place {
     input: Option<bool>,
     /// What its group last laid out took (its field is its own).
     heights: Heights,
-    /// The full form's group's top under the bar's.
+    /// The full form's group's top under the bar's, and the mini item's.
     top: f32,
+    mini_top: f32,
+    /// How many lines its group last showed at most, for its room.
+    most: usize,
 }
 
-/// The group's heights as last laid out: the full form's, and whether the
-/// mini item shows.
+/// The group's heights as last laid out: the full form's, the least it
+/// takes once its lines gave way, and whether the mini item shows.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Heights {
     full: f32,
+    least: f32,
     mini: bool,
 }
 
@@ -348,11 +395,17 @@ fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
 }
 
 /// The surface's top under the bar's and its size, in `form`, for a
-/// group `h` tall.
-fn placement(form: Form, switching: bool, h: Heights, top: f32) -> (f32, (u32, u32)) {
+/// group `h` tall, its top `top` and the mini item's `mini_top`.
+fn placement(
+    form: Form,
+    switching: bool,
+    h: Heights,
+    top: f32,
+    mini_top: f32,
+) -> (f32, (u32, u32)) {
     let tall = |height: f32| (height + 2.0 * ROOM).ceil() as u32;
     let full = (top, h.full);
-    let mini = (mini_top(), if h.mini { MINI.height } else { 0.0 });
+    let mini = (mini_top, if h.mini { MINI.height } else { 0.0 });
     match (switching, form) {
         (false, Form::Full) if full.1 > 0.0 => (full.0 - ROOM, (FULL_WIDTH, tall(full.1))),
         (false, Form::Full) => (full.0 - ROOM, (FULL_WIDTH, 1)),
@@ -375,8 +428,8 @@ fn margin(top: f32) -> Margin {
 /// and what opens it.
 pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Message>) {
     let id = window::Id::unique();
-    let group = group_top(bar);
-    let (top, size) = placement(form, false, Heights::default(), group);
+    let (group, item) = (group_top(bar), item_top(bar));
+    let (top, size) = placement(form, false, Heights::default(), group, item);
     let margin = margin(top);
     places(|places| {
         places.insert(
@@ -384,6 +437,8 @@ pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Mes
             Place {
                 heights: Heights::default(),
                 top: group,
+                mini_top: item,
+                most: GROUP_LINES,
                 id,
                 form,
                 switching: false,
@@ -418,7 +473,13 @@ pub fn slot(bar: &str, slot: u8) -> Option<Key> {
 }
 
 fn refit(place: &mut Place) -> Option<((u32, u32), Margin)> {
-    let (top, size) = placement(place.form, place.switching, place.heights, place.top);
+    let (top, size) = placement(
+        place.form,
+        place.switching,
+        place.heights,
+        place.top,
+        place.mini_top,
+    );
     let margin = margin(top);
     if place.asked == (size, margin) {
         return None;
@@ -430,10 +491,11 @@ fn refit(place: &mut Place) -> Option<((u32, u32), Margin)> {
 /// Bar `bar` is in `form`, switching or not: its surface's new size and
 /// margins, if they change. The field closes as the form changes.
 pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
-    let top = group_top(bar);
+    let (top, item) = (group_top(bar), item_top(bar));
     let changed = places(|places| {
         let place = places.get_mut(bar)?;
         place.top = top;
+        place.mini_top = item;
         let changed = place.form != form || place.switching != switching;
         place.form = form;
         place.switching = switching;
@@ -456,20 +518,21 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
 }
 
 /// The groups above moved, or this one's height changed: every bar's
-/// surface to its place.
+/// surface to its place in the column.
 pub fn moved() {
-    // Today's places read first: not under this lock.
+    // The column's tops read first: not under this lock.
     let bars: Vec<String> = places(|places| places.keys().cloned().collect());
-    let tops: Vec<(String, f32)> = bars
+    let tops: Vec<(String, f32, f32)> = bars
         .into_iter()
-        .map(|b| (group_top(&b), b))
-        .map(|(t, b)| (b, t))
+        .map(|b| (group_top(&b), item_top(&b), b))
+        .map(|(t, m, b)| (b, t, m))
         .collect();
-    let effects: Vec<popover::Effect> = places(|places| {
+    let mut effects: Vec<popover::Effect> = places(|places| {
         tops.iter()
-            .filter_map(|(bar, top)| {
+            .filter_map(|(bar, top, item)| {
                 let place = places.get_mut(bar)?;
                 place.top = *top;
+                place.mini_top = *item;
                 let (size, margin) = refit(place)?;
                 Some(popover::Effect::Resize {
                     id: place.id,
@@ -480,7 +543,43 @@ pub fn moved() {
             .collect()
     });
     if !effects.is_empty() {
+        // Drawn again where it goes: on the CPU its backdrop is the bar's
+        // colour there.
+        effects.push(popover::Effect::Wake(TASKS_NAMESPACE));
         popover::send(effects);
+    }
+}
+
+/// Bar `bar`'s room for its lines now (none counted for the field), as
+/// many as fit: what its group lays out at most.
+fn most_for(bar: &str, lines: &Lines) -> usize {
+    let open = lines.lines.iter().filter(|l| l.going.is_none()).count();
+    let field = super::field().is_some_and(|f| f.at == At::Group(bar.to_owned()));
+    let room = crate::column::room(bar, crate::column::Part::Tasks);
+    lines_that_fit(open, field, room)
+}
+
+/// The column's room changed: the groups whose lines it changes draw
+/// again (laid out as they draw).
+pub fn fit_lines() {
+    let bars: Vec<String> = places(|places| places.keys().cloned().collect());
+    if bars.is_empty() {
+        return;
+    }
+    let lines = super::lines();
+    let most: Vec<(String, usize)> = bars
+        .into_iter()
+        .map(|bar| {
+            let most = most_for(&bar, &lines);
+            (bar, most)
+        })
+        .collect();
+    let changed = places(|places| {
+        most.iter()
+            .any(|(bar, most)| places.get(bar).is_some_and(|p| p.most != *most))
+    });
+    if changed {
+        popover::send(vec![popover::Effect::Wake(TASKS_NAMESPACE)]);
     }
 }
 
@@ -513,13 +612,8 @@ fn takes_pointer(bar: &str, takes: bool) {
 
 /// The surface's top under the bar's, as last asked for.
 fn top_of(bar: &str) -> f32 {
-    places(|places| {
-        places
-            .get(bar)
-            .map_or(crate::agents::draw::next_top(Form::Full) - ROOM, |p| {
-                (p.asked.1.0 - EDGE) as f32
-            })
-    })
+    places(|places| places.get(bar).map(|p| (p.asked.1.0 - EDGE) as f32))
+        .unwrap_or_else(|| group_top(bar) - ROOM)
 }
 
 // --- Drawing ---------------------------------------------------------------------------
@@ -718,8 +812,8 @@ pub struct Group {
     /// The bar's width as drawn now.
     pub bar_width: f32,
     pub words: Words,
-    /// Without glass: the bar's opaque colour behind.
-    pub backdrop: Option<Color>,
+    /// Without glass: the bar's opaque gradient behind.
+    pub backdrop: Option<crate::agents::draw::Backdrop>,
     pub bar: String,
 }
 
@@ -765,7 +859,10 @@ impl Group {
     /// wide as it is drawn.
     fn mini_origin(&self, size: Size) -> Point {
         let centre = size.width + 1.0 - self.bar_width / 2.0;
-        Point::new(centre - MINI.width / 2.0, mini_top() - top_of(&self.bar))
+        Point::new(
+            centre - MINI.width / 2.0,
+            mini_top(&self.bar) - top_of(&self.bar),
+        )
     }
 
     /// A point of the surface (`size`) in the bar's frame.
@@ -846,8 +943,8 @@ impl Group {
             })
     }
 
-    /// What it shows, laid out from `lines`.
-    fn lay(&self, lines: &Lines) -> Laid {
+    /// What it shows, laid out from `lines`, `most` of them at most.
+    fn lay(&self, lines: &Lines, most: usize) -> Laid {
         let field = super::field().is_some_and(|f| f.at == At::Group(self.bar.clone()));
         // The mini form shows no card (Day.5's calendar carries the offer).
         let card =
@@ -858,12 +955,12 @@ impl Group {
             Ok(mut system) => {
                 let mut width = |t: &str, size| kit::measure_in(system.raw(), t, size, MANROPE);
                 let card = card.then(|| crate::setup::card::lay(card_words, &mut width));
-                lay_out(lines, field, self.words, width, card)
+                lay_out(lines, field, most, self.words, width, card)
             }
             Err(_) => {
                 let width = |t: &str, size| t.chars().count() as f32 * size * 0.55;
                 let card = card.then(|| crate::setup::card::lay(card_words, width));
-                lay_out(lines, field, self.words, width, card)
+                lay_out(lines, field, most, self.words, width, card)
             }
         }
     }
@@ -1172,29 +1269,34 @@ impl canvas::Program<Message> for Group {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(_)) => {
                 let lines = super::lines();
-                let laid = self.lay(&lines);
+                // As many lines as its room in the column has (read
+                // outside its lock).
+                let most = most_for(&self.bar, &lines);
+                let laid = self.lay(&lines, most);
                 let heights = Heights {
                     full: resting_height(&laid),
+                    least: least_of(&laid),
                     mini: laid.mini.is_some(),
                 };
                 // Its surface to the group's height, if it changed.
                 let resized = places(|places| {
                     let place = places.get_mut(&self.bar)?;
+                    place.most = most;
                     if place.heights == heights {
                         return None;
                     }
                     place.heights = heights;
-                    let (size, margin) = refit(place)?;
-                    Some(popover::Effect::Resize {
+                    Some(refit(place).map(|(size, margin)| popover::Effect::Resize {
                         id: place.id,
                         size,
                         margin: Some(margin),
-                    })
+                    }))
                 });
                 if let Some(resized) = resized {
-                    popover::send(vec![resized]);
-                    // Today over it keeps the room left (Day.3).
-                    crate::today::moved();
+                    popover::send(resized.into_iter().collect());
+                    // Today over it keeps the room left, the agents'
+                    // group under it moves (`crate::column`).
+                    crate::column::moved();
                 }
                 takes_pointer(&self.bar, self.alone().is_some() && laid.height > 0.0);
                 let keys: Vec<Key> = laid
@@ -1243,7 +1345,15 @@ impl canvas::Program<Message> for Group {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
+        if let Some(backdrop) = self.backdrop {
+            // At the group's (or the item's) middle, where the column has it
+            // now, on the bar as tall as it is.
+            let (top, tall) = match self.alone() {
+                Some(Form::Mini) => (mini_top(&self.bar), MINI.height),
+                _ => (full_top(&self.bar), height(&self.bar, Form::Full)),
+            };
+            let bar = popover::with(|c| c.bar_height(&self.bar));
+            let colour = backdrop.at(top + tall / 2.0, bar);
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
         }
         let size = bounds.size();
@@ -1328,6 +1438,7 @@ mod tests {
         lay_out(
             &lines,
             field,
+            GROUP_LINES,
             Words::new(crate::clock::time::Lang::French),
             |t, size| t.chars().count() as f32 * size * 0.5,
             None,
@@ -1356,11 +1467,49 @@ mod tests {
         let none = lay_out(
             &Lines::default(),
             false,
+            GROUP_LINES,
             Words::new(crate::clock::time::Lang::French),
             |_, _| 0.0,
             None,
         );
         assert_eq!(none.height, 0.0);
+    }
+
+    #[test]
+    fn on_a_short_bar_its_lines_give_way_to_the_rest_its_header_staying() {
+        // All of them when they fit, 3 at most.
+        assert_eq!(lines_that_fit(2, false, f32::INFINITY), GROUP_LINES);
+        assert_eq!(lines_that_fit(3, false, 18.0 + 3.0 * 22.0), GROUP_LINES);
+        assert_eq!(
+            lines_that_fit(7, false, 18.0 + 3.0 * 22.0 + 20.0),
+            GROUP_LINES
+        );
+        // Else as many as fit over "+ N", the field counted.
+        assert_eq!(lines_that_fit(3, false, 18.0 + 3.0 * 22.0 - 1.0), 2);
+        assert_eq!(lines_that_fit(7, false, 18.0 + 22.0 + 20.0), 1);
+        assert_eq!(lines_that_fit(7, true, 18.0 + 30.0 + 22.0 + 20.0), 1);
+        assert_eq!(lines_that_fit(7, false, 18.0 + 20.0), 0);
+        // Laid out with none: the header and "+ 7 autres", its least.
+        let seven: Vec<Line> = (0..7).map(|i| line(&i.to_string(), Look::Open)).collect();
+        let lines = Lines {
+            shows: true,
+            lines: seven,
+        };
+        let none = lay_out(
+            &lines,
+            false,
+            0,
+            Words::new(crate::clock::time::Lang::French),
+            |t, size| t.chars().count() as f32 * size * 0.5,
+            None,
+        );
+        assert!(none.rows.is_empty());
+        assert_eq!(none.more.as_ref().map(|m| m.0.as_str()), Some("+ 7 autres"));
+        assert_eq!(none.height, 18.0 + 20.0);
+        let all = laid(lines.lines.clone(), false);
+        assert_eq!(least_of(&all), 18.0 + 20.0);
+        // Nothing open: the header and "Rien à faire.".
+        assert_eq!(least_of(&laid(Vec::new(), false)), 18.0 + 22.0);
     }
 
     #[test]

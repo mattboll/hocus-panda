@@ -889,10 +889,10 @@ const ROOM: (f32, f32, f32, f32) = (45.0, 35.0, 8.0, 55.0);
 fn placed(places: &Places, bar: &str, form: Form, index: usize) -> Opened {
     let card_top = match form {
         // Its top on the meeting card's.
-        Form::Full => EDGE as f32 + crate::agents::draw::TOP,
+        Form::Full => EDGE as f32 + crate::column::TOP,
         // Centred on the mini form's mark.
         Form::Mini => {
-            EDGE as f32 + crate::agents::MINI_TOP + meeting::MARK_HEIGHT / 2.0 - HEIGHT / 2.0
+            EDGE as f32 + crate::column::MINI_TOP + meeting::MARK_HEIGHT / 2.0 - HEIGHT / 2.0
         }
     };
     let top = card_top + index as f32 * (HEIGHT + BETWEEN);
