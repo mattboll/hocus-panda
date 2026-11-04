@@ -389,7 +389,12 @@ that name itself, on a queue of its own on the same connection that
 takes the toolkit's steps (bind the screen, ask for its xdg-output, read
 its name), each request made after the toolkit's for the same step: the
 name reaches the shell after it reached the toolkit, with no round trip
-counted (#552). It never asks for a bar on no screen. The compositor defends too: one of the
+counted (#552). The screen's global is the one step the shell does not
+ask for: the compositor announces it to the shell's registry first, and
+the toolkit's can come in a later write. So the shell binds the screen
+only once a `wl_display.sync` it asked for on seeing the global is
+answered, which comes after the toolkit's announcement (#559). It never
+asks for a bar on no screen. The compositor defends too: one of the
 bar's own surfaces (the bar, its clock, levels, connections, desktops,
 agents and footer) asked for on no screen goes to a screen given a bar
 that lacks that surface, and is closed if none does, rather than making

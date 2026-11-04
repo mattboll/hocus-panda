@@ -1,6 +1,6 @@
 //! The screens' names as the shell's Wayland connection knows them, so a
 //! bar opens on the screen the compositor names and never on the one
-//! under the pointer (#540, #552).
+//! under the pointer (#540, #552, #559).
 //!
 //! iced_layershell finds the screen of a surface by its xdg-output name,
 //! in a cache it does not show. When it does not know the name yet, as
@@ -17,13 +17,26 @@
 //!
 //! The shell's queue, on iced's connection, takes the same steps, each
 //! request made only from the shell's update ([`step`]). iced_layershell
-//! runs the update once it has handled every event read so far and made
-//! the requests they called for (its `NormalDispatch` comes after them in
-//! its loop). So each of the shell's requests goes out after
-//! iced_layershell's for the same step, the compositor answers them in
-//! that order, and a name reaches the shell's queue after it reached
-//! iced_layershell's: when the shell sees a name, iced_layershell has it.
-//! No round trip, no count: the order is the protocol's.
+//! reads the connection, handles every event read, makes the requests
+//! they call for, and only then runs the update (its `NormalDispatch`;
+//! it reads again only after, as it draws). So when the shell's update
+//! sees an event, iced_layershell has handled it, and every event that
+//! came before it on the connection.
+//!
+//! Steps 2 and 3 are answers to the shell's own requests, made after
+//! iced_layershell's for the same step: they come after iced_layershell's
+//! answers, so when the shell sees its name, iced_layershell has its own.
+//! Step 1 is not an answer: the compositor announces a global to every
+//! registry at once, and the shell's registry, older, comes first. It
+//! writes at most 4 KiB at a time, so the two can reach the shell apart,
+//! the rest at its next flush (#559): an update between them binds the
+//! screen before iced_layershell has seen it, and each step after is one
+//! ahead of iced_layershell's instead of one behind. So the shell first
+//! asks for a `wl_display.sync`, its fence: the compositor answers it
+//! after the announcements it made before, so when the shell sees the
+//! answer, iced_layershell has seen the global and bound the screen. One
+//! request per screen, no round trip counted, no timer: the order is the
+//! protocol's.
 //!
 //! The one update iced_layershell runs elsewhere is a held key's repeat,
 //! from a timer of its loop: an update then can see an event that
@@ -45,6 +58,7 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
     globals::{GlobalListContents, registry_queue_init},
     protocol::{
+        wl_callback::{self, WlCallback},
         wl_output::{self, WlOutput},
         wl_registry::{self, WlRegistry},
     },
@@ -133,8 +147,14 @@ struct Screens {
 /// Where a screen is in giving its name. Its events move it on; the
 /// shell's update makes the requests ([`Outputs::step`]).
 enum Screen {
-    /// Its global, not bound yet.
+    /// Its global: the fence is to be asked for.
     Seen { version: u32 },
+    /// The fence asked for (see the module's comment); its answer has not
+    /// come.
+    Fencing { version: u32, fence: WlCallback },
+    /// The fence answered: iced_layershell has bound the screen, the
+    /// shell's own binding is due.
+    Fenced { version: u32 },
     /// Bound; its first `done` has not come.
     Bound(WlOutput),
     /// Its first `done` came: its xdg-output is to be asked for.
@@ -199,6 +219,11 @@ impl Outputs {
         for (global, screen) in &mut self.screens.by_global {
             let next = match std::mem::replace(screen, Screen::Known(String::new())) {
                 Screen::Seen { version } => {
+                    asked = true;
+                    let fence = self.connection.display().sync(&qh, *global);
+                    Screen::Fencing { version, fence }
+                }
+                Screen::Fenced { version } => {
                     asked = true;
                     Screen::Bound(self.registry.bind(*global, version.min(4), &qh, *global))
                 }
@@ -271,9 +296,39 @@ impl Dispatch<WlRegistry, GlobalListContents> for Screens {
                 Some(Screen::Asked(output, xdg) | Screen::Named(output, xdg, _)) => {
                     let_go(&output, &xdg);
                 }
-                Some(Screen::Seen { .. } | Screen::Known(_)) | None => {}
+                // A fence still asked for is answered later and finds no
+                // screen, or a new one under the same name, not its own.
+                Some(
+                    Screen::Seen { .. }
+                    | Screen::Fencing { .. }
+                    | Screen::Fenced { .. }
+                    | Screen::Known(_),
+                )
+                | None => {}
             },
             _ => {}
+        }
+    }
+}
+
+/// The fence's answer. The compositor gives a global's name again once it
+/// is removed: the answer moves the screen on only if the fence is its own.
+impl Dispatch<WlCallback, u32> for Screens {
+    fn event(
+        screens: &mut Self,
+        callback: &WlCallback,
+        event: wl_callback::Event,
+        global: &u32,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event
+            && let Some(screen) = screens.by_global.get_mut(global)
+            && let Screen::Fencing { version, fence } = screen
+            && fence == callback
+        {
+            *screen = Screen::Fenced { version: *version };
+            screens.changed = true;
         }
     }
 }
