@@ -661,7 +661,10 @@ pub fn shake_at(t: Duration) -> f32 {
         (0.75, 4.0),
         (1.0, 0.0),
     ];
-    let p = (t.as_secs_f32() / LOCK_SHAKE.as_secs_f32()).clamp(0.0, 1.0);
+    let p = t.as_secs_f32() / LOCK_SHAKE.as_secs_f32();
+    if p <= 0.0 || p >= 1.0 {
+        return 0.0;
+    }
     for pair in STEPS.windows(2) {
         let ((a, x0), (b, x1)) = (pair[0], pair[1]);
         if p <= b {
@@ -679,6 +682,9 @@ fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), x: f32) -> f32 {
         let u = 1.0 - t;
         3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
     };
+    if x <= 0.0 || x >= 1.0 {
+        return x.clamp(0.0, 1.0);
+    }
     let (mut lo, mut hi) = (0.0f32, 1.0f32);
     let mut t = x;
     for _ in 0..30 {
