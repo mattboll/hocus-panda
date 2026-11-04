@@ -250,6 +250,8 @@ impl<Message> canvas::Program<Message> for Clock {
             .is_some_and(|before| before.hm != shown.hm)
         {
             crate::agents::minute();
+            // The next meeting's minutes, line and colours (Day.2).
+            crate::meeting::minute();
         }
         state.shown = Some(shown);
         state.at = Some(now);

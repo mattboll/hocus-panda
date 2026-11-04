@@ -148,14 +148,14 @@ struct Place {
 type Margin = (i32, i32, i32, i32);
 
 /// The group's top under the bar's in the full form, and the mini item's:
-/// under the sign of what is in use when it shows (5.11), else under the
-/// clock.
+/// under the next meeting's card (Day.2) and the sign of what is in use
+/// (5.11) when they show, else under the clock.
 pub fn full_top() -> f32 {
-    TOP + crate::in_use::room(Form::Full)
+    TOP + crate::meeting::room(Form::Full) + crate::in_use::room(Form::Full)
 }
 
 pub fn mini_top() -> f32 {
-    MINI_TOP + crate::in_use::room(Form::Mini)
+    MINI_TOP + crate::meeting::room(Form::Mini) + crate::in_use::room(Form::Mini)
 }
 
 /// Bar `bar`'s surface's top under the bar's, as last asked for.
@@ -280,8 +280,8 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<crate::network::dr
     })
 }
 
-/// The sign of what is in use came or went (5.11): every bar's surface
-/// moves under it, or back under the clock.
+/// The sign of what is in use (5.11) or the next meeting's card (Day.2)
+/// came or went: every bar's surface moves under them, or back up.
 pub fn moved() {
     let effects: Vec<popover::Effect> = places(|places| {
         places
