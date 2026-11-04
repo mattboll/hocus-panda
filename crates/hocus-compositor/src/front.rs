@@ -60,6 +60,7 @@ pub fn in_the_bar(namespace: &str) -> bool {
             | hocus_link::CONNECTIONS_NAMESPACE
             | hocus_link::DESKTOPS_NAMESPACE
             | hocus_link::AGENTS_NAMESPACE
+            | hocus_link::TASKS_NAMESPACE
             | hocus_link::FOOTER_NAMESPACE
             | hocus_link::IN_USE_NAMESPACE
             | hocus_link::TRAY_NAMESPACE
@@ -252,6 +253,7 @@ mod tests {
             hocus_link::CONNECTIONS_NAMESPACE,
             hocus_link::DESKTOPS_NAMESPACE,
             hocus_link::AGENTS_NAMESPACE,
+            hocus_link::TASKS_NAMESPACE,
             hocus_link::FOOTER_NAMESPACE,
             hocus_link::TRAY_NAMESPACE,
         ] {

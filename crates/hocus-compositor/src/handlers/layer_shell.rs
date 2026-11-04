@@ -97,13 +97,14 @@ impl WlrLayerShellHandler for State {
 delegate_layer_shell!(State);
 
 /// The bar's own surfaces, one of each per bar.
-const BAR_PARTS: [&str; 7] = [
+const BAR_PARTS: [&str; 8] = [
     hocus_link::NAMESPACE,
     hocus_link::CLOCK_NAMESPACE,
     hocus_link::LEVELS_NAMESPACE,
     hocus_link::CONNECTIONS_NAMESPACE,
     hocus_link::DESKTOPS_NAMESPACE,
     hocus_link::AGENTS_NAMESPACE,
+    hocus_link::TASKS_NAMESPACE,
     hocus_link::FOOTER_NAMESPACE,
 ];
 
@@ -171,6 +172,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::CONNECTIONS_NAMESPACE => state.panel.connections_commits += 1,
             hocus_link::DESKTOPS_NAMESPACE => state.panel.desktops_commits += 1,
             hocus_link::AGENTS_NAMESPACE => state.agents.commits += 1,
+            hocus_link::TASKS_NAMESPACE => state.panel.tasks_commits += 1,
             hocus_link::POPOVER_NAMESPACE => {
                 state.panel.popover_commits += 1;
                 state.popover_committed(&layer);

@@ -620,6 +620,7 @@ impl State {
                     | hocus_link::CONNECTIONS_NAMESPACE
                     | hocus_link::DESKTOPS_NAMESPACE
                     | hocus_link::AGENTS_NAMESPACE
+                    | hocus_link::TASKS_NAMESPACE
                     | hocus_link::IN_USE_NAMESPACE
                     | hocus_link::BELL_NAMESPACE
                     | hocus_link::TRAY_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
