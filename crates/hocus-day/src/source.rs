@@ -9,8 +9,11 @@ use std::fmt;
 use jiff::{Timestamp, Zoned};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{
-    Calendar, CalendarId, Column, ColumnId, Event, EventId, Place, Task, TaskBoard, TaskId,
+use crate::{
+    model::{
+        Calendar, CalendarId, Column, ColumnId, Event, EventId, Place, Task, TaskBoard, TaskId,
+    },
+    snapshot::Login,
 };
 
 /// What went wrong with a source. A worker keeps what it had and shows it
@@ -128,6 +131,13 @@ pub trait KanbanSource: Send {
     /// Moves `card` to `place`: the top of a column (a task ticked into
     /// the done column), or back where it was (unticked).
     fn move_card(&mut self, card: &TaskId, place: &Place) -> Result<()>;
+
+    /// How its server lets the user sign in, once it said; asked after
+    /// each read of the board, so it may read it then, once. `None`: not
+    /// known, or no server (a file, the local list).
+    fn login(&mut self) -> Option<Login> {
+        None
+    }
 }
 
 /// The columns a tasks' account uses, found by name in its board.

@@ -25,6 +25,11 @@ rustix = { version = "1.1.6", features = ["fs"] }
 # waits for it with a timeout (as the clipboard's key, 5.6).
 zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
 tokio = { version = "1.54.1", features = ["rt", "time"] }
+# A kanban server's REST API (Planka), blocking, on its account's worker.
+# TLS by rustls on ring, against the system's certificates (the platform's
+# verifier): no bundled roots.
+ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
