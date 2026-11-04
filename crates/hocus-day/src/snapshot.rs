@@ -17,7 +17,7 @@ pub enum Kind {
     Local,
     /// A file of the configuration's, for tests and screenshots.
     Fixture,
-    /// Google Calendar (its own ticket).
+    /// Google Calendar, through GNOME Online Accounts.
     Google,
     /// A Planka board (its own ticket).
     Planka,
@@ -140,6 +140,16 @@ impl Snapshot {
     }
 }
 
+/// What the workers send the day.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Update {
+    /// An account's latest.
+    Snapshot(Box<Snapshot>),
+    /// An account no more (removed from Online Accounts, its calendar
+    /// switched off): nothing of it comes after.
+    Gone(AccountId),
+}
+
 /// An event shown, with its calendar (its colour, its name).
 #[derive(Debug, Clone, Copy)]
 pub struct Shown<'a> {
@@ -177,9 +187,31 @@ impl Day {
                 true
             }
             None => {
-                self.accounts.push(snapshot);
+                // An account that comes later (Online Accounts'): before
+                // the local list, which stays last.
+                let at = self
+                    .accounts
+                    .iter()
+                    .position(|s| s.account.kind == Kind::Local)
+                    .unwrap_or(self.accounts.len());
+                self.accounts.insert(at, snapshot);
                 true
             }
+        }
+    }
+
+    /// `account` and its data left out: whether it was there.
+    pub fn remove(&mut self, account: &AccountId) -> bool {
+        let before = self.accounts.len();
+        self.accounts.retain(|s| s.account.id != *account);
+        self.accounts.len() != before
+    }
+
+    /// What a worker sent applied: whether anything changed.
+    pub fn apply(&mut self, update: Update) -> bool {
+        match update {
+            Update::Snapshot(snapshot) => self.update(*snapshot),
+            Update::Gone(account) => self.remove(&account),
         }
     }
 
@@ -298,6 +330,23 @@ mod tests {
         assert_eq!(day.tasks().map(|s| s.account.id.as_str()), Some("local"));
         let day = Day::new(vec![calendars, board, local]);
         assert_eq!(day.tasks().map(|s| s.account.id.as_str()), Some("planka-1"));
+    }
+
+    #[test]
+    fn an_account_coming_later_goes_before_the_local_list_and_can_go() {
+        let local = Snapshot::loading(account("local", Kind::Local, Holds::Tasks));
+        let google = Snapshot::loading(account("google-1", Kind::Google, Holds::Calendars));
+        let mut day = Day::new(vec![local]);
+        assert!(day.apply(Update::Snapshot(Box::new(google))));
+        let ids: Vec<&str> = day
+            .accounts()
+            .iter()
+            .map(|s| s.account.id.as_str())
+            .collect();
+        assert_eq!(ids, ["google-1", "local"]);
+        assert!(day.apply(Update::Gone(AccountId::new("google-1"))));
+        assert!(!day.apply(Update::Gone(AccountId::new("google-1"))));
+        assert_eq!(day.accounts().len(), 1);
     }
 
     #[test]

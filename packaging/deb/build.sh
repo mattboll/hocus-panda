@@ -69,7 +69,8 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # GTK backend (the file chooser, which saving a capture uses); ffmpeg,
 # which encodes screen recordings (a program of its own, never linked),
 # and a VA-API driver for it to encode on the GPU (without one, on the
-# CPU). Depends:
+# CPU); GNOME Online Accounts, whose Google accounts give "Your day" its
+# calendars. Depends:
 # xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
@@ -84,7 +85,8 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  upower, power-profiles-daemon | tuned-ppd, pipewire-bin, wireplumber,
  network-manager, bluez, xdg-utils, fonts-noto-color-emoji,
  pipewire, xdg-desktop-portal-gtk,
- ffmpeg, va-driver-all | va-driver
+ ffmpeg, va-driver-all | va-driver,
+ gnome-online-accounts
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

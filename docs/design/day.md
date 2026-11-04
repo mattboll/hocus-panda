@@ -11,9 +11,10 @@ What the bar draws of it is each view's own spec.
 ```
 config.toml [day] ──► hocus_day::Workers::start ──► one worker thread per account
                                                       │  (its source: fixture, local list,
-                                                      │   later Google, Planka)
+                                                      │   Google, later Planka)
                                                       ▼
-                          mpsc::Sender<Snapshot>  (owned, only when it changed)
+                          mpsc::Sender<Update>  (owned snapshots, only when they changed;
+                                                 an account gone)
                                                       │
               shell: day thread ──► Day (Arc, behind a mutex) ──► views: day::snapshot()
                                      │ changed?
@@ -24,6 +25,9 @@ config.toml [day] ──► hocus_day::Workers::start ──► one worker threa
 - **`hocus-day`** (no smithay, no iced): the model, the two adapter traits,
   the fixture and the local list, the workers, the configuration's
   `[day]`, and the accounts' secrets.
+- **Online Accounts' thread** (`day: online accounts`, [Google](#google-calendar)):
+  starts and stops the Google accounts' workers as GNOME Online Accounts
+  lists them.
 - **The shell's `day` module** (`crates/hocus-shell/src/day`): starts the
   workers as the shell starts, from the configuration file the compositor
   read (`HOCUS_CONFIG`, set by the compositor; empty: none), and keeps the
@@ -167,7 +171,10 @@ One thread per account (`day: <account id>`), never the shell's loop.
   `Fresh { fetched }`, `Failed { error, fetched }`, the times on the wall
   clock, for the user to read), `calendars`, `events` (the window's, of
   the shown calendars, in order), `board`, `tasks` (the tasks' column's
-  cards, in order), `pending` (the changes not carried out yet).
+  cards, in order), `pending` (the changes not carried out yet). As
+  `Update::Snapshot`; `Update::Gone` when its account stopped (Google's),
+  and nothing of it after. `Day::apply` takes either; an account that
+  comes later goes before the local list.
 - **Calendars**: listed whole once a day (the window moves), else synced
   from each calendar's token; the configuration's `shown` and `colors`
   apply over what the account says.
@@ -261,10 +268,77 @@ An account's id is made from its kind, what it holds and its name
 (`fixture-calendars-day`, `planka-tasks-planka.example.org-1234`), unique;
 `local` is the local list's. Its cache and its secret are named by it.
 
-Google calendars come through GNOME Online Accounts (#425's amendment):
-its access token from `OAuth2Based.GetAccessToken`, nothing kept by us.
-Until their adapters land, a `google` or `planka` account shows as
-`Failed (invalid: … not supported yet)`, and no worker runs for it.
+Google calendars come through GNOME Online Accounts (#425's amendment,
+[below](#google-calendar)): `account` names one by its e-mail; without
+it, every Google account of Online Accounts with its calendar on. Until
+its adapter lands, a `planka` account shows as `Failed (invalid: … not
+supported yet)`, and no worker runs for it.
+
+## Google Calendar
+
+Built in #567 (`hocus_day::goa`, `hocus_day::google`). No OAuth client of
+ours, no refresh token, no secret kept: the accounts, and their tokens,
+are GNOME Online Accounts'.
+
+- **The bus**: the session bus the compositor names (`--session-bus`, the
+  session's own on a virtual terminal; `Env::session_bus`), never another.
+  Without one there is no Google source, and that is logged.
+- **The accounts**: `org.gnome.OnlineAccounts`, its object manager
+  `/org/gnome/OnlineAccounts` (`GetManagedObjects`). An object with
+  `org.gnome.OnlineAccounts.Account` (`ProviderType` `google`,
+  `CalendarDisabled` false) and `…OAuth2Based` is a Google account. The
+  first `[[day.calendars]] kind = "google"` whose `account` is its
+  `Identity` or `PresentationIdentity` (case-insensitively) takes it, else
+  the first without `account`; its `shown` and `colors` apply. Its id is
+  `google-calendars-<identity>`, its name the e-mail.
+- **Coming and going**: a thread of its own (`day: online accounts`, a
+  runtime of its own) lists them as it starts, then again each time Online
+  Accounts says something (`InterfacesAdded`, `InterfacesRemoved`,
+  `PropertiesChanged` under its path, or its name changing hands); it
+  sleeps meanwhile. An account that appears (or whose calendar is switched
+  on) starts its worker; one removed (or switched off) stops it: the day
+  is told (`Update::Gone`, nothing of its worker after it, under the
+  worker's lock), the worker ends once its call is done, and its cache is
+  removed. One signed in again (`AttentionNeeded` back to false) is read
+  again at once. Online Accounts not answering leaves the workers as they
+  were. An account the configuration names that Online Accounts does not
+  have is logged.
+- **The token**: `OAuth2Based.GetAccessToken` (a connection of its own,
+  30 s at most), kept until a minute before its `expires_in`, asked for
+  again then and once on a `401`. Online Accounts answering with an error
+  (the account needs signing in again) is `SourceError::SignIn`, shown as
+  the account's error, its last events kept; not answering is `Offline`.
+- **The API**: Google Calendar API v3 over HTTPS, `ureq` (blocking, on the
+  worker; rustls with ring, the certificates the system trusts; 30 s per
+  call), every page read (`pageToken`).
+  - `users/me/calendarList`: a calendar's name is its `summaryOverride`,
+    else its `summary`; its colour `backgroundColor`; shown as `selected`
+    says; read-only unless its `accessRole` is `owner` or `writer`.
+    Deleted ones are left out.
+  - `calendars/<id>/events`, `singleEvents=true` (occurrences expanded by
+    Google, exceptions honoured), `timeMin`/`timeMax` the window: the
+    shown calendars only. Its last page's `nextSyncToken` is the
+    calendar's; the next read syncs from it (`syncToken`), a `410` lists
+    again.
+  - `401`: the token asked for again, once; then `SignIn`. `429` and `5xx`,
+    or no answer: `Offline`. Others: `Refused`.
+- **An event**: `summary`; `start`/`end` (`dateTime`, or `date`, the end
+  date the day after the last); `status` (`confirmed`, `tentative`,
+  `cancelled`); the user's answer from `attendees[self]`'s `responseStatus`
+  (`accepted`, `declined`; else, or not invited, unanswered);
+  `transparency` `transparent` is free; `location`; the video from
+  `hangoutLink`, else `conferenceData`'s `video` entry point, else the
+  first meeting address in its place or description
+  (`model::meeting_address`); `htmlLink`; `description`; the alarms from
+  `reminders.overrides`, else the calendar's `defaultReminders`, the
+  `popup` ones only (an e-mail is Google's to send).
+- **Deleted events**: Google gives a deleted event as `cancelled`; one
+  that comes with its times stays, marked cancelled (the bar leaves it
+  out), one that comes as its id alone is removed.
+  Working locations (`eventType` `workingLocation`) are left out.
+- **Tests only**: `HOCUS_TEST_GOOGLE_API` sets the API's address, taken
+  only on this machine (`http://127.0.0.1:…`, `[::1]`, `localhost`), so
+  that a token never leaves for another host. The shell reads it.
 
 ## Secrets (`hocus_day::secrets`)
 
@@ -302,4 +376,14 @@ never the loop. `Token`'s `Debug` never shows it.
 - `crates/hocus-compositor/tests/day.rs`, the real shell, headless: a
   fixture's day reaches the shell; the local list survives a restart of
   the shell; changing the fixture's file shows the change; at rest nothing
-  wakes, and a change of the day draws nothing.
+  wakes, and a change of the day draws nothing; a Google account of
+  Online Accounts reaches the shell.
+- `crates/hocus-day/tests/google.rs`, against fakes of the test's own
+  (`tests/fakes`: a private `dbus-daemon` with an Online Accounts on it,
+  a Calendar API on 127.0.0.1): the calendars and today's events reach the
+  snapshot; a declined event, a free one and a cancelled one are marked
+  so; the video link from `hangoutLink` or `conferenceData`; an
+  incremental sync applies its changes, a `410` lists again; a `401` asks
+  Online Accounts again, and its refusal is "sign in again"; an account
+  added starts its worker, one switched off or removed stops it; without a
+  bus, no Google source.
