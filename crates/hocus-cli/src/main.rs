@@ -18,6 +18,9 @@
 //!   on standard input, checked and kept where the bar reads it
 //!   (docs/design/day.md).
 //!
+//! - `hocus settings [SECTION]`: the Settings' window (6.1), on that
+//!   section (`power`), or brought forward on it when it is open.
+//!
 //! The line goes to the compositor's control socket: `--socket`, else
 //! `$HOCUS_SOCKET`, else beside `$WAYLAND_DISPLAY`'s socket.
 
@@ -33,6 +36,25 @@ use clap::{Parser, Subcommand};
 use hocus_agents::{Question, Report, Source, State, hooks};
 
 mod day;
+
+/// `hocus-settings`, in `PATH` or beside this program, which it becomes.
+fn settings(section: Option<&str>) -> ExitCode {
+    use std::os::unix::process::CommandExt as _;
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("hocus-settings")))
+        .filter(|p| p.is_file());
+    let in_path = std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| dir.join("hocus-settings").is_file())
+    });
+    let program = match (in_path, beside) {
+        (false, Some(beside)) => beside,
+        _ => PathBuf::from("hocus-settings"),
+    };
+    let err = std::process::Command::new(&program).args(section).exec();
+    eprintln!("hocus: {}: {err}", program.display());
+    ExitCode::FAILURE
+}
 
 /// What the hook reads of its standard input at most.
 const MOST: u64 = 4 << 20;
@@ -76,6 +98,14 @@ enum Command {
         tool: String,
         /// The hook's JSON (Codex's notify gives it here).
         payload: Option<String>,
+    },
+    /// Opens the Settings, on SECTION (power, keyboard…), or brings them
+    /// forward on it.
+    Settings {
+        /// The section: appearance, wallpaper, bar, agenda, screens, sound,
+        /// keyboard, mouse, network, bluetooth, desktops, applications,
+        /// agents, captures, power, account, date-and-time.
+        section: Option<String>,
     },
     /// Your day's accounts (docs/design/day.md).
     Day {
@@ -122,6 +152,7 @@ enum DayCommand {
 fn main() -> ExitCode {
     let args = Args::parse();
     match args.command {
+        Command::Settings { section } => settings(section.as_deref()),
         Command::Agent { name, state, pid } => {
             let state = match state.as_str() {
                 "ended" => None,

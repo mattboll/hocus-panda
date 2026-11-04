@@ -678,8 +678,8 @@ fn unlocking_gives_the_desktop_back() -> anyhow::Result<()> {
 /// lock's clock then draws once.
 #[test]
 fn at_rest_while_locked_nothing_wakes_but_the_minute() -> anyhow::Result<()> {
-    // Twelve seconds before a minute changes, as the shell starts.
-    let Some(mut bed) = Bed::start(&["1920x1080"], Some("10:00:48"))? else {
+    // Eighteen seconds before a minute changes, as the shell starts.
+    let Some(mut bed) = Bed::start(&["1920x1080"], Some("10:00:42"))? else {
         return Ok(());
     };
     bed.lock()?;
@@ -699,6 +699,19 @@ fn at_rest_while_locked_nothing_wakes_but_the_minute() -> anyhow::Result<()> {
             .unwrap_or_default()
             .contains("hm: \"10:01\"")
     };
+    // Settled: the shell's last frames of the lock's start (on the CPU a
+    // buffer comes a while after it is drawn) have come, nothing for a
+    // second.
+    let mut settled = false;
+    for _ in 0..10 {
+        let commits = counts(&bed.hp);
+        wait(&mut bed.hp, Duration::from_secs(1))?;
+        if counts(&bed.hp) == commits {
+            settled = true;
+            break;
+        }
+    }
+    anyhow::ensure!(settled, "the lock never came to rest");
     let from = bed.mark();
     let before = counts(&bed.hp);
     wait(&mut bed.hp, Duration::from_secs(2))?;

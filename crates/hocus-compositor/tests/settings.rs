@@ -1,0 +1,717 @@
+//! The Settings (6.1, issue #401): the real `hocus-settings` window, a
+//! client of a headless compositor, its configuration file the test's
+//! own, its state, home and runtime directories too; never the machine's
+//! power supplies, buses or GPU (it draws with tiny-skia).
+//!
+//! One test per point of the issue: the window opens with its sidebar's
+//! 17 sections; searching "veille" finds "Mettre en veille après", the lid
+//! and the power button, and opening a result lights its row; changing the
+//! delay writes `[idle] delay` at once, the file's other sections and
+//! comments kept; "Annuler" and `Ctrl+Z` take it back; a hand edit of the
+//! file shows in the window; a file that does not read turns it read-only
+//! with the offer to take back the last version that read, which works; a
+//! value not understood warns on its row; a second launch brings the first
+//! forward; at rest, the window commits nothing.
+//!
+//! What the window shows is read from its log, as it says it ("shows" and
+//! "places" lines, JSON): the places are the window's own, the window's
+//! place on the screen added.
+
+mod common;
+
+use std::{
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use common::{BTN_LEFT, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTSHIFT, WAIT, chord, wait};
+use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use serde_json::Value;
+
+const APP_ID: &str = "hocus-settings";
+const KEY_ENTER: u32 = 28;
+const KEY_F: u32 = 33;
+const KEY_Z: u32 = 44;
+
+/// A configuration of the user's own: comments, sections the Settings do
+/// not know, an idle delay of five minutes.
+const FILE: &str = "# My desktop, by hand.\n\
+    [keyboard]\n\
+    layouts = [\"fr\", \"us\"]   # both\n\
+    \n\
+    # When I step away.\n\
+    [idle]\n\
+    delay = 300 # five minutes\n\
+    \n\
+    [panel]\n\
+    form = \"full\"\n";
+
+/// A US keyboard's letters, by their evdev codes.
+fn letter(c: char) -> Option<u32> {
+    Some(match c {
+        'a' => 30,
+        'c' => 46,
+        'e' => 18,
+        'i' => 23,
+        'l' => 38,
+        'o' => 24,
+        'r' => 19,
+        's' => 31,
+        'u' => 22,
+        'v' => 47,
+        _ => return None,
+    })
+}
+
+struct Bed {
+    hp: Headless,
+    dir: tempfile::TempDir,
+    log: PathBuf,
+    script: PathBuf,
+}
+
+impl Bed {
+    /// A compositor, the configuration file holding `file`; `None` when
+    /// the Settings are not built.
+    fn start(file: &str) -> anyhow::Result<Option<Self>> {
+        Self::start_on(file, "1920x1080")
+    }
+
+    /// The same on a screen `output` (`WxH[@SCALE]`).
+    fn start_on(file: &str, output: &str) -> anyhow::Result<Option<Self>> {
+        let Some(program) = common::settings_program() else {
+            eprintln!("hocus-settings is not built: build the workspace to run this test");
+            return Ok(None);
+        };
+        let dir = tempfile::tempdir()?;
+        let root = dir.path();
+        for sub in ["home", "config/hocuspanda", "cache", "state", "data", "bin"] {
+            std::fs::create_dir_all(root.join(sub))?;
+        }
+        let config_file = root.join("config/hocuspanda/config.toml");
+        std::fs::write(&config_file, file)?;
+        // What "Ouvrir le fichier" runs: nothing.
+        let opener = root.join("bin/xdg-open");
+        std::fs::write(&opener, "#!/bin/sh\nexit 0\n")?;
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))?;
+        let log = root.join("settings.log");
+        let script = root.join("bin/hocus-settings");
+        let at = |sub: &str| root.join(sub).display().to_string();
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
+                 export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
+                 HOCUS_POWER_SUPPLY_DIR=/nonexistent ICED_BACKEND=tiny-skia \
+                 LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
+                 XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
+                 PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \
+                 RUST_LOG=warn,hocus_settings=debug\n\
+                 exec '{}' \"$@\" 2>>'{}'\n",
+                at("home"),
+                at("config"),
+                at("cache"),
+                at("state"),
+                at("data"),
+                at("bin"),
+                program.display(),
+                log.display()
+            ),
+        )?;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+        let mut config = Config::default();
+        config.keyboard.layouts = vec!["us".to_owned()];
+        config.file = Some(config_file);
+        let hp = Headless::start_with(
+            HeadlessConfig {
+                outputs: vec![output.parse()?],
+                renderer: RendererChoice::Pixman,
+                ..HeadlessConfig::default()
+            },
+            config,
+        )?;
+        Ok(Some(Self {
+            hp,
+            dir,
+            log,
+            script,
+        }))
+    }
+
+    fn file(&self) -> PathBuf {
+        self.dir.path().join("config/hocuspanda/config.toml")
+    }
+
+    fn text(&self) -> String {
+        std::fs::read_to_string(self.file()).unwrap_or_default()
+    }
+
+    /// The Settings launched as the desktop launches applications: with an
+    /// activation token.
+    fn launch(&mut self, args: &[&str]) {
+        let mut argv = vec![self.script.display().to_string()];
+        argv.extend(args.iter().map(|a| (*a).to_owned()));
+        self.hp.launch(hocus_link::Launch {
+            id: APP_ID.to_owned(),
+            terminal: false,
+            dir: String::new(),
+            argv,
+        });
+    }
+
+    /// Launched, its window open with the keyboard and drawn.
+    fn open(&mut self) -> anyhow::Result<()> {
+        self.launch(&[]);
+        let open = self.hp.dispatch_until(Duration::from_secs(20), |hp| {
+            hp.windows()
+                .iter()
+                .any(|w| w.app_id.as_deref() == Some(APP_ID) && w.keyboard)
+        })?;
+        anyhow::ensure!(open, "the window never opened: {}", self.plain());
+        self.shows(|s| s["file"] == "saved" || s["file"] == "read-only")?;
+        self.places_with("nav:power")?;
+        Ok(())
+    }
+
+    fn plain(&self) -> String {
+        String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned()
+    }
+
+    /// What the window shows, once `done` holds of it.
+    fn shows(&mut self, done: impl Fn(&Value) -> bool) -> anyhow::Result<Value> {
+        let log = self.log.clone();
+        let read = |log: &Path| -> Option<Value> {
+            let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
+            let line = text.lines().rev().find(|l| l.contains(" shows {"))?;
+            let at = line.find(" shows {")? + " shows ".len();
+            serde_json::from_str(&line[at..]).ok()
+        };
+        let seen = self
+            .hp
+            .dispatch_until(WAIT, |_| read(&log).is_some_and(|s| done(&s)))?;
+        let last = read(&log);
+        anyhow::ensure!(
+            seen,
+            "the window never showed it; it shows {}",
+            last.map_or_else(|| "nothing".to_owned(), |s| s.to_string())
+        );
+        last.ok_or_else(|| anyhow::anyhow!("nothing shown"))
+    }
+
+    /// The window's places, once they hold `id`.
+    fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
+        let log = self.log.clone();
+        let read = |log: &Path| -> Option<Value> {
+            let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
+            let line = text.lines().rev().find(|l| l.contains(" places {"))?;
+            let at = line.find(" places {")? + " places ".len();
+            serde_json::from_str(&line[at..]).ok()
+        };
+        let seen = self
+            .hp
+            .dispatch_until(WAIT, |_| read(&log).is_some_and(|p| p.get(id).is_some()))?;
+        anyhow::ensure!(seen, "{id} is nowhere: {:?}", read(&log));
+        read(&log).ok_or_else(|| anyhow::anyhow!("no places"))
+    }
+
+    /// The window's place on the screen.
+    fn window(&self) -> anyhow::Result<Rect> {
+        self.hp
+            .windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some(APP_ID))
+            .map(|w| w.rect)
+            .ok_or_else(|| anyhow::anyhow!("no settings window"))
+    }
+
+    /// The middle of `id` on the screen.
+    fn at(&mut self, id: &str) -> anyhow::Result<(f64, f64)> {
+        let places = self.places_with(id)?;
+        let place = &places[id];
+        let n = |i: usize| place[i].as_f64().unwrap_or_default();
+        let window = self.window()?;
+        Ok((
+            f64::from(window.x) + n(0) + n(2) / 2.0,
+            f64::from(window.y) + n(1) + n(3) / 2.0,
+        ))
+    }
+
+    fn click(&mut self, id: &str) -> anyhow::Result<()> {
+        let at = self.at(id)?;
+        self.hp.pointer_move(at.0 - 1.0, at.1);
+        self.hp.pointer_move(at.0, at.1);
+        wait(&mut self.hp, Duration::from_millis(30))?;
+        self.hp.button(BTN_LEFT, true);
+        self.hp.button(BTN_LEFT, false);
+        Ok(())
+    }
+
+    fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
+        for c in text.chars() {
+            let code = letter(c).ok_or_else(|| anyhow::anyhow!("no key for {c}"))?;
+            self.hp.key(code, true);
+            self.hp.key(code, false);
+            wait(&mut self.hp, Duration::from_millis(10))?;
+        }
+        Ok(())
+    }
+
+    /// Waits for the file to hold `done`.
+    fn written(&mut self, done: impl Fn(&str) -> bool) -> anyhow::Result<String> {
+        let file = self.file();
+        let seen = self.hp.dispatch_until(WAIT, |_| {
+            std::fs::read_to_string(&file).is_ok_and(|t| done(&t))
+        })?;
+        let text = self.text();
+        anyhow::ensure!(
+            seen,
+            "the file never held it:\n{text}\nthe window said:\n{}",
+            self.plain()
+        );
+        Ok(text)
+    }
+
+    /// The power page, its rows shown.
+    fn power(&mut self) -> anyhow::Result<Value> {
+        self.click("nav:power")?;
+        let shown = self.shows(|s| {
+            s["page"] == "power" && s["rows"].as_array().is_some_and(|r| r.len() == 8)
+        })?;
+        self.places_with("control:power.suspend-after")?;
+        Ok(shown)
+    }
+
+    /// `id`'s row as shown.
+    fn row(shown: &Value, id: &str) -> Value {
+        shown["rows"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["id"] == id))
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    /// A menu's choice `n` taken: its button clicked, then its option.
+    fn choose(&mut self, setting: &str, n: usize) -> anyhow::Result<()> {
+        self.click(&format!("control:{setting}"))?;
+        self.shows(|s| s["menu"].as_str().is_some_and(|m| m.starts_with(setting)))?;
+        self.click(&format!("option:{n}"))?;
+        Ok(())
+    }
+}
+
+/// Every line of `before` is in `after`, in its order.
+fn kept(before: &str, after: &str, but: &[&str]) -> bool {
+    let mut from = 0;
+    for line in before
+        .lines()
+        .filter(|l| !but.iter().any(|b| l.contains(b)))
+    {
+        match after[from..].find(line) {
+            Some(at) => from += at + line.len(),
+            None => return false,
+        }
+    }
+    true
+}
+
+#[test]
+fn the_window_opens_with_its_sidebars_17_sections() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| s["page"] == "home")?;
+    let sections: Vec<&str> = shown["sections"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    assert_eq!(sections.len(), 17, "{sections:?}");
+    assert_eq!(sections[0], "Apparence et langue");
+    assert_eq!(sections[14], "Énergie");
+    // Each drawn in the sidebar, in that order, under the home's row.
+    let places = bed.places_with("nav:date-and-time")?;
+    let y = |id: &str| places[id][1].as_f64().unwrap_or(-1.0);
+    let slugs = [
+        "home",
+        "appearance",
+        "wallpaper",
+        "bar",
+        "agenda",
+        "screens",
+        "sound",
+        "keyboard",
+        "mouse",
+        "network",
+        "bluetooth",
+        "desktops",
+        "applications",
+        "agents",
+        "captures",
+        "power",
+        "account",
+        "date-and-time",
+    ];
+    for pair in slugs.windows(2) {
+        let (a, b) = (
+            y(&format!("nav:{}", pair[0])),
+            y(&format!("nav:{}", pair[1])),
+        );
+        assert!(a >= 0.0 && b > a, "{} at {a}, {} at {b}", pair[0], pair[1]);
+    }
+    // All of them in the window's 760 px, without scrolling.
+    assert!(y("nav:date-and-time") + 30.0 <= 760.0, "{places}");
+    let window = bed.window()?;
+    assert_eq!((window.width, window.height), (1100, 760));
+    // The home: six cards, Énergie's from the file.
+    let cards = shown["cards"].as_array().map_or(0, Vec::len);
+    assert_eq!(cards, 6, "{shown}");
+    Ok(())
+}
+
+#[test]
+fn searching_veille_finds_the_suspend_delay_the_lid_and_the_button() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+    bed.type_text("veille")?;
+    let shown = bed.shows(|s| {
+        s["query"] == "veille" && s["results"].as_array().is_some_and(|r| !r.is_empty())
+    })?;
+    let names: Vec<&str> = shown["results"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|r| r["name"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        names,
+        [
+            "Mettre en veille après",
+            "Couvercle fermé",
+            "Bouton d’alimentation"
+        ]
+    );
+    assert_eq!(shown["results"][0]["via"], Value::Null);
+    assert_eq!(shown["results"][1]["via"], "veille");
+    assert_eq!(shown["results"][2]["via"], "veille");
+    // Enter opens the first: its page, its row lit.
+    bed.hp.key(KEY_ENTER, true);
+    bed.hp.key(KEY_ENTER, false);
+    bed.shows(|s| s["page"] == "power" && s["lit"] == "power.suspend-after")?;
+    // The list stays: the lid's is one click away.
+    bed.click("result:1")?;
+    bed.shows(|s| s["page"] == "power" && s["lit"] == "power.lid" && s["query"] == "veille")?;
+    // Esc empties the field and brings the sections back.
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.shows(|s| s["query"] == "")?;
+    Ok(())
+}
+
+#[test]
+fn changing_the_delay_writes_idle_delay_at_once_keeping_the_rest() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.power()?;
+    // No battery here: the page shows the values on AC, the idle delay's.
+    assert_eq!(shown["source"], "ac");
+    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "5 min");
+    // 15 min, the menu's fifth choice.
+    bed.choose("power.screen-off", 4)?;
+    let text = bed.written(|t| t.contains("delay = 900"))?;
+    assert_eq!(text, FILE.replace("delay = 300 #", "delay = 900 #"));
+    assert!(kept(FILE, &text, &["delay ="]));
+    let shown = bed.shows(|s| s["toast"].as_str().is_some())?;
+    assert_eq!(
+        shown["toast"],
+        "Éteindre l’écran après, sur secteur : 15 min"
+    );
+    assert_eq!(shown["toast_action"], "undo");
+    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "15 min");
+    // A setting the file did not hold: its table made, the rest kept.
+    bed.choose("power.lid", 1)?;
+    let text = bed.written(|t| t.contains("lid = \"lock\""))?;
+    assert!(
+        text.starts_with(&FILE.replace("delay = 300 #", "delay = 900 #")),
+        "{text}"
+    );
+    assert!(text.contains("[power]\nlid = \"lock\"\n"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn annuler_and_ctrl_z_take_the_value_back() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    bed.choose("power.screen-off", 4)?;
+    bed.written(|t| t.contains("delay = 900"))?;
+    bed.shows(|s| s["toast_action"] == "undo")?;
+    // The toast's "Annuler": the file as it was.
+    bed.click("toast-action")?;
+    bed.written(|t| t == FILE)?;
+    let shown = bed.shows(|s| s["toast"].as_str().is_some_and(|t| t.starts_with("Annulé")))?;
+    assert_eq!(
+        shown["toast"],
+        "Annulé : Éteindre l’écran après, sur secteur revient à 5 min."
+    );
+    assert_eq!(shown["lit"], "power.screen-off");
+    // Ctrl+Z, the same.
+    bed.choose("power.screen-off", 3)?;
+    bed.written(|t| t.contains("delay = 600"))?;
+    bed.shows(|s| s["undo"] == 1)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
+    bed.written(|t| t == FILE)?;
+    bed.shows(|s| Bed::row(s, "power.screen-off")["value"] == "5 min")?;
+    // Ctrl+Shift+Z does it again.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z]);
+    bed.written(|t| t.contains("delay = 600"))?;
+    Ok(())
+}
+
+#[test]
+fn a_hand_edit_of_the_file_shows_in_the_window() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    // As an editor saves: a new file renamed over the old.
+    let edited = FILE.replace("delay = 300", "delay = 600");
+    let beside = bed.dir.path().join("config/hocuspanda/.config.toml.swp");
+    std::fs::write(&beside, &edited)?;
+    std::fs::rename(&beside, bed.file())?;
+    let shown = bed.shows(|s| Bed::row(s, "power.screen-off")["value"] == "10 min")?;
+    assert_eq!(shown["toast"], "config.toml a changé : relu.");
+    assert_eq!(shown["toast_action"], "show");
+    assert_eq!(shown["lit"], "power.screen-off");
+    // Nothing written over it.
+    assert_eq!(bed.text(), edited);
+    Ok(())
+}
+
+#[test]
+fn an_unreadable_file_turns_it_read_only_and_the_last_readable_one_comes_back() -> anyhow::Result<()>
+{
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    // The file that read is kept.
+    let kept_file = bed
+        .dir
+        .path()
+        .join("state/hocuspanda/config.last-good.toml");
+    let seen = bed.hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&kept_file).is_ok_and(|t| t == FILE)
+    })?;
+    anyhow::ensure!(seen, "the last version that read is not kept");
+    let broken = format!("{FILE}\n[idle\ndelay = 3\n");
+    std::fs::write(bed.file(), &broken)?;
+    let shown = bed.shows(|s| s["file"] == "read-only")?;
+    assert_eq!(shown["banner"], "config.toml ne se lit plus, ligne 12");
+    assert!(
+        shown["restore"]
+            .as_str()
+            .is_some_and(|r| r.starts_with("Reprendre la version de ")),
+        "{shown}"
+    );
+    let rows = shown["rows"].as_array().cloned().unwrap_or_default();
+    assert!(rows.iter().all(|r| r["inert"] == true), "{rows:?}");
+    // It shows the last version that read, as the desktop keeps it.
+    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "5 min");
+    // Its controls do nothing.
+    bed.click("control:power.lid")?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    let shown = bed.shows(|s| s["file"] == "read-only")?;
+    assert_eq!(shown["menu"], Value::Null);
+    assert_eq!(bed.text(), broken);
+    // Taken back: the broken one kept beside it.
+    bed.click("restore")?;
+    bed.written(|t| t == FILE)?;
+    bed.shows(|s| s["file"] == "saved" && s["banner"].is_null())?;
+    let aside =
+        std::fs::read_to_string(bed.dir.path().join("config/hocuspanda/config.toml.broken"))?;
+    assert_eq!(aside, broken);
+    Ok(())
+}
+
+#[test]
+fn a_value_not_understood_warns_on_its_row() -> anyhow::Result<()> {
+    let file = format!("{FILE}\n[power.ac]\nsuspend-after = \"3 heures\" # by hand\n");
+    let Some(mut bed) = Bed::start(&file)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.power()?;
+    let row = Bed::row(&shown, "power.suspend-after");
+    assert_eq!(
+        row["warn"],
+        "Dans le fichier : « 3 heures », non compris ; Jamais s’applique."
+    );
+    assert_eq!(row["value"], "Jamais");
+    // Choosing a value writes over that one line.
+    bed.choose("power.suspend-after", 3)?;
+    let text = bed.written(|t| t.contains("suspend-after = \"1h\""))?;
+    assert_eq!(text, file.replace("\"3 heures\"", "\"1h\""));
+    let shown = bed.shows(|s| Bed::row(s, "power.suspend-after")["warn"].is_null())?;
+    assert_eq!(Bed::row(&shown, "power.suspend-after")["value"], "1 h");
+    Ok(())
+}
+
+#[test]
+fn a_second_launch_brings_the_first_forward() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    // Another window takes the focus.
+    let other = common::open(&mut bed.hp, "other", (500, 400))?;
+    common::click(
+        &mut bed.hp,
+        (
+            f64::from(other.x + other.width / 2),
+            f64::from(other.y + other.height / 2),
+        ),
+    )?;
+    let away = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("other") && w.keyboard)
+    })?;
+    anyhow::ensure!(away, "the other window never took the keyboard");
+    // Launched again, on Énergie.
+    bed.launch(&["power"]);
+    let back = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(APP_ID) && w.keyboard)
+    })?;
+    anyhow::ensure!(back, "the Settings never came forward: {}", bed.plain());
+    bed.shows(|s| s["page"] == "power")?;
+    let windows = bed
+        .hp
+        .windows()
+        .iter()
+        .filter(|w| w.app_id.as_deref() == Some(APP_ID))
+        .count();
+    assert_eq!(windows, 1);
+    assert!(bed.plain().contains("the Settings already run: told them"));
+    Ok(())
+}
+
+#[test]
+fn at_rest_it_commits_nothing() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    // Settled: a second without a commit.
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..200 {
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+        if still >= 10 {
+            break;
+        }
+    }
+    anyhow::ensure!(still >= 10, "the window never came to rest");
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    assert_eq!(bed.hp.window_commits(), last, "the window drew at rest");
+    Ok(())
+}
+
+/// The pull request's screenshots, the window at scale 2 on the CPU:
+/// written to `$HOCUS_SHOTS` when it names a folder. Run by hand
+/// (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let file = format!("{FILE}\n[power.battery]\nsuspend-after = \"30m\"\n");
+    let Some(mut bed) = Bed::start_on(&file, "2880x1800@2")? else {
+        return Ok(());
+    };
+    let shoot = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        // Drawn, and still (a text field's caret blinks: 3 s at most).
+        let mut last = bed.hp.window_commits();
+        let mut still = 0;
+        for _ in 0..30 {
+            if still >= 5 {
+                break;
+            }
+            wait(&mut bed.hp, Duration::from_millis(100))?;
+            let now = bed.hp.window_commits();
+            still = if now == last { still + 1 } else { 0 };
+            last = now;
+        }
+        let window = bed.window()?;
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        // The window and a little of what is around it, ×2.
+        let pad = 24;
+        let x = (window.x * 2 - pad).max(0) as u32;
+        let y = (window.y * 2 - pad).max(0) as u32;
+        let cw = ((window.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+        let ch = ((window.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    bed.open()?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "home.png")?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+    bed.type_text("veille")?;
+    bed.shows(|s| s["results"].as_array().is_some_and(|r| r.len() == 3))?;
+    shoot(&mut bed, "search-veille.png")?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.power()?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "power.png")?;
+    bed.choose("power.suspend-after", 2)?;
+    bed.shows(|s| s["toast_action"] == "undo")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    // Past the toast's rise.
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    shoot(&mut bed, "toast.png")?;
+    bed.choose("power.screen-off", 4)?;
+    bed.shows(|s| s["menu"].is_null())?;
+    bed.click("control:power.lid")?;
+    bed.shows(|s| s["menu"] == "power.lid")?;
+    bed.places_with("option:0")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "menu.png")?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    std::fs::write(bed.file(), format!("{}\n[idle\ndelay = 3\n", bed.text()))?;
+    bed.shows(|s| s["file"] == "read-only")?;
+    wait(&mut bed.hp, Duration::from_secs(7))?;
+    shoot(&mut bed, "read-only.png")?;
+    Ok(())
+}

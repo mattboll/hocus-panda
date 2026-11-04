@@ -28,6 +28,9 @@ pub struct Env {
     pub cursor: crate::cursor::Choice,
     /// The session bus given (`--session-bus`), which the programs use.
     pub session_bus: Option<String>,
+    /// The configuration file read (`HOCUS_CONFIG`): the Settings started
+    /// from the desktop write into this one.
+    pub config: Option<PathBuf>,
 }
 
 impl Env {
@@ -42,6 +45,7 @@ impl Env {
                 Some(crate::shell::Bus::Given(address)) => Some(address.clone()),
                 _ => None,
             },
+            config: state.config.file.clone(),
         }
     }
 
@@ -86,6 +90,14 @@ impl Env {
         if let Some(bus) = &self.session_bus {
             cmd.env("DBUS_SESSION_BUS_ADDRESS", bus);
         }
+        // Empty: no file, never the one a program would look for.
+        cmd.env(
+            hocus_link::CONFIG_ENV,
+            self.config
+                .as_deref()
+                .map(Path::as_os_str)
+                .unwrap_or_default(),
+        );
         match &self.activation {
             Some(token) => {
                 cmd.env("XDG_ACTIVATION_TOKEN", token)
@@ -302,7 +314,20 @@ mod tests {
             activation: None,
             cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
             session_bus: None,
+            config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
         };
+        // The Settings it starts write the file it read.
+        let command = env("/run/user/1000/hocus-0").command("hocus-settings");
+        let config = command
+            .get_envs()
+            .find(|(name, _)| *name == hocus_link::CONFIG_ENV)
+            .and_then(|(_, value)| value);
+        assert_eq!(
+            config,
+            Some(std::ffi::OsStr::new(
+                "/home/alex/.config/hocuspanda/config.toml"
+            ))
+        );
         assert_eq!(env("/run/user/1000/hocus-0").wayland_display(), "hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").wayland_display(), "/tmp/hp/hocus-0");
         assert_eq!(env("/tmp/hp/hocus-0").display().as_deref(), Some(":1"));

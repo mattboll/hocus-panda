@@ -186,8 +186,32 @@
 # screen with the focus, hold it off; the countdown starts again from zero
 # when they let go (docs/design/idle.md). Being idle shows nothing yet:
 # the lock screen will use it. Applications' own idle notifications work
-# either way.
+# either way. The Settings' "Éteindre l'écran après", on AC, writes it.
 # delay = "off"
+
+# [power]
+# Written by the Settings' Énergie page (docs/design/settings.md); the
+# desktop acts on them from 6.10 on. The lid closed: "suspend", "lock",
+# "screen-off" or "nothing"; kept on with a screen plugged in, on AC; the
+# power button's short press: "ask", "suspend", "power-off" or "nothing";
+# the automatic power saver, under this battery level (5 to 50 %).
+# lid = "suspend"
+# lid-ignored-when-docked = true
+# power-button = "ask"
+# auto-saver = true
+# auto-saver-below = 20
+
+# [power.battery]
+# On battery: the screen off, the session locked once it is, the computer
+# asleep after this long without input ("0s", "5m", "1h", or "never").
+# On AC, the screen's delay is [idle] delay.
+# screen-off = "5m"
+# lock-after = "0s"
+# suspend-after = "15m"
+
+# [power.ac]
+# lock-after = "0s"
+# suspend-after = "never"
 
 # [programs]
 # The terminal's command, run through sh -c, for example "foot" or

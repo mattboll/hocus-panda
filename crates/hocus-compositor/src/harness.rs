@@ -279,6 +279,17 @@ impl Headless {
             .collect()
     }
 
+    /// Commits of the windows' surfaces so far, all windows together.
+    pub fn window_commits(&self) -> u64 {
+        self.app.state.window_commits
+    }
+
+    /// Starts `launch` as the launcher's applications start: off the loop,
+    /// with an activation token from the desktop for its first window.
+    pub fn launch(&mut self, launch: hocus_link::Launch) {
+        self.app.state.launch(launch);
+    }
+
     /// Commits of the bars' surfaces so far.
     pub fn bar_commits(&self) -> u64 {
         self.app.state.panel.commits

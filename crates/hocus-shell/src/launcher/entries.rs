@@ -549,6 +549,22 @@ mod tests {
         );
     }
 
+    /// The Settings' entry the package installs (6.1): "Réglages" in the
+    /// launcher, found by its words, started as `hocus-settings`.
+    #[test]
+    fn the_settings_entry_shows_as_reglages() {
+        let entry = shown(include_str!("../../../../packaging/hocus-settings.desktop"));
+        let entry = entry.expect("the Settings' entry is shown");
+        assert_eq!(entry.name, "Réglages");
+        assert_eq!(entry.argv, ["hocus-settings"]);
+        assert!(!entry.terminal);
+        assert!(
+            entry.keywords.iter().any(|k| k == "veille"),
+            "{:?}",
+            entry.keywords
+        );
+    }
+
     #[test]
     fn hidden_nodisplay_and_the_desktops_keep_an_entry_out() {
         let base = "[Desktop Entry]\nType=Application\nName=A\nExec=a\n";

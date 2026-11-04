@@ -3,7 +3,7 @@
 # library dependencies are the ones dpkg-shlibdeps finds on this system, so
 # the package installs on this release and later ones.
 #
-#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
 # Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
@@ -43,8 +43,9 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
     printf 'License: Expat\n'
     # The licence's text, indented, with its blank lines as " .".
     sed -e '1,/^Copyright/d' -e 's/^$/./' -e 's/^/ /' "$top/LICENSE" | sed '1{/^ \.$/d}'
-    # The fonts the shell carries in its binary, under the SIL Open Font
-    # License: each one's copyright line, then the licence once.
+    # The fonts the shell (and the Settings) carry in their binaries, under
+    # the SIL Open Font License: each one's copyright line, then the
+    # licence once.
     fonts="$top/crates/hocus-shell/fonts"
     for family in MartianMono Manrope; do
         printf '\nFiles: crates/hocus-shell/fonts/%s-*\n' "$family"
@@ -64,7 +65,8 @@ printf '/etc/pam.d/hocuspanda\n' > "$root/DEBIAN/conffiles"
 printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
-    debian/hocuspanda/usr/bin/hocuspanda-shell debian/hocuspanda/usr/bin/hocus) > "$work/shlibs"
+    debian/hocuspanda/usr/bin/hocuspanda-shell debian/hocuspanda/usr/bin/hocus \
+    debian/hocuspanda/usr/bin/hocus-settings) > "$work/shlibs"
 depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 
 # Recommends: Mesa's drivers (the shell draws with Vulkan, or on the CPU
@@ -107,9 +109,9 @@ Description: Wayland desktop for developers who work with AI agents
  virtual desktops, and the state of the user's AI agents at a glance.
  Display managers offer it as the "Hocuspanda" session.
  .
- This early version holds the compositor, its session and the base of its
- bar; Super+Return opens a terminal, Super+B switches the bar's form and
- Super+Shift+E logs out.
+ This early version holds the compositor, its session, the base of its
+ bar and its Settings; Super+Return opens a terminal, Super+B switches the
+ bar's form and Super+Shift+E logs out.
 CONTROL
 
 mkdir -p "$out"

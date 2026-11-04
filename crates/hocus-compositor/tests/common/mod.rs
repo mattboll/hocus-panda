@@ -93,21 +93,32 @@ pub const KEY_F4: u32 = 62;
 /// A test binary does not build it, so it may be older than its sources:
 /// that fails the test rather than testing an old shell (#464).
 pub fn shell_program() -> Option<std::path::PathBuf> {
+    built("hocuspanda-shell", "hocus-shell")
+}
+
+/// The Settings' program (6.1), as [`shell_program`].
+pub fn settings_program() -> Option<std::path::PathBuf> {
+    built("hocus-settings", "hocus-settings")
+}
+
+/// The workspace's program `name` (of the package `package`), built next
+/// to the test's, and fresh.
+fn built(name: &str, package: &str) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let program = exe.parent()?.parent()?.join("hocuspanda-shell");
+    let program = exe.parent()?.parent()?.join(name);
     if !program.exists() {
         return None;
     }
-    if let Err(why) = shell_is_fresh(&program) {
-        panic!("{why}: build it again (cargo build -p hocus-shell)");
+    if let Err(why) = is_fresh(&program, name) {
+        panic!("{why}: build it again (cargo build -p {package})");
     }
     Some(program)
 }
 
 /// Whether `program` was built from this checkout's sources as they are:
-/// cargo's list of its sources (`hocuspanda-shell.d`, beside it) names
-/// only files of this workspace, none of them newer than it.
-fn shell_is_fresh(program: &Path) -> anyhow::Result<()> {
+/// cargo's list of its sources (`NAME.d`, beside it) names only files of
+/// this workspace, none of them newer than it.
+fn is_fresh(program: &Path, name: &str) -> anyhow::Result<()> {
     let built = std::fs::metadata(program)?.modified()?;
     let list = program.with_extension("d");
     let text = std::fs::read_to_string(&list)
@@ -123,15 +134,15 @@ fn shell_is_fresh(program: &Path) -> anyhow::Result<()> {
         let source = std::path::PathBuf::from(source.replace('\0', " "));
         anyhow::ensure!(
             source.starts_with(workspace),
-            "hocuspanda-shell was built from another checkout ({})",
+            "{name} was built from another checkout ({})",
             source.display()
         );
         let changed = std::fs::metadata(&source)
             .and_then(|m| m.modified())
-            .with_context(|| format!("hocuspanda-shell's source {} is gone", source.display()))?;
+            .with_context(|| format!("{name}'s source {} is gone", source.display()))?;
         anyhow::ensure!(
             changed <= built,
-            "hocuspanda-shell is older than {}",
+            "{name} is older than {}",
             source.display()
         );
     }

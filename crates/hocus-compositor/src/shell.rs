@@ -220,7 +220,6 @@ impl State {
         let gpu = self.gpu;
         let bus = self.shell.bus.clone();
         let auth_agent = self.shell.auth_agent;
-        let config = self.config.file.clone();
         // Its Wayland connection, made here: the compositor knows it is the
         // shell's, which no other client can claim to be (7.1).
         let theirs = match self.shell_connection() {
@@ -246,11 +245,8 @@ impl State {
             } else {
                 command.env_remove(hocus_link::AUTH_AGENT_ENV);
             }
-            // Empty: no file, never the one the shell would look for.
-            command.env(
-                hocus_link::CONFIG_ENV,
-                config.as_deref().map(Path::as_os_str).unwrap_or_default(),
-            );
+            // Its configuration file (`HOCUS_CONFIG`) is the programs'
+            // ([`programs::Env`]).
             for (name, value) in gpu_env(gpu) {
                 command.env(name, value);
             }
