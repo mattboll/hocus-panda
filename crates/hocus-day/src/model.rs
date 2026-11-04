@@ -259,6 +259,54 @@ pub fn sort_events(events: &mut [Event], zone: &TimeZone) {
     events.sort_by(|a, b| event_order(a, b, zone));
 }
 
+/// The video services whose addresses are taken from a description.
+const VIDEO_HOSTS: &[&str] = &[
+    "meet.google.com",
+    "zoom.us",
+    "teams.microsoft.com",
+    "teams.live.com",
+    "whereby.com",
+    "meet.jit.si",
+    "webex.com",
+    "gotomeeting.com",
+    "bigbluebutton.org",
+];
+
+/// An event's meeting address when its source gives none of its own: the
+/// first `https://` address in its place, else the first of a usual video
+/// service in its description (Day.2).
+pub fn meeting_address(place: Option<&str>, description: Option<&str>) -> Option<String> {
+    let in_place = place.and_then(|p| addresses(p).next());
+    in_place.or_else(|| {
+        description.and_then(|d| {
+            addresses(d).find(|address| {
+                let host = address["https://".len()..]
+                    .split(['/', '?', '#', ':'])
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                VIDEO_HOSTS
+                    .iter()
+                    .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+            })
+        })
+    })
+}
+
+/// The `https://` addresses in `text`, in its order: up to a space, a
+/// quote or a bracket (a description is often HTML), its last
+/// punctuation left out.
+fn addresses(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.match_indices("https://").filter_map(|(at, _)| {
+        let rest = &text[at..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || "\"'<>()[]{}".contains(c))
+            .unwrap_or(rest.len());
+        let address = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+        (address.len() > "https://".len()).then(|| address.to_owned())
+    })
+}
+
 /// A board of an account: its columns, in their order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskBoard {
@@ -324,6 +372,24 @@ pub fn today(now: &Zoned) -> (Timestamp, Timestamp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meeting_address_from_the_place_else_a_video_service_in_the_description() {
+        assert_eq!(
+            meeting_address(Some("Salle Jupiter, https://visio.example.org/r/42."), None),
+            Some("https://visio.example.org/r/42".to_owned())
+        );
+        let description = "Ordre du jour : https://docs.example.org/a\n\
+                           <a href=\"https://acme.zoom.us/j/123?pwd=x\">Rejoindre</a>";
+        assert_eq!(
+            meeting_address(Some("Salle Jupiter"), Some(description)),
+            Some("https://acme.zoom.us/j/123?pwd=x".to_owned())
+        );
+        assert_eq!(
+            meeting_address(None, Some("Voir https://docs.example.org/a")),
+            None
+        );
+    }
 
     fn paris() -> TimeZone {
         TimeZone::posix("CET-1CEST,M3.5.0,M10.5.0/3").expect("a POSIX zone")

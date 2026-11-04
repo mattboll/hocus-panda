@@ -362,6 +362,12 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that says what its pointer gets:
+    /// [`Event::Pointer`].
+    Pointing {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
 }
 
 /// What the test asks of a client.
@@ -420,6 +426,18 @@ pub enum Event {
     Committed(String),
     /// A writing client read this text from the clipboard (empty: none).
     Pasted(String),
+    /// A pointing client's pointer got this.
+    Pointer(Pointed),
+}
+
+/// What a pointing client's pointer got ([`Shows::Pointing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pointed {
+    Enter,
+    Leave,
+    Motion,
+    Press,
+    Release,
 }
 
 /// A client running on its thread.
@@ -482,6 +500,7 @@ fn run_client(
         popup: None,
         popup_on_press: false,
         hiding: false,
+        pointing: false,
         margin: 0,
         cell: 0,
         seat: None,
@@ -543,6 +562,16 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.hiding = true;
+        }
+        Some(Shows::Pointing { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.pointing = true;
         }
         Some(Shows::Checkered { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -749,6 +778,8 @@ struct Client {
     popup_on_press: bool,
     /// Hides the pointer over its window ([`Shows::Hiding`]).
     hiding: bool,
+    /// Says what its pointer gets ([`Shows::Pointing`]).
+    pointing: bool,
     /// The shadow around the window, outside its geometry.
     margin: u32,
     /// Floating, its sizes are whole multiples of this.
@@ -968,7 +999,9 @@ impl SeatHandler for Client {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Pointer && (self.popup_on_press || self.hiding) {
+        if capability == Capability::Pointer
+            && (self.popup_on_press || self.hiding || self.pointing)
+        {
             let _ = self.seats.get_pointer(qh, &seat);
             self.seat = Some(seat);
         } else if capability == Capability::Keyboard && self.typing {
@@ -1007,6 +1040,19 @@ impl PointerHandler for Client {
         events: &[PointerEvent],
     ) {
         for event in events {
+            if self.pointing {
+                let pointed = match event.kind {
+                    PointerEventKind::Enter { .. } => Some(Pointed::Enter),
+                    PointerEventKind::Leave { .. } => Some(Pointed::Leave),
+                    PointerEventKind::Motion { .. } => Some(Pointed::Motion),
+                    PointerEventKind::Press { .. } => Some(Pointed::Press),
+                    PointerEventKind::Release { .. } => Some(Pointed::Release),
+                    _ => None,
+                };
+                if let Some(pointed) = pointed {
+                    let _ = self.events.send(Event::Pointer(pointed));
+                }
+            }
             match event.kind {
                 PointerEventKind::Enter { serial } if self.hiding => {
                     pointer.set_cursor(serial, None, 0, 0);

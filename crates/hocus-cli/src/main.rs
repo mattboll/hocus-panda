@@ -11,6 +11,10 @@
 //!   prints nothing a tool would take as an answer: a hook must not get in
 //!   the agent's way, desktop or not.
 //!
+//! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
+//!   on standard input, checked and kept where the bar reads it
+//!   (docs/design/day.md).
+//!
 //! The line goes to the compositor's control socket: `--socket`, else
 //! `$HOCUS_SOCKET`, else beside `$WAYLAND_DISPLAY`'s socket.
 
@@ -24,6 +28,8 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use hocus_agents::{Report, Source, State, hooks};
+
+mod day;
 
 /// What the hook reads of its standard input at most.
 const MOST: u64 = 4 << 20;
@@ -66,6 +72,34 @@ enum Command {
         /// The hook's JSON (Codex's notify gives it here).
         payload: Option<String>,
     },
+    /// Your day's accounts (docs/design/day.md).
+    Day {
+        #[command(subcommand)]
+        command: DayCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DayCommand {
+    /// Keeps a Planka board's access token, read on standard input, where
+    /// the bar reads it: the session's keyring, else a file of yours alone.
+    /// It is checked with the server first.
+    PlankaToken {
+        /// The account (default: the configuration's Planka board), as the
+        /// shell's log names it: planka-tasks-HOST-BOARD.
+        account: Option<String>,
+        /// The configuration file (default:
+        /// $XDG_CONFIG_HOME/hocuspanda/config.toml).
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
+        /// The session bus whose keyring keeps it (default: the session's;
+        /// none: a file).
+        #[arg(long, value_name = "ADDRESS")]
+        bus: Option<String>,
+        /// Kept without asking the server first.
+        #[arg(long)]
+        no_check: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -102,6 +136,29 @@ fn main() -> ExitCode {
             hook(&tool, payload, args.socket);
             ExitCode::SUCCESS
         }
+        Command::Day {
+            command:
+                DayCommand::PlankaToken {
+                    account,
+                    config,
+                    bus,
+                    no_check,
+                },
+        } => match day::planka_token(day::PlankaToken {
+            account,
+            config,
+            bus,
+            no_check,
+        }) {
+            Ok(said) => {
+                println!("{said}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("hocus: {err}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 

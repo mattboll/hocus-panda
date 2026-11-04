@@ -18,7 +18,7 @@ use std::{
 };
 
 use hocus_day::{
-    Change, Clock, Config, Day, Env, Snapshot, Workers, model::TaskId, secrets::Secrets,
+    Change, Clock, Config, Day, Env, Update, Workers, google, model::TaskId, secrets::Secrets,
 };
 use hocus_link::DayAsk;
 
@@ -46,11 +46,11 @@ pub fn start() {
     let kept = std::thread::Builder::new()
         .name("day".to_owned())
         .spawn(|| {
-            let Some(snapshots) = start_workers() else {
+            let Some(updates) = start_workers() else {
                 return;
             };
-            for snapshot in snapshots {
-                publish(snapshot);
+            for update in updates {
+                publish(update);
             }
         });
     if let Err(err) = kept {
@@ -61,7 +61,7 @@ pub fn start() {
 }
 
 /// The workers started from `[day]`, and what they send.
-fn start_workers() -> Option<mpsc::Receiver<Snapshot>> {
+fn start_workers() -> Option<mpsc::Receiver<Update>> {
     let file = config_file();
     let config = match &file {
         Some(file) => hocus_day::config::read(file).unwrap_or_else(|why| {
@@ -76,10 +76,12 @@ fn start_workers() -> Option<mpsc::Receiver<Snapshot>> {
         .filter(|b| !b.is_empty());
     let env = Env {
         clock: Clock::new(crate::notifications::wall),
-        secrets: Secrets::new(bus, state.as_ref().map(|s| s.join("accounts"))),
+        secrets: Secrets::new(bus.clone(), state.as_ref().map(|s| s.join("accounts"))),
         state_dir: state,
         cache_dir: cache_dir(),
         config_dir: file.as_deref().and_then(|f| f.parent()).map(PathBuf::from),
+        session_bus: bus,
+        google_api: google::api(std::env::var(google::API_ENV).ok().as_deref()),
     };
     let (out, snapshots) = mpsc::channel();
     let (workers, day) = Workers::start(&config, &env, &out);
@@ -133,14 +135,14 @@ pub fn snapshot() -> Arc<Day> {
     })
 }
 
-/// A worker's snapshot: kept, said, and shown if the day changed.
-fn publish(snapshot: Snapshot) {
+/// What a worker sent: kept, said, and shown if the day changed.
+fn publish(update: Update) {
     let Some(service) = SERVICE.get() else {
         return;
     };
     {
         let mut day = service.day.lock().unwrap_or_else(PoisonError::into_inner);
-        if !Arc::make_mut(&mut day).update(snapshot) {
+        if !Arc::make_mut(&mut day).apply(update) {
             return;
         }
     }

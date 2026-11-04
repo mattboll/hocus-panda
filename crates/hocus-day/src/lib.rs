@@ -9,8 +9,12 @@
 
 pub mod config;
 pub mod fixture;
+pub mod goa;
+pub mod google;
+mod http;
 pub mod local;
 pub mod model;
+pub mod planka;
 pub mod secrets;
 pub mod snapshot;
 pub mod source;
@@ -19,7 +23,7 @@ mod worker;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, PoisonError, mpsc},
     time::Duration,
 };
 
@@ -27,7 +31,9 @@ use jiff::Zoned;
 
 pub use crate::{
     config::Config,
-    snapshot::{Account, Change, ChangeId, Day, Holds, Kind, Pending, Shown, Snapshot, State},
+    snapshot::{
+        Account, Change, ChangeId, Day, Holds, Kind, Login, Pending, Shown, Snapshot, State, Update,
+    },
     source::{CalendarSource, KanbanSource, SourceError},
 };
 use crate::{
@@ -92,12 +98,77 @@ pub struct Env {
     pub cache_dir: Option<PathBuf>,
     /// The configuration's folder: a fixture's relative file is there.
     pub config_dir: Option<PathBuf>,
+    /// The session bus the compositor names (`--session-bus`; "session":
+    /// the session's own), where Online Accounts is; `None`: no Google
+    /// calendars.
+    pub session_bus: Option<String>,
+    /// The Calendar API's address: [`google::API`], or a fake's on this
+    /// machine for tests ([`google::API_ENV`]).
+    pub google_api: String,
+}
+
+/// Starts and stops workers, from the thread that keeps the day or
+/// Online Accounts' (accounts that come and go).
+#[derive(Debug, Clone)]
+pub(crate) struct Launcher {
+    handles: Arc<Mutex<Vec<Handle>>>,
+    clock: Clock,
+    cache_dir: Option<PathBuf>,
+    out: mpsc::Sender<Update>,
+}
+
+impl Launcher {
+    fn handles(&self) -> std::sync::MutexGuard<'_, Vec<Handle>> {
+        self.handles.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `plan`'s worker started, with its kind's schedule and cache:
+    /// whether it runs.
+    pub(crate) fn launch(&self, mut plan: Plan) -> bool {
+        if plan.account.kind.cached() {
+            plan.cache = self
+                .cache_dir
+                .as_ref()
+                .map(|dir| dir.join(format!("{}.json", plan.account.id)));
+        }
+        plan.every = plan.account.kind.every();
+        match worker::spawn(plan, self.clock.clone(), self.out.clone()) {
+            Some(handle) => {
+                self.handles().push(handle);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `account`'s worker stopped and the account said gone; its cache
+    /// forgotten if `forget`.
+    pub(crate) fn stop(&self, account: &AccountId, forget: bool) {
+        let stopped: Vec<Handle> = {
+            let mut handles = self.handles();
+            let (stopped, kept) = std::mem::take(&mut *handles)
+                .into_iter()
+                .partition(|h| h.account == *account);
+            *handles = kept;
+            stopped
+        };
+        for handle in stopped {
+            handle.stop(&self.out, forget);
+        }
+    }
+
+    /// `account` read again now.
+    pub(crate) fn refresh(&self, account: &AccountId) {
+        for handle in self.handles().iter().filter(|h| h.account == *account) {
+            handle.send(Command::Refresh);
+        }
+    }
 }
 
 /// The running workers, one per account.
 #[derive(Debug)]
 pub struct Workers {
-    handles: Vec<Handle>,
+    launcher: Launcher,
     /// The bar's tasks' account ([`Day::tasks`]).
     tasks: Option<AccountId>,
     next: u64,
@@ -105,14 +176,25 @@ pub struct Workers {
 
 impl Workers {
     /// Starts a worker for each account of `config`, and one for the local
-    /// list, each sending its snapshots to `out`; the day as it is before
+    /// list, each sending what it reads to `out`; the day as it is before
     /// they say anything (each account loading, or failed when it cannot
-    /// be read at all). Only the first `[[day.tasks]]` is used.
-    pub fn start(config: &Config, env: &Env, out: &mpsc::Sender<Snapshot>) -> (Self, Day) {
+    /// be read at all). Only the first `[[day.tasks]]` is used. Google
+    /// accounts come from Online Accounts as it lists them, later, each
+    /// with its worker ([`goa`]).
+    pub fn start(config: &Config, env: &Env, out: &mpsc::Sender<Update>) -> (Self, Day) {
         let base = env.config_dir.as_deref();
         let mut taken = vec![config::local_account().id];
         let mut plans: Vec<Result<Plan, Box<Snapshot>>> = Vec::new();
+        let google: Vec<config::CalendarEntry> = config
+            .calendars
+            .iter()
+            .filter(|e| e.kind == config::CalendarKind::Google)
+            .cloned()
+            .collect();
         for entry in &config.calendars {
+            if entry.kind == config::CalendarKind::Google {
+                continue;
+            }
             let account = entry.account(base, &mut taken);
             plans.push(match entry.kind {
                 config::CalendarKind::Fixture => {
@@ -128,7 +210,7 @@ impl Workers {
                         },
                     )
                 }
-                config::CalendarKind::Google => Err(not_yet(account)),
+                config::CalendarKind::Google => continue,
             });
         }
         for (i, entry) in config.tasks.iter().enumerate() {
@@ -150,7 +232,7 @@ impl Workers {
                         },
                     )
                 }
-                config::TaskKind::Planka => Err(not_yet(account)),
+                config::TaskKind::Planka => planka_plan(account, entry, env),
             });
         }
         let local = env.state_dir.as_ref().map(|dir| dir.join("tasks.json"));
@@ -168,31 +250,42 @@ impl Workers {
             cache: None,
             watch: None,
         }));
-        let mut handles = Vec::new();
+        let launcher = Launcher {
+            handles: Arc::default(),
+            clock: env.clock.clone(),
+            cache_dir: env.cache_dir.clone(),
+            out: out.clone(),
+        };
         let mut accounts = Vec::new();
         for plan in plans {
             match plan {
-                Ok(mut plan) => {
-                    if plan.account.kind.cached() {
-                        plan.cache = env
-                            .cache_dir
-                            .as_ref()
-                            .map(|dir| dir.join(format!("{}.json", plan.account.id)));
-                    }
-                    plan.every = plan.account.kind.every();
+                Ok(plan) => {
                     accounts.push(Snapshot::loading(plan.account.clone()));
-                    if let Some(handle) = worker::spawn(plan, env.clock.clone(), out.clone()) {
-                        handles.push(handle);
-                    }
+                    launcher.launch(plan);
                 }
                 Err(failed) => accounts.push(*failed),
+            }
+        }
+        if !google.is_empty() {
+            match &env.session_bus {
+                Some(bus) => goa::watch(
+                    goa::Google {
+                        entries: google,
+                        bus: bus.clone(),
+                        api: env.google_api.clone(),
+                    },
+                    launcher.clone(),
+                ),
+                None => {
+                    tracing::info!("no session bus, so no Online Accounts: no Google calendars")
+                }
             }
         }
         let day = Day::new(accounts);
         let tasks = day.tasks().map(|s| s.account.id.clone());
         (
             Self {
-                handles,
+                launcher,
                 tasks,
                 next: 0,
             },
@@ -204,7 +297,12 @@ impl Workers {
     /// `None` when that account has no worker.
     pub fn change(&mut self, change: Change) -> Option<ChangeId> {
         let account = self.tasks.as_ref()?;
-        let handle = self.handles.iter().find(|h| h.account == *account)?;
+        let handle = self
+            .launcher
+            .handles()
+            .iter()
+            .find(|h| h.account == *account)?
+            .clone();
         self.next += 1;
         let id = ChangeId(self.next);
         handle.send(Command::Change(id, change)).then_some(id)
@@ -212,7 +310,7 @@ impl Workers {
 
     /// Every account read again now (on request, on resume).
     pub fn refresh(&self) {
-        for handle in &self.handles {
+        for handle in self.launcher.handles().iter() {
             handle.send(Command::Refresh);
         }
     }
@@ -220,7 +318,8 @@ impl Workers {
     /// Waits, up to `within` for each, until what was asked of the workers
     /// is done (the local list written): before the shell ends.
     pub fn flush(&self, within: Duration) {
-        for handle in &self.handles {
+        let handles = self.launcher.handles().clone();
+        for handle in &handles {
             if !handle.flush(within) {
                 tracing::info!(account = %handle.account, "an account of the day did not finish in time");
             }
@@ -228,12 +327,28 @@ impl Workers {
     }
 }
 
-fn not_yet(account: Account) -> Box<Snapshot> {
-    let kind = account.kind.name();
-    Box::new(Snapshot::failed(
+/// A Planka board's worker: its server and board from the entry, its token
+/// from the secrets when it first reads.
+fn planka_plan(
+    account: Account,
+    entry: &config::TaskEntry,
+    env: &Env,
+) -> Result<Plan, Box<Snapshot>> {
+    let (server, board) = match planka::address(&entry.address, &entry.board) {
+        Ok(found) => found,
+        Err(error) => return Err(Box::new(Snapshot::failed(account, error))),
+    };
+    let (id, secrets, names) = (account.id.clone(), env.secrets.clone(), entry.columns());
+    Ok(Plan {
         account,
-        SourceError::Invalid(format!("{kind} accounts are not supported yet")),
-    ))
+        make: Box::new(move || Source::Tasks {
+            source: Box::new(planka::Planka::new(server, board, id, secrets)),
+            names,
+        }),
+        every: None,
+        cache: None,
+        watch: None,
+    })
 }
 
 /// A fixture's worker, its source made by `make` from its file.
@@ -295,18 +410,20 @@ mod tests {
             state_dir: Some(dir.join("state")),
             cache_dir: Some(dir.join("cache")),
             config_dir: Some(dir.to_path_buf()),
+            session_bus: None,
+            google_api: google::API.to_owned(),
         }
     }
 
     /// Snapshots until `ok` says the day is as expected.
     fn until(
         day: &mut Day,
-        snapshots: &mpsc::Receiver<Snapshot>,
+        updates: &mpsc::Receiver<Update>,
         ok: impl Fn(&Day) -> bool,
     ) -> anyhow::Result<()> {
         while !ok(day) {
-            let snapshot = snapshots.recv_timeout(Duration::from_secs(10))?;
-            day.update(snapshot);
+            let update = updates.recv_timeout(Duration::from_secs(10))?;
+            day.apply(update);
         }
         Ok(())
     }

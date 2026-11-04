@@ -9,9 +9,13 @@
 //! 4 November 2026, 14:00 UTC); the local list survives a restart of the
 //! shell; changing the fixture's file shows the change; at rest, nothing
 //! wakes, neither the workers nor the shell's surfaces, a change of the
-//! day included.
+//! day included. And a Google account (#567): Online Accounts of the
+//! test's own on the bus the compositor names, a Calendar API of its own
+//! on 127.0.0.1 (`HOCUS_TEST_GOOGLE_API`).
 
 mod common;
+#[path = "../../hocus-day/tests/fakes/mod.rs"]
+mod fakes;
 
 use std::{
     path::{Path, PathBuf},
@@ -23,8 +27,9 @@ use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
 use hocus_link::{DayAsk, ToShell};
 
 struct Bed {
-    _dir: tempfile::TempDir,
+    // The compositor (its shell) before the bus it is given.
     hp: Headless,
+    _dir: tempfile::TempDir,
     log: PathBuf,
     /// The shell's process id, as its script writes it.
     pid: PathBuf,
@@ -92,8 +97,23 @@ fn ready() -> Option<PathBuf> {
 /// configuration `config` (its `[day]`) and, beside it, `day.toml`
 /// holding `fixture`.
 fn start(shell: &Path, config: &str, fixture: &str) -> anyhow::Result<Bed> {
+    start_in(tempfile::tempdir()?, shell, config, fixture, None)
+}
+
+/// A session bus and the Calendar API's address, for the shell.
+struct Google<'a> {
+    bus: &'a str,
+    api: &'a str,
+}
+
+fn start_in(
+    dir: tempfile::TempDir,
+    shell: &Path,
+    config: &str,
+    fixture: &str,
+    google: Option<Google<'_>>,
+) -> anyhow::Result<Bed> {
     use std::os::unix::fs::PermissionsExt;
-    let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
     let state = dir.path().join("state");
     let settings_dir = dir.path().join("config");
@@ -115,8 +135,12 @@ fn start(shell: &Path, config: &str, fixture: &str) -> anyhow::Result<Bed> {
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
              HOME='{home}' XDG_CONFIG_HOME='{home}/.config' XDG_CACHE_HOME='{home}/.cache' \
              XDG_STATE_HOME='{state}' TZ=UTC HOCUS_CLOCK_AT='2026-11-04T14:00:00' \
-             RUST_LOG=warn,hocuspanda_shell=debug,hocus_day=trace\necho $$ > '{pid}'\n\
+             RUST_LOG=warn,hocuspanda_shell=debug,hocus_day=trace {api}\necho $$ > '{pid}'\n\
              exec '{shell}' \"$@\" 2>>'{log}'\n",
+            api = google
+                .as_ref()
+                .map(|g| format!("HOCUS_TEST_GOOGLE_API='{}'", g.api))
+                .unwrap_or_default(),
             home = home.display(),
             state = state.display(),
             pid = pid.display(),
@@ -129,7 +153,7 @@ fn start(shell: &Path, config: &str, fixture: &str) -> anyhow::Result<Bed> {
         file: Some(file),
         ..Config::default()
     };
-    let mut hp = Headless::start_with_shell(
+    let mut hp = Headless::start_on_bus(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],
             renderer: RendererChoice::Pixman,
@@ -137,6 +161,7 @@ fn start(shell: &Path, config: &str, fixture: &str) -> anyhow::Result<Bed> {
         },
         settings,
         Some(script),
+        google.map(|g| g.bus.to_owned()),
     )?;
     let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| hp.bar_commits() > 0)?;
     anyhow::ensure!(drawn, "no bar");
@@ -288,6 +313,12 @@ fn the_local_list_survives_a_restart_of_the_shell() -> anyhow::Result<()> {
     assert!(!line.contains("Acheter du pain"), "{line}");
     let again = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
     assert_ne!(again, pid);
+    // The new shell's day may be read before it is linked to the
+    // compositor, which drops what it tells no shell: wait for the link.
+    let linked = bed
+        .hp
+        .dispatch_until(common::WAIT, |hp| hp.shell_connected())?;
+    anyhow::ensure!(linked, "the shell started again never linked");
     // Ticked before the restart, it is in the done column still: unticked,
     // it comes back (at the top: where it was went with the shell).
     let mark = bed.mark();
@@ -364,5 +395,64 @@ fn at_rest_nothing_wakes_and_a_change_of_the_day_draws_nothing() -> anyhow::Resu
     let mark = bed.mark();
     common::wait(&mut bed.hp, Duration::from_secs(2))?;
     assert!(bed.lines_since(mark, "the day").is_empty(), "{}", bed.log());
+    Ok(())
+}
+
+#[test]
+fn a_google_account_of_online_accounts_reaches_the_shell() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let dir = tempfile::tempdir()?;
+    // Dropped after the compositor (declared before it).
+    let bus = fakes::PrivateBus::start(dir.path())?;
+    let goa = fakes::FakeGoa::start(&bus.address)?;
+    goa.add("account_1", "google", "alex@example.org")?;
+    let api = fakes::FakeApi::start()?;
+    api.with(|api| {
+        let mut work = fakes::calendar(
+            "alex@example.org",
+            "alex@example.org",
+            "#6CC287",
+            "owner",
+            true,
+        );
+        work["summaryOverride"] = serde_json::json!("Travail");
+        api.calendars = vec![work];
+        api.events.insert(
+            "alex@example.org".to_owned(),
+            (
+                vec![
+                    fakes::event("e1", "Point produit", "14:25", "14:55"),
+                    fakes::event("e2", "Revue de sprint", "16:00", "17:00"),
+                ],
+                "s1".to_owned(),
+            ),
+        );
+    });
+    let mut bed = start_in(
+        dir,
+        &shell,
+        "[[day.calendars]]\nkind = \"google\"\n",
+        "",
+        Some(Google {
+            bus: &bus.address,
+            api: &api.address,
+        }),
+    )?;
+    bed.day_since(
+        0,
+        &[
+            "google-calendars-alex@example.org fresh",
+            "today=2=[14:25 «Point produit» (Travail); 16:00 «Revue de sprint» (Travail)]",
+        ],
+        &[],
+    )?;
+    // Asked with Online Accounts' token, never another address.
+    let asked = api.asked();
+    assert!(
+        !asked.is_empty() && asked.iter().all(|a| a.token == "tok-1"),
+        "{asked:?}"
+    );
     Ok(())
 }

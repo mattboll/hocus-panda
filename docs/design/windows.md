@@ -81,8 +81,10 @@ open on), agents' badges on windows (slice 3).
 
 ## 6. Moving, and the wobbly windows
 
-- Moving: drag a client-side header, or `Super`+drag anywhere in the
-  window, or the grip (section 7).
+- Moving: drag a client-side header, or `Alt`+drag anywhere in the
+  window, or the grip (section 7). `Alt`+drag took the place of
+  `Super`+drag with issue #564, `Super`+drag drawing on the screen since
+  ([ink.md](ink.md)); nested too, `Alt`+drag moves.
 - While a window moves, it **wobbles**: a soft spring mesh (4×4 control
   points) where the grabbed point follows the pointer exactly and the far
   side lags, then settles in about 400 ms after the pointer stops.
@@ -454,8 +456,11 @@ and do not wobble; desktops cross-fade) and `high-contrast` (the focused
 rim 2 px wide), both off by default. `[desktops] count` is the number of
 desktops on each screen (4).
 
-Not configurable yet: `Super`+drag moves a window, `Super`+right-drag
-resizes it; `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
+Not configurable yet: `Alt`+drag moves a window, `Super`+right-drag
+resizes it (`Alt+Super` nested); `Super`+drag draws on the screen,
+`Super`+`Shift`+drag draws an arrow and `Super`+`Alt` held shows the
+laser (`Alt+Super` and `Alt+Super+Shift` drag nested; [ink.md](ink.md));
+`Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
 they are built.
 
 ## 14. Session
@@ -501,7 +506,7 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 
 1. opens Firefox, kitty, Slack and foot: each opens in place, animated,
    focused;
-2. moves them with the header, `Super`+drag and the grip: they wobble, stay
+2. moves them with the header, `Alt`+drag and the grip: they wobble, stay
    opaque, settle;
 3. snaps halves, quarters and maximise by dragging and with the keys, and
    resizes one window of a snapped pair by its shared edge, and both with

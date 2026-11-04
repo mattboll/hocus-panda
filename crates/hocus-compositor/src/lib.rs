@@ -25,6 +25,7 @@ mod grabs;
 pub mod halo;
 mod handlers;
 mod harness;
+mod ink;
 mod input;
 mod launcher;
 mod layouts;

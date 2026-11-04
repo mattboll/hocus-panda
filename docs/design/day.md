@@ -11,9 +11,10 @@ What the bar draws of it is each view's own spec.
 ```
 config.toml [day] ──► hocus_day::Workers::start ──► one worker thread per account
                                                       │  (its source: fixture, local list,
-                                                      │   later Google, Planka)
+                                                      │   Planka, Google)
                                                       ▼
-                          mpsc::Sender<Snapshot>  (owned, only when it changed)
+                          mpsc::Sender<Update>  (owned snapshots, only when they changed;
+                                                 an account gone)
                                                       │
               shell: day thread ──► Day (Arc, behind a mutex) ──► views: day::snapshot()
                                      │ changed?
@@ -22,8 +23,11 @@ config.toml [day] ──► hocus_day::Workers::start ──► one worker threa
 ```
 
 - **`hocus-day`** (no smithay, no iced): the model, the two adapter traits,
-  the fixture and the local list, the workers, the configuration's
+  the fixture, the local list and Planka, the workers, the configuration's
   `[day]`, and the accounts' secrets.
+- **Online Accounts' thread** (`day: online accounts`, [Google](#google-calendar)):
+  starts and stops the Google accounts' workers as GNOME Online Accounts
+  lists them.
 - **The shell's `day` module** (`crates/hocus-shell/src/day`): starts the
   workers as the shell starts, from the configuration file the compositor
   read (`HOCUS_CONFIG`, set by the compositor; empty: none), and keeps the
@@ -74,6 +78,7 @@ pub trait KanbanSource: Send {
     fn cards(&mut self, column: &ColumnId) -> Result<Vec<Task>>;  // in the column's order
     fn create(&mut self, column: &ColumnId, title: &str) -> Result<Task>;  // at its top
     fn move_card(&mut self, card: &TaskId, place: &Place) -> Result<()>;   // to a top, or back
+    fn login(&mut self) -> Option<Login> { None }  // how its server signs in, once it said
 }
 ```
 
@@ -89,6 +94,10 @@ pub trait KanbanSource: Send {
   else TODO, else the first; the done column, as set, else DONE, else the
   last; `+` adds to the add column as set, else the tasks'. By name,
   case-insensitively; a name set that no column has is `Invalid`.
+- `Login` (`Password`, `PasswordOrSso`, `SsoOnly`): how a server lets its
+  users sign in, kept in the snapshot (`Snapshot::login`) for Day.1's
+  form, which shows the user name and password fields unless SSO is
+  enforced.
 
 ### Built in this ticket
 
@@ -100,6 +109,54 @@ pub trait KanbanSource: Send {
   It is always there: the bar's tasks until a board is set.
 - **The fixture** (`fixture::FixtureCalendars`, `fixture::FixtureTasks`):
   a day from a file, below.
+
+## Planka (`hocus_day::planka`, #566)
+
+A Planka board as a `KanbanSource`, through Planka's REST API, with
+`ureq` (blocking, rustls on ring, the system's certificates) on the
+account's worker; read every 2 min, on resume, and at once after a
+change, as any account.
+
+| What | How |
+|---|---|
+| The board | `GET /api/boards/{id}`: its `included` `lists` (the `active` and `closed` ones are its columns, by `position`; Planka 2's `archive` and `trash` have no name and are not) and `cards` (by `position`; `dueDate` is the task's due date) |
+| Add | `POST /api/lists/{listId}/cards` `{type, position, name}`: the board's `defaultCardType` (Planka 2 wants one), at half the first card's position (65536 in an empty column; Planka makes room itself when two meet) |
+| Tick, untick | `PATCH /api/cards/{id}` `{listId, position}`: the top of the done column; back to its column at the position it had |
+| The token | `GET /api/users/me` with it, as it is read |
+| How it signs in | `GET /api/bootstrap`'s `oidc` (Planka 2), else `GET /api/config`'s (Planka 1), once: none `Password`, `isEnforced: false` `PasswordOrSso`, `true` `SsoOnly` |
+
+- **The address**: `address = "https://host/boards/ID"` gives the server
+  and the board (`board` may hold it instead); else `address` is the
+  server (and its path, when Planka is served under one) and `board` the
+  board's id. The token goes over `https` only, but to this computer
+  (`http://127.0.0.1`, `localhost`, for tests).
+- **Sign-in**: a token pasted from the server (#425's amendment: the
+  server may sign in through SSO only, whose redirect a desktop program
+  cannot complete), sent as `Authorization: Bearer`. Planka 2's web
+  sign-in pairs its sessions with an `httpOnlyToken` cookie, without
+  which it refuses the token: the token kept is then the browser's
+  cookies for the server, `accessToken=…; httpOnlyToken=…` (or the
+  `Cookie:` line of a request), each sent as Planka wants it. The token
+  is read from the secrets when first needed, and again after the server
+  refused it, so that a token pasted meanwhile is taken at the next read.
+- **Errors**: `401` is `SignIn` ("Jeton refusé ou expiré : colle un
+  nouveau jeton.", Day.1); no token kept is `SignIn` too. A `404` on the
+  board or a card is `Gone` (Planka says the same of a board not shared
+  with the user), on the add column `Refused`; `403` `Refused`; no answer
+  or a `5xx` `Offline`; a redirect (a sign-in page in front of the API)
+  or an answer that is not Planka's JSON `Invalid`.
+- **Until Day.1's form**: `hocus day planka-token [ACCOUNT]` reads the
+  token on standard input (one line from a terminal), checks it with
+  `GET /api/users/me` (refused: nothing kept; no answer: kept unchecked),
+  and keeps it through `hocus_day::secrets`, where the worker reads it:
+  the session's keyring (`--bus`, default the session's; `none`: a
+  file), else `$XDG_STATE_HOME/hocuspanda/accounts/<id>`. The account is
+  the configuration's Planka board by default
+  (`Config::tasks_account`, the id the workers give it).
+
+```sh
+wl-paste | hocus day planka-token     # or: hocus day planka-token < token.txt
+```
 
 ## The fixture
 
@@ -167,7 +224,10 @@ One thread per account (`day: <account id>`), never the shell's loop.
   `Fresh { fetched }`, `Failed { error, fetched }`, the times on the wall
   clock, for the user to read), `calendars`, `events` (the window's, of
   the shown calendars, in order), `board`, `tasks` (the tasks' column's
-  cards, in order), `pending` (the changes not carried out yet).
+  cards, in order), `pending` (the changes not carried out yet). As
+  `Update::Snapshot`; `Update::Gone` when its account stopped (Google's),
+  and nothing of it after. `Day::apply` takes either; an account that
+  comes later goes before the local list.
 - **Calendars**: listed whole once a day (the window moves), else synced
   from each calendar's token; the configuration's `shown` and `colors`
   apply over what the account says.
@@ -260,13 +320,80 @@ file = "day.toml"               # fixture
 
 Only the first `[[day.tasks]]` is used (the bar's tasks are one board's).
 An account's id is made from its kind, what it holds and its name
-(`fixture-calendars-day`, `planka-tasks-planka.example.org-1234`), unique;
+(`fixture-calendars-day`, `planka-tasks-planka.example.org-1234`: a
+board's from its server's host and its id), unique;
 `local` is the local list's. Its cache and its secret are named by it.
 
-Google calendars come through GNOME Online Accounts (#425's amendment):
-its access token from `OAuth2Based.GetAccessToken`, nothing kept by us.
-Until their adapters land, a `google` or `planka` account shows as
-`Failed (invalid: … not supported yet)`, and no worker runs for it.
+Google calendars come through GNOME Online Accounts (#425's amendment,
+[below](#google-calendar)): `account` names one by its e-mail; without
+it, every Google account of Online Accounts with its calendar on.
+
+## Google Calendar
+
+Built in #567 (`hocus_day::goa`, `hocus_day::google`). No OAuth client of
+ours, no refresh token, no secret kept: the accounts, and their tokens,
+are GNOME Online Accounts'.
+
+- **The bus**: the session bus the compositor names (`--session-bus`, the
+  session's own on a virtual terminal; `Env::session_bus`), never another.
+  Without one there is no Google source, and that is logged.
+- **The accounts**: `org.gnome.OnlineAccounts`, its object manager
+  `/org/gnome/OnlineAccounts` (`GetManagedObjects`). An object with
+  `org.gnome.OnlineAccounts.Account` (`ProviderType` `google`,
+  `CalendarDisabled` false) and `…OAuth2Based` is a Google account. The
+  first `[[day.calendars]] kind = "google"` whose `account` is its
+  `Identity` or `PresentationIdentity` (case-insensitively) takes it, else
+  the first without `account`; its `shown` and `colors` apply. Its id is
+  `google-calendars-<identity>`, its name the e-mail.
+- **Coming and going**: a thread of its own (`day: online accounts`, a
+  runtime of its own) lists them as it starts, then again each time Online
+  Accounts says something (`InterfacesAdded`, `InterfacesRemoved`,
+  `PropertiesChanged` under its path, or its name changing hands); it
+  sleeps meanwhile. An account that appears (or whose calendar is switched
+  on) starts its worker; one removed (or switched off) stops it: the day
+  is told (`Update::Gone`, nothing of its worker after it, under the
+  worker's lock), the worker ends once its call is done, and its cache is
+  removed. One signed in again (`AttentionNeeded` back to false) is read
+  again at once. Online Accounts not answering leaves the workers as they
+  were. An account the configuration names that Online Accounts does not
+  have is logged.
+- **The token**: `OAuth2Based.GetAccessToken` (a connection of its own,
+  30 s at most), kept until a minute before its `expires_in`, asked for
+  again then and once on a `401`. Online Accounts answering with an error
+  (the account needs signing in again) is `SourceError::SignIn`, shown as
+  the account's error, its last events kept; not answering is `Offline`.
+- **The API**: Google Calendar API v3 over HTTPS, through the client the
+  network's adapters share (`hocus_day::http`: `ureq`, blocking, on the
+  worker; rustls with ring, the certificates the system trusts; redirects
+  not followed; 30 s per call), every page read (`pageToken`).
+  - `users/me/calendarList`: a calendar's name is its `summaryOverride`,
+    else its `summary`; its colour `backgroundColor`; shown as `selected`
+    says; read-only unless its `accessRole` is `owner` or `writer`.
+    Deleted ones are left out.
+  - `calendars/<id>/events`, `singleEvents=true` (occurrences expanded by
+    Google, exceptions honoured), `timeMin`/`timeMax` the window: the
+    shown calendars only. Its last page's `nextSyncToken` is the
+    calendar's; the next read syncs from it (`syncToken`), a `410` lists
+    again.
+  - `401`: the token asked for again, once; then `SignIn`. `429` and `5xx`,
+    or no answer: `Offline`. Others: `Refused`.
+- **An event**: `summary`; `start`/`end` (`dateTime`, or `date`, the end
+  date the day after the last); `status` (`confirmed`, `tentative`,
+  `cancelled`); the user's answer from `attendees[self]`'s `responseStatus`
+  (`accepted`, `declined`; else, or not invited, unanswered);
+  `transparency` `transparent` is free; `location`; the video from
+  `hangoutLink`, else `conferenceData`'s `video` entry point, else the
+  first meeting address in its place or description
+  (`model::meeting_address`); `htmlLink`; `description`; the alarms from
+  `reminders.overrides`, else the calendar's `defaultReminders`, the
+  `popup` ones only (an e-mail is Google's to send).
+- **Deleted events**: Google gives a deleted event as `cancelled`; one
+  that comes with its times stays, marked cancelled (the bar leaves it
+  out), one that comes as its id alone is removed.
+  Working locations (`eventType` `workingLocation`) are left out.
+- **Tests only**: `HOCUS_TEST_GOOGLE_API` sets the API's address, taken
+  only on this machine (`http://127.0.0.1:…`, `[::1]`, `localhost`), so
+  that a token never leaves for another host. The shell reads it.
 
 ## Secrets (`hocus_day::secrets`)
 
@@ -284,8 +411,9 @@ never the loop. `Token`'s `Debug` never shows it.
 ## For the next tickets
 
 - **An adapter** implements `CalendarSource` or `KanbanSource` in a module
-  of `hocus-day`, and replaces `not_yet` for its kind in
-  `Workers::start`: the worker, its schedule, its cache, its queue and its
+  of `hocus-day`, and makes its `Plan` for its kind in `Workers::start`
+  (or, for accounts that come and go, starts it through the `Launcher`,
+  as Online Accounts' thread does): the worker, its schedule, its cache, its queue and its
   retries come with it. Tested against a fake server, never the network.
 - **A view** reads `day::snapshot()`, wakes its surface from
   `day::on_change`, and sends `day::change`; screenshots and tests feed it
@@ -300,8 +428,35 @@ never the loop. `Token`'s `Debug` never shows it.
   `tasks_are_in_their_columns_order`), the fixture's relative times
   (`times_are_relative_to_the_clock`, `times_follow_the_clocks_zone`), the
   local list (`add_tick_untick_written_and_read_back`), the worker's queue,
-  sync and cache, the configuration, the secrets' file.
+  sync and cache, the configuration, the secrets' file; Planka's
+  addresses (`a_boards_address_gives_its_server_and_its_id`) and pasted
+  tokens (`a_token_is_pasted_alone_or_with_its_cookie_pair`).
+- `crates/hocus-day/tests/planka.rs`: the workers against a fake Planka
+  server of the test's own on 127.0.0.1, with Planka's answers' shapes,
+  never the network: the TODO cards in the column's order
+  (`the_boards_todo_cards_are_the_bars_tasks_in_the_columns_order`), a
+  tick to the top of DONE (`a_tick_moves_the_card_to_the_top_of_done`),
+  an untick back where it was (`an_untick_puts_the_card_back_where_it_was`),
+  add at the top of the add column
+  (`add_creates_a_card_at_the_top_of_the_add_column`), a `401`
+  (`a_refused_token_turns_the_account_to_sign_in_again`), offline
+  (`offline_the_change_is_kept_and_sent_when_the_server_answers`), the
+  columns by name (`columns_are_found_by_name_case_insensitively`), a
+  board not shared, SSO and the cookie pair
+  (`a_board_not_shared_is_gone_and_sso_and_the_cookie_pair_are_known`).
+- `crates/hocus-cli/tests/day.rs`: `hocus day planka-token` checks the
+  token with a fake server and keeps it where the worker reads it.
 - `crates/hocus-compositor/tests/day.rs`, the real shell, headless: a
   fixture's day reaches the shell; the local list survives a restart of
   the shell; changing the fixture's file shows the change; at rest nothing
-  wakes, and a change of the day draws nothing.
+  wakes, and a change of the day draws nothing; a Google account of
+  Online Accounts reaches the shell.
+- `crates/hocus-day/tests/google.rs`, against fakes of the test's own
+  (`tests/fakes`: a private `dbus-daemon` with an Online Accounts on it,
+  a Calendar API on 127.0.0.1): the calendars and today's events reach the
+  snapshot; a declined event, a free one and a cancelled one are marked
+  so; the video link from `hangoutLink` or `conferenceData`; an
+  incremental sync applies its changes, a `410` lists again; a `401` asks
+  Online Accounts again, and its refusal is "sign in again"; an account
+  added starts its worker, one switched off or removed stops it; without a
+  bus, no Google source.

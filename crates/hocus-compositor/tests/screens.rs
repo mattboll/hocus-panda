@@ -8,8 +8,8 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP, Shows, WAIT,
-    chord, client, open, open_with, rect_of, two_screens, wait, wait_for_rect,
+    BTN_LEFT, Command, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
+    Shows, WAIT, chord, client, open, open_with, rect_of, two_screens, wait, wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -52,7 +52,7 @@ fn a_drag_snaps_on_the_screen_under_the_pointer_and_stays_there() -> anyhow::Res
     assert!(start.right() < 1920, "on the first screen: {start:?}");
     let (x, y) = (f64::from(start.right() - 20), f64::from(start.y + 150));
     hp.pointer_move(x, y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     // The second screen's top-left corner: most of the window, and its
     // centre, still on the first.
@@ -64,7 +64,7 @@ fn a_drag_snaps_on_the_screen_under_the_pointer_and_stays_there() -> anyhow::Res
     );
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area))?;
     let id = id_of(&hp, "test.drag").expect("mapped");
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::TopLeft));

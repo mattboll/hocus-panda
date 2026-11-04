@@ -12,7 +12,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::mpsc,
+    sync::{Arc, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
 };
 
@@ -25,7 +25,7 @@ use crate::{
         Calendar, CalendarId, Colour, Event, Place, Task, TaskBoard, TaskId, sort_events,
         sort_tasks,
     },
-    snapshot::{Account, Change, ChangeId, Pending, Snapshot, State},
+    snapshot::{Account, Change, ChangeId, Pending, Snapshot, State, Update},
     source::{CalendarSource, ColumnNames, Columns, KanbanSource, Range, SourceError, SyncToken},
 };
 
@@ -61,18 +61,37 @@ pub(crate) enum Command {
     Change(ChangeId, Change),
     /// Answered once what came before is done.
     Flush(mpsc::Sender<()>),
+    /// The account is no more (removed, switched off): the worker ends,
+    /// its cache forgotten if `forget`.
+    Stop {
+        forget: bool,
+    },
 }
 
 /// A running worker.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Handle {
     pub account: crate::model::AccountId,
     commands: mpsc::Sender<Command>,
+    /// Whether its snapshots still go to the day: cleared, under its lock,
+    /// as its account is said gone, so that none comes after.
+    alive: Arc<Mutex<bool>>,
 }
 
 impl Handle {
     pub fn send(&self, command: Command) -> bool {
         self.commands.send(command).is_ok()
+    }
+
+    /// The account said gone to `out`, nothing of its worker after that,
+    /// and the worker ended once it is done with what it does.
+    pub fn stop(&self, out: &mpsc::Sender<Update>, forget: bool) {
+        {
+            let mut alive = self.alive.lock().unwrap_or_else(PoisonError::into_inner);
+            *alive = false;
+            let _ = out.send(Update::Gone(self.account.clone()));
+        }
+        self.send(Command::Stop { forget });
     }
 
     /// Waits up to `within` for what was sent before to be done.
@@ -83,9 +102,11 @@ impl Handle {
 }
 
 /// Starts `plan`'s worker, sending its snapshots to `out`.
-pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Snapshot>) -> Option<Handle> {
+pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Update>) -> Option<Handle> {
     let (commands, incoming) = mpsc::channel();
     let account = plan.account.id.clone();
+    let alive = Arc::new(Mutex::new(true));
+    let still = alive.clone();
     if let Some(file) = plan.watch.clone() {
         watch(file, commands.clone(), &account);
     }
@@ -105,6 +126,7 @@ pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Snapshot>) -> Op
                 cache,
                 clock,
                 out,
+                alive: still,
                 sent: None,
                 cached: None,
                 tokens: BTreeMap::new(),
@@ -112,15 +134,26 @@ pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Snapshot>) -> Op
                 columns: None,
                 places: HashMap::new(),
             };
-            worker.run(&incoming, every);
+            if let Some(Stopped { forget: true }) = worker.run(&incoming, every) {
+                worker.forget_cache();
+            }
         });
     match started {
-        Ok(_) => Some(Handle { account, commands }),
+        Ok(_) => Some(Handle {
+            account,
+            commands,
+            alive,
+        }),
         Err(err) => {
             tracing::warn!(%account, %err, "no thread for an account of the day");
             None
         }
     }
+}
+
+/// Why a worker ended: its account stopped.
+struct Stopped {
+    forget: bool,
 }
 
 /// What the cache keeps of an account.
@@ -147,7 +180,8 @@ struct Worker {
     snapshot: Snapshot,
     cache: Option<PathBuf>,
     clock: Clock,
-    out: mpsc::Sender<Snapshot>,
+    out: mpsc::Sender<Update>,
+    alive: Arc<Mutex<bool>>,
     sent: Option<Snapshot>,
     /// What the cache holds, so that it is written only when that changes.
     cached: Option<Data>,
@@ -163,7 +197,12 @@ impl Worker {
         self.snapshot.account.id.as_str()
     }
 
-    fn run(&mut self, incoming: &mpsc::Receiver<Command>, every: Option<Duration>) {
+    /// Until its account stops (`Some`) or the day ends (`None`).
+    fn run(
+        &mut self,
+        incoming: &mpsc::Receiver<Command>,
+        every: Option<Duration>,
+    ) -> Option<Stopped> {
         self.read_cache();
         self.send();
         self.fetch_and_retry();
@@ -175,12 +214,12 @@ impl Worker {
                     match incoming.recv_timeout(at.saturating_duration_since(Instant::now())) {
                         Ok(command) => Some(command),
                         Err(mpsc::RecvTimeoutError::Timeout) => None,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return None,
                     }
                 }
                 None => match incoming.recv() {
                     Ok(command) => Some(command),
-                    Err(_) => return,
+                    Err(_) => return None,
                 },
             };
             tracing::trace!(account = self.id(), "the day's worker wakes");
@@ -196,6 +235,7 @@ impl Worker {
                         changes = true;
                     }
                     Command::Flush(done) => flushes.push(done),
+                    Command::Stop { forget } => return Some(Stopped { forget }),
                 }
             }
             if changes {
@@ -216,13 +256,34 @@ impl Worker {
         }
     }
 
-    /// The snapshot to the shell, if it changed since the last sent.
+    /// The snapshot to the shell, if it changed since the last sent and
+    /// its account is not said gone.
     fn send(&mut self) {
         if self.sent.as_ref() == Some(&self.snapshot) {
             return;
         }
+        let alive = self.alive.lock().unwrap_or_else(PoisonError::into_inner);
+        if !*alive {
+            return;
+        }
         self.sent = Some(self.snapshot.clone());
-        let _ = self.out.send(self.snapshot.clone());
+        let _ = self
+            .out
+            .send(Update::Snapshot(Box::new(self.snapshot.clone())));
+    }
+
+    /// Its cache removed: the account is no more here.
+    fn forget_cache(&self) {
+        let Some(file) = &self.cache else {
+            return;
+        };
+        match std::fs::remove_file(file) {
+            Ok(()) => tracing::debug!(account = self.id(), "the day's cache forgotten"),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                tracing::warn!(file = %file.display(), %err, "the day's cache is not removed")
+            }
+        }
     }
 
     // --- Changes ------------------------------------------------------------------
@@ -366,6 +427,9 @@ impl Worker {
                     self.snapshot.board = Some(board);
                     self.snapshot.tasks = tasks;
                     self.columns = Some(columns);
+                    if self.snapshot.login.is_none() {
+                        self.snapshot.login = source.login();
+                    }
                 })
             }
         };
@@ -697,7 +761,18 @@ mod tests {
         }
     }
 
-    fn start(fake: Fake, every: Option<Duration>) -> (Handle, mpsc::Receiver<Snapshot>) {
+    /// The snapshots `updates` holds now.
+    fn snapshots(updates: &mpsc::Receiver<Update>) -> Vec<Snapshot> {
+        updates
+            .try_iter()
+            .filter_map(|u| match u {
+                Update::Snapshot(s) => Some(*s),
+                Update::Gone(_) => None,
+            })
+            .collect()
+    }
+
+    fn start(fake: Fake, every: Option<Duration>) -> (Handle, mpsc::Receiver<Update>) {
         let (out, snapshots) = mpsc::channel();
         let plan = Plan {
             account: Account {
@@ -719,9 +794,9 @@ mod tests {
 
     /// The last snapshot sent once the worker is done with what it was
     /// sent.
-    fn last(handle: &Handle, snapshots: &mpsc::Receiver<Snapshot>) -> Snapshot {
+    fn last(handle: &Handle, updates: &mpsc::Receiver<Update>) -> Snapshot {
         assert!(handle.flush(Duration::from_secs(10)));
-        snapshots.try_iter().last().expect("a snapshot")
+        snapshots(updates).pop().expect("a snapshot")
     }
 
     #[test]
@@ -880,7 +955,7 @@ mod tests {
         // Started again: the cache's day first, then synced from its token.
         let (handle, snapshots) = run(asked.clone());
         assert!(handle.flush(Duration::from_secs(10)));
-        let sent: Vec<Snapshot> = snapshots.try_iter().collect();
+        let sent: Vec<Snapshot> = super::tests::snapshots(&snapshots);
         assert!(matches!(sent[0].state, State::Cached { .. }), "{sent:?}");
         assert_eq!(sent[0].calendars.len(), 1);
         assert_eq!(*asked.lock().expect("lock"), ["list", "sync", "sync"]);
