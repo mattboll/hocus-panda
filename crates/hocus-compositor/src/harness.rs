@@ -299,6 +299,11 @@ impl Headless {
         self.app.state.panel.in_use_commits
     }
 
+    /// The commits of the next meeting's surfaces (Day.2), all bars'.
+    pub fn meeting_commits(&self) -> u64 {
+        self.app.state.panel.meeting_commits
+    }
+
     /// Commits of the connections' surfaces so far.
     pub fn connections_commits(&self) -> u64 {
         self.app.state.panel.connections_commits

@@ -485,6 +485,28 @@ fn placement(form: Form, switching: bool) -> ((u32, u32), (i32, i32, i32, i32)) 
     ((w, h), (EDGE + top.round() as i32, EDGE + 1, 0, 0))
 }
 
+/// The next meeting's card came or went (Day.2): the sign's surfaces move
+/// under it, or back under the clock.
+pub fn moved() {
+    let effects: Vec<Effect> = places(|places| {
+        places
+            .values()
+            .filter_map(|place| {
+                let id = place.id?;
+                let (size, margin) = placement(place.form, place.switching);
+                Some(Effect::Resize {
+                    id,
+                    size,
+                    margin: Some(margin),
+                })
+            })
+            .collect()
+    });
+    if !effects.is_empty() {
+        popover::send(effects);
+    }
+}
+
 /// Bar `bar` opened in `form`: its sign, if something is in use.
 pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
     let shown = snapshot().any();
