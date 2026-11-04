@@ -568,10 +568,12 @@ the 5.10 mockup: the indicator in the bar.
   window (which it follows), `rgba(242,84,91,0.9)`, half as opaque while
   paused; a whole screen's just inside its edges. Solid rectangles, on the
   screen only.
-- **The bar's item** (since 5.12, issue #445: the sign of what is in
-  use's screen tile, the recording's line, its pause and **Arrêter
-  l'enregistrement** in its popover; [bar.md](bar.md), as built, 5.12;
-  what follows is 5.10's item as it was): one more use of
+- **The bar's item** (since 5.12, issue #445: the recording's line, its
+  pause and **Arrêter l'enregistrement** in the popover of the sign of
+  what is in use; since 5.12b, issue #561, the item's red, its dot and
+  its time are the sign's recording tile again, without its buttons;
+  [bar.md](bar.md), as built, 5.12; what follows is 5.10's item as it
+  was): one more use of
   5.11's sign, over the sharing one (10 px between them), on the same
   surface; the agents move under both. 48 wide, 6 px in, its 10 px dot 4
   px over its time's 16 px line (Martian Mono 12 px, `#FFD9DB`); the dot

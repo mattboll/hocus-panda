@@ -875,9 +875,9 @@ impl ShellBed {
     }
 }
 
-/// The sign of what is in use (5.12), the recording its screen's tile: 6
-/// + 24 + 6, with the surface's 5 px around it.
-const SIGN: i32 = 36 + 10;
+/// The sign of what is in use (5.12), the recording its own red tile
+/// (5.12b): 6 + 42 + 6, with the surface's 5 px around it.
+const SIGN: i32 = 54 + 10;
 
 impl ShellBed {
     /// The sign's popover, opened by a click on the sign at `x` (the
@@ -994,7 +994,7 @@ fn the_signs_popover_pauses_and_stops_it_then_the_thumbnail() -> anyhow::Result<
     };
     bed.hp.pointer_move(400.0, 300.0);
     bed.record_screen()?;
-    // Under the clock, the sign of what is in use (5.12): the screen's
+    // Under the clock, the sign of what is in use (5.12): the recording's
     // tile; its popover has the recording's line and buttons.
     let item = bed.item(SIGN)?;
     let popover = bed.popover(item, item.x + 27)?;

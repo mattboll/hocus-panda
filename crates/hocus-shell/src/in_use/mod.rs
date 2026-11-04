@@ -10,9 +10,10 @@
 //!   read from `/proc` off the loop ([`cameras`]), only while a camera's
 //!   node exists and at most once a second.
 //! - **The screen**: what the compositor says is shared through the
-//!   desktop portal (`shares`, 5.11) and its recording (`recording`, 5.10),
-//!   which join the sign as its screen, their lines and their buttons in
-//!   its popover.
+//!   desktop portal (`shares`, 5.11), the sign's screen; and its recording
+//!   (`recording`, 5.10), a red tile of its own with its time (5.12b),
+//!   counted here from the compositor's lines. Their lines and their
+//!   buttons are in its popover.
 //!
 //! Each use shows from the moment it is seen and stays [`LINGER`] after it
 //! ends, so that a short one is not missed: a thread of its own wakes at
@@ -50,6 +51,9 @@ pub const LINGER: Duration = Duration::from_secs(3);
 pub enum Kind {
     Microphone,
     Camera,
+    /// The recording, its red tile with its time (5.10's item).
+    Recording,
+    /// What is shared.
     Screen,
 }
 
@@ -126,7 +130,10 @@ impl Uses {
         if !self.camera.is_empty() {
             kinds.push(Kind::Camera);
         }
-        if !self.shares.is_empty() || self.recording.is_some() {
+        if self.recording.is_some() {
+            kinds.push(Kind::Recording);
+        }
+        if !self.shares.is_empty() {
             kinds.push(Kind::Screen);
         }
         kinds
@@ -248,11 +255,11 @@ pub fn snapshot() -> Uses {
 /// The room the sign takes under the clock in `form`, the 14 px after it
 /// included: none when nothing is in use.
 pub fn room(form: Form) -> f32 {
-    let kinds = snapshot().kinds().len();
-    if kinds > 0 {
-        draw::size(form, kinds).height + draw::AFTER
-    } else {
+    let kinds = snapshot().kinds();
+    if kinds.is_empty() {
         0.0
+    } else {
+        draw::size(form, &kinds).height + draw::AFTER
     }
 }
 
@@ -299,7 +306,9 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
         if is.is_empty() && popover::with(|c| c.open_item()) == Some(Item::InUse) {
             popover::event(popover::Event::Chosen);
         }
-    } else if was.len() != is.len() {
+    } else if draw::size(Form::Mini, &was) != draw::size(Form::Mini, &is)
+        || draw::size(Form::Full, &was) != draw::size(Form::Full, &is)
+    {
         // Another size: its surfaces and the agents follow.
         effects.extend(places(|places| {
             places
@@ -472,7 +481,7 @@ fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
 /// The surface's size and its margins in `form` (both forms' places while
 /// the bar switches).
 fn placement(form: Form, switching: bool) -> ((u32, u32), (i32, i32, i32, i32)) {
-    let ((w, h), top) = draw::placement(form, switching, snapshot().kinds().len());
+    let ((w, h), top) = draw::placement(form, switching, &snapshot().kinds());
     ((w, h), (EDGE + top.round() as i32, EDGE + 1, 0, 0))
 }
 
@@ -556,8 +565,13 @@ impl Words {
             Kind::Microphone if muted => self.pick("Micro coupé", "Microphone muted"),
             Kind::Microphone => self.pick("Micro", "Microphone"),
             Kind::Camera => self.pick("Caméra", "Camera"),
-            Kind::Screen => self.pick("Écran", "Screen"),
+            Kind::Recording | Kind::Screen => self.pick("Écran", "Screen"),
         }
+    }
+
+    /// The recording's tile's time while it is paused (5.10).
+    pub fn paused(self) -> &'static str {
+        self.pick("pause", "paused")
     }
 
     /// "depuis 12 min": how long it has been used.
@@ -746,7 +760,7 @@ mod tests {
         follow(&mut uses.camera, vec![media("Zoom")], key, t0);
         follow(&mut uses.microphone, vec![media("Zoom")], key, t0);
         assert_eq!(uses.kinds(), [Kind::Microphone, Kind::Camera, Kind::Screen]);
-        let rec = Uses {
+        let mut rec = Uses {
             recording: Some(Seen {
                 what: Rec {
                     shown: RecordingShown {
@@ -761,7 +775,14 @@ mod tests {
             }),
             ..Uses::default()
         };
-        assert_eq!(rec.kinds(), [Kind::Screen]);
+        // The recording, a tile of its own; before what is shared.
+        assert_eq!(rec.kinds(), [Kind::Recording]);
+        rec.shares = uses.shares.clone();
+        rec.microphone = uses.microphone.clone();
+        assert_eq!(
+            rec.kinds(),
+            [Kind::Microphone, Kind::Recording, Kind::Screen]
+        );
     }
 
     #[test]
@@ -811,6 +832,8 @@ mod tests {
         assert_eq!(fr.stop(None), "Arrêter le partage");
         assert_eq!(en.stop(Some("Firefox")), "Stop sharing with Firefox");
         assert_eq!(fr.stop_recording(), "Arrêter l'enregistrement");
+        assert_eq!(fr.paused(), "pause");
+        assert_eq!(en.paused(), "paused");
         assert_eq!(en.stop_recording(), "Stop recording");
         assert_eq!(fr.held(4), "4 notifications en attente");
         assert_eq!(en.held(0), "Notifications wait until the end");

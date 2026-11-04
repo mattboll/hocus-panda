@@ -2627,8 +2627,9 @@ groups it with the microphone and the camera (issue #445), below.
 ### 5.12, what uses the microphone, the camera or the screen (2026-11-03)
 
 What the approved 5.12 mockup shows, variant A (issue #445): one sign
-under the clock, which 5.11's sharing sign and 5.10's recording item
-join as its screen.
+under the clock, which 5.11's sharing sign joins as its screen and
+5.10's recording item as a tile of its own (5.12b, issue #561, chosen on
+the machine).
 
 - **The sign** (`crates/hocus-shell/src/in_use/draw.rs`): a surface of
   its own on each bar (`hocus-bar-in-use`, never in a capture, a share or
@@ -2639,13 +2640,33 @@ join as its screen.
   kind in use (radius 7, 4 px apart), its 16 px icon (the mockup's
   drawings, stroked 2 px at 24) in its colour on `#RRGGBB29` of it: the
   microphone `#F5A35B` (muted: `#A9B2C2` on `rgba(255,255,255,0.06)`),
-  the camera `#6CC287`, the screen `#8FB3FF`, in that order. Stacked in
-  the mini form; in a row in the full one, 9 px in at its sides (one tile
-  is the same 48 × 36 sign in both forms). It pops in over 200 ms as it
-  appears (`ease-out`, from 0.9 of its size and transparent; a fade alone
-  with reduced motion and on the CPU, which draws no motion), then draws
-  only when what it shows changes. A tile coming or going resizes its
-  surface; the agents follow.
+  the camera `#6CC287`, then the recording's (below), then the screen
+  `#8FB3FF` for the shares only, in that order. Stacked in the mini form,
+  each centred across it; in a row in the full one, 9 px in at its sides,
+  as tall as its tallest tile, the others centred on it (one tile is the
+  same 48 × 36 sign in both forms). It pops in over 200 ms as it appears
+  (`ease-out`, from 0.9 of its size and transparent; a fade alone with
+  reduced motion and on the CPU, which draws no motion), then draws only
+  when what it shows changes. A tile coming or going resizes its surface;
+  the agents follow.
+- **The recording's tile** (5.12b, issue #561; 5.10's item, its drawing
+  in `in_use/draw.rs`): 36 × 42 (the sign's 48 less its 6 px sides; 6 px
+  in above its 10 px dot, 4 px over its time's 16 px line, 6 px under
+  it), radius 8, `rgba(242,84,91,0.16)` in a 1 px `rgba(242,84,91,0.55)`
+  ring; the dot `#F2545B`, the time in Martian Mono 12 px, `#FFD9DB`:
+  "0:12", "12:04", "1:02:03", smaller when it would not fit inside the
+  ring (12 px holds four characters). The dot beats from 1 to 0.35 of its
+  opacity and back over 1.4 s (ease-in-out); still with reduced motion
+  and on the CPU. Paused, the dot amber `#F5B44A` and still, the time
+  "pause" / "paused". Alone, the sign is 48 × 54 in the mini form, 54 ×
+  54 in the full one; with the others, the mini sign grows by 46 and the
+  full one by 40. The time is counted by the shell from the compositor's
+  `recording ID running|paused ELAPSED` lines (on the monotonic clock,
+  from when the line came); the sign draws again only for it: as its
+  second changes when still, every 50 ms while the dot beats; nothing
+  wakes while it is paused, nor once no recording runs. Ended, it says
+  the time it ended at, still, while it lingers. No buttons: they stay
+  in the popover.
 - **When** (`in_use/mod.rs`): each use shows from the moment its source
   says it, and lingers 3 s after it ends (on the monotonic clock: a
   thread of its own sleeps until the next use to go, and without one
@@ -2674,9 +2695,9 @@ join as its screen.
   WirePlumber's own processes are left out (their opens are a stream's,
   which the graph shows with its application); a program is named by its
   desktop entry (by its program's name), else by its program.
-- **The screen**: the compositor's `shares` (5.11) and `recording`
-  (5.10): no longer items of their own, their lines and buttons are in
-  the popover.
+- **The screen**: the compositor's `shares` (5.11), the screen's tile;
+  and its `recording` (5.10), the recording's tile. No longer items of
+  their own: their lines and buttons are in the popover.
 - **The popover** (`popover/in_use.rs`), 290 wide, as the bar's others: a
   150 ms hover or a click opens it, the pointer leaving closes it 300 ms
   later, `Tab` and the arrows go through its buttons, `Enter` acts, `Esc`
@@ -2706,10 +2727,19 @@ join as its screen.
   recording's pause (or go on, 36 wide, 5.10's) and **Arrêter
   l'enregistrement** / **Stop recording** (`rgba(242,84,91,0.85)`). A use
   that ended keeps its line while it lingers, without its button.
-- **Choices made here** (to confirm on the machine): the screen's tile is
-  blue for a recording too (its red stays in its popover's line and
-  stop); the recording's time is in its popover's line only (the bar no
-  longer shows it); the sign pops in as it appears, a new kind's tile
+- **Choices made here** (to confirm on the machine): 5.12 had the
+  screen's tile blue for a recording too and the recording's time in its
+  popover's line only; the maintainer chose on the machine to bring 5.10's
+  red and time back (5.12b, issue #561): the recording is its own red
+  tile with its time, the screen's blue tile for shares only. Then, 5.12b's
+  own: the recording's tile is 42 tall, 5.10's item's 6 px
+  in kept above its dot and under its time, and in the full form's row
+  the shorter tiles are centred on its height; its time shrinks to fit
+  inside its ring when longer than four characters (Martian Mono's 12 px
+  advance is 8.4 px: "12:04" is 9.7 px, "1:02:03" 6.9 px, "pause" 9.7
+  px), where 5.10's 48 px item let it overflow; without a beat (reduced
+  motion, the CPU) it draws as its second changes, not every 250 ms as
+  5.10's did; the sign pops in as it appears, a new kind's tile
   then shows at once; under a minute the line says "depuis 12 s"; a
   share's and the recording's lines come after the microphone's and the
   camera's, the recording first; a lingering use keeps its line;
@@ -2735,9 +2765,19 @@ join as its screen.
   (pause, go on, stop); at rest no commit of the sign and no reading of
   `/proc` without a camera's node, one with a node nobody opens; twenty
   opens in two seconds, a reading a second at most, none once the node is
-  gone. 5.11's and 5.10's tests go through the popover. Unit tests for
+  gone. 5.11's and 5.10's tests go through the popover. 5.12b's (issue
+  #561), recording the screen with ffmpeg: the recording's red tile (its
+  dot's pixel), 54 + 10 tall, its time "0:0N" (as the shell says it
+  reads it) moving on, the sign committed at most once a second on the
+  CPU; paused, amber and "pause"; going on, red; stopped, gone no sooner
+  than 3 s after; with a share, the red tile then the blue one (the
+  surface 82 + 10 tall); in the full form after the microphone's, in a
+  194 × 64 surface; paused, and once the recording's tile has gone with
+  a share still on, no commit of the sign. Unit tests for
   the linger and a use back, the kinds' order, the words in both
-  languages, the sizes in both forms, the pop, the colours, the graph's
+  languages, the sizes in both forms (the recording's tile's too), the
+  pop, the colours, the time and the beat, when the recording draws
+  again, the time's size, the graph's
   links, the popover's layout, the `/proc` reading's bound and a holder
   found by its program.
 - **Not built**: the camera's light as a privacy indicator of its own
