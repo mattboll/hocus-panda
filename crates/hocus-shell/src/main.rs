@@ -115,6 +115,7 @@ fn main() -> ExitCode {
     let software = renderer::choose();
     // From here, SIGTERM ends it once what it keeps is written.
     ending::start();
+    load_fonts();
     levels::start();
     network::start();
     bluetooth::start();
@@ -176,6 +177,23 @@ fn main() -> ExitCode {
             tracing::error!(%err, "the shell stopped");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The bundled fonts, in the font system that measures and draws text,
+/// before anything is measured: iced loads them only as it makes the
+/// renderer of the first surface it draws, and a text measured before (a
+/// capture's toolbar opened as the shell starts) was measured in another
+/// font, its surface too wide or too narrow for what it draws. iced loads
+/// them again later, which the font system knows they are (by address).
+fn load_fonts() {
+    match iced::advanced::graphics::text::font_system().write() {
+        Ok(mut system) => {
+            for font in clock::FONTS {
+                system.load_font(Cow::Borrowed(font));
+            }
+        }
+        Err(err) => tracing::warn!(%err, "the fonts are not loaded before the first surface"),
     }
 }
 
