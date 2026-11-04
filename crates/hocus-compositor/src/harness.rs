@@ -741,6 +741,19 @@ impl Headless {
         Ok(())
     }
 
+    /// Whether strokes show on the screens, and whether the laser does
+    /// (docs/design/ink.md).
+    pub fn ink(&self) -> (bool, bool) {
+        let ink = &self.app.state.ink;
+        (ink.shows(), ink.laser_shown())
+    }
+
+    /// When a frame is asked for after a pause, if one is: a wakeup to
+    /// come.
+    pub fn wake(&self) -> Option<Duration> {
+        self.app.state.wake
+    }
+
     /// Whether nothing moved as of the last frame drawn (`tick`'s word).
     pub fn still(&self) -> bool {
         self.app.state.still

@@ -55,7 +55,7 @@ fn dragging_to_an_edge_snaps_once_the_preview_shows() -> anyhow::Result<()> {
     let (x, y) = (f64::from(start.x + 200), f64::from(start.y + 150));
     // Across the left edge and back, quickly: nothing.
     hp.pointer_move(x, y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     hp.pointer_move(1.0, y);
     hp.pointer_move(x, y);
@@ -67,12 +67,12 @@ fn dragging_to_an_edge_snaps_once_the_preview_shows() -> anyhow::Result<()> {
     hp.pointer_move(1.0, y);
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     wait_for_rect(&mut hp, "test.drag", Zone::Left.rect(AREA))?;
     let id = hp.windows()[0].id;
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::Left));
     // A top corner: a quarter.
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.pointer_move(400.0, 500.0);
     hp.button(BTN_LEFT, true);
     // Pulled away, it floats again at its size, under the pointer.
@@ -82,7 +82,7 @@ fn dragging_to_an_edge_snaps_once_the_preview_shows() -> anyhow::Result<()> {
     hp.pointer_move(1700.0, 2.0);
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     wait_for_rect(&mut hp, "test.drag", Zone::TopRight.rect(AREA))?;
     Ok(())
 }
@@ -489,11 +489,11 @@ fn a_terminal_resized_by_its_left_edge_keeps_its_cells_and_stays_where_it_is_mov
     // the focus).
     let (cx, cy) = wider.centre();
     hp.pointer_move(cx, cy);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     hp.pointer_move(cx + 100.0, cy + 50.0);
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     let moved = Rect::new(wider.x + 100, wider.y + 50, 430, 300);
     wait_for_rect(&mut hp, "test.cells", moved)?;
     open(&mut hp, "test.other", (200, 150))?;

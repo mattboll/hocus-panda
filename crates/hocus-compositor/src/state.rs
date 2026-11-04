@@ -196,6 +196,9 @@ pub struct State {
     pub share: crate::share::Sharing,
     /// Screen recording (5.10).
     pub record: crate::record::Recording,
+    /// The strokes, the arrows and the laser drawn on the screens
+    /// (docs/design/ink.md).
+    pub ink: crate::ink::Ink,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
@@ -381,6 +384,7 @@ impl State {
             capture,
             share: crate::share::Sharing::default(),
             record: crate::record::Recording::default(),
+            ink: crate::ink::Ink::default(),
             swiping: None,
             switcher: None,
             switcher_out: None,

@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use anyhow::Context;
-use common::{BTN_LEFT, Event, KEY_LEFTMETA, Shows, WAIT, client, compositor, open};
+use common::{BTN_LEFT, Event, KEY_LEFTALT, Shows, WAIT, client, compositor, open};
 use hocus_compositor::{Headless, model::Rect};
 
 #[test]
@@ -59,24 +59,24 @@ fn a_click_focuses_and_raises_the_window_under_the_pointer() -> anyhow::Result<(
 }
 
 #[test]
-fn super_and_drag_moves_a_window() -> anyhow::Result<()> {
+fn alt_and_drag_moves_a_window() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     let start = open(&mut hp, "test.moved", (400, 300))?;
     let (x, y) = (f64::from(start.x + 200), f64::from(start.y + 150));
     hp.pointer_move(x, y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 60.0, y + 40.0);
     hp.pointer_move(x + 100.0, y + 50.0);
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     let rect = hp.windows()[0].rect;
     assert_eq!(
         rect,
         Rect::new(start.x + 100, start.y + 50, 400, 300),
         "the window follows the pointer"
     );
-    // Without Super, a drag is the application's.
+    // Without Alt, a drag is the application's.
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 300.0, y + 50.0);
     hp.button(BTN_LEFT, false);

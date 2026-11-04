@@ -1,7 +1,8 @@
 //! Input from the backends, routed to clients or kept by the compositor:
 //! keys (the virtual terminal switch, the shortcuts), the pointer (click to
-//! focus, `Super`+drag to move), scrolling and touchpad gestures, which go
-//! to the client under the pointer (pointer-gestures).
+//! focus, `Alt`+drag to move, `Super`+drag to draw on the screen),
+//! scrolling and touchpad gestures, which go to the client under the
+//! pointer (pointer-gestures).
 
 use smithay::{
     backend::input::{
@@ -54,6 +55,8 @@ enum Kept {
     Switch(SwitchKey),
     /// A key while the capture is open (5.8).
     Capture(crate::capture::Key),
+    /// `Esc` while strokes show: they go (docs/design/ink.md).
+    InkClear,
 }
 
 /// The digit of a key of the keyboard's top row, whatever the layout puts
@@ -133,6 +136,14 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let kept =
             keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
+                // Another key than a modifier with `Super`+`Alt`: a
+                // shortcut's, not the laser.
+                if state == KeyState::Pressed
+                    && !is_modifier(keysym.modified_sym())
+                    && this.ink.other_key()
+                {
+                    this.redraw = true;
+                }
                 if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key) {
                     // Alt+Tab held: its keys are its own, the modifiers
                     // go on to the application.
@@ -182,6 +193,13 @@ impl State {
                 {
                     let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
                     return FilterResult::Intercept(Kept::Vt(vt));
+                }
+                // `Esc` clears the strokes while they show, with whatever
+                // modifiers are still held from drawing; otherwise it goes
+                // to the window.
+                if sym == Keysym::Escape.raw() && this.ink.shows() {
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::InkClear);
                 }
                 // The key of the layout's first level, Latin when the keyboard
                 // has a Latin layout: a shortcut stays on its key whatever the
@@ -244,8 +262,12 @@ impl State {
                 }
             }
             Some(Kept::Capture(key)) => self.capture_key(key),
+            Some(Kept::InkClear) => self.ink_clear(),
             Some(Kept::Release) | None => {}
         }
+        // `Super`+`Alt` held: the laser.
+        let mods = keyboard.modifier_state();
+        self.ink_modifiers(&mods);
         // Alt let go: Alt+Tab goes to its selection.
         if self.switcher.is_some() {
             let mods = keyboard.modifier_state();
@@ -257,8 +279,15 @@ impl State {
     }
 
     /// Whether the modifiers held move a window under the pointer:
-    /// `Super`, or `Alt+Super` nested, where the host takes `Super`.
+    /// `Alt`, without `Super` (`Super`+drag draws, docs/design/ink.md).
     pub fn move_modifier(&self, modifiers: &ModifiersState) -> bool {
+        modifiers.alt && !modifiers.logo
+    }
+
+    /// Whether the modifiers held resize a window under the pointer with
+    /// its right button: `Super`, or `Alt+Super` nested, where the host
+    /// takes `Super`.
+    pub fn resize_modifier(&self, modifiers: &ModifiersState) -> bool {
         modifiers.logo && (!self.nested || modifiers.alt)
     }
 
@@ -335,6 +364,8 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // The laser's trail follows, over everything.
+        self.ink_pointer(location);
         // The capture open takes it, but over its toolbar (5.8).
         if self.capture_motion(location, time) {
             return;
@@ -479,9 +510,9 @@ impl State {
     }
 
     /// A pointer button by its evdev code. A press focuses the window
-    /// under the pointer and goes to it; with the move modifier, the left
-    /// button moves the window and the right one resizes it, and the client
-    /// sees nothing. A press on a window's frame resizes it, on its grip
+    /// under the pointer and goes to it; with `Alt` the left button moves
+    /// the window, with `Super` the right one resizes it, and the client
+    /// sees nothing; `Super` and the left button draw, anywhere. A press on a window's frame resizes it, on its grip
     /// moves it; a press away from an open menu closes it; a left press on
     /// a bar's edge switches its form.
     pub fn pointer_button(&mut self, button: u32, state: ButtonState, time: u32) {
@@ -505,6 +536,19 @@ impl State {
         // Alt+Tab's panel takes the click.
         if state == ButtonState::Pressed && self.switcher_click(at.x, at.y) {
             self.kept_buttons.insert(button);
+            return;
+        }
+        // `Super`+drag draws, wherever it starts: over a window, the bar
+        // or another shell surface (docs/design/ink.md).
+        if state == ButtonState::Pressed
+            && button == BTN_LEFT
+            && !pointer.is_grabbed()
+            && let Some(shape) = self
+                .seat
+                .get_keyboard()
+                .and_then(|k| self.ink_shape(&k.modifier_state()))
+        {
+            self.start_ink(shape, button, serial);
             return;
         }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
@@ -564,18 +608,17 @@ impl State {
             } else if let Some(id) = self.window_under(at) {
                 self.focus(Some(id));
                 let modifiers = self.seat.get_keyboard().map(|k| k.modifier_state());
-                if modifiers.is_some_and(|m| self.move_modifier(&m)) {
-                    if button == BTN_LEFT {
-                        self.start_move(id, button, None, serial);
-                        return;
-                    }
-                    if button == BTN_RIGHT
-                        && let Some(rect) = self.rect_of(id)
-                    {
-                        let edges = Edges::nearest_corner(rect, at.x, at.y);
-                        self.start_resize(id, edges, button, None, serial);
-                        return;
-                    }
+                if button == BTN_LEFT && modifiers.is_some_and(|m| self.move_modifier(&m)) {
+                    self.start_move(id, button, None, serial);
+                    return;
+                }
+                if button == BTN_RIGHT
+                    && modifiers.is_some_and(|m| self.resize_modifier(&m))
+                    && let Some(rect) = self.rect_of(id)
+                {
+                    let edges = Edges::nearest_corner(rect, at.x, at.y);
+                    self.start_resize(id, edges, button, None, serial);
+                    return;
                 }
             }
         }

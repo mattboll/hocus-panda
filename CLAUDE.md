@@ -103,7 +103,8 @@ virtual terminal otherwise; `--backend winit|tty|headless` forces one.
 Always with a fresh, short runtime directory next to a live session:
 
 ```sh
-# nested; Alt+Super+drag moves a window (Super+drag on a real session)
+# nested; Alt+drag moves a window, Alt+Super+drag draws on the screen
+# (Super+drag on a real session, docs/design/ink.md)
 target/debug/hocuspanda --runtime-dir "$(mktemp -d /tmp/hp-XXXX)" --spawn foot
 # notifications (docs/design/notifications.md): only on a bus of your own,
 # never the live session's; the programs it starts use it (notify-send)

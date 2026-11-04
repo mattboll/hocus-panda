@@ -16,8 +16,8 @@ mod common;
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, KEY_LEFTMETA, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord, client, open,
-    open_with, rect_of, shell_program, wait, wait_for_rect,
+    BTN_LEFT, Command, KEY_LEFTALT, KEY_LEFTMETA, KEY_UP, Shows, WAIT, WINDOW_COLOUR, chord,
+    client, open, open_with, rect_of, shell_program, wait, wait_for_rect,
 };
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, RendererChoice, halo::Meeting, model::Rect,
@@ -118,14 +118,14 @@ fn shows(hp: &mut Headless, at: (i32, i32), colour: u32, what: &str) -> anyhow::
     Ok(())
 }
 
-/// Moves `app_id`'s window with `Super`+drag, held at its left part, until
+/// Moves `app_id`'s window with `Alt`+drag, held at its left part, until
 /// its left edge is at `x`; then lets go.
 fn drag_to(hp: &mut Headless, app_id: &str, x: i32) -> anyhow::Result<Rect> {
     let start = rect_of(hp, app_id).ok_or_else(|| anyhow::anyhow!("no {app_id}"))?;
     let held = (100, start.height / 2);
     let y = f64::from(start.y + held.1);
     hp.pointer_move(f64::from(start.x + held.0), y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     let mut at = start.x;
     while at != x {
@@ -138,7 +138,7 @@ fn drag_to(hp: &mut Headless, app_id: &str, x: i32) -> anyhow::Result<Rect> {
         wait(hp, Duration::from_millis(10))?;
     }
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     let want = Rect::new(x, start.y, start.width, start.height);
     wait_for_rect(hp, app_id, want)?;
     wait(hp, Duration::from_millis(200))?;

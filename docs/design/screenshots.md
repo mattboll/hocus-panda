@@ -76,6 +76,12 @@ at once. `Alt+Print`: the focused window, at once. All three are in
 
 ## As built
 
+Drawing on the screen (issue #564, [ink.md](ink.md)): the strokes, the
+arrows and the laser are in the scene a capture (5.8) and a recording's
+frames (5.10) of a screen are drawn from, as on the screen; the capture's
+own darkening, border and toolbar, and the recorded area's frame, are
+over them and never in the picture.
+
 ### 5.8, choose then capture (2026-11-03)
 
 - **Who draws what.** The compositor owns the capture and draws all of

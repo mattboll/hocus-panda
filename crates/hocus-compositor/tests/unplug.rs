@@ -42,17 +42,17 @@ fn inside(rect: Rect, area: Rect) -> bool {
         && rect.bottom() <= area.bottom()
 }
 
-/// Drags the window under (`x`, `y`) by (`dx`, `dy`) with `Super`.
-fn super_drag(hp: &mut Headless, (x, y): (f64, f64), (dx, dy): (f64, f64)) {
+/// Drags the window under (`x`, `y`) by (`dx`, `dy`) with `Alt`.
+fn alt_drag(hp: &mut Headless, (x, y): (f64, f64), (dx, dy): (f64, f64)) {
     hp.pointer_move(x, y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     for i in 1..=10 {
         let k = f64::from(i) / 10.0;
         hp.pointer_move(x + dx * k, y + dy * k);
     }
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
 }
 
 fn centre(rect: Rect) -> (f64, f64) {
@@ -86,7 +86,7 @@ fn a_screen_unplugged_keeps_its_windows_and_gets_them_back() -> anyhow::Result<(
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_3]);
     // ... and floating on top, moved off its centre.
     let opened = open(&mut hp, "test.floating", (600, 400))?;
-    super_drag(&mut hp, centre(opened), (600.0, 300.0));
+    alt_drag(&mut hp, centre(opened), (600.0, 300.0));
     wait(&mut hp, Duration::from_millis(100))?;
     let before = hp.placements();
     let moved: Vec<&Placed> = before
@@ -132,7 +132,7 @@ fn a_screen_unplugged_keeps_its_windows_and_gets_them_back() -> anyhow::Result<(
 
     // The user moves one of them meanwhile: it stays where they put it.
     let carried = placed(&hp, "test.floating").rect;
-    super_drag(&mut hp, centre(carried), (-100.0, -60.0));
+    alt_drag(&mut hp, centre(carried), (-100.0, -60.0));
     let put = placed(&hp, "test.floating");
     assert_ne!(put.rect, carried, "the drag moved it");
 
@@ -163,7 +163,7 @@ fn a_drag_alt_tab_or_a_slide_on_a_screen_unplugged_ends_there() -> anyhow::Resul
     // showing there.
     let (x, y) = centre(opened);
     hp.pointer_move(x, y);
-    hp.key(KEY_LEFTMETA, true);
+    hp.key(KEY_LEFTALT, true);
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x - 300.0, y);
     hp.pointer_move(1925.0, y);
@@ -174,7 +174,7 @@ fn a_drag_alt_tab_or_a_slide_on_a_screen_unplugged_ends_there() -> anyhow::Resul
     assert!(first.contains(px, py), "the pointer at {px},{py}");
     // Let go: nothing more happens to it.
     hp.button(BTN_LEFT, false);
-    hp.key(KEY_LEFTMETA, false);
+    hp.key(KEY_LEFTALT, false);
     wait(&mut hp, Duration::from_millis(50))?;
     let dragged = placed(&hp, "test.dragged");
     assert_eq!(dragged.output.as_deref(), Some(FIRST));
@@ -281,7 +281,7 @@ fn a_screen_back_elsewhere_gets_its_windows_at_the_same_place_on_it() -> anyhow:
     let mut hp = two_screens()?;
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     let opened = open(&mut hp, "test.floating", (600, 400))?;
-    super_drag(&mut hp, centre(opened), (-500.0, 300.0));
+    alt_drag(&mut hp, centre(opened), (-500.0, 300.0));
     let was = placed(&hp, "test.floating");
     hp.unplug(SECOND)?;
     // Below the first screen now.

@@ -9,7 +9,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{BTN_LEFT, KEY_LEFTMETA, Shows, WAIT, client, open, wait};
+use common::{BTN_LEFT, KEY_LEFTALT, Shows, WAIT, client, open, wait};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, model::Rect};
 
 /// One pixel of a screenshot (B, G, R, A in memory), as R, G, B.
@@ -69,7 +69,7 @@ fn the_glass_shows_a_dragged_window_where_it_is() -> anyhow::Result<()> {
         let held = (width / 2, 200);
         let (y, mut x) = (start.y, start.x);
         hp.pointer_move(f64::from(x + held.0), f64::from(y + held.1));
-        hp.key(KEY_LEFTMETA, true);
+        hp.key(KEY_LEFTALT, true);
         hp.button(BTN_LEFT, true);
         let first = 40;
         while x > first {
@@ -119,7 +119,7 @@ fn the_glass_shows_a_dragged_window_where_it_is() -> anyhow::Result<()> {
             }
         }
         hp.button(BTN_LEFT, false);
-        hp.key(KEY_LEFTMETA, false);
+        hp.key(KEY_LEFTALT, false);
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
     Ok(())

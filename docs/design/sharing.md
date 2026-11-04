@@ -262,6 +262,12 @@ notifications held and **Arrêter le partage** are in that sign's popover
   portals; xdg-foreign's parent windows (a Wayland application's window,
   which the portal names by its exported handle, is not looked up).
 
+- **Drawing on the screen** (issue #564, [ink.md](ink.md)): the strokes,
+  the arrows and the laser are in a shared screen's frames as on the
+  screen (`tests/sharing.rs`,
+  `the_strokes_are_in_the_shared_screens_frames`); a window shared alone
+  is drawn without them.
+
 ### 5.11b, a portal left by a previous session (2026-11-03)
 
 Issue #538. The user's service manager outlives a graphical session

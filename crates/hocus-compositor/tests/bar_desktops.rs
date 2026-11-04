@@ -34,8 +34,8 @@ use std::{
 };
 
 use common::{
-    BTN_LEFT, ClientHandle, Command, KEY_2, KEY_ESC, KEY_H, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB,
-    KEY_UP, WAIT, chord, wait,
+    BTN_LEFT, ClientHandle, Command, KEY_2, KEY_ESC, KEY_H, KEY_LEFTALT, KEY_LEFTMETA,
+    KEY_LEFTSHIFT, KEY_TAB, KEY_UP, WAIT, chord, wait,
 };
 use fakes::Fakes;
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
@@ -435,12 +435,12 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     let drawn = bed.sketch(0, window);
     let (x, y) = centre(drawn);
     assert!(light(bed.pixel(x, y)?) > 95, "{:?}", bed.pixel(x, y)?);
-    // Dragged with Super: nothing told on the way, where it lands at the
+    // Dragged with Alt: nothing told on the way, where it lands at the
     // end.
     let commits = bed.hp.desktops_commits();
     let grab = (f64::from(window.x + 100), f64::from(window.y + 100));
     bed.hp.pointer_move(grab.0, grab.1);
-    bed.hp.key(KEY_LEFTMETA, true);
+    bed.hp.key(KEY_LEFTALT, true);
     bed.hp.button(BTN_LEFT, true);
     for step in 1..=40 {
         bed.hp.pointer_move(
@@ -452,7 +452,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     wait(&mut bed.hp, Duration::from_millis(300))?;
     assert_eq!(bed.hp.desktops_commits(), commits, "drawn while dragged");
     bed.hp.button(BTN_LEFT, false);
-    bed.hp.key(KEY_LEFTMETA, false);
+    bed.hp.key(KEY_LEFTALT, false);
     let moved = common::rect_of(&bed.hp, "test.sketched").expect("the window");
     assert!(
         moved.x > window.x + 300 && moved.y > window.y + 150,
