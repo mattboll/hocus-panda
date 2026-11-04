@@ -81,10 +81,11 @@ struct Args {
     session_bus: Option<String>,
 
     /// The system bus whose logind the session menu asks to suspend,
-    /// restart or power off: an address. Without it, only the session on
-    /// a virtual terminal asks the system's; nested or headless, the menu
-    /// has no power actions, so that the machine it runs on is never
-    /// powered off.
+    /// restart or power off, and whose logind's sleeps and UPower's power
+    /// source the session follows (locking before sleep, the idle delay on
+    /// battery): an address. Without it, only the session on a virtual
+    /// terminal uses the system's; nested or headless, there are none, so
+    /// that the machine it runs on is never powered off nor waits for it.
     #[arg(long, value_name = "ADDRESS")]
     system_bus: Option<String>,
 }

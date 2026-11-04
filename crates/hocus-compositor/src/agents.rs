@@ -319,7 +319,7 @@ impl Compositor {
                     Question::Idle => {
                         // What changed this turn, judged first.
                         self.flush_idle();
-                        self.idle_said().to_string()
+                        format!("{}{}", self.idle_said(), self.away_said())
                     }
                     Question::Lock => {
                         tracing::info!("hocus msg lock: the session locks");

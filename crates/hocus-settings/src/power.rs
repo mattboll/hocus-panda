@@ -3,14 +3,16 @@
 //! when the session locks, when the computer sleeps, on battery and on AC;
 //! the lid and the power button; the automatic power saver.
 //!
-//! The screen's delay on AC is the compositor's idle delay, `[idle] delay`
-//! (7.3, docs/design/idle.md): seconds, or `"off"`, which applies today
-//! whatever the power source. The other keys are 6.10's proposal, which
-//! nothing reads yet: `[power.battery]` and `[power.ac]` `screen-off` (the
-//! battery's only: on AC it is `[idle] delay`), `lock-after`,
-//! `suspend-after` (`"5m"`, `"1h"`, `"never"`), and `[power]` `lid`,
-//! `lid-ignored-when-docked`, `power-button`, `auto-saver`,
-//! `auto-saver-below`.
+//! The compositor reads the screen's and the lock's rows (7.2,
+//! docs/design/idle.md): the idle delay, after which the curtain comes,
+//! is `[idle] delay` on AC (seconds, or `"off"`; 5 min by default) and
+//! `[power.battery] screen-off` on battery (3 min); `[power.ac]` and
+//! `[power.battery]` `lock-after` say when the session locks once idle
+//! (`"0s"`: as the curtain ends, the default; a delay: that long after the
+//! screens went off; `"never"`). The other keys are 6.10's proposal,
+//! which nothing reads yet: `suspend-after` (`"5m"`, `"1h"`, `"never"`),
+//! and `[power]` `lid`, `lid-ignored-when-docked`, `power-button`,
+//! `auto-saver`, `auto-saver-below`.
 
 use std::sync::OnceLock;
 
@@ -86,6 +88,7 @@ pub fn settings() -> &'static [Setting] {
                 kind: Kind::Menu(vec![
                     minutes("1 min", "1 min", Some(60)),
                     minutes("2 min", "2 min", Some(120)),
+                    minutes("3 min", "3 min", Some(180)),
                     minutes("5 min", "5 min", Some(300)),
                     minutes("10 min", "10 min", Some(600)),
                     minutes("15 min", "15 min", Some(900)),
@@ -93,13 +96,18 @@ pub fn settings() -> &'static [Setting] {
                     never.clone(),
                 ]),
                 places: Places::PerSource {
+                    // The compositor's defaults (7.2): 3 min on battery,
+                    // 5 on AC.
                     battery: place(
                         &["power", "battery", "screen-off"],
                         Codec::Delay,
+                        Value::Seconds(Some(180)),
+                    ),
+                    ac: place(
+                        &["idle", "delay"],
+                        Codec::IdleSeconds,
                         Value::Seconds(Some(300)),
                     ),
-                    // Off until the lock (7.2) picks a default.
-                    ac: place(&["idle", "delay"], Codec::IdleSeconds, Value::Seconds(None)),
                 },
                 needs: None,
             },

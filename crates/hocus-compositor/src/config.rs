@@ -26,6 +26,7 @@ pub struct Config {
     pub panel: Panel,
     pub recording: Recording,
     pub idle: Idle,
+    pub power: Power,
     /// The system's keyboard (`/etc/default/keyboard`), used when
     /// `[keyboard] layouts` is empty. Not part of the file: the program
     /// reads it once at start.
@@ -112,13 +113,143 @@ fn record_format<'de, D: Deserializer<'de>>(
 }
 
 /// When the session is idle, `[idle]` (docs/design/idle.md).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Idle {
-    /// How long without input before the session is idle; `None`, `"off"`
-    /// in the file: never. Off by default until the lock (7.2) chooses one.
+    /// How long without input before the session is idle, on AC (the
+    /// curtain then comes before the lock, 7.2); `None`, `"off"` in the
+    /// file: never. On battery, `[power.battery] screen-off` says it.
     #[serde(deserialize_with = "idle_delay")]
     pub delay: Option<std::time::Duration>,
+}
+
+/// Five minutes on AC (7.2).
+pub const IDLE_ON_AC: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// Three minutes on battery (7.2).
+pub const IDLE_ON_BATTERY: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
+impl Default for Idle {
+    fn default() -> Self {
+        Self {
+            delay: Some(IDLE_ON_AC),
+        }
+    }
+}
+
+/// `[power]` (the Settings' Énergie page, docs/design/settings.md): what
+/// the compositor reads of it, the battery's idle delay and when each
+/// source locks (7.2). The rest (the lid, the power button, suspending,
+/// the power saver) is the system's or 6.10's, let through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Power {
+    pub ac: PowerSource,
+    pub battery: PowerSource,
+}
+
+/// `[power.ac]` or `[power.battery]`: `"0s"`, `"5m"`, `"1h"` or
+/// `"never"`, as the Settings write them; a value that does not read is
+/// taken as not given (and logged), the rest of the file kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct PowerSource {
+    /// On battery, how long without input before the session is idle (on
+    /// AC, `[idle] delay`).
+    #[serde(deserialize_with = "power_delay")]
+    pub screen_off: Option<Delay>,
+    /// When the session locks once idle: `"0s"` as the curtain ends, a
+    /// delay after the screens went off, or never.
+    #[serde(deserialize_with = "power_delay")]
+    pub lock_after: Option<Delay>,
+}
+
+impl Default for Power {
+    fn default() -> Self {
+        Self {
+            ac: PowerSource::default(),
+            battery: PowerSource {
+                screen_off: Some(Delay::After(IDLE_ON_BATTERY)),
+                ..PowerSource::default()
+            },
+        }
+    }
+}
+
+/// Locked as the curtain ends; on AC, the idle delay is `[idle]`'s.
+impl Default for PowerSource {
+    fn default() -> Self {
+        Self {
+            screen_off: None,
+            lock_after: Some(Delay::After(std::time::Duration::ZERO)),
+        }
+    }
+}
+
+/// One of `[power]`'s delays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delay {
+    Never,
+    After(std::time::Duration),
+}
+
+impl Delay {
+    /// `"5m"`, `"90s"`, `"1h"`, `"never"`, as the Settings write them.
+    pub fn parse(text: &str) -> Option<Self> {
+        if text == "never" {
+            return Some(Self::Never);
+        }
+        let (number, unit) = text.split_at(text.find(|c: char| !c.is_ascii_digit())?);
+        let n: u64 = number.parse().ok()?;
+        let by = match unit {
+            "s" => 1,
+            "m" => 60,
+            "h" => 3600,
+            _ => return None,
+        };
+        n.checked_mul(by)
+            .filter(|s| *s <= IDLE_MOST)
+            .map(|s| Self::After(std::time::Duration::from_secs(s)))
+    }
+}
+
+fn power_delay<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Delay>, D::Error> {
+    let value = toml::Value::deserialize(deserializer)?;
+    let read = value.as_str().and_then(Delay::parse);
+    if read.is_none() {
+        tracing::warn!(%value, "a [power] delay that does not read: its default applies");
+    }
+    Ok(read)
+}
+
+impl Config {
+    /// How long without input before the session is idle, on battery or
+    /// on AC; `None`: never.
+    pub fn idle_delay(&self, battery: bool) -> Option<std::time::Duration> {
+        if !battery {
+            return self.idle.delay;
+        }
+        match self.power.battery.screen_off {
+            None => Some(IDLE_ON_BATTERY),
+            Some(Delay::Never) => None,
+            Some(Delay::After(d)) => (!d.is_zero()).then_some(d),
+        }
+    }
+
+    /// When the session locks once idle, on battery or on AC: at once as
+    /// the curtain ends (zero, the default), this long after the screens
+    /// went off, or never (`None`).
+    pub fn lock_after(&self, battery: bool) -> Option<std::time::Duration> {
+        let source = if battery {
+            &self.power.battery
+        } else {
+            &self.power.ac
+        };
+        match source.lock_after {
+            None => Some(std::time::Duration::ZERO),
+            Some(Delay::Never) => None,
+            Some(Delay::After(d)) => Some(d),
+        }
+    }
 }
 
 /// The longest delay taken: a day, far beyond any use, so that a deadline
@@ -657,8 +788,36 @@ mod tests {
     }
 
     #[test]
+    fn the_power_delays_read_as_the_settings_write_them() -> anyhow::Result<()> {
+        use std::time::Duration;
+        let none = Config::default();
+        assert_eq!(none.idle_delay(false), Some(Duration::from_secs(300)));
+        assert_eq!(none.idle_delay(true), Some(Duration::from_secs(180)));
+        assert_eq!(none.lock_after(false), Some(Duration::ZERO));
+        assert_eq!(none.lock_after(true), Some(Duration::ZERO));
+        let set: Config = toml::from_str(
+            "[idle]\ndelay = 600\n[power]\nlid = \"suspend\"\n\
+             [power.battery]\nscreen-off = \"2m\"\nlock-after = \"5m\"\n\
+             suspend-after = \"15m\"\n[power.ac]\nlock-after = \"never\"\n",
+        )?;
+        assert_eq!(set.idle_delay(false), Some(Duration::from_secs(600)));
+        assert_eq!(set.idle_delay(true), Some(Duration::from_secs(120)));
+        assert_eq!(set.lock_after(true), Some(Duration::from_secs(300)));
+        assert_eq!(set.lock_after(false), None);
+        let never: Config = toml::from_str("[power.battery]\nscreen-off = \"never\"\n")?;
+        assert_eq!(never.idle_delay(true), None);
+        // A value that does not read: its default, the rest of the file kept.
+        let odd: Config =
+            toml::from_str("[power.battery]\nscreen-off = \"3 heures\"\n[desktops]\ncount = 6\n")?;
+        assert_eq!(odd.idle_delay(true), Some(Duration::from_secs(180)));
+        assert_eq!(odd.desktops.count, 6);
+        Ok(())
+    }
+
+    #[test]
     fn desktops_are_from_1_to_9() -> anyhow::Result<()> {
         assert_eq!(Config::default().desktops.count, 4);
+        assert_eq!(Config::default().idle.delay, Some(IDLE_ON_AC));
         let idle: Config = toml::from_str("[idle]\ndelay = 300\n")?;
         assert_eq!(idle.idle.delay, Some(std::time::Duration::from_secs(300)));
         let off: Config = toml::from_str("[idle]\ndelay = \"off\"\n")?;

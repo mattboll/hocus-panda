@@ -8,6 +8,7 @@
 
 mod agents;
 pub mod auth;
+pub mod away;
 mod backdrop;
 mod backend;
 mod bubbles;
@@ -73,8 +74,9 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Appearance, Config, Desktops, FormChoice, Idle as IdleSettings, OutputSettings, PanelScreens,
-    Recording, ScaleFrom, SystemKeyboard,
+    Appearance, Config, Delay as PowerDelay, Desktops, FormChoice, Idle as IdleSettings,
+    OutputSettings, PanelScreens, Power as PowerSettings, PowerSource, Recording, ScaleFrom,
+    SystemKeyboard,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -130,10 +132,11 @@ pub struct Options {
     /// the session's own bus; nested or headless, none is served.
     pub session_bus: Option<String>,
     /// The system bus given (`--system-bus`), an address: logind there
-    /// does the session menu's power actions (7.4). Without it, only the
-    /// session on a virtual terminal uses the system's; nested or
-    /// headless, there are none, so that the developer's machine is never
-    /// suspended or powered off.
+    /// does the session menu's power actions (7.4) and says the sleeps
+    /// (7.2), UPower the power source. Without it, only the session on a
+    /// virtual terminal uses the system's; nested or headless, there are
+    /// none, so that the developer's machine is never suspended or powered
+    /// off, nor waits for a test.
     pub system_bus: Option<String>,
 }
 
@@ -207,6 +210,11 @@ fn start(options: Options) -> anyhow::Result<Started> {
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
     state.shell.program = options.shell;
+    let system_bus = match (options.system_bus.clone(), &options.backend) {
+        (Some(address), _) => Some(away::system::Bus::Given(address)),
+        (None, BackendKind::Tty) => Some(away::system::Bus::System),
+        (None, _) => None,
+    };
     state.shell.bus = match (options.session_bus, &options.backend) {
         (Some(address), _) => Some(shell::Bus::Given(address)),
         (None, BackendKind::Tty) => Some(shell::Bus::Session),
@@ -224,6 +232,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     });
     state.start_sharing();
     state.start_idle();
+    state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
@@ -329,6 +338,8 @@ impl App {
         // The lock (7.1): an external locker's unlock judged, the screens
         // that drew it.
         state.lock_after_turn();
+        // Before sleep (7.2): the machine sleeps once the lock shows.
+        state.away_after_turn();
         // The session's end (7.4): the windows that closed, the lock drawn
         // before suspending.
         state.leave_after_turn();

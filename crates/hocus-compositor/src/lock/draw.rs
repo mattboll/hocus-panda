@@ -63,8 +63,12 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         let sc = Scale::from(scale);
         let mut out: Vec<OutputElement<R>> = Vec::new();
+        // The lock itself shows, not only black: its surface fully in, or
+        // none to wait for (7.2 waits for it before the machine sleeps).
+        let mut full = true;
         match &locked.holder {
             Holder::Own => {
+                full = !self.shell_linked();
                 if let Some(layer) = self.shell_lock_layer(output) {
                     let geometry = layer_map_for_output(output).layer_geometry(&layer);
                     let alpha = if purpose.screen() {
@@ -75,6 +79,7 @@ impl State {
                     } else {
                         1.0
                     };
+                    full = alpha >= 1.0;
                     if let Some(geometry) = geometry.filter(|_| alpha > 0.0) {
                         let loc = geometry.loc.to_physical_precise_round(scale);
                         let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
@@ -128,7 +133,7 @@ impl State {
             Kind::Unspecified,
         )));
         if purpose.screen() {
-            self.lock_drew_on(output);
+            self.lock_drew_on(output, full);
         }
         Some(out)
     }

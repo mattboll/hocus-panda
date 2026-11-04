@@ -1289,6 +1289,7 @@ impl State {
         moving |= self.bubbles.tick(now);
         moving |= self.capture_tick(now);
         moving |= self.auth_tick(now);
+        moving |= self.curtain_tick(now, &mut wake);
         let popover_motion = self.popover_motion();
         moving |= self.panel.tick(now, popover_motion);
         if let Some(at) = self.panel.launchers.next(now) {
