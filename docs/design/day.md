@@ -281,7 +281,8 @@ local list last.
   the connections do; the shell's loop is never woken otherwise. The next
   meeting (Day.2, `crates/hocus-shell/src/meeting`) is the first; the
   calendar (Day.5, `popover::calendar`) draws itself again from it while
-  it is open.
+  it is open;
+  the to-do list (Day.4) wakes only when its tasks changed.
 - `day::change(Change)`: a change of the bar's tasks, to their account,
   at once. The view keeps its own 1.5 s ticked state (Day.4) and reads the
   outcome in the next snapshots: the task gone from `tasks`, or its change

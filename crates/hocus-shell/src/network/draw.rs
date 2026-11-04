@@ -501,7 +501,11 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Join
                             | Item::MeetingMark
                             | Item::TodayLine(_)
-                            | Item::TodayMore,
+                            | Item::TodayMore
+                            | Item::Tasks
+                            | Item::TasksMore
+                            | Item::TaskAdd
+                            | Item::Task(_),
                             _,
                         ) => {}
                     }

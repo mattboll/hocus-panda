@@ -48,6 +48,7 @@ mod pointer;
 mod popover;
 mod renderer;
 mod share;
+mod tasks;
 mod today;
 mod tray;
 mod user;
@@ -129,6 +130,7 @@ fn main() -> ExitCode {
     day::start();
     meeting::start();
     today::start();
+    tasks::start();
     // The calendar drawn again as the day changes, while it is open.
     popover::calendar::start();
     // After the notifications' wall clock, which its times read.
@@ -260,6 +262,8 @@ struct Bar {
     desktops: window::Id,
     /// Its agents' group's surface (placed by [`agents::draw`]).
     agents: window::Id,
+    /// Its to-do list's (placed by [`tasks::draw`]).
+    tasks: window::Id,
     /// Its footer's (placed by [`footer`]).
     footer: window::Id,
 }
@@ -551,6 +555,7 @@ impl Shell {
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
                     footer::forget(&bar.output);
+                    tasks::draw::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
                     let card = meeting::forget(&bar.output);
                     let today = today::forget(&bar.output);
@@ -561,6 +566,7 @@ impl Shell {
                         today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
+                        Task::done(Message::RemoveWindow(bar.tasks)),
                         Task::done(Message::RemoveWindow(bar.agents)),
                         Task::done(Message::RemoveWindow(bar.desktops)),
                         Task::done(Message::RemoveWindow(bar.connections)),
@@ -751,6 +757,7 @@ impl Shell {
             connections: window::Id::unique(),
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
+            tasks: window::Id::unique(),
             footer: window::Id::unique(),
         };
         bar.surface = bar.surface_width();
@@ -858,6 +865,9 @@ impl Shell {
             id: agents_id,
         });
         bar.agents = agents_id;
+        // Under the agents: the to-do list.
+        let (tasks_id, open_tasks) = tasks::draw::open(&bar.output, form, option.clone());
+        bar.tasks = tasks_id;
         // Last, above the others: the footer.
         let (footer_id, open_footer) = footer::open(&bar.output, form, option.clone());
         bar.footer = footer_id;
@@ -881,6 +891,7 @@ impl Shell {
             .chain(open_connections)
             .chain(open_desktops)
             .chain(open_agents)
+            .chain(Task::batch(open_tasks.into_iter().map(Task::done)))
             .chain(Task::batch(open_footer.into_iter().map(Task::done)))
             .chain(Task::batch(
                 popover::messages(after).into_iter().map(Task::done),
@@ -900,6 +911,7 @@ impl Shell {
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
             c.set_footer(&bar.output, bar.footer);
+            c.set_tasks(&bar.output, bar.tasks);
         });
         notifications::bars_changed();
     }
@@ -985,6 +997,11 @@ impl Shell {
         }
         tasks.extend(
             footer::form(&bar.output, bar.form, switching)
+                .into_iter()
+                .map(Task::done),
+        );
+        tasks.extend(
+            self::tasks::draw::form(&bar.output, bar.form, switching)
                 .into_iter()
                 .map(Task::done),
         );
@@ -1140,6 +1157,34 @@ impl Shell {
             backdrop,
             bar: bar.output.clone(),
             motion: self.look.motion,
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// The to-do list of the bar whose to-do list's surface is `id`.
+    fn tasks_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let bar = self.bars.values().find(|b| b.tasks == id)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then(|| {
+            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
+            let middle = tasks::draw::full_top(&bar.output) + 40.0;
+            mix(
+                OPAQUE_TOP,
+                OPAQUE_BOTTOM,
+                (middle / bar_height).clamp(0.0, 1.0),
+            )
+        });
+        let program = tasks::draw::Group {
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: tasks::Words::new(clock::time::Lang::of_messages()),
+            backdrop,
+            bar: bar.output.clone(),
         };
         Some(
             canvas(program)
@@ -1514,6 +1559,14 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
+                id,
+                words: tasks::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::MeetingMark => canvas(popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
@@ -1554,7 +1607,9 @@ impl Shell {
             | popover::Item::Meeting
             | popover::Item::Join
             | popover::Item::TodayLine(_)
-            | popover::Item::TodayMore => {
+            | popover::Item::TodayMore
+            | popover::Item::TaskAdd
+            | popover::Item::Task(_) => {
                 return None;
             }
         };
@@ -1575,6 +1630,7 @@ impl Shell {
                 .or_else(|| self.connections_view(id))
                 .or_else(|| self.desktops_view(id))
                 .or_else(|| self.agents_view(id))
+                .or_else(|| self.tasks_view(id))
                 .or_else(|| self.footer_view(id))
                 .or_else(|| self.tray_view(id))
                 .or_else(|| tray::tip::view(id))
