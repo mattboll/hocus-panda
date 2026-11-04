@@ -482,6 +482,8 @@ fn a_tick_reaches_the_source_at_once_and_its_line_goes_after_1_5_s() -> anyhow::
     bed.click_item("Task(0)")?;
     bed.logged_after(from, &["a task ticked", "task=\"t1\""])?;
     let ticked = Instant::now();
+    // Off the box, for the screenshot.
+    bed.hp.pointer_move(400.0, 300.0);
     // The source told at once: the fixture's board no longer lists it.
     bed.logged_after(from, &["the day holds", "tasks=6=["])?;
     // Ticked, struck through, still there.
@@ -557,6 +559,7 @@ fn a_refused_change_unticks_and_says_not_saved_for_3_s() -> anyhow::Result<()> {
     let from = bed.mark();
     bed.click_item("Task(0)")?;
     bed.logged_after(from, &["a change of a task was not saved", "task=\"t1\""])?;
+    bed.hp.pointer_move(400.0, 300.0);
     // The box unticked, "Pas enregistré" in the title's place.
     let line = bed.group_after(from, &["Cocher « Relire la spec »: Pas enregistré"])?;
     assert_eq!(rows(&line).len(), 3, "{line}");
@@ -600,6 +603,9 @@ fn enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_
     bed.shot("field-empty")?;
     bed.type_text("acheter du pain");
     bed.logged_after(from, &["the tasks show", "«acheter du pain» focused=true"])?;
+    let commits = bed.hp.tasks_commits();
+    bed.hp
+        .dispatch_until(WAIT, |hp| hp.tasks_commits() > commits)?;
     bed.shot("field")?;
     // `Enter`: at the top of the column, no due date; the third goes into
     // "+ N".
