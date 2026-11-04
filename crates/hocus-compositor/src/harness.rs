@@ -546,6 +546,11 @@ impl Headless {
         self.app.state.record.copied_on_loop()
     }
 
+    /// Tells the shell `message`, as the compositor would.
+    pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
+        self.app.state.tell_shell(message);
+    }
+
     /// The shell asks something of the recording, as its bar's item does.
     pub fn record_ask(&mut self, ask: hocus_link::RecordAsk) {
         self.app.state.record_asked(ask);

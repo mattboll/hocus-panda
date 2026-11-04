@@ -15,6 +15,8 @@ workspace = true
 
 [dependencies]
 hocus-link = { path = "../hocus-link", version = "0.2.0" }
+# "Your day"'s data: calendars, events and tasks, read off the loop.
+hocus-day = { path = "../hocus-day", version = "0.2.0" }
 # No x11, no winit-side theme detection: the shell only talks Wayland
 # through iced_layershell (tech-choices, spike #315).
 iced = { version = "0.14", default-features = false, features = [

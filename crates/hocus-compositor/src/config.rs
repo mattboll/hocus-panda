@@ -83,6 +83,11 @@ pub struct Config {
     /// `PATH`. Not part of the file.
     #[serde(skip)]
     pub ffmpeg: PathBuf,
+    /// The file this was read from, which the shell reads its own sections
+    /// of (`[day]`, docs/design/day.md). Not part of the file; `None`: the
+    /// shell reads none (tests, unless they give one).
+    #[serde(skip)]
+    pub file: Option<PathBuf>,
 }
 
 /// Screen recording, `[recording]` (5.10).

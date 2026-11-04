@@ -202,3 +202,31 @@
 # For example:
 #   cursor-theme = "Adwaita"
 #   cursor-size = 32
+
+# [day]
+# "Your day" in the bar: meetings from calendar accounts, and tasks from
+# a kanban board, else from the list kept on this computer
+# (~/.local/state/hocuspanda/tasks.json). Read by the bar as it starts.
+# No secret goes here: an account's token is kept in the session's
+# keyring, else in ~/.local/state/hocuspanda/accounts/, readable by you
+# alone. Each account is a section of its own, and the bar's tasks are
+# the first tasks' account's. For example, a day from a file (for tests
+# and screenshots; its format: docs/design/day.md), read as it changes:
+#
+#   [[day.calendars]]
+#   kind = "fixture"
+#   file = "day.toml"                    # beside this file
+#   shown = ["Travail"]                  # by name; none: as the account says
+#   colors = { "Travail" = "#6CC287" }
+#
+#   [[day.tasks]]
+#   kind = "fixture"
+#   file = "day.toml"
+#   tasks = "TODO"                       # default TODO, else the first column
+#   done = "DONE"                        # default DONE, else the last
+#   add = ""                             # where + adds: the tasks' column
+#
+# Google calendars (kind "google", through GNOME Online Accounts, the
+# account named by its e-mail) and Planka boards (kind "planka", with the
+# server's address and the board's address or id) are read, and show as
+# not supported until their adapters land.

@@ -17,7 +17,7 @@
 //! clipboard's history, `Super+.` for the emoji picker and where it opens,
 //! what the screen capture's toolbar shows and what was captured, the
 //! screen the notifications' bubbles show on, a request to share the screen
-//! and what is shared;
+//! and what is shared, and a change asked of the day's tasks (for tests);
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
@@ -179,6 +179,11 @@ pub fn is_bubble(namespace: &str) -> bool {
 /// the session's own (`session`). Without it, the shell serves none: a
 /// nested or headless compositor never takes the live session's.
 pub const NOTIFICATIONS_BUS_ENV: &str = "HOCUS_NOTIFICATIONS_BUS";
+
+/// The environment variable naming the configuration file the compositor
+/// read, for the shell's own sections (`[day]`, docs/design/day.md); empty:
+/// none. Unset (the shell alone): `$XDG_CONFIG_HOME/hocuspanda/config.toml`.
+pub const CONFIG_ENV: &str = "HOCUS_CONFIG";
 
 /// A popover's width, its distance from the bar, and how far it slides from
 /// the bar as it opens and closes (logical pixels). Its corners are the
@@ -429,6 +434,23 @@ pub enum ToShell {
     /// ([`ToCompositor::TrayClick`], 5.14b): the shell gives it to the
     /// item before activating it. Written `tray-token ASK TOKEN`.
     TrayToken { ask: u64, token: String },
+    /// A change asked of the day's tasks, or a read of every account
+    /// (docs/design/day.md): what the bar's own views ask, for tests and
+    /// tools that have no view to click. Written `day add TITLE`, `day tick
+    /// ID`, `day untick ID`, `day refresh`.
+    Day(DayAsk),
+}
+
+/// What [`ToShell::Day`] asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DayAsk {
+    /// A task titled so, at the top of the tasks' add column.
+    Add(String),
+    /// The task of that id ticked, or unticked.
+    Tick(String),
+    Untick(String),
+    /// Every account read again now.
+    Refresh,
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the
@@ -917,6 +939,16 @@ pub fn title_text(title: &str) -> String {
     title.trim().to_owned()
 }
 
+/// A text on one line: its line breaks and other control characters made
+/// spaces, trimmed.
+fn one_line(text: &str) -> String {
+    let text: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    text.trim().to_owned()
+}
+
 /// An application's id as a [`ToShell::Desktops`] line carries it: its
 /// spaces and control characters made `_`, which an id has none of.
 fn app_word(app: &str) -> String {
@@ -1393,6 +1425,12 @@ impl fmt::Display for ToShell {
             Self::Recording(shown) => shown.write(f),
             Self::RecordingEnd => f.write_str("recording-end"),
             Self::Recorded(recorded) => recorded.write(f),
+            Self::Day(ask) => match ask {
+                DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
+                DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
+                DayAsk::Untick(id) => write!(f, "day untick {}", one_line(id)),
+                DayAsk::Refresh => f.write_str("day refresh"),
+            },
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
                 for (id, title) in &titles.titles {
@@ -1420,6 +1458,23 @@ impl FromStr for ToShell {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(rest) = line.strip_prefix("share-choose ") {
             return ShareChoose::read(rest).map(Self::ShareChoose);
+        }
+        if let Some(rest) = line.strip_prefix("day ") {
+            let (what, text) = rest.split_once(' ').unwrap_or((rest, ""));
+            let text = || {
+                if text.trim().is_empty() {
+                    Err(BadLine(format!("day {what}: nothing given")))
+                } else {
+                    Ok(text.to_owned())
+                }
+            };
+            return match what {
+                "add" => text().map(|t| Self::Day(DayAsk::Add(t))),
+                "tick" => text().map(|t| Self::Day(DayAsk::Tick(t))),
+                "untick" => text().map(|t| Self::Day(DayAsk::Untick(t))),
+                "refresh" => Ok(Self::Day(DayAsk::Refresh)),
+                other => Err(BadLine(format!("day {other}"))),
+            };
         }
         if let Some(fields) = line.strip_prefix("shares")
             && (fields.is_empty() || fields.starts_with('\t'))
@@ -2108,6 +2163,21 @@ mod tests {
                 seconds: false,
             }),
         ];
+        let day = [
+            ToShell::Day(DayAsk::Add("Acheter du pain, et du café".into())),
+            ToShell::Day(DayAsk::Tick("18a2f-3".into())),
+            ToShell::Day(DayAsk::Untick("c 2".into())),
+            ToShell::Day(DayAsk::Refresh),
+        ];
+        for message in &day {
+            assert_eq!(message.to_string().parse::<ToShell>().as_ref(), Ok(message));
+        }
+        assert!("day add ".parse::<ToShell>().is_err());
+        assert!("day plant x".parse::<ToShell>().is_err());
+        assert_eq!(
+            ToShell::Day(DayAsk::Add("deux\nlignes".into())).to_string(),
+            "day add deux lignes"
+        );
         let keys = LevelKey::ALL.map(ToShell::Level);
         let screens = [
             ToShell::Screens(Vec::new()),

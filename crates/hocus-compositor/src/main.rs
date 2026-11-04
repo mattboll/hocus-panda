@@ -122,11 +122,9 @@ fn main() -> ExitCode {
             BackendArg::Tty
         }
     });
-    let mut config = args
-        .config
-        .or_else(Config::default_path)
-        .map(|path| Config::load(&path))
-        .unwrap_or_default();
+    let file = args.config.or_else(Config::default_path);
+    let mut config = file.as_deref().map(Config::load).unwrap_or_default();
+    config.file = file;
     // Once, before the loop: the keyboard the system was set up with,
     // unless the configuration names its own.
     if config.keyboard.layouts.is_empty() {
