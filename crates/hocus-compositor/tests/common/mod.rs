@@ -354,6 +354,14 @@ pub enum Shows {
         size: (u32, u32),
         caret: Option<(i32, i32, i32, i32)>,
     },
+    /// An xdg toplevel of this size that hides the pointer over it at each
+    /// enter (`wl_pointer.set_cursor` without a surface), as a video
+    /// player does: a shape of its own, which the next surface's client
+    /// must replace.
+    Hiding {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
 }
 
 /// What the test asks of a client.
@@ -473,6 +481,7 @@ fn run_client(
         layer: None,
         popup: None,
         popup_on_press: false,
+        hiding: false,
         margin: 0,
         cell: 0,
         seat: None,
@@ -524,6 +533,16 @@ fn run_client(
             client.size = size;
             client.margin = margin;
             client.window = Some(window);
+        }
+        Some(Shows::Hiding { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.hiding = true;
         }
         Some(Shows::Checkered { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -728,6 +747,8 @@ struct Client {
     layer: Option<LayerSurface>,
     popup: Option<Popup>,
     popup_on_press: bool,
+    /// Hides the pointer over its window ([`Shows::Hiding`]).
+    hiding: bool,
     /// The shadow around the window, outside its geometry.
     margin: u32,
     /// Floating, its sizes are whole multiples of this.
@@ -947,7 +968,7 @@ impl SeatHandler for Client {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Pointer && self.popup_on_press {
+        if capability == Capability::Pointer && (self.popup_on_press || self.hiding) {
             let _ = self.seats.get_pointer(qh, &seat);
             self.seat = Some(seat);
         } else if capability == Capability::Keyboard && self.typing {
@@ -982,14 +1003,20 @@ impl PointerHandler for Client {
         &mut self,
         _: &Connection,
         qh: &QueueHandle<Self>,
-        _: &wl_pointer::WlPointer,
+        pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
         for event in events {
-            if let PointerEventKind::Press { serial, .. } = event.kind
-                && self.popup.is_none()
-            {
-                self.open_popup(qh, serial);
+            match event.kind {
+                PointerEventKind::Enter { serial } if self.hiding => {
+                    pointer.set_cursor(serial, None, 0, 0);
+                }
+                PointerEventKind::Press { serial, .. }
+                    if self.popup_on_press && self.popup.is_none() =>
+                {
+                    self.open_popup(qh, serial);
+                }
+                _ => {}
             }
         }
     }

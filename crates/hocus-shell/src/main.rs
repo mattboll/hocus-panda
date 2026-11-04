@@ -41,6 +41,7 @@ mod network;
 mod notifications;
 mod outputs;
 mod paste;
+mod pointer;
 mod popover;
 mod renderer;
 mod share;
@@ -138,6 +139,7 @@ fn main() -> ExitCode {
         Ok(connection) => {
             paste::start(&connection);
             outputs::start(&connection);
+            pointer::start(&connection);
             Some(connection)
         }
         Err(err) => {
@@ -1463,7 +1465,13 @@ impl Shell {
         Some(panel)
     }
 
+    /// A surface's widgets, whose pointer's shape is set again each time
+    /// the pointer enters it ([`pointer`]).
     fn view(&self, id: window::Id) -> Element<'_, Message> {
+        pointer::Entered::new(self.surface_view(id)).into()
+    }
+
+    fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
             return self
                 .clock_view(id)

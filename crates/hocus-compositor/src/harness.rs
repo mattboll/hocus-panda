@@ -860,6 +860,33 @@ impl Headless {
         ))
     }
 
+    /// Holds the shell still (`SIGSTOP`), or lets it go on (`SIGCONT`):
+    /// what the compositor sends it meanwhile is read at once as it goes
+    /// on, as by a shell busy for a while. The shell is the client that
+    /// drew the bars' surfaces, which the test started.
+    pub fn hold_shell(&self, held: bool) -> anyhow::Result<()> {
+        use rustix::process::{Pid, Signal, kill_process};
+        use smithay::reexports::wayland_server::Resource;
+        let state = &self.app.state;
+        let pid = state
+            .space
+            .outputs()
+            .find_map(|output| {
+                let map = smithay::desktop::layer_map_for_output(output);
+                let client = map
+                    .layers()
+                    .find(|l| l.namespace() == hocus_link::NAMESPACE)?
+                    .wl_surface()
+                    .client()?;
+                let credentials = client.get_credentials(&state.display_handle).ok()?;
+                Pid::from_raw(credentials.pid)
+            })
+            .context("no bar, so no shell")?;
+        let signal = if held { Signal::STOP } else { Signal::CONT };
+        kill_process(pid, signal).with_context(|| format!("signalling the shell ({pid:?})"))?;
+        Ok(())
+    }
+
     /// Whether the shell said it draws on the CPU.
     pub fn shell_on_cpu(&self) -> bool {
         self.app.state.shell.software

@@ -59,8 +59,9 @@ serde = "1.0.229"
 # on it (paste); the same version as iced_layershell's.
 wayland-client = "0.31.15"
 # Its screens' xdg-output names, which iced_layershell finds them by
-# (outputs); the same version as iced_layershell's.
-wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
+# (outputs), and the pointer's shapes (pointer); the same version as
+# iced_layershell's.
+wayland-protocols = { version = "0.32.13", features = ["client", "unstable", "staging"] }
 # The clipboard's history sealed on disk (5.6): XChaCha20-Poly1305
 # (RustCrypto, MIT or Apache-2.0); its random keys and nonces.
 chacha20poly1305 = "0.11.0"
