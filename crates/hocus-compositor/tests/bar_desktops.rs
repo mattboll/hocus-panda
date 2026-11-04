@@ -19,7 +19,8 @@
 //! And 3.9c (issue #479): past 8 windows the list scrolls, by the wheel and
 //! to the row the keyboard holds; minimised windows are listed last,
 //! greyed, and a click brings one back; an application without an icon
-//! shows its letter on a colour.
+//! shows its letter on a colour. A touchpad scrolls it by the logical
+//! pixels the fingers moved, at ×1 and ×2 alike (#488).
 //!
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI.
@@ -113,9 +114,12 @@ fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let mut config = Config::default();
     config.desktops.count = setup.count;
-    if setup.mini {
-        config.panel.form = FormChoice::Mini;
-    }
+    // Either form, on a screen too narrow to choose the full one too.
+    config.panel.form = if setup.mini {
+        FormChoice::Mini
+    } else {
+        FormChoice::Full
+    };
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec![setup.output.parse()?],
@@ -994,6 +998,61 @@ fn past_eight_windows_the_list_scrolls_by_the_wheel_and_to_the_keyboards_row() -
             .any(|w| w.focused && w.app_id.as_deref() == Some("test.w1"))
     })?;
     assert!(focused, "{:?}", bed.hp.windows());
+    Ok(())
+}
+
+#[test]
+fn a_touchpad_scrolls_the_list_by_its_logical_pixels_at_any_scale() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    // On a ×2 screen, iced hands a touchpad's pixels multiplied by its
+    // scale.
+    for output in ["1920x1080", "2560x1600@2"] {
+        let mut bed = start(
+            &shell,
+            Setup {
+                output,
+                ..Setup::default()
+            },
+        )?;
+        let windows = [
+            ("test.w1", "One"),
+            ("test.w2", "Two"),
+            ("test.w3", "Three"),
+            ("test.w4", "Four"),
+            ("test.w5", "Five"),
+            ("test.w6", "Six"),
+            ("test.w7", "Seven"),
+            ("test.w8", "Eight"),
+            ("test.w9", "Nine"),
+            ("test.w10", "Ten"),
+        ];
+        let mut clients = Vec::new();
+        for (app, title) in windows {
+            clients.push(bed.open_titled(app, title, (400, 300))?);
+        }
+        bed.hp.pointer_move(600.0, 500.0);
+        bed.settle()?;
+        let mark = bed.mark();
+        bed.rest_on(0);
+        let list = bed.list()?;
+        bed.logged_after(mark, "count=10 fenêtres")?;
+        let (x, y) = Bed::row(list, 0);
+        bed.hp.pointer_move(x, y);
+        wait(&mut bed.hp, Duration::from_millis(300))?;
+        // A touchpad scrolls down a row and its gap, 34 logical px: the second
+        // row is where the first was (two rows at twice that, the end).
+        bed.hp.finger_scroll(34.0);
+        wait(&mut bed.hp, Duration::from_millis(300))?;
+        bed.click((x, y))?;
+        let focused = bed.hp.dispatch_until(WAIT, |hp| {
+            hp.windows()
+                .iter()
+                .any(|w| w.focused && w.app_id.as_deref() == Some("test.w9"))
+        })?;
+        assert!(focused, "on {output}: {:?}", bed.hp.windows());
+    }
     Ok(())
 }
 

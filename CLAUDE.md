@@ -51,7 +51,7 @@ sharing).
 
 ## Workflow
 
-- One issue per branch, `<type>/<issue>-<short-name>`, based on `v2`. A
+- One issue per branch, `<type>/<issue>-<short-name>`, based on `main`. A
   pull request says `Closes #N`, how it was tested, and shows screenshots
   for anything visible.
 - Commit messages in English, `area: what changes`. **No attribution
@@ -82,7 +82,7 @@ cargo fmt --check
 cargo deny check                              # licences and advisories
 ```
 
-CI runs the same on every pull request to `v2`. Update this section as
+CI runs the same on every pull request to `main`. Update this section as
 commands land.
 
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
