@@ -102,6 +102,9 @@ pub struct Panel {
     pub clock_commits: u64,
     /// Commits of the levels' surfaces, for tests: none at rest.
     pub levels_commits: u64,
+    /// Commits of the signs of what is in use (5.12), for tests: none at
+    /// rest.
+    pub in_use_commits: u64,
     /// Commits of the connections' surfaces, for tests: none at rest.
     pub connections_commits: u64,
     /// Commits of the desktops' surfaces, for tests: none at rest.

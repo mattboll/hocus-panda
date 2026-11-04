@@ -72,6 +72,8 @@ fn follow(default: &Default) {
         *default.lock().unwrap_or_else(PoisonError::into_inner) = None;
         publish(|levels| levels.sound = None);
         publish_mixer(Mixer::default());
+        crate::in_use::cameras::nodes(0);
+        crate::in_use::set_media(Vec::new(), false, Vec::new());
         presence.now(false, "PipeWire", ended);
         if started.elapsed() >= STEADY {
             wait = RETRY_FIRST;
@@ -121,6 +123,9 @@ fn dump(default: &Default, presence: &mut Presence) -> String {
             sound.map(|(id, sound)| (id, sound.muted));
         publish(|levels| levels.sound = sound.map(|(_, sound)| sound));
         publish_mixer(graph.mixer(&mut icons));
+        let used = graph.in_use(&mut icons);
+        crate::in_use::cameras::nodes(used.cameras);
+        crate::in_use::set_media(used.microphone, used.muted, used.camera);
     }
     match end_dump() {
         Some(Ok(status)) => format!("pw-dump ended: {status}"),
@@ -260,6 +265,8 @@ pub struct Graph {
     nodes: HashMap<u32, Node>,
     /// Devices by id: what they are.
     devices: HashMap<u32, Device>,
+    /// Links by id: the node out of which they go, and the one into which.
+    links: HashMap<u32, (u32, u32)>,
 }
 
 /// What a node is, from its `media.class`.
@@ -270,6 +277,13 @@ enum Class {
     Source,
     /// An application's output stream (a "sink input").
     Stream,
+    /// An application's input stream: a microphone's when it is linked to
+    /// a source (5.12).
+    Capture,
+    /// A camera, and an application's video input stream: the camera's
+    /// when linked to one.
+    Camera,
+    VideoCapture,
 }
 
 impl Class {
@@ -278,6 +292,9 @@ impl Class {
             "Audio/Sink" => Some(Self::Sink),
             "Audio/Source" | "Audio/Source/Virtual" => Some(Self::Source),
             "Stream/Output/Audio" => Some(Self::Stream),
+            "Stream/Input/Audio" => Some(Self::Capture),
+            "Video/Source" => Some(Self::Camera),
+            "Stream/Input/Video" => Some(Self::VideoCapture),
             _ => None,
         }
     }
@@ -297,6 +314,9 @@ struct Node {
     app: Who,
     running: bool,
     corked: bool,
+    /// A stream's `media.name`, and its process's id.
+    media: Option<String>,
+    pid: Option<u32>,
 }
 
 /// Who plays a stream, from its node's props.
@@ -388,6 +408,7 @@ impl Graph {
         if gone {
             self.nodes.remove(&id);
             self.devices.remove(&id);
+            self.links.remove(&id);
             if self.metadata == Some(id) {
                 self.metadata = None;
                 self.sink = None;
@@ -398,6 +419,18 @@ impl Graph {
         match object.get("type").and_then(Value::as_str) {
             Some("PipeWire:Interface:Metadata") => self.metadata(id, &object),
             Some("PipeWire:Interface:Node") => self.node(id, &object),
+            Some("PipeWire:Interface:Link") => {
+                // An update without them keeps those known.
+                let node = |key: &str| {
+                    object
+                        .pointer(&format!("/info/{key}"))
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok())
+                };
+                if let (Some(out), Some(into)) = (node("output-node-id"), node("input-node-id")) {
+                    self.links.insert(id, (out, into));
+                }
+            }
             Some("PipeWire:Interface:Device") => {
                 // An update without props keeps those known.
                 if let Some(props) = object.pointer("/info/props") {
@@ -475,6 +508,16 @@ impl Graph {
                 .get("pulse.corked")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            node.media = props
+                .get("media.name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .map(str::to_owned);
+            node.pid = props
+                .get("application.process.id")
+                .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()))
+                .and_then(|p| u32::try_from(p).ok());
         }
         if let Some(state) = info.get("state").and_then(Value::as_str) {
             node.running = state == "running";
@@ -604,6 +647,90 @@ impl Graph {
         }
     }
 
+    /// The streams of class `class` linked from a node of class `from`
+    /// (a source, a camera), by application, their icons looked for once
+    /// each (`icons`, by application).
+    fn linked(
+        &self,
+        class: Class,
+        from: Class,
+        icons: &mut HashMap<String, Option<Icon>>,
+    ) -> Vec<crate::in_use::Media> {
+        let fed = |id: u32| {
+            self.links.values().any(|(out, into)| {
+                *into == id && self.nodes.get(out).is_some_and(|n| n.class == from)
+            })
+        };
+        let mut streams: Vec<(&u32, &Node)> = self
+            .nodes
+            .iter()
+            .filter(|(id, node)| node.class == class && fed(**id))
+            .collect();
+        streams.sort_by_key(|(id, _)| **id);
+        let mut used: Vec<crate::in_use::Media> = Vec::new();
+        for (_, node) in streams {
+            let key = node.app.key(&node.name);
+            if let Some(media) = used.iter_mut().find(|m| m.key == key) {
+                if media.media.is_none() {
+                    media.media.clone_from(&node.media);
+                }
+                continue;
+            }
+            let app = node
+                .app
+                .name
+                .clone()
+                .or_else(|| node.app.binary.clone())
+                .or_else(|| node.pid.and_then(program_of))
+                .unwrap_or_else(|| node.name.clone());
+            let icon = icons
+                .entry(key.clone())
+                .or_insert_with(|| super::icons::find(&node.app.icon_names()))
+                .clone();
+            let ids = [
+                &node.app.sandboxed,
+                &node.app.id,
+                &node.app.binary,
+                &node.app.name,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|id| id.to_lowercase())
+            .collect();
+            used.push(crate::in_use::Media {
+                key,
+                app,
+                icon,
+                ids,
+                media: node.media.clone(),
+            });
+        }
+        used
+    }
+
+    /// What is in use (5.12): the applications whose streams take a
+    /// source's sound, whether the default source is muted, those whose
+    /// streams take a camera's pictures, and how many cameras there are.
+    pub fn in_use(&self, icons: &mut HashMap<String, Option<Icon>>) -> Used {
+        let sources = self.sources();
+        let muted = sources
+            .iter()
+            .find(|s| s.default)
+            .or(sources.first())
+            .and_then(|s| s.sound)
+            .is_some_and(|s| s.muted);
+        Used {
+            microphone: self.linked(Class::Capture, Class::Source, icons),
+            muted,
+            camera: self.linked(Class::VideoCapture, Class::Camera, icons),
+            cameras: self
+                .nodes
+                .values()
+                .filter(|n| n.class == Class::Camera)
+                .count(),
+        }
+    }
+
     /// The default sink's node id and its sound.
     pub fn default_sink(&self) -> Option<(u32, Sound)> {
         let name = self.sink.as_deref()?;
@@ -612,6 +739,23 @@ impl Graph {
             .filter(|(_, node)| node.class == Class::Sink && node.name == name)
             .find_map(|(id, node)| node.sound.map(|sound| (*id, sound)))
     }
+}
+
+/// What the graph says is in use.
+#[derive(Debug, Default)]
+pub struct Used {
+    pub microphone: Vec<crate::in_use::Media>,
+    pub muted: bool,
+    pub camera: Vec<crate::in_use::Media>,
+    pub cameras: usize,
+}
+
+/// Process `pid`'s program, as `/proc` names it.
+fn program_of(pid: u32) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
 }
 
 /// A sink's monitor made a source: not a microphone.
@@ -903,6 +1047,100 @@ mod tests {
                   "value": { "name": name } }
             ]
         })
+    }
+
+    fn classed(id: u32, class: &str, props: Value) -> Value {
+        let mut props = props;
+        props["media.class"] = json!(class);
+        json!({ "id": id, "type": "PipeWire:Interface:Node", "info": { "props": props } })
+    }
+
+    fn link(id: u32, out: u32, into: u32) -> Value {
+        json!({
+            "id": id, "type": "PipeWire:Interface:Link",
+            "info": { "output-node-id": out, "input-node-id": into, "state": "active" }
+        })
+    }
+
+    #[test]
+    fn a_stream_linked_to_a_source_uses_the_microphone_one_to_a_camera_the_camera() {
+        let mut graph = Graph::default();
+        let mut icons = HashMap::new();
+        let mut mic = sink(30, "mic", &[0.5, 0.5], false);
+        mic["info"]["props"]["media.class"] = json!("Audio/Source");
+        graph.apply(mic);
+        graph.apply(sink(31, "speakers", &[0.5, 0.5], false));
+        graph.apply(classed(
+            40,
+            "Stream/Input/Audio",
+            json!({
+                "node.name": "Firefox", "application.name": "Firefox",
+                "application.process.binary": "firefox", "media.name": "meet.google.com"
+            }),
+        ));
+        graph.apply(classed(
+            41,
+            "Stream/Input/Audio",
+            json!({
+                "node.name": "peak", "application.name": "Volume Meter"
+            }),
+        ));
+        // Nothing linked: nothing used.
+        let used = graph.in_use(&mut icons);
+        assert!(used.microphone.is_empty() && used.camera.is_empty());
+        assert_eq!(used.cameras, 0);
+        // Linked to the source: Firefox uses it; the meter, linked to a
+        // sink's monitor, does not.
+        graph.apply(link(50, 30, 40));
+        graph.apply(link(51, 31, 41));
+        let used = graph.in_use(&mut icons);
+        assert_eq!(used.microphone.len(), 1);
+        let firefox = &used.microphone[0];
+        assert_eq!(firefox.app, "Firefox");
+        assert_eq!(firefox.media.as_deref(), Some("meet.google.com"));
+        assert!(firefox.ids.contains(&"firefox".to_owned()));
+        assert!(!used.muted);
+        // An update of the link without its nodes keeps them.
+        graph.apply(
+            json!({ "id": 50, "type": "PipeWire:Interface:Link", "info": { "state": "paused" } }),
+        );
+        assert_eq!(graph.in_use(&mut icons).microphone.len(), 1);
+        // The default source muted.
+        graph.apply(json!({
+            "id": 29, "type": "PipeWire:Interface:Metadata",
+            "props": { "metadata.name": "default" },
+            "metadata": [{ "subject": 0, "key": "default.audio.source",
+                           "type": "Spa:String:JSON", "value": { "name": "mic" } }]
+        }));
+        let mut muted = sink(30, "mic", &[0.5, 0.5], true);
+        muted["info"]["props"]["media.class"] = json!("Audio/Source");
+        graph.apply(muted);
+        assert!(graph.in_use(&mut icons).muted);
+        // The link goes: no longer used.
+        graph.apply(json!({ "id": 50, "info": null }));
+        assert!(graph.in_use(&mut icons).microphone.is_empty());
+        // A camera, and a stream linked to it.
+        graph.apply(classed(
+            60,
+            "Video/Source",
+            json!({ "node.name": "v4l2_input.usb" }),
+        ));
+        graph.apply(classed(
+            61,
+            "Stream/Input/Video",
+            json!({
+                "node.name": "zoom", "application.name": "Zoom",
+                "pipewire.access.portal.app_id": "us.zoom.Zoom"
+            }),
+        ));
+        let used = graph.in_use(&mut icons);
+        assert_eq!(used.cameras, 1);
+        assert!(used.camera.is_empty());
+        graph.apply(link(62, 60, 61));
+        let used = graph.in_use(&mut icons);
+        assert_eq!(used.camera.len(), 1);
+        assert_eq!(used.camera[0].key, "us.zoom.Zoom");
+        assert!(used.camera[0].ids.contains(&"us.zoom.zoom".to_owned()));
     }
 
     #[test]
