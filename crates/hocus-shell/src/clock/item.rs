@@ -6,22 +6,27 @@
 //! holds the keyboard (after `Esc` in the calendar). Resting on it opens
 //! nothing.
 //!
-//! The clock draws every second whatever it shows: its look is read as it
-//! draws, and the pointer's comings and goings draw it once more.
+//! The clock's surface lets the pointer through to the bar's own, which
+//! hears it for the group ([`crate::popover::BarPointer`]) as the clock
+//! tells it where the group is. The clock draws every second whatever it
+//! shows: its look is read as it draws, and the pointer's comings and
+//! goings wake it once more.
 
-use iced::{
-    Point, Rectangle, Size, keyboard, mouse,
-    widget::canvas::{self, Frame},
+use std::{
+    collections::HashSet,
+    sync::{Mutex, PoisonError},
 };
+
+use hocus_link::{CLOCK_NAMESPACE, Form};
+use iced::{Point, Rectangle, Size, widget::canvas::Frame};
 
 use super::{
     BIG, CELL_HEIGHT, Clock, DATE, DATE_GAP, DATE_LINE, FULL_TOP, MINI, SURFACE_TOP, State,
 };
 use crate::{
     levels::draw::{ACCENT, HOVER, OPEN, stroke},
-    popover::{self, Event, Item, kit},
+    popover::{self, Item, kit},
 };
-use hocus_link::{CLOCK_NAMESPACE, Form};
 
 /// The full form's group: the bar's inside less its 12 px sides, from the
 /// digits' cells to 6 px under the date.
@@ -44,9 +49,35 @@ pub struct Look {
 /// The item's state between the clock's draws.
 #[derive(Debug, Default)]
 pub struct ItemState {
-    at: Option<Point>,
-    hover: bool,
     look: Look,
+}
+
+/// The bars whose clock's group has the pointer on it.
+static HOVERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// The pointer came onto bar `bar`'s group (`on`), or left it: its clock
+/// draws it so at once.
+pub fn hover(bar: &str, on: bool) {
+    let changed = {
+        let mut hovered = HOVERED.lock().unwrap_or_else(PoisonError::into_inner);
+        let hovered = hovered.get_or_insert_with(HashSet::new);
+        if on {
+            hovered.insert(bar.to_owned())
+        } else {
+            hovered.remove(bar)
+        }
+    };
+    if changed {
+        popover::send(vec![popover::Effect::Wake(CLOCK_NAMESPACE)]);
+    }
+}
+
+fn hovered(bar: &str) -> bool {
+    HOVERED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|h| h.contains(bar))
 }
 
 /// The group's height in `form`, from its top.
@@ -91,93 +122,29 @@ impl Clock {
     }
 }
 
-/// What the pointer and the keys do on the clock's surface.
-pub fn update<Message>(
-    clock: &Clock,
-    state: &mut State,
-    event: &iced::Event,
-    bounds: Rectangle,
-    cursor: mouse::Cursor,
-) -> Option<canvas::Action<Message>> {
-    match event {
-        iced::Event::Mouse(seen) => {
-            let item = &mut state.item;
-            let at = crate::levels::draw::pointer(seen, bounds, cursor, item.at);
-            item.at = at;
-            let rect = clock.item_rect(bounds.size()).map(|(_, r)| r);
-            let over = matches!((at, rect), (Some(at), Some(rect)) if rect.contains(at));
-            match seen {
-                mouse::Event::CursorEntered
-                | mouse::Event::CursorMoved { .. }
-                | mouse::Event::CursorLeft => {
-                    if over != item.hover {
-                        item.hover = over;
-                        match rect.filter(|_| over) {
-                            Some(rect) => popover::event(Event::ItemEnter {
-                                bar: clock.bar.clone(),
-                                item: Item::Calendar,
-                                rect: clock.in_bar(rect),
-                            }),
-                            None => {
-                                let at = at.unwrap_or(Point::new(bounds.width / 2.0, bounds.height));
-                                popover::event(Event::ItemLeave {
-                                    at: clock.in_bar(Rectangle::new(at, Size::ZERO)).position(),
-                                });
-                            }
-                        }
-                        return Some(canvas::Action::request_redraw());
-                    }
-                    if let Some(at) = at.filter(|_| !over) {
-                        let at = clock.in_bar(Rectangle::new(at, Size::ZERO)).position();
-                        popover::event(Event::Pointer { at });
-                    }
-                    None
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) if over => {
-                    if let Some(rect) = rect {
-                        popover::event(Event::ItemPress {
-                            bar: clock.bar.clone(),
-                            item: Item::Calendar,
-                            rect: clock.in_bar(rect),
-                        });
-                    }
-                    Some(canvas::Action::request_redraw().and_capture())
-                }
-                mouse::Event::ButtonPressed(_) => {
-                    popover::event(Event::PressElsewhere);
-                    None
-                }
-                _ => None,
-            }
-        }
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key,
-            modifiers,
-            text,
-            ..
-        }) => popover::key(key, *modifiers, text.as_deref())
-            .then(|| canvas::Action::request_redraw().and_capture()),
-        _ => None,
-    }
-}
-
 /// As the clock is about to draw: its look read, and its place told to
-/// the popovers (for `Tab`, and where the calendar opens).
+/// the popovers (for the pointer on the bar, `Tab`, and where the
+/// calendar opens). While the form switches, it has none.
 pub fn refresh(clock: &Clock, state: &mut State, size: Size) {
-    let Some((form, rect)) = clock.item_rect(size) else {
-        state.item.look = Look::default();
-        return;
-    };
-    let in_bar = clock.in_bar(rect);
+    let place = clock.item_rect(size);
+    let in_bar = place.map(|(_, rect)| clock.in_bar(rect));
     let (open, focused) = popover::with(|c| {
-        c.set_items(&clock.bar, CLOCK_NAMESPACE, vec![(Item::Calendar, in_bar)]);
+        c.set_items(
+            &clock.bar,
+            CLOCK_NAMESPACE,
+            in_bar.map(|r| (Item::Calendar, r)).into_iter().collect(),
+        );
         (
             c.shows(&clock.bar, Item::Calendar),
             c.focused(&clock.bar, Item::Calendar),
         )
     });
+    let (Some((form, _)), Some(in_bar)) = (place, in_bar) else {
+        state.item.look = Look::default();
+        return;
+    };
     let look = Look {
-        hover: state.item.hover,
+        hover: hovered(&clock.bar),
         open,
         focused,
     };
@@ -216,15 +183,6 @@ pub fn draw(clock: &Clock, state: &State, frame: &mut Frame, size: Size) {
             Size::new(rect.width - RING, rect.height - RING),
         );
         frame.stroke(&kit::rounded(ring, RADIUS - inset), stroke(RING, ACCENT));
-    }
-}
-
-/// The pointer's look: a hand over the group.
-pub fn interaction(state: &State) -> mouse::Interaction {
-    if state.item.hover {
-        mouse::Interaction::Pointer
-    } else {
-        mouse::Interaction::default()
     }
 }
 

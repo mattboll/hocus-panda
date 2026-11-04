@@ -770,8 +770,8 @@ impl Shell {
             namespace: Some(NAMESPACE.to_owned()),
         };
         let (id, open) = Message::layershell_open(settings);
-        // Inside the rim; its group takes the pointer (the calendar's item),
-        // and hands the rest on to the popovers as the bar's surface does.
+        // Inside the rim; pointer events go through to the bar, which hears
+        // them for the clock's group too (the calendar's item).
         let clock = NewLayerShellSettings {
             size: Some(bar.clock_surface),
             layer: Layer::Top,
@@ -780,7 +780,7 @@ impl Shell {
             margin: Some((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
-            events_transparent: false,
+            events_transparent: true,
             namespace: Some(CLOCK_NAMESPACE.to_owned()),
         };
         let (clock_id, open_clock) = Message::layershell_open(clock);
@@ -900,7 +900,6 @@ impl Shell {
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
             c.set_footer(&bar.output, bar.footer);
-            c.set_clock(&bar.output, bar.clock);
         });
         notifications::bars_changed();
     }
@@ -1592,6 +1591,7 @@ impl Shell {
                 .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
+        let output = bar.output.clone();
         let (top, bottom) = if self.look.glass {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
@@ -1617,7 +1617,7 @@ impl Shell {
         let bar = container(row![space::horizontal(), column])
             .width(Length::Fill)
             .height(Length::Fill);
-        let pointer = canvas(popover::BarPointer)
+        let pointer = canvas(popover::BarPointer { bar: output })
             .width(Length::Fill)
             .height(Length::Fill);
         stack![bar, pointer].into()

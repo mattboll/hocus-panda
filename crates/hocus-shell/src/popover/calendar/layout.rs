@@ -64,6 +64,10 @@ pub(super) const DAY_NAME: f32 = 13.5;
 pub(super) const RELATIVE: f32 = 12.5;
 pub(super) const COUNT: f32 = 12.0;
 const DAY_GAP: f32 = 8.0;
+/// How far the day's line may reach into the right padding before its
+/// name is cut, as the mockup's line does with a long day ("Mercredi 4
+/// novembre", "aujourd'hui" and "6 événements" are 299 px in 286).
+const LINE_OVER: f32 = 14.0;
 /// The list: 2 px between rows, 236 px at most.
 const LIST_GAP: f32 = 2.0;
 pub(super) const LIST_MOST: f32 = 236.0;
@@ -355,8 +359,14 @@ impl Viewport {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Body {
     /// A note, centred: an empty day, no source, a day not loaded.
-    Note { text: String, middle: f32 },
-    Rows { list: Viewport, rows: Vec<Row> },
+    Note {
+        text: String,
+        middle: f32,
+    },
+    Rows {
+        list: Viewport,
+        rows: Vec<Row>,
+    },
 }
 
 /// What can be clicked: an event by its row's place in the list.
@@ -449,8 +459,7 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
         Point::new(next.x - BUTTON_GAP - BUTTON, next.y),
         Size::new(BUTTON, BUTTON),
     );
-    let today_width =
-        measure(words.today_button(), TODAY_TEXT, MANROPE_SEMIBOLD) + 2.0 * TODAY_PAD;
+    let today_width = measure(words.today_button(), TODAY_TEXT, MANROPE_SEMIBOLD) + 2.0 * TODAY_PAD;
     let today_button = Rectangle::new(
         Point::new(previous.x - BUTTON_GAP - today_width, next.y),
         Size::new(today_width, BUTTON),
@@ -469,8 +478,7 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
     let top = HEADER_TOP + HEADER + GAP;
     let letters_middle = top + LETTERS_ROW / 2.0;
     let column = (ROOM - WEEK_COLUMN) / 7.0;
-    let columns: [f32; 7] =
-        std::array::from_fn(|i| LEFT + WEEK_COLUMN + (i as f32 + 0.5) * column);
+    let columns: [f32; 7] = std::array::from_fn(|i| LEFT + WEEK_COLUMN + (i as f32 + 0.5) * column);
     let start = grid_start(view.month);
     let weeks = (0..WEEKS)
         .map(|w| {
@@ -480,7 +488,10 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
                 .map(|i| {
                     let date = days_on(monday, i as i64);
                     let rect = Rectangle::new(
-                        Point::new(columns[i] - DAY.width / 2.0, row_top + (ROW - DAY.height) / 2.0),
+                        Point::new(
+                            columns[i] - DAY.width / 2.0,
+                            row_top + (ROW - DAY.height) / 2.0,
+                        ),
                         DAY,
                     );
                     Cell {
@@ -522,16 +533,23 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
     let relative_width = relative.map_or(0.0, |r| measure(r, RELATIVE, MANROPE) + DAY_GAP);
     let name = kit::elide(
         &words.day_title(view.selected, context.today.year()),
-        ROOM - count_width - relative_width,
+        ROOM + LINE_OVER - count_width - relative_width,
         |t| measure(t, DAY_NAME, MANROPE_BOLD),
     );
     let name_width = measure(&name, DAY_NAME, MANROPE_BOLD);
+    let count_right =
+        (LEFT + name_width + relative_width + count_width).clamp(RIGHT, RIGHT + LINE_OVER);
     let day_line = DayLine {
         title: on_baseline(name, LEFT, baseline, DAY_NAME),
         relative: relative.map(|r| {
-            on_baseline(r.to_owned(), LEFT + name_width + DAY_GAP, baseline, RELATIVE)
+            on_baseline(
+                r.to_owned(),
+                LEFT + name_width + DAY_GAP,
+                baseline,
+                RELATIVE,
+            )
         }),
-        count: count.map(|c| on_baseline(c, RIGHT, baseline, COUNT)),
+        count: count.map(|c| on_baseline(c, count_right, baseline, COUNT)),
     };
     let line_end = line_top + DAY_NAME * LINE;
     // The agenda.
@@ -672,10 +690,11 @@ fn rows(events: &[Ev], view: &View, context: &Context<'_>, measure: Measure<'_>)
             }),
             ..meta
         });
-        let column = EVENT_TITLE * LINE
-            + meta.as_ref().map_or(0.0, |_| META_GAP + META * LINE);
+        let column = EVENT_TITLE * LINE + meta.as_ref().map_or(0.0, |_| META_GAP + META * LINE);
         let times = START * MONO_LINE + TIME_LINES_GAP + END * MONO_LINE;
-        let base = EVENT_LEAST.max(2.0 * EVENT_PAD_Y + column.max(times)).ceil();
+        let base = EVENT_LEAST
+            .max(2.0 * EVENT_PAD_Y + column.max(times))
+            .ceil();
         let row = row(
             event,
             RowKind::Timed { start, end, meta },
@@ -741,8 +760,9 @@ fn times(event: &Ev, context: &Context<'_>) -> (jiff::civil::Time, jiff::civil::
     )
 }
 
-/// An event's details, unfolded: its time, its place, its calendar's name,
-/// its description on four lines at most, each cut to the row.
+/// An event's details, unfolded: its time, its place (an all-day row's:
+/// a timed one has it under its title), its calendar's name, its
+/// description on four lines at most, each cut to the row.
 fn details(event: &Ev, inset: f32, context: &Context<'_>, measure: Measure<'_>) -> Vec<String> {
     let room = ROOM - inset - EVENT_PAD_X;
     let mut width = |t: &str| measure(t, DETAILS, MANROPE);
@@ -759,7 +779,10 @@ fn details(event: &Ev, inset: f32, context: &Context<'_>, measure: Measure<'_>) 
         }
     };
     let mut lines = vec![when];
-    lines.extend(event.place.clone());
+    // A timed row shows its place under its title already.
+    if event.when.all_day() {
+        lines.extend(event.place.clone());
+    }
     lines.push(event.calendar.clone());
     let mut lines: Vec<String> = lines
         .into_iter()
@@ -1026,7 +1049,10 @@ mod tests {
         let today = laid.cell(TODAY).expect("today shows");
         assert!(today.today && today.selected && !today.outlined);
         assert!(laid.cell(date(2026, 11, 10)).is_some_and(|c| c.busy));
-        assert!(laid.cell(date(2026, 12, 3)).is_some_and(|c| c.busy && !c.in_month));
+        assert!(
+            laid.cell(date(2026, 12, 3))
+                .is_some_and(|c| c.busy && !c.in_month)
+        );
         // 34 × 30 buttons in seven equal columns after the 28 px one; six
         // rows of 32 px, 2 px apart, under the 18 px letters.
         assert_eq!(today.rect.size(), Size::new(34.0, 30.0));
@@ -1034,7 +1060,10 @@ mod tests {
         let (a, b) = (&laid.weeks[1].days[0], &laid.weeks[1].days[1]);
         assert!((b.rect.x - a.rect.x - column).abs() < 0.01);
         assert!((laid.weeks[2].middle - laid.weeks[1].middle - 34.0).abs() < 0.01);
-        assert_eq!(laid.weeks[0].middle, HEADER_TOP + 28.0 + 10.0 + 18.0 + 2.0 + 16.0);
+        assert_eq!(
+            laid.weeks[0].middle,
+            HEADER_TOP + 28.0 + 10.0 + 18.0 + 2.0 + 16.0
+        );
         // Its dot 4 px under its number.
         assert!((today.dot_middle - today.number_middle - (12.5 / 2.0 + 4.0 + 2.0)).abs() < 0.01);
         assert!(laid.today_faint);
@@ -1107,8 +1136,14 @@ mod tests {
         assert!(rows[2].height >= 44.0);
         assert_eq!(rows[3].top, rows[2].top + rows[2].height + 2.0);
         let said = laid.said(&view);
-        assert!(said.contains("rel=«aujourd'hui» count=«4 événements»"), "{said}");
-        assert!(said.contains("09:30–09:45 «Point d'équipe quotidien» video="), "{said}");
+        assert!(
+            said.contains("rel=«aujourd'hui» count=«4 événements»"),
+            "{said}"
+        );
+        assert!(
+            said.contains("09:30–09:45 «Point d'équipe quotidien» video="),
+            "{said}"
+        );
         // Another day: nothing greyed.
         let mut tomorrow = view.clone();
         tomorrow.select(date(2026, 11, 5));
@@ -1175,13 +1210,13 @@ mod tests {
         view.unfolded = Some(EventId::new("x"));
         let laid = lay_out(&view, &context(&busy, &agenda), &mut measure);
         let row = &laid.rows()[0];
+        // Its place under its title already.
         assert_eq!(row.details[0], "14:00 – 15:30");
-        assert_eq!(row.details[1], "Salle Jupiter");
-        assert_eq!(row.details[2], "Travail");
+        assert_eq!(row.details[1], "Travail");
         // The description on four lines at most, the last cut.
-        assert_eq!(row.details.len(), 3 + 4, "{:?}", row.details);
-        assert!(row.details[3].starts_with("Un long ordre du jour :"));
-        assert!(row.details[6].ends_with('…'), "{:?}", row.details);
+        assert_eq!(row.details.len(), 2 + 4, "{:?}", row.details);
+        assert!(row.details[2].starts_with("Un long ordre du jour :"));
+        assert!(row.details[5].ends_with('…'), "{:?}", row.details);
         assert!(row.height > folded.rows()[0].height);
         assert_eq!(laid.rows()[1].top, row.top + row.height + 2.0);
         // An event with a page never unfolds.

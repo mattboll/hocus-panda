@@ -474,7 +474,8 @@ fn at_the_cards_end_its_first_line_becomes_the_card() -> anyhow::Result<()> {
 }
 
 #[test]
-fn a_line_opens_its_call_else_its_page_and_more_opens_nothing_yet() -> anyhow::Result<()> {
+fn a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar() -> anyhow::Result<()>
+{
     let Some(shell) = ready() else {
         return Ok(());
     };
@@ -491,17 +492,23 @@ fn a_line_opens_its_call_else_its_page_and_more_opens_nothing_yet() -> anyhow::R
     // With a video link: the call.
     common::click_on(&mut bed.hp, at(0), TODAY_NAMESPACE)?;
     assert_eq!(bed.opened(1)?, ["https://meet.example.org/entretien"]);
-    // Without: its page.
+    // Without: the calendar (Day.5) on today, the event chosen, a page or
+    // none.
+    let mark = bed.mark();
     common::click_on(&mut bed.hp, at(1), TODAY_NAMESPACE)?;
-    assert_eq!(
-        bed.opened(2)?[1],
-        "https://calendar.example.org/event/workshop"
-    );
-    // Neither: nothing, said.
+    bed.logged_since(
+        mark,
+        "the calendar opens",
+        &["day=2026-11-04", "focus=Some(Event(EventId(\"workshop\")))"],
+    )?;
     let mark = bed.mark();
     common::click_on(&mut bed.hp, at(2), TODAY_NAMESPACE)?;
-    bed.logged_since(mark, "a line of today has no link nor page", &[])?;
-    // "+ N": Day.5's calendar, not built yet.
+    bed.logged_since(
+        mark,
+        "the calendar opens",
+        &["day=2026-11-04", "focus=Some(Event("],
+    )?;
+    // "+ N": the calendar on today.
     let mark = bed.mark();
     bed.rewrite(&busy(40))?;
     let line = bed.logged_since(mark, "today is drawn at rest", &["autres aujourd'hui"])?;
@@ -513,8 +520,12 @@ fn a_line_opens_its_call_else_its_page_and_more_opens_nothing_yet() -> anyhow::R
         (f64::from(LINE_X + 40), f64::from(line_middle(top, shown))),
         TODAY_NAMESPACE,
     )?;
-    bed.logged_since(mark, "Day.5's calendar is not built", &[])?;
-    assert_eq!(bed.opened(2)?.len(), 2);
+    bed.logged_since(
+        mark,
+        "the calendar opens",
+        &["day=2026-11-04", "focus=Some(Days)"],
+    )?;
+    assert_eq!(bed.opened(1)?.len(), 1);
     Ok(())
 }
 

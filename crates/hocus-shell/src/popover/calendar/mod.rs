@@ -140,10 +140,7 @@ fn agenda(day: Date, now: &Zoned) -> Agenda {
         return Agenda::NoSource;
     }
     let zone = now.time_zone();
-    let (from, to) = (
-        midnight(day, zone),
-        midnight(layout::days_on(day, 1), zone),
-    );
+    let (from, to) = (midnight(day, zone), midnight(layout::days_on(day, 1), zone));
     let events: Vec<Ev> = held
         .events(from, to, zone)
         .into_iter()

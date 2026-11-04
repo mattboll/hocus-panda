@@ -239,10 +239,10 @@ impl<Message> canvas::Program<Message> for Clock {
         state: &mut State,
         event: &iced::Event,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
-            return item::update(self, state, event, bounds, cursor);
+            return None;
         };
         let now = *now;
         let time = self.wall.now();
@@ -327,15 +327,6 @@ impl<Message> canvas::Program<Message> for Clock {
             }
         }
         vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        item::interaction(state)
     }
 }
 

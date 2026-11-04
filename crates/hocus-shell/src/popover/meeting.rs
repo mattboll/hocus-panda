@@ -8,7 +8,8 @@
 //! `text.dim`, the times in Martian Mono), and the link's address or the
 //! place with a 13 px camera or pin (12.5 px, `text.faint`). Then
 //! **Rejoindre** (34 px, radius 9, `#5B8DEF`) with a link, **Voir dans le
-//! calendrier** (30 px, `rgba(255,255,255,0.06)`) with a page, a divider,
+//! calendrier** (30 px, `rgba(255,255,255,0.06)`), which opens the
+//! calendar on today with the meeting chosen (Day.5), a divider,
 //! and "ENSUITE" with the next event's time and title on one line. 14 px
 //! in, its parts 10 px apart.
 
@@ -127,14 +128,13 @@ fn layout(card: &Card) -> Layout {
         ));
         y += JOIN;
     }
-    if card.page.is_some() {
-        y += GAP;
-        buttons.push((
-            Target::Calendar,
-            Rectangle::new(Point::new(left, y), Size::new(room, CALENDAR)),
-        ));
-        y += CALENDAR;
-    }
+    // The calendar (Day.5) on today, the meeting chosen.
+    y += GAP;
+    buttons.push((
+        Target::Calendar,
+        Rectangle::new(Point::new(left, y), Size::new(room, CALENDAR)),
+    ));
+    y += CALENDAR;
     let then = card.then.as_ref().map(|_| {
         y += GAP;
         let rule = y;
@@ -458,12 +458,19 @@ impl Panel {
     }
 
     fn act(target: Target) {
-        let effect = match target {
-            Target::Join => crate::meeting::join(),
-            Target::Calendar => crate::meeting::open_page(),
-        };
-        super::send(effect.into_iter().collect());
-        event(Seen::Chosen);
+        match target {
+            Target::Join => {
+                super::send(crate::meeting::join().into_iter().collect());
+                event(Seen::Chosen);
+            }
+            // The calendar takes this popover's place (it closes it).
+            Target::Calendar => {
+                let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
+                if let Some(bar) = bar {
+                    super::send(crate::meeting::open_in_calendar(&bar).into_iter().collect());
+                }
+            }
+        }
     }
 
     fn targets() -> Vec<Target> {
@@ -566,8 +573,10 @@ mod tests {
         assert_eq!(calendar.height, 30.0);
         assert_eq!(calendar.y - (join.y + join.height), GAP);
         assert!(all.then.is_some());
+        // Without a link or a page: the calendar's button alone (Day.5).
         let bare = layout(&card(false, false, false));
-        assert!(bare.buttons.is_empty());
+        let targets: Vec<Target> = bare.buttons.iter().map(|(t, _)| *t).collect();
+        assert_eq!(targets, [Target::Calendar]);
         assert!(bare.then.is_none());
         assert!(bare.height < all.height);
         assert_eq!(

@@ -61,9 +61,9 @@ use std::{
 };
 
 use hocus_link::{
-    AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
-    Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE,
-    POPOVER_WIDTH, TODAY_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
+    AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
+    FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE,
+    POPOVER_NAMESPACE, POPOVER_WIDTH, TODAY_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -123,14 +123,14 @@ pub enum Item {
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
     /// The next meeting's card (Day.2): a click, or `Enter`, opens the
-    /// meeting (its page in its calendar until Day.5).
+    /// calendar (Day.5) on today, its meeting chosen.
     Meeting,
     /// The card's join button: a click, or `Enter`, joins its video call.
     Join,
     /// The mini form's meeting mark: its popover, by a hover or a click.
     MeetingMark,
     /// A line of Today (Day.3), by its row from the top: a click, or
-    /// `Enter`, opens its call, else its page.
+    /// `Enter`, opens its call, else the calendar on its event.
     TodayLine(u8),
     /// Today's "+ N autres aujourd'hui": Day.5's calendar on today.
     TodayMore,
@@ -361,7 +361,8 @@ impl Item {
             MEETING_NAMESPACE => place.meeting.unwrap_or(place.levels),
             TODAY_NAMESPACE => place.today.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
-            CLOCK_NAMESPACE => place.clock.unwrap_or(place.levels),
+            // The bar's own surface hears the clock's group's keys.
+            CLOCK_NAMESPACE => place.surface,
             _ => place.connections,
         }
     }
@@ -387,8 +388,6 @@ pub struct Place {
     pub agents: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
-    /// Its clock's (Day.5: the calendar's item), once the bar has told it.
-    pub clock: Option<window::Id>,
     /// The footer's (5.5), once the bar has told it.
     pub footer: Option<window::Id>,
     /// The sign of what is in use (5.11), while it shows.
@@ -581,6 +580,14 @@ pub enum Effect {
     },
     /// A line to the compositor.
     Tell(ToCompositor),
+    /// The calendar opens on `bar` on `day`, `event` chosen (Day.5): from
+    /// what acts within the controller (the next meeting's card, Today's
+    /// lines), carried out after it.
+    OpenCalendar {
+        bar: String,
+        day: jiff::civil::Date,
+        event: Option<hocus_day::model::EventId>,
+    },
     /// The capture's toolbar on `output` (5.8), `size` large: at its
     /// bottom, taking the pointer, never the keyboard.
     CaptureBar {
@@ -686,7 +693,6 @@ impl Controller {
         (levels, connections, desktops, agents): (window::Id, window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
-        let clock = self.bars.get(bar).and_then(|p| p.clock);
         let footer = self.bars.get(bar).and_then(|p| p.footer);
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let tray = self.bars.get(bar).and_then(|p| p.tray);
@@ -700,7 +706,6 @@ impl Controller {
             desktops,
             agents,
             surface,
-            clock,
             footer,
             in_use,
             tray,
@@ -714,13 +719,6 @@ impl Controller {
     pub fn set_footer(&mut self, bar: &str, footer: window::Id) {
         if let Some(place) = self.bars.get_mut(bar) {
             place.footer = Some(footer);
-        }
-    }
-
-    /// Bar `bar`'s clock's surface is `clock`.
-    pub fn set_clock(&mut self, bar: &str, clock: window::Id) {
-        if let Some(place) = self.bars.get_mut(bar) {
-            place.clock = Some(clock);
         }
     }
 
@@ -1406,10 +1404,10 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Menu => Some(Effect::ToggleLauncher(bar)),
         Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
         Item::Calendar => None,
-        Item::Meeting => crate::meeting::open_page(),
+        Item::Meeting => crate::meeting::open_in_calendar(&bar),
         Item::Join => crate::meeting::join(),
         Item::TodayLine(row) => crate::today::open(&bar, usize::from(row)),
-        Item::TodayMore => crate::today::open_more(),
+        Item::TodayMore => crate::today::open_more(&bar),
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1597,16 +1595,45 @@ pub fn take_keys() -> Vec<Pressed> {
 
 /// The bar's own surface, under its clock and its levels, for the
 /// popovers: where the pointer goes (the cone), and presses off the
-/// items. It never draws, nor asks to.
-#[derive(Debug, Clone, Copy)]
-pub struct BarPointer;
+/// items; and the clock's group (Day.5), whose surface lets the pointer
+/// through: the pointer on it, a hand, and a press opening the calendar.
+/// It never draws, nor asks to.
+#[derive(Debug, Clone)]
+pub struct BarPointer {
+    /// The bar's screen's name.
+    pub bar: String,
+}
+
+impl BarPointer {
+    /// Where the clock's group is, in the bar's frame, while it shows.
+    fn calendar(&self) -> Option<Rectangle> {
+        with(|c| {
+            c.items
+                .get(&(self.bar.clone(), CLOCK_NAMESPACE))
+                .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
+                .map(|(_, rect)| *rect)
+        })
+    }
+
+    /// `position` on the surface at `bounds`, in the bar's frame.
+    fn in_bar(position: Point, bounds: Rectangle) -> Point {
+        Point::new(position.x - bounds.x - bounds.width, position.y - bounds.y)
+    }
+}
+
+/// The bar's surface's pointer: on the clock's group, and where it was.
+#[derive(Debug, Default)]
+pub struct BarPointerState {
+    on_clock: bool,
+    at: Option<Point>,
+}
 
 impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
-    type State = ();
+    type State = BarPointerState;
 
     fn update(
         &self,
-        _state: &mut (),
+        state: &mut BarPointerState,
         seen: &iced::Event,
         bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
@@ -1614,8 +1641,45 @@ impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
         use iced::mouse::Event as Mouse;
         match seen {
             iced::Event::Mouse(Mouse::CursorMoved { position }) => {
-                let at = Point::new(position.x - bounds.x - bounds.width, position.y - bounds.y);
-                event(Event::Pointer { at });
+                let at = Self::in_bar(*position, bounds);
+                state.at = Some(at);
+                let group = self.calendar().filter(|r| r.contains(at));
+                match (group, state.on_clock) {
+                    (Some(rect), false) => {
+                        state.on_clock = true;
+                        crate::clock::item::hover(&self.bar, true);
+                        event(Event::ItemEnter {
+                            bar: self.bar.clone(),
+                            item: Item::Calendar,
+                            rect,
+                        });
+                    }
+                    (None, true) => {
+                        state.on_clock = false;
+                        crate::clock::item::hover(&self.bar, false);
+                        event(Event::ItemLeave { at });
+                    }
+                    (Some(_), true) => {}
+                    (None, false) => event(Event::Pointer { at }),
+                }
+            }
+            iced::Event::Mouse(Mouse::CursorLeft) if state.on_clock => {
+                state.on_clock = false;
+                crate::clock::item::hover(&self.bar, false);
+                event(Event::ItemLeave {
+                    at: state.at.unwrap_or(Point::ORIGIN),
+                });
+            }
+            iced::Event::Mouse(Mouse::ButtonPressed(iced::mouse::Button::Left))
+                if state.on_clock =>
+            {
+                if let Some(rect) = self.calendar() {
+                    event(Event::ItemPress {
+                        bar: self.bar.clone(),
+                        item: Item::Calendar,
+                        rect,
+                    });
+                }
             }
             iced::Event::Mouse(Mouse::ButtonPressed(_)) => event(Event::PressElsewhere),
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -1633,13 +1697,26 @@ impl<Message> iced::widget::canvas::Program<Message> for BarPointer {
 
     fn draw(
         &self,
-        _state: &(),
+        _state: &BarPointerState,
         _renderer: &iced::Renderer,
         _theme: &iced::Theme,
         _bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<iced::widget::canvas::Geometry> {
         Vec::new()
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &BarPointerState,
+        _bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> iced::mouse::Interaction {
+        if state.on_clock {
+            iced::mouse::Interaction::Pointer
+        } else {
+            iced::mouse::Interaction::default()
+        }
     }
 }
 
@@ -1882,6 +1959,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Copy(text) => {
             tell(ToCompositor::Copy(text));
+            Vec::new()
+        }
+        Effect::OpenCalendar { bar, day, event } => {
+            calendar::open_on(&bar, day, event);
             Vec::new()
         }
         Effect::TrayMenu { bar, key, rect } => {
@@ -2485,7 +2566,6 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
-            clock: None,
             footer: None,
             in_use: None,
             tray: None,
@@ -2516,7 +2596,6 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
-            clock: None,
             footer: None,
             in_use: None,
             tray: None,
@@ -2765,6 +2844,64 @@ mod tests {
                 row: row(0.0)
             }]
         );
+    }
+
+    #[test]
+    fn the_clocks_group_opens_the_calendar_by_a_click_only_and_holds_the_keyboard_after_esc() {
+        let mut c = Controller::default();
+        let surface = window::Id::unique();
+        c.place(
+            BAR,
+            Form::Mini,
+            surface,
+            (
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+            ),
+        );
+        c.motion = false;
+        let t = Instant::now();
+        let group = Rectangle::new(Point::new(-52.0, 12.0), Size::new(48.0, 46.0));
+        c.set_items(BAR, CLOCK_NAMESPACE, vec![(Item::Calendar, group)]);
+        // Resting on it opens nothing, in the mini form too.
+        assert!(!Item::Calendar.hovers(Form::Mini) && !Item::Calendar.hovers(Form::Full));
+        c.handle(
+            Event::ItemEnter {
+                bar: BAR.to_owned(),
+                item: Item::Calendar,
+                rect: group,
+            },
+            t,
+        );
+        c.tick(t + HOVER_OPEN * 4);
+        assert_eq!(c.open_item(), None);
+        // A click: 320 wide, its top on the group's, the group lit.
+        let press = || Event::ItemPress {
+            bar: BAR.to_owned(),
+            item: Item::Calendar,
+            rect: group,
+        };
+        let effects = c.handle(press(), t);
+        let opened = effects.iter().find_map(|e| match e {
+            Effect::Open { size, .. } => Some(*size),
+            _ => None,
+        });
+        assert_eq!(opened.map(|s| s.0), Some(320), "{effects:?}");
+        assert!(effects.contains(&Effect::Wake(CLOCK_NAMESPACE)));
+        assert!(c.shows(BAR, Item::Calendar));
+        assert!(!Item::Calendar.on_bottom());
+        // `Esc`: closed, the keyboard on the bar's surface, which hears
+        // the group's keys; `Enter` opens it again.
+        let effects = c.handle(Event::Escape, t);
+        assert!(effects.contains(&Effect::Keyboard(surface, KeyboardInteractivity::Exclusive)));
+        assert!(c.focused(BAR, Item::Calendar) && c.open_item().is_none());
+        c.handle(Event::ItemActivate, t);
+        assert!(c.shows(BAR, Item::Calendar));
+        // A second click closes it.
+        c.handle(press(), t);
+        assert_eq!(c.open_item(), None);
     }
 
     #[test]

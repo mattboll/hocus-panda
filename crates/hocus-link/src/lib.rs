@@ -461,7 +461,10 @@ pub enum DayAsk {
     Refresh,
     /// The calendar opens (Day.5) on `day` (`2026-11-04`), the event of
     /// that id chosen, as the next meeting's card opens it.
-    Calendar { day: String, event: Option<String> },
+    Calendar {
+        day: String,
+        event: Option<String>,
+    },
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the

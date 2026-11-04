@@ -11,14 +11,14 @@ use iced::{
 
 use super::layout::{
     ALL_DAY_DOT, ALL_DAY_PAD, ALL_DAY_TITLE, BAR, Body, COUNT, DAY_NAME, DETAILS, DETAILS_LINE,
-    DOT, END, EVENT_PAD_X, EVENT_PAD_Y, EVENT_TITLE, ICON, ICON_GAP, LEFT, LETTER, Laid, META,
-    META_GAP, MONO_LINE, MARTIAN, NOTE, NUMBER, RELATIVE, RIGHT, Row, RowKind, SPAN, START,
-    Stop, TIME_LINES_GAP, TITLE, TODAY_TEXT, Target, View, WEEK_NUMBER, WEEK_WORD,
+    DOT, END, EVENT_PAD_X, EVENT_PAD_Y, EVENT_TITLE, ICON, ICON_GAP, LEFT, LETTER, Laid, MARTIAN,
+    META, META_GAP, MONO_LINE, NOTE, NUMBER, RELATIVE, RIGHT, Row, RowKind, SPAN, START, Stop,
+    TIME_LINES_GAP, TITLE, TODAY_TEXT, Target, View, WEEK_NUMBER, WEEK_WORD,
 };
 use super::words::Words;
 use crate::{
     clock::time::Lang,
-    levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, ring, rgb, stroke},
+    levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring, stroke},
     popover::kit::{self, Clip, FILL, MANROPE_SEMIBOLD},
 };
 
@@ -99,16 +99,14 @@ fn colour([r, g, b]: [u8; 3]) -> Color {
 }
 
 /// The calendar.
-pub(super) fn calendar(
-    f: &mut Frame,
-    laid: &Laid,
-    view: &View,
-    hover: Option<Target>,
-    clip: Clip,
-) {
+pub(super) fn calendar(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Target>, clip: Clip) {
     header(f, laid, view, hover);
     month(f, laid, hover);
-    f.fill_rectangle(Point::new(LEFT, laid.rule), Size::new(RIGHT - LEFT, 1.0), RULE);
+    f.fill_rectangle(
+        Point::new(LEFT, laid.rule),
+        Size::new(RIGHT - LEFT, 1.0),
+        RULE,
+    );
     day_line(f, laid);
     match &laid.body {
         Body::Note { text, middle } => f.fill_text(said(
@@ -162,9 +160,7 @@ fn header(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Target>) {
         },
     );
     f.fill_text(said(
-        Words::new(Lang::of_messages())
-            .today_button()
-            .to_owned(),
+        Words::new(Lang::of_messages()).today_button().to_owned(),
         today.center(),
         (TODAY_TEXT, LINE),
         MANROPE_SEMIBOLD,
@@ -242,14 +238,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
         for cell in &week.days {
             let shape = kit::rounded(cell.rect, DAY_RADIUS);
             if cell.selected {
-                f.fill(
-                    &shape,
-                    if cell.today {
-                        TODAY_CHOSEN
-                    } else {
-                        DAY_CHOSEN
-                    },
-                );
+                f.fill(&shape, if cell.today { TODAY_CHOSEN } else { DAY_CHOSEN });
             } else if hover == Some(Target::Day(cell.date)) {
                 f.fill(&shape, DAY_LIT);
             }
@@ -401,35 +390,30 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
             if lit {
                 f.fill(&shape, ROW_LIT);
             }
+            // Text centred on its line: the CPU's clip reads it so.
             let top = rect.y + EVENT_PAD_Y;
             let left = x + EVENT_PAD_X;
             clip.fill(
                 f,
-                from_top(
-                    said(
-                        start.clone(),
-                        Point::new(left, top),
-                        (START, MONO_LINE),
-                        MARTIAN,
-                        fade(TEXT),
-                        Alignment::Left,
-                    ),
-                    top,
+                said(
+                    start.clone(),
+                    Point::new(left, top + START * MONO_LINE / 2.0),
+                    (START, MONO_LINE),
+                    MARTIAN,
+                    fade(TEXT),
+                    Alignment::Left,
                 ),
             );
             let end_top = top + START * MONO_LINE + TIME_LINES_GAP;
             clip.fill(
                 f,
-                from_top(
-                    said(
-                        end.clone(),
-                        Point::new(left, end_top),
-                        (END, MONO_LINE),
-                        MARTIAN,
-                        fade(FAINT),
-                        Alignment::Left,
-                    ),
-                    end_top,
+                said(
+                    end.clone(),
+                    Point::new(left, end_top + END * MONO_LINE / 2.0),
+                    (END, MONO_LINE),
+                    MARTIAN,
+                    fade(FAINT),
+                    Alignment::Left,
                 ),
             );
             // The bar, between the column and the title.
@@ -441,16 +425,13 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
             let title_x = x + row.inset;
             clip.fill(
                 f,
-                from_top(
-                    said(
-                        row.title.clone(),
-                        Point::new(title_x, top),
-                        (EVENT_TITLE, LINE),
-                        MANROPE_SEMIBOLD,
-                        fade(TEXT),
-                        Alignment::Left,
-                    ),
-                    top,
+                said(
+                    row.title.clone(),
+                    Point::new(title_x, top + EVENT_TITLE * LINE / 2.0),
+                    (EVENT_TITLE, LINE),
+                    MANROPE_SEMIBOLD,
+                    fade(TEXT),
+                    Alignment::Left,
                 ),
             );
             if let Some(meta) = meta {

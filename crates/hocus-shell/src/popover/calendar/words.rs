@@ -114,7 +114,11 @@ impl Words {
 
     /// The header's month: "Novembre 2026", "November 2026".
     pub fn month_title(self, month: Date) -> String {
-        format!("{} {}", capitalised(self.month(month.month())), month.year())
+        format!(
+            "{} {}",
+            capitalised(self.month(month.month())),
+            month.year()
+        )
     }
 
     /// The columns' letters, Monday first.
@@ -301,7 +305,10 @@ mod tests {
         assert_eq!(en.month_title(day), "November 2026");
         assert_eq!(fr.day_title(day, 2026), "Mercredi 4 novembre");
         assert_eq!(en.day_title(day, 2026), "Wednesday 4 November");
-        assert_eq!(fr.day_title(date(2027, 1, 6), 2026), "Mercredi 6 janvier 2027");
+        assert_eq!(
+            fr.day_title(date(2027, 1, 6), 2026),
+            "Mercredi 6 janvier 2027"
+        );
         assert_eq!(fr.relative(day, day), Some("aujourd'hui"));
         assert_eq!(en.relative(date(2026, 11, 5), day), Some("tomorrow"));
         assert_eq!(fr.relative(date(2026, 11, 3), day), Some("hier"));

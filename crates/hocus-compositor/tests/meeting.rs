@@ -567,8 +567,8 @@ fn at_its_end_the_next_meeting_takes_the_card_at_the_minutes_change() -> anyhow:
 }
 
 #[test]
-fn the_card_opens_the_meetings_page_and_its_button_the_call_ending_the_halo() -> anyhow::Result<()>
-{
+fn the_card_opens_the_calendar_on_its_meeting_and_its_button_the_call_ending_the_halo()
+-> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
@@ -580,18 +580,27 @@ fn the_card_opens_the_meetings_page_and_its_button_the_call_ending_the_halo() ->
     )?;
     bed.card_since(0, &["«Point produit» 14:08 · dans 8\u{a0}min look=Soon"])?;
     bed.halo(Some(Concern::MeetingSoon))?;
-    // The card, on its title: the event's page in its calendar.
+    // The card, on its title: the calendar (Day.5) on today, the meeting
+    // chosen.
+    let mark = bed.mark();
     let title = (CARD.0 + 40, CARD.1 + 14);
     bed.click_part(title, "Card")?;
-    let opened = bed.opened(1)?;
-    assert_eq!(opened, ["https://calendar.example.org/event/point"]);
+    bed.logged_since(
+        mark,
+        "the calendar opens",
+        &["day=2026-11-04", "focus=Some(Event(EventId(\"point\")))"],
+    )?;
+    let shown = bed.hp.dispatch_until(common::WAIT, |hp| {
+        common::drawn_popovers(hp).iter().any(|p| p.width == 320)
+    })?;
+    anyhow::ensure!(shown, "no calendar drawn");
     // Opened: its halo ends (§6).
     bed.halo(None)?;
     // The button: the video call.
     let button = (JOIN_FILL.0 + 12, JOIN_FILL.1);
     bed.click_part(button, "Join")?;
-    let opened = bed.opened(2)?;
-    assert_eq!(opened[1], "https://meet.example.org/abc-defg");
+    let opened = bed.opened(1)?;
+    assert_eq!(opened[0], "https://meet.example.org/abc-defg");
     Ok(())
 }
 
