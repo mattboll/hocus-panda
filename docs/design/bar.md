@@ -1030,8 +1030,9 @@ control panel is not part of the product.
   the mockup. A row runs `wpctl set-default ID`: WirePlumber then makes
   that sink the default, whose own volume the slider shows. A mute or a
   step asked for one output is never carried over to the next.
-- **The wheel**: a mouse's notch is one step (its pixels after it count for
-  nothing); a touchpad's scrolling makes a step each 15 px.
+- **The wheel**: a mouse's notch is one step, a fast spin's several in one
+  event each (#487; its pixels after it count for nothing); a touchpad's
+  scrolling makes a step each 15 logical px, at any scale (#488).
 - **Not built:** the microphone and the volume per application (3.4b, below); the
   other popovers (3.5–3.7, since built); names for screen readers (iced 0.14 has no
   accessibility tree: the Accessibility milestone); the bar's keyboard
@@ -1489,6 +1490,12 @@ What issue #465 changes under the five popovers, nothing on screen.
   the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
   FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
   the shell divides by it.
+- **A touchpad's pixels** are multiplied by the scale too; the kit's
+  `Wheel` divides them as it does the notches, so a list scrolls by the
+  logical pixels the fingers moved, and the touchpad's notches are 15
+  logical px, at any scale (#488). Every list and level counts through it:
+  the bar's sound and brightness rows (#487, which counted a fast spin as
+  one notch) and the calendar's list among them.
 - **Bluetooth's keys** lay the popover out from what it shows now, as the
   Wi-Fi's do since #455, not as last drawn: an arrow in the frame where
   `Enter` cleared a row's failure scrolls with the rows' new heights

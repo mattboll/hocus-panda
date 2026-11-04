@@ -106,8 +106,6 @@ pub(crate) const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
 pub(crate) const ACCENT: Color = rgb(0x6CC287);
 pub(crate) const RING: f32 = 3.0;
 pub(crate) const RING_OUT: f32 = 2.0;
-/// A wheel's notch is 15 px of scrolling, as the compositor writes it.
-const NOTCH: f32 = 15.0;
 
 pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -219,11 +217,8 @@ pub struct State {
     pointer: Option<Point>,
     hover: Option<Item>,
     last: Option<Point>,
-    /// Scrolling not yet a notch; a wheel's notch also comes as pixels,
-    /// right after it, which then count for nothing.
-    scroll: f32,
-    after_notch: bool,
-    scroll_up: bool,
+    /// The wheel and the touchpad, counted as the lists' (the kit's).
+    wheel: popover::kit::Wheel,
     /// The keyboard layout's button (the mini form).
     keyboard: crate::layouts::draw::RowState,
 }
@@ -598,8 +593,9 @@ impl Levels {
                     Some(Item::Brightness) => (LevelKey::BrightnessUp, LevelKey::BrightnessDown),
                     _ => return None,
                 };
-                for _ in 0..notches(state, *delta).unsigned_abs() {
-                    super::key(if state.scroll_up { up } else { down });
+                let notches = state.wheel.notches(delta, popover::kit::scale(&self.bar));
+                for _ in 0..notches.unsigned_abs() {
+                    super::key(if notches > 0 { up } else { down });
                 }
                 Some(canvas::Action::capture())
             }
@@ -626,42 +622,6 @@ pub(crate) fn pointer(
         mouse::Event::CursorLeft => None,
         _ => before,
     }
-}
-
-/// The notches a scroll makes, with what was scrolled before it: a wheel
-/// sends its notches as lines, then the same as pixels, which count for
-/// nothing; a touchpad sends pixels, a notch each [`NOTCH`]. Positive: up,
-/// louder; the direction is kept in `state.scroll_up`.
-fn notches(state: &mut State, delta: mouse::ScrollDelta) -> i32 {
-    let n = match delta {
-        mouse::ScrollDelta::Lines { y, .. } => {
-            state.after_notch = true;
-            state.scroll = 0.0;
-            if y > 0.0 {
-                1
-            } else if y < 0.0 {
-                -1
-            } else {
-                0
-            }
-        }
-        mouse::ScrollDelta::Pixels { y: 0.0, .. } => 0,
-        mouse::ScrollDelta::Pixels { .. } if state.after_notch => {
-            state.after_notch = false;
-            0
-        }
-        mouse::ScrollDelta::Pixels { y, .. } => {
-            if state.scroll * y < 0.0 {
-                state.scroll = 0.0;
-            }
-            state.scroll += y;
-            let n = (state.scroll / NOTCH).trunc();
-            state.scroll -= n * NOTCH;
-            n as i32
-        }
-    };
-    state.scroll_up = n > 0;
-    n
 }
 
 /// The full form's rows' middles, from the surface's bottom: the
@@ -1357,29 +1317,6 @@ mod tests {
         // A service gone keeps the gauge where it was.
         gauge.toward(None, t0, true, true);
         assert_eq!(gauge.at(t0), 100.0);
-    }
-
-    #[test]
-    fn a_wheels_notches_and_a_touchpads_pixels_make_steps() {
-        let mut state = State::default();
-        let lines = |y| mouse::ScrollDelta::Lines { x: 0.0, y };
-        let pixels = |y| mouse::ScrollDelta::Pixels { x: 0.0, y };
-        // A wheel: a notch each, its pixels counting for nothing.
-        assert_eq!(notches(&mut state, pixels(0.0)), 0);
-        assert_eq!(notches(&mut state, lines(1.0)), 1);
-        assert!(state.scroll_up);
-        assert_eq!(notches(&mut state, pixels(15.0)), 0);
-        // At scale 2, a notch is still one.
-        assert_eq!(notches(&mut state, lines(-2.0)), -1);
-        assert!(!state.scroll_up);
-        assert_eq!(notches(&mut state, pixels(-30.0)), 0);
-        // A touchpad: 15 px a notch, the rest kept, a turn back starting
-        // afresh.
-        assert_eq!(notches(&mut state, pixels(10.0)), 0);
-        assert_eq!(notches(&mut state, pixels(10.0)), 1);
-        assert_eq!(notches(&mut state, pixels(40.0)), 3);
-        assert_eq!(notches(&mut state, pixels(-4.0)), 0);
-        assert_eq!(notches(&mut state, pixels(-12.0)), -1);
     }
 
     #[test]
