@@ -38,6 +38,35 @@ pub fn snapshot(bar: &str) -> Option<Desktops> {
         .cloned()
 }
 
+/// The title of a window of the application that goes by one of `ids`
+/// (lower case): on any screen, the focused one first. Its application's
+/// id matches whole or by its last part (`org.mozilla.firefox`,
+/// `firefox`).
+pub fn title_of_app(ids: &[String]) -> Option<String> {
+    let desktops = DESKTOPS.lock().unwrap_or_else(PoisonError::into_inner);
+    let titles = TITLES.lock().unwrap_or_else(PoisonError::into_inner);
+    let (desktops, titles) = (desktops.as_ref()?, titles.as_ref()?);
+    let matches = |app: &str| {
+        let app = app.to_lowercase();
+        let last = app.rsplit('.').next().unwrap_or(&app).to_owned();
+        !app.is_empty() && ids.iter().any(|id| *id == app || *id == last)
+    };
+    let mut windows: Vec<(&String, &hocus_link::DeskWindow)> = desktops
+        .iter()
+        .flat_map(|(output, d)| d.windows.iter().map(move |w| (output, w)))
+        .filter(|(_, w)| matches(&w.app))
+        .collect();
+    windows.sort_by_key(|(_, w)| w.look != Look::Focused);
+    windows.into_iter().find_map(|(output, w)| {
+        let (_, title) = titles
+            .get(output)?
+            .titles
+            .iter()
+            .find(|(id, _)| *id == w.id)?;
+        Some(title.clone()).filter(|t| !t.is_empty())
+    })
+}
+
 /// The compositor says `desktops`: kept, their icons looked for, the
 /// desktops' surfaces woken (resized when their number changes the rows),
 /// and the list drawn again if it shows on that bar.

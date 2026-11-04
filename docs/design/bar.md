@@ -25,8 +25,9 @@ agents' item (section 5; 4.7, issue #390), the footer (section 4
 group 11, section 5; 5.5, issue #395), and the bar under the windows,
 brought in front by the screen's edge (sections 2 and 3; 5.13, issue
 #519), and the tray, the applications' icons over the footer (section 4
-group 11, section 5, section 9; 5.14, issue #531): see
-[as built](#as-built).
+group 11, section 5, section 9; 5.14, issue #531), and the sign under the
+clock of what uses the microphone, the camera or the screen, and its
+popover (5.12, issue #445): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -701,6 +702,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3); their history kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications` (5.4) | the bell's badge counts what was not seen; do not disturb holds the bubbles |
 | Applications' icons (the tray) | the desktop's own `org.kde.StatusNotifierWatcher` (and `org.freedesktop.StatusNotifierWatcher`), its host, on the notifications' session bus, in the shell; each item's properties and signals, its `com.canonical.dbusmenu` menu (as built, 5.14) | `Passive` items hidden; the attention icon while one `NeedsAttention` |
+| Microphone, camera, screen in use | PipeWire's graph, from the sound's `pw-dump --monitor`: `Stream/Input/Audio` nodes linked to a source, `Stream/Input/Video` nodes linked to a `Video/Source`, their `application.*` and `media.name` props; the processes holding `/dev/video*` open, from `/proc`, read on inotify's word that one was opened or closed, at most once a second and only while a camera's node exists; the compositor's `shares` and `recording` lines (5.11, 5.10) | the default source's mute greys the microphone; muted with `wpctl set-mute` as the sound's button (as built, 5.12) |
 | Clipboard | the compositor, which sees every selection | what clients copy (their text, else their PNG image), read off its loop, never what is marked secret, on the `copied` line of `hocus-link`; kept by the shell, sealed, in `$XDG_STATE_HOME/hocuspanda/clipboard` (as built, 5.6) |
 
 Every source is read off the event loop and pushes changes; nothing is
@@ -2620,7 +2622,127 @@ maintainer's spec (issue #396).
 While the screen is shared, a sign shows under the clock (48 wide, in
 both forms, where the agents' group or item was, which move under it) and
 its popover stops the share: [sharing.md](sharing.md), as built. 5.12
-groups it with the microphone and the camera (issue #445).
+groups it with the microphone and the camera (issue #445), below.
+
+### 5.12, what uses the microphone, the camera or the screen (2026-11-03)
+
+What the approved 5.12 mockup shows, variant A (issue #445): one sign
+under the clock, which 5.11's sharing sign and 5.10's recording item
+join as its screen.
+
+- **The sign** (`crates/hocus-shell/src/in_use/draw.rs`): a surface of
+  its own on each bar (`hocus-bar-in-use`, never in a capture, a share or
+  a recording), where the agents' group (the full form) or the agents'
+  item (the mini) was, centred; they move under it and 14 px. 48 wide,
+  radius 12, `rgba(255,255,255,0.05)` (`0.10` under the pointer and while
+  its popover shows), 6 px in above and under its tiles: a 30 × 24 tile a
+  kind in use (radius 7, 4 px apart), its 16 px icon (the mockup's
+  drawings, stroked 2 px at 24) in its colour on `#RRGGBB29` of it: the
+  microphone `#F5A35B` (muted: `#A9B2C2` on `rgba(255,255,255,0.06)`),
+  the camera `#6CC287`, the screen `#8FB3FF`, in that order. Stacked in
+  the mini form; in a row in the full one, 9 px in at its sides (one tile
+  is the same 48 × 36 sign in both forms). It pops in over 200 ms as it
+  appears (`ease-out`, from 0.9 of its size and transparent; a fade alone
+  with reduced motion and on the CPU, which draws no motion), then draws
+  only when what it shows changes. A tile coming or going resizes its
+  surface; the agents follow.
+- **When** (`in_use/mod.rs`): each use shows from the moment its source
+  says it, and lingers 3 s after it ends (on the monotonic clock: a
+  thread of its own sleeps until the next use to go, and without one
+  until told one); a use back while it lingers is the same use, its
+  "depuis" kept. The sign goes when the last use has lingered.
+- **The microphone**: the sound's `pw-dump --monitor`
+  (`levels/sound.rs`) keeps the graph's links too: a `Stream/Input/Audio`
+  node linked from a source (`Audio/Source`, `Audio/Source/Virtual`; not a
+  sink's monitor: a level meter on an output is not the microphone) is a
+  use, its streams taken together by application (its sandbox's app id,
+  else `application.name`, else its program); named by
+  `application.name`, else `application.process.binary`, else the
+  program of `application.process.id` (`/proc/PID/comm`); its icon as the
+  sound's popover finds it (its icon's name, its desktop file's).
+  Grey while the default source (else the first) is muted.
+- **The camera**: a `Stream/Input/Video` node linked from a
+  `Video/Source`, the same way; and the processes holding a camera's
+  device open (`in_use/cameras.rs`), for programs that open
+  `/dev/video0` themselves: a thread of its own, started with the first
+  camera's node, watches the devices (`/dev/video*`, or
+  `HOCUS_VIDEO_DEVICES`'s) with inotify (opened, closed) while a camera's
+  node exists, and reads `/proc/*/fd` when one was touched, at most once a
+  second (a touch during the second after a reading is read at its end);
+  without a node it sleeps, its watches dropped. A device it cannot
+  watch is read each second while a node exists. PipeWire's and
+  WirePlumber's own processes are left out (their opens are a stream's,
+  which the graph shows with its application); a program is named by its
+  desktop entry (by its program's name), else by its program.
+- **The screen**: the compositor's `shares` (5.11) and `recording`
+  (5.10): no longer items of their own, their lines and buttons are in
+  the popover.
+- **The popover** (`popover/in_use.rs`), 290 wide, as the bar's others: a
+  150 ms hover or a click opens it, the pointer leaving closes it 300 ms
+  later, `Tab` and the arrows go through its buttons, `Enter` acts, `Esc`
+  closes. "En ce moment" / "Right now" (14 px bold), then a line per use
+  (the microphone's, the camera's, the recording, the shares): the
+  application's 28 px icon (its letter on its colour without one; the
+  recording's red dot, amber while paused, on 5.10's tint) ringed 2 px in
+  its kind's colour, its name (13 px semibold) and "Micro ·
+  meet.google.com · depuis 12 min" / "Microphone · … · for 12 min" (11.5
+  px, the kind's colour; "Micro coupé" / "Microphone muted" while muted).
+  The detail is the title of the application's window (a window whose
+  application id is one of the stream's ids, whole or by its last part,
+  the focused one first), else the stream's `media.name`; a share's,
+  "partage la fenêtre « … »" / "sharing the window "…"" or the screen; the
+  recording's, "enregistrement" or "en pause" and its time ("0:12"). The
+  time: "depuis 12 s" under a minute, "depuis 12 min", "depuis 1 h 05"
+  ("for 1 h 5 min"); drawn again each second while it shows. A line too
+  long has its detail cut ("…"), what is used and since when kept. While
+  sharing, how many notifications wait for its end (5.11's line). Then
+  its buttons, 30 tall, radius 9, 8 px apart: **Couper le micro** /
+  **Mute the microphone** (`rgba(245,163,91,0.14)`, its 1 px ring
+  `0.6`), or **Rétablir le micro** / **Unmute** (no fill, a
+  `rgba(255,255,255,0.14)` ring), which mutes the default source as the
+  sound's popover's button does (`wpctl set-mute`); **Arrêter le
+  partage** / **Stop sharing** for each share (5.11's `#5B8DEF`; with
+  several, "Arrêter le partage avec Firefox"), which ends its session; the
+  recording's pause (or go on, 36 wide, 5.10's) and **Arrêter
+  l'enregistrement** / **Stop recording** (`rgba(242,84,91,0.85)`). A use
+  that ended keeps its line while it lingers, without its button.
+- **Choices made here** (to confirm on the machine): the screen's tile is
+  blue for a recording too (its red stays in its popover's line and
+  stop); the recording's time is in its popover's line only (the bar no
+  longer shows it); the sign pops in as it appears, a new kind's tile
+  then shows at once; under a minute the line says "depuis 12 s"; a
+  share's and the recording's lines come after the microphone's and the
+  camera's, the recording first; a lingering use keeps its line;
+  "Unmute" in English as the spec says; with several shares, each button
+  names its application; the cameras' devices are watched with inotify,
+  so that `/proc` is read only when one is opened or closed (the spec's
+  bound, once a second while a camera's node exists, holds: it is the
+  most).
+- **Measured headless** (`crates/hocus-compositor/tests/in_use.rs`): the
+  real shell on the CPU, against a PipeWire of the test's own (its source
+  a null node, the applications' streams null nodes of their classes,
+  linked by the test as a session manager would), a D-Bus daemon of its
+  own for the screen cast portal, the cameras' devices files of the
+  test's own: the microphone's sign as a stream takes the source (a
+  stream not linked: none), orange; a use gone, the sign gone no sooner
+  than 3 s after (the shell's clock says how long it lingered); the
+  camera's through PipeWire and through a program holding its device;
+  the screen's as it is shared; the microphone grey while the source is
+  muted, orange again; the three side by side (the surface 92 + 10 tall);
+  the full form's row; the popover's lines, the window's title or the
+  media name, "depuis"; its button muting the default source and back
+  (as `wpctl` reads it); its buttons stopping the share and the recording
+  (pause, go on, stop); at rest no commit of the sign and no reading of
+  `/proc` without a camera's node, one with a node nobody opens; twenty
+  opens in two seconds, a reading a second at most, none once the node is
+  gone. 5.11's and 5.10's tests go through the popover. Unit tests for
+  the linger and a use back, the kinds' order, the words in both
+  languages, the sizes in both forms, the pop, the colours, the graph's
+  links, the popover's layout, the `/proc` reading's bound and a holder
+  found by its program.
+- **Not built**: the camera's light as a privacy indicator of its own
+  (none is read: the device's use stands for it); a portal's camera
+  sessions told apart from other streams (they are streams).
 
 ### 5.14, the tray (2026-11-03)
 

@@ -6,7 +6,10 @@ chooser's sizes are logical pixels, the mockup's, drawn × 1.5
 (`hocus_link::LAUNCHER_ZOOM`) as the launcher's and the capture's are; the
 bar's sign and its popover keep the bar's own sizes. 5.12 (issue #445)
 groups the sign with the microphone's and the camera's into one sign of
-what is in use.
+what is in use: since then the share is its screen's tile, and its line
+("Firefox", "Écran · partage la fenêtre « … » · depuis 3 min"), the
+notifications held and **Arrêter le partage** are in that sign's popover
+([bar.md](bar.md), as built, 5.12).
 
 ## The approved spec
 
