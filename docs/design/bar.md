@@ -302,8 +302,10 @@ secretary, desktops and footer always stay.
 Clicks:
 
 - A tile or line of an agent: go to it (section 8).
-- The meeting card: open the meeting (Day.5's calendar on it; its page
-  until Day.5 is built); its button joins the call (Day.2, variant B).
+- The meeting card: open the meeting (Day.5's calendar on today, the
+  meeting chosen); its button joins the call (Day.2, variant B).
+- The date and the clock: the calendar (Day.5, variant A), by a click
+  only, in both forms.
 - A connection tile or a gauge: opens its popover (section 9).
 - A desktop tile: switch to it (§4.4); the wheel over the tiles, to the
   next or the previous one. A task's box: toggles it.
@@ -2995,16 +2997,16 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   pin (12.5 px, `text.faint`); **Rejoindre** / **Join** (34 px, radius 9,
   `#5B8DEF`, the camera and the word white 13.5 px 700) with a link;
   **Voir dans le calendrier** / **Show in the calendar** (30 px, radius 8,
-  `rgba(255,255,255,0.06)`, 12.5 px 600 `text.dim`) with a page; a 1 px
+  `rgba(255,255,255,0.06)`, 12.5 px 600 `text.dim`), which opens the
+  calendar (Day.5) on today with the meeting chosen; a 1 px
   divider, then "ENSUITE" / "NEXT", the next event's start and its title
   on one line, when one is left. `Tab` goes through its buttons, `Enter`
   acts, `Esc` closes; a button acts and closes it.
-- **Clicks**: the card (or `Enter` on it) opens the event's page in its
-  calendar (`page`: Google's `htmlLink`), Day.5's popover not being built;
-  without a page, nothing (said in the log). The join button (and
+- **Clicks**: the card (or `Enter` on it) opens the calendar (Day.5) on
+  today with its meeting chosen (as built, Day.5). The join button (and
   Rejoindre) opens the video link (`video`: the event's conference data,
   else the first meeting address of its place or description, as its
-  source finds it, day.md). Both through the launcher's `xdg-open`, which
+  source finds it, day.md), through the launcher's `xdg-open`, which
   the compositor starts. `Tab` reaches the card, then its button, among
   the bar's items.
 - **The halo** (§6): the shell tells the compositor `meeting ten` (10 min
@@ -3028,9 +3030,10 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   room is 144 (the spec's "about 140"). In progress the line is "fin dans
   18 min" alone, as the mockup draws it. The sign of what is in use goes
   under the card, the card staying right under the clock. Opening the
-  meeting from the card (its page) ends its halo as joining does. The
-  popover's "Voir dans le calendrier" shows only when the event has a
-  page, its "ENSUITE" only when an event is left after it. The card's
+  meeting from the card (in the calendar) ends its halo as joining does.
+  The popover's "Voir dans le calendrier" always shows (it showed only
+  with a page until Day.5), its "ENSUITE" only when an event is left
+  after it. The card's
   minutes count from the clock's minute, the meeting's start and end
   rounded to the nearest minute.
 - **Measured headless** (`crates/hocus-compositor/tests/meeting.rs`): the
@@ -3047,8 +3050,8 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   to 40 % of the card and not past it, no halo; at a meeting's end the
   next one at the minute's change, drawn once, no button without a link;
   the last one's end: no card, its surface gone, the agents' group 58 px
-  higher; a click on the card opens its page and ends the halo, on its
-  button the call; in the mini form, the mark's glow and its 54 × 26
+  higher; a click on the card opens the calendar on its meeting and ends
+  the halo, on its button the call; in the mini form, the mark's glow and its 54 × 26
   surface, the agents' item 30 px lower, a hover opening the 280 px
   popover with what it says, Rejoindre opening the call and ending the
   halo; at rest nothing drawn for 3 s, the minute's change drawn once, a
@@ -3059,9 +3062,8 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   the popover's layout, and `Tab` from the card to its button. On the
   CPU, the screenshots of the pull request
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
-- **Not built**: Day.5's popover (the card opens the event's page until
-  then); the secretary's meeting line in her briefing (4.6); names for
-  screen readers (§11).
+- **Not built**: the secretary's meeting line in her briefing (4.6);
+  names for screen readers (§11).
 
 ### Day.3, Today (2026-11-04)
 
@@ -3100,10 +3102,8 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
   the bottom; at once with reduced motion or on the CPU. Its lines say no
   minutes: a minute's change that changes no line draws nothing.
 - **Clicks**: a line with a video link (found by its source, as for the
-  card) opens it in the browser; else the event's page in its calendar
-  (Day.5's popover not being built); with neither, nothing (said in the
-  log). "+ N" will open Day.5's calendar on today: nothing until then
-  (said in the log), lit and a hand all the same. `Tab` goes through the
+  card) opens it in the browser; else the calendar (Day.5) on today, the
+  event chosen. "+ N" opens the calendar on today. `Tab` goes through the
   lines and "+ N" among the bar's items, `Enter` or `Space` acts.
 - **Names for screen readers** (§11), said in the log: "15:00, Entretien —
   poste back-end, visio" / "15:00, Entretien — poste back-end, video
@@ -3111,8 +3111,7 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
 - **Choices made here** (to confirm on the machine): one 14 px gap over
   the desktops (the spacer then having nothing, its own gap not counted
   twice); with room for one line only and several events, that line is
-  "+ N" alone, as the rule says; "+ N" opens nothing until Day.5; a line
-  with neither link nor page opens nothing; the tooltip is the tray's
+  "+ N" alone, as the rule says; the tooltip is the tray's
   (bold times, then the title) rather than a new look.
 - **Measured headless** (`crates/hocus-compositor/tests/today.rs`): the
   real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`, its
@@ -3124,8 +3123,8 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
   px or more over the desktops' group and one more line not fitting; on a
   1920 × 320 screen, no group; at the card's end the first line becomes
   the card at the minute's change, the group a line shorter; a click on a
-  line with a link opens it, on one without its page, on one with neither
-  nothing, on "+ N" nothing; resting on a line, its tooltip
+  line with a link opens it, on one without the calendar on its event, on
+  "+ N" the calendar on today; resting on a line, its tooltip
   ("15:00–15:45", "Entretien — poste back-end") beside the bar on it, the
   line lit, gone as the pointer leaves; the mini form, no group; at rest
   and through a minute's change that changes no line, no commit. Unit
@@ -3133,9 +3132,7 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
   surface's size, the lines' motion, `Tab` through the lines and "+ N".
   On the CPU, the screenshots of the pull request
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
-- **Not built**: Day.5's calendar popover (the lines open the event's
-  page until then, "+ N" nothing); To do (Day.4), which will sit under it;
-  names for screen readers (§11).
+- **Not built**: names for screen readers (§11).
 
 ### Day.4, the to-do list (2026-11-04)
 
@@ -3274,6 +3271,161 @@ spec (issue #428).
 - **Not built**: names for screen readers (§11); the motion of the
   line's close is drawn only on a GPU, so the tests check its CPU path.
 
+### Day.5, the calendar (2026-11-04)
+
+Built in #429, variant A of the mockup (the month, then the day's list),
+as the issue's last comment specifies it, with its decisions: no
+calendars' colours in the month, no line for the time nor free gaps
+(variant B), an event without a page of its own unfolding its details in
+its row, the mini form's clock opening it on a click only.
+
+- **Opening** (`crates/hocus-shell/src/clock/item.rs`,
+  `popover::Item::Calendar`): a click on the clock's group, the date and
+  the clock (172 × 77 in the full form, from the digits' cells to 6 px
+  under the date; 48 × 46 in the mini, the two lines and 6 px), opens the
+  calendar; a second click, a click outside or `Esc` closes it (§9).
+  Resting on it opens nothing, in either form. The group is lit
+  `rgba(255,255,255,0.06)` under the pointer, which turns into a hand,
+  and `0.08` while the calendar is open, radius 10; ringed (2 px, the
+  accent, inside it) while it holds the keyboard after `Esc`, where
+  `Enter` or `Space` opens it again and `Tab` goes on to the next item of
+  the bar. The clock's surface grew to hold the group (194 × 80, 54 × 46)
+  and still lets the pointer through: the bar's own surface hears it for
+  the group (`popover::BarPointer`), the clock telling the popovers where
+  the group is as it draws. It always opens on today.
+- **The popover** (`popover/calendar/`: `layout.rs`, `draw.rs`,
+  `words.rs`): 320 wide, the popovers' glass, rim and shadow, padding 14,
+  16 and 12 px, its parts 10 px apart; 8 px left of the bar, its top on
+  the group's (22 px from the screen's top in the full form, 20 in the
+  mini). Its height follows the day: six weeks always, the list 236 px at
+  most (573 px with a full list). It moves in and out as the other
+  popovers do, the compositor's (none with reduced motion or on the CPU).
+- **The header** (28 px): the month and year (Manrope 700, 16 px, cut
+  if it must be); "Aujourd'hui" / "Today" (26 px high, 10 px in, radius 7,
+  `rgba(255,255,255,0.06)`, `0.10` under the pointer, 12 px 600,
+  `text.faint` with today's month and today shown, else `text`); the two
+  26 × 26 arrows (16 px chevrons in `text.dim`, lit `0.10`), 6 px apart.
+  The arrows turn the month, not the day chosen; "Aujourd'hui" brings
+  back today's month and today.
+- **The month**: a 28 px column of ISO weeks (Martian Mono 10.5 px,
+  `text.faint`), then seven equal columns, Monday first, under an 18 px
+  row of "sem." / "wk" (10 px 600) and "L M M J V S D" / "M T W T F S S"
+  (11 px 700, `text.faint`); six rows of 32 px, 2 px apart. A day is a
+  34 × 30 button, radius 9, its number in Martian Mono 12.5 px (`text`,
+  `text.dim` on weekends, `text.faint` for the months around), its 4 px
+  dot 4 px under it when it has events (`rgba(238,241,246,0.6)`, around:
+  `rgba(140,150,168,0.6)`), lit `0.06` under the pointer; today ringed
+  1.5 px `#6CC287` inside; the day chosen filled `rgba(255,255,255,0.16)`
+  (today's `rgba(108,194,135,0.24)`, its ring kept), its number white;
+  the keyboard's day outlined 2 px `#EEF1F6`, 1 px outside, once a key
+  moved it.
+- **The day's agenda**: a 1 px `rgba(255,255,255,0.08)` divider, then the
+  day's name (13.5 px 700, with its year when it is not this year's),
+  "aujourd'hui" / "demain" / "hier" (12.5 px, `text.dim`) 8 px after it,
+  the count on its right ("6 événements", "1 événement", 12 px,
+  `text.faint`; nothing on an empty day), all on one baseline; the line
+  may reach 14 px into the right padding before the name is cut, as the
+  mockup's does ("Mercredi 4 novembre", "aujourd'hui" and "6 événements"
+  are 299 px in 286). The all-day events first: 28 px rows, 4 px more
+  under them, radius 8, tinted with their calendar's colour at 14 %, an
+  8 px dot, the title (12.5 px 600, cut), "toute la journée" / "all day"
+  or a span of days ("7 – 8 nov.", "30 nov. – 2 déc.") on the right
+  (11.5 px, `text.dim`). Then the timed ones by start: rows of 44 px at
+  least (49 with a line under the title), radius 9, 6 and 8 px in, the
+  start (Martian Mono 12 px) 3 px over the end (10.5 px, `text.faint`) in
+  a 42 px column (wider for 12 hours' times), a 3 px bar in the
+  calendar's colour, the title (13.5 px 600, cut), under it the video
+  link's host and path with a 13 px camera in `#A9C4FF`, else the place
+  with a pin in `text.dim`; lit `0.06` under the pointer; today's events
+  over at half their opacity. Times as the system's clock writes them:
+  24 hours, but 12 ("9:30 AM") in `en_US`, `en_CA`, `en_AU`, `en_NZ`,
+  `en_PH`, `en_IN`. Past 236 px the list scrolls (the wheel, a notch a
+  44 px row; the keyboard as it goes to an event), with the popovers'
+  6 px thumb 3 px past the content's right. An empty day: "Rien de prévu
+  ce jour-là." / "Nothing planned that day." (13.5 px, `text.dim`,
+  centred, 14 px above, 12 px under). No calendar account: the month,
+  and "Aucun agenda branché." / "No calendar connected.".
+- **Clicks**: a day chooses it, its agenda replacing the one shown; one
+  of the months around also turns to its month. An event with a video
+  link opens it (`xdg-open`, the launcher's), else its own page (Google's
+  `htmlLink`), and the calendar closes; one with neither unfolds its
+  details under its title, its row lit `0.05`: its time, its place (an
+  all-day event's: a timed one shows it under its title already), its
+  calendar's name and its description on four lines at most (12 px,
+  `text.dim`, its HTML read as text); a second click folds it.
+- **The keyboard**: as it opens, on today. On the days, `←` `→` a day,
+  `↑` `↓` a week, `Page Up` `Page Down` a month (the same day, or the
+  month's last), `Home` `End` the week's Monday and Sunday, the month
+  turning past it; `Enter` or `Space` chooses the day. `Tab` goes
+  through the arrows, "Aujourd'hui", the days (one stop) and each event,
+  round; on an event `Enter` or `Space` acts as a click and `↑` `↓` go to
+  the one before or after. `Esc` closes, the keyboard back on the clock's
+  group. Names for screen readers, said in the log: "mercredi 4 novembre,
+  6 événements, aujourd'hui" / "Wednesday 4 November, 6 events, today"
+  ("…, rien de prévu" without events), the arrows' "Mois précédent" /
+  "Previous month", "Mois suivant" / "Next month".
+- **Data**: the day's (`day::snapshot()`), its window kept by the workers
+  off the loop (2 months back to 12 ahead); the calendars hidden left out
+  by `Day::events`, the cancelled events too (Google keeps them with
+  their times). Nothing is asked of the workers as the popover opens or
+  turns: a month outside the window shows what the day holds of it
+  (nothing: no dots), and a day of it reads "Ce jour n'est pas chargé." /
+  "This day is not loaded.". A change of the day draws the popover again
+  while it is open (`day::on_change`), nothing while it is closed.
+- **For the other views** (`popover::calendar::open_on(bar, day,
+  event)`): the calendar opens beside `bar`'s clock (its screen's name;
+  else the first bar) on `day`, the event of that id chosen: it holds the
+  keyboard and is scrolled to, unfolded when a click would unfold it;
+  what was open closes, and the calendar open already turns to it. From
+  within the popovers' controller (an item's click), as
+  `popover::Effect::OpenCalendar`, carried out after it. The next
+  meeting's card and its mini popover's "Voir dans le calendrier" open it
+  on today with the meeting chosen (Day.2); Today's lines without a video
+  link on their event, "+ N" on today (Day.3); a reminder's Voir on its
+  meeting's day with the meeting chosen (Day.6). For tests and tools, the
+  compositor's `day calendar DATE [EVENT]` line asks the same.
+- **At rest** it draws nothing; while open, again as one of today's
+  events ends (it greys out) and at midnight (today moves), nothing
+  between.
+- **Choices made here** (to confirm on the machine): an event's own page
+  closes the calendar as its video call does; the list's 236 px hold four
+  rows with a line under their title and a part of the fifth (the
+  spec's "five rows" counts 44 px ones); the day's line reaching into the
+  padding as the mockup's does; the year after a day's name of another
+  year; "Choisir des agendas…" left out until Day.1's picker exists, and
+  months outside the window not asked of the workers (no request for a
+  range of its own yet); `↑` `↓` between events; the 12 hours' locales.
+- **Measured headless** (`crates/hocus-compositor/tests/calendar.rs`):
+  the real shell on the CPU, in French, a fixture's day and
+  `HOCUS_CLOCK_AT` (Wednesday 4 November 2026, 09:47), its `xdg-open` the
+  test's own: a click on the date opens it 320 wide at 8 px from the bar,
+  22 px from the top, the group lit while it is open, a second click on
+  the clock closes it and another opens it again; in the mini form
+  resting on the clock opens nothing and a click opens it beside the 56
+  px bar; today chosen with its rows in order, the hidden calendar's and
+  the cancelled event left out, the one over greyed, the dots of the six
+  weeks, today's green ring and a dot on the screen; another day, the
+  day after ("demain"), an empty day, a day of the next month turning
+  it; the arrows (their places), "Aujourd'hui"; a busy day's 236 px list
+  and the wheel; an event's call, another's page, both closing it, one
+  unfolding and folding its details; `Esc`, the keyboard on the group
+  ringed, `Enter` opening it again, a click outside; the keyboard by day,
+  week, month, the week's ends, `Enter`, `Tab` through the arrows,
+  "Aujourd'hui", the days and an event, `Enter` on it; the entry point on
+  a busy day's last event, scrolled to, then on another, unfolded; a day
+  outside the window; no calendar; at rest no commit for 3 s, a change of
+  the day drawing it once while open and nothing while closed. Unit
+  tests for the grid and ISO weeks, the rows' order and sizes, the list's
+  scroll and what it reveals, the details, the notes, the keyboard's
+  moves, the words in both languages and the 12 hours, the controller's
+  item (a click only, `Esc`, `Enter`). The next meeting's and Today's
+  tests open it from the card and the lines. On the CPU, the screenshots
+  of the pull request (`screenshots_for_the_pull_request`,
+  `HOCUS_SHOTS=dir`).
+- **Not built**: "Choisir des agendas…" (Day.1's picker); months outside
+  the window asked of the workers; names for screen readers given to
+  them (§11, logged until iced has them).
+
 ### Day.6, a meeting's reminder (2026-11-04)
 
 What the approved Day.6 mockup shows, variant B (a tab against the bar),
@@ -3338,8 +3490,8 @@ through do not disturb; on a shared screen the tab hides its title;
   pointer; nothing at rest.
 - **Clicks**: Rejoindre opens the link with the default handler (the
   launcher's `xdg-open`), the tab goes and the halo's meeting state ends
-  (`meeting::acted_on`); Voir, or a click on the text, opens the event's
-  page in its calendar (Day.5's popover is not built yet), the tab goes and
+  (`meeting::acted_on`); Voir, or a click on the text, opens the calendar
+  (Day.5) on the meeting's day with the meeting chosen, the tab goes and
   the halo ends; Later takes it away until 1 min before, then until the
   start, the halo going on; ✕ takes it away for this meeting and ends its
   halo, so that the 2-min wave does not run. The card stays in each case.
@@ -3366,8 +3518,8 @@ through do not disturb; on a shared screen the tab hides its title;
   reminder (as day.md's `takes_time` says, like the card); the tab shows
   on every bar, as the card does; in the mini form it is centred on the
   mark; on a shared screen only the title is replaced, its line kept;
-  `Super+J` joins the next meeting again if it was already joined; Voir
-  opens the event's page until Day.5; what was dismissed is kept in memory
+  `Super+J` joins the next meeting again if it was already joined; what
+  was dismissed is kept in memory
   only (a restart of the shell shows a due tab again).
 - **Measured headless** (`crates/hocus-compositor/tests/reminders.rs`):
   the real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`,
@@ -3393,4 +3545,4 @@ through do not disturb; on a shared screen the tab hides its title;
 - **Not built**: the tab's keyboard (`Super+B` reaching the bar, then
   `Tab` through its buttons): the bar has no keyboard entry yet
   (`Super+B` switches its form); calendars "without reminders" (Day.1's
-  settings); Day.5's calendar for Voir; the halo on the CPU.
+  settings); the halo on the CPU.

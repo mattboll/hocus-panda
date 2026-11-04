@@ -170,7 +170,7 @@ pub struct Looked {
 pub enum Act {
     /// Rejoindre: the video call.
     Join,
-    /// Voir, or a click on its text: the event.
+    /// Voir, or a click on its text: the event, in the calendar (Day.5).
     Open,
     /// Later: back 1 min before, or at the start.
     Later,
@@ -307,10 +307,7 @@ impl Reminders {
             }
             Act::Open => {
                 t.stage = Stage::Done;
-                Some(Acted::Opens {
-                    url: m.page.clone(),
-                    meeting: m,
-                })
+                Some(Acted::InCalendar(m))
             }
             Act::Later => {
                 let left = m.start - minute;
@@ -375,11 +372,13 @@ impl Reminders {
 /// What acting on a tab did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Acted {
-    /// Joined or opened: `url` opens (none: nothing to open).
+    /// Joined: `url` opens (none: nothing to open).
     Opens {
         url: Option<String>,
         meeting: Meeting,
     },
+    /// Opened: the calendar (Day.5) on its day, the meeting chosen.
+    InCalendar(Meeting),
     Later {
         back: i64,
         meeting: Meeting,
@@ -753,6 +752,17 @@ fn acted(acted: Option<Acted>) {
                 }
                 None => tracing::info!(id = m.id, "the reminder's meeting has nothing to open"),
             }
+        }
+        Some(Acted::InCalendar(m)) => {
+            meeting::acted_on(&m.id);
+            let day = jiff::Timestamp::from_second(m.start * 60)
+                .map(|at| {
+                    at.to_zoned(crate::notifications::wall().time_zone().clone())
+                        .date()
+                })
+                .unwrap_or_else(|_| crate::notifications::wall().date());
+            tracing::info!(id = m.id, %day, "the reminder opens its meeting in the calendar");
+            crate::popover::calendar::open_on("", day, Some(hocus_day::model::EventId::new(m.id)));
         }
         Some(Acted::Later { back, meeting: m }) => {
             tracing::info!(
@@ -1309,9 +1319,7 @@ mod tests {
                 (Act::Join, Acted::Opens { url, .. }) => {
                     assert_eq!(url.as_deref(), Some("https://meet.example.org/abc"));
                 }
-                (Act::Open, Acted::Opens { url, .. }) => {
-                    assert_eq!(url.as_deref(), Some("https://calendar.example.org/e"));
-                }
+                (Act::Open, Acted::InCalendar(m)) => assert_eq!(m.id, "p"),
                 (Act::Dismiss, Acted::Dismissed(_)) => {}
                 other => panic!("{other:?}"),
             }

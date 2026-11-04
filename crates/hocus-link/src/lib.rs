@@ -476,7 +476,8 @@ pub enum ToShell {
     /// A change asked of the day's tasks, or a read of every account
     /// (docs/design/day.md): what the bar's own views ask, for tests and
     /// tools that have no view to click. Written `day add TITLE`, `day tick
-    /// ID`, `day untick ID`, `day refresh`, `day slept SECONDS`.
+    /// ID`, `day untick ID`, `day refresh`, `day slept SECONDS`, `day calendar
+    /// DATE [EVENT]`.
     Day(DayAsk),
     /// `Super+J` (`[shortcuts] join`, Day.6): the meeting whose reminder
     /// shows is joined, else the one starting next within 10 min; nothing
@@ -509,6 +510,12 @@ pub enum DayAsk {
     /// clock moved on while its monotonic clock did not, and it resumed,
     /// as logind would say it (`PrepareForSleep(false)`).
     Slept(u64),
+    /// The calendar opens (Day.5) on `day` (`2026-11-04`), the event of
+    /// that id chosen, as the next meeting's card opens it.
+    Calendar {
+        day: String,
+        event: Option<String>,
+    },
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the
@@ -1518,6 +1525,13 @@ impl fmt::Display for ToShell {
                 DayAsk::Untick(id) => write!(f, "day untick {}", one_line(id)),
                 DayAsk::Refresh => f.write_str("day refresh"),
                 DayAsk::Slept(seconds) => write!(f, "day slept {seconds}"),
+                DayAsk::Calendar { day, event } => {
+                    write!(f, "day calendar {}", one_line(day))?;
+                    match event {
+                        Some(event) => write!(f, " {}", one_line(event)),
+                        None => Ok(()),
+                    }
+                }
             },
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
@@ -1561,6 +1575,13 @@ impl FromStr for ToShell {
                 "tick" => text().map(|t| Self::Day(DayAsk::Tick(t))),
                 "untick" => text().map(|t| Self::Day(DayAsk::Untick(t))),
                 "refresh" => Ok(Self::Day(DayAsk::Refresh)),
+                "calendar" => text().map(|t| {
+                    let (day, event) = match t.split_once(' ') {
+                        Some((day, event)) => (day.to_owned(), Some(event.to_owned())),
+                        None => (t, None),
+                    };
+                    Self::Day(DayAsk::Calendar { day, event })
+                }),
                 "slept" => text().and_then(|t| {
                     t.trim()
                         .parse()
@@ -2302,6 +2323,14 @@ mod tests {
             ToShell::Fullscreen(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
             ToShell::SharedScreens(Vec::new()),
+            ToShell::Day(DayAsk::Calendar {
+                day: "2026-11-10".into(),
+                event: Some("e 12".into()),
+            }),
+            ToShell::Day(DayAsk::Calendar {
+                day: "2026-11-04".into(),
+                event: None,
+            }),
         ];
         for message in &day {
             assert_eq!(message.to_string().parse::<ToShell>().as_ref(), Ok(message));

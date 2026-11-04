@@ -16,10 +16,11 @@
 //! - **The halo** (§6): told to the compositor (`meeting ten|two|none`)
 //!   as it changes: in 10 min or less, in 2 min or less; none once it has
 //!   started, nor once the user opened it or joined it.
-//! - **Clicks**: the card opens the event's page in its calendar (Day.5's
-//!   popover is not built yet), the join button its video call, both in the
-//!   default browser through the launcher's `xdg-open`; the mini form's
-//!   mark opens its popover ([`crate::popover::meeting`]).
+//! - **Clicks**: the card opens the calendar (Day.5,
+//!   [`crate::popover::calendar`]) on today with its meeting chosen, the
+//!   join button its video call in the default browser through the
+//!   launcher's `xdg-open`; the mini form's mark opens its popover
+//!   ([`crate::popover::meeting`]).
 //!
 //! The card has a surface of its own on each bar, opened while a meeting
 //! is left today and removed after ([`draw`]).
@@ -385,20 +386,17 @@ pub fn acted_on(id: &str) {
     popover::send(effects);
 }
 
-/// The card's click (or `Enter` on it): its event's page in its calendar,
-/// until Day.5's popover; nothing without one.
-pub fn open_page() -> Option<Effect> {
+/// The card's click (or `Enter` on it), on `bar`: the calendar (Day.5) on
+/// today, its meeting chosen.
+pub fn open_in_calendar(bar: &str) -> Option<Effect> {
     let card = snapshot()?;
-    let Some(page) = card.page else {
-        tracing::info!(
-            id = card.id,
-            "the meeting has no page: the card opens nothing"
-        );
-        return None;
-    };
     acted();
-    tracing::info!(id = card.id, "the meeting's page opens");
-    crate::launcher::browse(&page)
+    tracing::info!(id = card.id, "the meeting opens in the calendar");
+    Some(Effect::OpenCalendar {
+        bar: bar.to_owned(),
+        day: crate::notifications::wall().date(),
+        event: Some(hocus_day::model::EventId::new(card.id)),
+    })
 }
 
 /// The join button: the meeting's video call in the browser.

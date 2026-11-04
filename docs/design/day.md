@@ -280,7 +280,9 @@ local list last.
   kept apart from the workers). A view wakes its own surface from it, as
   the connections do; the shell's loop is never woken otherwise. The next
   meeting (Day.2, `crates/hocus-shell/src/meeting`) is the first; the
-  to-do list (Day.4) wakes only when its tasks changed.
+  calendar (Day.5, `popover::calendar`) draws itself again from it while
+  it is open;
+  the to-do list (Day.4) wakes only when its tasks changed.
 - `day::change(Change)`: a change of the bar's tasks, to their account,
   at once. The view keeps its own 1.5 s ticked state (Day.4) and reads the
   outcome in the next snapshots: the task gone from `tasks`, or its change
@@ -295,10 +297,12 @@ local list last.
   tasks=N=[ID «TITLE»; …] pending=N`, which the headless tests read
   (`RUST_LOG=hocuspanda_shell=debug`).
 - The compositor's `day` line (`hocus_link::DayAsk`: `day add TITLE`,
-  `day tick ID`, `day untick ID`, `day refresh`) asks the same as the
-  views, for tests (`Headless::tell_shell`). `day slept SECONDS`, for
-  tests only and only with `HOCUS_CLOCK_AT`, moves the shell's wall clock
-  on by that much and says the machine resumed, as a suspend would.
+  `day tick ID`, `day untick ID`, `day refresh`, and `day calendar DATE
+  [EVENT]`, which opens Day.5's calendar on that day with that event
+  chosen, `popover::calendar::open_on`) asks the same as the views, for
+  tests (`Headless::tell_shell`). `day slept SECONDS`, for tests only and
+  only with `HOCUS_CLOCK_AT`, moves the shell's wall clock on by that much
+  and says the machine resumed, as a suspend would.
 
 ## The configuration
 
@@ -432,11 +436,12 @@ never the loop. `Token`'s `Debug` never shows it.
 - **A view** reads `day::snapshot()`, wakes its surface from
   `day::on_change`, and sends `day::change`; screenshots and tests feed it
   a fixture (`[[day.calendars]] kind = "fixture"`) and `HOCUS_CLOCK_AT`.
-- Day.5's months outside the window will need a request of their own to
-  the workers; not built yet. Day.6's reminders did not: they are
-  computed from the day's snapshot, on a thread of their own
-  (`crates/hocus-shell/src/reminder`, bar.md, as built), the window's 12
-  months ahead holding the alarms that come days before.
+- Day.5's months outside the window (the calendar shows what the day
+  holds of them, nothing, and says a day of them is not loaded) will need
+  a request of their own to the workers; not built yet. Day.6's reminders
+  did not: they are computed from the day's snapshot, on a thread of
+  their own (`crates/hocus-shell/src/reminder`, bar.md, as built), the
+  window's 12 months ahead holding the alarms that come days before.
 
 ## Tests
 

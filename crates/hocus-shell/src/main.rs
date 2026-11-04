@@ -134,6 +134,8 @@ fn main() -> ExitCode {
     reminder::start(software);
     today::start();
     tasks::start();
+    // The calendar drawn again as the day changes, while it is open.
+    popover::calendar::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
@@ -796,7 +798,8 @@ impl Shell {
             namespace: Some(NAMESPACE.to_owned()),
         };
         let (id, open) = Message::layershell_open(settings);
-        // Inside the rim; pointer events go through to the bar.
+        // Inside the rim; pointer events go through to the bar, which hears
+        // them for the clock's group too (the calendar's item).
         let clock = NewLayerShellSettings {
             size: Some(bar.clock_surface),
             layer: Layer::Top,
@@ -1066,6 +1069,7 @@ impl Shell {
             )
         });
         let program = clock::Clock {
+            bar: bar.output.clone(),
             style: self.clock,
             motion: self.look.motion,
             wall: self.wall.clone(),
@@ -1617,6 +1621,14 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Calendar => canvas(popover::calendar::Panel {
+                id,
+                glass: self.look.glass,
+                software: self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             // They open none.
             popover::Item::Tray(key) => canvas(popover::tray::Panel {
                 id,
@@ -1674,6 +1686,7 @@ impl Shell {
                 .unwrap_or_else(|| Space::new().into());
         };
         let width = bar.width(self.now + AHEAD);
+        let output = bar.output.clone();
         let (top, bottom) = if self.look.glass {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
@@ -1699,7 +1712,7 @@ impl Shell {
         let bar = container(row![space::horizontal(), column])
             .width(Length::Fill)
             .height(Length::Fill);
-        let pointer = canvas(popover::BarPointer)
+        let pointer = canvas(popover::BarPointer { bar: output })
             .width(Length::Fill)
             .height(Length::Fill);
         stack![bar, pointer].into()
