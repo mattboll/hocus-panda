@@ -158,6 +158,31 @@ pub fn mini_top() -> f32 {
     MINI_TOP + crate::meeting::room(Form::Mini) + crate::in_use::room(Form::Mini)
 }
 
+/// Where the group under the agents' starts in `form` (the to-do list's,
+/// Day.4): 14 px under their group (or their mini item), or where theirs
+/// would be when it shows nothing.
+pub fn next_top(form: Form) -> f32 {
+    let laid = layout();
+    let (top, height) = match form {
+        Form::Full => (full_top(), laid.as_ref().map_or(0.0, |l| l.height)),
+        Form::Mini => (
+            mini_top(),
+            laid.as_ref()
+                .filter(|l| l.height > 0.0)
+                .and_then(|l| l.mini.as_ref())
+                .map_or(0.0, |m| m.height),
+        ),
+    };
+    if height > 0.0 {
+        top + height + NEXT_GAP
+    } else {
+        top
+    }
+}
+
+/// Between the bar's groups, and the mini form's items.
+const NEXT_GAP: f32 = 14.0;
+
 /// Bar `bar`'s surface's top under the bar's, as last asked for.
 fn top_of(bar: &str) -> f32 {
     places(|places| {
@@ -333,6 +358,8 @@ pub fn laid_out(layout: Layout) {
     if before != Some(height) {
         crate::today::moved();
     }
+    // The to-do list under them follows (Day.4).
+    crate::tasks::draw::moved();
 }
 
 /// Bar `bar`'s surface takes the pointer (`takes`), or lets it through.

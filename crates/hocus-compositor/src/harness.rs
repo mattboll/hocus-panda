@@ -457,6 +457,11 @@ impl Headless {
         self.app.state.panel.desktops_commits
     }
 
+    /// Commits of the to-do list's surfaces so far (Day.4).
+    pub fn tasks_commits(&self) -> u64 {
+        self.app.state.panel.tasks_commits
+    }
+
     /// Commits of the popovers' surfaces so far.
     pub fn popover_commits(&self) -> u64 {
         self.app.state.panel.popover_commits
