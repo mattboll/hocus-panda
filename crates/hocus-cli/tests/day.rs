@@ -55,7 +55,9 @@ fn fake_planka() -> std::io::Result<String> {
 }
 
 /// `hocus day planka-token ARGS` with `token` on its standard input, in
-/// the fresh home `home`.
+/// the fresh home `home`. The CLI may end before it reads its input (no
+/// board configured, say): the write then meets a closed pipe, which is
+/// no failure of the test's; the caller checks the status and the files.
 fn run(home: &Path, args: &[&str], token: &str) -> std::io::Result<Output> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_hocus"))
         .args(["day", "planka-token"])
@@ -71,7 +73,10 @@ fn run(home: &Path, args: &[&str], token: &str) -> std::io::Result<Output> {
         .stderr(Stdio::piped())
         .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(token.as_bytes())?;
+        match stdin.write_all(token.as_bytes()) {
+            Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => return Err(error),
+            _ => {}
+        }
     }
     child.wait_with_output()
 }
