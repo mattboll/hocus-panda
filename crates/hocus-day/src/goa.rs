@@ -29,10 +29,10 @@ use crate::{
     Launcher,
     config::{self, CalendarEntry},
     google::{AccessToken, GoogleCalendar},
-    model::AccountId,
+    model::{AccountId, Calendar},
     secrets::Token,
     snapshot::Account,
-    source::{Result, SourceError},
+    source::{CalendarSource as _, Result, SourceError},
     worker::{Plan, Source},
 };
 
@@ -156,34 +156,189 @@ pub(crate) struct Google {
     pub api: String,
 }
 
-/// Watches Online Accounts on a thread of its own, starting and stopping
-/// the Google accounts' workers through `launcher`.
-pub(crate) fn watch(google: Google, launcher: Launcher) {
+/// A thread following Online Accounts, until it is ended.
+#[derive(Debug)]
+pub struct Watch {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Watch {
+    /// It stops following, once what it does is done; waits for that.
+    pub fn end(mut self) {
+        self.stop_and_join();
+    }
+
+    fn stop_and_join(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!("Online Accounts' thread ended in a panic");
+        }
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.stop_and_join();
+    }
+}
+
+/// `follow` on a thread named `name`, with a runtime of its own, until
+/// the watch it gives is ended.
+fn on_a_thread(name: &str, follow: impl AsyncFnOnce() + Send + 'static) -> Option<Watch> {
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let started = std::thread::Builder::new()
-        .name("day: online accounts".to_owned())
+        .name(name.to_owned())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
-            match runtime {
-                Ok(runtime) => runtime.block_on(watching(Accounts {
-                    google,
-                    launcher,
-                    running: BTreeMap::new(),
-                    missing: BTreeSet::new(),
-                })),
-                Err(err) => tracing::warn!(%err, "no runtime to watch Online Accounts"),
-            }
+            let runtime = match runtime {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    tracing::warn!(%err, "no runtime to watch Online Accounts");
+                    return;
+                }
+            };
+            runtime.block_on(async move {
+                use std::{future::Future, task::Poll};
+                let mut stopped = std::pin::pin!(stopped);
+                let mut work = std::pin::pin!(follow());
+                std::future::poll_fn(|cx| {
+                    if stopped.as_mut().poll(cx).is_ready() {
+                        return Poll::Ready(());
+                    }
+                    work.as_mut().poll(cx)
+                })
+                .await;
+            });
         });
-    if let Err(err) = started {
-        tracing::warn!(%err, "no thread to watch Online Accounts: no Google calendars");
+    match started {
+        Ok(thread) => Some(Watch {
+            stop: Some(stop),
+            thread: Some(thread),
+        }),
+        Err(err) => {
+            tracing::warn!(%err, "no thread to watch Online Accounts");
+            None
+        }
     }
 }
 
-async fn watching(mut accounts: Accounts) {
-    let bus = accounts.google.bus.clone();
+/// Watches Online Accounts on a thread of its own, starting and stopping
+/// the Google accounts' workers through `launcher`, until the watch is
+/// ended (its workers then stopped by whoever ends it).
+pub(crate) fn watch(google: Google, launcher: Launcher) -> Option<Watch> {
+    let watch = on_a_thread("day: online accounts", async move || {
+        let bus = google.bus.clone();
+        let mut accounts = Accounts {
+            google,
+            launcher,
+            running: BTreeMap::new(),
+            missing: BTreeSet::new(),
+        };
+        follow(&bus, |listed| match listed {
+            Ok(listed) => accounts.update(&listed),
+            Err(err) => {
+                tracing::info!(%err, "Online Accounts is not read: its accounts as they were");
+            }
+        })
+        .await;
+    });
+    if watch.is_none() {
+        tracing::warn!("no Google calendars");
+    }
+    watch
+}
+
+/// A Google account of Online Accounts, as Day.1's popover lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoogleAccount {
+    /// Its object's path, which asks for its tokens.
+    pub path: String,
+    /// Its e-mail, as Online Accounts names it.
+    pub identity: String,
+    /// What names it for the user.
+    pub name: String,
+    /// Its calendar is on.
+    pub calendar: bool,
+}
+
+/// Follows Online Accounts' Google accounts on `bus` for Day.1's popover,
+/// on a thread of its own: `seen` is called with them as it starts and
+/// each time they change, or with `None` while Online Accounts is not on
+/// the bus (or the bus does not answer). Until the watch is ended.
+pub fn watch_accounts(
+    bus: String,
+    mut seen: impl FnMut(Option<Vec<GoogleAccount>>) + Send + 'static,
+) -> Option<Watch> {
+    on_a_thread("day: online accounts' list", async move || {
+        let mut last: Option<Option<Vec<GoogleAccount>>> = None;
+        let mut said = |now: Option<Vec<GoogleAccount>>| {
+            if last.as_ref() != Some(&now) {
+                seen(now.clone());
+                last = Some(now);
+            }
+        };
+        let followed = follow(&bus, |listed| match listed {
+            Ok(listed) => said(Some(
+                listed
+                    .into_iter()
+                    .map(|l| GoogleAccount {
+                        name: if l.presentation.is_empty() {
+                            l.identity.clone()
+                        } else {
+                            l.presentation
+                        },
+                        identity: l.identity,
+                        calendar: l.calendar,
+                        path: l.path.to_string(),
+                    })
+                    .collect(),
+            )),
+            Err(zbus::Error::MethodError(name, _, _))
+                if matches!(
+                    name.as_str(),
+                    "org.freedesktop.DBus.Error.ServiceUnknown"
+                        | "org.freedesktop.DBus.Error.NameHasNoOwner"
+                ) =>
+            {
+                said(None);
+            }
+            Err(err) => tracing::info!(%err, "Online Accounts is not read"),
+        })
+        .await;
+        if !followed {
+            said(None);
+        }
+    })
+}
+
+/// The calendars of Online Accounts' account at `path` (`identity`'s),
+/// read from the Calendar API at `api` with its token: for Day.1's
+/// popover. Blocking.
+pub fn calendars(bus: &str, path: &str, identity: &str, api: &str) -> Result<Vec<Calendar>> {
+    let path = OwnedObjectPath::try_from(path)
+        .map_err(|err| SourceError::Invalid(format!("{path}: {err}")))?;
+    let account = config::google_account(identity, identity.to_owned());
+    let mut google = GoogleCalendar::new(
+        account.id,
+        Box::new(GoaToken::new(bus.to_owned(), path)),
+        api.to_owned(),
+    );
+    google.calendars()
+}
+
+/// Online Accounts on `bus`: its accounts listed now, then each time it
+/// says something changed (or its name changes hands), handed to
+/// `listed`. Until the bus goes; `false` when it does not answer at all.
+async fn follow(bus: &str, mut listed: impl FnMut(zbus::Result<Vec<Listed>>)) -> bool {
     let streams = async {
-        let connection = connect(&bus).await?;
+        let connection = connect(bus).await?;
         let goa = MatchRule::builder()
             .msg_type(Type::Signal)
             .sender(NAME)
@@ -205,17 +360,12 @@ async fn watching(mut accounts: Accounts) {
         Ok(streams) => streams,
         Err(err) => {
             tracing::info!(%err, "the session bus does not answer: no Google calendars");
-            return;
+            return false;
         }
     };
     let (mut goa, mut owner) = (std::pin::pin!(goa), std::pin::pin!(owner));
     loop {
-        match list(&connection).await {
-            Ok(listed) => accounts.update(&listed),
-            Err(err) => {
-                tracing::info!(%err, "Online Accounts is not read: its accounts as they were")
-            }
-        }
+        listed(list(&connection).await);
         let next = std::future::poll_fn(|cx| {
             use std::task::Poll;
             use zbus::export::futures_core::Stream;
@@ -226,7 +376,7 @@ async fn watching(mut accounts: Accounts) {
         });
         if next.await.is_none() {
             tracing::info!("the session bus went: Online Accounts no longer watched");
-            return;
+            return true;
         }
         tracing::debug!("Online Accounts changed: read again");
     }

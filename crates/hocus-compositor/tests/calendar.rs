@@ -1004,15 +1004,41 @@ fn a_day_outside_the_window_says_it_is_not_loaded_and_its_month_has_no_dots() ->
 }
 
 #[test]
-fn with_no_calendar_the_month_shows_and_the_agenda_says_none_is_connected() -> anyhow::Result<()> {
+fn with_no_calendar_the_agenda_says_none_is_connected_and_offers_day_1s_popover()
+-> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
     let mut bed = start(&shell, "", "", FormChoice::Full)?;
-    let (_, shown) = bed.open()?;
+    let mark = bed.mark();
+    let (popover, shown) = bed.open()?;
     assert!(
         shown.contains("month=2026-11") && shown.contains("note=«Aucun agenda branché.»"),
         "{shown}"
+    );
+    // "Choisir des agendas…" under it: Day.1's popover, at its first step,
+    // in the calendar's place.
+    assert!(shown.contains("choose=«Choisir des agendas…»"), "{shown}");
+    let targets = bed.logged_since(mark, "the calendar's targets", &["Choose@"])?;
+    let at = targets
+        .split(" Choose@")
+        .nth(1)
+        .and_then(|a| a.split_whitespace().next())
+        .and_then(|a| a.split_once(','))
+        .and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?)))
+        .ok_or_else(|| anyhow::anyhow!("no Choose in {targets}"))?;
+    let mark = bed.mark();
+    bed.click_in(popover, at)?;
+    bed.logged_since(mark, "the sources' popover shows it", &["step=accounts"])?;
+    let replaced = bed.hp.dispatch_until(common::WAIT, |hp| {
+        common::drawn_popovers(hp)
+            .first()
+            .is_some_and(|r| r.x == popover.x && r.y == popover.y && r.height != popover.height)
+    })?;
+    assert!(
+        replaced,
+        "{:?} {popover:?}",
+        common::drawn_popovers(&bed.hp)
     );
     Ok(())
 }

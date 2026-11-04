@@ -50,6 +50,7 @@ pub mod in_use;
 pub mod kit;
 pub mod meeting;
 pub mod session;
+pub mod setup;
 pub mod sound;
 pub mod tasks;
 pub mod tray;
@@ -146,6 +147,12 @@ pub enum Item {
     /// The box of the group's line, from its top: a click, or `Space` or
     /// `Enter` while it holds the keyboard, ticks it (or unticks it).
     Task(u8),
+    /// Day.1's first-run card's "Choisir…": the sources' popover, step by
+    /// step.
+    DayChoose,
+    /// The card's "Plus tard": a click, or `Enter`, removes the card for
+    /// good.
+    DayLater,
     /// The clock's group, the date and the clock (Day.5): the calendar,
     /// by a click only, in both forms.
     Calendar,
@@ -168,6 +175,7 @@ impl Item {
                 | Self::TodayMore
                 | Self::TaskAdd
                 | Self::Task(_)
+                | Self::DayLater
         )
     }
 
@@ -198,6 +206,7 @@ impl Item {
             | Self::TodayLine(_)
             | Self::TodayMore => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
+            Self::DayChoose | Self::DayLater => false,
             // Resting on the clock stays harmless (Day.5).
             Self::Calendar => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
@@ -218,6 +227,7 @@ impl Item {
             Self::Tray(_) => tray::WIDTH,
             Self::MeetingMark => meeting::WIDTH,
             Self::Tasks | Self::TasksMore => tasks::WIDTH,
+            Self::DayChoose => setup::WIDTH,
             Self::Calendar => calendar::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
@@ -245,6 +255,7 @@ impl Item {
             Self::Calendar => calendar::height(),
             Self::MeetingMark => meeting::height(),
             Self::Tasks | Self::TasksMore => tasks::height(),
+            Self::DayChoose => setup::height(),
             Self::Keyboard
             | Self::Decline
             | Self::Agent(_)
@@ -254,7 +265,8 @@ impl Item {
             | Self::TodayLine(_)
             | Self::TodayMore
             | Self::TaskAdd
-            | Self::Task(_) => 0,
+            | Self::Task(_)
+            | Self::DayLater => 0,
         }
     }
 
@@ -282,6 +294,8 @@ impl Item {
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
+            Self::DayChoose => crate::setup::opening(),
+            Self::DayLater => {}
             Self::Calendar => calendar::opening(),
         }
     }
@@ -311,8 +325,10 @@ impl Item {
             | Self::TodayMore
             | Self::TaskAdd
             | Self::Task(_)
+            | Self::DayLater
             | Self::Clipboard => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
+            Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
@@ -339,7 +355,15 @@ impl Item {
             (Self::Tray(_), _) => TRAY_NAMESPACE,
             (Self::Meeting | Self::Join | Self::MeetingMark, _) => MEETING_NAMESPACE,
             (Self::TodayLine(_) | Self::TodayMore, _) => TODAY_NAMESPACE,
-            (Self::Tasks | Self::TasksMore | Self::TaskAdd | Self::Task(_), _) => TASKS_NAMESPACE,
+            (
+                Self::Tasks
+                | Self::TasksMore
+                | Self::TaskAdd
+                | Self::Task(_)
+                | Self::DayChoose
+                | Self::DayLater,
+                _,
+            ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
             (
                 Self::Sources
@@ -372,6 +396,7 @@ impl Item {
                 | Self::MeetingMark
                 | Self::Tasks
                 | Self::TasksMore
+                | Self::DayChoose
         ) && !self.agents()
     }
 
@@ -1428,6 +1453,15 @@ fn anchor(
             ..from
         };
     }
+    // The sources' popover: its top on the first-run card's when opened
+    // from it (from the calendar's "Choisir des agendas…", where the
+    // calendar's was).
+    if item == Item::DayChoose {
+        let card = crate::tasks::draw::full_top(bar);
+        if from.y >= card {
+            return Rectangle { y: card, ..from };
+        }
+    }
     if !matches!(item, Item::Desktop(_)) {
         return from;
     }
@@ -1458,6 +1492,10 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::TodayMore => crate::today::open_more(&bar),
         Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),
         Item::Task(slot) => Some(Effect::Tasks(crate::tasks::Act::Toggle { bar, slot })),
+        Item::DayLater => {
+            crate::setup::later();
+            None
+        }
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1473,7 +1511,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::InUse
         | Item::MeetingMark
         | Item::Tasks
-        | Item::TasksMore => None,
+        | Item::TasksMore
+        | Item::DayChoose => None,
     }
 }
 

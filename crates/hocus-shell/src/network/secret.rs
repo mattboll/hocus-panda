@@ -13,21 +13,24 @@
 pub const SHORTEST: usize = 8;
 pub const LONGEST: usize = 64;
 
-pub struct Secret(Vec<u8>);
+pub struct Secret(Vec<u8>, usize);
 
 impl Secret {
-    /// Room for the longest password in four-byte characters, so that the
-    /// buffer is never moved.
-    const ROOM: usize = LONGEST * 4;
-
     pub fn new() -> Self {
-        Self(Vec::with_capacity(Self::ROOM))
+        Self::longest(LONGEST)
+    }
+
+    /// One of `longest` characters at most (a pasted access token, Day.1),
+    /// with room for them in four-byte characters, so that the buffer is
+    /// never moved.
+    pub fn longest(longest: usize) -> Self {
+        Self(Vec::with_capacity(longest * 4), longest)
     }
 
     /// A copy, made on purpose (the popover keeps what was typed while
     /// NetworkManager tries it).
     pub fn duplicate(&self) -> Self {
-        let mut copy = Self::new();
+        let mut copy = Self::longest(self.1);
         copy.0.extend_from_slice(&self.0);
         copy
     }
@@ -52,8 +55,8 @@ impl Secret {
 
     /// Adds `text` if it fits; whether it did.
     pub fn push(&mut self, text: &str) -> bool {
-        let fits = self.chars() + text.chars().count() <= LONGEST
-            && self.0.len() + text.len() <= Self::ROOM;
+        let fits = self.chars() + text.chars().count() <= self.1
+            && self.0.len() + text.len() <= self.1 * 4;
         if fits {
             self.0.extend_from_slice(text.as_bytes());
         }

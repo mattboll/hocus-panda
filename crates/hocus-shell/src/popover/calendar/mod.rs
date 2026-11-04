@@ -372,6 +372,7 @@ impl Panel {
             Stop::Previous => Some(words.previous().to_owned()),
             Stop::Next => Some(words.next().to_owned()),
             Stop::Today => Some(words.today_button().to_owned()),
+            Stop::Choose => Some(words.choose_calendars().to_owned()),
             Stop::Days => {
                 let count = if view.focus_day == view.selected {
                     read.agenda.events().len()
@@ -460,6 +461,8 @@ impl Panel {
                     self.act_on(id);
                 }
             }
+            // Day.1's popover, beside the clock, in its place.
+            Target::Choose => event(Seen::Replace(Item::DayChoose)),
         }
     }
 
@@ -512,9 +515,11 @@ impl Panel {
             .map(|l| l.rows().iter().map(|r| r.id.clone()).collect())
             .unwrap_or_default();
         let focus = view(|v| v.focus.clone());
+        let choose = state.laid.as_ref().is_some_and(|l| l.choose.is_some());
         if *named == Named::Tab {
             let order: Vec<Stop> = [Stop::Previous, Stop::Next, Stop::Today, Stop::Days]
                 .into_iter()
+                .chain(choose.then_some(Stop::Choose))
                 .chain(events.into_iter().map(Stop::Event))
                 .collect();
             let next = step(&order, focus.as_ref(), pressed.modifiers.shift());
@@ -544,6 +549,13 @@ impl Panel {
                         v.focus = Some(Stop::Event(next));
                         v.reveal = true;
                     });
+                    captured
+                }
+                _ => None,
+            },
+            Some(Stop::Choose) => match named {
+                Named::Enter | Named::Space => {
+                    self.click(Target::Choose, &[]);
                     captured
                 }
                 _ => None,

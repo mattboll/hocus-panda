@@ -48,6 +48,7 @@ mod pointer;
 mod popover;
 mod reminder;
 mod renderer;
+mod setup;
 mod share;
 mod tasks;
 mod today;
@@ -134,6 +135,8 @@ fn main() -> ExitCode {
     reminder::start(software);
     today::start();
     tasks::start();
+    // After the day: whether the first-run card shows.
+    setup::start();
     // The calendar drawn again as the day changes, while it is open.
     popover::calendar::start();
     // After the notifications' wall clock, which its times read.
@@ -1605,6 +1608,15 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::DayChoose => canvas(popover::setup::Panel {
+                id,
+                words: setup::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+                motion: self.look.motion && !self.software,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
             popover::Item::MeetingMark => canvas(popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
@@ -1647,7 +1659,8 @@ impl Shell {
             | popover::Item::TodayLine(_)
             | popover::Item::TodayMore
             | popover::Item::TaskAdd
-            | popover::Item::Task(_) => {
+            | popover::Item::Task(_)
+            | popover::Item::DayLater => {
                 return None;
             }
         };

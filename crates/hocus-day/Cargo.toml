@@ -17,6 +17,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # The configuration's `[day]` and the fixture's file.
 toml = "1.1.8"
+# Day.1's choices written into the configuration file, its other sections,
+# comments and order kept.
+toml_edit = "0.25.17"
 tracing = "0.1.44"
 # The fixture's file watched for changes (inotify), its worker asleep
 # meanwhile.

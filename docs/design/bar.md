@@ -3392,8 +3392,7 @@ its row, the mini form's clock opening it on a click only.
   rows with a line under their title and a part of the fifth (the
   spec's "five rows" counts 44 px ones); the day's line reaching into the
   padding as the mockup's does; the year after a day's name of another
-  year; "Choisir des agendas…" left out until Day.1's picker exists, and
-  months outside the window not asked of the workers (no request for a
+  year; months outside the window not asked of the workers (no request for a
   range of its own yet); `↑` `↓` between events; the 12 hours' locales.
 - **Measured headless** (`crates/hocus-compositor/tests/calendar.rs`):
   the real shell on the CPU, in French, a fixture's day and
@@ -3422,8 +3421,7 @@ its row, the mini form's clock opening it on a click only.
   tests open it from the card and the lines. On the CPU, the screenshots
   of the pull request (`screenshots_for_the_pull_request`,
   `HOCUS_SHOTS=dir`).
-- **Not built**: "Choisir des agendas…" (Day.1's picker); months outside
-  the window asked of the workers; names for screen readers given to
+- **Not built**: months outside the window asked of the workers; names for screen readers given to
   them (§11, logged until iced has them).
 
 ### Day.6, a meeting's reminder (2026-11-04)
@@ -3546,3 +3544,152 @@ through do not disturb; on a shared screen the tab hides its title;
   `Tab` through its buttons): the bar has no keyboard entry yet
   (`Super+B` switches its form); calendars "without reminders" (Day.1's
   settings); the halo on the CPU.
+
+### Day.1, choosing the day's sources (2026-11-04)
+
+What the approved Day.1 spec says, variant B (step by step, from the
+bar), with its two amendments (Google through GNOME Online Accounts, a
+Planka board through a pasted token; issue #425). The data under it is
+docs/design/day.md's; the Settings page (sprint 6), CalDAV and `.ics`
+are not part of it.
+
+- **The first-run card** (`crates/hocus-shell/src/setup/card.rs`): while
+  `[day]` sets no `[[day.calendars]]` nor `[[day.tasks]]` and the user has
+  not said "Plus tard", in the full form, where the day's groups go
+  (Today and To do give it their place: it is drawn on the to-do list's
+  surface, `hocus-bar-tasks`, 14 px under the agents' group). 172 px, radius 10,
+  `rgba(255,255,255,0.05)`, a 1 px `0.08` rim, padding 10, 8 px gaps: the
+  18 px calendar in `#8FB3FF` and "Ta journée ici" (13.5 px, 700); "Branche
+  ton agenda et tes tâches : la barre montrera tes réunions et ce qu'il
+  reste à faire." (12 px, `text.dim`, 1.45 lines); "Choisir…" (30 px, radius
+  8, `#6CC287`, `#0b1020` 12.5 px 700, lit `#7DCF97` under the pointer and
+  while its popover shows); "Plus tard" (24 px, transparent, `text.faint`,
+  lit `0.06`). Both are the bar's items: `Tab` reaches them, `Enter` acts.
+  Not before both are known (the configuration read, "Plus tard" read),
+  so that it never shows for a moment. The mini form shows none.
+- **"Plus tard"** removes it for good: `$XDG_STATE_HOME/hocuspanda/day-sources`
+  (written off the loop) keeps it, read as the shell starts. Day.5's
+  calendar still offers the popover: with no source, "Choisir des
+  agendas…" (30 px, radius 7, 12 px 600, under "Aucun agenda branché.";
+  `Tab` reaches it) opens step 1 in the calendar's place.
+- **The popover** (`crates/hocus-shell/src/popover/setup.rs`): 320 wide,
+  the popovers' glass, padding 12 px at the top, 14 px on the sides and
+  the bottom, its parts 12 px apart, 8 px left of the bar, its top on the
+  card's (on the clock's from the calendar), pushed up to stay 8 px from
+  the screen's bottom; it grows and shrinks with its step. Its 28 px
+  header: the back arrow (26 × 26, "Retour") from step 2 on, the step's
+  title (15 px, 700), ✕ ("Fermer").
+  - **Step 1, "Ajouter un compte"**: rows of 54 px at least, radius 10,
+    `rgba(255,255,255,0.03)` (`0.06` under the pointer), 8 px apart: a 32
+    px tile (radius 8), the kind's letter in its tint on 16 % of it (G
+    `#8FB3FF`, P `#6CC287`), the name (13.5 px, 600), its line (12 px,
+    `text.dim`, on 16 px lines, wrapped: the row grows), a chevron. Google's
+    line is "Tes réunions et rendez-vous." and under it, in the same row, one
+    34 px line per Google account of Online Accounts whose calendar is on
+    (its e-mail, 13 px, a chevron), each going straight to step 3. None:
+    "Ajoute un compte Google dans les comptes en ligne", the row running
+    `gnome-control-center online-accounts` (through the compositor, as the
+    applications are) when it is in `PATH`, else inert; Online Accounts is
+    followed while the popover is open, so that an account added there
+    shows by itself. Without Online Accounts on the bus (or no bus):
+    "Comptes en ligne de GNOME absents", the row at 50 % and inert. Then
+    "Tableau Planka" ("Tes tâches : les cartes d'une colonne d'un
+    tableau."), and under the rows "Tes tâches restent sur cet ordinateur
+    tant qu'aucun tableau n'en fournit." (12 px, `text.faint`).
+  - **Step 2, "Tableau Planka"**: "Adresse du tableau" and "Jeton d'accès"
+    (12 px, 600, `text.dim`, 6 px over their field), two 34 px fields
+    (radius 8, `rgba(255,255,255,0.05)`, a 1 px `0.14` rim, green while it
+    holds the keyboard, `#F2945B` when what went wrong is about it; 13 px,
+    10 px in, the end of a long text in view). The token is a `Secret`
+    of 4096 characters at most, shown as dots, zeroed as the popover
+    closes; `Ctrl+V` and `Shift+Insert` paste the clipboard's text in
+    either field (3.5b: the address on one line, the token without its
+    line breaks). The help line: "Dans Planka, une fois connecté : outils du
+    navigateur (F12) › Stockage › Cookies : copie accessToken et
+    httpOnlyToken." Then "Annuler" (back to step 1) and "Se connecter"
+    (green, inert until both fields hold something; "Connexion…" while it
+    checks), 32 px, side by side. What went wrong, in 12.5 px `#F7B98A`,
+    the fields keeping what was typed: "Jeton refusé ou expiré : colle un
+    nouveau jeton." (`401`); "Aucun serveur Planka ne répond à cette
+    adresse." (no answer, a `5xx`, or not Planka's API); "Ce tableau
+    n'existe pas ou ne t'est pas partagé." (`404`, `403`); "Colle l'adresse
+    d'un tableau : https://…/boards/…" (not an address).
+  - **The check**, off the loop (`hocus_day::planka::find`): `GET
+    /api/users/me` with the token, then `GET /api/boards/{id}` (its columns
+    and how many cards each holds). A server's address alone lists the
+    user's boards (`GET /api/projects`), and step 3 then has a "Tableau"
+    menu first, a board chosen being read the same way.
+  - **Step 3, "Quoi montrer ?"**: the account's name and address (12.5 px,
+    `text.dim`: "alex@example.org · Google Agenda", "Alex ·
+    planka.example.org"). For Google, "AGENDAS" and one 32 px row per
+    calendar, as Online Accounts' token reads `calendarList`: a 16 px box
+    (`#6CC287` and a dark check when ticked), a 16 px swatch, the name (13
+    px, `text`, `text.dim` when unticked), "lecture seule" (11.5 px,
+    `text.faint`) on the right. Ticked at first: those the account marks
+    selected. The swatch unfolds under its row the eight colours (20 px, 6
+    px apart; the chosen one ringed `text`), the account's own matched to
+    the nearest; a click chooses and folds. For a board, "TÂCHES", its name
+    (13.5 px, 600), then "Colonne des tâches" (TODO by name, else the
+    first), "Colonne des terminées" (DONE, else the last), "Ajout dans" (the
+    tasks' column, following it until chosen apart), each a 32 px row
+    whose menu unfolds the board's columns (28 px, the chosen one with a
+    green check), and how many cards the tasks' column holds ("2 cartes").
+    "Terminé" (34 px, green) ends; ✕ here keeps the account as ticked.
+  - **The keyboard**: `Tab` through the rows, the fields and the buttons
+    (✕ last), `↑` `↓` through a list's rows, `Space` ticks, `Enter`
+    chooses (in a field, signs in), `Esc` folds what is unfolded, goes back
+    a step, then closes (the keyboard on "Choisir…").
+- **"Terminé"**, off the loop (`day: sources`): the choice written into
+  the configuration file the compositor names (`HOCUS_CONFIG`) with
+  `toml_edit` (`hocus_day::edit`: its other sections, comments and order
+  kept; through a symbolic link, with its mode; beside it, then renamed
+  over it); a Google account's `[[day.calendars]]` (`account`, `shown`,
+  `colors`, replacing the entry that names it), a board's `[[day.tasks]]`
+  (its `address`, `tasks`, `done`, `add`, replacing the first). The token
+  is kept by `hocus_day::secrets` under the board's account (the keyring
+  on the bus given, else its 0600 file), never in the file. Then the day's
+  workers start again from the file (`Workers::reconfigure`), the card
+  goes, and the bar shows the day (the meeting card, Today, To do).
+- **Names for screen readers** (§11), logged: the header's "Retour" and
+  "Fermer"; the card's buttons are the bar's items.
+- **At rest** nothing draws: no spinner turns on the CPU or with reduced
+  motion, the caret does not blink, Online Accounts is followed on its
+  signals only.
+- **Choices the spec did not settle** (to confirm on the machine): the
+  card on the to-do list's surface, in the full form only; the Google
+  row's accounts listed inside it (34 px lines), its header inert then;
+  no account and no `gnome-control-center`: the row inert; the tiles'
+  tints; Planka's user name and password fields left out (the token
+  only: Planka's SSO cannot be told apart on 2.2, the brief asked the
+  token); the address error's words; a calendar list that fails to read:
+  "Les agendas de ce compte ne se lisent pas. Réessaie."; "Ajout dans"
+  following the tasks' column; every calendar's colour written in
+  `colors` (the eight), by name; a press outside, or `Esc`, in step 3
+  keeps nothing (only ✕ and "Terminé" do); the popover's lists do not
+  scroll (it grows with them); no spinner beside "Lecture des agendas…".
+- **Measured headless** (`crates/hocus-compositor/tests/day_sources.rs`),
+  the real shell on the CPU, in French, its configuration file and
+  folders the test's own, Online Accounts on a private bus, a Calendar API
+  and a Planka server on 127.0.0.1, `gnome-control-center` a script:
+  `the_first_run_card_shows_only_without_a_source` (and not with a source,
+  after "Plus tard", in the mini form);
+  `later_removes_the_card_for_good` (the file, a restart of the shell);
+  `choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disabled`
+  (320 wide, its top on the card's);
+  `the_google_row_lists_online_accounts_and_step_3_its_calendars_and_colours`
+  (the nearest colours, read-only, a colour chosen, a box unticked, the file
+  written with its other sections, the account's events in the day);
+  `without_an_account_the_google_row_opens_online_accounts_and_comes_back_with_one`;
+  `the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_board_not_shared`
+  (`Ctrl+V`, the token never logged nor in the file, the columns' menus,
+  the board's tasks in the bar); `a_servers_address_alone_lists_its_boards`;
+  `tab_goes_through_the_rows_and_esc_goes_back_a_step_then_closes`;
+  `at_rest_the_card_and_the_popover_draw_nothing`. In `calendar.rs`,
+  `with_no_calendar_the_agenda_says_none_is_connected_and_offers_day_1s_popover`.
+  Unit tests: the card's layout, the steps' layouts, the nearest colour,
+  the first columns, the refusals, the words in both languages
+  (`hocus-shell`); the configuration edited and written
+  (`hocus_day::edit`), the workers started again (`hocus-day`).
+- **Not built**: the Settings page (sprint 6); Planka's own sign-in by
+  user name and password; CalDAV and `.ics`; names for screen readers
+  given to them (§11).

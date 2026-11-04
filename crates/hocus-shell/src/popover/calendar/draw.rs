@@ -108,6 +108,26 @@ pub(super) fn calendar(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Ta
         RULE,
     );
     day_line(f, laid);
+    if let Some(rect) = laid.choose {
+        let lit = hover == Some(Target::Choose);
+        f.fill(
+            &kit::rounded(rect, BUTTON_RADIUS),
+            if lit { BUTTON_LIT } else { FILL },
+        );
+        f.fill_text(said(
+            Words::new(Lang::of_messages())
+                .choose_calendars()
+                .to_owned(),
+            rect.center(),
+            (TODAY_TEXT, LINE),
+            MANROPE_SEMIBOLD,
+            TEXT,
+            Alignment::Center,
+        ));
+        if view.focus == Some(Stop::Choose) {
+            ring(f, rect, BUTTON_RADIUS);
+        }
+    }
     match &laid.body {
         Body::Note { text, middle } => f.fill_text(said(
             text.clone(),

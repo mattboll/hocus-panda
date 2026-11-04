@@ -102,6 +102,10 @@ pub(super) const ICON_GAP: f32 = 5.0;
 pub(super) const NOTE: f32 = 13.5;
 const NOTE_ABOVE: f32 = 14.0;
 const NOTE_BELOW: f32 = 12.0;
+/// "Choisir des agendas…" under the note: 30 px, 14 px in, 8 px under it.
+pub(super) const CHOOSE: f32 = 30.0;
+const CHOOSE_PAD: f32 = 14.0;
+const CHOOSE_ABOVE: f32 = 8.0;
 /// An event unfolded: its details under its title, 12 px on lines 1.4
 /// apart, the description on 4 lines at most, 8 px under them.
 pub(super) const DETAILS: f32 = 12.0;
@@ -175,6 +179,8 @@ pub enum Stop {
     /// The days: one stop, on the focused day.
     Days,
     Event(EventId),
+    /// "Choisir des agendas…", without a source.
+    Choose,
 }
 
 /// What the popover shows: the month, the day chosen, the keyboard.
@@ -377,6 +383,8 @@ pub enum Target {
     Today,
     Day(Date),
     Event(usize),
+    /// "Choisir des agendas…": Day.1's popover, at its first step.
+    Choose,
 }
 
 /// The popover laid out.
@@ -396,6 +404,9 @@ pub struct Laid {
     pub rule: f32,
     pub day_line: DayLine,
     pub body: Body,
+    /// "Choisir des agendas…" under the note without a source: Day.1's
+    /// popover.
+    pub choose: Option<Rectangle>,
     /// The list's scroll, clamped (and to the event to reveal).
     pub scroll: f32,
     pub end: f32,
@@ -563,10 +574,19 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
             middle + NOTE * LINE / 2.0 + NOTE_BELOW,
         )
     };
+    let mut choose = None;
     let (body, end, scroll) = match context.agenda {
         Agenda::NoSource => {
             let (body, end) = note(words.no_source());
-            (body, end, 0.0)
+            // Its button under the note, the note's space under it.
+            let width =
+                measure(words.choose_calendars(), TODAY_TEXT, MANROPE_SEMIBOLD) + 2.0 * CHOOSE_PAD;
+            let top = end - NOTE_BELOW + CHOOSE_ABOVE;
+            choose = Some(Rectangle::new(
+                Point::new((LEFT + RIGHT - width) / 2.0, top),
+                Size::new(width, CHOOSE),
+            ));
+            (body, top + CHOOSE + NOTE_BELOW, 0.0)
         }
         Agenda::NotLoaded => {
             let (body, end) = note(words.not_loaded());
@@ -619,6 +639,7 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
         rule,
         day_line,
         body,
+        choose,
         scroll,
         end,
     }
@@ -855,6 +876,9 @@ impl Laid {
         for cell in self.weeks.iter().flat_map(|w| &w.days) {
             targets.push((Target::Day(cell.date), cell.rect));
         }
+        if let Some(rect) = self.choose {
+            targets.push((Target::Choose, rect));
+        }
         if let Body::Rows { list, rows } = &self.body {
             for (i, row) in rows.iter().enumerate() {
                 if let Some(rect) = self.row_rect(*list, row).intersection(&list.view) {
@@ -926,6 +950,9 @@ impl Laid {
                 .join(","),
             busy.join(",")
         ));
+        if self.choose.is_some() {
+            said.push_str(" choose=«Choisir des agendas…»");
+        }
         match &self.body {
             Body::Note { text, .. } => said.push_str(&format!(" note=«{text}»")),
             Body::Rows { list, rows } => {
@@ -1242,7 +1269,19 @@ mod tests {
             assert!(laid.day_line.count.is_none());
             let line_end = laid.rule + 1.0 + GAP + DAY_NAME * LINE;
             assert!((middle - (line_end + GAP + 14.0 + NOTE * LINE / 2.0)).abs() < 0.01);
-            assert!((laid.end - (middle + NOTE * LINE / 2.0 + 12.0)).abs() < 0.01);
+            // Without a source, "Choisir des agendas…" under the note
+            // (Day.1's popover), 8 px under it, the 12 px under the button.
+            let note_end = middle + NOTE * LINE / 2.0;
+            match (&agenda, laid.choose) {
+                (Agenda::NoSource, Some(choose)) => {
+                    assert!((choose.y - (note_end + 8.0)).abs() < 0.01);
+                    assert_eq!(choose.height, CHOOSE);
+                    assert!((laid.end - (choose.y + CHOOSE + 12.0)).abs() < 0.01);
+                }
+                (Agenda::NoSource, None) => panic!("no button without a source"),
+                (_, None) => assert!((laid.end - (note_end + 12.0)).abs() < 0.01),
+                (_, Some(_)) => panic!("a button with a source"),
+            }
         }
     }
 

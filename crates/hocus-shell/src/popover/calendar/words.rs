@@ -218,6 +218,11 @@ impl Words {
         self.pick("Aucun agenda branché.", "No calendar connected.")
     }
 
+    /// The button under it: Day.1's popover.
+    pub fn choose_calendars(self) -> &'static str {
+        self.pick("Choisir des agendas…", "Choose calendars…")
+    }
+
     /// A day outside the window the shell keeps (2 months back to 12
     /// ahead), of which it holds nothing.
     pub fn not_loaded(self) -> &'static str {

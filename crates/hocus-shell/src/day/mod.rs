@@ -13,7 +13,11 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock, PoisonError, mpsc},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError,
+        atomic::{AtomicU8, Ordering},
+        mpsc,
+    },
     time::Duration,
 };
 
@@ -62,28 +66,71 @@ pub fn start() {
     watch_resume();
 }
 
-/// The workers started from `[day]`, and what they send.
-fn start_workers() -> Option<mpsc::Receiver<Update>> {
-    let file = config_file();
-    let config = match &file {
+/// Whether `[day]` sets a source (Day.1's first-run card shows without
+/// one): unknown until the configuration is read.
+static SOURCES: AtomicU8 = AtomicU8::new(UNKNOWN);
+const UNKNOWN: u8 = 0;
+const NONE: u8 = 1;
+const SET: u8 = 2;
+
+/// Whether the configuration sets a calendar or a tasks' source; `None`
+/// until it is read.
+pub fn sources() -> Option<bool> {
+    match SOURCES.load(Ordering::Acquire) {
+        NONE => Some(false),
+        SET => Some(true),
+        _ => None,
+    }
+}
+
+/// `[day]` of the configuration file, `Config::default()` when it does
+/// not read (said in the log).
+fn read_config(file: Option<&std::path::Path>) -> Config {
+    let config = match file {
         Some(file) => hocus_day::config::read(file).unwrap_or_else(|why| {
             tracing::warn!("[day] refused, no account: {why}");
             Config::default()
         }),
         None => Config::default(),
     };
-    let state = crate::launcher::apps::state_file("");
-    let bus = std::env::var(hocus_link::NOTIFICATIONS_BUS_ENV)
+    let set = !config.calendars.is_empty() || !config.tasks.is_empty();
+    SOURCES.store(if set { SET } else { NONE }, Ordering::Release);
+    config
+}
+
+/// The session bus the compositor names, where Online Accounts and the
+/// keyring are.
+pub fn session_bus() -> Option<String> {
+    std::env::var(hocus_link::NOTIFICATIONS_BUS_ENV)
         .ok()
-        .filter(|b| !b.is_empty());
+        .filter(|b| !b.is_empty())
+}
+
+/// The Calendar API's address (a fake's, for tests).
+pub fn google_api() -> String {
+    google::api(std::env::var(google::API_ENV).ok().as_deref())
+}
+
+/// Where the accounts' tokens are kept, as the workers read them.
+pub fn secrets() -> Secrets {
+    let state = crate::launcher::apps::state_file("");
+    Secrets::new(session_bus(), state.map(|s| s.join("accounts")))
+}
+
+/// The workers started from `[day]`, and what they send.
+fn start_workers() -> Option<mpsc::Receiver<Update>> {
+    let file = config_file();
+    let config = read_config(file.as_deref());
+    let state = crate::launcher::apps::state_file("");
+    let bus = session_bus();
     let env = Env {
         clock: Clock::new(crate::notifications::wall),
-        secrets: Secrets::new(bus.clone(), state.as_ref().map(|s| s.join("accounts"))),
+        secrets: secrets(),
         state_dir: state,
         cache_dir: cache_dir(),
         config_dir: file.as_deref().and_then(|f| f.parent()).map(PathBuf::from),
         session_bus: bus,
-        google_api: google::api(std::env::var(google::API_ENV).ok().as_deref()),
+        google_api: google_api(),
     };
     let (out, snapshots) = mpsc::channel();
     let (workers, day) = Workers::start(&config, &env, &out);
@@ -103,9 +150,34 @@ fn start_workers() -> Option<mpsc::Receiver<Update>> {
     started.then_some(snapshots)
 }
 
+/// The day's accounts started again from the configuration file, as it is
+/// now (Day.1's choices written): blocking, off the loop. Whether the day
+/// had started.
+pub fn reconfigure() -> bool {
+    let Some(service) = SERVICE.get() else {
+        return false;
+    };
+    let config = read_config(config_file().as_deref());
+    let workers = || {
+        service
+            .workers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    };
+    // Online Accounts' thread is waited for without the workers' lock,
+    // which the bar's changes take on the loop.
+    let goa = workers().take_online_accounts();
+    if let Some(goa) = goa {
+        goa.end();
+    }
+    workers().reconfigure(&config);
+    wake_all();
+    true
+}
+
 /// The configuration file the compositor names (none when it names an
 /// empty one); the shell alone: `$XDG_CONFIG_HOME/hocuspanda/config.toml`.
-fn config_file() -> Option<PathBuf> {
+pub fn config_file() -> Option<PathBuf> {
     match std::env::var_os(hocus_link::CONFIG_ENV) {
         Some(file) if file.is_empty() => None,
         Some(file) => Some(PathBuf::from(file)),
