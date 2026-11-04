@@ -721,6 +721,127 @@ fn copy_and_close_updates_the_file_and_the_clipboard() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run by [`common::other_program`] as a process of its own: the portal's
+/// backend's dialog.
+#[test]
+fn another_program() -> anyhow::Result<()> {
+    common::as_other_program()
+}
+
+/// What the desktop portal's file chooser was asked: the dialog's parent,
+/// the request's path, who asked.
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>;
+
+/// The desktop portal's file chooser, as the shell sees it on the test's
+/// bus: it says what it was asked, and answers when the test says.
+struct Chooser(Asked);
+
+#[zbus::interface(name = "org.freedesktop.portal.FileChooser")]
+impl Chooser {
+    fn save_file(
+        &self,
+        parent_window: String,
+        _title: String,
+        options: std::collections::HashMap<String, zbus::OwnedVariant>,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<zbus::OwnedObjectPath> {
+        let sender = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        let token = options
+            .get("handle_token")
+            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+            .unwrap_or_default();
+        let path = format!(
+            "/org/freedesktop/portal/desktop/request/{}/{token}",
+            sender.trim_start_matches(':').replace('.', "_")
+        );
+        self.0
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("poisoned".into()))?
+            .push((parent_window, path.clone(), sender));
+        zbus::OwnedObjectPath::try_from(path).map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+}
+
+/// "Enregistrer sous…" (#595): the portal's file chooser is the editor's
+/// child (`parent_window`, an xdg-foreign handle); its backend, another
+/// program, maps its dialog as that handle's child and asks for the focus
+/// with a token of its own, made from no input: the dialog comes in front
+/// with the keyboard, though another program's window (a terminal, as
+/// the maintainer had) had the focus. Chosen, the annotated copy is
+/// written there. The programs are processes of the test's: the desktop
+/// lets a program's window take the focus from the window of the program
+/// that started it, so the terminal is the dialog's sibling.
+#[test]
+fn save_as_shows_the_chooser_in_front_with_the_keyboard() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()?;
+    let asked = Asked::default();
+    let address = format!("unix:path={}", bed.dir.path().join("bus").display());
+    let portal = runtime.block_on(
+        zbus::connection::Builder::address(address.as_str())
+            .name("org.freedesktop.portal.Desktop")
+            .serve_at("/org/freedesktop/portal/desktop", Chooser(asked.clone()))
+            .build(),
+    )?;
+    let _terminal = common::other_program(&mut bed.hp, "test.terminal", false, None)?;
+    let (_, _, thumb) = bed.capture()?;
+    let places = bed.edit(thumb)?;
+    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    assert!(
+        bed.hp
+            .windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("test.terminal") && w.focused),
+        "{:?}",
+        bed.hp.windows()
+    );
+    bed.click(places.at("save-as"))?;
+    let came = bed
+        .hp
+        .dispatch_until(WAIT, |_| asked.lock().is_ok_and(|a| !a.is_empty()))?;
+    anyhow::ensure!(came, "the file chooser was never asked");
+    let (parent, path, sender) = asked
+        .lock()
+        .map_err(|_| anyhow::anyhow!("poisoned"))?
+        .remove(0);
+    let handle = parent
+        .strip_prefix("wayland:")
+        .with_context(|| format!("no parent: {parent:?}"))?;
+    let _dialog = common::other_program(&mut bed.hp, "test.chooser", false, Some(handle))?;
+    let front = bed.hp.dispatch_until(WAIT, |hp| {
+        let windows = hp.windows();
+        windows
+            .last()
+            .is_some_and(|w| w.app_id.as_deref() == Some("test.chooser") && w.focused && w.keyboard)
+    })?;
+    assert!(front, "{:?}", bed.hp.windows());
+    // Chosen.
+    let chosen = bed.dir.path().join("chosen.png");
+    let mut results = std::collections::HashMap::new();
+    results.insert(
+        "uris",
+        zbus::Variant::from(vec![format!("file://{}", chosen.display())]),
+    );
+    let mark = bed.mark();
+    runtime.block_on(portal.emit_signal(
+        Some(sender.as_str()),
+        path.as_str(),
+        "org.freedesktop.portal.Request",
+        "Response",
+        &(0u32, results),
+    ))?;
+    bed.logged_since(mark, "the capture is saved as")?;
+    let saved = png(&std::fs::read(&chosen)?)?;
+    assert_eq!(saved.dimensions(), (AREA.2 as u32, AREA.3 as u32));
+    Ok(())
+}
+
 /// Closing with no marks changes nothing: the file as it was, the
 /// clipboard too. Undone back to nothing is no marks.
 #[test]

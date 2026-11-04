@@ -434,6 +434,10 @@ impl State {
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::TrayClick { ask, pid } => self.tray_clicked(ask, pid),
+            ToCompositor::Export { ask, namespace } => {
+                let handle = self.export_for_shell(&namespace);
+                self.tell_shell(ToShell::Exported { ask, handle });
+            }
             ToCompositor::LogOut => {
                 tracing::info!("the shell logs out");
                 self.end(crate::Ending::LoggedOut);

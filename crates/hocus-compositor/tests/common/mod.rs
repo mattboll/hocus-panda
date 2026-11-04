@@ -63,6 +63,12 @@ use wayland_protocols::{
             zwp_text_input_v3::{self, ZwpTextInputV3},
         },
     },
+    xdg::foreign::zv2::client::{
+        zxdg_exported_v2::{self, ZxdgExportedV2},
+        zxdg_exporter_v2::ZxdgExporterV2,
+        zxdg_imported_v2::{self, ZxdgImportedV2},
+        zxdg_importer_v2::ZxdgImporterV2,
+    },
 };
 
 pub const WAIT: Duration = Duration::from_secs(10);
@@ -417,6 +423,16 @@ pub enum Command {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// Exports its window through xdg-foreign: [`Event::Exported`].
+    Export,
+    /// Opens a window made, before its first frame, the child of the one
+    /// xdg-foreign's `handle` names, as the desktop portal's backend opens
+    /// its dialogs; [`Event::ImportGone`] if the handle names nothing.
+    OpenDialog {
+        app_id: &'static str,
+        size: (u32, u32),
+        handle: String,
+    },
     /// Holds idleness off with an idle inhibitor on its window's (or
     /// layer's) surface, as a video player does; `false` destroys it.
     Inhibit(bool),
@@ -469,6 +485,10 @@ pub enum Event {
     Resumed {
         input: bool,
     },
+    /// Its window's xdg-foreign handle.
+    Exported(String),
+    /// The handle it imported names nothing (any more).
+    ImportGone,
 }
 
 /// What a pointing client's pointer got ([`Shows::Pointing`]).
@@ -566,6 +586,8 @@ fn run_client(
         activation: ActivationState::bind(&globals, &qh).ok(),
         inhibitor: None,
         notifications: Vec::new(),
+        exported: None,
+        imported: None,
     };
     match shows {
         Some(Shows::Window {
@@ -807,6 +829,35 @@ fn run_client(
                         client.notifications.push(notification);
                     }
                 }
+                (Command::Export, Some(window)) => {
+                    if let Ok(exporter) = globals.bind::<ZxdgExporterV2, _, _>(&qh, 1..=1, ()) {
+                        client.exported =
+                            Some(exporter.export_toplevel(window.wl_surface(), &qh, ()));
+                    }
+                }
+                (Command::Export, None) => {}
+                (
+                    Command::OpenDialog {
+                        app_id,
+                        size,
+                        handle,
+                    },
+                    _,
+                ) => {
+                    let importer = globals.bind::<ZxdgImporterV2, _, _>(&qh, 1..=1, ());
+                    if let (Some(xdg), Ok(importer)) = (&client.xdg, importer) {
+                        let surface = client.compositor.create_surface(&qh);
+                        let window =
+                            xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+                        window.set_app_id(app_id);
+                        let imported = importer.import_toplevel(handle, &qh, ());
+                        imported.set_parent_of(window.wl_surface());
+                        window.commit();
+                        client.size = size;
+                        client.window = Some(window);
+                        client.imported = Some(imported);
+                    }
+                }
                 (Command::Open { app_id, size }, _) => {
                     if let Some(xdg) = &client.xdg {
                         let surface = client.compositor.create_surface(&qh);
@@ -885,6 +936,8 @@ struct Client {
     activation: Option<ActivationState>,
     inhibitor: Option<ZwpIdleInhibitorV1>,
     notifications: Vec<ExtIdleNotificationV1>,
+    exported: Option<ZxdgExportedV2>,
+    imported: Option<ZxdgImportedV2>,
 }
 
 impl Client {
@@ -1669,6 +1722,60 @@ impl Dispatch<ZwpIdleInhibitorV1, ()> for Client {
     }
 }
 
+impl Dispatch<ZxdgExporterV2, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZxdgExporterV2,
+        _: <ZxdgExporterV2 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZxdgExportedV2, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ZxdgExportedV2,
+        event: zxdg_exported_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zxdg_exported_v2::Event::Handle { handle } = event {
+            let _ = client.events.send(Event::Exported(handle));
+        }
+    }
+}
+
+impl Dispatch<ZxdgImporterV2, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &ZxdgImporterV2,
+        _: <ZxdgImporterV2 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZxdgImportedV2, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ZxdgImportedV2,
+        event: zxdg_imported_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zxdg_imported_v2::Event::Destroyed = event {
+            let _ = client.events.send(Event::ImportGone);
+        }
+    }
+}
+
 impl Dispatch<ExtIdleNotifierV1, ()> for Client {
     fn event(
         _: &mut Self,
@@ -1698,4 +1805,139 @@ impl Dispatch<ExtIdleNotificationV1, bool> for Client {
         };
         let _ = client.events.send(said);
     }
+}
+
+// --- Another program's windows (#595) -------------------------------------------------
+
+/// What [`as_other_program`] reads: the compositor's socket, its window's
+/// app id, whether it exports it, the handle it opens it as the child of.
+const OTHER_SOCKET: &str = "HOCUS_TEST_OTHER_SOCKET";
+const OTHER_APP: &str = "HOCUS_TEST_OTHER_APP";
+const OTHER_EXPORT: &str = "HOCUS_TEST_OTHER_EXPORT";
+const OTHER_PARENT: &str = "HOCUS_TEST_OTHER_PARENT";
+
+/// The body of a test binary's `another_program` test: run by
+/// [`other_program`] as a process of its own, a window of another program
+/// until the compositor goes (the desktop tells programs apart by their
+/// process: a window of the test's own would take the focus as the
+/// user's). With [`OTHER_PARENT`], its window is the child of that
+/// xdg-foreign handle and asks for the focus with a token of its own, as
+/// the desktop portal's backend shows its dialogs; with [`OTHER_EXPORT`],
+/// it prints its window's handle (`exported HANDLE`). Run alone, it does
+/// nothing.
+pub fn as_other_program() -> anyhow::Result<()> {
+    let Some(socket) = std::env::var_os(OTHER_SOCKET) else {
+        return Ok(());
+    };
+    let app_id: &'static str = std::env::var(OTHER_APP)
+        .unwrap_or_else(|_| "test.other".to_owned())
+        .leak();
+    let size = (500, 400);
+    let client = match std::env::var(OTHER_PARENT) {
+        Ok(handle) => {
+            let client = client(Path::new(&socket), None)?;
+            client.commands.send(Command::OpenDialog {
+                app_id,
+                size,
+                handle,
+            })?;
+            client.commands.send(Command::Activate(None))?;
+            client
+        }
+        Err(_) => {
+            let shows = Shows::Window {
+                app_id,
+                size,
+                popup: false,
+            };
+            client(Path::new(&socket), Some(shows))?
+        }
+    };
+    if std::env::var_os(OTHER_EXPORT).is_some() {
+        client.commands.send(Command::Export)?;
+    }
+    // Its events end with its connection, as the compositor goes.
+    while let Ok(event) = client.events.recv() {
+        if let Event::Exported(handle) = event {
+            println!("exported {handle}");
+        }
+    }
+    Ok(())
+}
+
+/// Another program's window ([`as_other_program`]), stopped by its own PID
+/// when dropped; what it prints, line by line.
+pub struct OtherProgram {
+    child: std::process::Child,
+    pub lines: mpsc::Receiver<String>,
+}
+
+impl Drop for OtherProgram {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl OtherProgram {
+    /// Its window's xdg-foreign handle, once it has printed it.
+    pub fn handle(&self, hp: &mut Headless) -> anyhow::Result<String> {
+        let mut handle = None;
+        let got = hp.dispatch_until(WAIT, |_| {
+            if let Ok(line) = self.lines.try_recv()
+                && let Some(h) = line.strip_prefix("exported ")
+            {
+                handle = Some(h.to_owned());
+            }
+            handle.is_some()
+        })?;
+        anyhow::ensure!(got, "no handle exported");
+        handle.context("no handle")
+    }
+}
+
+/// Starts another program's window, `app_id`, through the test binary's
+/// `another_program` test, and waits until it is mapped: exported or not,
+/// the child of `parent` (a handle) or not.
+pub fn other_program(
+    hp: &mut Headless,
+    app_id: &str,
+    export: bool,
+    parent: Option<&str>,
+) -> anyhow::Result<OtherProgram> {
+    use std::io::BufRead;
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command
+        .args(["--exact", "another_program", "--nocapture"])
+        .env(OTHER_SOCKET, hp.socket())
+        .env(OTHER_APP, app_id)
+        .stdout(std::process::Stdio::piped());
+    if export {
+        command.env(OTHER_EXPORT, "1");
+    }
+    if let Some(parent) = parent {
+        command.env(OTHER_PARENT, parent);
+    }
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().context("no output")?;
+    let (sender, lines) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let other = OtherProgram { child, lines };
+    let app = app_id.to_owned();
+    let mapped = hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(app.as_str()))
+    })?;
+    anyhow::ensure!(mapped, "{app_id} never mapped: {:?}", hp.windows());
+    Ok(other)
 }

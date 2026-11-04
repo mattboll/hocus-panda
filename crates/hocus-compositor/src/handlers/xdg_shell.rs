@@ -66,6 +66,12 @@ impl XdgShellHandler for State {
         self.desktops_soon();
     }
 
+    /// A dialog of its own client's window: above it, as one through
+    /// xdg-foreign (#595).
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.parent_changed_of(surface.wl_surface());
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
             self.unmap_window(&window);
