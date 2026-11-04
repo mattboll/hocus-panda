@@ -128,10 +128,18 @@ fn input_starts_the_countdown_again() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Off by default: never idle, and no timer for it.
+/// Five minutes by default (7.2); `"off"`: never idle, and no timer for
+/// it.
 #[test]
-fn off_by_default() -> anyhow::Result<()> {
-    let mut hp = Headless::start(headless())?;
+fn five_minutes_by_default_and_never_when_off() -> anyhow::Result<()> {
+    let hp = Headless::start(headless())?;
+    assert_eq!(hp.idle().delay, Some(DELAY));
+    drop(hp);
+    let off = Config {
+        idle: IdleSettings { delay: None },
+        ..Config::default()
+    };
+    let mut hp = Headless::start_with(headless(), off)?;
     begin(&mut hp);
     pass(&mut hp, Duration::from_secs(3600))?;
     let said = hp.idle();
@@ -405,7 +413,8 @@ fn hocus_msg_idle_says_who_holds_it() -> anyhow::Result<()> {
     pass(&mut bus.hp, Duration::from_secs(60))?;
     assert_eq!(
         ask_idle(&mut bus.hp)?,
-        "state counting\ndelay 300 s\nleft 240.0 s\nheld-by nothing\n"
+        "state counting\ndelay 300 s\nleft 240.0 s\nheld-by nothing\n\
+         away here\nscreens on\npower ac\nsleep-inhibitor none\n"
     );
     let (_, video) = open_with(&mut bus.hp, "test.video", (640, 360), false)?;
     video.commands.send(Command::Inhibit(true))?;
@@ -420,7 +429,8 @@ fn hocus_msg_idle_says_who_holds_it() -> anyhow::Result<()> {
     assert_eq!(
         ask_idle(&mut bus.hp)?,
         "state held\ndelay 300 s\nheld-by inhibitor test.video\n\
-         held-by screensaver Firefox: video-playing\n"
+         held-by screensaver Firefox: video-playing\n\
+         away here\nscreens on\npower ac\nsleep-inhibitor none\n"
     );
     Ok(())
 }

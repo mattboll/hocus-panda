@@ -120,6 +120,8 @@ struct Screen {
     /// An empty frame went nowhere: clients hear of it at the next refresh
     /// instead of at once, or a client redrawing nothing would spin.
     pace: Option<RegistrationToken>,
+    /// Lit (DPMS on), or turned off by idle or the lid (7.2).
+    powered: bool,
 }
 
 /// Takes the seat, opens the primary GPU, lights the connected screens and
@@ -305,16 +307,7 @@ fn on_session(app: &mut App, event: SessionEvent) {
                 tracing::warn!(%err, "could not take the screens back");
             }
             // What the screens show was another terminal's: draw it all.
-            for screen in tty.gpu.screens.values_mut() {
-                screen.flip = Flip::Idle;
-                screen.surface.with_compositor(|c| {
-                    if let Err(err) = c.reset_state() {
-                        tracing::warn!(%err, "could not reset a screen");
-                    }
-                });
-                screen.surface.reset_buffers();
-                screen.dirty = true;
-            }
+            tty.relight();
             // Screens may have come or gone meanwhile.
             tty.scan(state);
         }
@@ -554,7 +547,59 @@ impl TtyBackend {
             presented: 0,
             health: None,
             pace: None,
+            powered: true,
         })
+    }
+
+    /// Every screen's state forgotten and drawn afresh, as after another
+    /// terminal showed: the next frame commits its CRTC whole.
+    fn relight(&mut self) {
+        for screen in self.gpu.screens.values_mut() {
+            screen.flip = Flip::Idle;
+            screen.surface.with_compositor(|c| {
+                if let Err(err) = c.reset_state() {
+                    tracing::warn!(%err, "could not reset a screen");
+                }
+            });
+            screen.surface.reset_buffers();
+            screen.dirty = true;
+            // Turned off again by `power` if it was.
+            screen.powered = true;
+        }
+    }
+
+    /// Turns the screens off or on as the state asks (7.2): off, its CRTC
+    /// disabled (DPMS off) and nothing drawn; on, drawn afresh, the CRTC
+    /// lit again with that frame.
+    fn power(&mut self, state: &mut State) {
+        for screen in self.gpu.screens.values_mut() {
+            let powered = state.output_powered(&screen.output);
+            if powered == screen.powered {
+                continue;
+            }
+            screen.powered = powered;
+            let output = screen.output.name();
+            if powered {
+                tracing::info!(output, "screen on");
+                screen.flip = Flip::Idle;
+                screen.surface.with_compositor(|c| {
+                    if let Err(err) = c.reset_state() {
+                        tracing::warn!(%err, "could not reset a screen");
+                    }
+                });
+                screen.surface.reset_buffers();
+                screen.dirty = true;
+            } else {
+                tracing::info!(output, "screen off");
+                screen.surface.with_compositor(|c| {
+                    if let Err(err) = c.clear() {
+                        tracing::warn!(%err, "could not turn a screen off");
+                    }
+                });
+                screen.flip = Flip::Idle;
+                screen.dirty = false;
+            }
+        }
     }
 
     /// Draws the screens that changed and are free to take a frame.
@@ -597,12 +642,21 @@ impl TtyBackend {
             let gles: &mut GlesRenderer = renderer.as_mut();
             crate::share::frames::run::<_, GlesTexture>(gles, state, &mut self.share);
         }
+        if self.active {
+            // Back from sleep (7.2): a display engine may have lost what
+            // it showed; every screen is lit and drawn afresh.
+            if std::mem::take(&mut state.away.woke) {
+                tracing::info!("the machine woke up: the screens drawn afresh");
+                self.relight();
+            }
+            self.power(state);
+        }
         if !state.redraw {
             return;
         }
         state.redraw = false;
         for screen in self.gpu.screens.values_mut() {
-            screen.dirty = true;
+            screen.dirty = screen.powered;
         }
         if !self.active {
             return;
@@ -611,7 +665,7 @@ impl TtyBackend {
             .gpu
             .screens
             .iter()
-            .filter(|(_, s)| s.dirty && !s.flip.is_queued() && s.pace.is_none())
+            .filter(|(_, s)| s.powered && s.dirty && !s.flip.is_queued() && s.pace.is_none())
             .map(|(crtc, _)| *crtc)
             .collect();
         for crtc in ready {
@@ -631,6 +685,10 @@ impl TtyBackend {
             return;
         };
         screen.dirty = false;
+        // Off (7.2): nothing is drawn until it is on again.
+        if !screen.powered {
+            return;
+        }
         let mut renderer = match gpus.single_renderer(render_node) {
             Ok(renderer) => renderer,
             Err(err) => {

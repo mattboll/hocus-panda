@@ -690,6 +690,14 @@ pub enum Effect {
         id: window::Id,
         output: String,
     },
+    /// The curtain's pill on `output` (7.2): 300 × 64, centred across it,
+    /// `top` from its top, over everything, taking neither the pointer nor
+    /// the keyboard.
+    CurtainSurface {
+        id: window::Id,
+        output: String,
+        top: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2337,6 +2345,28 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::CurtainSurface { id, output, top } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some((
+                    hocus_link::PILL_WIDTH as u32,
+                    hocus_link::PILL_HEIGHT as u32,
+                )),
+                layer: Layer::Overlay,
+                // Centred across the screen, its top fixed.
+                anchor: Anchor::Top,
+                exclusive_zone: Some(-1),
+                margin: Some((top, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: true,
+                namespace: Some(hocus_link::CURTAIN_NAMESPACE.to_owned()),
             },
             id,
         }],

@@ -202,6 +202,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.bubble_committed(&layer);
             }
             hocus_link::LOCK_NAMESPACE => state.lock_layer_committed(&layer, &output),
+            hocus_link::CURTAIN_NAMESPACE => state.curtain_committed(&layer, &output),
             _ => {}
         }
         let before = state.work_area(&output);
@@ -258,6 +259,7 @@ impl State {
                 // alone, while it holds (7.1).
                 if !pick.takes(surface.namespace())
                     || surface.namespace() == hocus_link::LOCK_NAMESPACE
+                    || surface.namespace() == hocus_link::CURTAIN_NAMESPACE
                 {
                     continue;
                 }

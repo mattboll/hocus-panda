@@ -1,9 +1,11 @@
 //! When the session is idle (7.3, docs/design/idle.md): the countdown since
 //! the user's last input, what holds it off, and the clients told.
 //!
-//! - **The countdown** (`[idle] delay`, off by default) runs from the
-//!   user's last input. Reaching its end is [`Idle::Reached`], which the
-//!   lock (7.2) will act on; the next input is [`Idle::Resumed`].
+//! - **The countdown** (`[idle] delay` on AC, five minutes by default;
+//!   `[power.battery] screen-off` on battery, three) runs from the user's
+//!   last input. Reaching its end is [`Idle::Reached`], which brings the
+//!   curtain and the lock (7.2, [`crate::away`]); the next input is
+//!   [`Idle::Resumed`].
 //! - **What holds it off**, each at once: a shown surface's
 //!   `zwp_idle_inhibitor_v1`; an application's `org.freedesktop.ScreenSaver`
 //!   `Inhibit`, until its `UnInhibit` or until it leaves the bus
@@ -49,8 +51,8 @@ use smithay::{
 
 use crate::{State, model::WindowId, shell::Bus};
 
-/// What the session's idleness does, as it happens: the lock (7.2) hooks
-/// into [`State::idle_event`].
+/// What the session's idleness does, as it happens: the curtain and the
+/// lock (7.2) come from [`State::idle_event`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Idle {
     /// No input for the whole delay, nothing holding it off.
@@ -265,6 +267,29 @@ impl State {
     /// The user's input, from a device or a test.
     pub fn idle_input(&mut self) {
         self.idle_active(true);
+    }
+
+    /// The user's last input.
+    pub(crate) fn idle_input_at(&self) -> Duration {
+        self.idle.input_at
+    }
+
+    /// The session's delay is now `delay` (the power source changed, 7.2):
+    /// the countdown goes on from where it runs from, to the new end.
+    pub(crate) fn idle_set_delay(&mut self, delay: Option<Duration>) {
+        if self.idle.delay == delay {
+            return;
+        }
+        tracing::info!(?delay, "the idle delay changes");
+        let idle = &mut self.idle;
+        idle.delay = delay;
+        idle.phase = match (idle.phase, delay) {
+            (Phase::Reached, _) => Phase::Reached,
+            (_, None) => Phase::Off,
+            (_, Some(_)) if idle.held => Phase::Held,
+            (_, Some(_)) => Phase::Counting,
+        };
+        self.idle_check();
     }
 
     /// Activity: the user's input, or an application saying the user is
@@ -531,11 +556,16 @@ impl State {
         }
     }
 
-    /// The session became idle, or the user came back: where the lock
-    /// (7.2) will act. For now it is only logged.
+    /// The session became idle, or the user came back: the curtain comes,
+    /// then the lock (7.2, [`crate::away`]). The user's return lifts the
+    /// curtain as their input comes ([`State::felt`]), before it reaches
+    /// anything: here it is only logged.
     pub fn idle_event(&mut self, event: Idle) {
         match event {
-            Idle::Reached => tracing::info!(delay = ?self.idle.delay, "idle reached"),
+            Idle::Reached => {
+                tracing::info!(delay = ?self.idle.delay, "idle reached");
+                self.away_idle();
+            }
             Idle::Resumed => tracing::info!("idle no more: the user is back"),
         }
     }

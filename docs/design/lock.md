@@ -8,11 +8,14 @@ and what was decided on the way.
 ## What locks, and what it guarantees
 
 **The entry point** is `State::lock_now()` (crate `hocus-compositor`,
-`src/lock/mod.rs`). 7.2 (idle, before suspend) and 7.4 (the session
-menu's "Verrouiller", `Super+L`) call it; the shell can ask it too
-(`lock now` on its line, `ToCompositor::Lock(LockAsk::Now)`), and so can
-`hocus msg lock` on the control socket (any program of the session; a
-lock is no privilege). Locked already, it changes nothing.
+`src/lock/mod.rs`). 7.2's idle (as the curtain ends, docs/design/idle.md)
+and 7.4 (the session menu's "Verrouiller", `Super+L`) call it; the shell
+can ask it too (`lock now` on its line, `ToCompositor::Lock(LockAsk::Now)`),
+and so can `hocus msg lock` on the control socket (any program of the
+session; a lock is no privilege). Locked already, it changes nothing.
+`State::lock_at_once()` locks without the fade nor the picture of the
+desktop: before the machine sleeps (7.2), and when the screens have been
+off for `lock-after`.
 
 Its state, `State::lock_state()`:
 
@@ -24,7 +27,26 @@ Its state, `State::lock_state()`:
 
 `State::locked()` is true in `Locked` only. `State::lock_drawn()` says
 every screen has drawn the lock, its fade over: nothing of the session
-shows any more (what 7.2 waits for before letting the machine sleep).
+shows any more. `State::lock_presented()` says more, what 7.2 waits for
+before letting the machine sleep: every screen that is on has presented
+(its page flip done, `State::presented`) a frame of the lock itself, the
+shell's surface fully in (or black when no shell is linked). A screen off
+(7.2: idle, or the lid closed over it) is not waited for by either.
+
+**As built in 7.2** (docs/design/idle.md, "Locking on idle and before
+sleep"):
+
+- Idle, the curtain dims every screen for 10 s, then the lock fades in
+  over the curtain's last look: the picture of the desktop taken as it
+  locks is drawn with the curtain at its end, so the screen never
+  brightens between them.
+- Locked, the screens go off 30 s after the lock or the last input, by
+  whatever locked; input turns them on, still locked, and a key goes to
+  the field.
+- Before sleep, logind's delay inhibitor is held for the whole session;
+  `PrepareForSleep(true)` locks at once (no curtain, no fade), and the
+  inhibitor goes once `lock_presented()`, or 2 s after at most. Waking
+  (`PrepareForSleep(false)`), the field holds the keyboard.
 
 While locked:
 
@@ -47,7 +69,8 @@ While locked:
   keys (`[shortcuts]`' level keys), the keyboard layout (XKB's group
   switch, and the lock's own button), the virtual terminals
   (`Ctrl+Alt+Fn`). The suspend key and the lid are logind's, which the
-  compositor does not take. Nothing else runs: no `Super` shortcut, no
+  compositor does not take (its lid switch only turns the laptop's
+  screen off, 7.2). Nothing else runs: no `Super` shortcut, no
   Alt+Tab, launcher, capture, recording, nor an application's key. There is
   no microphone mute key in `[shortcuts]` yet: nothing to let through.
 - **The shell's line** carries only what draws: the lock's state, how many
