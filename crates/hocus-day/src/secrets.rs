@@ -159,6 +159,18 @@ impl Secrets {
     }
 }
 
+/// Where the tokens' files go: `$XDG_STATE_HOME/hocuspanda/accounts`, or
+/// under `~/.local/state`; `None` without an absolute one.
+pub fn accounts_dir() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let state = var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    state
+        .is_absolute()
+        .then(|| state.join("hocuspanda/accounts"))
+}
+
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     std::fs::DirBuilder::new()

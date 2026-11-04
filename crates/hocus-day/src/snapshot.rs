@@ -69,6 +69,19 @@ pub enum State {
     },
 }
 
+/// How a tasks' account's server lets its users sign in, as it says
+/// (Planka's `oidc`), for Day.1's form: the user name and password fields
+/// show unless SSO is enforced, and the pasted token always.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Login {
+    /// Its own sign-in only.
+    Password,
+    /// Its own, or SSO.
+    PasswordOrSso,
+    /// SSO only: a desktop program cannot complete it, a token is pasted.
+    SsoOnly,
+}
+
 /// A change the bar asks of a tasks' account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
@@ -112,6 +125,8 @@ pub struct Snapshot {
     pub tasks: Vec<Task>,
     /// Changes queued, in their order.
     pub pending: Vec<Pending>,
+    /// How its server signs in, once it said (read once a worker runs).
+    pub login: Option<Login>,
 }
 
 impl Snapshot {
@@ -125,6 +140,7 @@ impl Snapshot {
             board: None,
             tasks: Vec::new(),
             pending: Vec::new(),
+            login: None,
         }
     }
 

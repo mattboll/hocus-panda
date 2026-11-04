@@ -141,6 +141,20 @@ pub fn read(path: &Path) -> Result<Config, String> {
     }
 }
 
+impl Config {
+    /// The bar's tasks' account the configuration sets (the first
+    /// `[[day.tasks]]`), with its id as [`crate::Workers::start`] makes
+    /// it: the one its token is kept under (`hocus day planka-token`).
+    pub fn tasks_account(&self, base: Option<&Path>) -> Option<(Account, &TaskEntry)> {
+        let mut taken = vec![local_account().id];
+        for entry in &self.calendars {
+            entry.account(base, &mut taken);
+        }
+        let entry = self.tasks.first()?;
+        Some((entry.account(base, &mut taken), entry))
+    }
+}
+
 /// The local list's account, always there.
 pub fn local_account() -> Account {
     Account {
@@ -164,24 +178,19 @@ impl CalendarEntry {
 impl TaskEntry {
     pub fn account(&self, base: Option<&Path>, taken: &mut Vec<AccountId>) -> Account {
         let (kind, name, short) = match self.kind {
-            TaskKind::Planka => {
-                let host = self
-                    .address
-                    .trim_start_matches("https://")
-                    .trim_start_matches("http://")
-                    .trim_end_matches('/');
-                let board = self
-                    .board
-                    .trim_end_matches('/')
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or("");
-                (
+            TaskKind::Planka => match crate::planka::address(&self.address, &self.board) {
+                Ok((server, board)) => (
+                    Kind::Planka,
+                    server.to_string(),
+                    format!("{}-{board}", server.host()),
+                ),
+                // Not usable as set (its worker says why): named as written.
+                Err(_) => (
                     Kind::Planka,
                     self.address.clone(),
-                    format!("{host}-{board}"),
-                )
-            }
+                    format!("{}-{}", self.address, self.board),
+                ),
+            },
             TaskKind::Fixture => fixture(self.file.as_deref(), base),
         };
         account(kind, Holds::Tasks, name, &short, taken)

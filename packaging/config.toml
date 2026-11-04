@@ -226,7 +226,17 @@
 #   done = "DONE"                        # default DONE, else the last
 #   add = ""                             # where + adds: the tasks' column
 #
+# A Planka board (kind "planka"): its address, or the server's and the
+# board's id; its columns by name. Its token is pasted once with
+# `hocus day planka-token` (in Planka, once signed in: the browser's
+# tools, Storage, Cookies, accessToken):
+#
+#   [[day.tasks]]
+#   kind = "planka"
+#   address = "https://planka.example.org/boards/1234"
+#   tasks = "TODO"
+#   done = "DONE"
+#
 # Google calendars (kind "google", through GNOME Online Accounts, the
-# account named by its e-mail) and Planka boards (kind "planka", with the
-# server's address and the board's address or id) are read, and show as
-# not supported until their adapters land.
+# account named by its e-mail) are read, and show as not supported until
+# their adapter lands.
