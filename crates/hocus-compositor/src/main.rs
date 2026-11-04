@@ -79,6 +79,14 @@ struct Args {
     /// taken.
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
+
+    /// The system bus whose logind the session menu asks to suspend,
+    /// restart or power off: an address. Without it, only the session on
+    /// a virtual terminal asks the system's; nested or headless, the menu
+    /// has no power actions, so that the machine it runs on is never
+    /// powered off.
+    #[arg(long, value_name = "ADDRESS")]
+    system_bus: Option<String>,
 }
 
 /// The shell's program.
@@ -179,6 +187,7 @@ fn main() -> ExitCode {
         config,
         shell,
         session_bus: args.session_bus,
+        system_bus: args.system_bus,
     };
     match hocus_compositor::run(options) {
         Ok(()) => ExitCode::SUCCESS,

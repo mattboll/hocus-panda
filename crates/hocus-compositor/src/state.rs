@@ -254,6 +254,8 @@ pub struct State {
     pub layout_codes: Vec<String>,
     /// The lock screen (7.1, docs/design/lock.md).
     pub lock: crate::lock::Lock,
+    /// How the session ends: the session menu's confirmation (7.4).
+    pub leave: crate::leave::Leave,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
 }
@@ -422,6 +424,7 @@ impl State {
             kept_keys: HashSet::new(),
             layout_codes,
             lock: crate::lock::Lock::new(dh),
+            leave: crate::leave::Leave::default(),
             ending: None,
         })
     }

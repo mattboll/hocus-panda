@@ -5,7 +5,7 @@
 //! One scenario per point of the approved spec: the full form's footer is
 //! four buttons in a row along the bar's bottom, each opening its thing
 //! (the clipboard's history, the notifications' history, the launcher, the
-//! user's name and logging out, confirmed by a second click within 4 s);
+//! user's name and the session menu, tests/session_menu.rs);
 //! the menu opens the launcher on a click, not on a hover; the mini form's
 //! bell sits over the user's avatar, last of all. The badge still counting is the notifications' tests' (they
 //! click the footer's bell), and its colour is checked there.
@@ -21,7 +21,7 @@ use std::{
 };
 
 use common::{BTN_LEFT, Clip, Command, Event, KEY_ESC, WAIT, wait};
-use hocus_compositor::{Config, Ending, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
 struct Bed {
     hp: Headless,
@@ -348,50 +348,17 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.launcher_surfaces().is_empty())?;
     anyhow::ensure!(closed, "the launcher stayed");
-    // The user: their name, "Réglages", and "Se déconnecter", which ends
-    // the session.
+    // The user: their name and the session menu's rows (7.4,
+    // tests/session_menu.rs), its bottom on the bar's.
     let mark = bed.mark();
     bed.click(bed.button(3))?;
     let session = bed.popover()?;
     assert_eq!(session.y + session.height, bar_bottom);
     let line = bed.logged_after(mark, "the session's popover shows it")?;
     assert!(line.contains("name=\"Alex\""), "{line}");
-    assert!(
-        line.contains("[\"Réglages\", \"Se déconnecter\"]"),
-        "{line}"
-    );
+    assert!(line.contains("\"Réglages\", \"Verrouiller\""), "{line}");
+    assert!(line.contains("\"Se déconnecter\""), "{line}");
     assert_eq!(bed.hp.ending(), None);
-    // Its second row: 8 px into the popover's padding, 49 + 46 px down
-    // (under "Réglages"), 44 px tall. A click asks to confirm, for 4 s;
-    // once they ran out, nothing ended.
-    let row = (
-        f64::from(session.x + 9 + 131),
-        f64::from(session.y + 49 + 46 + 22),
-    );
-    let mark = bed.mark();
-    bed.click(row)?;
-    bed.logged_after(mark, "the session's popover asks to confirm")?;
-    let mark = bed.mark();
-    wait(&mut bed.hp, Duration::from_millis(4300))?;
-    bed.logged_after(mark, "its time ran out")?;
-    assert_eq!(bed.hp.ending(), None);
-    // Asked again, Escape lets it go back, the popover still open.
-    let mark = bed.mark();
-    bed.click(row)?;
-    bed.logged_after(mark, "asks to confirm")?;
-    bed.press(KEY_ESC);
-    bed.logged_after(mark, "why=\"Escape\"")?;
-    assert_eq!(bed.hp.popover_surfaces().len(), 1);
-    assert_eq!(bed.hp.ending(), None);
-    // Asked, then confirmed within 4 s: the session ends.
-    let mark = bed.mark();
-    bed.click(row)?;
-    bed.logged_after(mark, "asks to confirm")?;
-    assert_eq!(bed.hp.ending(), None);
-    bed.click(row)?;
-    let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
-    anyhow::ensure!(ended, "the session did not end");
-    assert_eq!(bed.hp.ending(), Some(Ending::LoggedOut));
     Ok(())
 }
 
@@ -405,10 +372,10 @@ fn the_users_popover_opens_the_settings() -> anyhow::Result<()> {
     bed.click(bed.button(3))?;
     let session = bed.popover()?;
     bed.logged("the session's popover shows it")?;
-    // Its first row: 49 px down, 44 px tall.
+    // Its first row: 59 px down (under the 40 px header), 44 px tall.
     bed.click((
         f64::from(session.x + 9 + 131),
-        f64::from(session.y + 49 + 22),
+        f64::from(session.y + 59 + 22),
     ))?;
     bed.logged("the Settings open from the footer")?;
     let started = bed._dir.path().join("settings-started");
