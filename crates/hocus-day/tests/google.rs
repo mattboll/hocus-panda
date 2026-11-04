@@ -11,7 +11,7 @@ use std::{path::Path, sync::mpsc, time::Duration};
 
 use fakes::{FakeApi, FakeGoa, PrivateBus, Sync, calendar, event};
 use hocus_day::{
-    Clock, Day, Env, State, Update, Workers,
+    Clock, Day, Env, MonthState, State, Update, Workers,
     model::{Answer, Colour, FreeBusy, Status},
     secrets::Secrets,
 };
@@ -588,5 +588,68 @@ fn wait_for(ok: impl Fn() -> bool) -> anyhow::Result<()> {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(20), "never so");
         std::thread::sleep(Duration::from_millis(20));
     }
+    Ok(())
+}
+
+#[test]
+fn a_month_outside_the_window_is_listed_when_asked_for_once_and_kept() -> anyhow::Result<()> {
+    let mut bed = start(
+        &[("account_1", "google", "alex@example.org")],
+        |api| {
+            two_calendars(api);
+            let mut far = event("f1", "Comité de pilotage", "10:00", "11:00");
+            far["start"] = json!({ "dateTime": "2028-01-12T10:00:00Z" });
+            far["end"] = json!({ "dateTime": "2028-01-12T11:00:00Z" });
+            api.events.insert(
+                "alex@example.org".to_owned(),
+                (
+                    vec![event("e1", "Point produit", "14:25", "14:55"), far],
+                    "s1".to_owned(),
+                ),
+            );
+        },
+        GOOGLE,
+    )?;
+    let titles = |bed: &Bed| -> Vec<String> {
+        bed.account(ALEX)
+            .map(|s| s.events.iter().map(|e| e.title.clone()).collect())
+            .unwrap_or_default()
+    };
+    bed.until("Alex's account read", |d| {
+        d.accounts()
+            .iter()
+            .any(|s| s.account.id.as_str() == ALEX && matches!(s.state, State::Fresh { .. }))
+    })?;
+    // The window's events only (up to 4 November 2027).
+    assert_eq!(titles(&bed), ["Point produit"]);
+    let january = jiff::civil::date(2028, 1, 1);
+    assert_eq!(bed.day.month(january), Some(MonthState::Loading));
+    let before = bed.api.asked().len();
+    bed.workers.months(&[jiff::civil::date(2028, 1, 12)]);
+    bed.until("January read", |d| {
+        d.month(january) == Some(MonthState::Loaded)
+    })?;
+    assert_eq!(titles(&bed), ["Point produit", "Comité de pilotage"]);
+    // One listing, of the selected calendar only, between January's
+    // first and February's.
+    let asked = bed.api.asked();
+    let listed: Vec<&fakes::Asked> = asked[before..]
+        .iter()
+        .filter(|a| a.path.ends_with("/events"))
+        .collect();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].path, "/calendars/alex@example.org/events");
+    let query = |key: &str| listed[0].query.get(key).map(String::as_str);
+    assert_eq!(query("timeMin"), Some("2028-01-01T00:00:00Z"));
+    assert_eq!(query("timeMax"), Some("2028-02-01T00:00:00Z"));
+    assert_eq!(query("singleEvents"), Some("true"));
+    assert_eq!(query("syncToken"), None);
+    // Asked again: not listed again. It is kept in the cache.
+    let after = asked.len();
+    bed.workers.months(&[january]);
+    bed.workers.flush(Duration::from_secs(10));
+    assert_eq!(bed.api.asked().len(), after);
+    let cache = std::fs::read_to_string(bed.cache(ALEX))?;
+    assert!(cache.contains("Comité de pilotage"), "{cache}");
     Ok(())
 }

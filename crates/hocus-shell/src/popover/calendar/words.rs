@@ -224,7 +224,13 @@ impl Words {
     }
 
     /// A day outside the window the shell keeps (2 months back to 12
-    /// ahead), of which it holds nothing.
+    /// ahead), its month asked of the accounts, not answered yet.
+    pub fn loading(self) -> &'static str {
+        self.pick("Chargement…", "Loading…")
+    }
+
+    /// A day outside the window the shell keeps, its month not given by
+    /// an account (offline, say).
     pub fn not_loaded(self) -> &'static str {
         self.pick("Ce jour n'est pas chargé.", "This day is not loaded.")
     }
@@ -322,6 +328,8 @@ mod tests {
         assert_eq!(fr.count(1).as_deref(), Some("1 événement"));
         assert_eq!(en.count(1).as_deref(), Some("1 event"));
         assert_eq!(en.count(0), None);
+        assert_eq!(fr.loading(), "Chargement…");
+        assert_eq!(en.loading(), "Loading…");
         assert_eq!(fr.letters().join(" "), "L M M J V S D");
         assert_eq!(en.letters().join(" "), "M T W T F S S");
         assert_eq!(fr.span(date(2026, 11, 7), date(2026, 11, 8)), "7 – 8 nov.");

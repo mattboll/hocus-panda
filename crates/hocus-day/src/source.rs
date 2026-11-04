@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -72,6 +72,41 @@ impl Range {
             from: crate::model::midnight(months(-2), zone),
             to: crate::model::midnight(months(12), zone),
         }
+    }
+
+    /// The month whose first day is `first`'s (any day of it), in `zone`.
+    pub fn month(first: Date, zone: &TimeZone) -> Self {
+        let first = first.first_of_month();
+        let next = first
+            .checked_add(jiff::Span::new().months(1))
+            .unwrap_or(first);
+        Self {
+            from: crate::model::midnight(first, zone),
+            to: crate::model::midnight(next, zone),
+        }
+    }
+
+    /// Whether `other` is all within this range.
+    pub fn covers(&self, other: &Range) -> bool {
+        self.from <= other.from && other.to <= self.to
+    }
+
+    /// The months (their first days) that the days `[first, end)` touch
+    /// and this range does not hold whole, in order: what the calendar
+    /// asks the workers for when it turns to them (Day.5b).
+    pub fn months_outside(&self, first: Date, end: Date, zone: &TimeZone) -> Vec<Date> {
+        let mut months = Vec::new();
+        let mut month = first.first_of_month();
+        while month < end {
+            if !self.covers(&Self::month(month, zone)) {
+                months.push(month);
+            }
+            match month.checked_add(jiff::Span::new().months(1)) {
+                Ok(next) => month = next,
+                Err(_) => break,
+            }
+        }
+        months
     }
 }
 
@@ -204,6 +239,32 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn the_months_a_range_does_not_hold_whole() {
+        let zone = TimeZone::UTC;
+        let now = jiff::civil::date(2026, 11, 4)
+            .at(9, 47, 0, 0)
+            .to_zoned(zone.clone())
+            .expect("a time");
+        let window = Range::window(&now);
+        let date = jiff::civil::date;
+        // November 2027's six weeks: from 1 November to 12 December, its
+        // first days in the window, December out of it.
+        assert_eq!(
+            window.months_outside(date(2027, 11, 1), date(2027, 12, 13), &zone),
+            [date(2027, 11, 1), date(2027, 12, 1)]
+        );
+        assert!(
+            window
+                .months_outside(date(2026, 10, 26), date(2026, 12, 7), &zone)
+                .is_empty()
+        );
+        assert_eq!(
+            window.months_outside(date(2026, 8, 31), date(2026, 10, 12), &zone),
+            [date(2026, 8, 1), date(2026, 9, 1)]
+        );
     }
 
     #[test]

@@ -3367,11 +3367,22 @@ its row, the mini form's clock opening it on a click only.
 - **Data**: the day's (`day::snapshot()`), its window kept by the workers
   off the loop (2 months back to 12 ahead); the calendars hidden left out
   by `Day::events`, the cancelled events too (Google keeps them with
-  their times). Nothing is asked of the workers as the popover opens or
-  turns: a month outside the window shows what the day holds of it
-  (nothing: no dots), and a day of it reads "Ce jour n'est pas chargé." /
-  "This day is not loaded.". A change of the day draws the popover again
-  while it is open (`day::on_change`), nothing while it is closed.
+  their times). A change of the day draws the popover again while it is
+  open (`day::on_change`), nothing while it is closed.
+- **Months outside the window** (Day.5b, #578): as the popover opens on a
+  month or turns to it, the months its six weeks reach that the window
+  does not hold whole are asked of the calendars' accounts, once per
+  month shown (`day::months`, `Workers::months`; never blocking: a
+  message to each worker). Each worker reads those it has not read yet,
+  off the loop, in one range per run of months (`CalendarSource::events`:
+  Google's `timeMin`/`timeMax`, the fixture's file), keeps them with its
+  cache and sends them in its next snapshot (`Snapshot::months`,
+  day.md). Until every account has answered, a day of them reads
+  "Chargement…" / "Loading…" (the note's place and size), and their
+  days have no dots; then their dots and the day's agenda show. A month
+  an account did not give (offline) reads "Ce jour n'est pas chargé." /
+  "This day is not loaded.", and is asked again the next time the
+  popover turns to it. Nothing is asked while it is closed, nor at rest.
 - **For the other views** (`popover::calendar::open_on(bar, day,
   event)`): the calendar opens beside `bar`'s clock (its screen's name;
   else the first bar) on `day`, the event of that id chosen: it holds the
@@ -3392,8 +3403,12 @@ its row, the mini form's clock opening it on a click only.
   rows with a line under their title and a part of the fifth (the
   spec's "five rows" counts 44 px ones); the day's line reaching into the
   padding as the mockup's does; the year after a day's name of another
-  year; months outside the window not asked of the workers (no request for a
-  range of its own yet); `↑` `↓` between events; the 12 hours' locales.
+  year; `↑` `↓` between events; the 12 hours' locales; (Day.5b) the
+  months of the six weeks asked for, not the month shown alone, so that
+  the days around have their dots; "Chargement…" in the empty day's
+  note; a month read kept until the window is listed whole (once a day),
+  then read again only when the popover turns to it, its events shown
+  meanwhile; at most 24 such months kept per account.
 - **Measured headless** (`crates/hocus-compositor/tests/calendar.rs`):
   the real shell on the CPU, in French, a fixture's day and
   `HOCUS_CLOCK_AT` (Wednesday 4 November 2026, 09:47), its `xdg-open` the
@@ -3411,8 +3426,14 @@ its row, the mini form's clock opening it on a click only.
   ringed, `Enter` opening it again, a click outside; the keyboard by day,
   week, month, the week's ends, `Enter`, `Tab` through the arrows,
   "Aujourd'hui", the days and an event, `Enter` on it; the entry point on
-  a busy day's last event, scrolled to, then on another, unfolded; a day
-  outside the window; no calendar; at rest no commit for 3 s, a change of
+  a busy day's last event, scrolled to, then on another, unfolded; a
+  month 14 months ahead (Day.5b,
+  `a_month_outside_the_window_is_asked_for_as_it_turns_to_it_and_shows_once_loaded`,
+  the fixture's listings outside the window taking 1 s): nothing read
+  while closed, "Chargement…" and no dots, then its dots and its agenda,
+  its six weeks' three months read at once, the month before reading
+  only the one it adds, back to it shown at once and nothing read again,
+  nor at rest; no calendar; at rest no commit for 3 s, a change of
   the day drawing it once while open and nothing while closed. Unit
   tests for the grid and ISO weeks, the rows' order and sizes, the list's
   scroll and what it reveals, the details, the notes, the keyboard's
@@ -3420,9 +3441,9 @@ its row, the mini form's clock opening it on a click only.
   item (a click only, `Esc`, `Enter`). The next meeting's and Today's
   tests open it from the card and the lines. On the CPU, the screenshots
   of the pull request (`screenshots_for_the_pull_request`,
-  `HOCUS_SHOTS=dir`).
-- **Not built**: months outside the window asked of the workers; names for screen readers given to
-  them (§11, logged until iced has them).
+  `screenshot_of_a_month_outside_the_window`, `HOCUS_SHOTS=dir`).
+- **Not built**: names for screen readers given to them (§11, logged
+  until iced has them).
 
 ### Day.6, a meeting's reminder (2026-11-04)
 

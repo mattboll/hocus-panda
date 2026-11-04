@@ -34,7 +34,8 @@ use jiff::Zoned;
 pub use crate::{
     config::Config,
     snapshot::{
-        Account, Change, ChangeId, Day, Holds, Kind, Login, Pending, Shown, Snapshot, State, Update,
+        Account, Change, ChangeId, Day, Holds, Kind, Login, MonthState, Pending, Shown, Snapshot,
+        State, Update,
     },
     source::{CalendarSource, KanbanSource, SourceError},
 };
@@ -306,6 +307,21 @@ impl Workers {
         self.next += 1;
         let id = ChangeId(self.next);
         handle.send(Command::Change(id, change)).then_some(id)
+    }
+
+    /// The months of `months` (any of their days) that are outside the
+    /// window, asked of every calendars' account: each reads those it has
+    /// not read already, off the loop, and sends them in its next
+    /// snapshot ([`Snapshot::months`], Day.5b). It never blocks.
+    pub fn months(&self, months: &[jiff::civil::Date]) {
+        for handle in self
+            .launcher
+            .handles()
+            .iter()
+            .filter(|h| h.holds == Holds::Calendars)
+        {
+            handle.send(Command::Months(months.to_vec()));
+        }
     }
 
     /// Every account read again now (on request, on resume).
