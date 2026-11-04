@@ -1659,10 +1659,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-config"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "tempfile",
+ "toml_edit",
+]
+
+[[package]]
 name = "hocus-day"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "hocus-config",
  "jiff",
  "rustix 1.1.6",
  "rustls",
@@ -1682,6 +1692,28 @@ name = "hocus-link"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+]
+
+[[package]]
+name = "hocus-settings"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "hocus-config",
+ "iced",
+ "jiff",
+ "rustix 1.1.6",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-normalization",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wgpu",
 ]
 
 [[package]]

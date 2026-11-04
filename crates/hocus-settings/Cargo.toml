@@ -1,0 +1,61 @@
+[package]
+name = "hocus-settings"
+description = "The Hocuspanda Settings: an application window that writes the desktop's configuration file so that nobody has to edit it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocus-settings"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# The configuration file read, edited in place and written back.
+hocus-config = { path = "../hocus-config", version = "0.2.0" }
+toml_edit = "0.25.17"
+# The shell's toolkit and its settings (tech-choices, decision 2), as an
+# application window this time: winit's Wayland backend, no X11, no theme
+# detection over D-Bus.
+iced = { version = "0.14", default-features = false, features = [
+    "wgpu",
+    "tiny-skia",
+    "crisp",
+    "tokio",
+    "wayland",
+    # Blend in gamma space as browsers do: the mockups are CSS.
+    "web-colors",
+    # The sections' stroke icons.
+    "svg",
+    # The places of what it draws, for its log (tests and screen readers).
+    "advanced",
+] }
+# The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
+# the shell does).
+wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
+# The file's changes (inotify on its folder), on its worker; the user's id,
+# for their name.
+rustix = { version = "1.1.6", features = ["fs", "process"] }
+# The search ignores accents: words decomposed (NFD), their marks left out.
+unicode-normalization = "0.1.25"
+# When the last version that read was written, in the user's time zone.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+# Toasts' and the slider's delays.
+tokio = { version = "1.54.1", features = ["time", "rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# What it shows, said in its log as JSON (tests).
+serde_json = "1.0.154"
+# Raising the window on a second launch: xdg-activation on the connection
+# iced's winit drew it on (winit has no focus request on Wayland). The same
+# versions as winit's.
+wayland-client = "0.31.15"
+wayland-backend = { version = "0.3.17", features = ["client_system"] }
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+anyhow = "1.0.104"
