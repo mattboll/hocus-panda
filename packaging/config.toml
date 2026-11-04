@@ -167,6 +167,9 @@
 # a countdown; while recording, stops it. Saved in the videos' folder
 # ("Screen recordings", "Enregistrements d'écran" in French).
 # record = "Super+Shift+R"
+# Joins the meeting whose reminder shows, else the one starting next within
+# 10 min, opening its video call (docs/design/bar.md, Day.6).
+# join = "Super+J"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
@@ -246,3 +249,9 @@
 #   account = "alex@example.org"         # none: every Google account there
 #   shown = ["Travail"]
 #   colors = { "Travail" = "#6CC287" }
+
+# [calendar]
+# A meeting's reminder, a tab beside the bar with Join: at the event's own
+# alarm, else this many minutes before its start; 0 keeps only the
+# events' own alarms (docs/design/bar.md, Day.6).
+# remind = 5

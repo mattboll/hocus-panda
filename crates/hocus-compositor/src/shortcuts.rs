@@ -65,6 +65,9 @@ pub enum Action {
     /// A recording with the last settings, or the one under way stopped
     /// (5.10).
     Record,
+    /// The meeting whose reminder shows, else the one starting next within
+    /// 10 min, joined (Day.6).
+    Join,
 }
 
 /// What `Shift+Print` and `Alt+Print` capture at once.
@@ -256,6 +259,7 @@ shortcuts! {
     capture_screen: ["Shift+Print"] => Action::CaptureNow(CaptureNow::Screen),
     capture_window: ["Alt+Print"] => Action::CaptureNow(CaptureNow::Window),
     record: ["Super+Shift+R"] => Action::Record,
+    join: ["Super+J"] => Action::Join,
 }
 
 impl Shortcuts {
@@ -375,6 +379,7 @@ impl State {
             Action::Capture => self.open_capture(),
             Action::CaptureNow(what) => self.capture_now(what),
             Action::Record => self.record_shortcut(),
+            Action::Join => self.join_shortcut(),
         }
     }
 

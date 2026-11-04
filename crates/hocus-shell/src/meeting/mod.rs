@@ -149,17 +149,17 @@ fn tell_placed(placed: Placed) {
 }
 
 /// An instant's minute, to the nearest: a meeting's start and end.
-fn nearest_minute(t: Timestamp) -> i64 {
+pub(crate) fn nearest_minute(t: Timestamp) -> i64 {
     (t.as_millisecond() + 30_000).div_euclid(60_000)
 }
 
 /// The clock's minute at `now`, as it shows it.
-fn clock_minute(now: &Zoned) -> i64 {
+pub(crate) fn clock_minute(now: &Zoned) -> i64 {
     now.timestamp().as_millisecond().div_euclid(60_000)
 }
 
 /// `HH:MM` of an instant in `now`'s zone.
-fn hhmm(t: Timestamp, now: &Zoned) -> String {
+pub(crate) fn hhmm(t: Timestamp, now: &Zoned) -> String {
     t.to_zoned(now.time_zone().clone())
         .strftime("%H:%M")
         .to_string()
@@ -374,6 +374,17 @@ fn acted() {
     popover::send(effects);
 }
 
+/// The user acted on meeting `id` elsewhere (its reminder joined, opened
+/// or dismissed, Day.6): its halo ends, so that its 2-min wave does not
+/// run. The card stays.
+pub fn acted_on(id: &str) {
+    let effects: Vec<Effect> = state(|s| {
+        s.acted = Some(id.to_owned());
+        s.halo().into_iter().collect()
+    });
+    popover::send(effects);
+}
+
 /// The card's click (or `Enter` on it): its event's page in its calendar,
 /// until Day.5's popover; nothing without one.
 pub fn open_page() -> Option<Effect> {
@@ -509,7 +520,7 @@ impl Words {
     }
 
     /// "25 min", "1 h 05".
-    fn minutes(minutes: i64) -> String {
+    pub(crate) fn minutes(minutes: i64) -> String {
         if minutes >= 60 {
             format!("{}\u{a0}h\u{a0}{:02}", minutes / 60, minutes % 60)
         } else {
