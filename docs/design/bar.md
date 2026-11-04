@@ -29,7 +29,9 @@ group 11, section 5, section 9; 5.14, issue #531), and the sign under the
 clock of what uses the microphone, the camera or the screen, and its
 popover (5.12, issue #445), and the next meeting's card under the clock,
 its mark in the mini form and the halo's meeting states (section 4 group
-2, section 5, section 6; Day.2, issue #426): see [as built](#as-built).
+2, section 5, section 6; Day.2, issue #426), and Today, the list of
+today's events after it (section 4 group 4; Day.3, issue #427): see [as
+built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -128,7 +130,7 @@ Padding 14 px top, 12 px sides, 12 px bottom; 14 px between groups.
 | 1 | Clock | `HH:MM` in Martian Mono 400, 42 px, `text`, every character in a fixed cell (a `0`'s width, the colon 0.55 of it), centred; seconds in Martian Mono 300, 18 px, `text.faint`, on the same baseline, 4 px after; date 6 px below in Manrope 15.5 px, `text.dim` ("mercredi 28 octobre", "Wednesday 28 October"); on a minute change, the odometer (§4.1) | 72 px |
 | 2 | Next meeting | Card (Day.2, variant B): 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`; a click opens the meeting, a button joins its call. Hidden when nothing remains today (as built, Day.2) | 44 px |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows, then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
-| 4 | Today | The next 2 events after the meeting card: time, title | 18 px header + 20 px a line |
+| 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines, each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
 | 6 | Spacer | Takes what is left | flexible |
 | 7 | Secretary | Moved to the head of group 3 (4.6, variant B) | — |
@@ -3061,21 +3063,97 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   then); the secretary's meeting line in her briefing (4.6); names for
   screen readers (§11).
 
+### Day.3, Today (2026-11-04)
+
+What the approved Day.3 mockup shows, variant A (plain lines), with the
+maintainer's spec (§4 group 4; issue #427). Its data is the day's
+(docs/design/day.md), the same list as the next meeting's card (Day.2).
+
+- **What it lists** (`crates/hocus-shell/src/today/mod.rs`): today's
+  events that take time (`Event::takes_time`) and have not ended, in order
+  of start, the card's own left out (`meeting::ahead`, skipping the
+  first). All-day events stay in Day.5's calendar; every calendar shown is
+  in it. Nothing after the card: no group. The mini form: nothing.
+- **Where**: a surface of its own on each bar (`hocus-bar-today`),
+  opened while it lists something and removed after, 14 px under the
+  agents' group (where that group starts when it does not show: under
+  the card, or the sign of what is in use). Its room is what the spacer
+  would have: down to 14 px over the desktops' group. When the lines do
+  not fit, the last line that fits says how many more: "+ 5 autres
+  aujourd'hui" / "+ 5 more today", "+ 1 autre aujourd'hui" / "+ 1 more
+  today"; with no room for even one line (18 + 20 px), no group: Today
+  gives way first (§4). It follows the agents' group's height, the card
+  and the sign coming or going, the desktops' rows and the bar's height.
+- **The group** (`today/draw.rs`): its 18 px header "AUJOURD'HUI" /
+  "TODAY" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`), then 20 px
+  lines, 6 px past the group's sides (radius 6, 6 px in): the start in
+  Martian Mono 11 px `text.dim` in a 38 px cell, 7 px, a 7 px dot in the
+  calendar's colour, 7 px, the title (Manrope 13 px, `text`, cut with
+  "…"); "+ N" in 12.5 px `text.faint`. Under the pointer a line is lit
+  `rgba(255,255,255,0.06)` and the pointer is a hand; resting 600 ms on an
+  event shows "15:00–15:45 · Entretien — poste back-end" in the tray's
+  tooltip (5.14), the times in bold, beside the bar on the line.
+- **Time passing**: at each minute change the shell asks whether the
+  card's meeting ended; if so the first line becomes the card: it fades
+  out (200 ms) where it was and the lines under it move up 20 px (240 ms,
+  `cubic-bezier(0.2, 0.9, 0.25, 1)`), a line counted in "+ N" fading in at
+  the bottom; at once with reduced motion or on the CPU. Its lines say no
+  minutes: a minute's change that changes no line draws nothing.
+- **Clicks**: a line with a video link (found by its source, as for the
+  card) opens it in the browser; else the event's page in its calendar
+  (Day.5's popover not being built); with neither, nothing (said in the
+  log). "+ N" will open Day.5's calendar on today: nothing until then
+  (said in the log), lit and a hand all the same. `Tab` goes through the
+  lines and "+ N" among the bar's items, `Enter` or `Space` acts.
+- **Names for screen readers** (§11), said in the log: "15:00, Entretien —
+  poste back-end, visio" / "15:00, Entretien — poste back-end, video
+  call".
+- **Choices made here** (to confirm on the machine): one 14 px gap over
+  the desktops (the spacer then having nothing, its own gap not counted
+  twice); with room for one line only and several events, that line is
+  "+ N" alone, as the rule says; "+ N" opens nothing until Day.5; a line
+  with neither link nor page opens nothing; the tooltip is the tray's
+  (bold times, then the title) rather than a new look.
+- **Measured headless** (`crates/hocus-compositor/tests/today.rs`): the
+  real shell on the CPU, in French, a fixture's day, `HOCUS_CLOCK_AT`, its
+  `xdg-open` the test's own: the three events after the card in order,
+  their names, all-day, declined, free, cancelled and ended skipped, its
+  194 × 88 surface 14 px under where the agents' group starts, each dot in
+  its calendar's colour on the screen; nothing after the card, no group;
+  40 events: the first ones, then "+ N" counting the rest, its bottom 14
+  px or more over the desktops' group and one more line not fitting; on a
+  1920 × 320 screen, no group; at the card's end the first line becomes
+  the card at the minute's change, the group a line shorter; a click on a
+  line with a link opens it, on one without its page, on one with neither
+  nothing, on "+ N" nothing; resting on a line, its tooltip
+  ("15:00–15:45", "Entretien — poste back-end") beside the bar on it, the
+  line lit, gone as the pointer leaves; the mini form, no group; at rest
+  and through a minute's change that changes no line, no commit. Unit
+  tests for what fits and "+ N", the words in both languages, the
+  surface's size, the lines' motion, `Tab` through the lines and "+ N".
+  On the CPU, the screenshots of the pull request
+  (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
+- **Not built**: Day.5's calendar popover (the lines open the event's
+  page until then, "+ N" nothing); To do (Day.4), which will sit under it;
+  names for screen readers (§11).
+
 ### Day.4, the to-do list (2026-11-04)
 
 What the approved Day.4 mockup shows, variant C (A's group in the full
 form, an item and its popover in the mini form), with the maintainer's
 spec (issue #428).
 
-- **Its place**: the full form's group 14 px under the agents' group, or
-  where that group would be when it does not show (Today, Day.3, comes
-  between them); the mini form's item 14 px under the agents' item, or in
+- **Its place**: the full form's group 14 px under Today (Day.3) when it
+  lists something, else under the agents' group, or where that group
+  would be when it does not show; Today keeps the group's room under it
+  as it fits its lines; the mini form's item 14 px under the agents' item, or in
   its place. Its surface (`hocus-bar-tasks`, under the windows with the
   bar's others, 5.13) is the bar inside its rim, 5 px around what it
   draws for the keyboard's ring, as tall as the group (18 px, 22 px a
   line, 20 px for "+ N", 30 px for the field) or the item (34 px), one
-  pixel taking no pointer when nothing shows. The agents' group laid out
-  again (or the sign of what is in use coming) moves it. While the bar
+  pixel taking no pointer when nothing shows. Today or the agents' group
+  laid out again (or the meeting card, the sign of what is in use coming)
+  moves it. While the bar
   switches its form, it holds both forms, the two cross-fading.
 - **What shows**: the day's tasks' account (`Day::tasks()`, docs/design/
   day.md): the cards of the board's tasks' column chosen in Day.1, else
@@ -3084,8 +3162,8 @@ spec (issue #428).
   à faire." (13 px, `text.faint`). The group shows 3 lines; "+ 4 autres"
   / "+ 1 autre" (12.5 px, `text.faint`, a button lit under the pointer
   6 px past its text) opens the tasks' popover. A title too long is cut
-  with an ellipsis; resting 600 ms on it shows it whole in the tray's
-  tooltip (5.14), beside the bar.
+  with an ellipsis; resting 600 ms on it shows it whole in the bar's
+  tooltip (5.14, as Today's lines), beside the bar.
 - **Ticking**: a click on the box (or `Space`, `Enter` while it holds the
   keyboard) ticks it at once: `#6CC287`, a dark check (`#0b1020`), the
   title `text.faint` and struck through. The source is told at once
@@ -3174,6 +3252,8 @@ spec (issue #428).
   up through the boxes to the `+`, `Tab`, `Space` ticking, `Enter` on the
   `+` opening the field
   (`tab_goes_through_the_add_and_each_box_space_ticks_and_enter_opens_the_field`);
+  with a meeting card and two events, the group 14 px under Today
+  (`the_group_goes_14_px_under_today_when_today_lists_something`);
   no board, no group (a one-pixel surface), an empty board "Rien à
   faire." (`no_board_no_group_and_an_empty_board_says_nothing_to_do`); at
   rest no commit, an event's change none either, a task's change one

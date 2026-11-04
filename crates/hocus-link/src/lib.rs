@@ -159,6 +159,10 @@ pub const TIP_NAMESPACE: &str = "hocus-bar-tip";
 /// card under the clock in the full form, its mark in the mini. Opened
 /// while a meeting is left today, none without.
 pub const MEETING_NAMESPACE: &str = "hocus-bar-meeting";
+/// The namespace of Today (bar.md §4 group 4; Day.3): today's events after
+/// the next meeting's, under the agents' group, in the full form. Opened
+/// while it lists something, none without.
+pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 

@@ -108,6 +108,8 @@ pub struct Panel {
     /// Commits of the next meeting's surfaces (Day.2), for tests: none at
     /// rest, one each minute's change.
     pub meeting_commits: u64,
+    /// Commits of Today's surfaces (Day.3), for tests: none at rest.
+    pub today_commits: u64,
     /// Commits of the connections' surfaces, for tests: none at rest.
     pub connections_commits: u64,
     /// Commits of the desktops' surfaces, for tests: none at rest.

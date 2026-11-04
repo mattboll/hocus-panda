@@ -264,10 +264,36 @@ fn resting_height(laid: &Laid) -> f32 {
 
 // --- Where the surface goes ------------------------------------------------------------
 
-/// The group's top under the bar's, in the full form: 14 px under the
-/// agents' group, or where it would be. (Today, Day.3, comes between.)
-pub fn full_top() -> f32 {
-    crate::agents::draw::next_top(Form::Full)
+/// Bar `bar`'s group's top under the bar's, in the full form: 14 px under
+/// Today (Day.3) when it lists something there, else under the agents'
+/// group, or where it would be.
+fn group_top(bar: &str) -> f32 {
+    let (rows, top) = crate::today::shown(bar);
+    if rows.is_empty() {
+        crate::agents::draw::next_top(Form::Full)
+    } else {
+        top + crate::today::height(&rows) + crate::today::GAP
+    }
+}
+
+/// Bar `bar`'s group's top as last placed.
+pub fn full_top(bar: &str) -> f32 {
+    places(|places| places.get(bar).map(|p| p.top))
+        .unwrap_or_else(|| crate::agents::draw::next_top(Form::Full))
+}
+
+/// What the group takes of bar `bar`'s column under Today: its height and
+/// the 14 px over it, when it shows in the full form.
+pub fn room_taken(bar: &str) -> f32 {
+    places(|places| {
+        places.get(bar).map_or(0.0, |p| {
+            if p.heights.full > 0.0 {
+                p.heights.full + crate::today::GAP
+            } else {
+                0.0
+            }
+        })
+    })
 }
 
 /// The mini item's top under the bar's: 14 px under the agents' item.
@@ -287,6 +313,8 @@ struct Place {
     input: Option<bool>,
     /// What its group last laid out took (its field is its own).
     heights: Heights,
+    /// The full form's group's top under the bar's.
+    top: f32,
 }
 
 /// The group's heights as last laid out: the full form's, and whether the
@@ -309,9 +337,9 @@ fn places<T>(with: impl FnOnce(&mut HashMap<String, Place>) -> T) -> T {
 
 /// The surface's top under the bar's and its size, in `form`, for a
 /// group `h` tall.
-fn placement(form: Form, switching: bool, h: Heights) -> (f32, (u32, u32)) {
+fn placement(form: Form, switching: bool, h: Heights, top: f32) -> (f32, (u32, u32)) {
     let tall = |height: f32| (height + 2.0 * ROOM).ceil() as u32;
-    let full = (full_top(), h.full);
+    let full = (top, h.full);
     let mini = (mini_top(), if h.mini { MINI.height } else { 0.0 });
     match (switching, form) {
         (false, Form::Full) if full.1 > 0.0 => (full.0 - ROOM, (FULL_WIDTH, tall(full.1))),
@@ -335,13 +363,15 @@ fn margin(top: f32) -> Margin {
 /// and what opens it.
 pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Message>) {
     let id = window::Id::unique();
-    let (top, size) = placement(form, false, Heights::default());
+    let group = group_top(bar);
+    let (top, size) = placement(form, false, Heights::default(), group);
     let margin = margin(top);
     places(|places| {
         places.insert(
             bar.to_owned(),
             Place {
                 heights: Heights::default(),
+                top: group,
                 id,
                 form,
                 switching: false,
@@ -376,7 +406,7 @@ pub fn slot(bar: &str, slot: u8) -> Option<Key> {
 }
 
 fn refit(place: &mut Place) -> Option<((u32, u32), Margin)> {
-    let (top, size) = placement(place.form, place.switching, place.heights);
+    let (top, size) = placement(place.form, place.switching, place.heights, place.top);
     let margin = margin(top);
     if place.asked == (size, margin) {
         return None;
@@ -388,8 +418,10 @@ fn refit(place: &mut Place) -> Option<((u32, u32), Margin)> {
 /// Bar `bar` is in `form`, switching or not: its surface's new size and
 /// margins, if they change. The field closes as the form changes.
 pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
+    let top = group_top(bar);
     let changed = places(|places| {
         let place = places.get_mut(bar)?;
+        place.top = top;
         let changed = place.form != form || place.switching != switching;
         place.form = form;
         place.switching = switching;
@@ -414,10 +446,18 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
 /// The groups above moved, or this one's height changed: every bar's
 /// surface to its place.
 pub fn moved() {
+    // Today's places read first: not under this lock.
+    let bars: Vec<String> = places(|places| places.keys().cloned().collect());
+    let tops: Vec<(String, f32)> = bars
+        .into_iter()
+        .map(|b| (group_top(&b), b))
+        .map(|(t, b)| (b, t))
+        .collect();
     let effects: Vec<popover::Effect> = places(|places| {
-        places
-            .values_mut()
-            .filter_map(|place| {
+        tops.iter()
+            .filter_map(|(bar, top)| {
+                let place = places.get_mut(bar)?;
+                place.top = *top;
                 let (size, margin) = refit(place)?;
                 Some(popover::Effect::Resize {
                     id: place.id,
@@ -464,7 +504,9 @@ fn top_of(bar: &str) -> f32 {
     places(|places| {
         places
             .get(bar)
-            .map_or(full_top() - ROOM, |p| (p.asked.1.0 - EDGE) as f32)
+            .map_or(crate::agents::draw::next_top(Form::Full) - ROOM, |p| {
+                (p.asked.1.0 - EDGE) as f32
+            })
     })
 }
 
@@ -704,7 +746,7 @@ impl Group {
     /// The group's top left on the surface.
     fn origin(&self, size: Size) -> Point {
         let left = size.width + 2.0 - self.bar_width;
-        Point::new(left + SIDE, full_top() - top_of(&self.bar))
+        Point::new(left + SIDE, full_top(&self.bar) - top_of(&self.bar))
     }
 
     /// The mini item's top left on the surface, centred in the bar as
@@ -1007,9 +1049,10 @@ impl Group {
                     Some((text, rect)) if state.title.as_ref() != Some(text) => {
                         crate::tray::tip::hover_text(
                             &self.bar,
-                            text,
                             self.in_bar_rect(*rect, size),
                             TIP,
+                            text.clone(),
+                            String::new(),
                         );
                     }
                     None if state.title.is_some() => crate::tray::tip::leave(),
@@ -1111,6 +1154,8 @@ impl canvas::Program<Message> for Group {
                 });
                 if let Some(resized) = resized {
                     popover::send(vec![resized]);
+                    // Today over it keeps the room left (Day.3).
+                    crate::today::moved();
                 }
                 takes_pointer(&self.bar, self.alone().is_some() && laid.height > 0.0);
                 let keys: Vec<Key> = laid

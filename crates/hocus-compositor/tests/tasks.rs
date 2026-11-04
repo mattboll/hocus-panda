@@ -444,8 +444,8 @@ fn the_group_shows_three_tasks_in_the_columns_order_and_the_rest_in_its_popover(
     bed.logged_after(
         from,
         &[
-            "the tray's tooltip shows",
-            "tip=\"Mettre à jour le changelog et la documentation du paiement\"",
+            "a tooltip shows",
+            "name=\"Mettre à jour le changelog et la documentation du paiement\"",
         ],
     )?;
     bed.shot("tooltip")?;
@@ -888,5 +888,40 @@ fn at_rest_the_list_draws_nothing_and_another_change_of_the_day_neither() -> any
     let commits = bed.hp.tasks_commits();
     wait(&mut bed.hp, Duration::from_secs(2))?;
     assert_eq!(bed.hp.tasks_commits(), commits, "the list kept drawing");
+    Ok(())
+}
+
+#[test]
+fn the_group_goes_14_px_under_today_when_today_lists_something() -> anyhow::Result<()> {
+    // The meeting card, then two events for Today.
+    let day = format!(
+        "[[calendars]]\nname = \"Travail\"\n\
+         [[events]]\ntitle = \"Point produit\"\nstart = \"today 14:25\"\nend = \"today 14:55\"\n\
+         [[events]]\ntitle = \"Entretien\"\nstart = \"today 15:00\"\nend = \"today 15:45\"\n\
+         [[events]]\ntitle = \"Atelier\"\nstart = \"today 16:30\"\nend = \"today 17:30\"\n{SEVEN}"
+    );
+    let config =
+        format!("{WITH_TASKS}[[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n");
+    let Some(mut bed) = Bed::start("today", "1920x1080", &config, &day)? else {
+        return Ok(());
+    };
+    bed.group_after(0, &["more=+ 4 autres"])?;
+    let today = common::drawn(&mut bed.hp, hocus_link::TODAY_NAMESPACE)?[0].1;
+    // Today's group ends 5 px over its surface's bottom; this one starts
+    // 14 px under it, 5 px under its surface's top.
+    let under = bed.hp.dispatch_until(WAIT, |hp| {
+        let today = hp.drawn_layers(hocus_link::TODAY_NAMESPACE);
+        let tasks = hp.drawn_layers(hocus_link::TASKS_NAMESPACE);
+        match (today.first(), tasks.first()) {
+            (Some((_, t)), Some((_, g))) => g.y == t.y + t.height - 5 + 14 - 5 && g.height > 1,
+            _ => false,
+        }
+    })?;
+    assert!(
+        under,
+        "today {today:?}, the list {:?}",
+        bed.hp.drawn_layers(hocus_link::TASKS_NAMESPACE)
+    );
+    bed.shot("under-today")?;
     Ok(())
 }

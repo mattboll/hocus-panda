@@ -63,7 +63,7 @@ use std::{
 use hocus_link::{
     AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
     Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE,
-    POPOVER_WIDTH, TASKS_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
+    POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE, TRAY_NAMESPACE, ToCompositor,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -129,6 +129,11 @@ pub enum Item {
     Join,
     /// The mini form's meeting mark: its popover, by a hover or a click.
     MeetingMark,
+    /// A line of Today (Day.3), by its row from the top: a click, or
+    /// `Enter`, opens its call, else its page.
+    TodayLine(u8),
+    /// Today's "+ N autres aujourd'hui": Day.5's calendar on today.
+    TodayMore,
     /// The mini form's to-do item (Day.4): the tasks' popover.
     Tasks,
     /// The group's "+ N autres" (Day.4): the same popover, every task.
@@ -154,6 +159,8 @@ impl Item {
                 | Self::Tray(_)
                 | Self::Meeting
                 | Self::Join
+                | Self::TodayLine(_)
+                | Self::TodayMore
                 | Self::TaskAdd
                 | Self::Task(_)
         )
@@ -182,7 +189,9 @@ impl Item {
             | Self::Menu
             | Self::Tray(_)
             | Self::Meeting
-            | Self::Join => false,
+            | Self::Join
+            | Self::TodayLine(_)
+            | Self::TodayMore => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
@@ -233,6 +242,8 @@ impl Item {
             | Self::Menu
             | Self::Meeting
             | Self::Join
+            | Self::TodayLine(_)
+            | Self::TodayMore
             | Self::TaskAdd
             | Self::Task(_) => 0,
         }
@@ -259,6 +270,7 @@ impl Item {
             Self::Clipboard => clipboard::opening(),
             Self::Menu | Self::User | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
             Self::Meeting | Self::Join | Self::MeetingMark => {}
+            Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
         }
@@ -285,6 +297,8 @@ impl Item {
             | Self::Meeting
             | Self::Join
             | Self::MeetingMark
+            | Self::TodayLine(_)
+            | Self::TodayMore
             | Self::TaskAdd
             | Self::Task(_)
             | Self::Clipboard => {}
@@ -313,6 +327,7 @@ impl Item {
             (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
             (Self::Meeting | Self::Join | Self::MeetingMark, _) => MEETING_NAMESPACE,
+            (Self::TodayLine(_) | Self::TodayMore, _) => TODAY_NAMESPACE,
             (Self::Tasks | Self::TasksMore | Self::TaskAdd | Self::Task(_), _) => TASKS_NAMESPACE,
             (
                 Self::Sources
@@ -354,6 +369,7 @@ impl Item {
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
             MEETING_NAMESPACE => place.meeting.unwrap_or(place.levels),
+            TODAY_NAMESPACE => place.today.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
             TASKS_NAMESPACE => place.tasks.unwrap_or(place.levels),
             _ => place.connections,
@@ -389,6 +405,8 @@ pub struct Place {
     pub tray: Option<window::Id>,
     /// The next meeting's (Day.2), while one is left today.
     pub meeting: Option<window::Id>,
+    /// Today's (Day.3), while it lists something.
+    pub today: Option<window::Id>,
     /// The to-do list's (Day.4), once the bar has told it.
     pub tasks: Option<window::Id>,
 }
@@ -685,6 +703,7 @@ impl Controller {
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let tray = self.bars.get(bar).and_then(|p| p.tray);
         let meeting = self.bars.get(bar).and_then(|p| p.meeting);
+        let today = self.bars.get(bar).and_then(|p| p.today);
         let tasks = self.bars.get(bar).and_then(|p| p.tasks);
         let place = Place {
             form,
@@ -698,6 +717,7 @@ impl Controller {
             in_use,
             tray,
             meeting,
+            today,
             tasks,
         };
         self.bars.insert(bar.to_owned(), place);
@@ -738,6 +758,23 @@ impl Controller {
                 .focused
                 .as_ref()
                 .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == MEETING_NAMESPACE)
+            {
+                self.focused = None;
+            }
+        }
+    }
+
+    /// Bar `bar`'s Today's surface is `today` (none: it went).
+    pub fn set_today(&mut self, bar: &str, today: Option<window::Id>) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.today = today;
+        }
+        if today.is_none() {
+            self.items.remove(&(bar.to_owned(), TODAY_NAMESPACE));
+            if self
+                .focused
+                .as_ref()
+                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == TODAY_NAMESPACE)
             {
                 self.focused = None;
             }
@@ -1359,6 +1396,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
         Item::Meeting => crate::meeting::open_page(),
         Item::Join => crate::meeting::join(),
+        Item::TodayLine(row) => crate::today::open(&bar, usize::from(row)),
+        Item::TodayMore => crate::today::open_more(),
         Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),
         Item::Task(slot) => Some(Effect::Tasks(crate::tasks::Act::Toggle { bar, slot })),
         Item::Sound
@@ -2457,6 +2496,7 @@ mod tests {
             in_use: None,
             tray: None,
             meeting: None,
+            today: None,
             tasks: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
@@ -2487,6 +2527,7 @@ mod tests {
             in_use: None,
             tray: None,
             meeting: None,
+            today: None,
             tasks: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2788,6 +2829,51 @@ mod tests {
         c.set_meeting(BAR, None);
         c.handle(Event::ItemStep { back: false }, t);
         assert!(c.focused(BAR, Item::Sources));
+    }
+
+    #[test]
+    fn tab_goes_through_todays_lines_and_its_more_which_act() {
+        let mut c = Controller::default();
+        let today = window::Id::unique();
+        c.place(
+            BAR,
+            Form::Full,
+            window::Id::unique(),
+            (
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+                window::Id::unique(),
+            ),
+        );
+        c.set_today(BAR, Some(today));
+        c.motion = false;
+        let t = Instant::now();
+        let line =
+            |i: f32| Rectangle::new(Point::new(-190.0, 176.0 + 20.0 * i), Size::new(184.0, 20.0));
+        let card = Rectangle::new(Point::new(-185.0, 100.0), Size::new(172.0, 44.0));
+        c.set_items(BAR, MEETING_NAMESPACE, vec![(Item::Meeting, card)]);
+        c.set_items(
+            BAR,
+            TODAY_NAMESPACE,
+            vec![
+                (Item::TodayLine(0), line(0.0)),
+                (Item::TodayLine(1), line(1.0)),
+                (Item::TodayMore, line(2.0)),
+            ],
+        );
+        assert!(!Item::TodayLine(0).clicks() && !Item::TodayMore.clicks());
+        assert!(!Item::TodayLine(0).hovers(Form::Full));
+        // From the card (it had the keyboard), down Today's rows and round.
+        c.focused = Some((BAR.to_owned(), Item::Meeting, card));
+        let effects = c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::TodayLine(0)));
+        assert!(effects.contains(&Effect::Keyboard(today, KeyboardInteractivity::Exclusive)));
+        c.handle(Event::ItemStep { back: false }, t);
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::TodayMore));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Meeting));
     }
 
     #[test]
