@@ -130,6 +130,8 @@ pub struct State {
     /// The user started a program through the desktop then: its window
     /// takes the focus.
     pub spawned_at: Option<Duration>,
+    /// Commits of the windows' surfaces so far, for tests: none at rest.
+    pub window_commits: u64,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
     /// The last click on a tray icon, while its application may still
@@ -353,6 +355,7 @@ impl State {
             unmapped: Vec::new(),
             activation_tokens: HashMap::new(),
             spawned_at: None,
+            window_commits: 0,
             activate_on_map: Vec::new(),
             tray_click: None,
             opens_as: Vec::new(),

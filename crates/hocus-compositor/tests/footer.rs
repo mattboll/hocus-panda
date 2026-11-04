@@ -333,20 +333,25 @@ fn each_footer_button_opens_its_thing() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.launcher_surfaces().is_empty())?;
     anyhow::ensure!(closed, "the launcher stayed");
-    // The user: their name and "Se déconnecter", which ends the session.
+    // The user: their name, "Réglages", and "Se déconnecter", which ends
+    // the session.
     let mark = bed.mark();
     bed.click(bed.button(3))?;
     let session = bed.popover()?;
     assert_eq!(session.y + session.height, bar_bottom);
     let line = bed.logged_after(mark, "the session's popover shows it")?;
     assert!(line.contains("name=\"Alex\""), "{line}");
-    assert!(line.contains("Se déconnecter"), "{line}");
+    assert!(
+        line.contains("[\"Réglages\", \"Se déconnecter\"]"),
+        "{line}"
+    );
     assert_eq!(bed.hp.ending(), None);
-    // Its row: 8 px into the popover's padding, 49 px down, 44 px tall. A
-    // click asks to confirm, for 4 s; once they ran out, nothing ended.
+    // Its second row: 8 px into the popover's padding, 49 + 46 px down
+    // (under "Réglages"), 44 px tall. A click asks to confirm, for 4 s;
+    // once they ran out, nothing ended.
     let row = (
         f64::from(session.x + 9 + 131),
-        f64::from(session.y + 49 + 22),
+        f64::from(session.y + 49 + 46 + 22),
     );
     let mark = bed.mark();
     bed.click(row)?;

@@ -1,8 +1,8 @@
 //! The footer's user's popover (5.5), until the session's menu (7.4)
-//! takes its place: the user's name ([`crate::user`]) and "Se
-//! déconnecter", which ends the session as its shortcut does (the
-//! compositor's `log-out`). The desktop has no lock of its own yet: no
-//! "Verrouiller" until it does.
+//! takes its place: the user's name ([`crate::user`]), "Réglages", which
+//! opens the Settings (6.1), and "Se déconnecter", which ends the session
+//! as its shortcut does (the compositor's `log-out`). The desktop has no
+//! lock of its own yet: no "Verrouiller" until it does.
 //!
 //! Logging out takes two steps, so that a slip loses no open work: a click
 //! on the row (or `Enter` or `Space` once `Tab` gave it the keyboard)
@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use hocus_link::{POPOVER_WIDTH, ToCompositor};
+use hocus_link::{Launch, POPOVER_WIDTH, ToCompositor};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -31,10 +31,12 @@ use super::{
 use crate::levels::draw::{MANROPE_BOLD, TEXT, ring};
 
 pub const WIDTH: u32 = POPOVER_WIDTH.unsigned_abs();
-/// The row under the header: 44 px, 4 px under it, 8 px in; its 28 px
-/// tile (radius 8), 10 px before its words (13 px, 600).
+/// The rows under the header: 44 px, 2 px apart, the first 4 px under it,
+/// 8 px in; their 28 px tile (radius 8), 10 px before their words (13 px,
+/// 600).
 const ROW_TOP: f32 = kit::HEADER_TOP + kit::HEADER + 4.0;
 const ROW: f32 = 44.0;
+const ROW_GAP: f32 = 2.0;
 const TILE: f32 = 28.0;
 const LINE_TEXT: f32 = 13.0;
 const ROW_PAD: f32 = 8.0;
@@ -58,17 +60,33 @@ fn press(armed: Option<Instant>, now: Instant) -> (Option<Instant>, bool) {
     }
 }
 
-/// The row's place.
-fn row() -> Rectangle {
-    Rectangle::new(
-        Point::new(kit::LEFT - kit::ROW_OUT, ROW_TOP),
-        Size::new(kit::RIGHT - kit::LEFT + 2.0 * kit::ROW_OUT, ROW),
-    )
+/// Its rows, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    Settings,
+    LogOut,
 }
 
-/// Its height: the header and its one row.
+impl Row {
+    const ALL: [Self; 2] = [Self::Settings, Self::LogOut];
+
+    /// Its place.
+    fn place(self) -> Rectangle {
+        let i = Self::ALL.iter().position(|r| *r == self).unwrap_or(0) as f32;
+        Rectangle::new(
+            Point::new(kit::LEFT - kit::ROW_OUT, ROW_TOP + i * (ROW + ROW_GAP)),
+            Size::new(kit::RIGHT - kit::LEFT + 2.0 * kit::ROW_OUT, ROW),
+        )
+    }
+
+    fn at(point: Point) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.place().contains(point))
+    }
+}
+
+/// Its height: the header and its rows.
 pub fn height() -> u32 {
-    kit::height(ROW_TOP + ROW)
+    kit::height(Row::LogOut.place().y + ROW)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +99,10 @@ impl Words {
         Self {
             fr: lang == crate::clock::time::Lang::French,
         }
+    }
+
+    pub fn settings(self) -> &'static str {
+        if self.fr { "Réglages" } else { "Settings" }
     }
 
     pub fn log_out(self) -> &'static str {
@@ -115,8 +137,9 @@ pub struct Panel {
 pub struct State {
     /// The name, as cut to the header.
     name: Option<String>,
-    pointer: Pointer<()>,
-    focused: bool,
+    pointer: Pointer<Row>,
+    /// The row holding the keyboard.
+    focused: Option<Row>,
     /// The row asks to confirm, since then.
     armed: Option<Instant>,
 }
@@ -157,24 +180,32 @@ impl State {
     }
 }
 
-/// The log-out glyph: a door and an arrow leaving it.
-fn glyph() -> svg::Handle {
-    static GLYPH: std::sync::OnceLock<svg::Handle> = std::sync::OnceLock::new();
-    GLYPH
-        .get_or_init(|| {
-            svg::Handle::from_memory(
-                format!(
-                    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" \
-                     width=\"24\" height=\"24\"><path d=\"M10 5 H6.5 a1.5 1.5 0 0 0 -1.5 1.5 \
-                     V17.5 a1.5 1.5 0 0 0 1.5 1.5 H10 M14 8 L18 12 L14 16 M18 12 H9.5\" \
-                     fill=\"none\" stroke=\"{}\" stroke-width=\"1.8\" stroke-linecap=\"round\" \
-                     stroke-linejoin=\"round\"/></svg>",
-                    crate::notifications::bell::INK
-                )
-                .into_bytes(),
+/// The rows' glyphs: the Settings' sliders; a door and an arrow leaving
+/// it.
+fn glyph(row: Row) -> svg::Handle {
+    static GLYPHS: std::sync::OnceLock<[svg::Handle; 2]> = std::sync::OnceLock::new();
+    let make = |path: &str| {
+        svg::Handle::from_memory(
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" \
+                 width=\"24\" height=\"24\"><path d=\"{path}\" \
+                 fill=\"none\" stroke=\"{}\" stroke-width=\"1.8\" stroke-linecap=\"round\" \
+                 stroke-linejoin=\"round\"/></svg>",
+                crate::notifications::bell::INK
             )
-        })
-        .clone()
+            .into_bytes(),
+        )
+    };
+    let glyphs = GLYPHS.get_or_init(|| {
+        [
+            make("M4 7 H13 M17 7 H20 M15 4.5 V9.5 M4 17 H7 M11 17 H20 M9 14.5 V19.5"),
+            make(
+                "M10 5 H6.5 a1.5 1.5 0 0 0 -1.5 1.5 V17.5 a1.5 1.5 0 0 0 1.5 1.5 H10 \
+                 M14 8 L18 12 L14 16 M18 12 H9.5",
+            ),
+        ]
+    });
+    glyphs[usize::from(row == Row::LogOut)].clone()
 }
 
 impl<Message> canvas::Program<Message> for Panel {
@@ -221,44 +252,47 @@ impl<Message> canvas::Program<Message> for Panel {
         if let Some(name) = &state.name {
             kit::title(f, name);
         }
-        let row = row();
         let asking = state.armed.is_some();
-        if asking {
-            f.fill(&kit::rounded(row, ROW_RADIUS), CONFIRM_FILL);
-        } else if state.pointer.hover.is_some() {
-            f.fill(&kit::rounded(row, ROW_RADIUS), ROW_HOVER);
+        for which in Row::ALL {
+            let row = which.place();
+            let confirming = asking && which == Row::LogOut;
+            if confirming {
+                f.fill(&kit::rounded(row, ROW_RADIUS), CONFIRM_FILL);
+            } else if state.pointer.hover == Some(which) {
+                f.fill(&kit::rounded(row, ROW_RADIUS), ROW_HOVER);
+            }
+            if state.focused == Some(which) {
+                ring(f, row, ROW_RADIUS);
+            }
+            let tile = Rectangle::new(
+                Point::new(row.x + ROW_PAD, row.center_y() - TILE / 2.0),
+                Size::new(TILE, TILE),
+            );
+            f.fill(&kit::rounded(tile, TILE_RADIUS), TILE_FILL);
+            let centre = tile.center();
+            f.draw_svg(
+                Rectangle::new(
+                    Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
+                    Size::new(GLYPH, GLYPH),
+                ),
+                svg::Svg::new(glyph(which)),
+            );
+            let words = match which {
+                Row::Settings => self.words.settings(),
+                Row::LogOut if confirming => self.words.confirm(),
+                Row::LogOut => self.words.log_out(),
+            };
+            f.fill_text(text_in(
+                kit::MANROPE_SEMIBOLD,
+                text(
+                    words.to_owned(),
+                    Point::new(tile.x + TILE + TILE_GAP, row.center_y()),
+                    LINE_TEXT,
+                    if confirming { CONFIRM_INK } else { TEXT },
+                    Alignment::Left,
+                ),
+            ));
         }
-        if state.focused {
-            ring(f, row, ROW_RADIUS);
-        }
-        let tile = Rectangle::new(
-            Point::new(row.x + ROW_PAD, row.center_y() - TILE / 2.0),
-            Size::new(TILE, TILE),
-        );
-        f.fill(&kit::rounded(tile, TILE_RADIUS), TILE_FILL);
-        let centre = tile.center();
-        f.draw_svg(
-            Rectangle::new(
-                Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
-                Size::new(GLYPH, GLYPH),
-            ),
-            svg::Svg::new(glyph()),
-        );
-        f.fill_text(text_in(
-            kit::MANROPE_SEMIBOLD,
-            text(
-                if asking {
-                    self.words.confirm()
-                } else {
-                    self.words.log_out()
-                }
-                .to_owned(),
-                Point::new(tile.x + TILE + TILE_GAP, row.center_y()),
-                LINE_TEXT,
-                if asking { CONFIRM_INK } else { TEXT },
-                Alignment::Left,
-            ),
-        ));
         vec![frame.into_geometry()]
     }
 
@@ -291,10 +325,25 @@ impl Panel {
         }
         tracing::debug!(
             name,
-            rows = ?[self.words.log_out()],
+            rows = ?[self.words.settings(), self.words.log_out()],
             "the session's popover shows it"
         );
         state.name = Some(name);
+    }
+
+    /// The Settings open (or come forward), the popover closes: the
+    /// program in `PATH`, else beside the shell's.
+    fn settings() {
+        let program = settings_program();
+        tracing::info!(program, "the Settings open from the footer");
+        let launch = Launch {
+            id: "hocus-settings".to_owned(),
+            terminal: false,
+            dir: String::new(),
+            argv: vec![program],
+        };
+        super::send(vec![Effect::Tell(ToCompositor::Launch(launch))]);
+        event(Seen::Chosen);
     }
 
     /// The session ends; the popover closes.
@@ -309,7 +358,7 @@ impl Panel {
         seen: &mouse::Event,
         at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let target = at.filter(|at| row().contains(*at)).map(|_| ());
+        let target = at.and_then(Row::at);
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
@@ -322,15 +371,19 @@ impl Panel {
                 redraw
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focused = false;
+                state.focused = None;
                 state.pointer.pressed = target;
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if state.pointer.release(target).is_some() {
-                    return state.press();
+                match state.pointer.release(target) {
+                    Some(Row::LogOut) => state.press(),
+                    Some(Row::Settings) => {
+                        Panel::settings();
+                        redraw
+                    }
+                    None => redraw,
                 }
-                redraw
             }
             _ => None,
         }
@@ -346,13 +399,46 @@ impl Panel {
                     return Some(canvas::Action::capture());
                 }
             }
-            // Its one row holds the keyboard, round and round.
-            Key::Named(Named::Tab | Named::ArrowDown | Named::ArrowUp) => state.focused = true,
-            Key::Named(Named::Enter | Named::Space) if state.focused => return state.press(),
+            // Its rows hold the keyboard, round and round.
+            Key::Named(Named::Tab | Named::ArrowDown | Named::ArrowUp) => {
+                let back = matches!(&pressed.key, Key::Named(Named::ArrowUp))
+                    || (matches!(&pressed.key, Key::Named(Named::Tab))
+                        && pressed.modifiers.shift());
+                state.focused = Some(match (state.focused, back) {
+                    (None, false) | (Some(Row::LogOut), false) => Row::Settings,
+                    (None, true) | (Some(Row::Settings), _) => Row::LogOut,
+                    (Some(Row::LogOut), true) => Row::Settings,
+                });
+            }
+            Key::Named(Named::Enter | Named::Space) => match state.focused {
+                Some(Row::LogOut) => return state.press(),
+                Some(Row::Settings) => Panel::settings(),
+                None => return None,
+            },
             _ => return None,
         }
         Some(canvas::Action::request_redraw().and_capture())
     }
+}
+
+/// The Settings' program: `hocus-settings` in `PATH`, else beside the
+/// shell's own (a build not installed).
+fn settings_program() -> String {
+    const NAME: &str = "hocus-settings";
+    let in_path = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(NAME))
+            .find(|p| p.is_file())
+    });
+    let beside = || {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.join(NAME)))
+            .filter(|p| p.is_file())
+    };
+    in_path
+        .or_else(beside)
+        .map_or_else(|| NAME.to_owned(), |p| p.display().to_string())
 }
 
 #[cfg(test)]
@@ -371,6 +457,23 @@ mod tests {
         assert_eq!(press(Some(t), lapsed), (Some(lapsed), false));
         let fr = Words { fr: true };
         assert_eq!(fr.confirm(), "Confirmer la déconnexion");
+        assert_eq!(fr.settings(), "Réglages");
         assert_eq!(Words { fr: false }.confirm(), "Confirm log out");
+    }
+}
+
+#[cfg(test)]
+mod rows {
+    use super::*;
+
+    #[test]
+    fn the_settings_row_comes_first_then_logging_out() {
+        let settings = Row::Settings.place();
+        let out = Row::LogOut.place();
+        assert_eq!(settings.y, ROW_TOP);
+        assert_eq!(out.y, ROW_TOP + ROW + ROW_GAP);
+        assert_eq!(Row::at(settings.center()), Some(Row::Settings));
+        assert_eq!(Row::at(out.center()), Some(Row::LogOut));
+        assert_eq!(height(), kit::height(out.y + ROW));
     }
 }
