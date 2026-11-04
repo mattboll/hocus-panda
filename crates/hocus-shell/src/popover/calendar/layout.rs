@@ -1269,7 +1269,19 @@ mod tests {
             assert!(laid.day_line.count.is_none());
             let line_end = laid.rule + 1.0 + GAP + DAY_NAME * LINE;
             assert!((middle - (line_end + GAP + 14.0 + NOTE * LINE / 2.0)).abs() < 0.01);
-            assert!((laid.end - (middle + NOTE * LINE / 2.0 + 12.0)).abs() < 0.01);
+            // Without a source, "Choisir des agendas…" under the note
+            // (Day.1's popover), 8 px under it, the 12 px under the button.
+            let note_end = middle + NOTE * LINE / 2.0;
+            match (&agenda, laid.choose) {
+                (Agenda::NoSource, Some(choose)) => {
+                    assert!((choose.y - (note_end + 8.0)).abs() < 0.01);
+                    assert_eq!(choose.height, CHOOSE);
+                    assert!((laid.end - (choose.y + CHOOSE + 12.0)).abs() < 0.01);
+                }
+                (Agenda::NoSource, None) => panic!("no button without a source"),
+                (_, None) => assert!((laid.end - (note_end + 12.0)).abs() < 0.01),
+                (_, Some(_)) => panic!("a button with a source"),
+            }
         }
     }
 

@@ -145,7 +145,11 @@ change, as any account.
   with the user), on the add column `Refused`; `403` `Refused`; no answer
   or a `5xx` `Offline`; a redirect (a sign-in page in front of the API)
   or an answer that is not Planka's JSON `Invalid`.
-- **Until Day.1's form**: `hocus day planka-token [ACCOUNT]` reads the
+- **Day.1's popover** (bar.md, "Day.1") checks an address and a pasted
+  token with `planka::find` (`GET /api/users/me`, then the board with its
+  columns' counts, or a server's boards from `GET /api/projects`), keeps
+  the token through `hocus_day::secrets` and writes the board's entry.
+- **Also**: `hocus day planka-token [ACCOUNT]` reads the
   token on standard input (one line from a terminal), checks it with
   `GET /api/users/me` (refused: nothing kept; no answer: kept unchecked),
   and keeps it through `hocus_day::secrets`, where the worker reads it:
@@ -307,7 +311,16 @@ local list last.
 ## The configuration
 
 `[day]` in `config.toml`, read by the shell as it starts (the rest of the
-file is the compositor's). No secret goes in it.
+file is the compositor's). No secret goes in it. Day.1's popover writes
+its entries (`hocus_day::edit`, with `toml_edit`: the file's other
+sections, comments and order kept; through a link to the real file, with
+its mode; whole or not at all, beside it then renamed over it, off the
+loop), then the shell starts the workers again from it
+(`Workers::reconfigure`: every worker but the local list's stopped, each
+account said gone, the file's started, their caches kept; Online
+Accounts' thread ended and started again with the new Google entries).
+`day::sources()` says whether it sets any, which the first-run card
+reads.
 
 ```toml
 [[day.calendars]]
@@ -377,7 +390,10 @@ are GNOME Online Accounts'.
   have is logged.
 - **The token**: `OAuth2Based.GetAccessToken` (a connection of its own,
   30 s at most), kept until a minute before its `expires_in`, asked for
-  again then and once on a `401`. Online Accounts answering with an error
+  again then and once on a `401`.
+- **Day.1's popover** follows the same accounts while it is open
+  (`goa::watch_accounts`, a thread of its own ended as it closes) and
+  reads an account's calendars once (`goa::calendars`), for its step 3. Online Accounts answering with an error
   (the account needs signing in again) is `SourceError::SignIn`, shown as
   the account's error, its last events kept; not answering is `Offline`.
 - **The API**: Google Calendar API v3 over HTTPS, through the client the
@@ -481,3 +497,9 @@ never the loop. `Token`'s `Debug` never shows it.
   Online Accounts again, and its refusal is "sign in again"; an account
   added starts its worker, one switched off or removed stops it; without a
   bus, no Google source.
+- Day.1 (#425): `hocus_day::edit`'s unit tests (a choice written, the rest
+  of the file kept; a board the first tasks' entry; a file that does not
+  read left alone; written through its link with its mode),
+  `reconfigured_the_new_accounts_start_and_the_local_list_stays`; the
+  popover end to end in `crates/hocus-compositor/tests/day_sources.rs`
+  (bar.md, "Day.1"), with the fakes' Planka server (`tests/fakes`).
