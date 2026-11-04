@@ -382,8 +382,10 @@ impl State {
             "the session locks"
         );
         // What takes input or shows over the desktop goes first, while it
-        // can still say so to its clients.
+        // can still say so to its clients; the session menu's confirmation
+        // too (7.4).
         self.lock_closes_everything();
+        self.leave_locking();
         let now = self.now();
         let caps = self
             .seat
@@ -689,6 +691,7 @@ impl State {
                 | T::Lock(_)
                 | T::Meeting(_)
                 | T::Auth(_)
+                | T::Leave(hocus_link::LeaveAsk::Cancel)
         )
     }
 

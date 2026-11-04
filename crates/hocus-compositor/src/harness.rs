@@ -112,8 +112,10 @@ impl Headless {
         Self::start_on_buses(headless, config, shell, bus, None)
     }
 
-    /// The same, the system bus at `system` (`--system-bus`) too: logind's
-    /// sleeps and UPower's power source are read there (7.2).
+    /// The same, the system bus at `system` (`--system-bus`) too: logind
+    /// there does the session menu's power actions (7.4) and says the
+    /// sleeps (7.2), UPower the power source. Never the machine's own in a
+    /// test: a private bus with a fake logind.
     pub fn start_on_buses(
         headless: HeadlessConfig,
         config: Config,
@@ -836,6 +838,8 @@ impl Headless {
         state.away_check();
         // The lock's wait counts on this clock, its timer on the real one.
         state.lock_wait_tick();
+        // So do the session menu's countdown and its windows' 5 s (7.4).
+        state.leave_tick();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
@@ -1595,6 +1599,12 @@ impl Headless {
     /// Why the compositor was asked to end, if it was.
     pub fn ending(&self) -> Option<crate::Ending> {
         self.app.state.ending
+    }
+
+    /// The session menu's confirmation under way, as the shell is told
+    /// it (7.4).
+    pub fn leave_shown(&self) -> Option<hocus_link::LeaveShown> {
+        self.app.state.leave_shown_now()
     }
 
     /// Whether the backend made the linux-dmabuf global.

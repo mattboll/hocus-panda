@@ -416,6 +416,7 @@ impl State {
         }
         self.lock_shell_connected();
         self.away_shell_connected();
+        self.leave_shell_connected();
     }
 
     /// The shell's connection ended.
@@ -437,6 +438,7 @@ impl State {
             self.redraw = true;
         }
         self.lock_shell_gone();
+        self.leave_shell_gone();
     }
 
     fn shell_says(&mut self, message: ToCompositor) {
@@ -507,6 +509,7 @@ impl State {
                 tracing::info!("the shell logs out");
                 self.end(crate::Ending::LoggedOut);
             }
+            ToCompositor::Leave(ask) => self.leave_asked(ask),
         }
     }
 

@@ -33,6 +33,7 @@ mod ink;
 mod input;
 mod launcher;
 mod layouts;
+mod leave;
 mod levels;
 pub mod lock;
 mod magnet;
@@ -130,10 +131,12 @@ pub struct Options {
     /// Without it, only the session on a virtual terminal serves them, on
     /// the session's own bus; nested or headless, none is served.
     pub session_bus: Option<String>,
-    /// The system bus given (`--system-bus`), an address: logind's sleeps
-    /// and UPower's power source are read there (7.2). Without it, only
-    /// the session on a virtual terminal reads them, on the machine's;
-    /// nested or headless, none is read.
+    /// The system bus given (`--system-bus`), an address: logind there
+    /// does the session menu's power actions (7.4) and says the sleeps
+    /// (7.2), UPower the power source. Without it, only the session on a
+    /// virtual terminal uses the system's; nested or headless, there are
+    /// none, so that the developer's machine is never suspended or powered
+    /// off, nor waits for a test.
     pub system_bus: Option<String>,
 }
 
@@ -207,7 +210,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     )?;
     socket::insert(&event_loop.handle(), socket, display)?;
     state.shell.program = options.shell;
-    let system_bus = match (options.system_bus, &options.backend) {
+    let system_bus = match (options.system_bus.clone(), &options.backend) {
         (Some(address), _) => Some(away::system::Bus::Given(address)),
         (None, BackendKind::Tty) => Some(away::system::Bus::System),
         (None, _) => None,
@@ -222,6 +225,11 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.shell.auth_agent = matches!(options.backend, BackendKind::Tty);
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
+    state.leave_start(match (options.system_bus, &options.backend) {
+        (Some(address), _) => Some(address),
+        (None, BackendKind::Tty) => Some("system".to_owned()),
+        (None, _) => None,
+    });
     state.start_sharing();
     state.start_idle();
     state.start_away(system_bus);
@@ -332,6 +340,9 @@ impl App {
         state.lock_after_turn();
         // Before sleep (7.2): the machine sleeps once the lock shows.
         state.away_after_turn();
+        // The session's end (7.4): the windows that closed, the lock drawn
+        // before suspending.
+        state.leave_after_turn();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

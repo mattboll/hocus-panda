@@ -441,7 +441,8 @@ string or list turns an action's off. The package ships every setting with its d
 | Action (`[shortcuts]`) | Default | What it does |
 |---|---|---|
 | `terminal` | `Super+Return` | Opens a terminal: `[programs] terminal`, or the first of kitty, foot, alacritty, xterm found in `PATH` |
-| `log-out` | `Super+Shift+E` | Ends the session at once; the display manager comes back |
+| `log-out` | `Super+Shift+E` | The session menu's log-out confirmation (bar.md, 7.4): 10 s, cancellable, then the session ends and the display manager comes back; without a shell, at once |
+| `lock` | `Super+L` | Locks the session (lock.md) |
 | `close` | `Super+Q`, `Alt+F4` | Asks the focused window to close (§10) |
 | `minimize` | `Super+H` | Minimises the focused window (§10) |
 | `snap-left`, `snap-right` | `Super+←`, `Super+→` | Left or right half; again, the other side (§9) |

@@ -768,6 +768,19 @@ impl Shell {
                 let effects = curtain::end();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
+            // Taken by the link itself, without a message.
+            ToShell::LeaveCan(can) => {
+                popover::session::set_can(can);
+                Task::none()
+            }
+            ToShell::Leave(shown) => {
+                popover::session::set_shown(Some(shown));
+                Task::none()
+            }
+            ToShell::LeaveEnd => {
+                popover::session::set_shown(None);
+                Task::none()
+            }
         }
     }
 
@@ -1730,6 +1743,7 @@ impl Shell {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
+                motion: self.look.motion && !self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -2211,6 +2225,19 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // A portal dialog's parent: to the thread asking.
                         Ok(ToShell::Exported { ask, handle }) => {
                             foreign::exported(ask, handle);
+                            continue;
+                        }
+                        // The session menu (7.4): its popover alone.
+                        Ok(ToShell::LeaveCan(can)) => {
+                            popover::session::set_can(can);
+                            continue;
+                        }
+                        Ok(ToShell::Leave(shown)) => {
+                            popover::session::set_shown(Some(shown));
+                            continue;
+                        }
+                        Ok(ToShell::LeaveEnd) => {
+                            popover::session::set_shown(None);
                             continue;
                         }
                         _ => {}

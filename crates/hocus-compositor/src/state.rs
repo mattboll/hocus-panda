@@ -257,6 +257,8 @@ pub struct State {
     /// Locking on idle and before sleep, the curtain and the screens off
     /// (7.2).
     pub away: crate::away::Away,
+    /// How the session ends: the session menu's confirmation (7.4).
+    pub leave: crate::leave::Leave,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
 }
@@ -426,6 +428,7 @@ impl State {
             layout_codes,
             lock: crate::lock::Lock::new(dh),
             away: crate::away::Away::default(),
+            leave: crate::leave::Leave::default(),
             ending: None,
         })
     }

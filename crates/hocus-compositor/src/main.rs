@@ -80,11 +80,12 @@ struct Args {
     #[arg(long, value_name = "ADDRESS")]
     session_bus: Option<String>,
 
-    /// The system bus logind's sleeps and UPower's power source are read
-    /// on (locking before sleep, the idle delay on battery): an address.
-    /// Without it, only the session on a virtual terminal reads them, on
-    /// the machine's own; nested or headless, none is read, so that the
-    /// machine's logind never waits for a test.
+    /// The system bus whose logind the session menu asks to suspend,
+    /// restart or power off, and whose logind's sleeps and UPower's power
+    /// source the session follows (locking before sleep, the idle delay on
+    /// battery): an address. Without it, only the session on a virtual
+    /// terminal uses the system's; nested or headless, there are none, so
+    /// that the machine it runs on is never powered off nor waits for it.
     #[arg(long, value_name = "ADDRESS")]
     system_bus: Option<String>,
 }
