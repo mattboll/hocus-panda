@@ -7,6 +7,7 @@
 //! Work that could block (starting programs) runs on threads of its own.
 
 mod agents;
+pub mod auth;
 mod backdrop;
 mod backend;
 mod bubbles;
@@ -203,6 +204,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
         (None, BackendKind::Tty) => Some(shell::Bus::Session),
         (None, _) => None,
     };
+    // On a virtual terminal the compositor is the session: its shell is
+    // the session's polkit agent (7.5).
+    state.shell.auth_agent = matches!(options.backend, BackendKind::Tty);
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
     state.start_sharing();

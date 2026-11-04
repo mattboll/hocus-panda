@@ -524,7 +524,12 @@ impl State {
             let mut parting = self.lock_parting_elements(renderer, output, now);
             elements.append(&mut parting);
         }
-        // The share's chooser over everything but the cursor, and the
+        // The authentication dialog and its dim over everything but the
+        // cursor (7.5): on the screen only.
+        if purpose.screen() {
+            self.auth_elements(renderer, output, now, &mut elements);
+        }
+        // The share's chooser over everything else, and the
         // ring around a screen shared (5.11): on the screen only.
         if purpose.screen() {
             self.share_elements(renderer, output, now, &mut elements);
@@ -580,6 +585,7 @@ impl State {
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
                         | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
                         | hocus_link::SHARE_CHOOSER_NAMESPACE
+                        | hocus_link::AUTH_NAMESPACE
                         | hocus_link::CAPTURE_THUMB_NAMESPACE
                         | hocus_link::CAPTURE_EDITOR_NAMESPACE
                 ) {

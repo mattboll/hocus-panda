@@ -592,6 +592,7 @@ fn look(asked: &Receiver<Ask>) {
         if found > 0 {
             super::wake();
             crate::share::wake();
+            crate::auth::wake();
             crate::popover::changed(crate::popover::Item::InUse);
         }
     }

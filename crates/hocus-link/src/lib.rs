@@ -17,7 +17,8 @@
 //! clipboard's history, `Super+.` for the emoji picker and where it opens,
 //! what the screen capture's toolbar shows and what was captured, the
 //! screen the notifications' bubbles show on, a request to share the screen
-//! and what is shared, and a change asked of the day's tasks (for tests);
+//! and what is shared, where the system's authentication dialog goes and
+//! Caps Lock's state, and a change asked of the day's tasks (for tests);
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
@@ -25,7 +26,8 @@
 //! plugs a tool in or out, declines them, copies a text, pastes or copies
 //! an item of the clipboard's history, inserts an emoji, starts an
 //! application, clicks a bubble (its application's window), the
-//! capture's toolbar, or chooses what to share.
+//! capture's toolbar, chooses what to share, or opens and closes the
+//! authentication dialog.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question. One request has an answer: a click on a tray icon asks for an
@@ -40,11 +42,16 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
+mod auth;
 pub mod backdrop;
 mod capture;
 mod lock;
 mod record;
 mod share;
+pub use auth::{
+    AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
+    AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
+};
 pub use capture::{
     CAPTURE_DELAYS, CAPTURE_EDITOR_IN, CAPTURE_EDITOR_NAMESPACE, CAPTURE_THUMB_IN,
     CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
@@ -462,6 +469,11 @@ pub enum ToShell {
     /// The chooser of that request goes. Written `share-choose-end
     /// REQUEST`.
     ShareChooseEnd(u64),
+    /// Where the system's authentication dialog goes (7.5, [`AuthAt`]).
+    AuthAt(AuthAt),
+    /// Caps Lock is on, or off (7.5): sent as it changes and as the shell
+    /// connects. Written `caps on` or `caps off`.
+    CapsLock(bool),
     /// What is shared now (5.11): sent as the shell connects and when it
     /// changes; empty, nothing is ([`ShareShown`]). Written `shares`, then
     /// each after a tab.
@@ -1327,6 +1339,9 @@ pub enum ToCompositor {
     /// The lock's arrow or one of its buttons clicked, or the session
     /// menu's "Verrouiller" (7.1, 7.4, [`LockAsk`]).
     Lock(LockAsk),
+    /// The system's authentication dialog opens or fades out (7.5,
+    /// [`AuthAsk`]).
+    Auth(AuthAsk),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1521,6 +1536,8 @@ impl fmt::Display for ToShell {
             }
             Self::ShareChoose(choose) => choose.write(f),
             Self::ShareChooseEnd(request) => write!(f, "share-choose-end {request}"),
+            Self::AuthAt(at) => at.write(f),
+            Self::CapsLock(on) => write!(f, "caps {}", if *on { "on" } else { "off" }),
             Self::TrayToken { ask, token } => write!(f, "tray-token {ask} {token}"),
             Self::Shares(shares) => {
                 f.write_str("shares")?;
@@ -1578,6 +1595,9 @@ impl FromStr for ToShell {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(rest) = line.strip_prefix("share-choose ") {
             return ShareChoose::read(rest).map(Self::ShareChoose);
+        }
+        if let Some(rest) = line.strip_prefix("auth-at ") {
+            return AuthAt::read(rest).map(Self::AuthAt);
         }
         if let Some(rest) = line.strip_prefix("day ") {
             let (what, text) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -1845,6 +1865,7 @@ impl FromStr for ToShell {
             }
             Some("emoji-inserted") => Ok(Self::EmojiInserted),
             Some("join") => Ok(Self::Join),
+            Some("caps") => Ok(Self::CapsLock(flag(words.next(), "on", "off")?)),
             Some("tray-token") => {
                 let ask = word(&mut words, "click")?
                     .parse()
@@ -1967,6 +1988,7 @@ impl fmt::Display for ToCompositor {
             Self::TrayClick { ask, pid } => write!(f, "tray-click {ask} {pid}"),
             Self::Capture(ask) => ask.write(f),
             Self::Share(ask) => ask.write(f),
+            Self::Auth(ask) => ask.write(f),
             Self::Record(ask) => ask.write(f),
             Self::Lock(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
@@ -2058,6 +2080,7 @@ impl FromStr for ToCompositor {
             Some("capture") => CaptureAsk::read(&mut words).map(Self::Capture),
             Some("record") => RecordAsk::read(&mut words).map(Self::Record),
             Some("lock") => LockAsk::read(&mut words).map(Self::Lock),
+            Some("auth") => AuthAsk::read(&mut words).map(Self::Auth),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,

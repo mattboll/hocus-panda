@@ -26,6 +26,7 @@
 //! peeking out of the bar's edge ([`agents::peek`]).
 
 mod agents;
+mod auth;
 mod bluetooth;
 mod capture;
 mod clipboard;
@@ -128,6 +129,8 @@ fn main() -> ExitCode {
     bluetooth::start();
     launcher::start();
     emoji::start();
+    // The session's polkit agent, when the shell is the session's (7.5).
+    auth::start();
     notifications::start(software);
     // After the notifications' wall clock, which the day is read against.
     day::start();
@@ -690,6 +693,14 @@ impl Shell {
             }
             ToShell::ShareChooseEnd(request) => {
                 share::end(request);
+                Task::none()
+            }
+            ToShell::AuthAt(at) => {
+                auth::placed(at);
+                Task::none()
+            }
+            ToShell::CapsLock(on) => {
+                auth::caps(on);
                 Task::none()
             }
             ToShell::TrayToken { ask, token } => {
@@ -1421,6 +1432,24 @@ impl Shell {
         Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
     }
 
+    /// The authentication dialog (7.5), if its surface is `id`.
+    fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !auth::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(auth::draw::View {
+                id,
+                words: auth::words(),
+                glass: self.look.glass,
+                motion: self.look.motion,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The share's chooser (5.11), if its surface is `id`.
     fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !share::is_surface(id) {
@@ -1727,6 +1756,7 @@ impl Shell {
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.capture_view(id))
+                .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
                 .or_else(|| self.lock_view(id))
                 .or_else(|| self.in_use_view(id))
@@ -2109,6 +2139,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::ShareChooseEnd(request)) => {
                             share::end(request);
+                            continue;
+                        }
+                        // The authentication dialog (7.5): its place, and
+                        // Caps Lock.
+                        Ok(ToShell::AuthAt(at)) => {
+                            auth::placed(at);
+                            continue;
+                        }
+                        Ok(ToShell::CapsLock(on)) => {
+                            auth::caps(on);
                             continue;
                         }
                         Ok(ToShell::Shares(shares)) => {

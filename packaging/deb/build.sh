@@ -80,7 +80,8 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # which encodes screen recordings (a program of its own, never linked),
 # and a VA-API driver for it to encode on the GPU (without one, on the
 # CPU); GNOME Online Accounts, whose Google accounts give "Your day" its
-# calendars. Depends:
+# calendars; polkit's daemon, which asks the shell, the session's agent,
+# for an administrator's password (without it, nothing asks). Depends:
 # xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
@@ -96,7 +97,8 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  network-manager, bluez, xdg-utils, fonts-noto-color-emoji,
  pipewire, xdg-desktop-portal-gtk,
  ffmpeg, va-driver-all | va-driver,
- gnome-online-accounts
+ gnome-online-accounts,
+ polkitd
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

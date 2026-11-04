@@ -40,6 +40,11 @@ driver that fails ends the recording, not the session): the package
 recommends it, and a VA-API driver for it to encode on the GPU.
 "Your day"'s Google calendars come from GNOME Online Accounts
 (`gnome-online-accounts`, recommended; [docs/design/day.md](../docs/design/day.md)).
+The shell is the session's polkit authentication agent: the package
+recommends `polkitd`, whose helper (`polkit-agent-helper-1`, through its
+socket `/run/polkit/agent-helper.socket` from polkit 126, else the setuid
+program) checks the password; without polkit, no system action asks for
+one ([docs/design/polkit.md](../docs/design/polkit.md)).
 
 GDM reads the sessions when its login screen starts: after installing,
 log out (or restart GDM) and the gear under the password field lists

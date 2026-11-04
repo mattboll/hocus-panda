@@ -161,7 +161,12 @@ impl State {
                 {
                     this.redraw = true;
                 }
-                if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key) {
+                // The authentication dialog holds the keyboard (7.5): of
+                // the compositor's keys, only the virtual terminals' and
+                // the levels' work; everything else goes to the dialog.
+                let auth = this.auth_holds();
+                if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key).filter(|_| !auth)
+                {
                     // Alt+Tab held: its keys are its own, the modifiers
                     // go on to the application.
                     let sym = keysym.modified_sym();
@@ -193,7 +198,7 @@ impl State {
                 }
                 // The capture open keeps the keys (5.8), the modifiers
                 // going on, as Alt+Tab's.
-                if this.capture.choosing() {
+                if this.capture.choosing() && !auth {
                     let sym = keysym.modified_sym();
                     if is_modifier(sym) {
                         return FilterResult::Forward;
@@ -214,7 +219,7 @@ impl State {
                 // `Esc` clears the strokes while they show, with whatever
                 // modifiers are still held from drawing; otherwise it goes
                 // to the window.
-                if sym == Keysym::Escape.raw() && this.ink.shows() {
+                if sym == Keysym::Escape.raw() && this.ink.shows() && !auth {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::InkClear);
                 }
@@ -240,6 +245,7 @@ impl State {
                         unshifted.shift = false;
                         shortcuts.action(&unshifted, typed, this.nested)
                     });
+                let action = action.filter(|(a, _)| !auth || matches!(a, Action::Level(_)));
                 if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action, chord));
@@ -300,6 +306,8 @@ impl State {
         // A group-switch option of the user's XKB options may have changed
         // the layout: the bar's row follows.
         self.layout_maybe_changed();
+        // Caps Lock, for the authentication dialog's sign (7.5).
+        self.auth_caps(mods.caps_lock);
     }
 
     /// Whether the modifiers held move a window under the pointer:
@@ -395,12 +403,13 @@ impl State {
         };
         // The laser's trail follows, over everything.
         self.ink_pointer(location);
-        // The capture open takes it, but over its toolbar (5.8).
-        if self.capture_motion(location, time) {
+        // The authentication dialog keeps it from what it dims (7.5);
+        // the capture open takes it, but over its toolbar (5.8).
+        if !self.auth_keeps_pointer(location) && self.capture_motion(location, time) {
             return;
         }
         // The share's chooser keeps it from what it darkens (5.11).
-        if self.share_keeps_pointer(location) {
+        if self.auth_keeps_pointer(location) || self.share_keeps_pointer(location) {
             pointer.motion(
                 self,
                 None,
@@ -566,8 +575,13 @@ impl State {
             pointer.frame(self);
             return;
         }
+        // A press away from the authentication dialog does nothing (7.5).
+        if state == ButtonState::Pressed && self.auth_keeps_pointer(pointer.current_location()) {
+            self.kept_buttons.insert(button);
+            return;
+        }
         // The capture open takes it, but over its toolbar (5.8).
-        if self.capture_button(button, state, time) {
+        if !self.auth_holds() && self.capture_button(button, state, time) {
             return;
         }
         let serial = SERIAL_COUNTER.next_serial();
@@ -590,6 +604,7 @@ impl State {
         if state == ButtonState::Pressed
             && button == BTN_LEFT
             && !pointer.is_grabbed()
+            && !self.auth_holds()
             && let Some(shape) = self
                 .seat
                 .get_keyboard()
@@ -702,6 +717,10 @@ impl State {
             }
         }
         if let Some(pointer) = self.seat.get_pointer() {
+            // Nothing under the authentication dialog's dim scrolls (7.5).
+            if self.auth_keeps_pointer(pointer.current_location()) {
+                return;
+            }
             pointer.axis(self, frame);
             pointer.frame(self);
         }
@@ -713,6 +732,10 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // Nothing under the authentication dialog's dim sees one (7.5).
+        if self.auth_keeps_pointer(pointer.current_location()) {
+            return;
+        }
         match gesture {
             // Locked (7.1): no desktop swipe; the lock's surface has the
             // pointer.

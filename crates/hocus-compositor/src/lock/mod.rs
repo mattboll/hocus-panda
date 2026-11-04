@@ -621,13 +621,21 @@ impl State {
     }
 
     /// What the shell may ask while the session is locked: drawing, the
-    /// lock's own asks and the next layout; nothing that shows or moves a
+    /// lock's own asks, the next layout, the authentication dialog's
+    /// comings and goings (never drawn nor given a key while locked);
+    /// nothing that shows or moves a
     /// window, starts or copies anything.
     pub(crate) fn lock_lets(message: &hocus_link::ToCompositor) -> bool {
         use hocus_link::ToCompositor as T;
         matches!(
             message,
-            T::Software | T::Wake(_) | T::Closing(_) | T::NextLayout | T::Lock(_) | T::Meeting(_)
+            T::Software
+                | T::Wake(_)
+                | T::Closing(_)
+                | T::NextLayout
+                | T::Lock(_)
+                | T::Meeting(_)
+                | T::Auth(_)
         )
     }
 

@@ -656,6 +656,15 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// The authentication dialog on `output` (7.5), `size` large: centred
+    /// across it, `top` from its top, over everything, holding the
+    /// keyboard.
+    Auth {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        top: i32,
+    },
     /// The capture's thumbnail on `output` (5.9), `size` large, its
     /// margins from the screen's bottom right corner (top, right, bottom,
     /// left): taking the pointer, never the keyboard.
@@ -1886,6 +1895,13 @@ pub fn linked(sender: iced::futures::channel::mpsc::UnboundedSender<String>) {
     *LINK.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
 }
 
+/// Whether the shell is linked to a compositor.
+pub(crate) fn linked_now() -> bool {
+    LINK.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some()
+}
+
 /// Tells the compositor; `false` without it.
 pub(crate) fn tell(message: ToCompositor) -> bool {
     LINK.lock()
@@ -1911,6 +1927,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
                 crate::tasks::deadline(),
+                crate::auth::deadline(),
             ]
             .into_iter()
             .flatten()
@@ -1930,6 +1947,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
                             due.extend(crate::tasks::tick(now));
+                            due.extend(crate::auth::tick(now));
                             Some(due)
                         }
                     }
@@ -2273,6 +2291,30 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::Auth {
+            id,
+            output,
+            size,
+            top,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                // Centred across the screen, its top fixed: it grows down.
+                anchor: Anchor::Top,
+                exclusive_zone: Some(-1),
+                margin: Some((top, 0, 0, 0)),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::AUTH_NAMESPACE.to_owned()),
             },
             id,
         }],
