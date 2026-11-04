@@ -538,6 +538,24 @@ impl Bed {
         Ok(())
     }
 
+    /// Waits until the sign has not committed for a second: a tile gone
+    /// resizes its surface, and the shell draws again at its new size
+    /// after it said what it shows.
+    fn settled(&mut self) -> anyhow::Result<u64> {
+        common::at_rest(&mut self.hp)?;
+        let mut last = self.hp.in_use_commits();
+        let mut since = Instant::now();
+        let still = self.hp.dispatch_until(WAIT, |hp| {
+            let now = hp.in_use_commits();
+            if now != last {
+                (last, since) = (now, Instant::now());
+            }
+            since.elapsed() >= Duration::from_secs(1)
+        })?;
+        anyhow::ensure!(still, "the sign kept drawing:\n{}", self.log());
+        Ok(self.hp.in_use_commits())
+    }
+
     /// What the recording's tile reads after `mark` once `pass` takes it:
     /// its time ("0:03"), or "pause".
     fn rec_reads(&mut self, mark: usize, pass: impl Fn(&str) -> bool) -> anyhow::Result<String> {
@@ -1132,8 +1150,7 @@ fn paused_or_gone_the_recording_draws_nothing_at_rest() -> anyhow::Result<()> {
     let mark = bed.mark();
     bed.pause(true)?;
     bed.rec_at_rest(mark, true)?;
-    common::at_rest(&mut bed.hp)?;
-    let commits = bed.hp.in_use_commits();
+    let commits = bed.settled()?;
     wait(&mut bed.hp, Duration::from_secs(2))?;
     assert_eq!(bed.hp.in_use_commits(), commits, "the sign drew, paused");
     // Stopped, the share still on: once the recording's tile has gone,
@@ -1141,8 +1158,7 @@ fn paused_or_gone_the_recording_draws_nothing_at_rest() -> anyhow::Result<()> {
     let mark = bed.mark();
     bed.hp.record_ask(hocus_link::RecordAsk::Stop);
     bed.sign_since(mark, "Screen")?;
-    common::at_rest(&mut bed.hp)?;
-    let commits = bed.hp.in_use_commits();
+    let commits = bed.settled()?;
     let reads = bed.lines("the in-use sign's recording reads").len();
     wait(&mut bed.hp, Duration::from_secs(3))?;
     assert_eq!(bed.hp.in_use_commits(), commits, "the sign drew at rest");
