@@ -467,12 +467,47 @@ fn answer(target: &str, token: String, api: &Mutex<Api>) -> (u16, Value) {
         };
     }
     match api.events.get(calendar) {
-        Some((items, next)) => (
-            200,
-            page(items, page_token, json!({ "nextSyncToken": next })),
-        ),
+        Some((items, next)) => {
+            let items: Vec<Value> = items
+                .iter()
+                .filter(|item| within(item, query.get("timeMin"), query.get("timeMax")))
+                .cloned()
+                .collect();
+            (
+                200,
+                page(&items, page_token, json!({ "nextSyncToken": next })),
+            )
+        }
         None => (404, json!({"error": {"code": 404}})),
     }
+}
+
+/// Whether `item` overlaps `[from, to)`, as Google lists an event between
+/// `timeMin` and `timeMax`; one without its times (removed) always.
+fn within(item: &Value, from: Option<&String>, to: Option<&String>) -> bool {
+    let at = |field: &str| -> Option<jiff::Timestamp> {
+        let time = &item[field];
+        match (time["dateTime"].as_str(), time["date"].as_str()) {
+            (Some(instant), _) => instant.parse().ok(),
+            (None, Some(date)) => date
+                .parse::<jiff::civil::Date>()
+                .ok()?
+                .to_zoned(jiff::tz::TimeZone::UTC)
+                .ok()
+                .map(|z| z.timestamp()),
+            (None, None) => None,
+        }
+    };
+    let (Some(start), Some(end)) = (at("start"), at("end")) else {
+        return true;
+    };
+    let before_end = to
+        .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+        .is_none_or(|to| start < to);
+    let after_start = from
+        .and_then(|f| f.parse::<jiff::Timestamp>().ok())
+        .is_none_or(|from| end > from);
+    before_end && after_start
 }
 
 /// A timed event of 4 November 2026, `from` to `to` (`HH:MM`, UTC).

@@ -8,7 +8,9 @@
 //! - `events`, with `singleEvents=true` (recurring events expanded by
 //!   Google, exceptions honoured), lists the window and gives a
 //!   `nextSyncToken`; a sync from it gives what changed, a `410` that it
-//!   expired (the worker lists again).
+//!   expired (the worker lists again). A month outside the window
+//!   (Day.5b) is listed the same way when the calendar turns to it, its
+//!   token left unused: the window's syncs keep it up to date.
 //! - The token is asked for again when it expires, and once on a `401`;
 //!   Online Accounts refusing it is [`SourceError::SignIn`].
 

@@ -5,12 +5,19 @@
 //! file changes), and at once after a change. Between, it sleeps on its
 //! channel: no wakeup until its schedule or a command.
 //!
+//! A calendars' account also reads the months outside its window it is
+//! asked for ([`Command::Months`], as the calendar turns to them: Day.5b),
+//! keeps them with its cache, and syncs them with the window: a month read
+//! is not read again, unless the window was listed whole since (once a
+//! day, a sync token expired, a source without tokens), and then only when
+//! it is asked for again.
+//!
 //! The bar's changes are queued, sent at once in their order, and kept
 //! when the source refuses them, each with why: they are tried again each
 //! time the source answers again. A card that is no more drops its change.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
@@ -22,10 +29,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Clock,
     model::{
-        Calendar, CalendarId, Colour, Event, Place, Task, TaskBoard, TaskId, sort_events,
+        Calendar, CalendarId, Colour, Event, EventId, Place, Task, TaskBoard, TaskId, sort_events,
         sort_tasks,
     },
-    snapshot::{Account, Change, ChangeId, Pending, Snapshot, State, Update},
+    snapshot::{Account, Change, ChangeId, Holds, MonthState, Pending, Snapshot, State, Update},
     source::{CalendarSource, ColumnNames, Columns, KanbanSource, Range, SourceError, SyncToken},
 };
 
@@ -58,6 +65,9 @@ pub(crate) struct Plan {
 
 pub(crate) enum Command {
     Refresh,
+    /// These months (any of their days), outside the window, read if they
+    /// are not already (a calendars' account's; the others ignore it).
+    Months(Vec<Date>),
     Change(ChangeId, Change),
     /// Answered once what came before is done.
     Flush(mpsc::Sender<()>),
@@ -72,6 +82,7 @@ pub(crate) enum Command {
 #[derive(Debug, Clone)]
 pub(crate) struct Handle {
     pub account: crate::model::AccountId,
+    pub holds: Holds,
     commands: mpsc::Sender<Command>,
     /// Whether its snapshots still go to the day: cleared, under its lock,
     /// as its account is said gone, so that none comes after.
@@ -105,6 +116,7 @@ impl Handle {
 pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Update>) -> Option<Handle> {
     let (commands, incoming) = mpsc::channel();
     let account = plan.account.id.clone();
+    let holds = plan.account.holds;
     let alive = Arc::new(Mutex::new(true));
     let still = alive.clone();
     if let Some(file) = plan.watch.clone() {
@@ -129,6 +141,9 @@ pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Update>) -> Opti
                 alive: still,
                 sent: None,
                 cached: None,
+                events: Vec::new(),
+                far: BTreeMap::new(),
+                failed: BTreeMap::new(),
                 tokens: BTreeMap::new(),
                 window: None,
                 columns: None,
@@ -141,6 +156,7 @@ pub(crate) fn spawn(plan: Plan, clock: Clock, out: mpsc::Sender<Update>) -> Opti
     match started {
         Ok(_) => Some(Handle {
             account,
+            holds,
             commands,
             alive,
         }),
@@ -173,7 +189,30 @@ struct Data {
     tokens: BTreeMap<CalendarId, SyncToken>,
     /// The day the events' window was last listed around.
     window: Option<Date>,
+    /// The months read outside the window.
+    #[serde(default)]
+    far: Vec<Far>,
 }
+
+/// A month outside the window, as read (Day.5b).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Far {
+    /// Its first day.
+    month: Date,
+    /// When it was read (the wall clock): the oldest are forgotten past
+    /// [`FAR_KEPT`].
+    read: Timestamp,
+    /// The window was listed whole since, so changes to it may have gone
+    /// unseen: read again the next time it is asked for (its events shown
+    /// meanwhile).
+    stale: bool,
+    /// The calendars shown when it was read.
+    calendars: Vec<CalendarId>,
+    events: Vec<Event>,
+}
+
+/// How many months outside the window an account keeps.
+const FAR_KEPT: usize = 24;
 
 struct Worker {
     source: Source,
@@ -185,6 +224,12 @@ struct Worker {
     sent: Option<Snapshot>,
     /// What the cache holds, so that it is written only when that changes.
     cached: Option<Data>,
+    /// The window's events; the snapshot's are these and the far months'.
+    events: Vec<Event>,
+    /// The months read outside the window, by their first day.
+    far: BTreeMap<Date, Far>,
+    /// The months outside the window the source did not give, and why.
+    failed: BTreeMap<Date, SourceError>,
     tokens: BTreeMap<CalendarId, SyncToken>,
     window: Option<Date>,
     columns: Option<Columns>,
@@ -226,10 +271,14 @@ impl Worker {
             // The schedule's time, or what was asked meanwhile, together.
             let mut fetch = first.is_none();
             let mut changes = false;
+            let mut months = BTreeSet::new();
             let mut flushes = Vec::new();
             for command in first.into_iter().chain(incoming.try_iter()) {
                 match command {
                     Command::Refresh => fetch = true,
+                    Command::Months(asked) => {
+                        months.extend(asked.iter().map(|m| m.first_of_month()));
+                    }
                     Command::Change(id, change) => {
                         self.queue(id, change);
                         changes = true;
@@ -248,6 +297,9 @@ impl Worker {
             if fetch {
                 self.fetch_and_retry();
                 due = every.map(|every| Instant::now() + every);
+            }
+            if !months.is_empty() {
+                self.read_months(months);
             }
             self.send();
             for done in flushes {
@@ -411,16 +463,18 @@ impl Worker {
                 colours,
                 &self.clock,
                 Fetched {
-                    events: &self.snapshot.events,
+                    events: &self.events,
                     tokens: &self.tokens,
                     window: self.window,
                 },
             )
-            .map(|(calendars, events, tokens, window)| {
-                self.snapshot.calendars = calendars;
-                self.snapshot.events = events;
-                self.tokens = tokens;
-                self.window = Some(window);
+            .map(|read| {
+                self.snapshot.calendars = read.calendars;
+                self.events = read.events;
+                self.tokens = read.tokens;
+                self.window = Some(read.window);
+                self.follow_far(read.whole, &read.changed, &read.removed);
+                self.compose();
             }),
             Source::Tasks { source, names } => {
                 read_tasks(source.as_mut(), names).map(|(board, columns, tasks)| {
@@ -442,11 +496,7 @@ impl Worker {
                 true
             }
             Err(error) => {
-                let before = match &self.snapshot.state {
-                    State::Cached { fetched } | State::Fresh { fetched } => Some(*fetched),
-                    State::Failed { fetched, .. } => *fetched,
-                    State::Loading => None,
-                };
+                let before = self.fetched();
                 if !matches!(&self.snapshot.state, State::Failed { error: e, .. } if *e == error) {
                     tracing::warn!(account = self.id(), %error, "the day's account is not read");
                 }
@@ -459,14 +509,209 @@ impl Worker {
         }
     }
 
+    /// When the source was last read, if ever.
+    fn fetched(&self) -> Option<Timestamp> {
+        match &self.snapshot.state {
+            State::Cached { fetched } | State::Fresh { fetched } => Some(*fetched),
+            State::Failed { fetched, .. } => *fetched,
+            State::Loading => None,
+        }
+    }
+
+    // --- Months outside the window --------------------------------------------------
+
+    /// The far months after the window was read: those it now holds
+    /// forgotten; the others stale if it was listed whole, else with what
+    /// its syncs said changed.
+    fn follow_far(&mut self, whole: bool, changed: &[Event], removed: &[(CalendarId, EventId)]) {
+        let now = self.clock.now();
+        let zone = now.time_zone().clone();
+        let window = Range::window(&now);
+        let outside = |month: &Date| !window.covers(&Range::month(*month, &zone));
+        self.far.retain(|month, _| outside(month));
+        self.failed.retain(|month, _| outside(month));
+        for far in self.far.values_mut() {
+            far.stale |= whole;
+            let month = Range::month(far.month, &zone);
+            far.events.retain(|e| {
+                let same = |c: &Event| c.calendar == e.calendar && c.id == e.id;
+                !changed.iter().any(same)
+                    && !removed
+                        .iter()
+                        .any(|(calendar, id)| *calendar == e.calendar && *id == e.id)
+            });
+            far.events.extend(
+                changed
+                    .iter()
+                    .filter(|e| e.overlaps(month.from, month.to, &zone))
+                    .cloned(),
+            );
+        }
+    }
+
+    /// The snapshot's events (the window's and the far months', those of
+    /// hidden calendars left out) and its months.
+    fn compose(&mut self) {
+        let zone = self.clock.now().time_zone().clone();
+        let shown: HashSet<&CalendarId> = self
+            .snapshot
+            .calendars
+            .iter()
+            .filter(|c| c.shown)
+            .map(|c| &c.id)
+            .collect();
+        let mut events = self.events.clone();
+        let mut seen: HashSet<(&CalendarId, &EventId)> =
+            self.events.iter().map(|e| (&e.calendar, &e.id)).collect();
+        for event in self.far.values().flat_map(|f| &f.events) {
+            if shown.contains(&event.calendar) && seen.insert((&event.calendar, &event.id)) {
+                events.push(event.clone());
+            }
+        }
+        sort_events(&mut events, &zone);
+        self.snapshot.events = events;
+        let mut months: BTreeMap<Date, MonthState> = self
+            .failed
+            .iter()
+            .map(|(month, error)| (*month, MonthState::Failed(error.clone())))
+            .collect();
+        months.extend(self.far.keys().map(|month| (*month, MonthState::Loaded)));
+        self.snapshot.months = months;
+    }
+
+    /// The months `asked` (their first days) read, unless the window holds
+    /// them or they are read already: listed for every shown calendar, a
+    /// range for each run of months that follow each other. Seen loading
+    /// first; a month the source does not give is failed, unless it was
+    /// read before (kept as it was).
+    fn read_months(&mut self, asked: BTreeSet<Date>) {
+        if !matches!(self.source, Source::Calendars { .. }) {
+            return;
+        }
+        let now = self.clock.now();
+        let zone = now.time_zone().clone();
+        let window = Range::window(&now);
+        let shown: Vec<CalendarId> = self
+            .snapshot
+            .calendars
+            .iter()
+            .filter(|c| c.shown)
+            .map(|c| c.id.clone())
+            .collect();
+        let wanted: Vec<Date> = asked
+            .into_iter()
+            .filter(|month| !window.covers(&Range::month(*month, &zone)))
+            .filter(|month| {
+                self.far
+                    .get(month)
+                    .is_none_or(|far| far.stale || far.calendars != shown)
+            })
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        let said: Vec<String> = wanted
+            .iter()
+            .map(|m| m.strftime("%Y-%m").to_string())
+            .collect();
+        tracing::debug!(
+            account = self.id(),
+            months = %said.join(" "),
+            "the day's account reads months outside its window"
+        );
+        // Its calendars never read: nothing to list them with.
+        if self.snapshot.calendars.is_empty()
+            && let State::Failed { error, .. } = &self.snapshot.state
+        {
+            let error = error.clone();
+            for month in wanted {
+                self.failed.insert(month, error.clone());
+            }
+            self.compose();
+            return;
+        }
+        for month in &wanted {
+            if !self.far.contains_key(month) {
+                self.snapshot.months.insert(*month, MonthState::Loading);
+            }
+        }
+        self.send();
+        let read = now.timestamp();
+        for run in runs(&wanted) {
+            let (Some(first), Some(last)) = (run.first(), run.last()) else {
+                continue;
+            };
+            let range = Range {
+                from: Range::month(*first, &zone).from,
+                to: Range::month(*last, &zone).to,
+            };
+            let Source::Calendars { source, .. } = &mut self.source else {
+                return;
+            };
+            let mut listed = Vec::new();
+            let mut error = None;
+            for calendar in &shown {
+                match source.events(calendar, range) {
+                    Ok(listing) => listed.extend(listing.events.into_iter().map(|mut e| {
+                        e.calendar = calendar.clone();
+                        e
+                    })),
+                    Err(e) => {
+                        error = Some(e);
+                        break;
+                    }
+                }
+            }
+            match error {
+                None => {
+                    for month in run {
+                        let within = Range::month(*month, &zone);
+                        self.failed.remove(month);
+                        self.far.insert(
+                            *month,
+                            Far {
+                                month: *month,
+                                read,
+                                stale: false,
+                                calendars: shown.clone(),
+                                events: listed
+                                    .iter()
+                                    .filter(|e| e.overlaps(within.from, within.to, &zone))
+                                    .cloned()
+                                    .collect(),
+                            },
+                        );
+                    }
+                }
+                Some(error) => {
+                    tracing::info!(account = self.id(), %error, "months outside the window are not read");
+                    for month in run {
+                        if !self.far.contains_key(month) {
+                            self.failed.insert(*month, error.clone());
+                        }
+                    }
+                }
+            }
+        }
+        while self.far.len() > FAR_KEPT {
+            let Some(oldest) = self.far.values().min_by_key(|f| f.read).map(|f| f.month) else {
+                break;
+            };
+            self.far.remove(&oldest);
+        }
+        self.compose();
+        self.write_cache(self.fetched().unwrap_or(read));
+    }
+
     fn data(&self) -> Data {
         Data {
             calendars: self.snapshot.calendars.clone(),
-            events: self.snapshot.events.clone(),
+            events: self.events.clone(),
             board: self.snapshot.board.clone(),
             tasks: self.snapshot.tasks.clone(),
             tokens: self.tokens.clone(),
             window: self.window,
+            far: self.far.values().cloned().collect(),
         }
     }
 
@@ -488,12 +733,19 @@ impl Worker {
                     fetched: cached.fetched,
                 };
                 self.snapshot.calendars = cached.data.calendars.clone();
-                self.snapshot.events = cached.data.events.clone();
+                self.events = cached.data.events.clone();
+                self.far = cached
+                    .data
+                    .far
+                    .iter()
+                    .map(|far| (far.month, far.clone()))
+                    .collect();
                 self.snapshot.board = cached.data.board.clone();
                 self.snapshot.tasks = cached.data.tasks.clone();
                 self.tokens = cached.data.tokens.clone();
                 self.window = cached.data.window;
                 self.cached = Some(cached.data);
+                self.compose();
             }
             Err(err) => {
                 tracing::info!(file = %file.display(), %err, "the day's cache does not read: read again");
@@ -530,12 +782,20 @@ struct Fetched<'a> {
     window: Option<Date>,
 }
 
-type CalendarsRead = (
-    Vec<Calendar>,
-    Vec<Event>,
-    BTreeMap<CalendarId, SyncToken>,
-    Date,
-);
+/// What a read of the calendars gives.
+struct CalendarsRead {
+    calendars: Vec<Calendar>,
+    /// The window's events, in order.
+    events: Vec<Event>,
+    tokens: BTreeMap<CalendarId, SyncToken>,
+    /// The day the window was read around.
+    window: Date,
+    /// A calendar was listed whole (not synced from its token).
+    whole: bool,
+    /// What the syncs said changed, and removed, for the far months.
+    changed: Vec<Event>,
+    removed: Vec<(CalendarId, EventId)>,
+}
 
 /// The calendars, the configuration's names and colours over the
 /// account's, and their events in the window: listed whole once a day (the
@@ -565,6 +825,7 @@ fn read_calendars(
     let whole = had.window != Some(now.date());
     let mut events = Vec::new();
     let mut tokens = BTreeMap::new();
+    let (mut listed_whole, mut changed, mut removed) = (false, Vec::new(), Vec::new());
     for calendar in calendars.iter().filter(|c| c.shown) {
         let synced = match had.tokens.get(&calendar.id).filter(|_| !whole) {
             Some(token) => match source.changes(&calendar.id, token) {
@@ -579,6 +840,16 @@ fn read_calendars(
                         })
                         .cloned()
                         .collect();
+                    changed.extend(changes.changed.iter().cloned().map(|mut e| {
+                        e.calendar = calendar.id.clone();
+                        e
+                    }));
+                    removed.extend(
+                        changes
+                            .removed
+                            .iter()
+                            .map(|id| (calendar.id.clone(), id.clone())),
+                    );
                     kept.extend(changes.changed);
                     Some((kept, changes.token))
                 }
@@ -590,6 +861,7 @@ fn read_calendars(
         let (mut listed, token) = match synced {
             Some(synced) => synced,
             None => {
+                listed_whole = true;
                 let listing = source.events(&calendar.id, window)?;
                 (listing.events, listing.token)
             }
@@ -607,7 +879,33 @@ fn read_calendars(
         }
     }
     sort_events(&mut events, &zone);
-    Ok((calendars, events, tokens, now.date()))
+    Ok(CalendarsRead {
+        calendars,
+        events,
+        tokens,
+        window: now.date(),
+        whole: listed_whole,
+        changed,
+        removed,
+    })
+}
+
+/// `months` (in order) in runs of months that follow each other.
+fn runs(months: &[Date]) -> Vec<&[Date]> {
+    let mut runs = Vec::new();
+    let mut start = 0;
+    for i in 1..=months.len() {
+        let follows = months.get(i).is_some_and(|month| {
+            months[i - 1]
+                .checked_add(jiff::Span::new().months(1))
+                .is_ok_and(|next| next == *month)
+        });
+        if !follows {
+            runs.push(&months[start..i]);
+            start = i;
+        }
+    }
+    runs
 }
 
 /// The board, its columns found, and the tasks' column's cards in order.
@@ -959,5 +1257,147 @@ mod tests {
         assert!(matches!(sent[0].state, State::Cached { .. }), "{sent:?}");
         assert_eq!(sent[0].calendars.len(), 1);
         assert_eq!(*asked.lock().expect("lock"), ["list", "sync", "sync"]);
+    }
+
+    /// A calendar with one event a month, from 2026 to 2029, that says
+    /// the ranges it lists; its listings with a token.
+    struct Monthly(Arc<Mutex<Vec<Range>>>);
+
+    impl CalendarSource for Monthly {
+        fn calendars(&mut self) -> Result<Vec<Calendar>, SourceError> {
+            Counting(Arc::default()).calendars()
+        }
+
+        fn events(&mut self, _: &CalendarId, range: Range) -> Result<Listing, SourceError> {
+            self.0.lock().expect("lock").push(range);
+            let zone = jiff::tz::TimeZone::UTC;
+            let events = (2026..2030)
+                .flat_map(|year| (1..=12).map(move |month| jiff::civil::date(year, month, 12)))
+                .map(|day| Event {
+                    id: crate::model::EventId::new(day.to_string()),
+                    calendar: CalendarId::new("c"),
+                    title: format!("Comité {day}"),
+                    when: crate::model::When::AllDay {
+                        first: day,
+                        last: day,
+                    },
+                    status: crate::model::Status::Confirmed,
+                    answer: crate::model::Answer::Accepted,
+                    free_busy: crate::model::FreeBusy::Busy,
+                    place: None,
+                    video: None,
+                    page: None,
+                    description: None,
+                    alarms: Vec::new(),
+                })
+                .filter(|e| e.overlaps(range.from, range.to, &zone))
+                .collect();
+            Ok(Listing {
+                events,
+                token: Some(SyncToken("t1".to_owned())),
+            })
+        }
+
+        fn changes(
+            &mut self,
+            _: &CalendarId,
+            token: &SyncToken,
+        ) -> Result<crate::source::Changes, SourceError> {
+            Ok(crate::source::Changes {
+                token: Some(token.clone()),
+                ..crate::source::Changes::default()
+            })
+        }
+    }
+
+    #[test]
+    fn months_outside_the_window_are_read_once_kept_in_the_cache_and_shown_first() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let cache = dir.path().join("day/cal.json");
+        let ranges = Arc::new(Mutex::new(Vec::new()));
+        let run = |ranges: Arc<Mutex<Vec<Range>>>| {
+            let (out, snapshots) = mpsc::channel();
+            let plan = Plan {
+                account: Account {
+                    id: AccountId::new("cal"),
+                    kind: Kind::Google,
+                    holds: Holds::Calendars,
+                    name: String::new(),
+                },
+                make: Box::new(move || Source::Calendars {
+                    source: Box::new(Monthly(ranges)),
+                    shown: None,
+                    colours: BTreeMap::new(),
+                }),
+                every: None,
+                cache: Some(cache.clone()),
+                watch: None,
+            };
+            (spawn(plan, clock(), out).expect("a worker"), snapshots)
+        };
+        let utc = jiff::tz::TimeZone::UTC;
+        let month = |y, m| jiff::civil::date(y, m, 1);
+        let titles = |s: &Snapshot| -> Vec<String> {
+            s.events
+                .iter()
+                .map(|e| e.title.clone())
+                .filter(|t| t.contains("2027-12") || t.contains("2028"))
+                .collect()
+        };
+        let (handle, snapshots) = run(ranges.clone());
+        let first = last(&handle, &snapshots);
+        // The window only: up to 4 November 2027.
+        assert!(titles(&first).is_empty(), "{:?}", titles(&first));
+        assert_eq!(ranges.lock().expect("lock").len(), 1);
+        // Asked for December 2027 to February 2028 (and a month of the
+        // window, which is not read): one range, seen loading, then read.
+        handle.send(Command::Months(vec![
+            jiff::civil::date(2027, 12, 27),
+            month(2028, 1),
+            month(2028, 2),
+            month(2027, 3),
+        ]));
+        assert!(handle.flush(Duration::from_secs(10)));
+        let sent = super::tests::snapshots(&snapshots);
+        assert_eq!(
+            sent.first().map(|s| s.months.clone()),
+            Some(BTreeMap::from([
+                (month(2027, 12), MonthState::Loading),
+                (month(2028, 1), MonthState::Loading),
+                (month(2028, 2), MonthState::Loading),
+            ]))
+        );
+        let read = sent.last().expect("a snapshot");
+        assert!(read.months.values().all(|m| *m == MonthState::Loaded));
+        assert_eq!(
+            titles(read),
+            [
+                "Comité 2027-12-12",
+                "Comité 2028-01-12",
+                "Comité 2028-02-12"
+            ]
+        );
+        assert_eq!(
+            ranges.lock().expect("lock")[1],
+            Range {
+                from: Range::month(month(2027, 12), &utc).from,
+                to: Range::month(month(2028, 2), &utc).to,
+            }
+        );
+        // Asked again, and read again on schedule (synced): nothing listed.
+        handle.send(Command::Months(vec![month(2028, 1)]));
+        handle.send(Command::Refresh);
+        assert!(handle.flush(Duration::from_secs(10)));
+        assert_eq!(ranges.lock().expect("lock").len(), 2);
+        // Started again: the cache's months at once, not read again.
+        drop(handle);
+        let (handle, snapshots) = run(ranges.clone());
+        assert!(handle.flush(Duration::from_secs(10)));
+        let sent = super::tests::snapshots(&snapshots);
+        assert!(matches!(sent[0].state, State::Cached { .. }), "{sent:?}");
+        assert_eq!(titles(&sent[0]).len(), 3);
+        handle.send(Command::Months(vec![month(2028, 1)]));
+        assert!(handle.flush(Duration::from_secs(10)));
+        assert_eq!(ranges.lock().expect("lock").len(), 2);
     }
 }

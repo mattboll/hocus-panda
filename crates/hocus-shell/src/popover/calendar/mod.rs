@@ -16,11 +16,14 @@
 //!   event, where `Enter` acts as a click and `↑` `↓` go from one to the
 //!   next. `Esc` closes, the keyboard back on the clock.
 //! - **The data** is the day's ([`crate::day::snapshot`]), read off the
-//!   loop by its workers: the window of 2 months back to 12 ahead. Nothing
-//!   is asked as the popover opens or turns: a month outside the window
-//!   shows what the day holds of it (nothing: no dots), and a day of it
-//!   says it is not loaded. A change of the day draws the popover again
-//!   while it is open, and nothing while it is closed.
+//!   loop by its workers: the window of 2 months back to 12 ahead. As the
+//!   popover turns to a month (or opens on one) whose six weeks reach out
+//!   of the window, it asks the workers for those months (Day.5b,
+//!   [`crate::day::months`]): a day of them says "Chargement…" until they
+//!   answer, its month without dots, then its dots and its agenda show; a
+//!   month an account did not give says its days are not loaded. A change
+//!   of the day draws the popover again while it is open, and nothing
+//!   while it is closed.
 //! - **At rest** it draws nothing, but at midnight and as today's events
 //!   end (they grey out).
 //!
@@ -33,11 +36,15 @@ pub mod words;
 
 use std::{
     collections::HashSet,
-    sync::{Mutex, PoisonError},
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use hocus_day::{
+    MonthState,
     model::{EventId, Status, When, midnight},
     snapshot::Holds,
     source::Range,
@@ -64,6 +71,8 @@ const NOTCH: f32 = 44.0;
 static VIEW: Mutex<Option<View>> = Mutex::new(None);
 /// What [`open_on`] asked it to open on.
 static ASKED: Mutex<Option<(Date, Option<EventId>)>> = Mutex::new(None);
+/// How many times it opened: each opening asks for its month again.
+static OPENED: AtomicU64 = AtomicU64::new(0);
 
 fn view<T>(with: impl FnOnce(&mut View) -> T) -> T {
     let mut view = VIEW.lock().unwrap_or_else(PoisonError::into_inner);
@@ -109,6 +118,7 @@ pub(super) fn opening() {
         None => View::on(now.date(), None),
     };
     tracing::debug!(day = %opened.selected, focus = ?opened.focus, "the calendar opens");
+    OPENED.fetch_add(1, Ordering::Relaxed);
     *VIEW.lock().unwrap_or_else(PoisonError::into_inner) = Some(opened);
 }
 
@@ -124,7 +134,7 @@ impl Agenda {
     fn events(&self) -> &[Ev] {
         match self {
             Self::Events(events) => events,
-            Self::NoSource | Self::NotLoaded => &[],
+            Self::NoSource | Self::Loading | Self::NotLoaded => &[],
         }
     }
 }
@@ -159,12 +169,37 @@ fn agenda(day: Date, now: &Zoned) -> Agenda {
             description: s.event.description.clone(),
         })
         .collect();
-    let window = Range::window(now);
-    if events.is_empty() && (from < window.from || to > window.to) {
-        Agenda::NotLoaded
-    } else {
-        Agenda::Events(events)
+    let within = Range::window(now).covers(&Range { from, to });
+    if within || !events.is_empty() {
+        return Agenda::Events(events);
     }
+    match held.month(day.first_of_month()) {
+        Some(MonthState::Loaded) | None => Agenda::Events(events),
+        Some(MonthState::Loading) => Agenda::Loading,
+        Some(MonthState::Failed(_)) => Agenda::NotLoaded,
+    }
+}
+
+/// The months of `month`'s six weeks outside the window, asked of the
+/// workers (as the popover turns to it): they read those they have not
+/// read yet, off the loop.
+fn ask_months(month: Date) {
+    let wall = crate::notifications::wall();
+    let zone = wall.time_zone();
+    let outside = Range::window(&wall).months_outside(
+        layout::grid_start(month),
+        layout::grid_end(month),
+        zone,
+    );
+    if outside.is_empty() {
+        return;
+    }
+    let said: Vec<String> = outside
+        .iter()
+        .map(|m| m.strftime("%Y-%m").to_string())
+        .collect();
+    tracing::debug!(months = %said.join(" "), "the calendar asks for months outside the window");
+    crate::day::months(&outside);
 }
 
 /// The days from `first` to `last` included.
@@ -275,6 +310,9 @@ pub struct Panel {
 pub struct State {
     laid: Option<Laid>,
     shown: Option<View>,
+    /// The month last asked of the workers ([`ask_months`]), and in which
+    /// opening.
+    asked: Option<(u64, Date)>,
     pointer: kit::Pointer<Target>,
 }
 
@@ -334,6 +372,13 @@ impl Panel {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
         let shown = view(|v| v.clone());
+        // Turned to a month (or opened on one): those of its weeks out of
+        // the window asked for, once.
+        let asking = (OPENED.load(Ordering::Relaxed), shown.month);
+        if state.asked != Some(asking) {
+            state.asked = Some(asking);
+            ask_months(shown.month);
+        }
         let read = Read::now(&shown);
         let laid = layout::lay_out(&shown, &read.context(), &mut kit::measure);
         let shown = view(|v| {

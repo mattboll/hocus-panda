@@ -163,8 +163,10 @@ pub enum Act {
 pub enum Agenda {
     /// No calendar account at all (Day.1 not set up).
     NoSource,
-    /// A day outside the window the shell keeps, of which it holds
-    /// nothing.
+    /// A day outside the window the shell keeps, its month asked of the
+    /// accounts and not answered yet (Day.5b).
+    Loading,
+    /// A day outside the window, its month not given by an account.
     NotLoaded,
     /// Its events, in the bar's order.
     Events(Vec<Ev>),
@@ -364,7 +366,8 @@ impl Viewport {
 /// Under the day's line.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Body {
-    /// A note, centred: an empty day, no source, a day not loaded.
+    /// A note, centred: an empty day, no source, a day loading or not
+    /// loaded.
     Note {
         text: String,
         middle: f32,
@@ -535,7 +538,7 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
     let baseline = line_top + ASCENT * DAY_NAME;
     let count = match context.agenda {
         Agenda::Events(events) => words.count(events.len()),
-        Agenda::NoSource | Agenda::NotLoaded => None,
+        Agenda::NoSource | Agenda::Loading | Agenda::NotLoaded => None,
     };
     let count_width = count
         .as_deref()
@@ -587,6 +590,10 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
                 Size::new(width, CHOOSE),
             ));
             (body, top + CHOOSE + NOTE_BELOW, 0.0)
+        }
+        Agenda::Loading => {
+            let (body, end) = note(words.loading());
+            (body, end, 0.0)
         }
         Agenda::NotLoaded => {
             let (body, end) = note(words.not_loaded());
@@ -1253,12 +1260,13 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_day_no_source_and_a_day_not_loaded_say_so() {
+    fn an_empty_day_no_source_and_a_day_loading_or_not_loaded_say_so() {
         let busy = HashSet::new();
         let view = View::on(date(2026, 11, 13), None);
         for (agenda, says) in [
             (Agenda::Events(Vec::new()), "Rien de prévu ce jour-là."),
             (Agenda::NoSource, "Aucun agenda branché."),
+            (Agenda::Loading, "Chargement…"),
             (Agenda::NotLoaded, "Ce jour n'est pas chargé."),
         ] {
             let laid = lay_out(&view, &context(&busy, &agenda), &mut measure);

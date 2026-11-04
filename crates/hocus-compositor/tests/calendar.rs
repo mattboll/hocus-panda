@@ -14,8 +14,8 @@
 //! the months around; the arrows and "Aujourd'hui"; a busy day's list
 //! scrolling; an event's call, its page, its details unfolding; `Esc` and
 //! a click outside; the keyboard; the entry point the next meeting's card
-//! opens it by; no calendar; a day outside the window; at rest, nothing
-//! drawn.
+//! opens it by; no calendar; a month outside the window, asked for as it
+//! turns to it (Day.5b, #578); at rest, nothing drawn.
 
 mod common;
 
@@ -216,6 +216,42 @@ end = "today+29 19:30"
 place = "École des Tilleuls"
 "##;
 
+/// A day for the months outside the window (Day.5b): a calendar, today's
+/// event, two of January 2028 (14 months ahead) and one of December 2027;
+/// a listing outside the window takes a second, as a network's would.
+const FAR: &str = r##"
+slow = "1s"
+
+[[calendars]]
+id = "work"
+name = "Travail"
+color = "#8FB3FF"
+
+[[events]]
+title = "Point d'équipe quotidien"
+start = "today 09:30"
+end = "today 09:45"
+
+[[events]]
+id = "comite"
+title = "Comité de pilotage"
+start = "2028-01-12 10:00"
+end = "2028-01-12 11:30"
+place = "Salle Jupiter · 3e étage"
+
+[[events]]
+title = "Séminaire d'équipe"
+date = "2028-01-20"
+days = 2
+
+[[events]]
+title = "Revue annuelle"
+start = "2027-12-15 14:00"
+"##;
+
+/// What the day's workers say as they read months outside the window.
+const READS: &str = "the day's account reads months outside its window";
+
 const WITH_FIXTURE: &str = "[[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n";
 
 /// The screen.
@@ -284,7 +320,7 @@ fn start(shell: &Path, config: &str, fixture: &str, form: FormChoice) -> anyhow:
              HOME='{home}' XDG_CONFIG_HOME='{home}/.config' XDG_CACHE_HOME='{home}/.cache' \
              XDG_STATE_HOME='{state}' TZ=UTC HOCUS_CLOCK_AT='2026-11-04T09:47:00' \
              LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 ICED_BACKEND=tiny-skia \
-             PATH='{bin}:/usr/bin:/bin' RUST_LOG=warn,hocuspanda_shell=debug\n\
+             PATH='{bin}:/usr/bin:/bin' RUST_LOG=warn,hocuspanda_shell=debug,hocus_day=debug\n\
              exec '{shell}' \"$@\" 2>>'{log}'\n",
             home = home.display(),
             state = root.join("state").display(),
@@ -979,27 +1015,83 @@ fn the_entry_point_opens_it_on_a_day_with_its_event_chosen() -> anyhow::Result<(
 }
 
 #[test]
-fn a_day_outside_the_window_says_it_is_not_loaded_and_its_month_has_no_dots() -> anyhow::Result<()>
-{
+fn a_month_outside_the_window_is_asked_for_as_it_turns_to_it_and_shows_once_loaded()
+-> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
-    let mut bed = start(&shell, WITH_FIXTURE, FIXTURE, FormChoice::Full)?;
+    let mut bed = start(&shell, WITH_FIXTURE, FAR, FormChoice::Full)?;
+    // Closed: nothing asked, nothing read but the window.
+    assert!(bed.lines_since(0, READS).is_empty());
+    // Opened on 12 January 2028, 14 months ahead: loading, no dots...
     let mark = bed.mark();
     bed.hp.tell_shell(ToShell::Day(DayAsk::Calendar {
-        day: "2028-01-05".to_owned(),
+        day: "2028-01-12".to_owned(),
         event: None,
     }));
-    bed.popover()?;
+    let popover = bed.popover()?;
     bed.shows(
         mark,
         &[
             "month=2028-01",
-            "selected=2028-01-05",
+            "selected=2028-01-12",
             "busy=[]",
-            "note=«Ce jour n'est pas chargé.»",
+            "note=«Chargement…»",
         ],
     )?;
+    // ...then its dots and its agenda, once read.
+    bed.shows(
+        mark,
+        &[
+            "month=2028-01",
+            "busy=[2028-01-12,2028-01-20,2028-01-21]",
+            "count=«1 événement»",
+            "«Comité de pilotage»",
+        ],
+    )?;
+    // Its six weeks' months (27 December to 6 February), in one read.
+    let reads = bed.lines_since(mark, READS);
+    assert_eq!(reads.len(), 1, "{reads:?}");
+    assert!(
+        reads[0].contains("months=2027-12 2028-01 2028-02"),
+        "{reads:?}"
+    );
+    // The month before: December's dots at once; only November 2027,
+    // which its weeks reach and the window holds in part, is read.
+    let mark = bed.mark();
+    let previous = bed.target(0, "Previous")?;
+    bed.click_in(popover, previous)?;
+    bed.shows(mark, &["month=2027-12", "busy=[2027-12-15]"])?;
+    let read = bed.logged_since(mark, READS, &["months=2027-11"])?;
+    assert!(
+        !read.contains("2027-12") && !read.contains("2028"),
+        "{read}"
+    );
+    // Back to January: shown at once, not read again; and at rest,
+    // nothing read.
+    let mark = bed.mark();
+    let next = bed.target(0, "Next")?;
+    bed.click_in(popover, next)?;
+    bed.shows(
+        mark,
+        &[
+            "month=2028-01",
+            "busy=[2028-01-12,2028-01-20,2028-01-21]",
+            "«Comité de pilotage»",
+        ],
+    )?;
+    common::wait(&mut bed.hp, Duration::from_secs(3))?;
+    assert!(
+        bed.lines_since(mark, READS).is_empty(),
+        "{:?}",
+        bed.lines_since(mark, READS)
+    );
+    assert!(
+        bed.lines_since(mark, "the calendar shows it")
+            .iter()
+            .all(|l| !l.contains("Chargement")),
+        "January loaded again"
+    );
     Ok(())
 }
 
@@ -1150,5 +1242,48 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.popover()?;
     bed.hp.pointer_move(400.0, 600.0);
     shoot(&mut bed, "mini", (SCREEN.0 as u32 - 420, 0, 420, 620))?;
+    Ok(())
+}
+
+/// The pull request's screenshot of a month outside the window, loaded
+/// (Day.5b): January 2028 on the 12th. Written to `$HOCUS_SHOTS` when it
+/// names a folder. Run by hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshot"]
+fn screenshot_of_a_month_outside_the_window() -> anyhow::Result<()> {
+    use anyhow::Context;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let mut bed = start(&shell, WITH_FIXTURE, FAR, FormChoice::Full)?;
+    let mark = bed.mark();
+    bed.hp.tell_shell(ToShell::Day(DayAsk::Calendar {
+        day: "2028-01-12".to_owned(),
+        event: None,
+    }));
+    bed.popover()?;
+    bed.shows(mark, &["month=2028-01", "«Comité de pilotage»"])?;
+    bed.hp.pointer_move(400.0, 600.0);
+    common::at_rest(&mut bed.hp)?;
+    common::wait(&mut bed.hp, Duration::from_millis(300))?;
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+    let (cw, ch) = (560, 620);
+    let part = image::imageops::crop_imm(&image, SCREEN.0 as u32 - cw, 0, cw, ch).to_image();
+    let doubled =
+        image::imageops::resize(&part, cw * 2, ch * 2, image::imageops::FilterType::Nearest);
+    let file = out.join("far-month.png");
+    doubled.save(&file)?;
+    eprintln!("{}", file.display());
     Ok(())
 }

@@ -7,6 +7,9 @@
 //! The file, TOML:
 //!
 //! ```toml
+//! slow = "1s"               # a listing outside the window takes this long,
+//!                           # as a network's would (Day.5b's tests)
+//!
 //! [[calendars]]
 //! id = "work"               # default: its name
 //! name = "Travail"
@@ -171,6 +174,7 @@ fn span_of(text: &str) -> Option<SignedDuration> {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct File {
+    slow: Option<String>,
     calendars: Vec<FileCalendar>,
     events: Vec<FileEvent>,
     tasks: Option<FileTasks>,
@@ -255,11 +259,21 @@ pub struct Read {
     pub events: Vec<Event>,
     /// The board, its cards by column, and whether changes are refused.
     pub board: Option<(TaskBoard, HashMap<ColumnId, Vec<Task>>, bool)>,
+    /// How long a listing outside the window takes.
+    pub slow: Option<std::time::Duration>,
 }
 
 /// Reads a fixture's `text` for account `account` against `now`.
 pub fn read(text: &str, account: &AccountId, now: &Zoned) -> std::result::Result<Read, String> {
     let file: File = toml::from_str(text).map_err(|err| err.to_string())?;
+    let slow = match &file.slow {
+        None => None,
+        Some(slow) => Some(
+            span_of(slow)
+                .and_then(|span| std::time::Duration::try_from(span).ok())
+                .ok_or_else(|| format!("slow: {slow:?} is not a duration"))?,
+        ),
+    };
     let calendars: Vec<Calendar> = file
         .calendars
         .iter()
@@ -372,6 +386,7 @@ pub fn read(text: &str, account: &AccountId, now: &Zoned) -> std::result::Result
         calendars,
         events,
         board,
+        slow,
     })
 }
 
@@ -468,7 +483,14 @@ impl CalendarSource for FixtureCalendars {
     }
 
     fn events(&mut self, calendar: &CalendarId, range: Range) -> Result<Listing> {
-        let zone = self.0.clock.now().time_zone().clone();
+        let now = self.0.clock.now();
+        let zone = now.time_zone().clone();
+        // On the account's worker, never the shell's loop.
+        if let Some(slow) = self.0.read.slow
+            && !Range::window(&now).covers(&range)
+        {
+            std::thread::sleep(slow);
+        }
         Ok(Listing {
             events: self
                 .0
@@ -747,9 +769,15 @@ mod tests {
             "[[calendars]]\nname = \"a\"\n[[events]]\ntitle = \"x\"\n",
             "[[calendars]]\nname = \"a\"\n[[events]]\ntitle = \"x\"\nstart = \"now\"\nend = \"now-1h\"\n",
             "[[calendars]]\nname = \"a\"\nsize = 3\n",
+            "slow = \"soon\"\n",
         ] {
             assert!(read_err(bad), "{bad}");
         }
+        let slow = super::read("slow = \"1m30s\"\n", &AccountId::new("fixture"), &now());
+        assert_eq!(
+            slow.map(|r| r.slow),
+            Ok(Some(std::time::Duration::from_secs(90)))
+        );
     }
 
     fn read_err(text: &str) -> bool {

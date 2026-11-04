@@ -85,7 +85,9 @@ pub trait KanbanSource: Send {
 - `Listing { events, token }`: a source without tokens gives `None`, and
   is never asked for `changes`. `Changes { changed, removed, token }`.
 - `Range::window(now)`: the events the bar keeps, 2 months back to 12
-  months ahead (Day.5).
+  months ahead (Day.5). `Range::month(day, zone)`, `covers`, and
+  `months_outside(first, end, zone)`: the months that days reach and a
+  range does not hold whole (Day.5b's months outside the window).
 - `SourceError`: `Offline`, `SignIn` (a token refused or missing),
   `Refused` (a conflict), `Gone` (the card is no more), `Expired` (the
   sync token), `Invalid` (as set it cannot work: a file that does not
@@ -172,6 +174,9 @@ changes in its tasks is kept in memory, never written to the file; a
 change of the file starts its tasks again from what it says.
 
 ```toml
+slow = "1s"               # a listing outside the window takes this long,
+                          # as a network's would (Day.5b's tests)
+
 [[calendars]]
 id = "work"               # default: its name
 name = "Travail"
@@ -226,15 +231,34 @@ One thread per account (`day: <account id>`), never the shell's loop.
 - **What it sends**: an owned `Snapshot` of its account, only when it
   differs from the last it sent: `account`, `state` (`Loading`, `Cached`,
   `Fresh { fetched }`, `Failed { error, fetched }`, the times on the wall
-  clock, for the user to read), `calendars`, `events` (the window's, of
-  the shown calendars, in order), `board`, `tasks` (the tasks' column's
-  cards, in order), `pending` (the changes not carried out yet). As
+  clock, for the user to read), `calendars`, `events` (the window's and
+  the months' read outside it, of the shown calendars, in order),
+  `months` (the months outside the window asked for, by their first day:
+  `MonthState::Loading`, `Loaded`, `Failed(error)`), `board`, `tasks` (the
+  tasks' column's cards, in order), `pending` (the changes not carried
+  out yet). As
   `Update::Snapshot`; `Update::Gone` when its account stopped (Google's),
   and nothing of it after. `Day::apply` takes either; an account that
   comes later goes before the local list.
 - **Calendars**: listed whole once a day (the window moves), else synced
   from each calendar's token; the configuration's `shown` and `colors`
   apply over what the account says.
+- **Months outside the window** (Day.5b, #578): `Workers::months(days)`
+  asks every calendars' account for the months of those days that the
+  window does not hold whole (`Command::Months`, never blocking). A
+  worker reads those it has not read, or whose shown calendars changed,
+  or that went stale: their `months` say `Loading` (sent at once), then
+  it lists every shown calendar over one range per run of months that
+  follow each other (`CalendarSource::events`, the listing's token left
+  unused), and keeps each month's events (`Loaded`); a month the source
+  does not give is `Failed`, unless it was read before (kept as it was).
+  It keeps them with its cache, and follows them with the window: a sync
+  applies its changes to them too; a listing whole (once a day, a token
+  expired, a source without tokens) makes them stale, read again the
+  next time they are asked for, their events shown meanwhile; one the
+  window comes to hold is forgotten, and past 24 the oldest read. Nothing
+  is read for them otherwise: never at rest. Asked of a tasks' account,
+  nothing.
 - **Changes** (`Change::Add { title }`, `Tick { task }`, `Untick { task }`)
   are queued per account, sent at once in their order. A tick goes to the
   top of the done column, and its place is remembered for its untick, which
@@ -246,8 +270,9 @@ One thread per account (`day: <account id>`), never the shell's loop.
   dropped. The queue is not kept across a restart of the shell.
 - **The cache**: for the network's accounts (Google, Planka),
   `$XDG_CACHE_HOME/hocuspanda/day/<account id>.json`: their calendars,
-  events, board, tasks, sync tokens and the window's day, with the time
-  they were read. Read as the worker starts, so that the bar shows the
+  events, board, tasks, sync tokens, the window's day and the months read
+  outside it (`far`: each month's first day, events, when it was read,
+  whether stale), with the time they were read. Read as the worker starts, so that the bar shows the
   last day at once (`State::Cached`) and while offline; written when what
   it holds changes.
 - `Workers::flush(within)` waits for each worker to be done with what it
@@ -268,6 +293,11 @@ local list last.
   list is there and it is empty is Day.4's to say.
 - `Day::accounts()`: every account's snapshot, its state for Settings and
   Day.5.
+- `Day::month(first day) -> Option<MonthState>`: where the calendars'
+  accounts are with a month outside the window (Day.5b): loading while
+  one of them has not answered (or not been asked yet), else failed if
+  one did not give it (an account that never read anything counts as
+  failed), else loaded; `None` without a calendars' account.
 - `Day::summary(now)`: one line, for the log and tests.
 
 ## In the shell (`crates/hocus-shell/src/day`)
@@ -291,6 +321,10 @@ local list last.
   at once. The view keeps its own 1.5 s ticked state (Day.4) and reads the
   outcome in the next snapshots: the task gone from `tasks`, or its change
   in `pending` with `refused` set ("Pas enregistré").
+- `day::months(days)`: the months of those days outside the window,
+  asked of the calendars' accounts (Day.5b): Day.5's calendar asks for
+  those its six weeks reach as it opens on a month or turns to it, once
+  per month shown (`popover::calendar`, bar.md, Day.5).
 - `day::refresh()`: every account read again. The shell asks it when
   logind says the machine resumed (`PrepareForSleep(false)` on the system
   bus, watched on a thread of its own; without a system bus, not at all),
@@ -408,7 +442,9 @@ are GNOME Online Accounts'.
     Google, exceptions honoured), `timeMin`/`timeMax` the window: the
     shown calendars only. Its last page's `nextSyncToken` is the
     calendar's; the next read syncs from it (`syncToken`), a `410` lists
-    again.
+    again. A month outside the window (Day.5b) is listed the same way,
+    `timeMin`/`timeMax` its range, when the calendar turns to it; its
+    token is left unused (the window's syncs keep it up to date).
   - `401`: the token asked for again, once; then `SignIn`. `429` and `5xx`,
     or no answer: `Offline`. Others: `Refused`.
 - **An event**: `summary`; `start`/`end` (`dateTime`, or `date`, the end
@@ -452,12 +488,11 @@ never the loop. `Token`'s `Debug` never shows it.
 - **A view** reads `day::snapshot()`, wakes its surface from
   `day::on_change`, and sends `day::change`; screenshots and tests feed it
   a fixture (`[[day.calendars]] kind = "fixture"`) and `HOCUS_CLOCK_AT`.
-- Day.5's months outside the window (the calendar shows what the day
-  holds of them, nothing, and says a day of them is not loaded) will need
-  a request of their own to the workers; not built yet. Day.6's reminders
-  did not: they are computed from the day's snapshot, on a thread of
-  their own (`crates/hocus-shell/src/reminder`, bar.md, as built), the
-  window's 12 months ahead holding the alarms that come days before.
+- Day.5's months outside the window are asked of the workers by
+  `Workers::months` (Day.5b, above). Day.6's reminders did not need it:
+  they are computed from the day's snapshot, on a thread of their own
+  (`crates/hocus-shell/src/reminder`, bar.md, as built), the window's 12
+  months ahead holding the alarms that come days before.
 
 ## Tests
 
@@ -465,7 +500,11 @@ never the loop. `Token`'s `Debug` never shows it.
   `tasks_are_in_their_columns_order`), the fixture's relative times
   (`times_are_relative_to_the_clock`, `times_follow_the_clocks_zone`), the
   local list (`add_tick_untick_written_and_read_back`), the worker's queue,
-  sync and cache, the configuration, the secrets' file; Planka's
+  sync and cache, the months outside the window
+  (`months_outside_the_window_are_read_once_kept_in_the_cache_and_shown_first`,
+  `a_month_outside_the_window_loads_until_every_calendars_account_answers`,
+  `the_months_a_range_does_not_hold_whole`), the configuration, the
+  secrets' file; Planka's
   addresses (`a_boards_address_gives_its_server_and_its_id`) and pasted
   tokens (`a_token_is_pasted_alone_or_with_its_cookie_pair`).
 - `crates/hocus-day/tests/planka.rs`: the workers against a fake Planka
@@ -487,13 +526,20 @@ never the loop. `Token`'s `Debug` never shows it.
   fixture's day reaches the shell; the local list survives a restart of
   the shell; changing the fixture's file shows the change; at rest nothing
   wakes, and a change of the day draws nothing; a Google account of
-  Online Accounts reaches the shell.
+  Online Accounts reaches the shell. `crates/hocus-compositor/tests/calendar.rs`
+  (Day.5, Day.5b): a month 14 months ahead asked for as the calendar
+  turns to it, "Chargement…" then its dots and its agenda, not read again,
+  nothing read at rest (bar.md, Day.5).
 - `crates/hocus-day/tests/google.rs`, against fakes of the test's own
   (`tests/fakes`: a private `dbus-daemon` with an Online Accounts on it,
   a Calendar API on 127.0.0.1): the calendars and today's events reach the
   snapshot; a declined event, a free one and a cancelled one are marked
   so; the video link from `hangoutLink` or `conferenceData`; an
-  incremental sync applies its changes, a `410` lists again; a `401` asks
+  incremental sync applies its changes, a `410` lists again; a month
+  outside the window listed when asked for, its range as `timeMin` and
+  `timeMax`, once, and kept in the cache
+  (`a_month_outside_the_window_is_listed_when_asked_for_once_and_kept`;
+  the fake lists only the events between them); a `401` asks
   Online Accounts again, and its refusal is "sign in again"; an account
   added starts its worker, one switched off or removed stops it; without a
   bus, no Google source.

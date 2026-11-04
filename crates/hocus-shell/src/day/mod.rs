@@ -262,6 +262,19 @@ pub fn change(change: Change) {
     }
 }
 
+/// The months of `months` (any of their days) outside the window, asked
+/// of the calendars' accounts, which read those they have not read yet
+/// off the loop (Day.5b). Never blocks.
+pub fn months(months: &[jiff::civil::Date]) {
+    if let Some(service) = SERVICE.get() {
+        service
+            .workers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .months(months);
+    }
+}
+
 /// Every account read again now.
 pub fn refresh() {
     if let Some(service) = SERVICE.get() {

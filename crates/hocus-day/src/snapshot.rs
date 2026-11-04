@@ -1,9 +1,9 @@
 //! What the workers send and the bar reads: each account's [`Snapshot`],
 //! owned, and the [`Day`] that holds the latest of each.
 
-use std::fmt::Write as _;
+use std::{collections::BTreeMap, fmt::Write as _};
 
-use jiff::{Timestamp, Zoned, tz::TimeZone};
+use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 
 use crate::{
     model::{AccountId, Calendar, Event, Task, TaskBoard, TaskId, today},
@@ -82,6 +82,18 @@ pub enum Login {
     SsoOnly,
 }
 
+/// Where an account is with a month outside its window (Day.5b), asked
+/// for as the calendar turns to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MonthState {
+    /// Asked, not answered yet.
+    Loading,
+    /// Its events are in the snapshot's.
+    Loaded,
+    /// The source did not give it.
+    Failed(SourceError),
+}
+
 /// A change the bar asks of a tasks' account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
@@ -115,10 +127,14 @@ pub struct Snapshot {
     pub state: State,
     /// A calendars' account's calendars, shown or not.
     pub calendars: Vec<Calendar>,
-    /// Their events in the window (2 months back, 12 ahead), those of
-    /// hidden calendars left out, in the bar's order
+    /// Their events in the window (2 months back, 12 ahead) and in the
+    /// months read outside it ([`Self::months`]), those of hidden
+    /// calendars left out, in the bar's order
     /// ([`crate::model::event_order`]).
     pub events: Vec<Event>,
+    /// The months outside the window it was asked for, by their first
+    /// day: read, being read, or not given.
+    pub months: BTreeMap<Date, MonthState>,
     /// A tasks' account's board.
     pub board: Option<TaskBoard>,
     /// The tasks' column's cards, in its order.
@@ -137,6 +153,7 @@ impl Snapshot {
             state: State::Loading,
             calendars: Vec::new(),
             events: Vec::new(),
+            months: BTreeMap::new(),
             board: None,
             tasks: Vec::new(),
             pending: Vec::new(),
@@ -247,6 +264,39 @@ impl Day {
             .collect();
         shown.sort_by(|a, b| crate::model::event_order(a.event, b.event, zone));
         shown
+    }
+
+    /// Where the calendars' accounts are with `month` (its first day), a
+    /// month outside their window: loading while one of them has not
+    /// answered (or not been asked yet), else failed if one did not give
+    /// it, else loaded. An account that never read anything (its source
+    /// cannot be read at all) counts as failed. `None` without a
+    /// calendars' account.
+    pub fn month(&self, month: Date) -> Option<MonthState> {
+        let mut calendars = self
+            .accounts
+            .iter()
+            .filter(|s| s.account.holds == Holds::Calendars)
+            .peekable();
+        calendars.peek()?;
+        let mut failed = None;
+        for account in calendars {
+            match (account.months.get(&month), &account.state) {
+                (Some(MonthState::Loaded), _) => {}
+                (Some(MonthState::Failed(error)), _)
+                | (
+                    None,
+                    State::Failed {
+                        error,
+                        fetched: None,
+                    },
+                ) => {
+                    failed.get_or_insert_with(|| error.clone());
+                }
+                (Some(MonthState::Loading) | None, _) => return Some(MonthState::Loading),
+            }
+        }
+        Some(failed.map_or(MonthState::Loaded, MonthState::Failed))
     }
 
     /// The bar's tasks' account: the first board set, else the local list
@@ -378,6 +428,54 @@ mod tests {
         };
         assert!(day.update(fresh.clone()));
         assert!(!day.update(fresh));
+    }
+
+    #[test]
+    fn a_month_outside_the_window_loads_until_every_calendars_account_answers() {
+        let month = jiff::civil::date(2028, 1, 1);
+        let calendars = |id: &str, state: Option<MonthState>| Snapshot {
+            state: State::Fresh {
+                fetched: Timestamp::UNIX_EPOCH,
+            },
+            months: state.into_iter().map(|s| (month, s)).collect(),
+            ..Snapshot::loading(account(id, Kind::Google, Holds::Calendars))
+        };
+        let local = Snapshot::loading(account("local", Kind::Local, Holds::Tasks));
+        assert_eq!(Day::new(vec![local.clone()]).month(month), None);
+        let day = |accounts: Vec<Snapshot>| Day::new(accounts).month(month);
+        // Not asked yet, or asked: loading.
+        assert_eq!(day(vec![calendars("a", None)]), Some(MonthState::Loading));
+        assert_eq!(
+            day(vec![
+                calendars("a", Some(MonthState::Loaded)),
+                calendars("b", Some(MonthState::Loading)),
+            ]),
+            Some(MonthState::Loading)
+        );
+        assert_eq!(
+            day(vec![
+                calendars("a", Some(MonthState::Loaded)),
+                local.clone()
+            ]),
+            Some(MonthState::Loaded)
+        );
+        let offline = SourceError::Offline("down".to_owned());
+        assert_eq!(
+            day(vec![
+                calendars("a", Some(MonthState::Loaded)),
+                calendars("b", Some(MonthState::Failed(offline.clone()))),
+            ]),
+            Some(MonthState::Failed(offline.clone()))
+        );
+        // An account that never read anything does not keep it loading.
+        let never = Snapshot::failed(
+            account("c", Kind::Fixture, Holds::Calendars),
+            offline.clone(),
+        );
+        assert_eq!(
+            day(vec![calendars("a", Some(MonthState::Loaded)), never]),
+            Some(MonthState::Failed(offline))
+        );
     }
 
     #[test]
