@@ -437,7 +437,7 @@ pub enum ToShell {
     /// A change asked of the day's tasks, or a read of every account
     /// (docs/design/day.md): what the bar's own views ask, for tests and
     /// tools that have no view to click. Written `day add TITLE`, `day tick
-    /// ID`, `day untick ID`, `day refresh`.
+    /// ID`, `day untick ID`, `day refresh`, `day calendar DATE [EVENT]`.
     Day(DayAsk),
 }
 
@@ -451,6 +451,9 @@ pub enum DayAsk {
     Untick(String),
     /// Every account read again now.
     Refresh,
+    /// The calendar opens (Day.5) on `day` (`2026-11-04`), the event of
+    /// that id chosen, as the next meeting's card opens it.
+    Calendar { day: String, event: Option<String> },
 }
 
 /// Where the emoji picker opens on its screen (logical pixels, from the
@@ -1430,6 +1433,13 @@ impl fmt::Display for ToShell {
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
                 DayAsk::Untick(id) => write!(f, "day untick {}", one_line(id)),
                 DayAsk::Refresh => f.write_str("day refresh"),
+                DayAsk::Calendar { day, event } => {
+                    write!(f, "day calendar {}", one_line(day))?;
+                    match event {
+                        Some(event) => write!(f, " {}", one_line(event)),
+                        None => Ok(()),
+                    }
+                }
             },
             Self::Titles(titles) => {
                 write!(f, "titles {}", titles.output)?;
@@ -1473,6 +1483,13 @@ impl FromStr for ToShell {
                 "tick" => text().map(|t| Self::Day(DayAsk::Tick(t))),
                 "untick" => text().map(|t| Self::Day(DayAsk::Untick(t))),
                 "refresh" => Ok(Self::Day(DayAsk::Refresh)),
+                "calendar" => text().map(|t| {
+                    let (day, event) = match t.split_once(' ') {
+                        Some((day, event)) => (day.to_owned(), Some(event.to_owned())),
+                        None => (t, None),
+                    };
+                    Self::Day(DayAsk::Calendar { day, event })
+                }),
                 other => Err(BadLine(format!("day {other}"))),
             };
         }
@@ -2168,6 +2185,14 @@ mod tests {
             ToShell::Day(DayAsk::Tick("18a2f-3".into())),
             ToShell::Day(DayAsk::Untick("c 2".into())),
             ToShell::Day(DayAsk::Refresh),
+            ToShell::Day(DayAsk::Calendar {
+                day: "2026-11-10".into(),
+                event: Some("e 12".into()),
+            }),
+            ToShell::Day(DayAsk::Calendar {
+                day: "2026-11-04".into(),
+                event: None,
+            }),
         ];
         for message in &day {
             assert_eq!(message.to_string().parse::<ToShell>().as_ref(), Ok(message));

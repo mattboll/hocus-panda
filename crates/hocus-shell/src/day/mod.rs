@@ -18,7 +18,9 @@ use std::{
 };
 
 use hocus_day::{
-    Change, Clock, Config, Day, Env, Update, Workers, google, model::TaskId, secrets::Secrets,
+    Change, Clock, Config, Day, Env, Update, Workers, google,
+    model::{EventId, TaskId},
+    secrets::Secrets,
 };
 use hocus_link::DayAsk;
 
@@ -27,10 +29,13 @@ type Waker = Box<dyn FnMut() -> bool + Send>;
 struct Service {
     day: Mutex<Arc<Day>>,
     workers: Mutex<Workers>,
-    waker: Mutex<Option<Waker>>,
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
+
+/// The views' wakers ([`on_change`]): kept apart from the service, which
+/// the day's thread makes, so that a view may ask before it is there.
+static WAKERS: Mutex<Vec<Waker>> = Mutex::new(Vec::new());
 
 /// How long the shell, ending, waits for each account's worker to finish
 /// what it was asked (the local list written).
@@ -89,9 +94,13 @@ fn start_workers() -> Option<mpsc::Receiver<Update>> {
     let service = Service {
         day: Mutex::new(Arc::new(day)),
         workers: Mutex::new(workers),
-        waker: Mutex::new(None),
     };
-    SERVICE.set(service).is_ok().then_some(snapshots)
+    let started = SERVICE.set(service).is_ok();
+    // The accounts as they start (loading): what the views asked before.
+    if started {
+        wake_all();
+    }
+    started.then_some(snapshots)
 }
 
 /// The configuration file the compositor names (none when it names an
@@ -143,23 +152,25 @@ fn publish(update: Update) {
         "the day holds {}",
         self::snapshot().summary(&crate::notifications::wall())
     );
-    let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
-    if waker.as_mut().is_some_and(|wake| !wake()) {
-        *waker = None;
-    }
+    wake_all();
 }
 
-/// From now on, a change of the day calls `wake` (until it returns
-/// `false`); it is called once now, for what came before.
-#[expect(
-    dead_code,
-    reason = "the bar's views of the day (Day.2 to Day.4) wake by it"
-)]
+/// Every view's waker, those that are done dropped.
+fn wake_all() {
+    let mut wakers = WAKERS.lock().unwrap_or_else(PoisonError::into_inner);
+    wakers.retain_mut(|wake| wake());
+}
+
+/// From now on, a change of the day calls `wake` (on the day's thread,
+/// until it returns `false`); it is called once now, for what came before.
+/// It may be asked before the day has started.
 pub fn on_change(wake: impl FnMut() -> bool + Send + 'static) {
-    if let Some(service) = SERVICE.get() {
-        let mut wake: Waker = Box::new(wake);
-        let alive = wake();
-        *service.waker.lock().unwrap_or_else(PoisonError::into_inner) = alive.then_some(wake);
+    let mut wake: Waker = Box::new(wake);
+    if wake() {
+        WAKERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(wake);
     }
 }
 
@@ -201,6 +212,10 @@ pub fn ask(ask: DayAsk) {
             task: TaskId::new(task),
         }),
         DayAsk::Refresh => refresh(),
+        DayAsk::Calendar { day, event } => match day.parse() {
+            Ok(day) => crate::popover::calendar::open_on("", day, event.map(EventId::new)),
+            Err(err) => tracing::warn!(day, %err, "the calendar asked for a day that is not one"),
+        },
     }
 }
 

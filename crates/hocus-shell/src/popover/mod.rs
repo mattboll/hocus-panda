@@ -42,6 +42,7 @@ pub mod battery;
 pub mod bluetooth;
 pub mod briefing;
 pub mod brightness;
+pub mod calendar;
 pub mod clipboard;
 pub mod desktop;
 pub mod history;
@@ -59,7 +60,7 @@ use std::{
 };
 
 use hocus_link::{
-    AGENTS_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
+    AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE, FOOTER_NAMESPACE,
     Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH,
     TRAY_NAMESPACE, ToCompositor,
 };
@@ -120,6 +121,9 @@ pub enum Item {
     /// A tray icon (5.14), by its item's key: its menu, read before it
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
+    /// The clock's group, the date and the clock (Day.5): the calendar,
+    /// by a click only, in both forms.
+    Calendar,
 }
 
 impl Item {
@@ -155,6 +159,8 @@ impl Item {
                 true
             }
             Self::Keyboard | Self::Agent(_) | Self::Menu | Self::Tray(_) => false,
+            // Resting on the clock stays harmless (Day.5).
+            Self::Calendar => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -171,6 +177,7 @@ impl Item {
             Self::User => session::WIDTH,
             Self::InUse => in_use::WIDTH,
             Self::Tray(_) => tray::WIDTH,
+            Self::Calendar => calendar::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -194,6 +201,7 @@ impl Item {
             Self::User => session::height(),
             Self::InUse => in_use::height(),
             Self::Tray(key) => tray::height(key),
+            Self::Calendar => calendar::height(),
             Self::Keyboard | Self::Decline | Self::Agent(_) | Self::Menu => 0,
         }
     }
@@ -219,6 +227,7 @@ impl Item {
             Self::Clipboard => clipboard::opening(),
             Self::Menu | Self::User | Self::InUse => {}
             Self::Tray(_) => tray::opening(),
+            Self::Calendar => calendar::opening(),
         }
     }
 
@@ -244,6 +253,7 @@ impl Item {
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
+            Self::Calendar => {}
         }
     }
 
@@ -264,6 +274,7 @@ impl Item {
             }
             (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
+            (Self::Calendar, _) => CLOCK_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -281,6 +292,10 @@ impl Item {
     /// brightness's and the battery's (else its top is on the item's,
     /// pushed up to stay inside the bar: a desktop's list's on the tiles').
     fn on_bottom(self) -> bool {
+        // The calendar's top on the clock's group's (Day.5).
+        if self == Self::Calendar {
+            return false;
+        }
         !matches!(
             self,
             Self::Sound | Self::Desktop(_) | Self::Secretary | Self::InUse | Self::Tray(_)
@@ -297,6 +312,7 @@ impl Item {
             FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
             IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
+            CLOCK_NAMESPACE => place.clock.unwrap_or(place.levels),
             _ => place.connections,
         }
     }
@@ -322,6 +338,8 @@ pub struct Place {
     pub agents: window::Id,
     /// The bar's own surface, whose size gives its height.
     pub surface: window::Id,
+    /// Its clock's (Day.5: the calendar's item), once the bar has told it.
+    pub clock: Option<window::Id>,
     /// The footer's (5.5), once the bar has told it.
     pub footer: Option<window::Id>,
     /// The sign of what is in use (5.11), while it shows.
@@ -615,6 +633,7 @@ impl Controller {
         (levels, connections, desktops, agents): (window::Id, window::Id, window::Id, window::Id),
     ) {
         let height = self.bars.get(bar).map_or(HEIGHT, |p| p.height);
+        let clock = self.bars.get(bar).and_then(|p| p.clock);
         let footer = self.bars.get(bar).and_then(|p| p.footer);
         let in_use = self.bars.get(bar).and_then(|p| p.in_use);
         let tray = self.bars.get(bar).and_then(|p| p.tray);
@@ -626,6 +645,7 @@ impl Controller {
             desktops,
             agents,
             surface,
+            clock,
             footer,
             in_use,
             tray,
@@ -637,6 +657,13 @@ impl Controller {
     pub fn set_footer(&mut self, bar: &str, footer: window::Id) {
         if let Some(place) = self.bars.get_mut(bar) {
             place.footer = Some(footer);
+        }
+    }
+
+    /// Bar `bar`'s clock's surface is `clock`.
+    pub fn set_clock(&mut self, bar: &str, clock: window::Id) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.clock = Some(clock);
         }
     }
 
@@ -1097,6 +1124,37 @@ impl Controller {
         effects
     }
 
+    /// The calendar opens on `output`'s bar (else the first), beside its
+    /// clock, on what was asked of it (`calendar::open_on`): open already
+    /// on that bar, it turns to it.
+    pub fn open_calendar(&mut self, output: &str, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        let bar = if self.bars.contains_key(output) {
+            output.to_owned()
+        } else {
+            match self.bars.keys().min() {
+                Some(bar) => bar.clone(),
+                None => return effects,
+            }
+        };
+        if self.shows(&bar, Item::Calendar) {
+            Item::Calendar.opening();
+            effects.extend(self.refit());
+            effects.push(Effect::Wake(POPOVER_NAMESPACE));
+            return effects;
+        }
+        let from = self
+            .items
+            .get(&(bar.clone(), CLOCK_NAMESPACE))
+            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| Rectangle::new(Point::new(-184.0, 14.0), Size::new(172.0, 77.0)));
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, Item::Calendar, from, Opened::Click, &mut effects);
+        effects
+    }
+
     /// Whether the popover `id` holds the keyboard: opened by a click (or
     /// a shortcut), or clicked in.
     pub fn holds_keyboard(&self, id: window::Id) -> bool {
@@ -1256,6 +1314,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Agent(id) => Some(Effect::GoToAgent { id, bar, row: rect }),
         Item::Menu => Some(Effect::ToggleLauncher(bar)),
         Item::Tray(key) => Some(Effect::TrayMenu { bar, key, rect }),
+        Item::Calendar => None,
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -2324,6 +2383,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
+            clock: None,
             footer: None,
             in_use: None,
             tray: None,
@@ -2352,6 +2412,7 @@ mod tests {
             desktops: window::Id::unique(),
             agents: window::Id::unique(),
             surface: window::Id::unique(),
+            clock: None,
             footer: None,
             in_use: None,
             tray: None,

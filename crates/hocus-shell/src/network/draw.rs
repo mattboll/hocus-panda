@@ -477,6 +477,8 @@ impl<Message> canvas::Program<Message> for Connections {
                         (Item::Keyboard, Form::Full) => {
                             crate::layouts::draw::full(f, rect, &state.keyboard, alpha);
                         }
+                        // The clock's, never on this surface.
+                        (Item::Calendar, _) => {}
                         (
                             Item::Sound
                             | Item::Brightness

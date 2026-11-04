@@ -125,6 +125,8 @@ fn main() -> ExitCode {
     notifications::start(software);
     // After the notifications' wall clock, which the day is read against.
     day::start();
+    // The calendar drawn again as the day changes, while it is open.
+    popover::calendar::start();
     // After the notifications' wall clock, which its times read.
     clipboard::start();
     user::start();
@@ -757,7 +759,8 @@ impl Shell {
             namespace: Some(NAMESPACE.to_owned()),
         };
         let (id, open) = Message::layershell_open(settings);
-        // Inside the rim; pointer events go through to the bar.
+        // Inside the rim; its group takes the pointer (the calendar's item),
+        // and hands the rest on to the popovers as the bar's surface does.
         let clock = NewLayerShellSettings {
             size: Some(bar.clock_surface),
             layer: Layer::Top,
@@ -766,7 +769,7 @@ impl Shell {
             margin: Some((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
-            events_transparent: true,
+            events_transparent: false,
             namespace: Some(CLOCK_NAMESPACE.to_owned()),
         };
         let (clock_id, open_clock) = Message::layershell_open(clock);
@@ -878,6 +881,7 @@ impl Shell {
                 (bar.levels, bar.connections, bar.desktops, bar.agents),
             );
             c.set_footer(&bar.output, bar.footer);
+            c.set_clock(&bar.output, bar.clock);
         });
         notifications::bars_changed();
     }
@@ -988,6 +992,7 @@ impl Shell {
             )
         });
         let program = clock::Clock {
+            bar: bar.output.clone(),
             style: self.clock,
             motion: self.look.motion,
             wall: self.wall.clone(),
@@ -1432,6 +1437,14 @@ impl Shell {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::Calendar => canvas(popover::calendar::Panel {
+                id,
+                glass: self.look.glass,
+                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)
