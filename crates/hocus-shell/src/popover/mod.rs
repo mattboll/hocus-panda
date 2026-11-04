@@ -5,7 +5,7 @@
 //! agents' tools' ([`agents`]), the secretary's briefing ([`briefing`]),
 //! the notifications' history ([`history`]), and the footer's clipboard's
 //! history ([`clipboard`], which `Super+V` opens too) and user's
-//! ([`session`]), drawn and handled with the pieces of [`kit`].
+//! ([`session`], the session menu, 7.4), drawn and handled with the pieces of [`kit`].
 //!
 //! - **By a click** on its item (the whole row in the full form, the gauge
 //!   in the mini): it stays open, whatever the pointer does, until a click
@@ -289,7 +289,8 @@ impl Item {
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
-            Self::Menu | Self::User | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
+            Self::User => session::opening(),
+            Self::Menu | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
             Self::Meeting | Self::Join | Self::MeetingMark => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
@@ -315,7 +316,6 @@ impl Item {
             | Self::Agent(_)
             | Self::Secretary
             | Self::Menu
-            | Self::User
             | Self::InUse
             | Self::Tray(_)
             | Self::Meeting
@@ -332,6 +332,7 @@ impl Item {
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
+            Self::User => session::closing(),
             Self::Calendar => {}
         }
     }
@@ -1263,6 +1264,51 @@ impl Controller {
         self.unfocus(&mut effects);
         self.close(now, &mut effects);
         self.open(&bar, Item::Clipboard, from, Opened::Click, &mut effects);
+        if let Phase::Open(open) = &mut self.phase {
+            open.shortcut = true;
+        }
+        effects
+    }
+
+    /// The session menu (7.4) opens on `output`'s bar (else the first),
+    /// beside the footer's user, as a click opens it, for a confirmation
+    /// the compositor started (`Super+Shift+E`); open already, it stays,
+    /// as if clicked.
+    pub fn open_session(&mut self, output: &str, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if let Phase::Open(open) = &mut self.phase
+            && open.item == Item::User
+        {
+            if open.how == Opened::Hover {
+                open.how = Opened::Click;
+                open.leave = None;
+                effects.push(Effect::Keyboard(
+                    open.surface,
+                    KeyboardInteractivity::Exclusive,
+                ));
+            }
+            return effects;
+        }
+        let bar = if self.bars.contains_key(output) {
+            output.to_owned()
+        } else {
+            match self.bars.keys().min() {
+                Some(bar) => bar.clone(),
+                None => return effects,
+            }
+        };
+        let from = self
+            .items
+            .get(&(bar.clone(), FOOTER_NAMESPACE))
+            .and_then(|items| items.iter().find(|(i, _)| *i == Item::User))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                let height = self.bar_height(&bar);
+                Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
+            });
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, Item::User, from, Opened::Click, &mut effects);
         if let Phase::Open(open) = &mut self.phase {
             open.shortcut = true;
         }

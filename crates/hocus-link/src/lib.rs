@@ -18,7 +18,8 @@
 //! what the screen capture's toolbar shows and what was captured, the
 //! screen the notifications' bubbles show on, a request to share the screen
 //! and what is shared, where the system's authentication dialog goes and
-//! Caps Lock's state, and a change asked of the day's tasks (for tests);
+//! Caps Lock's state, the lock, the session menu's confirmation and what
+//! logind allows, and a change asked of the day's tasks (for tests);
 //! the shell draws the bars, their popovers, the peek, the launcher and the
 //! bubbles, keeps the levels and the clipboard's history, and says when it
 //! draws on the CPU, when a popover, the launcher or a bubble closes, and
@@ -26,8 +27,8 @@
 //! plugs a tool in or out, declines them, copies a text, pastes or copies
 //! an item of the clipboard's history, inserts an emoji, starts an
 //! application, clicks a bubble (its application's window), the
-//! capture's toolbar, chooses what to share, or opens and closes the
-//! authentication dialog.
+//! capture's toolbar, chooses what to share, opens and closes the
+//! authentication dialog, or chooses in the session menu.
 //! Neither
 //! side waits for the other: a message is a fact or a request, never a
 //! question. Two requests have an answer: a click on a tray icon asks for
@@ -46,6 +47,7 @@ use std::{fmt, str::FromStr, time::Duration};
 mod auth;
 pub mod backdrop;
 mod capture;
+mod leave;
 mod lock;
 mod record;
 mod share;
@@ -58,6 +60,10 @@ pub use capture::{
     CAPTURE_THUMB_NAMESPACE, CAPTURE_THUMB_RADIUS, CAPTURE_THUMB_RISE, CAPTURE_TOOLBAR_BOTTOM,
     CAPTURE_TOOLBAR_IN, CAPTURE_TOOLBAR_NAMESPACE, CAPTURE_TOOLBAR_RADIUS, CaptureAsk, CaptureBar,
     CaptureMode, Captured,
+};
+pub use leave::{
+    Can, Holder, HolderKind, LEAVE_CLOSE_WAIT, LEAVE_COUNTDOWN, LeaveAction, LeaveAsk, LeaveCan,
+    LeaveShown, LeaveStep,
 };
 pub use lock::{
     LOCK_FADE, LOCK_FADE_REDUCED, LOCK_NAMESPACE, LOCK_PART, LOCK_SHAKE, LOCK_WAIT, LockAsk,
@@ -525,6 +531,16 @@ pub enum ToShell {
     /// The lock opened and its motion ended: its surfaces go. Written
     /// `unlocked`.
     Unlocked,
+    /// What logind allows of the session menu's power actions (7.4,
+    /// [`LeaveCan`]): sent as the shell connects and when it changed.
+    LeaveCan(LeaveCan),
+    /// A confirmation of the session's end under way (7.4,
+    /// [`LeaveShown`]): the user's popover shows it on its bar, opening if
+    /// it was not (`Super+Shift+E`). Sent as it starts and on each change.
+    Leave(LeaveShown),
+    /// No confirmation any more: the menu's rows again. Written
+    /// `leave-end`.
+    LeaveEnd,
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1357,6 +1373,9 @@ pub enum ToCompositor {
     /// The system's authentication dialog opens or fades out (7.5,
     /// [`AuthAsk`]).
     Auth(AuthAsk),
+    /// The session menu (7.4, [`LeaveAsk`]): it opened, a row chosen, the
+    /// confirmation acted on or cancelled.
+    Leave(LeaveAsk),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1572,6 +1591,9 @@ impl fmt::Display for ToShell {
             Self::Recorded(recorded) => recorded.write(f),
             Self::Lock(shown) => shown.write(f),
             Self::Unlocked => f.write_str("unlocked"),
+            Self::LeaveCan(can) => can.write(f),
+            Self::Leave(shown) => shown.write(f),
+            Self::LeaveEnd => f.write_str("leave-end"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -1616,6 +1638,9 @@ impl FromStr for ToShell {
         }
         if let Some(rest) = line.strip_prefix("auth-at ") {
             return AuthAt::read(rest).map(Self::AuthAt);
+        }
+        if let Some(rest) = line.strip_prefix("leave ") {
+            return LeaveShown::read(rest).map(Self::Leave);
         }
         if let Some(rest) = line.strip_prefix("day ") {
             let (what, text) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -1843,6 +1868,8 @@ impl FromStr for ToShell {
             Some("recording-end") => Ok(Self::RecordingEnd),
             Some("lock") => LockShown::read(&mut words).map(Self::Lock),
             Some("unlocked") => Ok(Self::Unlocked),
+            Some("leave-can") => LeaveCan::read(&mut words).map(Self::LeaveCan),
+            Some("leave-end") => Ok(Self::LeaveEnd),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
@@ -2021,6 +2048,7 @@ impl fmt::Display for ToCompositor {
             Self::Auth(ask) => ask.write(f),
             Self::Record(ask) => ask.write(f),
             Self::Lock(ask) => ask.write(f),
+            Self::Leave(ask) => ask.write(f),
             Self::Clip { paste, clip } => {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
@@ -2118,6 +2146,7 @@ impl FromStr for ToCompositor {
             Some("record") => RecordAsk::read(&mut words).map(Self::Record),
             Some("lock") => LockAsk::read(&mut words).map(Self::Lock),
             Some("auth") => AuthAsk::read(&mut words).map(Self::Auth),
+            Some("leave") => LeaveAsk::read(&mut words).map(Self::Leave),
             Some("clip") => Ok(Self::Clip {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,

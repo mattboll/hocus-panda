@@ -23,8 +23,11 @@ use crate::{
 pub enum Action {
     /// Opens a terminal (`[programs] terminal`).
     Terminal,
-    /// Ends the session: the display manager comes back.
+    /// The session menu's log-out confirmation (7.4): 10 s, cancellable;
+    /// without a shell, the session ends at once.
     LogOut,
+    /// Locks the session (7.1, 7.4).
+    Lock,
     /// Asks the focused window to close.
     Close,
     /// Minimises the focused window.
@@ -199,6 +202,7 @@ macro_rules! shortcuts {
 shortcuts! {
     terminal: ["Super+Return"] => Action::Terminal,
     log_out: ["Super+Shift+E"] => Action::LogOut,
+    lock: ["Super+L"] => Action::Lock,
     close: ["Super+Q", "Alt+F4"] => Action::Close,
     minimize: ["Super+H"] => Action::Minimize,
     snap_left: ["Super+Left"] => Action::Snap(Snap::Half(Side::Start)),
@@ -324,6 +328,10 @@ fn chord<E: de::Error>(text: &str) -> Result<Option<Chord>, E> {
 pub enum Ending {
     /// The user logged out.
     LoggedOut,
+    /// logind restarts the machine (7.4).
+    Restarted,
+    /// logind powers it off (7.4).
+    PoweredOff,
     /// SIGTERM or SIGINT.
     Signalled,
 }
@@ -345,7 +353,8 @@ impl State {
                 let env = programs::Env::of(self).with_activation(self.activation_token());
                 programs::spawn_terminal(self.config.programs.terminal.clone(), env);
             }
-            Action::LogOut => self.end(Ending::LoggedOut),
+            Action::LogOut => self.leave_shortcut(),
+            Action::Lock => self.lock_now(),
             Action::Close => self.close_focused(),
             Action::Minimize => {
                 if let Some(id) = self.model.focused() {
@@ -460,6 +469,10 @@ mod tests {
             Some(Action::LogOut)
         );
         assert_eq!(action(mods(true, false, false, false), Keysym::e), None);
+        assert_eq!(
+            action(mods(true, false, false, false), Keysym::l),
+            Some(Action::Lock)
+        );
         assert_eq!(
             action(mods(false, false, false, false), Keysym::Return),
             None

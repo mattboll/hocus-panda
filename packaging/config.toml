@@ -69,8 +69,11 @@
 #
 # Opens a terminal.
 # terminal = "Super+Return"
-# Logs out: the session ends and the display manager comes back.
+# Logs out: the session menu asks to confirm (10 s, cancellable), then
+# the session ends and the display manager comes back.
 # log-out = "Super+Shift+E"
+# Locks the session.
+# lock = "Super+L"
 # Asks the focused window to close (the application may ask first).
 # close = ["Super+Q", "Alt+F4"]
 # Minimises the focused window; Alt+Tab brings it back.

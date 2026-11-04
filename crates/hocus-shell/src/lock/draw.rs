@@ -852,9 +852,44 @@ fn draw_avatar(f: &mut Frame, rect: Rectangle) {
     }
 }
 
+/// A small avatar, round in `rect` (the footer's, the session menu's,
+/// 7.4): the account's photo, else the panda's face on the accent's
+/// gradient, as the lock's but without its ring and shadow; `alpha`
+/// opaque.
+pub(crate) fn avatar_round(f: &mut Frame, rect: Rectangle, alpha: f32) {
+    let centre = rect.center();
+    let r = rect.width / 2.0;
+    match super::avatar::photo() {
+        Some(photo) => {
+            let mut image = canvas::Image::new(photo)
+                .filter_method(FilterMethod::Linear)
+                .opacity(alpha);
+            image.border_radius = r.into();
+            f.draw_image(rect, image);
+        }
+        None => {
+            let fill = gradient::Linear::new(
+                rect.position(),
+                Point::new(rect.x + rect.width, rect.y + rect.height),
+            )
+            .add_stop(0.0, faded(ACCENT, alpha))
+            .add_stop(1.0, faded(ACCENT_TO, alpha));
+            f.fill(&Path::circle(centre, r), canvas::Fill::from(fill));
+            let face = rect.width * FACE / AVATAR;
+            panda(
+                f,
+                Point::new(centre.x - face / 2.0, centre.y - face / 2.0),
+                face,
+                false,
+                alpha,
+            );
+        }
+    }
+}
+
 /// The panda's face, `size` px at `at` (the mockup's 30-unit box): awake
 /// (its eyes lit) or asleep (its eyes closed).
-fn panda(f: &mut Frame, at: Point, size: f32, asleep: bool, alpha: f32) {
+pub(crate) fn panda(f: &mut Frame, at: Point, size: f32, asleep: bool, alpha: f32) {
     let s = size / 30.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
     let dark = faded(PANDA_DARK, alpha);
