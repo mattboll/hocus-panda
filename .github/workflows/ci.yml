@@ -209,6 +209,6 @@ jobs:
         # a test may name a program by the path it was built at
         # (`CARGO_BIN_EXE_hocus`, fixed at compile time).
         run: >
-          cargo nextest run --archive-file nextest.tar.zst --workspace-remap .
+          cargo nextest run --profile ci --archive-file nextest.tar.zst --workspace-remap .
           --extract-to . --extract-overwrite
           --partition count:${{ matrix.shard }}/4

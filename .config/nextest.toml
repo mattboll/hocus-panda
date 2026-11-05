@@ -12,3 +12,10 @@ archive.include = [
     { path = "debug/hocus-settings", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-settings.d", relative-to = "target", on-missing = "error" },
 ]
+
+# CI's runs. A test that fails by chance is quarantined here while its
+# issue is fixed, so it holds no one; the fix takes it out again. Run
+# locally, the default profile still runs it. To quarantine one:
+#   default-filter = "not (binary(NAME) & test(=TEST))"   # its issue
+[profile.ci]
+default-filter = "all()"
