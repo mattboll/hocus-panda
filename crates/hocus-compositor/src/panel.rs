@@ -341,7 +341,12 @@ impl State {
     /// The form a bar starts in on screen `name`, `width` logical pixels
     /// wide.
     fn first_form(&self, name: &str, width: i32) -> Form {
-        match self.config.form_choice(name) {
+        self.form_of(self.config.form_choice(name), name, width)
+    }
+
+    /// The form `choice` gives screen `name`, `width` logical pixels wide.
+    fn form_of(&self, choice: FormChoice, name: &str, width: i32) -> Form {
+        match choice {
             FormChoice::Full => Form::Full,
             FormChoice::Mini => Form::Mini,
             FormChoice::Auto => self
@@ -350,6 +355,73 @@ impl State {
                 .get(name)
                 .copied()
                 .unwrap_or_else(|| Form::default_for(width)),
+        }
+    }
+
+    /// The configuration changed (6.4): the screens with a bar, each
+    /// screen's form (a changed choice forgets the one made with a click),
+    /// the clock's look and what the column shows follow it; `followed`
+    /// says which. Before the screens take `[outputs]`: the forms asked
+    /// until now are read from the configuration still held.
+    pub(crate) fn panel_config_changed(
+        &mut self,
+        new: &crate::Config,
+        followed: &mut Vec<&'static str>,
+    ) {
+        if new.panel.clock != self.config.panel.clock {
+            self.config.panel.clock = new.panel.clock.clone();
+            self.tell_shell(ToShell::Clock(new.panel.clock.look()));
+            followed.push("[panel.clock]");
+        }
+        if new.panel.groups() != self.config.panel.groups() {
+            let groups = new.panel.groups();
+            (self.config.panel.meeting, self.config.panel.today) = (groups.meeting, groups.today);
+            (self.config.panel.tasks, self.config.panel.agents) = (groups.tasks, groups.agents);
+            self.config.panel.order = groups.order;
+            tracing::info!(?groups, "the bar's groups");
+            self.tell_shell(ToShell::BarGroups(groups));
+            followed.push("[panel] groups");
+        }
+        // Every screen known: those with a bar, those plugged, and those
+        // with a form chosen with a click.
+        let mut names: Vec<String> = self.space.outputs().map(Output::name).collect();
+        names.extend(self.panel.chosen.keys().cloned());
+        names.sort();
+        names.dedup();
+        let changed: Vec<(String, FormChoice)> = names
+            .into_iter()
+            .filter_map(|name| {
+                let now = new.form_choice(&name);
+                (now != self.config.form_choice(&name)).then_some((name, now))
+            })
+            .collect();
+        self.config.panel.form = new.panel.form;
+        if !changed.is_empty() {
+            let mut forgot = false;
+            for (name, choice) in changed {
+                forgot |= self.panel.chosen.remove(&name).is_some();
+                let Some(output) = self.space.outputs().find(|o| o.name() == name).cloned() else {
+                    continue;
+                };
+                let width = self.space.output_geometry(&output).map_or(0, |g| g.size.w);
+                let form = self.form_of(choice, &name, width);
+                tracing::info!(
+                    output = name,
+                    ?choice,
+                    form = form.name(),
+                    "the bar's form asked"
+                );
+                self.switch_bar(&name, form);
+            }
+            if forgot {
+                self.remember_forms();
+            }
+            followed.push("[panel] form");
+        }
+        if new.panel.screens != self.config.panel.screens {
+            self.config.panel.screens = new.panel.screens;
+            self.panel_refresh();
+            followed.push("[panel] screens");
         }
     }
 
@@ -386,26 +458,39 @@ impl State {
     /// The bar on screen `name` takes its other form (a click on its edge,
     /// `Super+B`); the windows beside it follow.
     pub fn toggle_bar(&mut self, name: &str) {
+        let Some(form) = self.panel.bars.get(name).map(|b| b.form.other()) else {
+            return;
+        };
+        if !self.switch_bar(name, form) {
+            return;
+        }
+        self.panel.chosen.insert(name.to_owned(), form);
+        if self.config.form_choice(name) == FormChoice::Auto {
+            self.remember_forms();
+        }
+    }
+
+    /// The bar on screen `name` takes `form`, the windows beside it
+    /// following; whether it has a bar there.
+    fn switch_bar(&mut self, name: &str, form: Form) -> bool {
         let now = self.now();
         // A shell on the CPU draws the new form at once: the bar's space
         // and the windows do not move along a motion it does not show.
         let reduced = self.reduced_motion() || self.shell.software;
         let Some(output) = self.space.outputs().find(|o| o.name() == name).cloned() else {
-            return;
+            return false;
         };
         let before = self.work_area(&output);
         let Some(bar) = self.panel.bars.get_mut(name) else {
-            return;
+            return false;
         };
-        let from = bar.width_at(now);
-        bar.form = bar.form.other();
-        bar.switch = (!reduced).then_some((from, now));
-        let form = bar.form;
-        tracing::info!(output = name, form = form.name(), "the bar switches");
-        self.panel.chosen.insert(name.to_owned(), form);
-        if self.config.form_choice(name) == FormChoice::Auto {
-            self.remember_forms();
+        if bar.form == form {
+            return true;
         }
+        let from = bar.width_at(now);
+        bar.form = form;
+        bar.switch = (!reduced).then_some((from, now));
+        tracing::info!(output = name, form = form.name(), "the bar switches");
         self.tell_shell(ToShell::Bar {
             output: name.to_owned(),
             form,
@@ -417,6 +502,7 @@ impl State {
             self.follow_bar(&output, before, after, motion);
         }
         self.redraw = true;
+        true
     }
 
     /// The windows on `output` that touch the bar's side take the new work

@@ -102,7 +102,11 @@ fn start(shell: &Path, clock: &str, fixture: &str, options: Options) -> anyhow::
         std::fs::create_dir_all(root.join(sub))?;
     }
     let file = root.join("config/config.toml");
-    std::fs::write(&file, WITH_FIXTURE)?;
+    let form = options.form.unwrap_or(FormChoice::Full);
+    std::fs::write(
+        &file,
+        format!("{WITH_FIXTURE}\n[panel]\nform = \"{}\"\n", form.name()),
+    )?;
     std::fs::write(root.join("config/day.toml"), fixture)?;
     let launched = root.join("launched/xdg-open");
     let opener = root.join("bin/xdg-open");
@@ -151,7 +155,7 @@ fn start(shell: &Path, clock: &str, fixture: &str, options: Options) -> anyhow::
         ..Config::default()
     };
     settings.keyboard.layouts = vec!["us".to_owned()];
-    settings.panel.form = options.form.unwrap_or(FormChoice::Full);
+    settings.panel.form = form;
     let (bus, address) = if options.dnd {
         let (bus, address) = common::private_bus(root)?;
         (Some(bus), Some(address))

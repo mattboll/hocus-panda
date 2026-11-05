@@ -112,7 +112,10 @@ fn start(shell: &Path, clock: &str, fixture: &str, form: FormChoice) -> anyhow::
         std::fs::create_dir_all(root.join(sub))?;
     }
     let file = root.join("config/config.toml");
-    std::fs::write(&file, WITH_FIXTURE)?;
+    std::fs::write(
+        &file,
+        format!("{WITH_FIXTURE}\n[panel]\nform = \"{}\"\n", form.name()),
+    )?;
     let fixture_file = root.join("config/day.toml");
     std::fs::write(&fixture_file, fixture)?;
     let launched = root.join("launched/xdg-open");

@@ -442,6 +442,12 @@ pub enum ToShell {
     /// #604): sent as the shell connects and when the configuration
     /// changes it. Written `bar-windows shown` or `bar-windows hidden`.
     BarWindows(bool),
+    /// Which of the bar's column's groups show, and the order of those
+    /// that move (`[panel] meeting`, `today`, `tasks`, `agents`, `order`,
+    /// 6.4): sent as the shell connects and when the configuration changes
+    /// them. Written `bar-groups`, the order, then the hidden groups (`-`
+    /// for none): `bar-groups tasks,today,agents meeting,today`.
+    BarGroups(BarGroups),
     /// The agents' tools on this computer and what each is to the desktop
     /// (4.0): sent as the shell connects and when they change. Written
     /// `agent-tools`, then for each a tab, its name, a space, its state, a
@@ -1254,6 +1260,87 @@ impl FromStr for Transition {
     }
 }
 
+/// A group of the bar's column that the user moves (`[panel] order`,
+/// 6.4): the meeting's card and the sign of what is in use stay first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BarGroup {
+    Today,
+    Tasks,
+    Agents,
+}
+
+impl BarGroup {
+    /// Their order when none is said (#599).
+    pub const DEFAULT: [Self; 3] = [Self::Today, Self::Tasks, Self::Agents];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Today => "today",
+            Self::Tasks => "tasks",
+            Self::Agents => "agents",
+        }
+    }
+
+    /// The order `names` say: the names known, each once, in their order,
+    /// then those missing in their default order; an unknown name is
+    /// skipped.
+    pub fn order_of<S: AsRef<str>>(names: &[S]) -> [Self; 3] {
+        let mut order: Vec<Self> = Vec::with_capacity(3);
+        let known = names.iter().filter_map(|n| n.as_ref().trim().parse().ok());
+        for group in known.chain(Self::DEFAULT) {
+            if !order.contains(&group) {
+                order.push(group);
+            }
+        }
+        [order[0], order[1], order[2]]
+    }
+}
+
+impl FromStr for BarGroup {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::DEFAULT
+            .into_iter()
+            .find(|g| g.name() == s)
+            .ok_or_else(|| BadLine(format!("no bar group {s:?}: today, tasks or agents")))
+    }
+}
+
+/// What the bar's column shows (`[panel]`, 6.4): each group that can be
+/// hidden, and the order of those that move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarGroups {
+    pub order: [BarGroup; 3],
+    pub meeting: bool,
+    pub today: bool,
+    pub tasks: bool,
+    pub agents: bool,
+}
+
+impl Default for BarGroups {
+    fn default() -> Self {
+        Self {
+            order: BarGroup::DEFAULT,
+            meeting: true,
+            today: true,
+            tasks: true,
+            agents: true,
+        }
+    }
+}
+
+impl BarGroups {
+    /// Whether `group` shows.
+    pub const fn shows(&self, group: BarGroup) -> bool {
+        match group {
+            BarGroup::Today => self.today,
+            BarGroup::Tasks => self.tasks,
+            BarGroup::Agents => self.agents,
+        }
+    }
+}
+
 /// How the clock looks (`[panel.clock]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClockLook {
@@ -1531,6 +1618,25 @@ impl fmt::Display for ToShell {
             }
             Self::BarWindows(shown) => {
                 write!(f, "bar-windows {}", if *shown { "shown" } else { "hidden" })
+            }
+            Self::BarGroups(groups) => {
+                let order: Vec<&str> = groups.order.iter().map(|g| g.name()).collect();
+                let hidden: Vec<&str> = [
+                    ("meeting", groups.meeting),
+                    ("today", groups.today),
+                    ("tasks", groups.tasks),
+                    ("agents", groups.agents),
+                ]
+                .into_iter()
+                .filter(|(_, shown)| !shown)
+                .map(|(name, _)| name)
+                .collect();
+                let hidden = if hidden.is_empty() {
+                    "-".to_owned()
+                } else {
+                    hidden.join(",")
+                };
+                write!(f, "bar-groups {} {hidden}", order.join(","))
             }
             Self::Desktops(desktops) => {
                 write!(
@@ -2033,6 +2139,37 @@ impl FromStr for ToShell {
                     .collect::<Result<_, _>>()?,
             })),
             Some("bar-windows") => Ok(Self::BarWindows(flag(words.next(), "shown", "hidden")?)),
+            Some("bar-groups") => {
+                let order: Vec<BarGroup> = word(&mut words, "order")?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()?;
+                let [a, b, c] = order[..] else {
+                    return Err(BadLine(format!("an order of three groups: {order:?}")));
+                };
+                if a == b || b == c || a == c {
+                    return Err(BadLine(format!("a group twice in {order:?}")));
+                }
+                let hidden = word(&mut words, "hidden groups")?;
+                let hidden: Vec<&str> = if hidden == "-" {
+                    Vec::new()
+                } else {
+                    hidden.split(',').collect()
+                };
+                if let Some(bad) = hidden
+                    .iter()
+                    .find(|h| !["meeting", "today", "tasks", "agents"].contains(h))
+                {
+                    return Err(BadLine(format!("no bar group {bad:?}")));
+                }
+                Ok(Self::BarGroups(BarGroups {
+                    order: [a, b, c],
+                    meeting: !hidden.contains(&"meeting"),
+                    today: !hidden.contains(&"today"),
+                    tasks: !hidden.contains(&"tasks"),
+                    agents: !hidden.contains(&"agents"),
+                }))
+            }
             Some("layout") => Ok(Self::Layout(
                 word(&mut words, "layout")?
                     .parse()
@@ -2695,6 +2832,14 @@ mod tests {
             }),
             ToShell::BarWindows(true),
             ToShell::BarWindows(false),
+            ToShell::BarGroups(BarGroups::default()),
+            ToShell::BarGroups(BarGroups {
+                order: [BarGroup::Tasks, BarGroup::Today, BarGroup::Agents],
+                meeting: false,
+                today: true,
+                tasks: false,
+                agents: true,
+            }),
         ];
         for message in to_shell
             .into_iter()
@@ -3077,5 +3222,33 @@ mod tests {
             .fold(f64::MAX, f64::min);
         assert!((44.0..56.0).contains(&narrowest), "{narrowest}");
         assert!(ease(0.3) > 0.7, "quick to start");
+    }
+
+    #[test]
+    fn the_bar_order_takes_known_names_once_then_the_missing_ones() {
+        use BarGroup::{Agents, Tasks, Today};
+        assert_eq!(BarGroup::order_of::<&str>(&[]), [Today, Tasks, Agents]);
+        assert_eq!(
+            BarGroup::order_of(&["tasks", "today", "agents"]),
+            [Tasks, Today, Agents]
+        );
+        // Unknown and repeated names skipped, the missing appended.
+        assert_eq!(
+            BarGroup::order_of(&["agents", "windows", "agents"]),
+            [Agents, Today, Tasks]
+        );
+        assert!("meeting".parse::<BarGroup>().is_err());
+        // A line with a group twice, or two, does not read.
+        assert!(
+            "bar-groups today,today,agents -"
+                .parse::<ToShell>()
+                .is_err()
+        );
+        assert!("bar-groups today,tasks -".parse::<ToShell>().is_err());
+        assert!(
+            "bar-groups today,tasks,agents windows"
+                .parse::<ToShell>()
+                .is_err()
+        );
     }
 }

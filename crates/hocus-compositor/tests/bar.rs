@@ -78,7 +78,7 @@ fn the_default_form_follows_the_screens_logical_width() -> anyhow::Result<()> {
     config.outputs.insert(
         "HEADLESS-1".into(),
         hocus_compositor::OutputSettings {
-            panel_form: hocus_compositor::FormChoice::Full,
+            panel_form: Some(hocus_compositor::FormChoice::Full),
             ..Default::default()
         },
     );

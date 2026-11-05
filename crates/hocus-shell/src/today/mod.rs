@@ -206,7 +206,13 @@ pub fn moved() {
 /// bar's rows again.
 pub fn refresh() {
     let now = crate::notifications::wall();
-    let lines = lines_of(&crate::day::snapshot(), &now);
+    // Hidden (`[panel] today`, 6.4): no lines, as with nothing after the
+    // meeting.
+    let lines = if crate::column::groups().today {
+        lines_of(&crate::day::snapshot(), &now)
+    } else {
+        Vec::new()
+    };
     let changed = state(|s| {
         if s.lines == lines {
             return false;

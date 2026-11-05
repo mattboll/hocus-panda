@@ -170,6 +170,7 @@ fn start(machine: &Machine) -> anyhow::Result<Option<Bed>> {
     if machine.tasks {
         config.push_str(WITH_TASKS);
     }
+    config.push_str(&format!("\n[panel]\nform = \"{}\"\n", machine.form.name()));
     std::fs::write(&settings, config)?;
     std::fs::write(root.join("config/day.toml"), machine.day)?;
     // This test's process in the test's own `/proc`: no tool's client is

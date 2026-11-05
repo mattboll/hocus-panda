@@ -227,6 +227,12 @@ pub fn start() {
     });
 }
 
+/// The group comes or goes (`[panel] tasks`, 6.4): its surfaces lay out
+/// again.
+pub fn shown_changed() {
+    wake();
+}
+
 /// The group's surfaces and the tasks' popover draw again.
 fn wake() {
     popover::send(vec![Effect::Wake(TASKS_NAMESPACE)]);
@@ -280,6 +286,10 @@ fn tasks_of(day: &Day) -> Option<&Snapshot> {
 }
 
 fn lines_of(ui: &Ui, day: &Day, now: Instant) -> Lines {
+    // Hidden (`[panel] tasks`, 6.4): nothing, as without a source.
+    if !crate::column::groups().tasks {
+        return Lines::default();
+    }
     let Some(tasks) = tasks_of(day) else {
         return Lines::default();
     };

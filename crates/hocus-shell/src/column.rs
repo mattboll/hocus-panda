@@ -13,15 +13,25 @@
 //! (#604), then the to-do list's lines, then the agents' rows, which fold
 //! into "+ N" ([`room`]).
 //!
+//! Which groups show and the order of Today, the to-do list and the
+//! agents are the configuration's (`[panel]`, 6.4, [`set_groups`]): a
+//! hidden group takes no room, as an empty one; the mini form follows the
+//! same order, Today not in it.
+//!
 //! The windows' group is not in the column's order: it sits on the
 //! desktops, from the bottom, in the room the column leaves free (the
 //! spacer's), so that nothing in the column moves for it. Today, which
 //! fills the spacer, ends over it; the to-do list and the agents' group
 //! never give way to it.
 
-use hocus_link::Form;
+use std::sync::{Mutex, PoisonError};
+
+use hocus_link::{BarGroup, BarGroups, Form};
 
 use crate::agents;
+
+/// What the configuration says the column shows, as last told.
+static GROUPS: Mutex<Option<BarGroups>> = Mutex::new(None);
 
 /// The column's top under the bar's in the full form: 14 px of padding,
 /// the clock's 72 px and the 14 px between groups.
@@ -52,29 +62,68 @@ pub enum Part {
     Windows,
 }
 
-/// The full form's column, top to bottom (§4, #599).
-pub const FULL: [Part; 5] = [
-    Part::Meeting,
-    Part::InUse,
-    Part::Today,
-    Part::Tasks,
-    Part::Agents,
-];
-
-/// The mini form's, top to bottom (§5): the mark, the sign, the to-do
-/// item, the agents' item.
-pub const MINI: [Part; 4] = [Part::Meeting, Part::InUse, Part::Tasks, Part::Agents];
+impl Part {
+    fn of(group: BarGroup) -> Self {
+        match group {
+            BarGroup::Today => Self::Today,
+            BarGroup::Tasks => Self::Tasks,
+            BarGroup::Agents => Self::Agents,
+        }
+    }
+}
 
 /// The order in which the full form's groups give way when the bar is
-/// short: the first gives way first.
+/// short: the first gives way first, whatever their order.
 pub const GIVES_WAY: [Part; 4] = [Part::Today, Part::Windows, Part::Tasks, Part::Agents];
 
-/// The column in `form`, top to bottom.
-pub fn order(form: Form) -> &'static [Part] {
-    match form {
-        Form::Full => &FULL,
-        Form::Mini => &MINI,
+/// What the column shows, as the configuration last said.
+pub fn groups() -> BarGroups {
+    GROUPS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_default()
+}
+
+/// The configuration says what the column shows (`[panel]`, 6.4): the
+/// groups that come or go and those that move take their places, on
+/// every bar.
+pub fn set_groups(groups: BarGroups) {
+    let before = GROUPS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .replace(groups)
+        .unwrap_or_default();
+    if before == groups {
+        return;
     }
+    tracing::info!(?groups, "the bar's groups");
+    // Each part reads what shows as it lays out; the meeting's card and
+    // Today's lines are made again, the to-do list and the agents laid
+    // out again as they draw, then everyone's place.
+    crate::meeting::refresh();
+    crate::today::refresh();
+    crate::tasks::shown_changed();
+    agents::shown_changed();
+    moved();
+}
+
+/// The column in `form`, top to bottom, the movable groups in `order`:
+/// the meeting's card (or mark), the sign of what is in use, then Today
+/// (in the full form only), the to-do list and the agents.
+pub fn order_with(form: Form, order: [BarGroup; 3]) -> Vec<Part> {
+    let mut parts = vec![Part::Meeting, Part::InUse];
+    parts.extend(
+        order
+            .into_iter()
+            .filter(|g| form == Form::Full || *g != BarGroup::Today)
+            .map(Part::of),
+    );
+    parts
+}
+
+/// The column in `form`, top to bottom, in the configuration's order.
+pub fn order(form: Form) -> Vec<Part> {
+    order_with(form, groups().order)
 }
 
 /// Where the column starts under the bar's top in `form`.
@@ -108,13 +157,14 @@ pub fn taken(bar: &str, form: Form, part: Part) -> f32 {
 /// `part`'s top under bar `bar`'s top in `form`: the column's start and
 /// what the parts above it take.
 pub fn top(bar: &str, form: Form, part: Part) -> f32 {
-    top_with(form, part, |above| taken(bar, form, above))
+    top_with(form, &order(form), part, |above| taken(bar, form, above))
 }
 
-/// `part`'s top in `form`, `taken` saying what each part above it takes.
-fn top_with(form: Form, part: Part, mut taken: impl FnMut(Part) -> f32) -> f32 {
+/// `part`'s top in `form`, the column being `order`, `taken` saying what
+/// each part above it takes.
+fn top_with(form: Form, order: &[Part], part: Part, mut taken: impl FnMut(Part) -> f32) -> f32 {
     start(form)
-        + order(form)
+        + order
             .iter()
             .take_while(|p| **p != part)
             .map(|p| taken(*p))
@@ -135,7 +185,7 @@ pub fn end(bar: &str, form: Form) -> f32 {
 /// are the same on every bar: nothing of a bar's own is above them.
 pub fn shared_top(form: Form, part: Part) -> f32 {
     debug_assert!(matches!(part, Part::Meeting | Part::InUse));
-    top_with(form, part, |above| taken("", form, above))
+    top_with(form, &order(form), part, |above| taken("", form, above))
 }
 
 /// Where bar `bar`'s column ends in the full form, under the bar's top:
@@ -178,7 +228,9 @@ fn room_with(
     mut taken: impl FnMut(Part) -> f32,
     mut least: impl FnMut(Part) -> f32,
 ) -> f32 {
-    let head = top_with(Form::Full, Part::Today, &mut taken);
+    // Under the meeting's card and the sign, whatever the order: the
+    // groups share the rest.
+    let head = start(Form::Full) + taken(Part::Meeting) + taken(Part::InUse);
     let mut room = bottom - head - GAP;
     let mut before = true;
     for q in GIVES_WAY {
@@ -254,21 +306,54 @@ mod tests {
         }
     }
 
+    const FULL: [Part; 5] = [
+        Part::Meeting,
+        Part::InUse,
+        Part::Today,
+        Part::Tasks,
+        Part::Agents,
+    ];
+    const MINI: [Part; 4] = [Part::Meeting, Part::InUse, Part::Tasks, Part::Agents];
+
     #[test]
     fn the_full_forms_order_puts_the_agents_under_to_do() {
+        assert_eq!(order_with(Form::Full, BarGroup::DEFAULT), FULL);
+        assert_eq!(order_with(Form::Mini, BarGroup::DEFAULT), MINI);
+    }
+
+    #[test]
+    fn the_configurations_order_moves_today_to_do_and_the_agents() {
+        let order = [BarGroup::Agents, BarGroup::Today, BarGroup::Tasks];
         assert_eq!(
-            FULL,
+            order_with(Form::Full, order),
             [
                 Part::Meeting,
                 Part::InUse,
+                Part::Agents,
                 Part::Today,
-                Part::Tasks,
-                Part::Agents
+                Part::Tasks
             ]
         );
+        // The mini form the same, without Today.
         assert_eq!(
-            MINI,
-            [Part::Meeting, Part::InUse, Part::Tasks, Part::Agents]
+            order_with(Form::Mini, order),
+            [Part::Meeting, Part::InUse, Part::Agents, Part::Tasks]
+        );
+        // The card (44 + 14), the agents (200 + 14), Today (92), To do.
+        let t = takes(58.0, 0.0, 92.0, 118.0, 200.0);
+        let full = order_with(Form::Full, order);
+        assert_eq!(top_with(Form::Full, &full, Part::Agents, &t), 158.0);
+        assert_eq!(top_with(Form::Full, &full, Part::Today, &t), 358.0);
+        assert_eq!(top_with(Form::Full, &full, Part::Tasks, &t), 450.0);
+        // The room each has does not depend on the order.
+        let least = |p: Part| match p {
+            Part::Today | Part::Windows => 0.0,
+            Part::Tasks => 52.0,
+            _ => t(p),
+        };
+        assert_eq!(
+            room_with(Part::Today, 700.0, &t, least),
+            700.0 - 158.0 - 14.0 - 118.0 - 200.0
         );
     }
 
@@ -277,20 +362,20 @@ mod tests {
         // The card (44 + 14), no sign, Today (18 + 60 + 14), To do (18 + 66
         // + 20 + 14).
         let t = takes(58.0, 0.0, 92.0, 118.0, 200.0);
-        assert_eq!(top_with(Form::Full, Part::Meeting, &t), 100.0);
-        assert_eq!(top_with(Form::Full, Part::InUse, &t), 158.0);
-        assert_eq!(top_with(Form::Full, Part::Today, &t), 158.0);
-        assert_eq!(top_with(Form::Full, Part::Tasks, &t), 250.0);
-        assert_eq!(top_with(Form::Full, Part::Agents, &t), 368.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Meeting, &t), 100.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::InUse, &t), 158.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Today, &t), 158.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Tasks, &t), 250.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Agents, &t), 368.0);
         // Without the card, an empty Today and no task source: the agents
         // right under the clock.
         let t = takes(0.0, 0.0, 0.0, 0.0, 200.0);
-        assert_eq!(top_with(Form::Full, Part::Agents, &t), 100.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Agents, &t), 100.0);
         // The mini form: the mark's 16 + 14, the to-do item's 34 + 14;
         // Today is not in it.
         let t = takes(30.0, 0.0, 92.0, 48.0, 76.0);
-        assert_eq!(top_with(Form::Mini, Part::Tasks, &t), 98.0);
-        assert_eq!(top_with(Form::Mini, Part::Agents, &t), 146.0);
+        assert_eq!(top_with(Form::Mini, &MINI, Part::Tasks, &t), 98.0);
+        assert_eq!(top_with(Form::Mini, &MINI, Part::Agents, &t), 146.0);
     }
 
     #[test]
@@ -351,6 +436,6 @@ mod tests {
         );
         // They are not in the column's order: no part's top counts them.
         assert!(!FULL.contains(&Part::Windows) && !MINI.contains(&Part::Windows));
-        assert_eq!(top_with(Form::Full, Part::Agents, &t), 368.0);
+        assert_eq!(top_with(Form::Full, &FULL, Part::Agents, &t), 368.0);
     }
 }
