@@ -323,6 +323,56 @@ fn with_reduced_motion_the_side_changes_at_once() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The window on top of the stack, and whether it has the keyboard.
+fn in_front(hp: &Headless) -> (Option<String>, bool) {
+    hp.windows()
+        .last()
+        .map_or((None, false), |w| (w.app_id.clone(), w.keyboard))
+}
+
+/// A window behind that follows the bar, a change of its form then of its
+/// side, stays behind for the pointer as on the screen: a click on the
+/// window in front is that window's (#647).
+#[test]
+fn a_window_that_follows_the_bar_stays_behind_for_the_pointer_too() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    let mut hp = following(&file, "")?;
+    // Maximised behind, another floating in front of it.
+    open(&mut hp, "behind", (600, 400))?;
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_UP]);
+    common::wait_for_rect(&mut hp, "behind", RIGHT_AREA)?;
+    let front = open(&mut hp, "front", (500, 300))?;
+    let middle = (
+        f64::from(front.x + front.width / 2),
+        f64::from(front.y + front.height / 2),
+    );
+    let in_front_now = |hp: &mut Headless, what: &str| -> anyhow::Result<()> {
+        let reached =
+            hp.dispatch_until(WAIT, |hp| in_front(hp) == (Some("front".to_owned()), true))?;
+        anyhow::ensure!(reached, "after {what}, in front: {:?}", in_front(hp));
+        Ok(())
+    };
+    in_front_now(&mut hp, "opening")?;
+    // The bar's form: the maximised window takes its new room.
+    hp.pointer_move(middle.0, middle.1);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    let mini = Rect::new(8, 8, 1920 - 8 - 56 - 8 - 8, 1064);
+    common::wait_for_rect(&mut hp, "behind", mini)?;
+    click(&mut hp, middle.0, middle.1);
+    in_front_now(&mut hp, "a click after the form changed")?;
+    // Its side, from the file: the same.
+    rewrite(&file, LEFT)?;
+    common::wait_for_rect(
+        &mut hp,
+        "behind",
+        Rect::new(8 + 56 + 8, 8, mini.width, mini.height),
+    )?;
+    click(&mut hp, middle.0, middle.1);
+    in_front_now(&mut hp, "a click after the side changed")?;
+    Ok(())
+}
+
 // --- With the shell ----------------------------------------------------------
 
 /// The next meeting's card at 14:25, an event after it, three tasks.

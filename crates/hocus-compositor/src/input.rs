@@ -362,17 +362,28 @@ impl State {
         self.auth_caps(mods.caps_lock);
     }
 
-    /// Whether the modifiers held move a window under the pointer:
-    /// `Alt`, without `Super` (`Super`+drag draws, docs/design/ink.md).
+    /// Whether the modifiers held move a window under the pointer with its
+    /// left button: `[windows] move-modifier` (6.14), `Alt` by default.
     pub fn move_modifier(&self, modifiers: &ModifiersState) -> bool {
-        modifiers.alt && !modifiers.logo
+        self.drag_key_held(self.config.windows.move_modifier, modifiers)
     }
 
     /// Whether the modifiers held resize a window under the pointer with
-    /// its right button: `Super`, or `Alt+Super` nested, where the host
-    /// takes `Super`.
+    /// its right button: `[windows] resize-modifier`, `Super` by default.
     pub fn resize_modifier(&self, modifiers: &ModifiersState) -> bool {
-        modifiers.logo && (!self.nested || modifiers.alt)
+        self.drag_key_held(self.config.windows.resize_modifier, modifiers)
+    }
+
+    /// Whether `key` is held for a drag in a window: `Alt` without
+    /// `Super` (`Super`+drag draws, docs/design/ink.md); `Super` without
+    /// `Ctrl`, nested `Alt+Super`, where the host takes `Super`.
+    fn drag_key_held(&self, key: crate::config::DragKey, modifiers: &ModifiersState) -> bool {
+        use crate::config::DragKey;
+        match key {
+            DragKey::Alt => modifiers.alt && !modifiers.logo,
+            DragKey::Super => modifiers.logo && !modifiers.ctrl && (!self.nested || modifiers.alt),
+            DragKey::None => false,
+        }
     }
 
     /// A mouse or touchpad: the pointer moves by the motion, and stays on

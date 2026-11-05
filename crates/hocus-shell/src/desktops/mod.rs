@@ -28,6 +28,32 @@ use crate::popover::{self, Item};
 static DESKTOPS: Mutex<Option<HashMap<String, Desktops>>> = Mutex::new(None);
 static TITLES: Mutex<Option<HashMap<String, Titles>>> = Mutex::new(None);
 static RECENT: Mutex<Option<HashMap<String, Recent>>> = Mutex::new(None);
+/// The desktops' names, by position, the same on every screen (6.14).
+static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Desktop `index`'s name (from 0), if it has one: else the words'
+/// "Bureau N".
+pub fn name(index: usize) -> Option<String> {
+    NAMES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(index)
+        .filter(|n| !n.is_empty())
+        .cloned()
+}
+
+/// The compositor says the desktops' names (`[desktops] names`): kept;
+/// the tiles say them again, and an open list's title shows it.
+pub fn set_names(names: Vec<String>) {
+    let mut kept = NAMES.lock().unwrap_or_else(PoisonError::into_inner);
+    if *kept == names {
+        return;
+    }
+    *kept = names;
+    drop(kept);
+    popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+    list_changed(None);
+}
 
 /// Bar `bar`'s screen's desktops as last said.
 pub fn snapshot(bar: &str) -> Option<Desktops> {
