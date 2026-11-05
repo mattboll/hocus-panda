@@ -507,7 +507,11 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::TaskAdd
                             | Item::Task(_)
                             | Item::DayChoose
-                            | Item::DayLater,
+                            | Item::DayLater
+                            | Item::Window(_)
+                            | Item::WindowClose(_)
+                            | Item::WindowsMore
+                            | Item::Windows,
                             _,
                         ) => {}
                     }

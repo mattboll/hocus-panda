@@ -4,8 +4,8 @@
 //! their own, never on the one that draws, once per id.
 //!
 //! What draws reads what was found and asks for what was not looked for
-//! yet; once found, the desktops' surfaces are woken, and the list if it
-//! shows. Ids looked for together wake them once.
+//! yet; once found, the desktops' surfaces and the windows over them are
+//! woken, and the list if it shows. Ids looked for together wake them once.
 
 use std::{
     collections::HashMap,
@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-use hocus_link::DESKTOPS_NAMESPACE;
+use hocus_link::{DESKTOPS_NAMESPACE, WINDOWS_NAMESPACE};
 
 use crate::{levels::icons::Icon, popover};
 
@@ -107,8 +107,12 @@ fn look(asked: &Receiver<String>) {
             icons(|icons| icons.insert(app, Looked::Found(icon)));
         }
         if found {
-            popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+            popover::send(vec![
+                popover::Effect::Wake(DESKTOPS_NAMESPACE),
+                popover::Effect::Wake(WINDOWS_NAMESPACE),
+            ]);
             super::list_changed(None);
+            crate::windows::icons_found();
         }
     }
 }

@@ -72,6 +72,10 @@
 # ~/.local/state/hocuspanda/panel.toml). A screen may have its own, as
 # panel-form in its [outputs.NAME] section.
 # form = "auto"
+# The windows of the screen's current desktop over its desktops, the
+# focused one first, at most 3 (each with its close button), then "+ N
+# more"; in the mini form, an item that lists them. false hides them.
+# windows = true
 
 # [panel.clock]
 # The clock at the top of the bar. Its font: the bundled "Martian Mono",

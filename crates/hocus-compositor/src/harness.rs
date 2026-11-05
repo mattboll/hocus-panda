@@ -331,6 +331,11 @@ impl Headless {
         self.app.state.panel.today_commits
     }
 
+    /// The commits of the windows' surfaces in the bar (#604), all bars'.
+    pub fn windows_commits(&self) -> u64 {
+        self.app.state.panel.windows_commits
+    }
+
     /// The commits of the next meeting's surfaces (Day.2), all bars'.
     pub fn meeting_commits(&self) -> u64 {
         self.app.state.panel.meeting_commits

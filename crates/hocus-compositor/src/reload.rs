@@ -211,6 +211,12 @@ impl State {
             self.input_settings_changed();
             followed.push("[pointer] [touchpad]");
         }
+        // The windows in the bar (#604): the shell shows or hides them.
+        if new.panel.windows != self.config.panel.windows {
+            self.config.panel.windows = new.panel.windows;
+            self.tell_shell(hocus_link::ToShell::BarWindows(new.panel.windows));
+            followed.push("[panel] windows");
+        }
         if !followed.is_empty() {
             tracing::info!(?followed, "the configuration changed on disk");
         }

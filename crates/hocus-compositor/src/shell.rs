@@ -388,6 +388,7 @@ impl State {
         });
         self.tell_shell(self.bar_look());
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
+        self.tell_shell(ToShell::BarWindows(self.config.panel.windows));
         let bars: Vec<ToShell> = self
             .panel
             .bars
@@ -467,6 +468,10 @@ impl State {
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
+            ToCompositor::Close(id) => {
+                tracing::debug!(window = id, "the shell asks a window to close");
+                self.close_window(crate::model::WindowId(id));
+            }
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),

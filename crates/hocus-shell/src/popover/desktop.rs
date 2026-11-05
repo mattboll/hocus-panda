@@ -1,5 +1,6 @@
 //! A desktop's list of windows (bar.md §4.4, §9; the 3.9b mockup), opened
-//! by resting on its tile (or its dot) for 150 ms: "Bureau N" and "M
+//! by resting on its tile (or its dot) for 150 ms, or for the current
+//! desktop by a click on the windows' "+ N autres" over the tiles (#604): "Bureau N" and "M
 //! fenêtres" on the right; one 32 px row per window, front to back, its
 //! application's icon (else its letter on a colour) and its title cut
 //! with an ellipsis; then the minimised ones, greyed (3.9c); "Aucune
@@ -372,12 +373,17 @@ impl Panel {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
         // Closing, it shows what it showed.
-        let (bar, index) = super::with(|c| match c.open_on() {
-            Some((bar, Item::Desktop(index))) if c.is_open(self.id) => {
-                Some((bar.to_owned(), index))
+        let (bar, item) = super::with(|c| match c.open_on() {
+            Some((bar, item @ (Item::Desktop(_) | Item::WindowsMore))) if c.is_open(self.id) => {
+                Some((bar.to_owned(), item))
             }
             _ => None,
         })?;
+        // The windows' "+ N" (#604): the current desktop's.
+        let index = match item {
+            Item::Desktop(index) => index,
+            _ => u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX),
+        };
         let rows = desktops::rows(&bar, usize::from(index));
         let same = state
             .shown
@@ -426,7 +432,7 @@ impl Panel {
         state.scroll = if another { 0.0 } else { state.scroll.min(most) };
         // A change of size reaches the controller, which resizes the
         // surface (without waking it again).
-        super::refit(Item::Desktop(index));
+        super::refit(item);
         None
     }
 

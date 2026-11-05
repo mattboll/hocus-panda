@@ -192,6 +192,10 @@ pub const MEETING_NAMESPACE: &str = "hocus-bar-meeting";
 /// agents' group, in the full form. Opened
 /// while it lists something, none without.
 pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
+/// The namespace of the windows in the bar (#604): the windows of the
+/// screen's current desktop over its desktops' tiles, or the mini form's
+/// item over its dots. Opened while it lists a window, none without.
+pub const WINDOWS_NAMESPACE: &str = "hocus-bar-windows";
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 
@@ -412,6 +416,16 @@ pub enum ToShell {
     /// then for each window a tab, its id, a tab, its title (on one line,
     /// without tabs, [`TITLE_MAX`] characters at most).
     Titles(Titles),
+    /// A bar's screen's windows, every desktop's, minimised ones too, the
+    /// most recently focused first, by their ids: the order of the
+    /// windows in the bar (#604). Sent as the shell connects, and when it
+    /// changes, at most once a frame. Written `recent`, the screen's name,
+    /// then the ids: `recent eDP-1 12 3 13`.
+    Recent(Recent),
+    /// Whether the bar shows its screen's windows (`[panel] windows`,
+    /// #604): sent as the shell connects and when the configuration
+    /// changes it. Written `bar-windows shown` or `bar-windows hidden`.
+    BarWindows(bool),
     /// The agents' tools on this computer and what each is to the desktop
     /// (4.0): sent as the shell connects and when they change. Written
     /// `agent-tools`, then for each a tab, its name, a space, its state, a
@@ -1053,6 +1067,13 @@ pub struct Titles {
     pub titles: Vec<(u64, String)>,
 }
 
+/// A screen's windows, the most recently focused first ([`ToShell::Recent`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recent {
+    pub output: String,
+    pub ids: Vec<u64>,
+}
+
 /// The characters of a title a [`ToShell::Titles`] line carries at most:
 /// the list cuts titles to its 190 px long before that.
 pub const TITLE_MAX: usize = 200;
@@ -1301,6 +1322,10 @@ pub enum ToCompositor {
     /// the compositor goes to its desktop, sliding, and focuses it.
     /// Written `bring ID`.
     Bring(u64),
+    /// The user asks window `id` to close (its ✕ in the bar, #604): the
+    /// compositor asks its application, as `Super+Q` does; the
+    /// application decides. Written `close ID`.
+    Close(u64),
     /// The user goes to agent `id` (its row in the agents' group, 4.1):
     /// the compositor brings its window, if it has one, and a finished
     /// agent is seen. From a row (4.3), the streak runs from it to the
@@ -1478,6 +1503,16 @@ impl fmt::Display for ToShell {
                 Ok(())
             }
             Self::Layout(index) => write!(f, "layout {index}"),
+            Self::Recent(recent) => {
+                write!(f, "recent {}", recent.output)?;
+                for id in &recent.ids {
+                    write!(f, " {id}")?;
+                }
+                Ok(())
+            }
+            Self::BarWindows(shown) => {
+                write!(f, "bar-windows {}", if *shown { "shown" } else { "hidden" })
+            }
             Self::Desktops(desktops) => {
                 write!(
                     f,
@@ -1963,6 +1998,13 @@ impl FromStr for ToShell {
                     .parse()
                     .map_err(|e| BadLine(format!("scale: {e}")))?,
             }),
+            Some("recent") => Ok(Self::Recent(Recent {
+                output: word(&mut words, "output")?.to_owned(),
+                ids: words
+                    .map(|w| w.parse().map_err(|e| BadLine(format!("an id: {e}"))))
+                    .collect::<Result<_, _>>()?,
+            })),
+            Some("bar-windows") => Ok(Self::BarWindows(flag(words.next(), "shown", "hidden")?)),
             Some("layout") => Ok(Self::Layout(
                 word(&mut words, "layout")?
                     .parse()
@@ -2037,6 +2079,7 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
             Self::Bring(id) => write!(f, "bring {id}"),
+            Self::Close(id) => write!(f, "close {id}"),
             Self::GoToAgent { id, row: None } => write!(f, "go-to-agent {id}"),
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
@@ -2205,6 +2248,11 @@ impl FromStr for ToCompositor {
                 },
             }),
             Some("bring") => Ok(Self::Bring(
+                word(&mut words, "window")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("window: {e}")))?,
+            )),
+            Some("close") => Ok(Self::Close(
                 word(&mut words, "window")?
                     .parse()
                     .map_err(|e| BadLine(format!("window: {e}")))?,
@@ -2591,6 +2639,16 @@ mod tests {
                 output: "eDP-1".into(),
                 titles: vec![(3, "~/hocus — fish".into()), (12, String::new())],
             }),
+            ToShell::Recent(Recent {
+                output: "eDP-1".into(),
+                ids: vec![12, 3, 13],
+            }),
+            ToShell::Recent(Recent {
+                output: "HDMI-A-1".into(),
+                ids: Vec::new(),
+            }),
+            ToShell::BarWindows(true),
+            ToShell::BarWindows(false),
         ];
         for message in to_shell
             .into_iter()
@@ -2626,6 +2684,7 @@ mod tests {
                 to: DesktopTo::Previous,
             },
             ToCompositor::Bring(42),
+            ToCompositor::Close(42),
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::GoToAgent {
                 id: 7,
@@ -2702,6 +2761,8 @@ mod tests {
         assert!("launch\tx\tmaybe\t\tfoot".parse::<ToCompositor>().is_err());
         assert!("launcher eDP-1".parse::<ToShell>().is_err());
         assert!("desktop eDP-1".parse::<ToCompositor>().is_err());
+        assert!("close".parse::<ToCompositor>().is_err());
+        assert!("close me".parse::<ToCompositor>().is_err());
         assert!("desktop eDP-1 last".parse::<ToCompositor>().is_err());
         assert!(
             "go-to-agent 7 eDP-1 -190 126 184"
@@ -2732,6 +2793,10 @@ mod tests {
             "titles",
             "titles eDP-1\t3",
             "titles eDP-1\tthree\tfish",
+            "recent",
+            "recent eDP-1 12 x",
+            "bar-windows",
+            "bar-windows maybe",
             "day slept",
             "day slept soon",
             "fullscreenHDMI-A-1",

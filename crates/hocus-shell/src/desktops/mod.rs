@@ -21,16 +21,38 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
-use hocus_link::{DESKTOPS_NAMESPACE, Desktops, Look, Titles};
+use hocus_link::{DESKTOPS_NAMESPACE, Desktops, Look, Recent, Titles};
 
 use crate::popover::{self, Item};
 
 static DESKTOPS: Mutex<Option<HashMap<String, Desktops>>> = Mutex::new(None);
 static TITLES: Mutex<Option<HashMap<String, Titles>>> = Mutex::new(None);
+static RECENT: Mutex<Option<HashMap<String, Recent>>> = Mutex::new(None);
 
 /// Bar `bar`'s screen's desktops as last said.
 pub fn snapshot(bar: &str) -> Option<Desktops> {
     DESKTOPS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()?
+        .get(bar)
+        .cloned()
+}
+
+/// Bar `bar`'s screen's windows' titles as last said.
+pub fn titles(bar: &str) -> Option<Titles> {
+    TITLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()?
+        .get(bar)
+        .cloned()
+}
+
+/// Bar `bar`'s screen's windows, the most recently focused first, as last
+/// said (#604).
+pub fn recent(bar: &str) -> Option<Recent> {
+    RECENT
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()?
@@ -87,6 +109,8 @@ pub fn set(desktops: Desktops) {
         draw::count(&output, usize::from(count));
     }
     popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+    // The windows over the tiles, if what they list changed (#604).
+    crate::windows::changed();
 }
 
 /// The compositor says the titles of a screen's windows: kept; only the
@@ -100,14 +124,31 @@ pub fn set_titles(titles: Titles) {
             .get_or_insert_with(HashMap::new)
             .insert(output.clone(), titles);
     });
+    crate::windows::changed();
+}
+
+/// The compositor says a screen's windows' order (#604): kept; only the
+/// windows over the tiles draw for it, if their lines changed.
+pub fn set_recent(recent: Recent) {
+    RECENT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(recent.output.clone(), recent);
+    crate::windows::changed();
 }
 
 /// `change` on bar `bar`'s desktops: the list draws again if it shows one
 /// of them and its rows changed.
 fn listed(bar: &str, change: impl FnOnce()) {
     let open = popover::with(|c| match c.open_on() {
-        Some((on, Item::Desktop(index))) if on == bar => Some(usize::from(index)),
+        Some((on, item @ (Item::Desktop(_) | Item::WindowsMore))) if on == bar => Some(item),
         _ => None,
+    });
+    let open = open.map(|item| match item {
+        Item::Desktop(index) => usize::from(index),
+        // "+ N" shows the current desktop's list (#604).
+        _ => current(bar),
     });
     let before = open.map(|index| rows(bar, index));
     change();
@@ -122,7 +163,7 @@ fn listed(bar: &str, change: impl FnOnce()) {
 /// shows, it draws again, to its new size.
 pub fn list_changed(bar: Option<&str>) {
     let effects = popover::with(|c| match c.open_on() {
-        Some((on, Item::Desktop(_))) if bar.is_none_or(|b| b == on) => {
+        Some((on, Item::Desktop(_) | Item::WindowsMore)) if bar.is_none_or(|b| b == on) => {
             let mut effects = c.refit();
             effects.push(popover::Effect::Wake(hocus_link::POPOVER_NAMESPACE));
             effects
@@ -132,6 +173,11 @@ pub fn list_changed(bar: Option<&str>) {
     if !effects.is_empty() {
         popover::send(effects);
     }
+}
+
+/// The desktop bar `bar`'s screen shows, from 0.
+pub fn current(bar: &str) -> usize {
+    snapshot(bar).map_or(0, |d| usize::from(d.current))
 }
 
 /// A window of a desktop's list.
