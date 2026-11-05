@@ -20,8 +20,9 @@
 //!   12.5 px `#F7B98A`, the fields keeping what was typed.
 //! - **Step 3, "Quoi montrer ?"**: the account's name and address, then
 //!   its calendars (a 16 px box, a 16 px swatch which unfolds the eight
-//!   colours, the name, "lecture seule"), or the board's three columns,
-//!   each a menu, and how many cards the tasks' column holds. "Terminé".
+//!   colours, a 16 px star, "Mettre en avant", which features it, the
+//!   name, "lecture seule"), or the board's three columns, each a menu,
+//!   and how many cards the tasks' column holds. "Terminé".
 //!
 //! The keyboard: `Tab` through the rows, the fields and the buttons, the
 //! arrows through a list's rows, `Space` ticks, `Enter` chooses, `Esc`
@@ -108,6 +109,8 @@ const PLAIN: Color = Color::from_rgba8(255, 255, 255, 0.06);
 const PLAIN_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
 const GREEN_HOVER: Color = rgb(0x7DCF97);
 const BOX_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.38);
+/// A featured calendar's star: the eight's yellow.
+const STAR: Color = rgb(0xF5C46E);
 
 /// What can be acted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +126,8 @@ enum Target {
     SignIn,
     Calendar(usize),
     Swatch(usize),
+    /// A calendar's star: featured or not.
+    Star(usize),
     Colour(usize, usize),
     Board,
     BoardOption(usize),
@@ -205,6 +210,7 @@ enum Part {
         name: String,
         colour: usize,
         shown: bool,
+        featured: bool,
         read_only: bool,
     },
     Colours {
@@ -531,13 +537,16 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                                     name: row.name.clone(),
                                     colour: row.colour,
                                     shown: row.shown,
+                                    featured: row.featured,
                                     read_only: row.read_only,
                                 });
                                 laid.target(Target::Calendar(i), rect);
                                 laid.target(Target::Swatch(i), swatch_rect(y));
+                                laid.target(Target::Star(i), star_rect(y));
                                 rows_said.push(format!(
-                                    "{} {} {}{}",
+                                    "{} {} {} {}{}",
                                     if row.shown { "[x]" } else { "[ ]" },
+                                    if row.featured { "★" } else { "☆" },
                                     row.name,
                                     PALETTE[row.colour],
                                     if row.read_only {
@@ -563,8 +572,9 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                         }
                     }
                     laid.said = format!(
-                        "step=show account=«{who}» calendars=[{}]",
-                        rows_said.join("; ")
+                        "step=show account=«{who}» calendars=[{}] star=«{}»",
+                        rows_said.join("; "),
+                        words.feature()
                     );
                 }
                 Some(Show::Planka {
@@ -743,6 +753,12 @@ fn swatch_rect(top: f32) -> Rectangle {
         Point::new(LEFT + BOX + 10.0 - 4.0, top + (CHECK_ROW - BOX) / 2.0 - 4.0),
         Size::new(BOX + 8.0, BOX + 8.0),
     )
+}
+
+/// A calendar's star, its row from `top`: after its swatch, 10 px apart.
+fn star_rect(top: f32) -> Rectangle {
+    let swatch = swatch_rect(top);
+    Rectangle::new(Point::new(swatch.x + BOX + 10.0, swatch.y), swatch.size())
 }
 
 /// Colour `c` of the eight, their row from `top`, under the swatch.
@@ -995,6 +1011,7 @@ impl Panel {
             Target::SignIn => setup::sign_in(),
             Target::Calendar(i) => setup::toggle(i),
             Target::Swatch(i) => setup::unfold(Unfold::Colours(i)),
+            Target::Star(i) => setup::feature(i),
             Target::Colour(i, c) => setup::colour(i, c),
             Target::Board => setup::unfold(Unfold::Boards),
             Target::BoardOption(i) => setup::board(i),
@@ -1276,6 +1293,7 @@ impl Panel {
                 name,
                 colour,
                 shown,
+                featured,
                 read_only,
             } => {
                 let target = Some(Target::Calendar(*index));
@@ -1303,7 +1321,20 @@ impl Panel {
                 if focused(swatch_target) {
                     ring(f, swatch, 6.0);
                 }
-                let x = swatch.x + swatch.width - 4.0 + 10.0;
+                let star = star_rect(rect.y);
+                // A star on a calendar not shown counts for nothing: dim.
+                star_mark(f, star.center(), *featured, *shown);
+                let star_target = Some(Target::Star(*index));
+                if lit(star_target) {
+                    f.stroke(
+                        &kit::rounded(star, 6.0),
+                        Stroke::default().with_color(DIM).with_width(1.0),
+                    );
+                }
+                if focused(star_target) {
+                    ring(f, star, 6.0);
+                }
+                let x = star.x + star.width - 4.0 + 10.0;
                 let aside = read_only.then(|| setup::Words::read_only(self.words));
                 let aside_width = aside.map_or(0.0, |a| measure(a, 11.5, MANROPE) + 8.0);
                 let room = RIGHT - x - aside_width;
@@ -1598,6 +1629,38 @@ fn tick(f: &mut Frame, at: Point, ticked: bool) {
     }
 }
 
+/// A 16 px five-pointed star centred on `c`: filled yellow when lit,
+/// else its outline; at half strength on a calendar not shown.
+fn star_mark(f: &mut Frame, c: Point, lit: bool, shown: bool) {
+    let (outer, inner) = (BOX / 2.0, BOX / 2.0 * 0.45);
+    let path = Path::new(|b| {
+        for i in 0..10 {
+            let r = if i % 2 == 0 { outer } else { inner };
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+            // Its points' middle a little low, so that it sits centred.
+            let p = Point::new(c.x + r * a.cos(), c.y + 0.6 + r * a.sin());
+            if i == 0 {
+                b.move_to(p);
+            } else {
+                b.line_to(p);
+            }
+        }
+        b.close();
+    });
+    let strength = if shown { 1.0 } else { 0.5 };
+    if lit {
+        f.fill(&path, faded(STAR, strength));
+    } else {
+        f.stroke(
+            &path,
+            Stroke::default()
+                .with_color(faded(BOX_BORDER, strength))
+                .with_width(1.3)
+                .with_line_join(canvas::LineJoin::Round),
+        );
+    }
+}
+
 /// A 12 px spinner, its middle-left at `at`: still without motion.
 fn spinner(f: &mut Frame, at: Point, colour: Color, motion: bool) {
     let r = 5.0;
@@ -1681,6 +1744,57 @@ mod tests {
         flow.online = Online::Missing;
         let laid = lay_out(&flow, words, width);
         assert!(laid.said.contains("disabled=true"), "{}", laid.said);
+    }
+
+    #[test]
+    fn step_3_has_a_star_after_each_calendars_swatch() {
+        let words = Words::new(crate::clock::time::Lang::French);
+        let mut flow = flow();
+        flow.step = Step::Show;
+        let row = |name: &str, shown: bool, featured: bool| setup::Row {
+            name: name.to_owned(),
+            colour: 0,
+            shown,
+            featured,
+            read_only: false,
+        };
+        flow.show = Some(Show::Google {
+            account: GoogleAccount {
+                path: "/a/1".to_owned(),
+                identity: "alex@example.org".to_owned(),
+                name: "alex@example.org".to_owned(),
+                calendar: true,
+            },
+            calendars: Calendars::Read(vec![
+                row("Travail", true, true),
+                row("Congés", true, false),
+            ]),
+        });
+        let laid = lay_out(&flow, words, width);
+        let order: Vec<Target> = laid.targets.iter().map(|(t, _)| *t).collect();
+        assert_eq!(
+            order[1..7],
+            [
+                Target::Calendar(0),
+                Target::Swatch(0),
+                Target::Star(0),
+                Target::Calendar(1),
+                Target::Swatch(1),
+                Target::Star(1),
+            ]
+        );
+        // 16 px, 10 px after the swatch, both in their 24 px targets.
+        let at = |t: Target| laid.targets.iter().find(|(o, _)| *o == t).map(|(_, r)| *r);
+        let (swatch, star) = (at(Target::Swatch(0)), at(Target::Star(0)));
+        assert_eq!(swatch.map(|r| r.x + 26.0), star.map(|r| r.x));
+        assert_eq!(star.map(|r| (r.y, r.width)), swatch.map(|r| (r.y, 24.0)));
+        assert!(
+            laid.said.contains(
+                "calendars=[[x] ★ Travail #8FB3FF; [x] ☆ Congés #8FB3FF] star=«Mettre en avant»"
+            ),
+            "{}",
+            laid.said
+        );
     }
 
     #[test]

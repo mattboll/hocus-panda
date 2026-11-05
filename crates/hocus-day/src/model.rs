@@ -129,6 +129,17 @@ pub struct Calendar {
     /// Its events are in the bar: as the configuration's `shown` says,
     /// else as the account marks it (Google's `selected`), else shown.
     pub shown: bool,
+    /// Its events feed what is about to start, if shown: the meeting card
+    /// (Day.2), the reminders (Day.6), the halo's meeting states and
+    /// `Super+J` ([`crate::Shown::featured`]). As the configuration's
+    /// `featured` says, else featured; a source gives `true`.
+    #[serde(default = "featured")]
+    pub featured: bool,
+}
+
+/// A calendar read from a cache written before `featured` was.
+fn featured() -> bool {
+    true
 }
 
 /// When an event is.

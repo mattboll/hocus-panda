@@ -222,6 +222,7 @@ impl CalendarSource for GoogleCalendar {
                         .unwrap_or(Colour::DEFAULT),
                     read_only: !matches!(entry.access_role.as_deref(), Some("owner" | "writer")),
                     shown: entry.selected,
+                    featured: true,
                     id,
                 });
             }

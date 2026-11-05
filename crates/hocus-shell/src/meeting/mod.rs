@@ -2,9 +2,11 @@
 //! card under the clock in the full form, its mark in the mini, and the
 //! halo's meeting states.
 //!
-//! - **Which meeting**: the first of today's events that take time
+//! - **Which meeting**: the first of today's events of the featured
+//!   calendars ([`hocus_day::Day::featured`]: `[[day.calendars]]
+//!   featured`, every shown calendar without it) that take time
 //!   ([`hocus_day::model::Event::takes_time`]: timed, neither cancelled,
-//!   declined nor free) that has not ended. One in progress keeps the card
+//!   declined nor free) and have not ended. One in progress keeps the card
 //!   until its end. Nothing left today: no card, and the column under it
 //!   (the sign of what is in use, Today, the to-do list, the agents'
 //!   group: `crate::column`) back under the clock.
@@ -167,13 +169,27 @@ pub(crate) fn hhmm(t: Timestamp, now: &Zoned) -> String {
         .to_string()
 }
 
-/// Today's events that take time and have not ended at `now`, in order:
-/// the card's meeting first, then what Today lists (Day.3).
+/// Today's events of the featured calendars that take time and have not
+/// ended at `now`, in order: the card's meeting first, then the one after
+/// it (the mini popover's "ENSUITE").
 pub fn ahead<'a>(day: &'a Day, now: &Zoned) -> Vec<hocus_day::Shown<'a>> {
-    let zone = now.time_zone();
     let (from, to) = model::today(now);
+    left(day.featured(from, to, now.time_zone()), now)
+}
+
+/// Today's events of every shown calendar, featured or not, that take
+/// time and have not ended at `now`, in order: what Today lists (Day.3),
+/// once the card's is left out.
+pub fn today<'a>(day: &'a Day, now: &Zoned) -> Vec<hocus_day::Shown<'a>> {
+    let (from, to) = model::today(now);
+    left(day.events(from, to, now.time_zone()), now)
+}
+
+/// Those of `shown` that take time and have not ended at `now`.
+fn left<'a>(shown: Vec<hocus_day::Shown<'a>>, now: &Zoned) -> Vec<hocus_day::Shown<'a>> {
+    let zone = now.time_zone();
     let minute = clock_minute(now);
-    day.events(from, to, zone)
+    shown
         .into_iter()
         .filter(|shown| shown.event.takes_time())
         .filter(|shown| nearest_minute(shown.event.when.end(zone)) > minute)
@@ -675,6 +691,7 @@ mod tests {
             colour: Colour([0x8F, 0xB3, 0xFF]),
             read_only: false,
             shown: true,
+            featured: true,
         }];
         snapshot.events = events;
         let mut day = Day::default();

@@ -358,15 +358,14 @@ fn plans(config: &Config, env: &Env) -> Vec<Result<Plan, Box<Snapshot>>> {
         let account = entry.account(base, &mut taken);
         plans.push(match entry.kind {
             config::CalendarKind::Fixture => {
-                let (shown, colours) = (entry.shown.clone(), entry.colors.clone());
+                let over = entry.over();
                 fixture_plan(
                     account,
                     entry.file.as_deref(),
                     env,
                     move |file, id, clock| Source::Calendars {
                         source: Box::new(fixture::FixtureCalendars::new(file, id, clock)),
-                        shown,
-                        colours,
+                        over,
                     },
                 )
             }
