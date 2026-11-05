@@ -13,12 +13,13 @@ use iced::{
 
 use super::{ICON, ICON_GAP, LEFT, RIGHT, ROW, ROW_GAP, ROW_OUT, ROW_PAD, ROW_RADIUS, SMALL, text};
 use crate::levels::draw::{DIM, FAINT, HOVER, LINE, stroke};
+use crate::theme::Ink;
 
 /// A list's scrollbar, on the content's right.
 pub(crate) const SCROLLBAR: f32 = 6.0;
-const THUMB: Color = Color::from_rgba8(255, 255, 255, 0.16);
+const THUMB: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
 /// A row lit under the pointer (or unfolded).
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.05);
+const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 /// The spinners: 12 px, a turn in 900 ms.
 const SPINNER: f32 = 12.0;
 const TURN: Duration = Duration::from_millis(900);
@@ -103,7 +104,7 @@ impl List {
         );
         f.fill(
             &Path::rounded_rectangle(thumb.position(), thumb.size(), (SCROLLBAR / 2.0).into()),
-            THUMB,
+            THUMB.get(),
         );
     }
 }
@@ -133,7 +134,7 @@ pub(crate) fn row_fill(f: &mut Frame, rect: Rectangle, chosen: bool, hovered: bo
     if let Some(fill) = fill {
         f.fill(
             &Path::rounded_rectangle(rect.position(), rect.size(), ROW_RADIUS.into()),
-            fill,
+            fill.get(),
         );
     }
 }
@@ -197,7 +198,12 @@ pub(crate) fn aside(
         && let Some(turn) = turn
     {
         right -= 6.0 + SPINNER;
-        spinner(f, Point::new(right, middle - SPINNER / 2.0), DIM, turn);
+        spinner(
+            f,
+            Point::new(right, middle - SPINNER / 2.0),
+            DIM.get(),
+            turn,
+        );
     }
     right
 }
@@ -209,12 +215,12 @@ pub(crate) fn searching(f: &mut Frame, word: &str, width: f32, middle: f32, turn
         word.to_owned(),
         Point::new(RIGHT, middle),
         SMALL,
-        FAINT,
+        FAINT.get(),
         Alignment::Right,
     ));
     if let Some(turn) = turn {
         let at = RIGHT - width - 6.0 - SPINNER;
-        spinner(f, Point::new(at, middle - SPINNER / 2.0), FAINT, turn);
+        spinner(f, Point::new(at, middle - SPINNER / 2.0), FAINT.get(), turn);
     }
 }
 

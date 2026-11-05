@@ -42,6 +42,7 @@ use crate::levels::{
     model::{Band, Battery, Profile, Snapshot, Words},
     power::Ask,
 };
+use crate::theme::Ink;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -71,11 +72,11 @@ const NOTE: f32 = 12.5;
 const NOTE_LINE: f32 = 1.4;
 const HEALTH_PAD: f32 = 2.0;
 
-const CHOSEN: Color = Color::from_rgba8(108, 194, 135, 0.16);
-const TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
-const TILE_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const TILE_EDGE: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const MISSING: Color = Color::from_rgba8(255, 255, 255, 0.28);
+const CHOSEN: Ink = Ink::Accent(0.16);
+const TILE_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
+const TILE_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const TILE_EDGE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const MISSING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.28));
 
 /// A tile shows the profile asked this long at most, until it is said.
 const ASKED_FOR: Duration = Duration::from_secs(3);
@@ -282,7 +283,7 @@ impl<Message> canvas::Program<Message> for Panel {
             .map(|(top, lines)| (top, lines, NOTE_LINE));
         let health = layout.health.iter().map(|(top, lines)| (top, lines, LINE));
         for (top, lines, height) in notes.chain(health) {
-            for line in kit::lines(lines, (LEFT, *top), NOTE, height, FAINT) {
+            for line in kit::lines(lines, (LEFT, *top), NOTE, height, FAINT.get()) {
                 frame.fill_text(line);
             }
         }
@@ -305,7 +306,7 @@ impl<Message> canvas::Program<Message> for Panel {
 /// The level's and its line's colour: as the bar's (§4.2).
 fn band(band: Band) -> (Color, Color) {
     match band {
-        Band::Ok => (TEXT, DIM),
+        Band::Ok => (TEXT.get(), DIM.get()),
         _ => (band_colour(band), band_colour(band)),
     }
 }
@@ -414,20 +415,20 @@ impl Panel {
             (true, false) if state.pointer.hover == Some(profile) => (TILE_HOVER, TILE_EDGE, DIM),
             (true, false) => (TILE_FILL, TILE_EDGE, DIM),
         };
-        f.fill(&rounded(rect, TILE_RADIUS), fill);
+        f.fill(&rounded(rect, TILE_RADIUS), fill.get());
         let inside = Path::rounded_rectangle(
             Point::new(rect.x + 0.5, rect.y + 0.5),
             Size::new(rect.width - 1.0, rect.height - 1.0),
             (TILE_RADIUS - 0.5).into(),
         );
-        f.stroke(&inside, stroke(1.0, edge));
+        f.stroke(&inside, stroke(1.0, edge.get()));
         let column = ICON + ICON_GAP + MODE * LINE;
         let top = rect.y + (TILE - column) / 2.0;
         mode_icon(
             f,
             Point::new(rect.center_x() - ICON / 2.0, top),
             profile,
-            ink,
+            ink.get(),
         );
         f.fill_text(kit::text_in(
             MANROPE_SEMIBOLD,
@@ -435,7 +436,7 @@ impl Panel {
                 self.words.mode(profile).to_owned(),
                 Point::new(rect.center_x(), top + ICON + ICON_GAP + MODE * LINE / 2.0),
                 MODE,
-                ink,
+                ink.get(),
                 Alignment::Center,
             ),
         ));

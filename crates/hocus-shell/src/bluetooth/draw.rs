@@ -18,6 +18,7 @@ use iced::{
 };
 
 use super::model::{Bluetooth, Kind, Row};
+use crate::theme::Ink;
 use crate::{
     levels::{
         draw::{DIM, FAINT, ITEM_OUT, LINE, MANROPE, TEXT, cell, faded, stroke},
@@ -33,7 +34,7 @@ const MINI_ICON: f32 = 20.0;
 const BATTERY: f32 = 13.0;
 const CHIP: f32 = 12.0;
 const CHIP_PAD: f32 = 5.0;
-const CHIP_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const CHIP_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 
 /// What the row keeps between draws: what it shows, and its words cut and
 /// measured to fit.
@@ -133,7 +134,7 @@ pub fn full(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
             " %".to_owned(),
             Point::new(right, middle),
             BATTERY,
-            faded(DIM, alpha),
+            faded(DIM.get(), alpha),
             Alignment::Right,
         ));
         right -= unit;
@@ -146,7 +147,7 @@ pub fn full(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
                 middle,
                 BATTERY,
                 MANROPE,
-                faded(DIM, alpha),
+                faded(DIM.get(), alpha),
             );
             x += zero;
         }
@@ -160,13 +161,13 @@ pub fn full(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
         );
         f.fill(
             &Path::rounded_rectangle(chip.position(), chip.size(), 6.0.into()),
-            faded(CHIP_FILL, alpha),
+            faded(CHIP_FILL.get(), alpha),
         );
         f.fill_text(text(
             more.clone(),
             chip.center(),
             CHIP,
-            faded(DIM, alpha),
+            faded(DIM.get(), alpha),
             Alignment::Center,
         ));
     }
@@ -193,10 +194,10 @@ pub fn mini(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
 /// The sign's and the label's colour, and whether the sign is slashed.
 fn colours(row: &Row) -> (Color, bool) {
     match row {
-        Row::Connected { .. } => (TEXT, false),
-        Row::Connecting => (DIM, false),
-        Row::Nothing | Row::Hidden => (FAINT, false),
-        Row::Off => (FAINT, true),
+        Row::Connected { .. } => (TEXT.get(), false),
+        Row::Connecting => (DIM.get(), false),
+        Row::Nothing | Row::Hidden => (FAINT.get(), false),
+        Row::Off => (FAINT.get(), true),
     }
 }
 
@@ -244,7 +245,7 @@ pub fn sign(f: &mut Frame, at: Point, size: f32, colour: Color, slash: bool, alp
     if slash {
         f.stroke(
             &Path::line(p(4.0, 3.0), p(20.0, 21.0)),
-            stroke(2.0 * s, faded(FAINT, alpha)),
+            stroke(2.0 * s, faded(FAINT.get(), alpha)),
         );
     }
 }

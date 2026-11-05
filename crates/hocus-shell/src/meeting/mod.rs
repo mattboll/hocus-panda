@@ -162,11 +162,11 @@ pub(crate) fn clock_minute(now: &Zoned) -> i64 {
     now.timestamp().as_millisecond().div_euclid(60_000)
 }
 
-/// `HH:MM` of an instant in `now`'s zone.
+/// An instant's time in `now`'s zone, as the desktop writes it: "14:25",
+/// or "2:25 PM" over 12 hours (`[locale] time`).
 pub(crate) fn hhmm(t: Timestamp, now: &Zoned) -> String {
-    t.to_zoned(now.time_zone().clone())
-        .strftime("%H:%M")
-        .to_string()
+    let time = t.to_zoned(now.time_zone().clone()).time();
+    crate::popover::calendar::words::Hours::from_env().write(time)
 }
 
 /// Today's events of the featured calendars that take time and have not

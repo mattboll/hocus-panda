@@ -35,6 +35,7 @@ use iced::{
 };
 
 use super::{Lock, Pointing, Target, Words};
+use crate::theme::Ink;
 use crate::{
     clock::time::{Lang, Shown, Wall},
     levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, rgb},
@@ -44,14 +45,16 @@ use crate::{
 const MARTIAN: Font = Font::with_name("Martian Mono");
 
 /// The background's veil.
-const VEIL: Color = Color::from_rgba8(5, 7, 12, 0.45);
+const VEIL: Ink = Ink::Dark(Color::from_rgba8(5, 7, 12, 0.45));
 /// The background without the gradient (`plain`): the compositor's base.
-const PLAIN: Color = Color::from_rgb(0.055, 0.059, 0.071);
+const PLAIN: Ink = Ink::Dark(Color::from_rgb(0.055, 0.059, 0.071));
 
 /// The clock: 112 px, line height 1; the date 16 px under, 22 px.
 const CLOCK: f32 = 112.0;
 const COLON: f32 = 0.55;
 const DATE: f32 = 22.0;
+/// Over 12 hours, between the minutes and AM or PM.
+const HALF_GAP: f32 = 10.0;
 const DATE_GAP: f32 = 16.0;
 const LINE: f32 = 1.366;
 /// The clock's top above the middle: with the form, alone.
@@ -99,22 +102,22 @@ const ROW_TEXT: f32 = 14.0;
 const PANDAS_LEFT: f32 = 34.0;
 const PANDAS_BOTTOM: f32 = 26.0;
 
-const ACCENT: Color = rgb(0x6CC287);
-const ACCENT_TO: Color = rgb(0x3E8FBF);
-const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const BORDER_KEYS: Color = Color::from_rgba8(108, 194, 135, 0.60);
-const BORDER_WRONG: Color = rgb(0xF2945B);
-const BORDER_IDLE: Color = Color::from_rgba8(255, 255, 255, 0.16);
-const BORDER_WAITING: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const AMBER: Color = rgb(0xF5C46E);
-const WRONG_TEXT: Color = rgb(0xF7B98A);
-const INK: Color = rgb(0x0B1020);
-const LIT: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const RING: Color = Color::from_rgba8(255, 255, 255, 0.18);
-const PANDA_DARK: Color = rgb(0x1D2230);
-const PANDA_LIGHT: Color = rgb(0xF2F4F7);
-const Z_NEAR: Color = rgb(0x8C96A8);
-const Z_FAR: Color = rgb(0x6A7384);
+const ACCENT: Ink = Ink::Accent(1.0);
+const ACCENT_TO: Ink = Ink::Dark(rgb(0x3E8FBF));
+const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const BORDER_KEYS: Ink = Ink::Accent(0.60);
+const BORDER_WRONG: Ink = Ink::Dark(rgb(0xF2945B));
+const BORDER_IDLE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
+const BORDER_WAITING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
+const WRONG_TEXT: Ink = Ink::Dark(rgb(0xF7B98A));
+const INK: Ink = Ink::Dark(rgb(0x0B1020));
+const LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.18));
+const PANDA_DARK: Ink = Ink::Fixed(rgb(0x1D2230));
+const PANDA_LIGHT: Ink = Ink::Fixed(rgb(0xF2F4F7));
+const Z_NEAR: Ink = Ink::Dark(rgb(0x8C96A8));
+const Z_FAR: Ink = Ink::Dark(rgb(0x6A7384));
 
 /// What a canvas of the lock draws: iced draws a canvas' images over its
 /// shapes, so the background's picture is a canvas under the other.
@@ -369,7 +372,7 @@ impl<Message> canvas::Program<Message> for View {
             background(&mut frame, size, lock.shown.wallpaper);
             return vec![frame.into_geometry()];
         }
-        frame.fill_rectangle(Point::ORIGIN, size, VEIL);
+        frame.fill_rectangle(Point::ORIGIN, size, VEIL.get());
         let form = self.form(&lock);
         let layout = Layout::of(size, form);
         let shown = Shown::at(&self.wall.now(), self.lang);
@@ -391,7 +394,7 @@ impl<Message> canvas::Program<Message> for View {
             phase: lock.shown.phase,
             chars: lock.shown.chars,
             caps: lock.shown.caps,
-            hm: shown.hm.iter().collect(),
+            hm: shown.time(),
             photo: super::avatar::photo().is_some(),
         };
         let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
@@ -464,7 +467,7 @@ fn background(f: &mut Frame, size: Size, wallpaper: bool) {
             canvas::Image::new(handle).filter_method(FilterMethod::Linear),
         );
     } else {
-        f.fill_rectangle(Point::ORIGIN, size, PLAIN);
+        f.fill_rectangle(Point::ORIGIN, size, PLAIN.get());
     }
 }
 
@@ -496,9 +499,18 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
     let cells: Vec<f32> = shown
         .hm
         .iter()
-        .map(|c| if *c == ':' { zero * COLON } else { zero })
+        .map(|c| match c {
+            ':' => zero * COLON,
+            ' ' => 0.0,
+            _ => zero,
+        })
         .collect();
-    let width: f32 = cells.iter().sum();
+    // Over 12 hours, AM or PM after the minutes, at the date's size, on
+    // their baseline's side.
+    let half = shown
+        .half
+        .map(|h| (h, HALF_GAP + 2.0 * zero * DATE / CLOCK * 1.25));
+    let width: f32 = cells.iter().sum::<f32>() + half.map_or(0.0, |(_, w)| w);
     let mut x = cx - width / 2.0;
     for (ch, w) in shown.hm.iter().zip(&cells) {
         let mut glyph = text(
@@ -506,19 +518,29 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
             Point::new(x + w / 2.0, top),
             CLOCK,
             MARTIAN,
-            TEXT,
+            TEXT.get(),
             Alignment::Center,
         );
         glyph.line_height = LineHeight::Absolute(Pixels(CLOCK));
         f.fill_text(glyph);
         x += w;
     }
+    if let Some((half, _)) = half {
+        f.fill_text(text(
+            half.to_owned(),
+            Point::new(x + HALF_GAP, top + CLOCK - DATE * 1.6),
+            DATE,
+            MARTIAN,
+            DIM.get(),
+            Alignment::Left,
+        ));
+    }
     f.fill_text(text(
         shown.date.clone(),
         Point::new(cx, top + CLOCK + DATE_GAP),
         DATE,
         MANROPE,
-        DIM,
+        DIM.get(),
         Alignment::Center,
     ));
 }
@@ -531,7 +553,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
         Point::new(layout.avatar.center_x(), layout.name_top),
         NAME,
         MANROPE_BOLD,
-        TEXT,
+        TEXT.get(),
         Alignment::Center,
     ));
     // The field, shaken after a wrong password.
@@ -555,7 +577,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
         _ => BORDER_IDLE,
     };
     let shape = Path::rounded_rectangle(field.position(), field.size(), FIELD_RADIUS.into());
-    f.fill(&shape, faded(FIELD_FILL, alpha));
+    f.fill(&shape, faded(FIELD_FILL.get(), alpha));
     let rim = Path::rounded_rectangle(
         Point::new(field.x + 0.5, field.y + 0.5),
         Size::new(field.width - 1.0, field.height - 1.0),
@@ -564,7 +586,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
     f.stroke(
         &rim,
         Stroke::default()
-            .with_color(faded(border, alpha))
+            .with_color(faded(border.get(), alpha))
             .with_width(1.0),
     );
     let button = Rectangle {
@@ -597,7 +619,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
                     Point::new(inside.x, field.center_y() - TEXT_SIZE * LINE / 2.0),
                     TEXT_SIZE,
                     MANROPE,
-                    faded(FAINT, alpha),
+                    faded(FAINT.get(), alpha),
                     Alignment::Left,
                 ));
             });
@@ -608,7 +630,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
         let shown_dots = shown.chars.min(fit);
         for i in 0..shown_dots {
             let centre = Point::new(inside.x + DOT + i as f32 * DOT_ADVANCE, field.center_y());
-            f.fill(&Path::circle(centre, DOT), faded(TEXT, alpha));
+            f.fill(&Path::circle(centre, DOT), faded(TEXT.get(), alpha));
         }
     }
     if caps {
@@ -633,7 +655,7 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
             Point::new(layout.message.center_x(), layout.message.y),
             MESSAGE,
             MANROPE,
-            colour,
+            colour.get(),
             Alignment::Center,
         );
         line.line_height = LineHeight::Relative(MESSAGE_LINE);
@@ -712,7 +734,10 @@ fn focus_ring(f: &mut Frame, rect: Rectangle, radius: f32) {
         Size::new(rect.width + 2.0 * out, rect.height + 2.0 * out),
         (radius + out).into(),
     );
-    f.stroke(&ring, Stroke::default().with_color(ACCENT).with_width(3.0));
+    f.stroke(
+        &ring,
+        Stroke::default().with_color(ACCENT.get()).with_width(3.0),
+    );
 }
 
 fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha: f32) {
@@ -721,11 +746,11 @@ fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha:
     let checking = shown.phase == LockPhase::Checking;
     let waiting = matches!(shown.phase, LockPhase::Waiting(_));
     let fill = if checking {
-        Color::from_rgba8(255, 255, 255, 0.10)
+        crate::theme::ink(Color::from_rgba8(255, 255, 255, 0.10))
     } else if has && !waiting {
-        ACCENT
+        ACCENT.get()
     } else {
-        FIELD_FILL
+        FIELD_FILL.get()
     };
     f.fill(
         &Path::rounded_rectangle(rect.position(), rect.size(), BUTTON_RADIUS.into()),
@@ -742,7 +767,7 @@ fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha:
         f.stroke(
             &Path::circle(centre, r),
             Stroke::default()
-                .with_color(Color::from_rgba8(238, 241, 246, 0.22))
+                .with_color(crate::theme::ink(Color::from_rgba8(238, 241, 246, 0.22)))
                 .with_width(2.0),
         );
         let start = -std::f32::consts::FRAC_PI_2 - std::f32::consts::FRAC_PI_4 + turn;
@@ -754,7 +779,10 @@ fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha:
                 end_angle: Radians(start + std::f32::consts::FRAC_PI_2),
             });
         });
-        f.stroke(&arc, Stroke::default().with_color(TEXT).with_width(2.0));
+        f.stroke(
+            &arc,
+            Stroke::default().with_color(TEXT.get()).with_width(2.0),
+        );
         return;
     }
     // The arrow: `M5 12 H19 M13 6 L19 12 L13 18` in 24, 16 px, 2.4 px.
@@ -775,7 +803,7 @@ fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha:
             line_cap: LineCap::Round,
             line_join: LineJoin::Round,
             ..Stroke::default()
-                .with_color(faded(colour, alpha))
+                .with_color(faded(colour.get(), alpha))
                 .with_width(2.4 * s)
         },
     );
@@ -785,7 +813,7 @@ fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha:
 fn draw_caps(f: &mut Frame, rect: Rectangle) {
     f.fill(
         &Path::rounded_rectangle(rect.position(), rect.size(), 6.0.into()),
-        Color::from_rgba8(245, 196, 110, 0.16),
+        crate::theme::ink(Color::from_rgba8(245, 196, 110, 0.16)),
     );
     // `M12 4 L20 12.5 H15.5 V17 H8.5 V12.5 H4 Z M8.5 20 H15.5`, 14 px.
     let s = 14.0 / 24.0;
@@ -808,7 +836,9 @@ fn draw_caps(f: &mut Frame, rect: Rectangle) {
         Stroke {
             line_cap: LineCap::Round,
             line_join: LineJoin::Round,
-            ..Stroke::default().with_color(AMBER).with_width(2.0 * s)
+            ..Stroke::default()
+                .with_color(AMBER.get())
+                .with_width(2.0 * s)
         },
     );
 }
@@ -826,7 +856,7 @@ fn draw_avatar(f: &mut Frame, rect: Rectangle) {
             Color::from_rgba8(0, 0, 0, 0.35 / 8.0 * (1.0 - k * 0.7)),
         );
     }
-    f.fill(&Path::circle(centre, r + 2.0), RING);
+    f.fill(&Path::circle(centre, r + 2.0), RING.get());
     match super::avatar::photo() {
         Some(photo) => {
             let mut image = canvas::Image::new(photo).filter_method(FilterMethod::Linear);
@@ -838,8 +868,8 @@ fn draw_avatar(f: &mut Frame, rect: Rectangle) {
                 rect.position(),
                 Point::new(rect.x + rect.width, rect.y + rect.height),
             )
-            .add_stop(0.0, ACCENT)
-            .add_stop(1.0, ACCENT_TO);
+            .add_stop(0.0, ACCENT.get())
+            .add_stop(1.0, ACCENT_TO.get());
             f.fill(&Path::circle(centre, r), canvas::Fill::from(fill));
             panda(
                 f,
@@ -880,8 +910,8 @@ pub(crate) fn avatar_round(f: &mut Frame, rect: Rectangle, alpha: f32) {
                 rect.position(),
                 Point::new(rect.x + rect.width, rect.y + rect.height),
             )
-            .add_stop(0.0, faded(ACCENT, alpha))
-            .add_stop(1.0, faded(ACCENT_TO, alpha));
+            .add_stop(0.0, faded(ACCENT.get(), alpha))
+            .add_stop(1.0, faded(ACCENT_TO.get(), alpha));
             f.fill(&Path::circle(centre, r), canvas::Fill::from(fill));
             let face = rect.width * FACE / AVATAR;
             panda(
@@ -908,8 +938,8 @@ pub(crate) fn panda_eyes(f: &mut Frame, at: Point, size: f32, eyes: Eyes, alpha:
     let asleep = eyes == Eyes::Closed;
     let s = size / 30.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let dark = faded(PANDA_DARK, alpha);
-    let light = faded(PANDA_LIGHT, alpha);
+    let dark = faded(PANDA_DARK.get(), alpha);
+    let light = faded(PANDA_LIGHT.get(), alpha);
     f.fill(&Path::circle(p(8.5, 8.5), 4.2 * s), dark);
     f.fill(&Path::circle(p(21.5, 8.5), 4.2 * s), dark);
     f.fill(&Path::circle(p(15.0, 16.5), 10.5 * s), light);
@@ -1008,7 +1038,7 @@ fn draw_pandas(f: &mut Frame, size: Size) {
         Point::new(PANDAS_LEFT + 108.0, top),
         15.0,
         MANROPE_BOLD,
-        Z_NEAR,
+        Z_NEAR.get(),
         Alignment::Left,
     ));
     f.fill_text(text(
@@ -1016,7 +1046,7 @@ fn draw_pandas(f: &mut Frame, size: Size) {
         Point::new(PANDAS_LEFT + 122.0, top - 14.0),
         11.0,
         MANROPE_BOLD,
-        Z_FAR,
+        Z_FAR.get(),
         Alignment::Left,
     ));
 }
@@ -1035,11 +1065,11 @@ fn draw_agents(f: &mut Frame, words: String, cx: f32, top: f32) {
     );
     f.fill(
         &Path::rounded_rectangle(rect.position(), rect.size(), 10.0.into()),
-        Color::from_rgba8(245, 180, 74, 0.10),
+        crate::theme::ink(Color::from_rgba8(245, 180, 74, 0.10)),
     );
     f.fill(
         &Path::circle(Point::new(rect.x + 10.0 + 4.0, rect.center_y()), 4.0),
-        rgb(0xF5B44A),
+        crate::theme::ink(rgb(0xF5B44A)),
     );
     f.fill_text(text(
         words,
@@ -1049,7 +1079,7 @@ fn draw_agents(f: &mut Frame, words: String, cx: f32, top: f32) {
         ),
         AGENTS_TEXT,
         MANROPE_SEMIBOLD,
-        AMBER,
+        AMBER.get(),
         Alignment::Left,
     ));
 }
@@ -1066,13 +1096,13 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
             Link::Off | Link::Offline => (0, true),
             Link::Hidden => (0, true),
         };
-        crate::network::draw::wifi(f, rect.position(), 20.0, bars, TEXT, slash, 1.0);
+        crate::network::draw::wifi(f, rect.position(), 20.0, bars, TEXT.get(), slash, 1.0);
     }
     if let Some((rect, battery, label)) = &items.battery {
         let (text_colour, fill) = match battery.band() {
-            Band::Ok => (rgb(0x7EE0A0), rgb(0x3FA66B)),
-            Band::Low => (AMBER, rgb(0xE8A13A)),
-            Band::Critical => (WRONG_TEXT, rgb(0xE5793F)),
+            Band::Ok => (crate::theme::ink(rgb(0x7EE0A0)), rgb(0x3FA66B)),
+            Band::Low => (AMBER.get(), rgb(0xE8A13A)),
+            Band::Critical => (WRONG_TEXT.get(), rgb(0xE5793F)),
         };
         // `rect 0.75 0.75 21.5 13.5 rx3`, the fill in `3 3 … 9 rx1.5`, the
         // nub at 23.5: 24 × 14 (26 × 15 drawn smaller).
@@ -1085,7 +1115,7 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
                 Size::new(21.5 * k, 13.5 * k),
                 (3.0 * k).into(),
             ),
-            Stroke::default().with_color(TEXT).with_width(1.5 * k),
+            Stroke::default().with_color(TEXT.get()).with_width(1.5 * k),
         );
         let full = 17.5 * k;
         let width = full * (battery.shown() as f32 / 100.0).clamp(0.05, 1.0);
@@ -1095,7 +1125,7 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
         );
         f.fill(
             &Path::rounded_rectangle(p(23.5, 4.5), Size::new(2.0 * k, 6.0 * k), (1.0 * k).into()),
-            TEXT,
+            TEXT.get(),
         );
         f.fill_text(text(
             label.clone(),
@@ -1117,7 +1147,7 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
             Point::new(rect.center_x(), rect.center_y() - ROW_TEXT * LINE / 2.0),
             ROW_TEXT,
             MANROPE_BOLD,
-            TEXT,
+            TEXT.get(),
             Alignment::Center,
         ));
         if lock.shown.focus == LockFocus::Layout {

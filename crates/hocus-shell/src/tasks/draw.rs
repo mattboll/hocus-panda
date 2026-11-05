@@ -47,6 +47,7 @@ use iced_layershell::reexport::{
 };
 
 use super::{At, GROUP_LINES, Key, Lines, Look, Words};
+use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
@@ -90,7 +91,7 @@ const TITLE_GAP: f32 = 4.0;
 const TITLE: f32 = 13.0;
 /// "Pas enregistré": 12 px, peach.
 const UNSAVED: f32 = 12.0;
-pub const UNSAVED_INK: Color = rgb(0xF7A77A);
+pub const UNSAVED_INK: Ink = Ink::Dark(rgb(0xF7A77A));
 /// "+ N autres": 20 px, 12.5 px, a button 6 px past its text each side.
 const MORE: f32 = 20.0;
 const MORE_TEXT: f32 = 12.5;
@@ -109,11 +110,11 @@ const MINI_GAP: f32 = 5.0;
 const MINI_TEXT: f32 = 11.0;
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
-const BORDER: Color = Color::from_rgba8(255, 255, 255, 0.38);
-pub const TICKED: Color = rgb(0x6CC287);
-const CHECK: Color = rgb(0x0B1020);
-pub const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-pub const FIELD_BORDER: Color = Color::from_rgba8(108, 194, 135, 0.65);
+const BORDER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.38));
+pub const TICKED: Ink = Ink::Accent(1.0);
+const CHECK: Ink = Ink::Dark(rgb(0x0B1020));
+pub const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+pub const FIELD_BORDER: Ink = Ink::Accent(0.65);
 /// A title's tooltip, after resting this long on it.
 const TIP: std::time::Duration = std::time::Duration::from_millis(600);
 /// The line's close, `ease-in`.
@@ -622,7 +623,10 @@ fn top_of(bar: &str) -> f32 {
 /// the pointer.
 pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha: f32) {
     if lit {
-        f.fill(&kit::rounded(button, BUTTON_RADIUS), faded(HOVER, alpha));
+        f.fill(
+            &kit::rounded(button, BUTTON_RADIUS),
+            faded(HOVER.get(), alpha),
+        );
     }
     let centre = button.center();
     let rect = Rectangle::new(
@@ -630,7 +634,7 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
         Size::new(BOX, BOX),
     );
     if ticked {
-        f.fill(&kit::rounded(rect, BOX_RADIUS), faded(TICKED, alpha));
+        f.fill(&kit::rounded(rect, BOX_RADIUS), faded(TICKED.get(), alpha));
         // The mockup's check, 10 px of its 24-unit box.
         let unit = 10.0 / 24.0;
         let at = |x: f32, y: f32| Point::new(centre.x - 5.0 + x * unit, centre.y - 5.0 + y * unit);
@@ -645,7 +649,7 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
                 width: 3.4 * unit,
                 line_cap: canvas::LineCap::Round,
                 line_join: canvas::LineJoin::Round,
-                ..Stroke::default().with_color(faded(CHECK, alpha))
+                ..Stroke::default().with_color(faded(CHECK.get(), alpha))
             },
         );
     } else {
@@ -657,7 +661,7 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
         f.stroke(
             &kit::rounded(border, BOX_RADIUS - inset),
             Stroke::default()
-                .with_color(faded(BORDER, alpha))
+                .with_color(faded(BORDER.get(), alpha))
                 .with_width(BOX_BORDER),
         );
     }
@@ -666,7 +670,7 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
 /// The `+` at `rect`, lit under the pointer: a 14 px plus.
 pub fn plus(f: &mut Frame, rect: Rectangle, lit: bool, alpha: f32) {
     if lit {
-        f.fill(&kit::rounded(rect, ADD_RADIUS), faded(HOVER, alpha));
+        f.fill(&kit::rounded(rect, ADD_RADIUS), faded(HOVER.get(), alpha));
     }
     let c = rect.center();
     let unit = PLUS / 24.0;
@@ -682,7 +686,7 @@ pub fn plus(f: &mut Frame, rect: Rectangle, lit: bool, alpha: f32) {
         Stroke {
             width: 2.2 * unit,
             line_cap: canvas::LineCap::Round,
-            ..Stroke::default().with_color(faded(DIM, alpha))
+            ..Stroke::default().with_color(faded(DIM.get(), alpha))
         },
     );
 }
@@ -695,7 +699,7 @@ pub fn title(f: &mut Frame, said: &str, at: Point, size: f32, ticked: bool, alph
         said.to_owned(),
         at,
         size,
-        faded(colour, alpha),
+        faded(colour.get(), alpha),
         Alignment::Left,
     ));
     if ticked {
@@ -703,7 +707,7 @@ pub fn title(f: &mut Frame, said: &str, at: Point, size: f32, ticked: bool, alph
         f.fill_rectangle(
             Point::new(at.x, (at.y + 0.5).floor()),
             Size::new(width, 1.0),
-            faded(FAINT, alpha),
+            faded(FAINT.get(), alpha),
         );
     }
 }
@@ -714,7 +718,7 @@ pub fn unsaved(f: &mut Frame, words: Words, at: Point, alpha: f32) {
         words.unsaved().to_owned(),
         at,
         UNSAVED,
-        faded(UNSAVED_INK, alpha),
+        faded(UNSAVED_INK.get(), alpha),
         Alignment::Left,
     ));
 }
@@ -729,7 +733,7 @@ pub fn field(
     words: Words,
     alpha: f32,
 ) {
-    f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL, alpha));
+    f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL.get(), alpha));
     let inset = 0.5;
     let rim = Rectangle::new(
         Point::new(rect.x + inset, rect.y + inset),
@@ -738,7 +742,7 @@ pub fn field(
     f.stroke(
         &kit::rounded(rim, radius - inset),
         Stroke::default()
-            .with_color(faded(FIELD_BORDER, alpha))
+            .with_color(faded(FIELD_BORDER.get(), alpha))
             .with_width(1.0),
     );
     let room = rect.width - 2.0 * pad;
@@ -749,7 +753,7 @@ pub fn field(
             words.placeholder().to_owned(),
             Point::new(left, middle),
             size,
-            faded(FAINT, alpha),
+            faded(FAINT.get(), alpha),
             Alignment::Left,
         ));
     }
@@ -767,7 +771,7 @@ pub fn field(
                 text.to_owned(),
                 Point::new(x, middle),
                 size,
-                faded(TEXT, alpha),
+                faded(TEXT.get(), alpha),
                 Alignment::Left,
             ));
         }
@@ -776,7 +780,7 @@ pub fn field(
             f.fill_rectangle(
                 Point::new(x + width, middle - caret / 2.0),
                 Size::new(1.0, caret),
-                faded(TEXT, alpha),
+                faded(TEXT.get(), alpha),
             );
         }
     });
@@ -790,7 +794,7 @@ fn mini_icon(f: &mut Frame, at: Point, alpha: f32) {
         width: 2.0 * unit,
         line_cap: canvas::LineCap::Round,
         line_join: canvas::LineJoin::Round,
-        ..Stroke::default().with_color(faded(DIM, alpha))
+        ..Stroke::default().with_color(faded(DIM.get(), alpha))
     };
     let square = Rectangle::new(p(4.0, 4.0), Size::new(16.0 * unit, 16.0 * unit));
     f.stroke(&kit::rounded(square, 4.0 * unit), stroke);
@@ -1017,7 +1021,7 @@ impl Group {
             (false, false) => None,
         };
         if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit, alpha));
+            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
         }
         if focused {
             ring(f, rect, MINI_RADIUS);
@@ -1039,7 +1043,7 @@ impl Group {
                     said,
                     Point::new(left + MINI_ICON + MINI_GAP, rect.center_y()),
                     MINI_TEXT,
-                    faded(TEXT, alpha),
+                    faded(TEXT.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -1071,7 +1075,7 @@ impl Group {
                     ch.clone(),
                     Point::new(x, o.y + HEADER / 2.0),
                     LABEL,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -1097,7 +1101,7 @@ impl Group {
                 self.words.nothing().to_owned(),
                 Point::new(o.x, o.y + middle),
                 TITLE,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
         }
@@ -1141,7 +1145,10 @@ impl Group {
             let lit = state.hover == Some(Item::TasksMore)
                 || popover::with(|c| c.shows(&self.bar, Item::TasksMore));
             if lit {
-                f.fill(&kit::rounded(rect, BUTTON_RADIUS), faded(HOVER, alpha));
+                f.fill(
+                    &kit::rounded(rect, BUTTON_RADIUS),
+                    faded(HOVER.get(), alpha),
+                );
             }
             if focused(Item::TasksMore) {
                 ring(f, rect, BUTTON_RADIUS);
@@ -1150,7 +1157,7 @@ impl Group {
                 said.clone(),
                 Point::new(rect.x + MORE_OUT, rect.center_y()),
                 MORE_TEXT,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
         }

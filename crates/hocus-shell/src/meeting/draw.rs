@@ -30,6 +30,7 @@ use iced::{
 };
 
 use super::{Card, Look, Phase, Words};
+use crate::theme::Ink;
 use crate::{
     Message,
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, faded, pointer, rgb, ring},
@@ -69,32 +70,32 @@ pub const FADE: Duration = Duration::from_millis(300);
 const FADE_STEP: Duration = Duration::from_millis(16);
 
 pub(crate) const MONO: iced::Font = iced::Font::with_name("Martian Mono");
-pub(crate) const BLUE: Color = rgb(0x8FB3FF);
-pub(crate) const JOIN_BLUE: Color = rgb(0x5B8DEF);
-const JOIN_BLUE_HOVER: Color = rgb(0x6E9BF2);
-const JOIN_GREY: Color = Color::from_rgba8(255, 255, 255, 0.09);
-const JOIN_GREY_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
+pub(crate) const BLUE: Ink = Ink::Dark(rgb(0x8FB3FF));
+pub(crate) const JOIN_BLUE: Ink = Ink::Dark(rgb(0x5B8DEF));
+const JOIN_BLUE_HOVER: Ink = Ink::Dark(rgb(0x6E9BF2));
+const JOIN_GREY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.09));
+const JOIN_GREY_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 
 /// The card's fill and border in `look`.
 pub fn card_colours(look: Look) -> (Color, Color) {
     match look {
         Look::Far => (
-            Color::from_rgba8(255, 255, 255, 0.05),
-            Color::from_rgba8(255, 255, 255, 0.06),
+            crate::theme::ink(Color::from_rgba8(255, 255, 255, 0.05)),
+            crate::theme::ink(Color::from_rgba8(255, 255, 255, 0.06)),
         ),
         Look::Soon => (
-            Color::from_rgba8(143, 179, 255, 0.12),
-            Color::from_rgba8(143, 179, 255, 0.30),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.12)),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.30)),
         ),
         Look::Now => (
-            Color::from_rgba8(143, 179, 255, 0.18),
-            Color::from_rgba8(143, 179, 255, 0.55),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.18)),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.55)),
         ),
         Look::Under => (
-            Color::from_rgba8(143, 179, 255, 0.09),
-            Color::from_rgba8(143, 179, 255, 0.22),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.09)),
+            crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.22)),
         ),
     }
 }
@@ -102,10 +103,10 @@ pub fn card_colours(look: Look) -> (Color, Color) {
 /// The join button's fill and its camera's colour in `look`.
 fn join_colours(look: Look, hover: bool) -> (Color, Color) {
     match (look, hover) {
-        (Look::Far, false) => (JOIN_GREY, TEXT),
-        (Look::Far, true) => (JOIN_GREY_HOVER, TEXT),
-        (_, false) => (JOIN_BLUE, Color::WHITE),
-        (_, true) => (JOIN_BLUE_HOVER, Color::WHITE),
+        (Look::Far, false) => (JOIN_GREY.get(), TEXT.get()),
+        (Look::Far, true) => (JOIN_GREY_HOVER.get(), TEXT.get()),
+        (_, false) => (JOIN_BLUE.get(), Color::WHITE),
+        (_, true) => (JOIN_BLUE_HOVER.get(), Color::WHITE),
     }
 }
 
@@ -113,9 +114,9 @@ fn join_colours(look: Look, hover: bool) -> (Color, Color) {
 /// min, 700 from 2, blue and 600 in progress.
 pub fn relative_style(look: Look) -> (Color, iced::Font) {
     match look {
-        Look::Far => (DIM, MANROPE),
-        Look::Soon | Look::Under => (BLUE, kit::MANROPE_SEMIBOLD),
-        Look::Now => (BLUE, MANROPE_BOLD),
+        Look::Far => (DIM.get(), MANROPE),
+        Look::Soon | Look::Under => (BLUE.get(), kit::MANROPE_SEMIBOLD),
+        Look::Now => (BLUE.get(), MANROPE_BOLD),
     }
 }
 
@@ -431,7 +432,7 @@ impl canvas::Program<Message> for View {
                         None
                     };
                     if let Some(lit) = lit {
-                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(lit, alpha));
+                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(lit.get(), alpha));
                     }
                     draw_mark(&mut frame, rect.center(), card.phase, alpha);
                     if focused == Some(Item::MeetingMark) {
@@ -496,7 +497,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
     let look = card.phase.look();
     f.fill(&kit::rounded(rect, RADIUS), faded(shown.fill, alpha));
     if shown.lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER, alpha));
+        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
     }
     f.stroke(
         &kit::rounded(
@@ -537,7 +538,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
             title,
             Point::new(x, title_middle),
             TITLE,
-            faded(TEXT, alpha),
+            faded(TEXT.get(), alpha),
             Alignment::Left,
         ),
     ));
@@ -551,7 +552,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
                 card.start.clone(),
                 Point::new(at, line_middle),
                 MONO_TEXT,
-                faded(DIM, alpha),
+                faded(DIM.get(), alpha),
                 Alignment::Left,
             ),
         ));
@@ -561,7 +562,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
             dot.to_owned(),
             Point::new(at, line_middle),
             LINE_TEXT,
-            faded(DIM, alpha),
+            faded(DIM.get(), alpha),
             Alignment::Left,
         ));
         at += width(dot, LINE_TEXT, MANROPE);
@@ -610,7 +611,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
         );
         f.fill(
             &bottom_strip(inner, RADIUS - BORDER, PROGRESS, share),
-            faded(BLUE, alpha),
+            faded(BLUE.get(), alpha),
         );
     }
 }
@@ -656,7 +657,10 @@ pub fn draw_mark(f: &mut Frame, centre: Point, phase: Phase, alpha: f32) {
     match phase.look() {
         Look::Far => f.fill(
             &kit::rounded(rect, radius),
-            faded(Color::from_rgba8(143, 179, 255, 0.60), alpha),
+            faded(
+                crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.60)),
+                alpha,
+            ),
         ),
         Look::Soon | Look::Now => {
             // An 8 px glow, as rings fading out.
@@ -673,12 +677,15 @@ pub fn draw_mark(f: &mut Frame, centre: Point, phase: Phase, alpha: f32) {
                     faded(Color::from_rgba8(143, 179, 255, 0.95 * 0.22 * k * k), alpha),
                 );
             }
-            f.fill(&kit::rounded(rect, radius), faded(BLUE, alpha));
+            f.fill(&kit::rounded(rect, radius), faded(BLUE.get(), alpha));
         }
         Look::Under => {
             f.fill(
                 &kit::rounded(rect, radius),
-                faded(Color::from_rgba8(143, 179, 255, 0.25), alpha),
+                faded(
+                    crate::theme::ink(Color::from_rgba8(143, 179, 255, 0.25)),
+                    alpha,
+                ),
             );
             if let Phase::Under { share, .. } = phase
                 && share > 0.0
@@ -687,7 +694,7 @@ pub fn draw_mark(f: &mut Frame, centre: Point, phase: Phase, alpha: f32) {
                     rect.position(),
                     Size::new((rect.width * share).max(MARK.height), rect.height),
                 );
-                f.fill(&kit::rounded(gone, radius), faded(BLUE, alpha));
+                f.fill(&kit::rounded(gone, radius), faded(BLUE.get(), alpha));
             }
         }
     }
@@ -790,13 +797,28 @@ mod tests {
             card_colours(Look::Under).1,
             Color::from_rgba8(143, 179, 255, 0.22)
         );
-        assert_eq!(join_colours(Look::Far, false), (JOIN_GREY, TEXT));
-        assert_eq!(join_colours(Look::Soon, false), (JOIN_BLUE, Color::WHITE));
-        assert_eq!(join_colours(Look::Under, false), (JOIN_BLUE, Color::WHITE));
-        assert_eq!(relative_style(Look::Far), (DIM, MANROPE));
-        assert_eq!(relative_style(Look::Soon), (BLUE, kit::MANROPE_SEMIBOLD));
-        assert_eq!(relative_style(Look::Now), (BLUE, MANROPE_BOLD));
-        assert_eq!(relative_style(Look::Under), (BLUE, kit::MANROPE_SEMIBOLD));
+        assert_eq!(
+            join_colours(Look::Far, false),
+            (JOIN_GREY.get(), TEXT.get())
+        );
+        assert_eq!(
+            join_colours(Look::Soon, false),
+            (JOIN_BLUE.get(), Color::WHITE)
+        );
+        assert_eq!(
+            join_colours(Look::Under, false),
+            (JOIN_BLUE.get(), Color::WHITE)
+        );
+        assert_eq!(relative_style(Look::Far), (DIM.get(), MANROPE));
+        assert_eq!(
+            relative_style(Look::Soon),
+            (BLUE.get(), kit::MANROPE_SEMIBOLD)
+        );
+        assert_eq!(relative_style(Look::Now), (BLUE.get(), MANROPE_BOLD));
+        assert_eq!(
+            relative_style(Look::Under),
+            (BLUE.get(), kit::MANROPE_SEMIBOLD)
+        );
     }
 
     #[test]

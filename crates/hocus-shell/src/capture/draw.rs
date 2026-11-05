@@ -16,6 +16,7 @@ use iced::{
 };
 
 use super::{Button, Words};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD},
@@ -62,22 +63,22 @@ const START_GAP: f32 = 7.0 * Z;
 
 /// The popovers' glass (bar.md §9) and the mockup's rim; opaque without
 /// glass.
-const GLASS: (Color, Color) = (
-    Color::from_rgba8(22, 27, 42, 0.72),
-    Color::from_rgba8(14, 17, 28, 0.82),
+const GLASS: (Ink, Ink) = (
+    Ink::Dark(Color::from_rgba8(22, 27, 42, 0.72)),
+    Ink::Dark(Color::from_rgba8(14, 17, 28, 0.82)),
 );
-const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const CHOSEN: Color = Color::from_rgba8(108, 194, 135, 0.22);
-const CHOSEN_RING: Color = Color::from_rgba8(108, 194, 135, 0.6);
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const GREEN: Color = rgb(0x6CC287);
-const ON_GREEN: Color = rgb(0x0B1020);
-const SWITCH: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const TAB_TEXT: Color = rgb(0xC9D0DC);
-const PHOTO_ON: Color = rgb(0xEEF1F6);
-const RED: Color = rgb(0xF2545B);
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const CHOSEN: Ink = Ink::Accent(0.22);
+const CHOSEN_RING: Ink = Ink::Accent(0.6);
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const GREEN: Ink = Ink::Accent(1.0);
+const ON_GREEN: Ink = Ink::Dark(rgb(0x0B1020));
+const SWITCH: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const TAB_TEXT: Ink = Ink::Dark(rgb(0xC9D0DC));
+const PHOTO_ON: Ink = Ink::Dark(rgb(0xEEF1F6));
+const RED: Ink = Ink::Dark(rgb(0xF2545B));
 const WHITE: Color = Color::WHITE;
 
 /// Where the toolbar's buttons are, and its size.
@@ -295,6 +296,7 @@ impl View {
         let layout = Layout::of(self.words, bar.video);
         let radius = CAPTURE_TOOLBAR_RADIUS as f32;
         let (top, bottom) = if self.glass { GLASS } else { OPAQUE };
+        let (top, bottom) = (top.get(), bottom.get());
         let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top)
             .add_stop(1.0, bottom);
@@ -308,10 +310,14 @@ impl View {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (radius - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
-        f.fill_rectangle(layout.separator.position(), layout.separator.size(), RULE);
-        f.fill(&kit::rounded(layout.switch, SWITCH_RADIUS), SWITCH);
+        f.fill_rectangle(
+            layout.separator.position(),
+            layout.separator.size(),
+            RULE.get(),
+        );
+        f.fill(&kit::rounded(layout.switch, SWITCH_RADIUS), SWITCH.get());
         for (button, rect) in &layout.buttons {
             let hovered = toolbar.hover == Some(*button);
             let shape = kit::rounded(*rect, BUTTON_RADIUS);
@@ -319,9 +325,9 @@ impl View {
                 Button::Kind(kind) => {
                     let on = bar.video == *kind;
                     let (back, ink) = match (on, kind) {
-                        (true, true) => (Some(RED), WHITE),
-                        (true, false) => (Some(PHOTO_ON), ON_GREEN),
-                        (false, _) => (hovered.then_some(HOVER), TAB_TEXT),
+                        (true, true) => (Some(RED.get()), WHITE),
+                        (true, false) => (Some(PHOTO_ON.get()), ON_GREEN.get()),
+                        (false, _) => (hovered.then_some(HOVER.get()), TAB_TEXT.get()),
                     };
                     if let Some(back) = back {
                         f.fill(&kit::rounded(*rect, TAB_RADIUS), back);
@@ -339,7 +345,7 @@ impl View {
                     continue;
                 }
                 Button::Shoot if bar.video => {
-                    f.fill(&shape, RED);
+                    f.fill(&shape, RED.get());
                     let text = kit::measure(self.words.start(), SHOOT_TEXT, MANROPE_BOLD);
                     let left = rect.center_x() - (START_DOT + START_GAP + text) / 2.0;
                     f.fill(
@@ -368,17 +374,19 @@ impl View {
                         bar.micro
                     };
                     if on {
-                        f.fill(&shape, CHOSEN);
+                        f.fill(&shape, CHOSEN.get());
                         let ring = Rectangle::new(
                             Point::new(rect.x + 0.5, rect.y + 0.5),
                             Size::new(rect.width - 1.0, rect.height - 1.0),
                         );
                         f.stroke(
                             &kit::rounded(ring, BUTTON_RADIUS - 0.5),
-                            Stroke::default().with_color(CHOSEN_RING).with_width(1.0),
+                            Stroke::default()
+                                .with_color(CHOSEN_RING.get())
+                                .with_width(1.0),
                         );
                     } else if hovered {
-                        f.fill(&shape, HOVER);
+                        f.fill(&shape, HOVER.get());
                     }
                     let alpha = if on { 1.0 } else { OFF };
                     let middle = rect.center_y();
@@ -386,7 +394,15 @@ impl View {
                         Point::new(rect.x + BUTTON_PAD, middle - TOGGLE_ICON / 2.0),
                         Size::new(TOGGLE_ICON, TOGGLE_ICON),
                     );
-                    toggle_icon(f, *button, icon, Color { a: alpha, ..TEXT });
+                    toggle_icon(
+                        f,
+                        *button,
+                        icon,
+                        Color {
+                            a: alpha,
+                            ..TEXT.get()
+                        },
+                    );
                     let said = if *button == Button::Sound {
                         self.words.sound()
                     } else {
@@ -398,39 +414,44 @@ impl View {
                             said.to_owned(),
                             Point::new(icon.x + TOGGLE_ICON + ICON_GAP, middle),
                             LABEL,
-                            Color { a: alpha, ..TEXT },
+                            Color {
+                                a: alpha,
+                                ..TEXT.get()
+                            },
                             Alignment::Left,
                         ),
                     ));
                     continue;
                 }
                 Button::Shoot => {
-                    f.fill(&shape, GREEN);
+                    f.fill(&shape, GREEN.get());
                     f.fill_text(kit::text_in(
                         MANROPE_BOLD,
                         kit::text(
                             self.words.shoot().to_owned(),
                             rect.center(),
                             SHOOT_TEXT,
-                            ON_GREEN,
+                            ON_GREEN.get(),
                             Alignment::Center,
                         ),
                     ));
                     continue;
                 }
                 Button::Mode(mode) if bar.mode == *mode => {
-                    f.fill(&shape, CHOSEN);
+                    f.fill(&shape, CHOSEN.get());
                     let ring = Rectangle::new(
                         Point::new(rect.x + 0.5, rect.y + 0.5),
                         Size::new(rect.width - 1.0, rect.height - 1.0),
                     );
                     f.stroke(
                         &kit::rounded(ring, BUTTON_RADIUS - 0.5),
-                        Stroke::default().with_color(CHOSEN_RING).with_width(1.0),
+                        Stroke::default()
+                            .with_color(CHOSEN_RING.get())
+                            .with_width(1.0),
                     );
                 }
-                Button::Pointer if bar.pointer => f.fill(&shape, CHOSEN),
-                _ if hovered => f.fill(&shape, HOVER),
+                Button::Pointer if bar.pointer => f.fill(&shape, CHOSEN.get()),
+                _ if hovered => f.fill(&shape, HOVER.get()),
                 _ => {}
             }
             let middle = rect.center_y();
@@ -459,7 +480,7 @@ impl View {
                         label,
                         Point::new(icon_x + icon + ICON_GAP, middle),
                         LABEL,
-                        TEXT,
+                        TEXT.get(),
                         Alignment::Left,
                     ),
                 ));
@@ -473,7 +494,7 @@ fn draw_icon(f: &mut Frame, button: Button, rect: Rectangle) {
     let k = rect.width / 24.0;
     let p = |x: f32, y: f32| Point::new(rect.x + x * k, rect.y + y * k);
     let stroke = Stroke::default()
-        .with_color(TEXT)
+        .with_color(TEXT.get())
         .with_width(STROKE * k)
         .with_line_join(LineJoin::Round)
         .with_line_cap(LineCap::Round);

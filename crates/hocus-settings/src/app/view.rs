@@ -80,11 +80,11 @@ impl App {
     fn sidebar(&self) -> El<'_> {
         let lang = self.lang;
         let header = row![
-            container(icon(Icon::Sliders, 15.0, ACCENT))
+            container(icon(Icon::Sliders, 15.0, ACCENT.get()))
                 .width(24)
                 .height(24)
                 .center(24)
-                .style(boxed(rgba(108, 194, 135, 0.16), 7.0, None)),
+                .style(boxed(crate::theme::Ink::Accent(0.16).get(), 7.0, None)),
             text(self.title()).size(15).font(BOLD).color(TEXT),
         ]
         .spacing(9)
@@ -114,21 +114,22 @@ impl App {
                 .style(boxed(
                     Color::TRANSPARENT,
                     4.0,
-                    Some((1.0, rgba(255, 255, 255, 0.14))),
+                    Some((1.0, crate::theme::ink(rgba(255, 255, 255, 0.14)))),
                 ))
                 .into()
         } else {
-            button(icon(Icon::Close, 13.0, DIM))
+            button(icon(Icon::Close, 13.0, DIM.get()))
                 .width(24)
                 .height(24)
                 .padding(5.5)
                 .on_press(Message::ClearSearch)
-                .style(flat(None, HOVER, 6.0, false))
+                .style(flat(None, HOVER.get(), 6.0, false))
                 .into()
         };
         let search = container(stack![
             field,
-            container(icon(Icon::Search, 15.0, DIM)).padding(Padding::default().left(9).top(9.5)),
+            container(icon(Icon::Search, 15.0, DIM.get()))
+                .padding(Padding::default().left(9).top(9.5)),
             container(aside)
                 .width(Length::Fill)
                 .height(34)
@@ -138,14 +139,14 @@ impl App {
         ])
         .height(34)
         .style(boxed(
-            rgba(255, 255, 255, 0.06),
+            crate::theme::ink(rgba(255, 255, 255, 0.06)),
             9.0,
             Some((
                 1.0,
                 if focused {
-                    rgba(108, 194, 135, 0.65)
+                    crate::theme::Ink::Accent(0.65).get()
                 } else {
-                    rgba(255, 255, 255, 0.10)
+                    crate::theme::ink(rgba(255, 255, 255, 0.10))
                 },
             )),
         ))
@@ -170,14 +171,18 @@ impl App {
         .width(SIDEBAR_WIDTH - 1.0)
         .height(Length::Fill)
         .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(SIDEBAR)),
+            background: Some(Background::Color(SIDEBAR.get())),
             ..container::Style::default()
         })
         .id(format!("sidebar:{}", if lang.fr() { "fr" } else { "en" }));
         // A 1 px line on its right.
         row![
             sidebar,
-            container(Space::new().width(1).height(Length::Fill)).style(boxed(LINE, 0.0, None)),
+            container(Space::new().width(1).height(Length::Fill)).style(boxed(
+                LINE.get(),
+                0.0,
+                None
+            )),
         ]
         .into()
     }
@@ -200,7 +205,7 @@ impl App {
             .wrapping(text::Wrapping::None);
         container(
             button(
-                row![icon(which, 17.0, ink), words]
+                row![icon(which, 17.0, ink.get()), words]
                     .spacing(10)
                     .height(Length::Fill)
                     .align_y(Alignment::Center),
@@ -209,7 +214,12 @@ impl App {
             .height(30)
             .padding([0, 10])
             .on_press(on)
-            .style(flat(current.then_some(CURRENT), HOVER, 8.0, focus)),
+            .style(flat(
+                current.then_some(CURRENT.get()),
+                HOVER.get(),
+                8.0,
+                focus,
+            )),
         )
         .id(id)
         .into()
@@ -278,7 +288,7 @@ impl App {
                 (Lang::English, n) => format!("{n} results · ↑ ↓ then Enter"),
             }
         };
-        let mut list = column![container(t(head, 11.5, FAINT)).padding([4, 10])].spacing(2);
+        let mut list = column![container(t(head, 11.5, FAINT.get())).padding([4, 10])].spacing(2);
         for (i, found) in self.results.iter().enumerate() {
             let section = found.target.section().section();
             let name: El<'_> = match found.hit {
@@ -288,7 +298,7 @@ impl App {
                     let spans: [text::Span<'_, (), iced::Font>; 3] = [
                         span(pre),
                         span(hit)
-                            .background(rgba(108, 194, 135, 0.30))
+                            .background(crate::theme::Ink::Accent(0.30).get())
                             .border(border(3.0, 0.0, Color::TRANSPARENT)),
                         span(post),
                     ];
@@ -331,9 +341,9 @@ impl App {
             }
             let opened = self.opened.as_deref() == Some(found.target.id().as_str());
             let fill = if opened {
-                Some(CURRENT)
+                Some(CURRENT.get())
             } else if i == self.selected {
-                Some(rgba(255, 255, 255, 0.07))
+                Some(crate::theme::ink(rgba(255, 255, 255, 0.07)))
             } else {
                 None
             };
@@ -341,16 +351,16 @@ impl App {
                 container(
                     button(
                         row![
-                            container(icon(section.icon, 16.0, DIM))
+                            container(icon(section.icon, 16.0, DIM.get()))
                                 .padding(Padding::default().top(2)),
-                            column![name, t(path, 11.5, FAINT)].spacing(2),
+                            column![name, t(path, 11.5, FAINT.get())].spacing(2),
                         ]
                         .spacing(10),
                     )
                     .width(Length::Fill)
                     .padding([7, 10])
                     .on_press(Message::Result(i))
-                    .style(flat(fill, HOVER, 8.0, false)),
+                    .style(flat(fill, HOVER.get(), 8.0, false)),
                 )
                 .id(format!("result:{i}")),
             );
@@ -373,25 +383,28 @@ impl App {
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
-            _ if self.screens_to_confirm() => (rgb(0xF5B44A), w("À confirmer", "To confirm")),
-            Some(FileState::Reads) | None => (ACCENT, w("Enregistré", "Saved")),
-            Some(FileState::Broken { .. }) => (ORANGE, w("Lecture seule", "Read-only")),
-            Some(FileState::NoFile) => (ORANGE, w("Aucun fichier", "No file")),
+            _ if self.screens_to_confirm() => (
+                crate::theme::ink(rgb(0xF5B44A)),
+                w("À confirmer", "To confirm"),
+            ),
+            Some(FileState::Reads) | None => (ACCENT.get(), w("Enregistré", "Saved")),
+            Some(FileState::Broken { .. }) => (ORANGE.get(), w("Lecture seule", "Read-only")),
+            Some(FileState::NoFile) => (ORANGE.get(), w("Aucun fichier", "No file")),
         };
         let header = mouse_area(
             row![
-                t(here, 13.0, FAINT),
+                t(here, 13.0, FAINT.get()),
                 Space::new().width(Length::Fill),
                 container(Space::new().width(7).height(7)).style(boxed(dot, 3.5, None)),
                 t(state.get(lang), 12.0, dot),
                 container(
                     container(
-                        button(icon(Icon::Close, 16.0, DIM))
+                        button(icon(Icon::Close, 16.0, DIM.get()))
                             .width(30)
                             .height(30)
                             .padding(7)
                             .on_press(Message::Close)
-                            .style(flat(None, HOVER, 8.0, false)),
+                            .style(flat(None, HOVER.get(), 8.0, false)),
                     )
                     .id("close".to_owned()),
                 )
@@ -434,7 +447,7 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(CONTENT)),
+                background: Some(Background::Color(CONTENT.get())),
                 border: Border {
                     // The sidebar's line on its right.
                     width: 0.0,
@@ -458,24 +471,28 @@ impl App {
                 t(
                     w("Ouvrir le fichier", "Open the file").get(lang),
                     12.5,
-                    TEXT
+                    TEXT.get()
                 )
                 .font(SEMIBOLD)
             )
             .height(28)
             .padding([5, 12])
             .on_press(Message::OpenFile)
-            .style(|_, status| solid(rgba(255, 255, 255, 0.08), TEXT, status)),
+            .style(|_, status| solid(
+                crate::theme::ink(rgba(255, 255, 255, 0.08)),
+                TEXT.get(),
+                status
+            )),
         ]
         .spacing(8);
         if let Some(restore) = restore {
             buttons = buttons.push(
                 container(
-                    button(t(restore, 12.5, DEEP).font(BOLD))
+                    button(t(restore, 12.5, DEEP.get()).font(BOLD))
                         .height(28)
                         .padding([5, 12])
                         .on_press(Message::Restore)
-                        .style(|_, status| solid(ORANGE, DEEP, status)),
+                        .style(|_, status| solid(ORANGE.get(), DEEP.get(), status)),
                 )
                 .id("restore".to_owned()),
             );
@@ -483,10 +500,10 @@ impl App {
         Some(
             container(
                 row![
-                    container(icon(Icon::Warning, 18.0, PEACH)).padding(Padding::default().top(1)),
+                    container(icon(Icon::Warning, 18.0, PEACH.get())).padding(Padding::default().top(1)),
                     column![
-                        t(title, 13.5, PEACH).font(BOLD),
-                        t(message.clone(), 12.5, SOFT),
+                        t(title, 13.5, PEACH.get()).font(BOLD),
+                        t(message.clone(), 12.5, SOFT.get()),
                         t(
                             w(
                                 "Le bureau garde la dernière configuration lisible, et les Réglages ne changent rien tant que le fichier n’est pas réparé.",
@@ -494,7 +511,7 @@ impl App {
                             )
                             .get(lang),
                             12.5,
-                            SOFT,
+                            SOFT.get(),
                         ),
                         container(buttons).padding(Padding::default().top(6)),
                     ]
@@ -504,9 +521,9 @@ impl App {
             )
             .padding([12, 14])
             .style(boxed(
-                rgba(242, 148, 91, 0.12),
+                crate::theme::ink(rgba(242, 148, 91, 0.12)),
                 10.0,
-                Some((1.0, rgba(242, 148, 91, 0.40))),
+                Some((1.0, crate::theme::ink(rgba(242, 148, 91, 0.40)))),
             ))
             .id("banner".to_owned())
             .into(),
@@ -540,8 +557,8 @@ impl App {
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Gradient(Gradient::Linear(
                     gradient::Linear::new(std::f32::consts::FRAC_PI_4 * 3.0)
-                        .add_stop(0.0, rgb(0x6CC287))
-                        .add_stop(1.0, rgb(0x5B8DEF)),
+                        .add_stop(0.0, crate::theme::Ink::Accent(1.0).get())
+                        .add_stop(1.0, crate::theme::ink(rgb(0x5B8DEF))),
                 ))),
                 border: border(26.0, 0.0, Color::TRANSPARENT),
                 ..container::Style::default()
@@ -561,7 +578,7 @@ impl App {
                     )
                     .get(lang),
                     13.5,
-                    DIM,
+                    DIM.get(),
                 ),
             ]
             .spacing(4),
@@ -597,9 +614,13 @@ impl App {
                 when(change.at, lang)
             };
             let mut line = row![
-                column![t(name, 13.5, TEXT).font(SEMIBOLD), t(value, 13.0, DIM)].spacing(1),
+                column![
+                    t(name, 13.5, TEXT.get()).font(SEMIBOLD),
+                    t(value, 13.0, DIM.get())
+                ]
+                .spacing(1),
                 Space::new().width(Length::Fill),
-                t(when, 12.0, FAINT),
+                t(when, 12.0, FAINT.get()),
             ]
             .align_y(Alignment::Center)
             .padding([0, 16])
@@ -626,14 +647,14 @@ impl App {
                 )
                 .get(lang),
                 12.5,
-                DIM,
+                DIM.get(),
             )
             .line_height(1.5),
-            button(t(w("Ouvrir le fichier", "Open the file").get(lang), 13.0, TEXT).font(SEMIBOLD))
+            button(t(w("Ouvrir le fichier", "Open the file").get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                 .height(32)
                 .padding([7, 14])
                 .on_press(Message::OpenFile)
-                .style(|_, status| solid(rgba(255, 255, 255, 0.06), TEXT, status)),
+                .style(|_, status| solid(crate::theme::ink(rgba(255, 255, 255, 0.06)), TEXT.get(), status)),
         ]
         .spacing(8);
         page = page.push(group_box(
@@ -649,17 +670,21 @@ impl App {
         container(
             button(
                 row![
-                    container(icon(section.icon, 18.0, BLUE))
+                    container(icon(section.icon, 18.0, BLUE.get()))
                         .width(34)
                         .height(34)
                         .center(34)
-                        .style(boxed(rgba(143, 179, 255, 0.12), 9.0, None)),
+                        .style(boxed(
+                            crate::theme::ink(rgba(143, 179, 255, 0.12)),
+                            9.0,
+                            None
+                        )),
                     column![
                         text(section.name.get(self.lang))
                             .size(13.5)
                             .font(BOLD)
                             .color(TEXT),
-                        t(state, 12.5, DIM).wrapping(text::Wrapping::None),
+                        t(state, 12.5, DIM.get()).wrapping(text::Wrapping::None),
                     ]
                     .spacing(2),
                 ]
@@ -675,12 +700,12 @@ impl App {
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
                     background: Some(Background::Color(if hovered {
-                        rgba(255, 255, 255, 0.06)
+                        crate::theme::ink(rgba(255, 255, 255, 0.06))
                     } else {
-                        CARD
+                        CARD.get()
                     })),
-                    text_color: TEXT,
-                    border: border(12.0, 1.0, CARD_RIM),
+                    text_color: TEXT.get(),
+                    border: border(12.0, 1.0, CARD_RIM.get()),
                     ..button::Style::default()
                 }
             }),
@@ -730,7 +755,7 @@ impl App {
         let mut page = column![
             column![
                 text(section.name.get(lang)).size(22).font(BOLD).color(TEXT),
-                t(section.line.get(lang), 13.5, DIM).line_height(1.5),
+                t(section.line.get(lang), 13.5, DIM.get()).line_height(1.5),
             ]
             .spacing(6),
         ]
@@ -751,7 +776,7 @@ impl App {
             page = page.push(card_box(
                 container(
                     column![
-                        t(w("À venir", "Coming").get(lang), 14.0, TEXT).font(SEMIBOLD),
+                        t(w("À venir", "Coming").get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
                         t(
                             w(
                                 "Les réglages de cette page arrivent bientôt. En attendant, le fichier de configuration les garde.",
@@ -759,7 +784,7 @@ impl App {
                             )
                             .get(lang),
                             12.5,
-                            DIM,
+                            DIM.get(),
                         ),
                     ]
                     .spacing(4),
@@ -806,7 +831,7 @@ impl App {
                     t(
                         source.name().get(self.lang),
                         12.5,
-                        if chosen { TEXT } else { DIM },
+                        if chosen { TEXT.get() } else { DIM.get() },
                     )
                     .font(SEMIBOLD),
                 )
@@ -814,8 +839,10 @@ impl App {
                 .padding([3, 10])
                 .on_press(Message::Source(source))
                 .style(move |_, _| button::Style {
-                    background: chosen.then_some(Background::Color(rgba(255, 255, 255, 0.13))),
-                    text_color: TEXT,
+                    background: chosen.then_some(Background::Color(crate::theme::ink(rgba(
+                        255, 255, 255, 0.13,
+                    )))),
+                    text_color: TEXT.get(),
                     border: border(7.0, 0.0, Color::TRANSPARENT),
                     ..button::Style::default()
                 }),
@@ -825,7 +852,9 @@ impl App {
         container(row![option(Source::Battery), option(Source::Ac)])
             .padding(2)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(rgba(255, 255, 255, 0.05))),
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    255, 255, 255, 0.05,
+                )))),
                 border: if focused {
                     ring(9.0)
                 } else {
@@ -846,18 +875,20 @@ impl App {
             text(setting.name.get(lang))
                 .size(14)
                 .font(SEMIBOLD)
-                .color(fade(TEXT, ink))
+                .color(fade(TEXT.get(), ink))
         ]
         .spacing(2)
         .width(Length::Fill);
-        if let Some(line) = setting.line {
-            words = words.push(t(line.get(lang), 12.5, fade(DIM, ink)));
+        if setting.kind == Kind::Swatches {
+            words = words.push(t(self.accent_line(slot), 12.5, fade(DIM.get(), ink)));
+        } else if let Some(line) = setting.line {
+            words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
         if let Some(not_here) = not_here {
-            words = words.push(t(not_here, 12.5, FAINT));
+            words = words.push(t(not_here, 12.5, FAINT.get()));
         }
         if let Some(warning) = self.warning(setting, slot) {
-            words = words.push(t(warning, 12.5, PEACH));
+            words = words.push(t(warning, 12.5, PEACH.get()));
         }
         let inert = self.inert(setting);
         let focused = matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&super::Control::Setting(slot)));
@@ -879,13 +910,10 @@ impl App {
             .height(Length::Shrink)
             .center_y(Length::Shrink)
             .style(move |_: &Theme| container::Style {
-                background: (lit > 0.0).then_some(Background::Color(rgba(
-                    108,
-                    194,
-                    135,
-                    0.20 * lit,
-                ))),
-                border: border(11.0, 1.5, rgba(108, 194, 135, 0.85 * lit)),
+                background: (lit > 0.0).then_some(Background::Color(
+                    crate::theme::Ink::Accent(0.20 * lit).get(),
+                )),
+                border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
                 ..container::Style::default()
             })
             .id(format!("row:{}", setting.id))
@@ -918,9 +946,9 @@ impl App {
                 });
                 let at = if on { moved } else { 1.0 - moved };
                 let track = if on {
-                    ACCENT
+                    ACCENT.get()
                 } else {
-                    rgba(255, 255, 255, 0.18)
+                    crate::theme::Ink::Token(|t| t.switch_off).get()
                 };
                 let knob = container(Space::new().width(18).height(18)).style(move |_: &Theme| {
                     container::Style {
@@ -942,7 +970,7 @@ impl App {
                 .padding(0)
                 .style(move |_, _| button::Style {
                     background: Some(Background::Color(fade(track, alpha))),
-                    text_color: TEXT,
+                    text_color: TEXT.get(),
                     border: if focused {
                         ring(11.0)
                     } else {
@@ -957,7 +985,7 @@ impl App {
             }
             Kind::Menu(_) => {
                 let said = value
-                    .map(|v| setting.say(&v, self.lang))
+                    .map(|v| self.menu_said(setting, &v))
                     .unwrap_or_default();
                 // 158 wide at least: its value, the chevron, their gap and
                 // its sides.
@@ -970,9 +998,9 @@ impl App {
                         text(said)
                             .size(13.5)
                             .font(SEMIBOLD)
-                            .color(fade(TEXT, alpha)),
+                            .color(fade(TEXT.get(), alpha)),
                         Space::new().width(Length::Fill),
-                        icon(Icon::Chevron, 12.0, fade(DIM, alpha)),
+                        icon(Icon::Chevron, 12.0, fade(DIM.get(), alpha)),
                     ]
                     .spacing(10)
                     .height(Length::Fill)
@@ -986,14 +1014,19 @@ impl App {
                         matches!(status, button::Status::Hovered | button::Status::Pressed);
                     button::Style {
                         background: Some(Background::Color(fade(
-                            rgba(255, 255, 255, if hovered || open { 0.09 } else { 0.06 }),
+                            crate::theme::ink(rgba(
+                                255,
+                                255,
+                                255,
+                                if hovered || open { 0.09 } else { 0.06 },
+                            )),
                             alpha,
                         ))),
-                        text_color: TEXT,
+                        text_color: TEXT.get(),
                         border: if focused {
                             ring(8.0)
                         } else {
-                            border(8.0, 1.0, fade(RIM_12, alpha))
+                            border(8.0, 1.0, fade(RIM_12.get(), alpha))
                         },
                         ..button::Style::default()
                     }
@@ -1027,10 +1060,13 @@ impl App {
                         backgrounds: (
                             Background::Gradient(Gradient::Linear(
                                 gradient::Linear::new(std::f32::consts::FRAC_PI_2)
-                                    .add_stop(0.0, fade(rgb(0x3FA66B), alpha))
-                                    .add_stop(1.0, fade(MINT, alpha)),
+                                    .add_stop(0.0, fade(ACCENT.get(), alpha))
+                                    .add_stop(1.0, fade(crate::theme::Ink::AccentLit.get(), alpha)),
                             )),
-                            Background::Color(fade(rgba(255, 255, 255, 0.12), alpha)),
+                            Background::Color(fade(
+                                crate::theme::ink(rgba(255, 255, 255, 0.12)),
+                                alpha,
+                            )),
                         ),
                         width: 6.0,
                         border: border(3.0, 0.0, Color::TRANSPARENT),
@@ -1038,8 +1074,15 @@ impl App {
                     handle: slider::Handle {
                         shape: slider::HandleShape::Circle { radius: 8.0 },
                         background: Background::Color(fade(Color::WHITE, alpha)),
-                        border_width: if focused { 3.0 } else { 0.0 },
-                        border_color: ACCENT,
+                        // On light, a rim so that the knob shows on the card.
+                        border_width: if focused {
+                            3.0
+                        } else if crate::theme::light() {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                        border_color: if focused { ACCENT.get() } else { RIM_12.get() },
                     },
                 });
                 row![
@@ -1048,7 +1091,7 @@ impl App {
                         text(said)
                             .size(12.5)
                             .font(MONO)
-                            .color(fade(TEXT, alpha))
+                            .color(fade(TEXT.get(), alpha))
                             .wrapping(text::Wrapping::None),
                     )
                     .width(56),
@@ -1060,12 +1103,18 @@ impl App {
             Kind::Speed { min, max } => self.speed_control(slot, *min, *max, inert, focused),
             // Drawn by their pages (6.8).
             Kind::Shortcut | Kind::Layouts => Space::new().into(),
+            // 6.2's.
+            Kind::Segmented(choices) => {
+                self.segmented_control(setting, slot, choices, inert, focused)
+            }
+            Kind::Swatches => self.swatches(slot, inert, focused),
+            Kind::Link(to) => self.link_control(*to),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
                     _ => String::new(),
                 };
-                text(said).size(13.5).color(fade(TEXT, alpha)).into()
+                text(said).size(13.5).color(fade(TEXT.get(), alpha)).into()
             }
         }
     }
@@ -1087,13 +1136,17 @@ impl App {
         } else {
             ease_out(self.now.saturating_duration_since(since), super::MENU_IN)
         };
-        let width = at.width.max(200.0);
+        // Wider when its choices say something beside them (6.2's dates).
+        let wide = choices
+            .iter()
+            .any(|c| self.choice_aside(setting, c).is_some());
+        let width = at.width.max(if wide { 330.0 } else { 200.0 });
         let mut list = column![].spacing(0);
         for (i, choice) in choices.iter().enumerate() {
             let chosen = current.as_ref() == Some(&choice.value);
             let keyboard = i == self.menu_index;
             let check: El<'_> = if chosen {
-                icon(Icon::Check, 13.0, fade(ACCENT, opened))
+                icon(Icon::Check, 13.0, fade(ACCENT.get(), opened))
             } else {
                 Space::new().width(13).into()
             };
@@ -1102,8 +1155,15 @@ impl App {
                     button(
                         row![
                             container(check).width(18).center_x(18),
-                            t(choice.label.get(self.lang), 13.5, fade(TEXT, opened))
+                            t(choice.label.get(self.lang), 13.5, fade(TEXT.get(), opened))
                                 .font(if chosen { SEMIBOLD } else { MANROPE }),
+                            Space::new().width(Length::Fill),
+                            t(
+                                self.choice_aside(setting, choice).unwrap_or_default(),
+                                11.5,
+                                fade(DIM.get(), opened)
+                            )
+                            .font(MONO),
                         ]
                         .spacing(6)
                         .height(Length::Fill)
@@ -1114,8 +1174,8 @@ impl App {
                     .padding([0, 8])
                     .on_press(Message::Choose(slot, choice.value.clone()))
                     .style(flat(
-                        keyboard.then_some(rgba(255, 255, 255, 0.07)),
-                        rgba(255, 255, 255, 0.07),
+                        keyboard.then_some(crate::theme::ink(rgba(255, 255, 255, 0.07))),
+                        crate::theme::ink(rgba(255, 255, 255, 0.07)),
                         7.0,
                         false,
                     )),
@@ -1127,8 +1187,8 @@ impl App {
             .width(width)
             .padding(5)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(fade(MENU, opened))),
-                border: border(10.0, 1.0, fade(RIM_12, opened)),
+                background: Some(Background::Color(fade(MENU.get(), opened))),
+                border: border(10.0, 1.0, fade(RIM_12.get(), opened)),
                 shadow: Shadow {
                     color: rgba(0, 0, 0, 0.45 * opened),
                     ..style::shadow()
@@ -1137,7 +1197,17 @@ impl App {
             })
             .id("menu".to_owned());
         let x = (at.x + at.width - width).max(0.0);
-        let y = at.y + 38.0 - 4.0 * (1.0 - opened);
+        // Under its button; over it when the page's bottom would cut it.
+        let height = choices.len() as f32 * 32.0 + 10.0;
+        let bottom = self
+            .places
+            .page
+            .map_or(f32::INFINITY, |p| p.viewport.y + p.viewport.height);
+        let y = if at.y + 38.0 + height > bottom {
+            at.y - 6.0 - height + 4.0 * (1.0 - opened)
+        } else {
+            at.y + 38.0 - 4.0 * (1.0 - opened)
+        };
         Some(pin(panel).x(x).y(y).into())
     }
 
@@ -1152,7 +1222,12 @@ impl App {
             )
         };
         let lang = self.lang;
-        let mut line = row![t(toast.text.clone(), 13.0, fade(TEXT, came))]
+        // Dark in both themes, and so are its words' colours.
+        let dark = hocus_link::theme::DARK;
+        let ink = crate::theme::color;
+        let [r, g, b] = crate::theme::now().accent().on_dark;
+        let mint = Color::from_rgb8(r, g, b);
+        let mut line = row![t(toast.text.clone(), 13.0, fade(ink(dark.text), came))]
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
@@ -1164,7 +1239,7 @@ impl App {
         if let Some(action) = action {
             line = line.push(
                 container(
-                    button(text(action).size(13).font(BOLD).color(fade(MINT, came)))
+                    button(text(action).size(13).font(BOLD).color(fade(mint, came)))
                         .padding([4, 6])
                         .on_press(Message::ToastAct)
                         .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
@@ -1173,7 +1248,7 @@ impl App {
             );
         }
         line = line.push(
-            button(icon(Icon::Close, 13.0, fade(DIM, came)))
+            button(icon(Icon::Close, 13.0, fade(ink(dark.dim), came)))
                 .width(24)
                 .height(24)
                 .padding(5.5)
@@ -1190,8 +1265,8 @@ impl App {
             })
             .center_y(40)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(fade(TOAST, came))),
-                border: border(10.0, 1.0, fade(RIM_12, came)),
+                background: Some(Background::Color(fade(TOAST.get(), came))),
+                border: border(10.0, 1.0, fade(ink(dark.control_rim), came)),
                 shadow: Shadow {
                     color: rgba(0, 0, 0, 0.45 * came),
                     ..style::shadow()
@@ -1244,7 +1319,7 @@ fn group_box<'a>(head: El<'a>, body: El<'a>) -> El<'a> {
 pub(super) fn card_box(body: El<'_>) -> El<'_> {
     container(body)
         .width(Length::Fill)
-        .style(boxed(CARD, 12.0, Some((1.0, CARD_RIM))))
+        .style(boxed(CARD.get(), 12.0, Some((1.0, CARD_RIM.get()))))
         .into()
 }
 
@@ -1255,7 +1330,11 @@ pub(super) fn divided(divider: bool, row: El<'_>) -> El<'_> {
     }
     column![
         container(
-            container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE, 0.0, None)),
+            container(Space::new().width(Length::Fill).height(1)).style(boxed(
+                LINE.get(),
+                0.0,
+                None
+            )),
         )
         .padding([0, 16]),
         row,
@@ -1291,7 +1370,12 @@ pub(super) fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
         background: None,
         border: border(3.0, 0.0, Color::TRANSPARENT),
         scroller: scrollable::Scroller {
-            background: Background::Color(rgba(255, 255, 255, if hovered { 0.16 } else { 0.08 })),
+            background: Background::Color(crate::theme::ink(rgba(
+                255,
+                255,
+                255,
+                if hovered { 0.16 } else { 0.08 },
+            ))),
             border: border(3.0, 0.0, Color::TRANSPARENT),
         },
     };
@@ -1301,10 +1385,10 @@ pub(super) fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
         horizontal_rail: rail,
         gap: None,
         auto_scroll: scrollable::AutoScroll {
-            background: Background::Color(TOAST),
-            border: border(10.0, 1.0, RIM_12),
+            background: Background::Color(TOAST.get()),
+            border: border(10.0, 1.0, RIM_12.get()),
             shadow: Shadow::default(),
-            icon: DIM,
+            icon: DIM.get(),
         },
     }
 }
@@ -1485,6 +1569,10 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "toast": toast,
         "toast_action": action,
         "file": file,
+        "theme": crate::theme::now().scheme.word(),
+        "lang": if app.lang == Lang::French { "fr" } else { "en" },
+        "text_scale": app.text_scale,
+        "accent": crate::theme::now().accent.word(),
         "banner": banner,
         "restore": if banner.is_some() { app.restore_label() } else { None },
         "source": app.source.word(),

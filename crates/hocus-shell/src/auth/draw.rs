@@ -18,6 +18,7 @@ use iced::{
 };
 
 use super::{Dialog, Phase, Pointing, Target, Words};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, stroke},
     popover::kit::{self, MANROPE_SEMIBOLD},
@@ -124,38 +125,38 @@ const SPINNER: f32 = 14.0;
 const SHAKE_MS: f32 = 360.0;
 const TURN_MS: f32 = 150.0;
 
-const GLASS: (Color, Color) = (
-    Color::from_rgba8(22, 27, 42, 0.96),
-    Color::from_rgba8(14, 17, 28, 0.97),
+const GLASS: (Ink, Ink) = (
+    Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96)),
+    Ink::Dark(Color::from_rgba8(14, 17, 28, 0.97)),
 );
-const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const BADGE_FILL: Color = rgb(0x0B1020);
-const BADGE_RING_COLOUR: Color = rgb(0x161B2A);
-const FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const LIST_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
-const LIST_RIM: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const FIELD_ON: Color = Color::from_rgba8(108, 194, 135, 0.60);
-const FIELD_WRONG: Color = rgb(0xF2945B);
-const FIELD_CHECKING: Color = Color::from_rgba8(255, 255, 255, 0.16);
-const AMBER: Color = rgb(0xF5C46E);
-const AMBER_FILL: Color = Color::from_rgba8(245, 196, 110, 0.16);
-const PEACH: Color = rgb(0xF7B98A);
-const VALUE_INK: Color = rgb(0xC9D0DC);
-const INK: Color = rgb(0x0B1020);
-const READY_OFF: Color = Color::from_rgba8(108, 194, 135, 0.18);
-const CHECKING_FILL: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const FOCUS: Color = ACCENT;
-const AVATAR_FROM: Color = rgb(0x6CC287);
-const AVATAR_TO: Color = rgb(0x3E8FBF);
-const OTHER_FROM: Color = rgb(0xC792EA);
-const OTHER_TO: Color = rgb(0x6F9BFF);
-const GEAR_FROM: Color = rgb(0x5C6576);
-const GEAR_TO: Color = rgb(0x9AA3B4);
-const PANDA_DARK: Color = rgb(0x1D2230);
-const PANDA_LIGHT: Color = rgb(0xF2F4F7);
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const BADGE_FILL: Ink = Ink::Dark(rgb(0x0B1020));
+const BADGE_RING_COLOUR: Ink = Ink::Dark(rgb(0x161B2A));
+const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const LIST_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
+const LIST_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const FIELD_ON: Ink = Ink::Accent(0.60);
+const FIELD_WRONG: Ink = Ink::Dark(rgb(0xF2945B));
+const FIELD_CHECKING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
+const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
+const AMBER_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.16));
+const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
+const VALUE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+const INK: Ink = Ink::Dark(rgb(0x0B1020));
+const READY_OFF: Ink = Ink::Accent(0.18);
+const CHECKING_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const FOCUS: Ink = ACCENT;
+const AVATAR_FROM: Ink = Ink::Accent(1.0);
+const AVATAR_TO: Ink = Ink::Dark(rgb(0x3E8FBF));
+const OTHER_FROM: Ink = Ink::Dark(rgb(0xC792EA));
+const OTHER_TO: Ink = Ink::Dark(rgb(0x6F9BFF));
+const GEAR_FROM: Ink = Ink::Dark(rgb(0x5C6576));
+const GEAR_TO: Ink = Ink::Dark(rgb(0x9AA3B4));
+const PANDA_DARK: Ink = Ink::Fixed(rgb(0x1D2230));
+const PANDA_LIGHT: Ink = Ink::Fixed(rgb(0xF2F4F7));
 
 const MARTIAN: Font = Font::with_name("Martian Mono");
 
@@ -418,11 +419,11 @@ impl Layout {
 /// The line under the field, and its colour.
 fn note(dialog: &Dialog, words: Words, caps: bool) -> (String, Color) {
     match (&dialog.said, dialog.phase) {
-        (Some((text, error)), _) => (text.clone(), if *error { PEACH } else { DIM }),
-        (None, Phase::Checking) => (words.checking().to_owned(), FAINT),
-        (None, Phase::Typing) if dialog.wrong_note => (words.wrong(caps), PEACH),
-        (None, Phase::Typing) if caps => (words.caps().to_owned(), AMBER),
-        _ => (String::new(), FAINT),
+        (Some((text, error)), _) => (text.clone(), if *error { PEACH.get() } else { DIM.get() }),
+        (None, Phase::Checking) => (words.checking().to_owned(), FAINT.get()),
+        (None, Phase::Typing) if dialog.wrong_note => (words.wrong(caps), PEACH.get()),
+        (None, Phase::Typing) if caps => (words.caps().to_owned(), AMBER.get()),
+        _ => (String::new(), FAINT.get()),
     }
 }
 
@@ -653,9 +654,9 @@ fn badge(f: &mut Frame, tile: Rectangle) {
     );
     f.fill(
         &Path::circle(centre, BADGE / 2.0 + BADGE_RING),
-        BADGE_RING_COLOUR,
+        BADGE_RING_COLOUR.get(),
     );
-    f.fill(&Path::circle(centre, BADGE / 2.0), BADGE_FILL);
+    f.fill(&Path::circle(centre, BADGE / 2.0), BADGE_FILL.get());
     let k = 12.0 / 24.0;
     let o = Point::new(centre.x - 6.0, centre.y - 6.0);
     let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
@@ -664,7 +665,7 @@ fn badge(f: &mut Frame, tile: Rectangle) {
             Rectangle::new(p(5.0, 11.0), Size::new(14.0 * k, 10.0 * k)),
             2.5 * k,
         ),
-        ACCENT,
+        ACCENT.get(),
     );
     let shackle = Path::new(|b| {
         b.move_to(p(8.0, 11.0));
@@ -677,7 +678,7 @@ fn badge(f: &mut Frame, tile: Rectangle) {
         });
         b.line_to(p(16.0, 11.0));
     });
-    f.stroke(&shackle, stroke(2.6 * k, ACCENT));
+    f.stroke(&shackle, stroke(2.6 * k, ACCENT.get()));
 }
 
 /// A generic gear: the tile's neutral gradient and a white cog.
@@ -686,8 +687,8 @@ fn gear(f: &mut Frame, tile: Rectangle) {
         tile.position(),
         Point::new(tile.x + tile.width, tile.y + tile.height),
     )
-    .add_stop(0.0, GEAR_FROM)
-    .add_stop(1.0, GEAR_TO);
+    .add_stop(0.0, GEAR_FROM.get())
+    .add_stop(1.0, GEAR_TO.get());
     f.fill(&kit::rounded(tile, TILE_RADIUS), canvas::Fill::from(fill));
     let c = tile.center();
     let teeth = 8;
@@ -723,8 +724,8 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
         Point::new(centre.x - r, centre.y - r),
         Point::new(centre.x + r, centre.y + r),
     )
-    .add_stop(0.0, from)
-    .add_stop(1.0, to);
+    .add_stop(0.0, from.get())
+    .add_stop(1.0, to.get());
     f.fill(&Path::circle(centre, r), canvas::Fill::from(fill));
     if !panda {
         centred(
@@ -732,7 +733,7 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
             &crate::user::initial(name),
             centre,
             14.0,
-            INK,
+            INK.get(),
             MANROPE_BOLD,
         );
         return;
@@ -741,9 +742,9 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
     let k = 24.0 / 30.0;
     let o = Point::new(centre.x - 12.0, centre.y - 12.0);
     let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
-    f.fill(&Path::circle(p(8.5, 8.5), 4.2 * k), PANDA_DARK);
-    f.fill(&Path::circle(p(21.5, 8.5), 4.2 * k), PANDA_DARK);
-    f.fill(&Path::circle(p(15.0, 16.5), 10.5 * k), PANDA_LIGHT);
+    f.fill(&Path::circle(p(8.5, 8.5), 4.2 * k), PANDA_DARK.get());
+    f.fill(&Path::circle(p(21.5, 8.5), 4.2 * k), PANDA_DARK.get());
+    f.fill(&Path::circle(p(15.0, 16.5), 10.5 * k), PANDA_LIGHT.get());
     for (x, turn) in [(10.8, -20.0_f32), (19.2, 20.0)] {
         let eye = Path::new(|b| {
             b.ellipse(Elliptical {
@@ -754,7 +755,7 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
                 end_angle: Radians(std::f32::consts::TAU),
             });
         });
-        f.fill(&eye, PANDA_DARK);
+        f.fill(&eye, PANDA_DARK.get());
     }
     f.fill(&Path::circle(p(11.3, 15.4), k), Color::WHITE);
     f.fill(&Path::circle(p(18.7, 15.4), k), Color::WHITE);
@@ -767,7 +768,7 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
             end_angle: Radians(std::f32::consts::TAU),
         });
     });
-    f.fill(&nose, PANDA_DARK);
+    f.fill(&nose, PANDA_DARK.get());
 }
 
 /// Caps Lock's arrow: `M12 4 L20 12.5 H15.5 V17 H8.5 V12.5 H4 Z M8.5 20
@@ -787,7 +788,7 @@ fn caps_arrow(f: &mut Frame, at: Point) {
         b.move_to(p(8.5, 20.0));
         b.line_to(p(15.5, 20.0));
     });
-    f.stroke(&arrow, stroke(2.0, AMBER));
+    f.stroke(&arrow, stroke(2.0, AMBER.get()));
 }
 
 /// A check: `M5 12.5 L10 17.5 L19 7.5`.
@@ -799,7 +800,7 @@ fn check(f: &mut Frame, at: Point) {
         b.line_to(p(10.0, 17.5));
         b.line_to(p(19.0, 7.5));
     });
-    f.stroke(&path, stroke(2.6, ACCENT));
+    f.stroke(&path, stroke(2.6, ACCENT.get()));
 }
 
 /// The focus ring around `rect`.
@@ -808,7 +809,7 @@ fn focus_ring(f: &mut Frame, rect: Rectangle, radius: f32) {
         Point::new(rect.x - 3.0, rect.y - 3.0),
         Size::new(rect.width + 6.0, rect.height + 6.0),
     );
-    rim(f, out, radius + 3.0, FOCUS, 2.0);
+    rim(f, out, radius + 3.0, FOCUS.get(), 2.0);
 }
 
 impl View {
@@ -827,6 +828,7 @@ impl View {
         let now = std::time::Instant::now();
         let mut said = Vec::new();
         let (top, bottom) = if self.glass { GLASS } else { OPAQUE };
+        let (top, bottom) = (top.get(), bottom.get());
         let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top)
             .add_stop(1.0, bottom);
@@ -834,14 +836,20 @@ impl View {
             &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
             canvas::Fill::from(tint),
         );
-        rim(f, Rectangle::new(Point::ORIGIN, size), RADIUS, RIM, BORDER);
+        rim(
+            f,
+            Rectangle::new(Point::ORIGIN, size),
+            RADIUS,
+            RIM.get(),
+            BORDER,
+        );
         // The header.
         let (_, icon) = who(dialog);
         let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
         let px = crate::launcher::icons::pixels(ICON_PX, scale);
         match icon.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
             Some(handle) => {
-                fill_rounded(f, layout.tile, TILE_RADIUS, FILL);
+                fill_rounded(f, layout.tile, TILE_RADIUS, FILL.get());
                 let inset = (TILE - ICON_PX as f32) / 2.0;
                 let rect = Rectangle::new(
                     Point::new(layout.tile.x + inset, layout.tile.y + inset),
@@ -852,8 +860,22 @@ impl View {
             None => gear(f, layout.tile),
         }
         badge(f, layout.tile);
-        text(f, &layout.app, layout.app_at, APP, DIM, MANROPE_SEMIBOLD);
-        text(f, w.title(), layout.title_at, TITLE, TEXT, MANROPE_BOLD);
+        text(
+            f,
+            &layout.app,
+            layout.app_at,
+            APP,
+            DIM.get(),
+            MANROPE_SEMIBOLD,
+        );
+        text(
+            f,
+            w.title(),
+            layout.title_at,
+            TITLE,
+            TEXT.get(),
+            MANROPE_BOLD,
+        );
         said.push(w.name(&layout.app));
         // The message.
         for (i, line) in layout.message.iter().enumerate() {
@@ -864,7 +886,7 @@ impl View {
                     line.clone(),
                     Point::new(LEFT, middle),
                     MESSAGE,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 )
             });
@@ -886,7 +908,7 @@ impl View {
                 &name,
                 Point::new(x, top + NAME * LINE / 2.0),
                 NAME,
-                TEXT,
+                TEXT.get(),
                 MANROPE_BOLD,
             );
             text(
@@ -894,7 +916,7 @@ impl View {
                 w.administrator(),
                 Point::new(x, top + NAME * LINE + ROLE * LINE / 2.0),
                 ROLE,
-                FAINT,
+                FAINT.get(),
                 MANROPE,
             );
             said.push(name);
@@ -902,13 +924,18 @@ impl View {
         }
         if let Some(change) = layout.change {
             let lit = dialog.hover == Some(Target::Change) && !checking;
-            fill_rounded(f, change, CHANGE_RADIUS, if lit { HOVER } else { FILL });
+            fill_rounded(
+                f,
+                change,
+                CHANGE_RADIUS,
+                if lit { HOVER.get() } else { FILL.get() },
+            );
             text(
                 f,
                 w.change(),
                 Point::new(change.x + CHANGE_PAD, change.center_y()),
                 CHANGE_TEXT,
-                DIM,
+                DIM.get(),
                 MANROPE_SEMIBOLD,
             );
             chevron(
@@ -923,7 +950,7 @@ impl View {
                 } else {
                     std::f32::consts::FRAC_PI_2
                 },
-                DIM,
+                DIM.get(),
                 2.2,
             );
             if dialog.focus == Target::Change {
@@ -932,8 +959,8 @@ impl View {
             said.push(format!("[{}]", w.change()));
         }
         if let Some(list) = layout.list {
-            fill_rounded(f, list, LIST_RADIUS, LIST_FILL);
-            rim(f, list, LIST_RADIUS, LIST_RIM, BORDER);
+            fill_rounded(f, list, LIST_RADIUS, LIST_FILL.get());
+            rim(f, list, LIST_RADIUS, LIST_RIM.get(), BORDER);
             for (i, (row, account)) in layout
                 .people
                 .iter()
@@ -943,14 +970,19 @@ impl View {
                 let on = i == dialog.request.chosen;
                 let lit = dialog.hover == Some(Target::Account(i));
                 if on || lit {
-                    fill_rounded(f, *row, PERSON_RADIUS, if lit { HOVER } else { FILL });
+                    fill_rounded(
+                        f,
+                        *row,
+                        PERSON_RADIUS,
+                        if lit { HOVER.get() } else { FILL.get() },
+                    );
                 }
                 text(
                     f,
                     &account.name,
                     Point::new(row.x + PERSON_PAD, row.center_y()),
                     PERSON_TEXT,
-                    TEXT,
+                    TEXT.get(),
                     MANROPE_SEMIBOLD,
                 );
                 if on {
@@ -984,14 +1016,14 @@ impl View {
             Point::new(layout.field.x + shake, layout.field.y),
             layout.field.size(),
         );
-        fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL);
+        fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL.get());
         let wrong = dialog.wrong_note;
         let border = match dialog.phase {
             Phase::Checking => FIELD_CHECKING,
             Phase::Typing if wrong => FIELD_WRONG,
             Phase::Typing => FIELD_ON,
         };
-        rim(f, field, FIELD_RADIUS, border, BORDER);
+        rim(f, field, FIELD_RADIUS, border.get(), BORDER);
         let middle = field.center_y();
         let left = field.x + FIELD_LEFT;
         let caps_shown = caps && dialog.phase == Phase::Typing;
@@ -1005,7 +1037,7 @@ impl View {
                 w.password(),
                 Point::new(left + 3.0, middle),
                 FIELD_TEXT,
-                FAINT,
+                FAINT.get(),
                 MANROPE,
             );
         } else {
@@ -1014,13 +1046,17 @@ impl View {
             for i in 0..typed {
                 let centre = Point::new(x + DOT_ADVANCE * (i as f32 + 0.5), middle);
                 if centre.x > left - DOT {
-                    f.fill(&Path::circle(centre, DOT), TEXT);
+                    f.fill(&Path::circle(centre, DOT), TEXT.get());
                 }
             }
         }
         if dialog.focus == Target::Field && !checking {
             let x = left + (typed as f32 * DOT_ADVANCE).min(room - 2.0);
-            f.fill_rectangle(Point::new(x, middle - 9.0), Size::new(1.0, 18.0), TEXT);
+            f.fill_rectangle(
+                Point::new(x, middle - 9.0),
+                Size::new(1.0, 18.0),
+                TEXT.get(),
+            );
         }
         if caps_shown {
             let sign = Rectangle::new(
@@ -1030,7 +1066,7 @@ impl View {
                 ),
                 Size::new(CAPS, CAPS),
             );
-            fill_rounded(f, sign, CAPS_RADIUS, AMBER_FILL);
+            fill_rounded(f, sign, CAPS_RADIUS, AMBER_FILL.get());
             caps_arrow(f, Point::new(sign.x + 4.0, sign.y + 4.0));
             said.push("[caps]".to_owned());
         }
@@ -1060,7 +1096,7 @@ impl View {
         // Details.
         let lit = dialog.hover == Some(Target::Details);
         if lit {
-            fill_rounded(f, layout.details, DETAILS_RADIUS, FILL);
+            fill_rounded(f, layout.details, DETAILS_RADIUS, FILL.get());
         }
         let turned = dialog.turned.map_or(1.0, |t| {
             if self.motion {
@@ -1078,7 +1114,7 @@ impl View {
             ),
             DETAILS_CHEVRON,
             turn * std::f32::consts::FRAC_PI_2,
-            DIM,
+            DIM.get(),
             2.4,
         );
         text(
@@ -1089,7 +1125,7 @@ impl View {
                 layout.details.center_y(),
             ),
             DETAILS_TEXT,
-            DIM,
+            DIM.get(),
             MANROPE_SEMIBOLD,
         );
         if dialog.focus == Target::Details {
@@ -1101,14 +1137,14 @@ impl View {
             w.details()
         ));
         if let Some(rect) = layout.facts_box {
-            fill_rounded(f, rect, FACTS_RADIUS, LIST_FILL);
+            fill_rounded(f, rect, FACTS_RADIUS, LIST_FILL.get());
             for fact in &layout.facts {
                 text(
                     f,
                     fact.label,
                     Point::new(LEFT + FACTS_PAD_X, fact.top + VALUE * VALUE_LINE / 2.0),
                     LABEL,
-                    FAINT,
+                    FAINT.get(),
                     MANROPE,
                 );
                 for (i, line) in fact.lines.iter().enumerate() {
@@ -1121,7 +1157,7 @@ impl View {
                                 line.clone(),
                                 Point::new(LEFT + FACTS_PAD_X + LABEL_COLUMN + LABEL_GAP, middle),
                                 VALUE,
-                                VALUE_INK,
+                                VALUE_INK.get(),
                                 Alignment::Left,
                             ),
                         )
@@ -1138,7 +1174,7 @@ impl View {
                 &layout.waiting,
                 Point::new(LEFT, footer_middle),
                 WAITING,
-                FAINT,
+                FAINT.get(),
                 MANROPE,
             );
             said.push(layout.waiting.clone());
@@ -1148,14 +1184,14 @@ impl View {
             f,
             layout.cancel,
             BUTTON_RADIUS,
-            if lit { HOVER } else { FILL },
+            if lit { HOVER.get() } else { FILL.get() },
         );
         centred(
             f,
             w.cancel(),
             layout.cancel.center(),
             BUTTON_TEXT,
-            TEXT,
+            TEXT.get(),
             MANROPE_SEMIBOLD,
         );
         if dialog.focus == Target::Cancel {
@@ -1169,13 +1205,19 @@ impl View {
         } else {
             (READY_OFF, FAINT)
         };
-        fill_rounded(f, layout.authorize, BUTTON_RADIUS, fill);
+        fill_rounded(f, layout.authorize, BUTTON_RADIUS, fill.get());
         let mut word_x = layout.authorize.x + BUTTON_PAD;
         if checking {
             let c = Point::new(word_x + SPINNER / 2.0, footer_middle);
             f.stroke(
                 &Path::circle(c, SPINNER / 2.0 - 1.0),
-                stroke(2.0, Color { a: 0.22, ..TEXT }),
+                stroke(
+                    2.0,
+                    Color {
+                        a: 0.22,
+                        ..TEXT.get()
+                    },
+                ),
             );
             let arc = Path::new(|b| {
                 b.arc(canvas::path::Arc {
@@ -1185,7 +1227,7 @@ impl View {
                     end_angle: Radians(0.0),
                 });
             });
-            f.stroke(&arc, stroke(2.0, TEXT));
+            f.stroke(&arc, stroke(2.0, TEXT.get()));
             word_x += SPINNER + 8.0;
         }
         text(
@@ -1193,7 +1235,7 @@ impl View {
             w.authorize(),
             Point::new(word_x, footer_middle),
             BUTTON_TEXT,
-            ink,
+            ink.get(),
             MANROPE_BOLD,
         );
         if dialog.focus == Target::Authorize {

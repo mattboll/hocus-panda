@@ -53,6 +53,7 @@ use super::{
         Widths, rounded, text,
     },
 };
+use crate::theme::Ink;
 use crate::{
     levels::{
         draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring, stroke},
@@ -102,11 +103,11 @@ const DOT_ADVANCE: f32 = 8.0;
 /// A notch of a mouse's wheel scrolls two rows.
 const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
 
-const PORTAL_FILL: Color = Color::from_rgba8(229, 121, 63, 0.18);
-const PORTAL_HOVER: Color = Color::from_rgba8(229, 121, 63, 0.26);
-const ORANGE: Color = rgb(0xF2945B);
-const FIELD_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.16);
-const INK: Color = rgb(0x0B1020);
+const PORTAL_FILL: Ink = Ink::Dark(Color::from_rgba8(229, 121, 63, 0.18));
+const PORTAL_HOVER: Ink = Ink::Dark(Color::from_rgba8(229, 121, 63, 0.26));
+const ORANGE: Ink = Ink::Dark(rgb(0xF2945B));
+const FIELD_BORDER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
+const INK: Ink = Ink::Dark(rgb(0x0B1020));
 
 // --- What the popover keeps while it is open -----------------------------------
 
@@ -1162,12 +1163,12 @@ impl Drawn<'_> {
         let network = &self.state.network;
         if let Some(top) = self.layout.wired {
             let middle = top + WIRED / 2.0;
-            ethernet(f, Point::new(LEFT, middle - ICON / 2.0), ICON, DIM);
+            ethernet(f, Point::new(LEFT, middle - ICON / 2.0), ICON, DIM.get());
             f.fill_text(text(
                 words.by_cable().to_owned(),
                 Point::new(LEFT + ICON + ICON_GAP, middle),
                 NOTE,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ));
         }
@@ -1189,14 +1190,14 @@ impl Drawn<'_> {
             } else {
                 PORTAL_FILL
             };
-            f.fill(&rounded(rect, ROW_RADIUS), fill);
+            f.fill(&rounded(rect, ROW_RADIUS), fill.get());
             f.fill_text(kit::text_in(
                 MANROPE_SEMIBOLD,
                 text(
                     words.open_sign_in().to_owned(),
                     rect.center(),
                     PORTAL_TEXT,
-                    PEACH,
+                    PEACH.get(),
                     Alignment::Center,
                 ),
             ));
@@ -1231,7 +1232,7 @@ impl Drawn<'_> {
             Point::new(LEFT, middle - ICON / 2.0),
             ICON,
             current.bars(),
-            ACCENT,
+            ACCENT.get(),
             false,
             1.0,
         );
@@ -1252,7 +1253,7 @@ impl Drawn<'_> {
                 line,
                 Point::new(x, first + i as f32 * STATUS * LINE),
                 STATUS,
-                colour,
+                colour.get(),
                 Alignment::Left,
             ));
         }
@@ -1280,7 +1281,7 @@ impl Drawn<'_> {
             let colour = if enterprise { FAINT } else { TEXT };
             let middle = rect.center_y();
             let icon = Point::new(rect.x + ROW_PAD, middle - ICON / 2.0);
-            wifi(f, icon, ICON, row.bars(), colour, false, 1.0);
+            wifi(f, icon, ICON, row.bars(), colour.get(), false, 1.0);
             let mut right = rect.x + rect.width - ROW_PAD;
             if row.security.locked() {
                 lock(f, Point::new(right - LOCK, middle - LOCK / 2.0));
@@ -1299,7 +1300,7 @@ impl Drawn<'_> {
                     name,
                     Point::new(x, middle),
                     ROW_TEXT,
-                    colour,
+                    colour.get(),
                     Alignment::Left,
                 ),
             );
@@ -1322,7 +1323,7 @@ impl Drawn<'_> {
             FIELD_BORDER
         };
         let field = form.field;
-        f.fill(&rounded(field, ROW_RADIUS), FILL);
+        f.fill(&rounded(field, ROW_RADIUS), FILL.get());
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(field.x + 0.5, field.y + 0.5),
@@ -1330,7 +1331,7 @@ impl Drawn<'_> {
                 7.5.into(),
             ),
             canvas::Stroke {
-                style: canvas::Style::Solid(border),
+                style: canvas::Style::Solid(border.get()),
                 width: 1.0,
                 ..canvas::Stroke::default()
             },
@@ -1338,7 +1339,7 @@ impl Drawn<'_> {
         eye(f, form.eye, self.ui.shown);
         if let (Some(top), Some(error)) = (form.error, error) {
             let lines = error_lines(error);
-            for said in kit::lines(&lines, (field.x, top), ERROR, LINE, PEACH) {
+            for said in kit::lines(&lines, (field.x, top), ERROR, LINE, PEACH.get()) {
                 self.clip().fill(f, said);
             }
         }
@@ -1354,7 +1355,7 @@ impl Drawn<'_> {
                 words.cancel().to_owned(),
                 cancel.center(),
                 BUTTON_TEXT,
-                if hover { TEXT } else { DIM },
+                if hover { TEXT.get() } else { DIM.get() },
                 Alignment::Center,
             ),
         );
@@ -1374,7 +1375,7 @@ impl Drawn<'_> {
             .to_owned(),
             join.center(),
             BUTTON_TEXT,
-            if ready { INK } else { FAINT },
+            if ready { INK.get() } else { FAINT.get() },
             Alignment::Center,
         );
         self.clip().fill(f, kit::text_in(MANROPE_BOLD, label));
@@ -1396,12 +1397,16 @@ impl Drawn<'_> {
                     self.words().password().to_owned(),
                     Point::new(left, middle),
                     FIELD_TEXT,
-                    FAINT,
+                    FAINT.get(),
                     Alignment::Left,
                 ),
             );
             if caret {
-                f.fill_rectangle(Point::new(left, middle - 8.0), Size::new(1.0, 16.0), TEXT);
+                f.fill_rectangle(
+                    Point::new(left, middle - 8.0),
+                    Size::new(1.0, 16.0),
+                    TEXT.get(),
+                );
             }
             return;
         }
@@ -1419,21 +1424,21 @@ impl Drawn<'_> {
                     password.as_str().to_owned(),
                     Point::new(x, middle),
                     FIELD_TEXT,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ),
             );
         } else {
             for i in 0..password.chars() {
                 let centre = Point::new(x + DOT_ADVANCE * (i as f32 + 0.5), middle);
-                f.fill(&Path::circle(centre, DOT), TEXT);
+                f.fill(&Path::circle(centre, DOT), TEXT.get());
             }
         }
         if caret {
             f.fill_rectangle(
                 Point::new(x + width + 1.0, middle - 8.0),
                 Size::new(1.0, 16.0),
-                TEXT,
+                TEXT.get(),
             );
         }
     }
@@ -1461,7 +1466,7 @@ impl Drawn<'_> {
 fn lock(f: &mut Frame, at: Point) {
     let s = LOCK / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let line = stroke(2.2 * s, FAINT);
+    let line = stroke(2.2 * s, FAINT.get());
     f.stroke(
         &Path::rounded_rectangle(
             p(5.0, 11.0),
@@ -1494,7 +1499,7 @@ fn eye(f: &mut Frame, button: Rectangle, shown: bool) {
         button.center_y() - EYE_ICON / 2.0,
     );
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let line = stroke(2.0 * s, DIM);
+    let line = stroke(2.0 * s, DIM.get());
     let almond = Path::new(|b| {
         b.move_to(p(2.0, 12.0));
         b.bezier_curve_to(p(2.0, 12.0), p(5.6, 5.0), p(12.0, 5.0));
@@ -1534,7 +1539,7 @@ fn row_aside(
     };
     Some(Aside {
         text,
-        colour,
+        colour: colour.get(),
         spinner,
     })
 }

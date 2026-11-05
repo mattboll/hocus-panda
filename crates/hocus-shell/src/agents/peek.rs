@@ -38,6 +38,7 @@ use iced::{
 };
 
 use super::{Words, now_us};
+use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
     levels::draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, pointer, rgb},
@@ -61,14 +62,14 @@ const RADIUS: f32 = 12.0;
 /// beside the bar.
 const NAME_ROOM: f32 = 280.0;
 /// `rgba(30,26,18,0.92)`, and under the pointer `rgba(40,32,18,0.96)`.
-const BUBBLE: Color = Color::from_rgba8(30, 26, 18, 0.92);
-const BUBBLE_HOVER: Color = Color::from_rgba8(40, 32, 18, 0.96);
+const BUBBLE: Ink = Ink::Dark(Color::from_rgba8(30, 26, 18, 0.92));
+const BUBBLE_HOVER: Ink = Ink::Dark(Color::from_rgba8(40, 32, 18, 0.96));
 /// Its border, the state's colour at 45 %: amber waiting, green finished.
-const BORDER_WAITING: Color = Color::from_rgba8(245, 180, 74, 0.45);
-const BORDER_DONE: Color = Color::from_rgba8(108, 194, 135, 0.45);
+const BORDER_WAITING: Ink = Ink::Dark(Color::from_rgba8(245, 180, 74, 0.45));
+const BORDER_DONE: Ink = Ink::Accent(0.45);
 /// The word after the name, in the rows' colours.
-const WORD_WAITING: Color = rgb(0xF5C46E);
-const WORD_DONE: Color = rgb(0x7EE0A0);
+const WORD_WAITING: Ink = Ink::Dark(rgb(0xF5C46E));
+const WORD_DONE: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The bubble's `box-shadow: 0 10px 30px rgba(0,0,0,0.35)` and the
 /// panda's `drop-shadow(0 8px 16px rgba(0,0,0,0.4))`: their offset, their
 /// deviation (half the CSS blur), their alpha.
@@ -171,14 +172,14 @@ pub fn said(
     let mut pieces = Vec::new();
     let mut x = PAD_X + BORDER;
     let name_width = measure(&name, MANROPE_BOLD);
-    pieces.push((name, x, TEXT, MANROPE_BOLD));
+    pieces.push((name, x, TEXT.get(), MANROPE_BOLD));
     x += name_width + space;
-    pieces.push((word.to_owned(), x, colour, MANROPE));
+    pieces.push((word.to_owned(), x, colour.get(), MANROPE));
     x += measure(word, MANROPE);
     if kind == PeekKind::Waiting {
         let since = words.since(minutes, false);
         x += space;
-        pieces.push((since.clone(), x, FAINT, MANROPE));
+        pieces.push((since.clone(), x, FAINT.get(), MANROPE));
         x += measure(&since, MANROPE);
     }
     Said {
@@ -538,16 +539,16 @@ impl<Message> canvas::Program<Message> for View {
             // No alpha: one opaque card, the bubble's, round both; the
             // compositor cuts its corners.
             let card = Rectangle::new(Point::ORIGIN, size);
-            let fill = over(fill, Color::BLACK);
+            let fill = over(fill.get(), Color::BLACK);
             f.fill_rectangle(Point::ORIGIN, size, fill);
-            stroke(&mut f, card, over(border, fill));
+            stroke(&mut f, card, over(border.get(), fill));
         } else {
             f.draw_svg(
                 Rectangle::new(Point::ORIGIN, size),
                 svg::Svg::new(bubble_shadow(size, placed.bubble)),
             );
-            f.fill(&kit::rounded(placed.bubble, RADIUS), fill);
-            stroke(&mut f, placed.bubble, border);
+            f.fill(&kit::rounded(placed.bubble, RADIUS), fill.get());
+            stroke(&mut f, placed.bubble, border.get());
         }
         let middle = placed.bubble.center_y();
         for (text, x, colour, font) in &said.pieces {
@@ -637,8 +638,8 @@ mod tests {
         let texts: Vec<&str> = waiting.pieces.iter().map(|p| p.0.as_str()).collect();
         assert_eq!(texts, ["site-web", "t'attend", "· à l'instant"]);
         assert_eq!(waiting.pieces[0].3, MANROPE_BOLD);
-        assert_eq!(waiting.pieces[1].2, WORD_WAITING);
-        assert_eq!(waiting.pieces[2].2, FAINT);
+        assert_eq!(waiting.pieces[1].2, WORD_WAITING.get());
+        assert_eq!(waiting.pieces[2].2, FAINT.get());
         // 13 px in, a space between the pieces, 13 px after the last.
         assert_eq!(waiting.pieces[0].1, 13.0);
         assert_eq!(waiting.pieces[1].1, 13.0 + 64.0 + 4.0);
@@ -650,7 +651,7 @@ mod tests {
         let done = said(fr, PeekKind::Done, "api-paiements", 3, measure);
         let texts: Vec<&str> = done.pieces.iter().map(|p| p.0.as_str()).collect();
         assert_eq!(texts, ["api-paiements", "a fini"]);
-        assert_eq!(done.pieces[1].2, WORD_DONE);
+        assert_eq!(done.pieces[1].2, WORD_DONE.get());
         let en = Words::new(Lang::English);
         let texts = |s: Said| s.pieces.into_iter().map(|p| p.0).collect::<Vec<_>>();
         assert_eq!(

@@ -387,6 +387,8 @@ impl State {
             flushing: None,
         });
         self.tell_shell(self.bar_look());
+        self.tell_shell(ToShell::Theme(self.config.appearance.theme_choice()));
+        self.tell_shell(ToShell::Locale(self.config.locale));
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
         self.tell_shell(ToShell::BarWindows(self.config.panel.windows));
         let bars: Vec<ToShell> = self

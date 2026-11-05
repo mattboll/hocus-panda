@@ -277,7 +277,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.title().to_owned(),
                 Point::new(LEFT, middle),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -286,7 +286,7 @@ impl<Message> canvas::Program<Message> for Panel {
             state.lines.open().to_string(),
             Point::new(LEFT + title_width + COUNT_GAP, middle),
             COUNT,
-            DIM,
+            DIM.get(),
             Alignment::Left,
         ));
         let add = add_rect();
@@ -310,7 +310,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.nothing().to_owned(),
                 Point::new(LEFT, middle),
                 LINE_TEXT,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ));
         }
@@ -358,7 +358,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 said.clone(),
                 Point::new(LEFT, *middle),
                 MORE_TEXT,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ));
         }

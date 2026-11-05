@@ -37,6 +37,8 @@ use iced::{
     window,
 };
 
+use crate::theme::Ink;
+
 use self::{
     motion::{Pivot, Pose},
     time::{Lang, Shown, Wall},
@@ -57,8 +59,8 @@ pub const FONTS: [&[u8]; 5] = [
 const MANROPE: Font = Font::with_name("Manrope");
 
 /// `text.dim` and `text.faint` (bar.md §13): the date and the seconds.
-const DIM: Color = Color::from_rgb8(0xA9, 0xB2, 0xC2);
-const FAINT: Color = Color::from_rgb8(0x8C, 0x96, 0xA8);
+const DIM: Ink = Ink::Dark(Color::from_rgb8(0xA9, 0xB2, 0xC2));
+const FAINT: Ink = Ink::Dark(Color::from_rgb8(0x8C, 0x96, 0xA8));
 
 /// The clock's surface starts this far below the bar's top: the mini
 /// form's padding (§5). The full form's 14 px are 2 px further, inside.
@@ -255,6 +257,16 @@ impl<Message> canvas::Program<Message> for Clock {
         state.motion = state
             .motion
             .after(state.shown.as_ref(), &shown, now, transition);
+        if state.shown.as_ref().is_none_or(|before| {
+            (before.hm, before.half, &before.date) != (shown.hm, shown.half, &shown.date)
+        }) {
+            tracing::debug!(
+                bar = self.bar,
+                time = shown.time(),
+                date = shown.date,
+                "the clock shows"
+            );
+        }
         // The agents' minutes go on with the clock's (4.1).
         if state
             .shown
@@ -347,7 +359,15 @@ impl Clock {
         let small = state.measure(self.style.light(), SECONDS, SECONDS);
         let cells = cells(&shown.hm, big.zero);
         let mut width: f32 = cells.iter().sum();
-        if self.style.seconds {
+        // Over 12 hours, AM or PM in the seconds' place.
+        let aside: Option<[char; 2]> = match shown.half {
+            Some(half) => {
+                let mut two = half.chars();
+                Some([two.next().unwrap_or(' '), two.next().unwrap_or(' ')])
+            }
+            None => self.style.seconds.then_some(shown.ss),
+        };
+        if aside.is_some() {
             width += SECONDS_GAP + 2.0 * small.zero;
         }
         let mut x = centre - width / 2.0;
@@ -363,16 +383,16 @@ impl Clock {
             draw.digit(cell, glyph, ch, i);
             x += w;
         }
-        if self.style.seconds {
+        if let Some(aside) = aside {
             x += SECONDS_GAP;
             let top = FULL_TOP + big.baseline - small.baseline;
-            for ch in shown.ss {
+            for ch in aside {
                 let cell = Rectangle::new(Point::new(x, top), Size::new(small.zero, SECONDS));
                 let glyph = Glyph {
                     font: self.style.light(),
                     size: SECONDS,
                     line: SECONDS,
-                    colour: faded(FAINT, alpha),
+                    colour: faded(FAINT.get(), alpha),
                 };
                 draw.glyph(cell, glyph, ch, Pose::REST);
                 x += small.zero;
@@ -385,7 +405,7 @@ impl Clock {
                 content: shown.date.clone(),
                 position: Point::new(centre, top),
                 max_width: f32::INFINITY,
-                color: faded(DIM, alpha),
+                color: faded(DIM.get(), alpha),
                 size: Pixels(DATE),
                 line_height: LineHeight::Relative(DATE_LINE),
                 font: MANROPE,
@@ -427,7 +447,12 @@ impl Clock {
 
 /// The cells' widths of `HH:MM`.
 pub fn cells(hm: &[char; 5], zero: f32) -> [f32; 5] {
-    hm.map(|ch| if ch == ':' { COLON * zero } else { zero })
+    hm.map(|ch| match ch {
+        ':' => COLON * zero,
+        // Over 12 hours, an hour of one digit.
+        ' ' => 0.0,
+        _ => zero,
+    })
 }
 
 fn faded(colour: Color, alpha: f32) -> Color {
@@ -538,6 +563,7 @@ mod tests {
         Shown {
             hm: [c[0], c[1], c[2], c[3], c[4]],
             ss: ['0', '0'],
+            half: None,
             date: String::new(),
         }
     }

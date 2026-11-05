@@ -60,6 +60,7 @@ use super::{
     LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_RADIUS,
     MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
 };
+use crate::theme::Ink;
 use crate::{
     clock::motion::bezier,
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE_BOLD, SIDE, TEXT, faded, pointer, rgb, ring},
@@ -72,13 +73,13 @@ const MINI_SURFACE: u32 = 54;
 /// Around the group: the keyboard's ring, 2 px out and 3 px wide.
 const ROOM: f32 = 5.0;
 
-const CARD: Color = Color::from_rgba8(255, 255, 255, 0.05);
+const CARD: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 /// The rows' tints and words (4.1), and a row under the pointer.
 const WAITING: (Color, Color) = (rgb(0xF5C46E), Color::from_rgba8(245, 180, 74, 0.12));
 const STUCK: (Color, Color) = (rgb(0xF7A77A), Color::from_rgba8(242, 148, 91, 0.10));
 const TO_SEE: (Color, Color) = (rgb(0x7EE0A0), Color::from_rgba8(108, 194, 135, 0.10));
-const RESTING: Color = rgb(0x6A7384);
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
+const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 /// The pandas' drawings' box (their view box).
 const PANDA_BOX: (f32, f32) = (126.0, 120.5);
 /// A resting agent's panda, asleep.
@@ -92,24 +93,24 @@ const HOP: Duration = Duration::from_millis(650);
 const EASE_OUT: (f32, f32, f32, f32) = (0.0, 0.0, 0.58, 1.0);
 /// The hop's keyframes, as the mockup's: up 4 px, down, up 2 px, down.
 const HOP_KEYS: [(f32, f32); 5] = [(0.0, 0.0), (0.3, -4.0), (0.6, 0.0), (0.8, -2.0), (1.0, 0.0)];
-const PLUG: Color = Color::from_rgba8(108, 194, 135, 0.18);
-const PLUG_HOVER: Color = Color::from_rgba8(108, 194, 135, 0.28);
+const PLUG: Ink = Ink::Accent(0.18);
+const PLUG_HOVER: Ink = Ink::Accent(0.28);
 /// The secretary's row (4.6): lit amber at 8 % when someone waits, orange
 /// at 7 % when an agent is stuck; `0.08` while her briefing is open.
-const SECRETARY_WAITING: Color = Color::from_rgba8(245, 180, 74, 0.08);
-const SECRETARY_STUCK: Color = Color::from_rgba8(242, 148, 91, 0.07);
-const ROW_OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const SECRETARY_WAITING: Ink = Ink::Dark(Color::from_rgba8(245, 180, 74, 0.08));
+const SECRETARY_STUCK: Ink = Ink::Dark(Color::from_rgba8(242, 148, 91, 0.07));
+const ROW_OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 /// Her line's colours: `text.dim` calm, then the rows' words'.
-const SAYS_WAITING: Color = rgb(0xF5C46E);
-const SAYS_STUCK: Color = rgb(0xF7A77A);
+const SAYS_WAITING: Ink = Ink::Dark(rgb(0xF5C46E));
+const SAYS_STUCK: Ink = Ink::Dark(rgb(0xF7A77A));
 /// The mini item (4.7): its badge's ring, 2 px in the bar's colour, and its
 /// number's ink; "au travail" under how many work.
 const BADGE_RING: f32 = 2.0;
-const BADGE_RING_COLOUR: Color = Color::from_rgba8(14, 17, 28, 0.95);
-const BADGE_INK: Color = rgb(0x1C1406);
-const AT_WORK: Color = rgb(0x7C8698);
+const BADGE_RING_COLOUR: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.95));
+const BADGE_INK: Ink = Ink::Fixed(rgb(0x1C1406));
+const AT_WORK: Ink = Ink::Dark(rgb(0x7C8698));
 /// Her ear's amber, its rings' colour.
-const EAR_WAITING: Color = rgb(0xF5B44A);
+const EAR_WAITING: Ink = Ink::Fixed(rgb(0xF5B44A));
 /// When someone starts waiting, the mockup's keyframes in 1.2 s instead
 /// of its 3.2 s (#503), each scaled alike: two rings out of her ear
 /// (`hpRing`, 525 ms `ease-out`, twice: from 90 % to nothing, from 0.9 to
@@ -554,8 +555,8 @@ fn colours(look: Look) -> (Color, Color) {
         Look::Waiting => WAITING,
         Look::Stuck => STUCK,
         Look::ToSee => TO_SEE,
-        Look::Working => (FAINT, Color::TRANSPARENT),
-        Look::Resting => (RESTING, Color::TRANSPARENT),
+        Look::Working => (FAINT.get(), Color::TRANSPARENT),
+        Look::Resting => (RESTING.get(), Color::TRANSPARENT),
     }
 }
 
@@ -609,7 +610,7 @@ fn ear_rings(f: &mut Frame, head: Rectangle, share: f32, alpha: f32) {
         f.stroke(
             &ring,
             canvas::Stroke {
-                style: canvas::Style::Solid(faded(EAR_WAITING, shown * opacity)),
+                style: canvas::Style::Solid(faded(EAR_WAITING.get(), shown * opacity)),
                 width: RING_WIDTH * scale * unit,
                 line_cap: canvas::LineCap::Round,
                 ..canvas::Stroke::default()
@@ -1002,7 +1003,7 @@ impl Group {
             (false, false) => None,
         };
         if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit, alpha));
+            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
         }
         let now = state.now.unwrap_or_else(Instant::now);
         let (hop, rings) = state.radiating.map_or((0.0, None), |since| {
@@ -1030,7 +1031,7 @@ impl Group {
             );
             f.fill(
                 &kit::rounded(ringed, BADGE / 2.0 + BADGE_RING),
-                faded(BADGE_RING_COLOUR, alpha),
+                faded(BADGE_RING_COLOUR.get(), alpha),
             );
             f.fill(&kit::rounded(rect, BADGE / 2.0), faded(badge.colour, alpha));
             f.fill_text(kit::text_in(
@@ -1039,7 +1040,7 @@ impl Group {
                     &badge.text,
                     rect.center(),
                     BADGE_TEXT,
-                    faded(BADGE_INK, alpha),
+                    faded(BADGE_INK.get(), alpha),
                     Alignment::Center,
                 ),
             ));
@@ -1056,7 +1057,7 @@ impl Group {
                         text,
                         Point::new(x, o.y + middle),
                         MINI_TEXT,
-                        faded(colour, alpha),
+                        faded(colour.get(), alpha),
                         Alignment::Center,
                     ),
                 ));
@@ -1065,13 +1066,19 @@ impl Group {
     }
 
     fn group(&self, f: &mut Frame, layout: &Layout, o: Point, hover: Option<Item>, alpha: f32) {
-        let lit = |item: Item, normal: Color| if hover == Some(item) { TEXT } else { normal };
+        let lit = |item: Item, normal: Color| {
+            if hover == Some(item) {
+                TEXT.get()
+            } else {
+                normal
+            }
+        };
         if let Some(card) = &layout.card {
             let rect = Rectangle::new(
                 Point::new(o.x + card.rect.x, o.y + card.rect.y),
                 card.rect.size(),
             );
-            f.fill(&kit::rounded(rect, CARD_RADIUS), faded(CARD, alpha));
+            f.fill(&kit::rounded(rect, CARD_RADIUS), faded(CARD.get(), alpha));
             let left = rect.x + 10.0;
             for (i, line) in card.intro.iter().enumerate() {
                 let mut text = said(
@@ -1081,7 +1088,7 @@ impl Group {
                         o.y + card.intro_top + (i as f32 + 0.5) * INTRO * INTRO_LINE,
                     ),
                     INTRO,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 );
                 text.line_height = iced::widget::text::LineHeight::Relative(INTRO_LINE);
@@ -1103,7 +1110,7 @@ impl Group {
                         line,
                         Point::new(left + MARK + MARK_GAP, first + i as f32 * NAME * LINE),
                         NAME,
-                        faded(TEXT, alpha),
+                        faded(TEXT.get(), alpha),
                         Alignment::Left,
                     ));
                 }
@@ -1116,14 +1123,17 @@ impl Group {
                 } else {
                     PLUG
                 };
-                f.fill(&kit::rounded(button, BUTTON / 2.0), faded(fill, alpha));
+                f.fill(
+                    &kit::rounded(button, BUTTON / 2.0),
+                    faded(fill.get(), alpha),
+                );
                 f.fill_text(kit::text_in(
                     MANROPE_BOLD,
                     said(
                         self.words.plug(),
                         button.center(),
                         BUTTON_TEXT,
-                        faded(ACCENT, alpha),
+                        faded(ACCENT.get(), alpha),
                         Alignment::Center,
                     ),
                 ));
@@ -1136,7 +1146,7 @@ impl Group {
                     word,
                     Point::new(o.x + rect.x, o.y + rect.center_y()),
                     LINK,
-                    faded(lit(item, FAINT), alpha),
+                    faded(lit(item, FAINT.get()), alpha),
                     Alignment::Left,
                 ));
             }
@@ -1146,14 +1156,14 @@ impl Group {
                 self.words.no_agent(),
                 Point::new(o.x, o.y + first),
                 IDLE,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
             f.fill_text(said(
                 followed,
                 Point::new(o.x, o.y + second),
                 FOLLOWED,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
         }
@@ -1168,9 +1178,9 @@ impl Group {
             layout.secretary.size(),
         );
         let (tint, says) = match layout.mood {
-            Mood::Calm => (Color::TRANSPARENT, DIM),
-            Mood::Waiting => (SECRETARY_WAITING, SAYS_WAITING),
-            Mood::Stuck => (SECRETARY_STUCK, SAYS_STUCK),
+            Mood::Calm => (Color::TRANSPARENT, DIM.get()),
+            Mood::Waiting => (SECRETARY_WAITING.get(), SAYS_WAITING.get()),
+            Mood::Stuck => (SECRETARY_STUCK.get(), SAYS_STUCK.get()),
         };
         if tint.a > 0.0 {
             f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(tint, alpha));
@@ -1182,7 +1192,7 @@ impl Group {
             (false, false) => None,
         };
         if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(lit, alpha));
+            f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(lit.get(), alpha));
         }
         let now = state.now.unwrap_or_else(Instant::now);
         let (hop, rings) = state.radiating.map_or((0.0, None), |since| {
@@ -1206,7 +1216,7 @@ impl Group {
                     &ch.to_string(),
                     Point::new(x + at - kit::LEFT, o.y + layout.label_middle),
                     LABEL,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -1218,7 +1228,7 @@ impl Group {
                     total,
                     Point::new(o.x + at, o.y + layout.label_middle),
                     LABEL,
-                    faded(FAINT, alpha),
+                    faded(FAINT.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -1255,7 +1265,10 @@ impl Group {
                 f.fill(&kit::rounded(rect, ROW_RADIUS), faded(tint, shown));
             }
             if state.hover == Some(Item::Agent(row.id)) {
-                f.fill(&kit::rounded(rect, ROW_RADIUS), faded(ROW_HOVER, shown));
+                f.fill(
+                    &kit::rounded(rect, ROW_RADIUS),
+                    faded(ROW_HOVER.get(), shown),
+                );
             }
             let middle = rect.center_y();
             let asleep = if row.look == Look::Resting {
@@ -1280,7 +1293,7 @@ impl Group {
                     &row.name,
                     Point::new(rect.x + ROW_PAD + PANDA + PANDA_GAP, middle),
                     AGENT_NAME,
-                    faded(TEXT, shown),
+                    faded(TEXT.get(), shown),
                     Alignment::Left,
                 ),
             ));
@@ -1297,7 +1310,7 @@ impl Group {
                 more,
                 Point::new(o.x, o.y + middle),
                 MORE_TEXT,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
         }
@@ -1384,7 +1397,7 @@ pub fn mark(
             letter,
             rect.center(),
             letter_size,
-            faded(MARK_INK, alpha),
+            faded(MARK_INK.get(), alpha),
             Alignment::Center,
         ),
     ));

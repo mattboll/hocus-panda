@@ -166,7 +166,7 @@ fn draw(f: &mut Frame, pill: &Pill, words: Words, glass: bool, now: Instant) {
             words.locking_in(seconds),
             Point::new(x, y),
             TITLE,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ),
     ));
@@ -176,7 +176,7 @@ fn draw(f: &mut Frame, pill: &Pill, words: Words, glass: bool, now: Instant) {
             words.stay().to_owned(),
             Point::new(x, y + TITLE * LINE + LINE_GAP),
             HINT,
-            DIM,
+            DIM.get(),
             Alignment::Left,
         ),
     ));

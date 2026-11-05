@@ -2,6 +2,7 @@
 //! ENTRÉE, each its devices' card (one row each, the one in use ticked)
 //! and the chosen device's card; then APPLICATIONS.
 
+use crate::theme::Ink;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
@@ -25,12 +26,12 @@ use crate::{
 };
 
 /// The page's colours (bar.md §13's sound gauge, the mockup's).
-const GAUGE_FROM: Color = rgb(0x5B8DEF);
-const AMBER: Color = rgb(0xF5B44A);
+const GAUGE_FROM: Ink = Ink::Dark(rgb(0x5B8DEF));
+const AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
 /// The microphone's, as the in-use sign's (5.12).
-const MIC: Color = rgb(0xF5A35B);
-const CHECK: Color = rgb(0x6CC287);
-const MUTED_FILL: Color = rgba(169, 178, 194, 0.45);
+const MIC: Ink = Ink::Dark(rgb(0xF5A35B));
+const CHECK: Ink = Ink::Accent(1.0);
+const MUTED_FILL: Ink = Ink::Dark(rgba(169, 178, 194, 0.45));
 
 /// The page's glyphs: the mockup's 24 px stroke paths.
 const SPEAKER: &str = "M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9 A4 4 0 0 1 15.5 15 M18 6.5 A7.5 7.5 0 0 1 18 17.5";
@@ -93,11 +94,11 @@ fn kind_glyph(kind: Kind) -> &'static str {
 /// The 32 px tile of a device: blue for the one in use.
 fn tile<'a>(path: &'static str, on: bool) -> El<'a> {
     let (fill, ink) = if on {
-        (rgba(143, 179, 255, 0.16), BLUE)
+        (crate::theme::ink(rgba(143, 179, 255, 0.16)), BLUE)
     } else {
-        (rgba(255, 255, 255, 0.06), DIM)
+        (crate::theme::ink(rgba(255, 255, 255, 0.06)), DIM)
     };
-    container(draw(path, 18.0, ink, 1.8))
+    container(draw(path, 18.0, ink.get(), 1.8))
         .width(32)
         .height(32)
         .center(32)
@@ -144,8 +145,10 @@ fn plain_row<'a>(
 /// A row lit after a search, as 6.1's.
 fn lit_style(lit: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: (lit > 0.0).then_some(Background::Color(rgba(108, 194, 135, 0.20 * lit))),
-        border: border(11.0, 1.5, rgba(108, 194, 135, 0.85 * lit)),
+        background: (lit > 0.0).then_some(Background::Color(
+            crate::theme::Ink::Accent(0.20 * lit).get(),
+        )),
+        border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
         ..container::Style::default()
     }
 }
@@ -153,9 +156,9 @@ fn lit_style(lit: f32) -> impl Fn(&Theme) -> container::Style {
 /// A line under a name, in `text.dim`, its end in `MIC` when it says a
 /// recording.
 fn sub_line<'a>(said: String, recording: Option<String>) -> El<'a> {
-    let mut line = row![t(said, 12.5, DIM)];
+    let mut line = row![t(said, 12.5, DIM.get())];
     if let Some(recording) = recording {
-        line = line.push(t(recording, 12.5, MIC));
+        line = line.push(t(recording, 12.5, MIC.get()));
     }
     line.into()
 }
@@ -171,7 +174,7 @@ impl App {
                         t(
                             w("PipeWire ne répond pas", "PipeWire does not answer").get(lang),
                             14.0,
-                            TEXT
+                            TEXT.get()
                         )
                         .font(SEMIBOLD),
                         t(
@@ -181,7 +184,7 @@ impl App {
                             )
                             .get(lang),
                             12.5,
-                            DIM,
+                            DIM.get(),
                         ),
                     ]
                     .spacing(4),
@@ -383,9 +386,9 @@ impl App {
             let only = profiles.len() <= 1;
             let line = current
                 .and_then(|p| model::profile_line(&p.name, only))
-                .map(|l| t(l.get(lang), 12.5, DIM).into());
+                .map(|l| t(l.get(lang), 12.5, DIM.get()).into());
             let control: El<'_> = if only {
-                t(name, 13.5, DIM).into()
+                t(name, 13.5, DIM.get()).into()
             } else {
                 self.menu_button(
                     name,
@@ -430,7 +433,7 @@ impl App {
             true,
             plain_row(
                 w("Balance", "Balance").get(lang).to_owned(),
-                Some(t(line.get(lang), 12.5, DIM).into()),
+                Some(t(line.get(lang), 12.5, DIM.get()).into()),
                 control.into(),
                 Some("sound.balance"),
                 lit,
@@ -474,7 +477,7 @@ impl App {
                         )
                         .get(lang),
                         12.5,
-                        DIM,
+                        DIM.get(),
                     )
                     .into(),
                 ),
@@ -495,14 +498,14 @@ impl App {
         for i in 0..SEGMENTS {
             let at = i as f32 / (SEGMENTS - 1) as f32;
             let color = if i >= SEGMENTS * 9 / 10 {
-                AMBER
+                AMBER.get()
             } else {
-                mix(GAUGE_FROM, BLUE, (at / 0.72).min(1.0))
+                mix(GAUGE_FROM.get(), BLUE.get(), (at / 0.72).min(1.0))
             };
             let fill = if i < lit {
                 color
             } else {
-                rgba(255, 255, 255, 0.12)
+                crate::theme::ink(rgba(255, 255, 255, 0.12))
             };
             bar =
                 bar.push(container(Space::new().width(7).height(10)).style(boxed(fill, 1.0, None)));
@@ -549,30 +552,34 @@ impl App {
             Which::App(key) => format!("app:{key}"),
         };
         let mute = container(
-            button(draw(path, 16.0, if muted { PEACH } else { DIM }, 1.9))
-                .width(32)
-                .height(32)
-                .padding(8)
-                .on_press(Message::Sound(Msg::Mute(which.clone())))
-                .style(move |_, status| {
-                    let hovered =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    let fill = match (muted, hovered) {
-                        (true, _) => rgba(229, 121, 63, 0.18),
-                        (false, true) => rgba(255, 255, 255, 0.10),
-                        (false, false) => rgba(255, 255, 255, 0.06),
-                    };
-                    button::Style {
-                        background: Some(Background::Color(fill)),
-                        text_color: TEXT,
-                        border: if mute_focused {
-                            ring(8.0)
-                        } else {
-                            border(8.0, 0.0, Color::TRANSPARENT)
-                        },
-                        ..button::Style::default()
-                    }
-                }),
+            button(draw(
+                path,
+                16.0,
+                if muted { PEACH.get() } else { DIM.get() },
+                1.9,
+            ))
+            .width(32)
+            .height(32)
+            .padding(8)
+            .on_press(Message::Sound(Msg::Mute(which.clone())))
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let fill = match (muted, hovered) {
+                    (true, _) => crate::theme::ink(rgba(229, 121, 63, 0.18)),
+                    (false, true) => crate::theme::ink(rgba(255, 255, 255, 0.10)),
+                    (false, false) => crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                };
+                button::Style {
+                    background: Some(Background::Color(fill)),
+                    text_color: TEXT.get(),
+                    border: if mute_focused {
+                        ring(8.0)
+                    } else {
+                        border(8.0, 0.0, Color::TRANSPARENT)
+                    },
+                    ..button::Style::default()
+                }
+            }),
         )
         .id(format!("mute:{id}"));
         let on_change = which.clone();
@@ -586,24 +593,28 @@ impl App {
             rail: slider::Rail {
                 backgrounds: (
                     if muted {
-                        Background::Color(MUTED_FILL)
+                        Background::Color(MUTED_FILL.get())
                     } else {
                         Background::Gradient(Gradient::Linear(
                             gradient::Linear::new(std::f32::consts::FRAC_PI_2)
-                                .add_stop(0.0, GAUGE_FROM)
-                                .add_stop(1.0, BLUE),
+                                .add_stop(0.0, GAUGE_FROM.get())
+                                .add_stop(1.0, BLUE.get()),
                         ))
                     },
-                    Background::Color(rgba(255, 255, 255, 0.12)),
+                    Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.12))),
                 ),
                 width: 6.0,
                 border: border(3.0, 0.0, Color::TRANSPARENT),
             },
             handle: slider::Handle {
                 shape: slider::HandleShape::Circle { radius: 8.0 },
-                background: Background::Color(if muted { rgb(0xC9D0DC) } else { Color::WHITE }),
+                background: Background::Color(if muted {
+                    crate::theme::ink(rgb(0xC9D0DC))
+                } else {
+                    Color::WHITE
+                }),
                 border_width: if slider_focused { 3.0 } else { 0.0 },
-                border_color: ACCENT,
+                border_color: ACCENT.get(),
             },
         });
         let said = if muted {
@@ -645,18 +656,18 @@ impl App {
         let (from, width) = (knob.min(centre), (knob - centre).abs());
         let track = container(stack![
             container(Space::new().width(160).height(6)).style(boxed(
-                fade(rgba(255, 255, 255, 0.12), alpha),
+                fade(crate::theme::ink(rgba(255, 255, 255, 0.12)), alpha),
                 3.0,
                 None
             )),
             container(container(Space::new().width(width).height(6)).style(boxed(
-                fade(BLUE, alpha),
+                fade(BLUE.get(), alpha),
                 3.0,
                 None
             )))
             .padding(Padding::default().left(from)),
             container(container(Space::new().width(2).height(14)).style(boxed(
-                fade(rgba(255, 255, 255, 0.28), alpha),
+                fade(crate::theme::ink(rgba(255, 255, 255, 0.28)), alpha),
                 1.0,
                 None
             )))
@@ -687,10 +698,15 @@ impl App {
                 shape: slider::HandleShape::Circle { radius: 8.0 },
                 background: Background::Color(fade(Color::WHITE, alpha)),
                 border_width: if focused { 3.0 } else { 0.0 },
-                border_color: ACCENT,
+                border_color: ACCENT.get(),
             },
         });
-        let letter = |l: &'static str| text(l).size(11.5).font(BOLD).color(fade(FAINT, alpha));
+        let letter = |l: &'static str| {
+            text(l)
+                .size(11.5)
+                .font(BOLD)
+                .color(fade(FAINT.get(), alpha))
+        };
         let (left, right) = match lang {
             Lang::French => ("G", "D"),
             Lang::English => ("L", "R"),
@@ -705,7 +721,7 @@ impl App {
                 text(model::say_balance(balance, lang))
                     .size(12.5)
                     .font(MONO)
-                    .color(fade(TEXT, alpha))
+                    .color(fade(TEXT.get(), alpha))
             )
             .width(54)
             .align_right(54),
@@ -727,7 +743,11 @@ impl App {
         };
         let dot = |on: bool| {
             container(Space::new().width(7).height(7)).style(boxed(
-                if on { BLUE } else { rgba(255, 255, 255, 0.20) },
+                if on {
+                    BLUE.get()
+                } else {
+                    crate::theme::ink(rgba(255, 255, 255, 0.20))
+                },
                 3.5,
                 None,
             ))
@@ -756,17 +776,17 @@ impl App {
             .style(move |_, status| {
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
-                    background: Some(Background::Color(rgba(
+                    background: Some(Background::Color(crate::theme::ink(rgba(
                         255,
                         255,
                         255,
                         if hovered { 0.10 } else { 0.06 },
-                    ))),
-                    text_color: TEXT,
+                    )))),
+                    text_color: TEXT.get(),
                     border: if focused {
                         ring(8.0)
                     } else {
-                        border(8.0, 1.0, RIM_12)
+                        border(8.0, 1.0, RIM_12.get())
                     },
                     ..button::Style::default()
                 }
@@ -798,7 +818,7 @@ impl App {
                         .color(TEXT)
                         .wrapping(text::Wrapping::None),
                     Space::new().width(Length::Fill),
-                    draw(CHEVRON, 12.0, DIM, 2.4),
+                    draw(CHEVRON, 12.0, DIM.get(), 2.4),
                 ]
                 .spacing(10)
                 .height(Length::Fill)
@@ -816,17 +836,17 @@ impl App {
             .style(move |_, status| {
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
-                    background: Some(Background::Color(rgba(
+                    background: Some(Background::Color(crate::theme::ink(rgba(
                         255,
                         255,
                         255,
                         if hovered || open { 0.09 } else { 0.06 },
-                    ))),
-                    text_color: TEXT,
+                    )))),
+                    text_color: TEXT.get(),
                     border: if focused {
                         ring(8.0)
                     } else {
-                        border(8.0, 1.0, RIM_12)
+                        border(8.0, 1.0, RIM_12.get())
                     },
                     ..button::Style::default()
                 }
@@ -859,7 +879,7 @@ impl App {
                         )
                         .get(lang),
                         12.5,
-                        DIM,
+                        DIM.get(),
                     ),
                 ]
                 .spacing(2),
@@ -980,7 +1000,7 @@ impl App {
         let mut widest = at.width;
         for (i, (label, sub, on, msg)) in options.into_iter().enumerate() {
             let check: El<'_> = if on {
-                draw(TICK, 13.0, fade(CHECK, opened), 3.0)
+                draw(TICK, 13.0, fade(CHECK.get(), opened), 3.0)
             } else {
                 Space::new().width(13).into()
             };
@@ -989,7 +1009,7 @@ impl App {
                 text(label.clone())
                     .size(13.5)
                     .font(if on { BOLD } else { MANROPE })
-                    .color(fade(TEXT, opened))
+                    .color(fade(TEXT.get(), opened))
                     .wrapping(text::Wrapping::None),
             ]
             .spacing(6)
@@ -1002,7 +1022,7 @@ impl App {
                 line = line.push(
                     text(sub)
                         .size(12.5)
-                        .color(fade(FAINT, opened))
+                        .color(fade(FAINT.get(), opened))
                         .wrapping(text::Wrapping::None),
                 );
             }
@@ -1021,8 +1041,8 @@ impl App {
                         })
                         .on_press(Message::Sound(msg))
                         .style(flat(
-                            keyboard.then_some(rgba(255, 255, 255, 0.07)),
-                            rgba(255, 255, 255, 0.07),
+                            keyboard.then_some(crate::theme::ink(rgba(255, 255, 255, 0.07))),
+                            crate::theme::ink(rgba(255, 255, 255, 0.07)),
                             7.0,
                             false,
                         )),
@@ -1035,8 +1055,8 @@ impl App {
             .width(width)
             .padding(5)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(fade(MENU, opened))),
-                border: border(10.0, 1.0, fade(RIM_12, opened)),
+                background: Some(Background::Color(fade(MENU.get(), opened))),
+                border: border(10.0, 1.0, fade(RIM_12.get(), opened)),
                 shadow: Shadow {
                     color: rgba(0, 0, 0, 0.45 * opened),
                     ..style::shadow()
@@ -1140,14 +1160,14 @@ fn group_head<'a>(words: &'static str, right: Option<String>) -> El<'a> {
         .align_y(Alignment::Center)
         .height(28);
     if let Some(right) = right {
-        head = head.push(t(right, 12.5, FAINT));
+        head = head.push(t(right, 12.5, FAINT.get()));
     }
     head.into()
 }
 
 /// The note under a group.
 fn note<'a>(words: &'static str) -> El<'a> {
-    container(t(words, 12.5, FAINT).line_height(1.5))
+    container(t(words, 12.5, FAINT.get()).line_height(1.5))
         .padding([0, 4])
         .into()
 }
@@ -1157,7 +1177,7 @@ fn caption<'a>(path: &'static str, name: String) -> El<'a> {
     column![
         container(
             row![
-                draw(path, 15.0, BLUE, 1.9),
+                draw(path, 15.0, BLUE.get(), 1.9),
                 text(name).size(12.5).font(BOLD).color(DIM)
             ]
             .spacing(8)
@@ -1166,7 +1186,7 @@ fn caption<'a>(path: &'static str, name: String) -> El<'a> {
         .height(34)
         .center_y(34)
         .padding([0, 16]),
-        container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE, 0.0, None)),
+        container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE.get(), 0.0, None)),
     ]
     .into()
 }
@@ -1187,7 +1207,7 @@ fn device_row<'a>(
     row_id: Option<&str>,
 ) -> El<'a> {
     let tick: El<'a> = if on {
-        draw(TICK, 16.0, CHECK, 3.0)
+        draw(TICK, 16.0, CHECK.get(), 3.0)
     } else {
         Space::new().width(16).into()
     };
@@ -1220,8 +1240,8 @@ fn device_row<'a>(
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: (hovered && !on).then_some(Background::Color(HOVER)),
-            text_color: TEXT,
+            background: (hovered && !on).then_some(Background::Color(HOVER.get())),
+            text_color: TEXT.get(),
             border: if focused {
                 ring(11.0)
             } else {
@@ -1249,12 +1269,17 @@ fn app_tile<'a>(name: &str, muted: bool) -> El<'a> {
     });
     let color = rgb(TILES[sum % TILES.len()]);
     let alpha = if muted { INERT } else { 1.0 };
-    container(text(letter).size(14).font(BOLD).color(fade(DEEP, alpha)))
-        .width(32)
-        .height(32)
-        .center(32)
-        .style(boxed(fade(color, alpha), 9.0, None))
-        .into()
+    container(
+        text(letter)
+            .size(14)
+            .font(BOLD)
+            .color(fade(DEEP.get(), alpha)),
+    )
+    .width(32)
+    .height(32)
+    .center(32)
+    .style(boxed(fade(color, alpha), 9.0, None))
+    .into()
 }
 
 /// `a` to `b` by `by`.

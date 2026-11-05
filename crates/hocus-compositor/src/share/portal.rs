@@ -91,7 +91,12 @@ pub enum FromPortal {
 /// side (stopped from the bar, its window closed): `Closed` is emitted.
 #[derive(Debug)]
 pub enum ToPortal {
-    Close { session: String },
+    Close {
+        session: String,
+    },
+    /// `[appearance]` changed: the settings portal says it
+    /// ([`crate::appearance::portal`]).
+    Appearance(crate::appearance::portal::Values),
 }
 
 /// The portal's thread, as the loop holds it.
@@ -106,11 +111,19 @@ impl Portal {
             session: session.to_owned(),
         });
     }
+
+    pub fn appearance(&self, values: crate::appearance::portal::Values) {
+        let _ = self.to.send(ToPortal::Appearance(values));
+    }
 }
 
 /// Serves the screen cast on `bus` (an address, or `session`), what comes
-/// in going to `loop_`.
-pub fn start(bus: String, loop_: Sender<FromPortal>) -> Option<Portal> {
+/// in going to `loop_`, and the settings, `appearance` first.
+pub fn start(
+    bus: String,
+    loop_: Sender<FromPortal>,
+    appearance: crate::appearance::portal::Values,
+) -> Option<Portal> {
     let (to, from_loop) = mpsc::unbounded_channel();
     let started = std::thread::Builder::new()
         .name("screen cast portal".to_owned())
@@ -119,7 +132,7 @@ pub fn start(bus: String, loop_: Sender<FromPortal>) -> Option<Portal> {
                 .enable_all()
                 .build();
             match runtime {
-                Ok(runtime) => runtime.block_on(run(bus, loop_, from_loop)),
+                Ok(runtime) => runtime.block_on(run(bus, loop_, from_loop, appearance)),
                 Err(err) => tracing::warn!(%err, "no runtime for the screen cast portal"),
             }
         });
@@ -145,8 +158,14 @@ async fn run(
     bus: String,
     loop_: Sender<FromPortal>,
     mut from_loop: mpsc::UnboundedReceiver<ToPortal>,
+    appearance: crate::appearance::portal::Values,
 ) {
+    use crate::appearance::portal as settings;
     let sessions = Sessions::default();
+    let values = settings::Shared::new(Mutex::new(appearance));
+    let served = settings::Settings {
+        values: values.clone(),
+    };
     let cast = ScreenCast {
         loop_: loop_.clone(),
         sessions: sessions.clone(),
@@ -156,7 +175,12 @@ async fn run(
     } else {
         Builder::address(bus.as_str())
     };
-    let connection = match builder.serve_at(PATH, cast).build().await {
+    let built = builder
+        .serve_at(PATH, cast)
+        .serve_at(PATH, served)
+        .build()
+        .await;
+    let connection = match built {
         Ok(connection) => connection,
         Err(err) => {
             tracing::warn!(%err, "cannot reach the session bus: no screen cast portal");
@@ -182,6 +206,7 @@ async fn run(
                     .remove(&session);
                 close_session(&connection, &session).await;
             }
+            ToPortal::Appearance(new) => settings::changed(&connection, &values, new).await,
         }
     }
 }

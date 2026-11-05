@@ -15,8 +15,9 @@ use crate::levels::{
     draw::{MANROPE_BOLD, rgb},
     icons::Icon,
 };
+use crate::theme::Ink;
 
-const LETTER_INK: Color = rgb(0x0B1020);
+const LETTER_INK: Ink = Ink::Dark(rgb(0x0B1020));
 /// The letter tiles' colours (the 3.4 mockup's two first), one per
 /// application by its name.
 const TILES: [Color; 6] = [

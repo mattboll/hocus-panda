@@ -42,7 +42,7 @@ use smithay::{
     output::Output,
     reexports::{
         calloop::{
-            LoopHandle,
+            LoopHandle, RegistrationToken,
             channel::{self, Event},
         },
         wayland_server::protocol::wl_surface::WlSurface,
@@ -82,6 +82,9 @@ const OWN: [CursorIcon; 8] = [
 pub struct CursorImages {
     choice: Choice,
     theme: RefCell<Theme>,
+    /// Where the theme's thread's images come in; taken out of the loop
+    /// when another theme replaces this one.
+    source: Option<RegistrationToken>,
     /// The theme's frames, by shape and size in pixels asked.
     frames: RefCell<HashMap<(CursorIcon, u32), Slot>>,
     /// Frames made into buffers for an output's scale: by shape, size
@@ -131,20 +134,21 @@ impl CursorImages {
     /// The cursor in `choice`'s theme and size, its files looked for in
     /// `search` on a thread of its own; drawn with no search path.
     pub fn start(handle: &LoopHandle<'static, App>, choice: Choice, search: Vec<PathBuf>) -> Self {
-        let theme = if search.is_empty() {
-            Theme::None
+        let (theme, source) = if search.is_empty() {
+            (Theme::None, None)
         } else {
             match load_theme(handle, &choice, search) {
-                Ok(asks) => Theme::Loading(asks),
+                Ok((asks, source)) => (Theme::Loading(asks), Some(source)),
                 Err(err) => {
                     tracing::warn!(%err, "could not load the cursor theme; cursors drawn");
-                    Theme::None
+                    (Theme::None, None)
                 }
             }
         };
         Self {
             choice,
             theme: RefCell::new(theme),
+            source,
             frames: RefCell::default(),
             placed: RefCell::default(),
             drawn: Drawn::default(),
@@ -263,9 +267,9 @@ fn load_theme(
     handle: &LoopHandle<'static, App>,
     choice: &Choice,
     search: Vec<PathBuf>,
-) -> anyhow::Result<mpsc::Sender<(CursorIcon, u32)>> {
+) -> anyhow::Result<(mpsc::Sender<(CursorIcon, u32)>, RegistrationToken)> {
     let (sender, receiver) = channel::channel::<Loaded>();
-    handle
+    let source = handle
         .insert_source(receiver, |event, _, app| {
             if let Event::Msg(loaded) = event {
                 app.state.cursor_loaded(loaded);
@@ -309,7 +313,7 @@ fn load_theme(
                 }
             }
         })?;
-    Ok(asks)
+    Ok((asks, source))
 }
 
 /// The logical size, from `pixels` up, that is a whole number of
@@ -365,6 +369,25 @@ pub enum Shown<'a> {
 }
 
 impl State {
+    /// `[appearance]`'s cursor changed: its images are loaded again in
+    /// `choice`'s theme and size, the old theme's thread let go (it ends
+    /// as its asks' channel closes).
+    pub fn restart_cursor(&mut self, choice: Choice) {
+        if let Some(source) = self.cursor_images.source.take() {
+            self.loop_handle.remove(source);
+        }
+        let search = self.config.cursor_env.search.clone();
+        tracing::info!(
+            theme = choice.theme,
+            size = choice.size,
+            "the cursor changed"
+        );
+        self.cursor_images = CursorImages::start(&self.loop_handle, choice, search);
+        if !self.nested {
+            self.redraw = true;
+        }
+    }
+
     /// What the pointer shows: what the client under it set.
     pub fn shown_cursor(&self) -> Shown<'_> {
         if let Some(icon) = self.frame_cursor {

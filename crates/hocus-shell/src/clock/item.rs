@@ -174,7 +174,7 @@ pub fn draw(clock: &Clock, state: &State, frame: &mut Frame, size: Size) {
         None
     };
     if let Some(fill) = fill {
-        frame.fill(&kit::rounded(rect, RADIUS), fill);
+        frame.fill(&kit::rounded(rect, RADIUS), fill.get());
     }
     if look.focused {
         let inset = RING / 2.0;
@@ -182,7 +182,10 @@ pub fn draw(clock: &Clock, state: &State, frame: &mut Frame, size: Size) {
             Point::new(rect.x + inset, rect.y + inset),
             Size::new(rect.width - RING, rect.height - RING),
         );
-        frame.stroke(&kit::rounded(ring, RADIUS - inset), stroke(RING, ACCENT));
+        frame.stroke(
+            &kit::rounded(ring, RADIUS - inset),
+            stroke(RING, ACCENT.get()),
+        );
     }
 }
 

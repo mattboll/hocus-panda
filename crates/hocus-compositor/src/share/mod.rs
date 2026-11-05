@@ -204,6 +204,14 @@ impl Sharing {
             .any(|s| s.node.is_some() && s.source == ShareSource::Window(id.0))
     }
 
+    /// The settings portal, served on the same connection, says
+    /// `values` from now on (#402).
+    pub fn portal_appearance(&self, values: crate::appearance::portal::Values) {
+        if let Some(portal) = &self.portal {
+            portal.appearance(values);
+        }
+    }
+
     /// Whether screen `name` is shared.
     pub fn screen_shared(&self, name: &str) -> bool {
         self.shares
@@ -235,7 +243,7 @@ impl State {
             tracing::warn!(%err.error, "could not listen to the screen cast portal");
             return;
         }
-        self.share.portal = portal::start(word, sender);
+        self.share.portal = portal::start(word, sender, self.portal_appearance());
     }
 
     fn portal_says(&mut self, said: FromPortal) {

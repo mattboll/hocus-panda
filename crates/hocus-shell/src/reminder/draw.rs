@@ -35,6 +35,7 @@ use iced::{
 };
 
 use super::{Act, Seen, Tab, Words};
+use crate::theme::Ink;
 use crate::{
     Message,
     levels::draw::{FAINT, LINE, MANROPE_BOLD, TEXT, pointer, rgb},
@@ -62,20 +63,20 @@ pub const TIP_DELAY: Duration = Duration::from_millis(500);
 /// Under the tab, the tooltip's top.
 const TIP_GAP: f32 = 6.0;
 
-const GLASS_TOP: Color = Color::from_rgba8(22, 27, 42, 0.96);
-const GLASS_BOTTOM: Color = Color::from_rgba8(14, 17, 28, 0.97);
-const OPAQUE_TOP: Color = rgb(0x161B2A);
-const OPAQUE_BOTTOM: Color = rgb(0x0E111C);
-const RIM: Color = Color::from_rgba8(143, 179, 255, 0.55);
-pub const LINE_BLUE: Color = rgb(0xA9C4FF);
-pub const JOIN: Color = rgb(0x3F6FD8);
-pub const JOIN_HOVER: Color = rgb(0x4A7BE6);
-const OPEN_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const OPEN_FILL_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const OPEN_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-pub const LATER_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const ICON_LIT: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const CLOCK_INK: Color = rgb(0xC9D0DC);
+const GLASS_TOP: Ink = Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96));
+const GLASS_BOTTOM: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.97));
+const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
+const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(143, 179, 255, 0.55));
+pub const LINE_BLUE: Ink = Ink::Dark(rgb(0xA9C4FF));
+pub const JOIN: Ink = Ink::Dark(rgb(0x3F6FD8));
+pub const JOIN_HOVER: Ink = Ink::Dark(rgb(0x4A7BE6));
+const OPEN_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const OPEN_FILL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const OPEN_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+pub const LATER_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const ICON_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const CLOCK_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
 /// The shadow and the glow: offset, deviation, alpha.
 const SHADOW: (f32, f32, f32) = (10.0, 15.0, 0.40);
 const GLOW: (f32, f32, f32) = (0.0, 10.0, 0.22);
@@ -347,8 +348,8 @@ fn draw_tab(
         (OPAQUE_TOP, OPAQUE_BOTTOM)
     };
     let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-        .add_stop(0.0, top)
-        .add_stop(1.0, bottom);
+        .add_stop(0.0, top.get())
+        .add_stop(1.0, bottom.get());
     f.fill(
         &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
         canvas::Fill::from(tint),
@@ -359,7 +360,7 @@ fn draw_tab(
             Size::new(size.width - BORDER, size.height - BORDER),
             (RADIUS - BORDER / 2.0).into(),
         ),
-        Stroke::default().with_color(RIM).with_width(BORDER),
+        Stroke::default().with_color(RIM.get()).with_width(BORDER),
     );
     // The title over the line, 1 px apart, centred.
     let (title_h, line_h) = (TITLE * LINE, LINE_TEXT * LINE);
@@ -374,7 +375,7 @@ fn draw_tab(
             title,
             Point::new(laid.text.x, y + title_h / 2.0),
             TITLE,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ),
     ));
@@ -385,7 +386,7 @@ fn draw_tab(
         line,
         Point::new(laid.text.x, y + title_h + LINES_GAP + line_h / 2.0),
         LINE_TEXT,
-        LINE_BLUE,
+        LINE_BLUE.get(),
         Alignment::Left,
     ));
     // The main button.
@@ -420,7 +421,9 @@ fn draw_tab(
                 ),
                 BUTTON_RADIUS - BORDER / 2.0,
             ),
-            Stroke::default().with_color(OPEN_RIM).with_width(BORDER),
+            Stroke::default()
+                .with_color(OPEN_RIM.get())
+                .with_width(BORDER),
         );
     }
     f.fill_text(kit::text_in(
@@ -429,7 +432,7 @@ fn draw_tab(
             laid.label.to_owned(),
             Point::new(x, laid.main.center_y()),
             BUTTON_TEXT,
-            if laid.join { Color::WHITE } else { TEXT },
+            if laid.join { Color::WHITE } else { TEXT.get() },
             Alignment::Left,
         ),
     ));
@@ -440,21 +443,29 @@ fn draw_tab(
         } else {
             LATER_FILL
         };
-        f.fill(&kit::rounded(later, BUTTON_RADIUS), fill);
+        f.fill(&kit::rounded(later, BUTTON_RADIUS), fill.get());
         clock(
             f,
             centred(later, CLOCK),
-            if lit(Part::Later) { TEXT } else { CLOCK_INK },
+            if lit(Part::Later) {
+                TEXT.get()
+            } else {
+                CLOCK_INK.get()
+            },
         );
     }
     // ✕.
     if lit(Part::Dismiss) {
-        f.fill(&kit::rounded(laid.dismiss, BUTTON_RADIUS), ICON_LIT);
+        f.fill(&kit::rounded(laid.dismiss, BUTTON_RADIUS), ICON_LIT.get());
     }
     cross(
         f,
         centred(laid.dismiss, CROSS),
-        if lit(Part::Dismiss) { TEXT } else { FAINT },
+        if lit(Part::Dismiss) {
+            TEXT.get()
+        } else {
+            FAINT.get()
+        },
     );
 }
 

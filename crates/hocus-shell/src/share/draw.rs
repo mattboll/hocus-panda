@@ -16,6 +16,7 @@ use iced::{
 };
 
 use super::{Chooser, Pointing, Tab, Target, Words};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD},
@@ -74,29 +75,29 @@ const MOST_ROWS: usize = 3;
 
 /// The mockup's panel: `rgba(22,27,42,0.97) → rgba(14,17,28,0.98)`, its rim
 /// `rgba(255,255,255,0.12)`; opaque without glass.
-const TINT: (Color, Color) = (
-    Color::from_rgba8(22, 27, 42, 0.97),
-    Color::from_rgba8(14, 17, 28, 0.98),
+const TINT: (Ink, Ink) = (
+    Ink::Dark(Color::from_rgba8(22, 27, 42, 0.97)),
+    Ink::Dark(Color::from_rgba8(14, 17, 28, 0.98)),
 );
-const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const TABS_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const TAB_ON: Color = rgb(0xEEF1F6);
-const TAB_ON_INK: Color = rgb(0x0B1020);
-const TAB_INK: Color = rgb(0xC9D0DC);
-const BLUE: Color = rgb(0x5B8DEF);
-const CHOSEN: Color = Color::from_rgba8(91, 141, 239, 0.16);
-const CHOSEN_RING: Color = Color::from_rgba8(91, 141, 239, 0.8);
-const CARD_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const THUMB_FILL: Color = rgb(0x161C2B);
-const THUMB_RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const LINE_INK: Color = rgb(0x7C8698);
-const CHECK_INK: Color = rgb(0xC9D0DC);
-const GREEN: Color = rgb(0x6CC287);
-const CANCEL_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const CANCEL_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const LETTER_FROM: Color = rgb(0x5C6576);
-const LETTER_TO: Color = rgb(0x9AA3B4);
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const TABS_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const TAB_ON: Ink = Ink::Dark(rgb(0xEEF1F6));
+const TAB_ON_INK: Ink = Ink::Dark(rgb(0x0B1020));
+const TAB_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+const BLUE: Ink = Ink::Dark(rgb(0x5B8DEF));
+const CHOSEN: Ink = Ink::Dark(Color::from_rgba8(91, 141, 239, 0.16));
+const CHOSEN_RING: Ink = Ink::Dark(Color::from_rgba8(91, 141, 239, 0.8));
+const CARD_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const THUMB_FILL: Ink = Ink::Dark(rgb(0x161C2B));
+const THUMB_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const LINE_INK: Ink = Ink::Dark(rgb(0x7C8698));
+const CHECK_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+const GREEN: Ink = Ink::Accent(1.0);
+const CANCEL_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const CANCEL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const LETTER_FROM: Ink = Ink::Dark(rgb(0x5C6576));
+const LETTER_TO: Ink = Ink::Dark(rgb(0x9AA3B4));
 const LINE_HEIGHT: f32 = crate::levels::draw::LINE;
 
 /// A card: what it shows (its index in the tab's list), where, and its
@@ -375,6 +376,7 @@ impl View {
         let size = f.size();
         let radius = SHARE_CHOOSER_RADIUS as f32;
         let (top, bottom) = if self.glass { TINT } else { OPAQUE };
+        let (top, bottom) = (top.get(), bottom.get());
         let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top)
             .add_stop(1.0, bottom);
@@ -388,7 +390,7 @@ impl View {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (radius - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
         let mut said = Vec::new();
         // The header.
@@ -410,23 +412,29 @@ impl View {
         );
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
-            kit::text(title.clone(), layout.title_at, TITLE, TEXT, Alignment::Left),
+            kit::text(
+                title.clone(),
+                layout.title_at,
+                TITLE,
+                TEXT.get(),
+                Alignment::Left,
+            ),
         ));
         f.fill_text(kit::text(
             sub.clone(),
             layout.sub_at,
             SUB,
-            DIM,
+            DIM.get(),
             Alignment::Left,
         ));
         said.push(title);
         said.push(sub);
         // The tabs.
-        f.fill(&kit::rounded(layout.tabs_box, TABS_RADIUS), TABS_FILL);
+        f.fill(&kit::rounded(layout.tabs_box, TABS_RADIUS), TABS_FILL.get());
         for (tab, rect) in &layout.tabs {
             let on = chooser.tab == *tab;
             if on {
-                f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_ON);
+                f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_ON.get());
             }
             f.fill_text(kit::text_in(
                 MANROPE_BOLD,
@@ -434,7 +442,7 @@ impl View {
                     self.words.tab(*tab).to_owned(),
                     rect.center(),
                     TAB_TEXT,
-                    if on { TAB_ON_INK } else { TAB_INK },
+                    if on { TAB_ON_INK.get() } else { TAB_INK.get() },
                     Alignment::Center,
                 ),
             ));
@@ -447,7 +455,7 @@ impl View {
             let selected = chooser.selected == card.index;
             let shape = kit::rounded(card.rect, CARD_RADIUS);
             if selected {
-                f.fill(&shape, CHOSEN);
+                f.fill(&shape, CHOSEN.get());
                 f.stroke(
                     &kit::rounded(
                         Rectangle::new(
@@ -456,13 +464,15 @@ impl View {
                         ),
                         CARD_RADIUS - 0.5,
                     ),
-                    Stroke::default().with_color(CHOSEN_RING).with_width(BORDER),
+                    Stroke::default()
+                        .with_color(CHOSEN_RING.get())
+                        .with_width(BORDER),
                 );
             } else if chooser.hover == Some(Target::Card(card.index)) {
-                f.fill(&shape, CARD_HOVER);
+                f.fill(&shape, CARD_HOVER.get());
             }
             let thumb_radius = SHARE_THUMB_RADIUS as f32;
-            f.fill(&kit::rounded(card.thumb, thumb_radius), THUMB_FILL);
+            f.fill(&kit::rounded(card.thumb, thumb_radius), THUMB_FILL.get());
             f.stroke(
                 &kit::rounded(
                     Rectangle::new(
@@ -471,7 +481,9 @@ impl View {
                     ),
                     thumb_radius - 0.5,
                 ),
-                Stroke::default().with_color(THUMB_RIM).with_width(BORDER),
+                Stroke::default()
+                    .with_color(THUMB_RIM.get())
+                    .with_width(BORDER),
             );
             let (name, line) = card_words(self.words, chooser, card.index);
             let text_room = card.thumb.width;
@@ -483,7 +495,7 @@ impl View {
                     name.clone(),
                     Point::new(card.thumb.x, name_y),
                     NAME,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ),
             ));
@@ -493,7 +505,7 @@ impl View {
                 line.clone(),
                 Point::new(card.thumb.x, line_y),
                 LINE,
-                LINE_INK,
+                LINE_INK.get(),
                 Alignment::Left,
             ));
             said.push(if selected {
@@ -512,7 +524,7 @@ impl View {
             self.words.pointer().to_owned(),
             Point::new(box_rect.x + CHECK + CHECK_GAP, layout.check.center_y()),
             CHECK_TEXT,
-            CHECK_INK,
+            CHECK_INK.get(),
             Alignment::Left,
         ));
         said.push(format!(
@@ -523,7 +535,7 @@ impl View {
         // The buttons.
         let cancel = kit::rounded(layout.cancel, BUTTON_RADIUS);
         if chooser.hover == Some(Target::Cancel) {
-            f.fill(&cancel, CANCEL_HOVER);
+            f.fill(&cancel, CANCEL_HOVER.get());
         }
         f.stroke(
             &kit::rounded(
@@ -533,7 +545,9 @@ impl View {
                 ),
                 BUTTON_RADIUS - 0.5,
             ),
-            Stroke::default().with_color(CANCEL_RIM).with_width(BORDER),
+            Stroke::default()
+                .with_color(CANCEL_RIM.get())
+                .with_width(BORDER),
         );
         f.fill_text(kit::text_in(
             MANROPE_SEMIBOLD,
@@ -541,11 +555,11 @@ impl View {
                 self.words.cancel().to_owned(),
                 layout.cancel.center(),
                 BUTTON_TEXT,
-                TEXT,
+                TEXT.get(),
                 Alignment::Center,
             ),
         ));
-        f.fill(&kit::rounded(layout.share, BUTTON_RADIUS), BLUE);
+        f.fill(&kit::rounded(layout.share, BUTTON_RADIUS), BLUE.get());
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
             kit::text(
@@ -607,8 +621,8 @@ fn letter(f: &mut Frame, rect: Rectangle, name: &str) {
         rect.position(),
         Point::new(rect.x + rect.width, rect.y + rect.height),
     )
-    .add_stop(0.0, LETTER_FROM)
-    .add_stop(1.0, LETTER_TO);
+    .add_stop(0.0, LETTER_FROM.get())
+    .add_stop(1.0, LETTER_TO.get());
     f.fill(&kit::rounded(rect, ICON_RADIUS), canvas::Fill::from(fill));
     let first: String = name
         .chars()
@@ -631,7 +645,7 @@ fn letter(f: &mut Frame, rect: Rectangle, name: &str) {
 fn checkbox(f: &mut Frame, rect: Rectangle, on: bool) {
     let radius = 3.0 * Z;
     if on {
-        f.fill(&kit::rounded(rect, radius), GREEN);
+        f.fill(&kit::rounded(rect, radius), GREEN.get());
         let k = rect.width / 16.0;
         let p = |x: f32, y: f32| Point::new(rect.x + x * k, rect.y + y * k);
         let tick = Path::new(|b| {
@@ -642,7 +656,7 @@ fn checkbox(f: &mut Frame, rect: Rectangle, on: bool) {
         f.stroke(
             &tick,
             Stroke::default()
-                .with_color(TAB_ON_INK)
+                .with_color(TAB_ON_INK.get())
                 .with_width(2.0 * k)
                 .with_line_cap(LineCap::Round)
                 .with_line_join(LineJoin::Round),
@@ -656,7 +670,9 @@ fn checkbox(f: &mut Frame, rect: Rectangle, on: bool) {
                 ),
                 radius,
             ),
-            Stroke::default().with_color(CANCEL_RIM).with_width(1.5),
+            Stroke::default()
+                .with_color(CANCEL_RIM.get())
+                .with_width(1.5),
         );
     }
 }

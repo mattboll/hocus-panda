@@ -43,6 +43,7 @@ use iced::{
     window,
 };
 
+use crate::theme::Ink;
 use crate::{
     clock::motion::bezier,
     levels::{
@@ -64,9 +65,9 @@ const COLUMNS: usize = 4;
 const TILE_HEIGHT: f32 = 30.0;
 const TILE_GAP: f32 = 6.0;
 const TILE_RADIUS: f32 = 6.0;
-const TILE: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const TILE_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const TILE_RING: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const TILE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
+const TILE_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const TILE_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const CURRENT_RING: f32 = 2.0;
 /// The windows' sketch: 4 px inside the tile; each window half a pixel in
 /// from its place, so that windows side by side on the screen (8 px apart,
@@ -74,14 +75,14 @@ const CURRENT_RING: f32 = 2.0;
 const INSET: f32 = 4.0;
 const APART: f32 = 0.5;
 const SKETCH_RADIUS: f32 = 1.5;
-const SKETCH: Color = Color::from_rgba8(236, 239, 244, 0.20);
-const SKETCH_FOCUSED: Color = Color::from_rgba8(236, 239, 244, 0.40);
+const SKETCH: Ink = Ink::Dark(Color::from_rgba8(236, 239, 244, 0.20));
+const SKETCH_FOCUSED: Ink = Ink::Dark(Color::from_rgba8(236, 239, 244, 0.40));
 /// A window's application's icon in its sketch (3.9b): 10 px, ringed 1 px
 /// out, when the sketch is 12 × 12 px at least.
 const ICON: f32 = 10.0;
 const ICON_ROOM: f32 = 12.0;
 const ICON_RADIUS: f32 = 3.0;
-const ICON_RING: Color = Color::from_rgba8(14, 17, 28, 0.6);
+const ICON_RING: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.6));
 /// An empty desktop's number: 11 px, 600, `text.faint`.
 const NUMBER: f32 = 11.0;
 
@@ -89,9 +90,9 @@ const DOT_COLUMNS: usize = 2;
 const DOT: Size = Size::new(18.0, 13.0);
 const DOT_GAP: f32 = 4.0;
 const DOT_RADIUS: f32 = 4.0;
-const DOT_FULL: Color = Color::from_rgba8(255, 255, 255, 0.30);
-const DOT_EMPTY: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const DOT_RING: Color = Color::from_rgba8(255, 255, 255, 0.12);
+const DOT_FULL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.30));
+const DOT_EMPTY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 
 /// The ring's move: the strip's slide (windows.md §12).
 const RING_MOVE: Duration = Duration::from_millis(320);
@@ -483,16 +484,20 @@ impl<Message> canvas::Program<Message> for Tiles {
                 if state.ring.is_some() {
                     let rect = self.ring(state, form, size, now);
                     match form {
-                        Form::Full => {
-                            inner_ring(f, rect, TILE_RADIUS, CURRENT_RING, faded(ACCENT, alpha))
-                        }
+                        Form::Full => inner_ring(
+                            f,
+                            rect,
+                            TILE_RADIUS,
+                            CURRENT_RING,
+                            faded(ACCENT.get(), alpha),
+                        ),
                         Form::Mini => f.fill(
                             &Path::rounded_rectangle(
                                 rect.position(),
                                 rect.size(),
                                 DOT_RADIUS.into(),
                             ),
-                            faded(ACCENT, alpha),
+                            faded(ACCENT.get(), alpha),
                         ),
                     }
                 }
@@ -537,13 +542,19 @@ fn full(
     let ground = if hover { TILE_HOVER } else { TILE };
     f.fill(
         &Path::rounded_rectangle(rect.position(), rect.size(), TILE_RADIUS.into()),
-        faded(ground, alpha),
+        faded(ground.get(), alpha),
     );
     let current = index == usize::from(shown.current);
     if current && ringed {
-        inner_ring(f, rect, TILE_RADIUS, CURRENT_RING, faded(ACCENT, alpha));
+        inner_ring(
+            f,
+            rect,
+            TILE_RADIUS,
+            CURRENT_RING,
+            faded(ACCENT.get(), alpha),
+        );
     } else {
-        inner_ring(f, rect, TILE_RADIUS, 1.0, faded(TILE_RING, alpha));
+        inner_ring(f, rect, TILE_RADIUS, 1.0, faded(TILE_RING.get(), alpha));
     }
     let mut windows = on(shown, index).peekable();
     if windows.peek().is_none() {
@@ -551,7 +562,7 @@ fn full(
             content: (index + 1).to_string(),
             position: rect.center(),
             max_width: f32::INFINITY,
-            color: faded(FAINT, alpha),
+            color: faded(FAINT.get(), alpha),
             size: Pixels(NUMBER),
             line_height: LineHeight::Relative(LINE),
             font: kit::MANROPE_SEMIBOLD,
@@ -570,7 +581,7 @@ fn full(
         let at = sketch(rect, window.rect);
         f.fill(
             &Path::rounded_rectangle(at.position(), at.size(), SKETCH_RADIUS.into()),
-            faded(colour, alpha),
+            faded(colour.get(), alpha),
         );
         if let Some(place) = icon_in(at)
             && let Some(icon) = super::icons::of(&window.app)
@@ -583,7 +594,7 @@ fn full(
                     (ICON_RADIUS + half).into(),
                 ),
                 Stroke {
-                    style: Style::Solid(faded(ICON_RING, alpha)),
+                    style: Style::Solid(faded(ICON_RING.get(), alpha)),
                     width: 1.0,
                     ..Stroke::default()
                 },
@@ -614,12 +625,12 @@ pub fn icon_in(at: Rectangle) -> Option<Rectangle> {
 fn mini(f: &mut Frame, rect: Rectangle, shown: &Desktops, index: usize, ringed: bool, alpha: f32) {
     let path = Path::rounded_rectangle(rect.position(), rect.size(), DOT_RADIUS.into());
     if index == usize::from(shown.current) && ringed {
-        f.fill(&path, faded(ACCENT, alpha));
+        f.fill(&path, faded(ACCENT.get(), alpha));
     } else if on(shown, index).next().is_some() {
-        f.fill(&path, faded(DOT_FULL, alpha));
+        f.fill(&path, faded(DOT_FULL.get(), alpha));
     } else {
-        f.fill(&path, faded(DOT_EMPTY, alpha));
-        inner_ring(f, rect, DOT_RADIUS, 1.0, faded(DOT_RING, alpha));
+        f.fill(&path, faded(DOT_EMPTY.get(), alpha));
+        inner_ring(f, rect, DOT_RADIUS, 1.0, faded(DOT_RING.get(), alpha));
     }
 }
 

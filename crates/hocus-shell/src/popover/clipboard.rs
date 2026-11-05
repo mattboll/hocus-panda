@@ -44,6 +44,7 @@ use super::{
     Effect, Event as Seen, Pressed, event,
     kit::{self, Clip, Input, Pointer, Wheel, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     clipboard::{self, Item, Kind},
     clock::time::Lang,
@@ -133,20 +134,20 @@ const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
 }
 
 /// The mockup's tint, opaque without glass.
-const GLASS_TOP: Color = rgba(22, 27, 42, 0.96);
-const GLASS_BOTTOM: Color = rgba(14, 17, 28, 0.98);
-const OPAQUE_TOP: Color = rgb(0x161B2A);
-const OPAQUE_BOTTOM: Color = rgb(0x0E111C);
-const RIM: Color = rgba(255, 255, 255, 0.10);
-const GHOST_HOVER: Color = rgba(255, 255, 255, 0.10);
-const FIELD_FILL: Color = rgba(255, 255, 255, 0.05);
-const FIELD_RIM: Color = rgba(108, 194, 135, 0.45);
-const QUIET: Color = rgb(0x7C8698);
-const SELECTED_RIM: Color = rgba(108, 194, 135, 0.55);
-const SELECTED_FILL: Color = rgba(108, 194, 135, 0.13);
-const TILE_FILL: Color = rgba(255, 255, 255, 0.07);
-const AMBER: Color = rgb(0xF5C46E);
-const KEYS: Color = rgb(0x6A7384);
+const GLASS_TOP: Ink = Ink::Dark(rgba(22, 27, 42, 0.96));
+const GLASS_BOTTOM: Ink = Ink::Dark(rgba(14, 17, 28, 0.98));
+const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
+const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
+const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const GHOST_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const FIELD_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.05));
+const FIELD_RIM: Ink = Ink::Accent(0.45);
+const QUIET: Ink = Ink::Dark(rgb(0x7C8698));
+const SELECTED_RIM: Ink = Ink::Accent(0.55);
+const SELECTED_FILL: Ink = Ink::Accent(0.13);
+const TILE_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.07));
+const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
+const KEYS: Ink = Ink::Dark(rgb(0x6A7384));
 
 const MONO: Font = Font::with_name("Martian Mono");
 
@@ -648,7 +649,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 empty.clone(),
                 Point::new(view.center_x(), LIST_TOP + EMPTY_TOP + EMPTY * LINE / 2.0),
                 EMPTY,
-                FAINT,
+                FAINT.get(),
                 Alignment::Center,
             ));
         }
@@ -680,7 +681,7 @@ impl<Message> canvas::Program<Message> for Panel {
             self.words.keys().to_owned(),
             Point::new(LEFT, FOOTER_TOP + FOOTER * LINE / 2.0),
             FOOTER,
-            KEYS,
+            KEYS.get(),
             Alignment::Left,
         ));
         vec![frame.into_geometry()]
@@ -729,8 +730,8 @@ impl Panel {
             },
         );
         let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
+            .add_stop(0.0, top.get())
+            .add_stop(1.0, bottom.get());
         f.fill(&shape, canvas::Fill::from(tint));
     }
 
@@ -741,7 +742,7 @@ impl Panel {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (RADIUS - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
     }
 
@@ -753,12 +754,12 @@ impl Panel {
                 self.words.title().to_owned(),
                 Point::new(LEFT, middle),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
         if hover == Some(Target::Clear) {
-            f.fill(&kit::rounded(laid.clear, GHOST_RADIUS), GHOST_HOVER);
+            f.fill(&kit::rounded(laid.clear, GHOST_RADIUS), GHOST_HOVER.get());
         }
         f.fill_text(text_in(
             MANROPE_SEMIBOLD,
@@ -766,7 +767,7 @@ impl Panel {
                 self.words.clear().to_owned(),
                 laid.clear.center(),
                 GHOST_TEXT,
-                DIM,
+                DIM.get(),
                 Alignment::Center,
             ),
         ));
@@ -774,10 +775,12 @@ impl Panel {
 
     fn field(&self, f: &mut Frame, state: &State, keyboard: bool) {
         let field = Laid::field();
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL);
+        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
         f.stroke(
             &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default().with_color(FIELD_RIM).with_width(1.0),
+            Stroke::default()
+                .with_color(FIELD_RIM.get())
+                .with_width(1.0),
         );
         magnifier(
             f,
@@ -797,7 +800,7 @@ impl Panel {
             content,
             Point::new(x, field.center_y()),
             QUERY,
-            colour,
+            colour.get(),
             Alignment::Left,
         ));
         // The caret after what is typed, while the field has the keyboard.
@@ -810,7 +813,7 @@ impl Panel {
             f.fill_rectangle(
                 Point::new(caret_x, field.center_y() - QUERY * 0.6),
                 Size::new(1.0, QUERY * 1.2),
-                TEXT,
+                TEXT.get(),
             );
         }
     }
@@ -829,7 +832,7 @@ impl Panel {
                         letter,
                         Point::new(x, middle),
                         HEAD_TEXT,
-                        QUIET,
+                        QUIET.get(),
                         Alignment::Left,
                     ),
                 ),
@@ -841,10 +844,12 @@ impl Panel {
     fn row(&self, f: &mut Frame, clip: Clip, row: &Row, rect: Rectangle, state: &State) {
         let selected = state.selected == Some(row.key);
         if selected {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), SELECTED_FILL);
+            f.fill(&kit::rounded(rect, ROW_RADIUS), SELECTED_FILL.get());
             f.stroke(
                 &kit::rounded(inset(rect, 0.5), ROW_RADIUS - 0.5),
-                Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
+                Stroke::default()
+                    .with_color(SELECTED_RIM.get())
+                    .with_width(1.0),
             );
         }
         // Its kind's tile.
@@ -852,7 +857,7 @@ impl Panel {
             Point::new(rect.x + TILE_IN, rect.center_y() - TILE / 2.0),
             Size::new(TILE, TILE),
         );
-        f.fill(&kit::rounded(tile, TILE_RADIUS), TILE_FILL);
+        f.fill(&kit::rounded(tile, TILE_RADIUS), TILE_FILL.get());
         let inner = inset(tile, TILE_PAD);
         match &row.tile {
             Tile::Glyph(glyph) => clip.fill(
@@ -863,7 +868,7 @@ impl Panel {
                         (*glyph).to_owned(),
                         tile.center(),
                         GLYPH,
-                        DIM,
+                        DIM.get(),
                         Alignment::Center,
                     ),
                 ),
@@ -894,7 +899,7 @@ impl Panel {
                     row.line.clone(),
                     Point::new(x, top + CONTENT * LINE / 2.0),
                     size,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ),
             ),
@@ -905,7 +910,7 @@ impl Panel {
                 row.meta.clone(),
                 Point::new(x, top + CONTENT * LINE + LINES_GAP + META * LINE / 2.0),
                 META,
-                QUIET,
+                QUIET.get(),
                 Alignment::Left,
             ),
         );
@@ -920,7 +925,7 @@ impl Panel {
             (remove, hover == Some(Target::Remove(row.key))),
         ] {
             if lit {
-                f.fill(&kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER);
+                f.fill(&kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
             }
         }
         pin_glyph(f, pin.center(), row.pinned);
@@ -930,7 +935,7 @@ impl Panel {
                 "✕".to_owned(),
                 remove.center(),
                 CROSS,
-                FAINT,
+                FAINT.get(),
                 Alignment::Center,
             ),
         );
@@ -1254,7 +1259,7 @@ fn magnifier(f: &mut Frame, at: Point) {
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
     let stroke = Stroke {
         line_cap: canvas::LineCap::Round,
-        ..Stroke::default().with_color(DIM).with_width(2.2 * k)
+        ..Stroke::default().with_color(DIM.get()).with_width(2.2 * k)
     };
     f.stroke(&Path::circle(p(10.5, 10.5), 6.5 * k), stroke);
     f.stroke(&Path::line(p(15.5, 15.5), p(20.0, 20.0)), stroke);
@@ -1277,12 +1282,14 @@ fn pin_glyph(f: &mut Frame, centre: Point, pinned: bool) {
     });
     let colour = if pinned { AMBER } else { FAINT };
     if pinned {
-        f.fill(&head, colour);
+        f.fill(&head, colour.get());
     }
     let stroke = Stroke {
         line_cap: canvas::LineCap::Round,
         line_join: canvas::LineJoin::Round,
-        ..Stroke::default().with_color(colour).with_width(1.8 * k)
+        ..Stroke::default()
+            .with_color(colour.get())
+            .with_width(1.8 * k)
     };
     f.stroke(&head, stroke);
     f.stroke(&Path::line(p(12.0, 13.0), p(12.0, 21.0)), stroke);

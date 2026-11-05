@@ -26,6 +26,7 @@ use super::{
     Event as Seen, Item, Pressed, event,
     kit::{self, Input, Pointer, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     levels::draw::{ACCENT, DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
     tray::menu::{Entry, Kind, Toggle},
@@ -38,15 +39,15 @@ const PAD: f32 = 6.0;
 const TITLE: f32 = 11.0;
 const TITLE_SPACING: f32 = 0.08 * TITLE;
 const TITLE_HEIGHT: f32 = TITLE * LINE + 12.0;
-const TITLE_INK: Color = rgb(0x7C8698);
+const TITLE_INK: Ink = Ink::Dark(rgb(0x7C8698));
 const ROW: f32 = 30.0;
 const ROW_IN: f32 = 8.0;
 const ROW_RADIUS: f32 = 8.0;
 const ROW_TEXT: f32 = 12.5;
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.07);
-const OFF: Color = rgb(0x6A7384);
+const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.07));
+const OFF: Ink = Ink::Dark(rgb(0x6A7384));
 const SEPARATOR: f32 = 9.0;
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 /// A row's icon, and the column of the checks and dots.
 pub const ICON: f32 = 16.0;
 const ICON_GAP: f32 = 8.0;
@@ -337,7 +338,7 @@ impl<Message> canvas::Program<Message> for Panel {
         // The title, spaced, or the way back.
         let title = title_rect();
         if lit(Target::Back) {
-            f.fill(&kit::rounded(title, ROW_RADIUS), ROW_HOVER);
+            f.fill(&kit::rounded(title, ROW_RADIUS), ROW_HOVER.get());
         }
         if state.focus == Some(Target::Back) {
             ring(f, title, ROW_RADIUS);
@@ -356,7 +357,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     ch,
                     Point::new(x, title.center_y()),
                     TITLE,
-                    TITLE_INK,
+                    TITLE_INK.get(),
                     Alignment::Left,
                 ),
             ));
@@ -369,13 +370,13 @@ impl<Message> canvas::Program<Message> for Panel {
                 f.fill_rectangle(
                     Point::new(rect.x + ROW_IN, rect.center_y().floor()),
                     Size::new(rect.width - 2.0 * ROW_IN, 1.0),
-                    RULE,
+                    RULE.get(),
                 );
                 continue;
             }
             let target = Target::Row(entry.id);
             if entry.acts() && lit(target) {
-                f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER);
+                f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
             }
             if state.focus == Some(target) {
                 ring(f, rect, ROW_RADIUS);
@@ -388,7 +389,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     f,
                     entry.toggle,
                     Point::new(x + TOGGLE / 2.0 - 2.0, middle),
-                    ink,
+                    ink.get(),
                 );
                 x += TOGGLE;
             }
@@ -414,7 +415,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 label,
                 Point::new(x, middle),
                 ROW_TEXT,
-                ink,
+                ink.get(),
                 Alignment::Left,
             ));
             if let Some(chevron) = chevron {
@@ -422,7 +423,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     chevron.to_owned(),
                     Point::new(rect.x + rect.width - ROW_IN, middle),
                     ROW_TEXT + 2.0,
-                    DIM,
+                    DIM.get(),
                     Alignment::Right,
                 ));
             }
@@ -453,7 +454,7 @@ fn toggle(f: &mut Frame, toggle: Toggle, at: Point, ink: Color) {
             f.stroke(
                 &check,
                 Stroke::default()
-                    .with_color(if ink == TEXT { ACCENT } else { ink })
+                    .with_color(if ink == TEXT.get() { ACCENT.get() } else { ink })
                     .with_width(1.8)
                     .with_line_cap(canvas::LineCap::Round)
                     .with_line_join(canvas::LineJoin::Round),
@@ -461,11 +462,11 @@ fn toggle(f: &mut Frame, toggle: Toggle, at: Point, ink: Color) {
         }
         Toggle::Radio(true) => f.fill(
             &Path::circle(at, 3.5),
-            if ink == TEXT { ACCENT } else { ink },
+            if ink == TEXT.get() { ACCENT.get() } else { ink },
         ),
         Toggle::Radio(false) => f.stroke(
             &Path::circle(at, 4.0),
-            Stroke::default().with_color(DIM).with_width(1.2),
+            Stroke::default().with_color(DIM.get()).with_width(1.2),
         ),
     }
 }

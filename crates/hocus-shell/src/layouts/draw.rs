@@ -17,6 +17,7 @@ use iced::{
 };
 
 use super::{Layout, Layouts};
+use crate::theme::Ink;
 use crate::{
     bluetooth::{self, model::Kind},
     levels::draw::{DIM, ITEM_OUT, LINE, MANROPE, MANROPE_BOLD, TEXT, faded},
@@ -27,7 +28,7 @@ const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 8.0;
 const CHIP: f32 = 12.0;
 const CHIP_PAD: f32 = 6.0;
-const CHIP_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const CHIP_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 /// The mini form's button, and its code's size.
 pub const MINI_BUTTON: Size = Size::new(44.0, 30.0);
 const MINI_CODE: f32 = 13.0;
@@ -86,13 +87,13 @@ pub fn full(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
         return;
     }
     let icon = Point::new(rect.x + ITEM_OUT, rect.center_y() - ICON / 2.0);
-    bluetooth::draw::kind(f, icon, ICON, Kind::Keyboard, faded(TEXT, alpha));
+    bluetooth::draw::kind(f, icon, ICON, Kind::Keyboard, faded(TEXT.get(), alpha));
     let middle = rect.center_y();
     f.fill_text(text(
         state.label.clone(),
         Point::new(icon.x + ICON + ICON_GAP, middle),
         (MANROPE, LABEL),
-        faded(TEXT, alpha),
+        faded(TEXT.get(), alpha),
         Alignment::Left,
     ));
     let height = CHIP * LINE + 2.0;
@@ -103,14 +104,14 @@ pub fn full(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
     );
     f.fill(
         &Path::rounded_rectangle(chip.position(), chip.size(), 6.0.into()),
-        faded(CHIP_FILL, alpha),
+        faded(CHIP_FILL.get(), alpha),
     );
     if let Some(layout) = &state.layout {
         f.fill_text(text(
             layout.code.clone(),
             chip.center(),
             (MANROPE_BOLD, CHIP),
-            faded(DIM, alpha),
+            faded(DIM.get(), alpha),
             Alignment::Center,
         ));
     }
@@ -125,7 +126,7 @@ pub fn mini(f: &mut Frame, rect: Rectangle, state: &RowState, alpha: f32) {
         state.mini.clone(),
         rect.center(),
         (MANROPE_BOLD, MINI_CODE),
-        faded(TEXT, alpha),
+        faded(TEXT.get(), alpha),
         Alignment::Center,
     ));
 }

@@ -11,8 +11,9 @@ use iced::{
 };
 
 use crate::levels::draw::{MUTED_FILL, TEXT, TRACK};
+use crate::theme::Ink;
 
-const KNOB_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.45);
+const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.45));
 
 /// A slider's track, from `left` to `right` and centred on `middle`: its
 /// height, its knob's size.
@@ -67,7 +68,7 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
             Size::new(right - left, height),
             radius.into(),
         ),
-        TRACK,
+        TRACK.get(),
     );
     let knob = left + travel * share.clamp(0.0, 1.0);
     let filled = Path::rounded_rectangle(
@@ -76,7 +77,7 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
         radius.into(),
     );
     match fill {
-        None => f.fill(&filled, MUTED_FILL),
+        None => f.fill(&filled, MUTED_FILL.get()),
         Some((from, to)) => {
             let fill = gradient::Linear::new(
                 Point::new(left, middle),
@@ -95,7 +96,7 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
             KNOB_SHADOW.scale_alpha(share),
         );
     }
-    f.fill(&Path::circle(centre, size / 2.0), TEXT);
+    f.fill(&Path::circle(centre, size / 2.0), TEXT.get());
 }
 
 /// The bars' screens' scales, by screen, as iced says them.

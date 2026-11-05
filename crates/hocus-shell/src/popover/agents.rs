@@ -32,6 +32,7 @@ use super::{
     Effect, Event as Seen, Item, Pressed, event,
     kit::{self, FILL, FILL_HOVER, Input, Pointer, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     agents::{self, HERDR_MARK, LINK, MARK_INK, Shows, Tool, Words},
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE_BOLD, TEXT, ring},
@@ -57,11 +58,11 @@ const HEADER: f32 = 32.0;
 const TITLE: f32 = 16.0;
 const MONO: Font = Font::with_name("Martian Mono");
 const CODE: f32 = 11.5;
-const PLUG: Color = Color::from_rgba8(108, 194, 135, 0.18);
-const PLUG_HOVER: Color = Color::from_rgba8(108, 194, 135, 0.28);
-const BLOCK: Color = Color::from_rgba8(255, 255, 255, 0.04);
-const CODE_FILL: Color = Color::from_rgba8(0, 0, 0, 0.25);
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const PLUG: Ink = Ink::Accent(0.18);
+const PLUG_HOVER: Ink = Ink::Accent(0.28);
+const BLOCK: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
+const CODE_FILL: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.25));
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 
 /// Sources: rows 40 px, 6 px apart; marks 20 px; the note 13 px on 1.45
 /// lines, the states' 12 px; the code's box 38 px.
@@ -469,7 +470,7 @@ impl Panel {
                 name.to_owned(),
                 Point::new(x, name_middle),
                 14.0,
-                if there { TEXT } else { FAINT },
+                if there { TEXT.get() } else { FAINT.get() },
                 Alignment::Left,
             ));
             let (said, green) = words.tool_state(tool_state);
@@ -480,7 +481,7 @@ impl Panel {
                     name_middle + 14.0 * LINE / 2.0 + 1.0 + SMALL * LINE / 2.0,
                 ),
                 SMALL,
-                if green { ACCENT } else { FAINT },
+                if green { ACCENT.get() } else { FAINT.get() },
                 Alignment::Left,
             ));
             match target {
@@ -491,11 +492,22 @@ impl Panel {
                     } else {
                         words.plug()
                     };
-                    button(f, *rect, word, (12.5, true), (fill, ACCENT), 13.0);
+                    button(
+                        f,
+                        *rect,
+                        word,
+                        (12.5, true),
+                        (fill.get(), crate::theme::ACCENT_TEXT.get()),
+                        13.0,
+                    );
                 }
                 Some((t @ Target::Unplug(_), rect)) => {
                     let lit = hover == Some(*t);
-                    let colours = if lit { (FILL_HOVER, TEXT) } else { (FILL, DIM) };
+                    let colours = if lit {
+                        (FILL_HOVER.get(), TEXT.get())
+                    } else {
+                        (FILL.get(), DIM.get())
+                    };
                     button(f, *rect, words.unplug(), (12.5, false), colours, 7.0);
                 }
                 _ => {}
@@ -507,27 +519,31 @@ impl Panel {
                 words.decline().to_owned(),
                 Point::new(rect.x, rect.center_y()),
                 LINK,
-                if lit { TEXT } else { FAINT },
+                if lit { TEXT.get() } else { FAINT.get() },
                 Alignment::Left,
             ));
         }
-        f.fill_rectangle(Point::new(LEFT, l.rule), Size::new(ROOM, 1.0), RULE);
+        f.fill_rectangle(Point::new(LEFT, l.rule), Size::new(ROOM, 1.0), RULE.get());
         let letters = kit::label_letters(words.another_label());
         kit::label(f, &letters, l.label + kit::LABEL * LINE / 2.0);
-        lines(f, &l.any.1, (LEFT, l.any.0), NOTE, NOTE_LINE, DIM);
-        f.fill(&kit::rounded(l.code, 8.0), CODE_FILL);
+        lines(f, &l.any.1, (LEFT, l.any.0), NOTE, NOTE_LINE, DIM.get());
+        f.fill(&kit::rounded(l.code, 8.0), CODE_FILL.get());
         f.fill_text(text_in(
             MONO,
             text(
                 words.command().to_owned(),
                 Point::new(l.code.x + 10.0, l.code.center_y()),
                 CODE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
         let lit = hover == Some(Target::Copy);
-        let colours = if lit { (FILL_HOVER, TEXT) } else { (FILL, DIM) };
+        let colours = if lit {
+            (FILL_HOVER.get(), TEXT.get())
+        } else {
+            (FILL.get(), DIM.get())
+        };
         button(
             f,
             l.copy,
@@ -536,7 +552,14 @@ impl Panel {
             colours,
             6.0,
         );
-        lines(f, &l.note.1, (LEFT, l.note.0), SMALL, NOTE_LINE, FAINT);
+        lines(
+            f,
+            &l.note.1,
+            (LEFT, l.note.0),
+            SMALL,
+            NOTE_LINE,
+            FAINT.get(),
+        );
     }
 
     fn consent(&self, f: &mut Frame, state: &State, tool: Tool) {
@@ -556,20 +579,20 @@ impl Panel {
                 words.plug_title(tool),
                 Point::new(LEFT + CONSENT_MARK + 10.0, header_middle),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
         let l = consent_layout(tool, &state.said, words);
-        lines(f, &l.what.1, (LEFT, l.what.0), WHAT, WHAT_LINE, DIM);
-        f.fill(&kit::rounded(l.block, 8.0), BLOCK);
+        lines(f, &l.what.1, (LEFT, l.what.0), WHAT, WHAT_LINE, DIM.get());
+        f.fill(&kit::rounded(l.block, 8.0), BLOCK.get());
         let x = l.block.x + BLOCK_PAD.1;
         let mut y = l.block.y + BLOCK_PAD.0;
         f.fill_text(text(
             words.file_changed().to_owned(),
             Point::new(x, y + SMALL * LINE / 2.0),
             SMALL,
-            FAINT,
+            FAINT.get(),
             Alignment::Left,
         ));
         y += SMALL * LINE + BLOCK_GAP;
@@ -579,26 +602,30 @@ impl Panel {
                 l.file.clone(),
                 Point::new(x, y + CODE * LINE / 2.0),
                 CODE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
         y += CODE * LINE + BLOCK_GAP;
-        lines(f, &l.kept, (x, y), SMALL, LINE, FAINT);
+        lines(f, &l.kept, (x, y), SMALL, LINE, FAINT.get());
         let lit = hover == Some(Target::Cancel);
-        let colours = if lit { (FILL_HOVER, TEXT) } else { (FILL, DIM) };
+        let colours = if lit {
+            (FILL_HOVER.get(), TEXT.get())
+        } else {
+            (FILL.get(), DIM.get())
+        };
         button(f, l.cancel, words.cancel(), (13.0, false), colours, 8.0);
         let fill = if hover == Some(Target::Confirm) {
             crate::levels::draw::rgb(0x7FD198)
         } else {
-            ACCENT
+            ACCENT.get()
         };
         button(
             f,
             l.confirm,
             words.plug(),
             (13.0, true),
-            (fill, MARK_INK),
+            (fill, MARK_INK.get()),
             8.0,
         );
     }

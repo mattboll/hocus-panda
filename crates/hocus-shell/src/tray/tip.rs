@@ -22,6 +22,7 @@ use iced::{
     window,
 };
 
+use crate::theme::Ink;
 use crate::{
     Message,
     levels::draw::{MANROPE, MANROPE_BOLD, TEXT},
@@ -33,8 +34,8 @@ pub const DELAY: Duration = Duration::from_millis(400);
 const PAD: Size = Size::new(10.0, 7.0);
 const BORDER: f32 = 1.0;
 const SIZE: f32 = 12.0;
-const FILL: Color = Color::from_rgba8(14, 17, 28, 0.96);
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
+const FILL: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.96));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 /// What comes between the name and what the item says.
 const BETWEEN: &str = " · ";
 
@@ -263,7 +264,7 @@ impl canvas::Program<Message> for Tip {
         let radius = TIP_RADIUS as f32;
         frame.fill(
             &Path::rounded_rectangle(Point::ORIGIN, size, radius.into()),
-            FILL,
+            FILL.get(),
         );
         frame.stroke(
             &Path::rounded_rectangle(
@@ -271,7 +272,7 @@ impl canvas::Program<Message> for Tip {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (radius - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
         let Some((name, tip)) = said(&self.says) else {
             return vec![frame.into_geometry()];
@@ -281,14 +282,20 @@ impl canvas::Program<Message> for Tip {
         let name_width = kit::measure(&name, SIZE, MANROPE_BOLD);
         frame.fill_text(kit::text_in(
             MANROPE_BOLD,
-            kit::text(name, Point::new(x, middle), SIZE, TEXT, Alignment::Left),
+            kit::text(
+                name,
+                Point::new(x, middle),
+                SIZE,
+                TEXT.get(),
+                Alignment::Left,
+            ),
         ));
         if !tip.is_empty() {
             frame.fill_text(kit::text(
                 format!("{BETWEEN}{tip}"),
                 Point::new(x + name_width, middle),
                 SIZE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ));
         }

@@ -17,6 +17,7 @@
 
 pub mod activate;
 pub mod app;
+pub mod appearance;
 pub mod devices;
 pub mod keyboard;
 pub mod keys;
@@ -30,5 +31,6 @@ pub mod search;
 pub mod single;
 pub mod sound;
 pub mod store;
+pub mod theme;
 pub mod worker;
 pub mod xkb;

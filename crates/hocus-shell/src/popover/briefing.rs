@@ -44,6 +44,7 @@ use super::{
     Event as Seen, Item, Pressed, event,
     kit::{self, FILL, Input, Pointer, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     agents::{self, Brief, Entry, Look, Words},
     clock::time::Lang,
@@ -85,17 +86,17 @@ const WHAT: f32 = 12.5;
 const WHAT_GAP: f32 = 1.0;
 /// The divider, 2 px from what is around it; the footer 12.5 px.
 const RULE_PAD: f32 = 2.0;
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const FOOTER: f32 = 12.5;
 /// "Sources" lit around it, for the pointer.
 const LINK_PAD: f32 = 6.0;
 /// The sections' colours: the rows' words'.
-const WAITING: Color = rgb(0xF5C46E);
-const STUCK: Color = rgb(0xF7A77A);
-const TO_SEE: Color = rgb(0x7EE0A0);
+const WAITING: Ink = Ink::Dark(rgb(0xF5C46E));
+const STUCK: Ink = Ink::Dark(rgb(0xF7A77A));
+const TO_SEE: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The mini form's last two (4.7): `text.dim`, and the resting rows' word.
-const AT_WORK: Color = DIM;
-const RESTING: Color = rgb(0x6A7384);
+const AT_WORK: Ink = DIM;
+const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
 
 /// What can be clicked in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,7 +429,7 @@ impl Panel {
                 words.briefing().to_owned(),
                 Point::new(LEFT + HEAD + HEAD_GAP, middle),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -444,11 +445,11 @@ impl Panel {
                 f,
                 words.section(section.look),
                 (LEFT, section.label_middle),
-                colour,
+                colour.get(),
             );
             for line in &section.lines {
                 if hover == Some(Target::Agent(line.id)) {
-                    f.fill(&kit::rounded(line.rect, LINE_RADIUS), FILL);
+                    f.fill(&kit::rounded(line.rect, LINE_RADIUS), FILL.get());
                 }
                 let who_middle = line.rect.y + LINE_PAD + WHO * LINE / 2.0;
                 f.fill_text(text_in(
@@ -457,7 +458,7 @@ impl Panel {
                         line.who.clone(),
                         Point::new(LEFT, who_middle),
                         WHO,
-                        TEXT,
+                        TEXT.get(),
                         Alignment::Left,
                     ),
                 ));
@@ -465,7 +466,7 @@ impl Panel {
                     line.when.clone(),
                     Point::new(line.when_x, who_middle),
                     WHO,
-                    FAINT,
+                    FAINT.get(),
                     Alignment::Left,
                 ));
                 if let Some(what) = &line.what {
@@ -476,29 +477,33 @@ impl Panel {
                             who_middle + WHO * LINE / 2.0 + WHAT_GAP + WHAT * LINE / 2.0,
                         ),
                         WHAT,
-                        DIM,
+                        DIM.get(),
                         Alignment::Left,
                     ));
                 }
             }
         }
-        f.fill_rectangle(Point::new(LEFT, laid.rule), Size::new(ROOM, 1.0), RULE);
+        f.fill_rectangle(
+            Point::new(LEFT, laid.rule),
+            Size::new(ROOM, 1.0),
+            RULE.get(),
+        );
         f.fill_text(text(
             laid.footer.clone(),
             Point::new(LEFT, laid.footer_middle),
             FOOTER,
-            FAINT,
+            FAINT.get(),
             Alignment::Left,
         ));
         let lit = hover == Some(Target::Sources);
         if lit {
-            f.fill(&kit::rounded(laid.sources, LINE_RADIUS), FILL);
+            f.fill(&kit::rounded(laid.sources, LINE_RADIUS), FILL.get());
         }
         f.fill_text(text(
             words.sources().to_owned(),
             Point::new(laid.sources.x + LINK_PAD, laid.footer_middle),
             FOOTER,
-            if lit { TEXT } else { FAINT },
+            if lit { TEXT.get() } else { FAINT.get() },
             Alignment::Left,
         ));
     }

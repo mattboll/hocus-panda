@@ -44,6 +44,7 @@ mod in_use;
 mod launcher;
 mod layouts;
 mod levels;
+mod locale;
 mod lock;
 mod meeting;
 mod network;
@@ -57,6 +58,7 @@ mod renderer;
 mod setup;
 mod share;
 mod tasks;
+mod theme;
 mod today;
 mod tray;
 mod user;
@@ -97,20 +99,16 @@ const ALONE: &str = "active";
 /// (the windows, the glass), which it draws as of the frame it shows.
 const AHEAD: Duration = Duration::from_millis(16);
 
-// --- Theme tokens (§13) -------------------------------------------------------
-
-const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
-    Color::from_rgba8(r, g, b, a)
-}
+// --- Theme tokens (§13, theme.rs) ------------------------------------------
 
 /// `bar.bg` on glass: the tint over the compositor's blur.
-const GLASS_TOP: Color = rgba(22, 27, 42, 0.70);
-const GLASS_BOTTOM: Color = rgba(14, 17, 28, 0.78);
+const GLASS_TOP: theme::Ink = theme::Ink::Token(|t| t.bar_top);
+const GLASS_BOTTOM: theme::Ink = theme::Ink::Token(|t| t.bar_bottom);
 /// `bar.bg` without glass (reduce transparency, no blur, CPU rendering).
-const OPAQUE_TOP: Color = rgba(0x16, 0x1B, 0x2A, 1.0);
-const OPAQUE_BOTTOM: Color = rgba(0x0E, 0x11, 0x1C, 1.0);
+const OPAQUE_TOP: theme::Ink = theme::Ink::Token(|t| t.bar_opaque_top);
+const OPAQUE_BOTTOM: theme::Ink = theme::Ink::Token(|t| t.bar_opaque_bottom);
 /// `bar.border`.
-const RIM: Color = rgba(255, 255, 255, 0.10);
+const RIM: theme::Ink = theme::Ink::Token(|t| t.bar_border);
 
 fn main() -> ExitCode {
     // Before anything could take it for its own (docs/design/lock.md).
@@ -233,12 +231,16 @@ fn load_fonts() {
 fn style(_: &Shell, _: &Theme) -> iced::theme::Style {
     iced::theme::Style {
         background_color: Color::TRANSPARENT,
-        text_color: Color::WHITE,
+        text_color: theme::TEXT.get(),
     }
 }
 
 fn theme(_: &Shell, _: window::Id) -> Option<Theme> {
-    Some(Theme::Dark)
+    Some(if theme::light() {
+        Theme::Light
+    } else {
+        Theme::Dark
+    })
 }
 
 /// `HOCUS_CLOCK_AT`: the time the clock reads as the shell starts, for
@@ -370,6 +372,9 @@ struct Shell {
     waiting: HashMap<String, Form>,
     now: Instant,
     clock: clock::Style,
+    /// What the compositor said of the clock: its colour follows the
+    /// theme when it is the default one.
+    clock_look: ClockLook,
     wall: clock::time::Wall,
     lang: clock::time::Lang,
     words: levels::model::Words,
@@ -422,6 +427,7 @@ impl Shell {
             waiting: HashMap::new(),
             now: Instant::now(),
             clock: clock_style(&ClockLook::default()),
+            clock_look: ClockLook::default(),
             wall: clock::time::Wall { zone, shift },
             lang: clock::time::Lang::from_env(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
@@ -540,6 +546,23 @@ impl Shell {
                 popover::with(|c| c.motion = self.look.motion);
                 Task::none()
             }
+            // Every surface draws again, in it: this is a message.
+            ToShell::Theme(choice) => {
+                if theme::set(choice) {
+                    self.clock = clock_style(&self.clock_look);
+                }
+                tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme");
+                Task::none()
+            }
+            // The words and the formats: every surface draws again in them.
+            ToShell::Locale(locale) => {
+                locale::set(locale);
+                self.lang = clock::time::Lang::from_env();
+                self.words = levels::model::Words::new(clock::time::Lang::of_messages());
+                let lang = clock::time::Lang::of_messages();
+                tracing::info!(%locale, ?lang, "the language and formats");
+                Task::none()
+            }
             ToShell::Bar {
                 output,
                 form,
@@ -604,6 +627,7 @@ impl Shell {
             }
             ToShell::Clock(look) => {
                 self.clock = clock_style(&look);
+                self.clock_look = look;
                 Task::none()
             }
             // Taken by the link itself, without a message: here only if
@@ -1145,8 +1169,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = clock::SURFACE_TOP as f32 + height as f32 / 2.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1178,8 +1202,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - levels::draw::BOTTOM as f32 - height as f32 / 2.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1207,8 +1231,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - levels::draw::BOTTOM as f32 - 160.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1236,8 +1260,8 @@ impl Shell {
             let middle =
                 bar_height - levels::draw::BOTTOM as f32 - desktops::draw::middle(&bar.output);
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1263,8 +1287,8 @@ impl Shell {
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the group, read as it draws.
         let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP,
-            bottom: OPAQUE_BOTTOM,
+            top: OPAQUE_TOP.get(),
+            bottom: OPAQUE_BOTTOM.get(),
         });
         let program = agents::draw::Group {
             forms: bar.forms(at),
@@ -1288,8 +1312,8 @@ impl Shell {
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the list, read as it draws.
         let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP,
-            bottom: OPAQUE_BOTTOM,
+            top: OPAQUE_TOP.get(),
+            bottom: OPAQUE_BOTTOM.get(),
         });
         let program = tasks::draw::Group {
             forms: bar.forms(at),
@@ -1314,8 +1338,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - 40.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1343,8 +1367,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = column::TOP;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1373,8 +1397,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = column::TOP;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1400,8 +1424,8 @@ impl Shell {
         let bar = self.bars.values().find(|b| b.output == output)?;
         let at = self.now + AHEAD;
         let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP,
-            bottom: OPAQUE_BOTTOM,
+            top: OPAQUE_TOP.get(),
+            bottom: OPAQUE_BOTTOM.get(),
         });
         let program = windows::draw::View {
             bar: bar.output.clone(),
@@ -1427,8 +1451,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = today::shown(&output).1 + 40.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1458,8 +1482,8 @@ impl Shell {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - 100.0;
             mix(
-                OPAQUE_TOP,
-                OPAQUE_BOTTOM,
+                OPAQUE_TOP.get(),
+                OPAQUE_BOTTOM.get(),
                 (middle / bar_height).clamp(0.0, 1.0),
             )
         });
@@ -1877,12 +1901,12 @@ impl Shell {
             .style(move |_| container::Style {
                 background: Some(Background::Gradient(
                     gradient::Linear::new(iced::Degrees(180.0))
-                        .add_stop(0.0, top)
-                        .add_stop(1.0, bottom)
+                        .add_stop(0.0, top.get())
+                        .add_stop(1.0, bottom.get())
                         .into(),
                 )),
                 border: Border {
-                    color: RIM,
+                    color: RIM.get(),
                     width: 1.0,
                     radius: (RADIUS as f32).into(),
                 },
@@ -1911,9 +1935,16 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 /// the bundled Martian Mono.
 fn clock_style(look: &ClockLook) -> clock::Style {
     let [r, g, b] = look.color;
+    // `text` by default, in the theme; a colour of the user's own as it
+    // is, unless it is a near-white that the light theme would lose.
+    let color = if look.color == ClockLook::DEFAULT_COLOR {
+        theme::TEXT.get()
+    } else {
+        theme::ink(Color::from_rgb8(r, g, b))
+    };
     clock::Style {
         font: clock_font(&look.font),
-        color: Color::from_rgb8(r, g, b),
+        color,
         transition: look.transition,
         seconds: look.seconds,
     }

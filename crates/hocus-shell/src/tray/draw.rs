@@ -35,6 +35,7 @@ use iced_layershell::reexport::{
 };
 
 use super::{Ask, ICON, Shown};
+use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
@@ -51,7 +52,7 @@ const MINI_GAP: f32 = 2.0;
 /// The line over the cells, and the room between them.
 const LINE: f32 = 1.0;
 const UNDER_LINE: f32 = 6.0;
-const LINE_COLOUR: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const LINE_COLOUR: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 /// The cells' bottom over the footer's top.
 const OVER_FOOTER: f32 = 10.0;
 /// The footer's top over the bar's bottom, in each form (5.5).

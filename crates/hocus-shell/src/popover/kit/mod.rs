@@ -38,6 +38,7 @@ use crate::levels::{
     draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
     model::Words,
 };
+use crate::theme::Ink;
 
 // --- The frame, at ×1 -------------------------------------------------------------
 
@@ -91,20 +92,20 @@ pub(crate) const SWITCH: Size = Size::new(40.0, 22.0);
 const KNOB: f32 = 18.0;
 
 /// The tint over the compositor's blur, a little denser than the bar's.
-const GLASS_TOP: Color = Color::from_rgba8(22, 27, 42, 0.72);
-const GLASS_BOTTOM: Color = Color::from_rgba8(14, 17, 28, 0.82);
-const OPAQUE_TOP: Color = Color::from_rgba8(0x16, 0x1B, 0x2A, 1.0);
-const OPAQUE_BOTTOM: Color = Color::from_rgba8(0x0E, 0x11, 0x1C, 1.0);
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const GLASS_TOP: Ink = Ink::Token(|t| t.popover_top);
+const GLASS_BOTTOM: Ink = Ink::Token(|t| t.popover_bottom);
+const OPAQUE_TOP: Ink = Ink::Token(|t| t.popover_opaque_top);
+const OPAQUE_BOTTOM: Ink = Ink::Token(|t| t.popover_opaque_bottom);
+const RIM: Ink = Ink::Token(|t| t.bar_border);
 /// Buttons, and under the pointer.
-pub(crate) const FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-pub(crate) const FILL_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const BLOCK_FILL: Color = Color::from_rgba8(108, 194, 135, 0.10);
-const SWITCH_OFF: Color = Color::from_rgba8(255, 255, 255, 0.18);
-const KNOB_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.4);
+pub(crate) const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+pub(crate) const FILL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const BLOCK_FILL: Ink = Ink::Accent(0.10);
+const SWITCH_OFF: Ink = Ink::Token(|t| t.switch_off);
+const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.4));
 /// `gauge.critical`'s light end: failures, a low battery, a sign-in page.
-pub(crate) const PEACH: Color = rgb(0xF7B98A);
+pub(crate) const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
 
 /// Manrope at 600, the mockups' for connected names and some buttons.
 pub(crate) const MANROPE_SEMIBOLD: iced::Font = iced::Font {
@@ -132,8 +133,8 @@ pub(crate) fn background(f: &mut Frame, size: Size, glass: bool) {
     let radius = RADIUS as f32;
     let shape = Path::rounded_rectangle(Point::ORIGIN, size, radius.into());
     let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-        .add_stop(0.0, top)
-        .add_stop(1.0, bottom);
+        .add_stop(0.0, top.get())
+        .add_stop(1.0, bottom.get());
     f.fill(&shape, canvas::Fill::from(tint));
     let rim = Path::rounded_rectangle(
         Point::new(BORDER / 2.0, BORDER / 2.0),
@@ -143,7 +144,7 @@ pub(crate) fn background(f: &mut Frame, size: Size, glass: bool) {
     f.stroke(
         &rim,
         canvas::Stroke {
-            style: canvas::Style::Solid(RIM),
+            style: canvas::Style::Solid(RIM.get()),
             width: BORDER,
             ..canvas::Stroke::default()
         },
@@ -186,7 +187,7 @@ pub(crate) fn title(f: &mut Frame, title: &str) {
             title.to_owned(),
             Point::new(LEFT, HEADER_MIDDLE),
             TITLE,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ),
     ));
@@ -198,14 +199,18 @@ pub(crate) fn title_aside(f: &mut Frame, word: String) {
         word,
         Point::new(RIGHT, HEADER_MIDDLE),
         ASIDE,
-        FAINT,
+        FAINT.get(),
         Alignment::Right,
     ));
 }
 
 /// A section's divider: 1 px across the content at `y`.
 pub(crate) fn rule(f: &mut Frame, y: f32) {
-    f.fill_rectangle(Point::new(LEFT, y), Size::new(RIGHT - LEFT, 1.0), RULE);
+    f.fill_rectangle(
+        Point::new(LEFT, y),
+        Size::new(RIGHT - LEFT, 1.0),
+        RULE.get(),
+    );
 }
 
 /// `word`'s letters and their places from the content's left, spaced as a
@@ -235,7 +240,7 @@ pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
                 ch.to_string(),
                 Point::new(*x, middle),
                 LABEL,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ),
         ));
@@ -253,7 +258,7 @@ pub(crate) fn note(said: String, top: f32) -> canvas::Text {
         said,
         Point::new(LEFT, top + NOTE_TOP + NOTE * LINE / 2.0),
         NOTE,
-        FAINT,
+        FAINT.get(),
         Alignment::Left,
     )
 }
@@ -318,7 +323,7 @@ pub(crate) fn block(f: &mut Frame, top: f32, height: f32) -> Rectangle {
         Point::new(LEFT - ROW_OUT, top),
         Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, height),
     );
-    f.fill(&rounded(block, ROW_RADIUS), BLOCK_FILL);
+    f.fill(&rounded(block, ROW_RADIUS), BLOCK_FILL.get());
     block
 }
 
@@ -333,7 +338,7 @@ pub(crate) fn block_name(f: &mut Frame, name: String, middle: f32, lines: f32) -
             name,
             Point::new(LEFT + ICON + ICON_GAP, name_middle),
             NAME,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ),
     ));
@@ -359,7 +364,7 @@ pub(crate) fn small_button(f: &mut Frame, rect: Rectangle, word: &str, hover: bo
         word.to_owned(),
         rect.center(),
         STATUS,
-        if hover { TEXT } else { DIM },
+        if hover { TEXT.get() } else { DIM.get() },
         Alignment::Center,
     ));
 }
@@ -435,7 +440,7 @@ impl Switch {
         let rect = Self::rect();
         f.fill(
             &rounded(rect, SWITCH.height / 2.0),
-            mix(SWITCH_OFF, ACCENT, p),
+            mix(SWITCH_OFF.get(), ACCENT.get(), p),
         );
         let centre = Point::new(
             rect.x + 2.0 + (SWITCH.width - KNOB - 4.0) * p + KNOB / 2.0,
@@ -448,7 +453,7 @@ impl Switch {
                 KNOB_SHADOW.scale_alpha(share),
             );
         }
-        f.fill(&Path::circle(centre, KNOB / 2.0), TEXT);
+        f.fill(&Path::circle(centre, KNOB / 2.0), TEXT.get());
     }
 }
 
