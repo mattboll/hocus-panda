@@ -38,6 +38,11 @@ jobs:
   # four times the runner time (#626).
   build:
     runs-on: ubuntu-latest
+    env:
+      # Line numbers in backtraces, not the full debug information: the
+      # binaries are a fraction of the size, quicker to link, to send to
+      # the test jobs and to unpack there.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
       - name: Free disk space
@@ -58,11 +63,10 @@ jobs:
             libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          # The key the one test job saved its build under on main, before
-          # this layout: same programs and tests, so a pull request starts
-          # warm (cold, this job took 20 min).
-          shared-key: linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A pull request starts from main's build (cold, this job takes
+          # 20 min).
+          shared-key: build
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ci/633-nextest-archive' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -76,7 +80,12 @@ jobs:
         # archive takes them along (.config/nextest.toml).
         run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings
       - name: Tests' archive
-        run: cargo nextest archive --workspace --archive-file nextest.tar.zst
+        run: cargo nextest archive --workspace --archive-file nextest.tar.zst --timings
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timings
+          path: target/cargo-timings/cargo-timing.html
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: nextest
@@ -113,6 +122,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          # The packages' files, so a slow mirror does not hold the tests
+          # (it once took 40 min). apt still checks for newer versions.
+          path: ~/apt-archives
+          key: apt-run-v1-${{ runner.os }}
       - name: Run dependencies
         # The libraries the programs link to (their -dev packages bring
         # them), and what the tests run: private D-Bus and PipeWire,
@@ -121,13 +136,16 @@ jobs:
         # the CPU, for the one test of the shell on wgpu, annotate.rs,
         # #594), and a font.
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+            -o Dir::Cache::Archives="$HOME/apt-archives" \
             fonts-dejavu-core zstd \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
+          sudo chown -R "$USER" ~/apt-archives
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
