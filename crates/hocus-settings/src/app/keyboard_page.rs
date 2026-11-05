@@ -644,7 +644,7 @@ impl App {
         ));
         // Raccourcis.
         let changed = model::shortcuts().filter(|s| self.changed(s.id)).count();
-        let mut words = column![
+        let words = column![
             t(
                 w("Raccourcis du bureau", "Desktop shortcuts").get(lang),
                 14.0,
