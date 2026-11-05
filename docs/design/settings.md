@@ -757,6 +757,73 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   the shell's own surfaces; the sample agents are drawn as the mockup's
   heads, not the pandas' pictures.
 
+## Date et heure (6.11)
+
+Issue #411, variant A of the mockup (`s611`), as the issue's last
+comment, approved 2026-11-05, specifies it; the Compte page is the
+ticket's second part. Section `date-and-time` (`hocus settings
+date-and-time`), SYSTÈME's last row. Nothing is written in
+`config.toml`: the time, the zone and the automatic time are systemd's
+timedated's; their format is 6.2's `[locale] time` and `[locale] date`,
+only read here. The header keeps "Enregistré".
+
+| Group | Row | Control | Where |
+|---|---|---|---|
+| (none) | the clock's card (88 px): the time in Martian Mono 36 in the desktop's format, the date in words (15/700, "jeudi 5 novembre 2026"), "Europe/Paris · UTC+01:00, heure d'hiver jusqu'au 28 mars" (the next offset change from the zone's rules; "pas de changement d'heure" without one) | read only | timedated's `Timezone`, tzdata |
+| HEURE | Mettre à l'heure automatiquement: green "Par Internet (NTP) · à l'heure", amber "… pas encore à l'heure", "Coupé : l'heure ne se corrige plus seule.", or "Aucun service de mise à l'heure sur cet ordinateur." (the switch inert, off) | switch | `NTP`, `NTPSynchronized`, `CanNTP`; `SetNTP` |
+| | Date et heure: the date (118 px, "05/11/2026", or year first when `[locale] date = "iso"`) and the time (72 px, 24 or 12 h) in Martian Mono 12.5, at 45 % and inert while automatic; off, editable, "Tape la date et l'heure, puis « Régler »." and "Régler" (green, 28 px) | two fields and a button | `SetTime` |
+| FUSEAU HORAIRE | Fuseau horaire: "Paris, France · UTC+01:00" | a 200 px button with the zone's id and "›", opening the picker | `SetTimezone` |
+| FORMAT | Format de l'heure et de la date: "24 h · « jeudi 5 novembre ». Une fois pour tout le bureau : la barre, l'agenda, l'écran verrouillé." | link "Apparence et langue ›", opening 6.2 with "Heure" lit | `[locale] time`, `date` (read) |
+| PLUS TARD | Fuseau horaire automatique (a switch, off), Formats régionaux | inert, amber chip | |
+
+- **timedated** is followed on a thread of its own (`timedate.rs`, zbus on
+  the system bus), started the first time the page shows: its properties
+  read again on each `PropertiesChanged`, and `NTPSynchronized` (which it
+  never says) every 5 s only while the automatic time is on and not right
+  yet. Only a change reaches the window. Without timedated the rows are
+  inert and the switch's line says "Le service de l'heure du système
+  (timedated) ne répond pas."; the thread tries again, slower and slower,
+  silently. The calls are interactive (polkit may ask, 7.5) and answered
+  aside; a refusal toasts "Le système a refusé." and the page shows what
+  timedated still holds.
+- **The time set by hand**: "Régler" (or `Enter` in a field) sets the
+  date and time typed, read in the zone shown; toast "Heure réglée :
+  14:45." without "Annuler". `↑` / `↓` in a field step its day or its
+  minute. The fields follow the clock until something is typed in them.
+- **The picker** (a sheet, 440 px): "Fuseau horaire" with a globe, a
+  search field holding the keyboard, up to 8 rows (44 px): the city and
+  its country (the typed part marked as the search's results), "America/Toronto
+  · UTC−05:00", the time there in Martian Mono. Nothing typed: the
+  current zone, its country's, then the best known cities. Typed: the
+  cities whose name (French or English) starts with it first, then a word
+  of it, its country, the zone's id, an abbreviation now or in six months
+  ("CET", "PST"), an offset ("UTC+1", "+05:30"); accents and case
+  ignored; among equals the best known first. `↑` / `↓` move, `Enter`
+  chooses, `Esc` or a click outside closes. "Choisir Montréal" sets the
+  zone; toast "Fuseau horaire : Montréal (UTC−05:00)." with "Annuler",
+  which joins `Ctrl+Z` and `Ctrl+Shift+Z`.
+- **The zones**: tzdata's `zone.tab` (one line per country and zone, so
+  Monaco is found by its name), the cities' and countries' names in
+  French and English from CLDR (Unicode License v3), and a few large
+  cities living in another's zone (Montréal, Mumbai, Genève…), in
+  `crates/hocus-settings/data/zones/zones.tsv`, made by
+  `scripts/zones/generate.py`; their offsets and changes computed with
+  jiff from the system's tzdata.
+- **At rest** the page draws once a minute: its clock, from a one-shot
+  timer to the next minute while it shows.
+- **The search** finds "Mettre à l'heure automatiquement" (ntp,
+  synchroniser, internet), "Date et heure" (régler, changer l'heure),
+  "Fuseau horaire" (pays, ville, utc, gmt, décalage) and "Format de
+  l'heure" (12 h, 24 h, am, pm), and lights their rows.
+- **Choices made here (to confirm on the machine)**: the clock is in
+  Martian Mono Regular (the Light weight is not carried); `↑` / `↓` in a
+  field step its day or its minute, not the part under the caret (iced
+  does not say where the caret is); the date and time fields are reached
+  with the pointer, `Tab` stops on the switch, "Régler", the zone's
+  button and the link; a row of the picker shows its city's own name
+  ("Montréal"), the zone's row the zone's ("Toronto"); the switch shows
+  the value asked until timedated answers.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -951,7 +1018,7 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.6, 6.7, 6.10, 6.11, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.6, 6.7, 6.10, 6.11's Compte, 6.13 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -1110,10 +1177,27 @@ with an XKB registry of the test's own:
 - `the_keyboards_layouts_and_repeat_follow_the_file`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
+`crates/hocus-compositor/tests/settings_time.rs` (6.11, Date et heure),
+the same bed with timedated faked on a D-Bus daemon of the test's own
+(`levels/timedate.rs`):
+
+- `the_page_shows_the_clock_the_zone_and_the_automatic_time`
+- `not_on_time_yet_and_no_time_service_are_said`
+- `automatic_time_off_lets_the_time_be_set`
+- `the_time_zone_picker_finds_montreal_by_mon_and_sets_it`
+- `the_picker_moves_with_the_arrows_and_closes_with_esc`
+- `a_refusal_by_polkit_leaves_the_values_unchanged`
+- `a_zone_changed_elsewhere_shows_at_once`
+- `without_timedated_the_page_says_so`
+- `the_format_link_and_the_search_light_their_rows`
+- `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
 Unit tests: the sections and groups, the delays' and the idle delay's
 codecs, the search's order, accents and keys, the store's edits (only the
 line, its comment kept, tables made, a value written back as it was), the
 power source from the kernel's supplies, the recent changes kept, the
-second launch's line, the ids' names; `hocus-config`'s edit through a link
-with its mode; the user popover's rows; the launcher reading the
-package's entry as "Réglages".
+second launch's line, the ids' names; the zones' offsets, next changes
+and the picker's search, the dates and times typed; `hocus-config`'s edit
+through a link with its mode; the user popover's rows; the launcher
+reading the package's entry as "Réglages".
