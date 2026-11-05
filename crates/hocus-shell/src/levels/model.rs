@@ -410,25 +410,26 @@ impl Words {
         }
     }
 
-    /// A desktop's tile for screen readers (3.9): its number (from 1) and
-    /// how many windows it has.
-    pub fn desktop(self, number: usize, windows: usize) -> String {
+    /// A desktop's tile for screen readers (3.9): its name, else its
+    /// number (from 1), and how many windows it has.
+    pub fn desktop(self, number: usize, name: Option<&str>, windows: usize) -> String {
+        let title = self.desktop_title(number, name);
         match (self.fr(), windows) {
-            (true, 0) => format!("Bureau {number}, aucune fenêtre"),
-            (true, 1) => format!("Bureau {number}, 1 fenêtre"),
-            (true, n) => format!("Bureau {number}, {n} fenêtres"),
-            (false, 0) => format!("Desktop {number}, no windows"),
-            (false, 1) => format!("Desktop {number}, 1 window"),
-            (false, n) => format!("Desktop {number}, {n} windows"),
+            (true, 0) => format!("{title}, aucune fenêtre"),
+            (true, 1) => format!("{title}, 1 fenêtre"),
+            (true, n) => format!("{title}, {n} fenêtres"),
+            (false, 0) => format!("{title}, no windows"),
+            (false, 1) => format!("{title}, 1 window"),
+            (false, n) => format!("{title}, {n} windows"),
         }
     }
 
-    /// A desktop's list's title (3.9b).
-    pub fn desktop_title(self, number: usize) -> String {
-        if self.fr() {
-            format!("Bureau {number}")
-        } else {
-            format!("Desktop {number}")
+    /// A desktop's list's title (3.9b): its name (6.14), else "Bureau N".
+    pub fn desktop_title(self, number: usize, name: Option<&str>) -> String {
+        match name {
+            Some(name) => name.to_owned(),
+            None if self.fr() => format!("Bureau {number}"),
+            None => format!("Desktop {number}"),
         }
     }
 

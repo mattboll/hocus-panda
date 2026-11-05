@@ -682,6 +682,12 @@ pub struct Model {
     sizes: HashMap<String, (i32, i32)>,
     /// The dialogs' parents: a dialog stays above its parent (#595).
     parents: BTreeMap<WindowId, WindowId>,
+    /// Windows kept above the others, their dialogs with them (a rule's
+    /// `above`, 6.14).
+    above: std::collections::BTreeSet<WindowId>,
+    /// The fullscreen window raised last: it covers those kept above
+    /// while it stays in front.
+    covering: Option<WindowId>,
 }
 
 impl Model {
@@ -693,6 +699,7 @@ impl Model {
         self.stack.push(id);
         self.placements.insert(id, Placement::default());
         self.recent.push(id);
+        self.settle_above();
         id
     }
 
@@ -701,15 +708,17 @@ impl Model {
     pub fn add_below_focus(&mut self) -> WindowId {
         let id = self.add();
         if let Some(focused) = self.focused
-            && let Some(at) = self.stack.iter().position(|w| *w == focused)
+            && self.stack.contains(&focused)
         {
-            self.stack.pop();
+            self.stack.retain(|w| *w != id);
+            let at = self.stack.iter().position(|w| *w == focused).unwrap_or(0);
             self.stack.insert(at, id);
             if let Some(at) = self.recent.iter().position(|w| *w == focused) {
                 self.recent.pop();
                 self.recent.insert(at + 1, id);
             }
         }
+        self.settle_above();
         id
     }
 
@@ -718,13 +727,14 @@ impl Model {
     pub fn add_dialog(&mut self, parent: WindowId) -> WindowId {
         let id = self.add();
         self.parents.insert(id, parent);
-        self.stack.pop();
+        self.stack.retain(|w| *w != id);
         let above = self
             .stack
             .iter()
             .rposition(|w| *w == parent || self.descends(*w, parent))
             .map_or(self.stack.len(), |at| at + 1);
         self.stack.insert(above, id);
+        self.settle_above();
         id
     }
 
@@ -757,6 +767,10 @@ impl Model {
     /// A window went; the focus goes to the one now on top that shows.
     pub fn remove(&mut self, id: WindowId) {
         self.parents.retain(|w, p| *w != id && *p != id);
+        self.above.remove(&id);
+        if self.covering == Some(id) {
+            self.covering = None;
+        }
         self.stack.retain(|w| *w != id);
         self.placements.remove(&id);
         self.recent.retain(|w| *w != id);
@@ -848,7 +862,53 @@ impl Model {
             up.retain(|w| *w != id);
             self.stack.push(id);
             self.stack.extend(up);
+            self.covering = (self.mode(id) == Mode::Fullscreen).then_some(id);
+            self.settle_above();
         }
+    }
+
+    /// The window `id` is a dialog of, if any.
+    pub fn parent(&self, id: WindowId) -> Option<WindowId> {
+        self.parents.get(&id).copied()
+    }
+
+    /// `id` is kept above the others (`true`), or stacks as they do.
+    pub fn set_above(&mut self, id: WindowId, above: bool) {
+        if above {
+            self.above.insert(id);
+        } else {
+            self.above.remove(&id);
+        }
+        self.settle_above();
+    }
+
+    /// Whether `id` is kept above the others.
+    pub fn is_above(&self, id: WindowId) -> bool {
+        self.above.contains(&id)
+    }
+
+    /// The windows kept above the others go on top, in their order, their
+    /// dialogs with them; the fullscreen window raised last covers them.
+    fn settle_above(&mut self) {
+        if self.above.is_empty() {
+            return;
+        }
+        let tier = |w: WindowId| {
+            let of = |a: WindowId| w == a || self.descends(w, a);
+            if self
+                .covering
+                .is_some_and(|c| of(c) && self.mode(c) == Mode::Fullscreen)
+            {
+                2
+            } else if self.above.iter().any(|a| of(*a)) {
+                1
+            } else {
+                0
+            }
+        };
+        let mut tiers: Vec<(u8, WindowId)> = self.stack.iter().map(|w| (tier(*w), *w)).collect();
+        tiers.sort_by_key(|(t, _)| *t);
+        self.stack = tiers.into_iter().map(|(_, w)| w).collect();
     }
 
     pub fn focused(&self) -> Option<WindowId> {
@@ -877,6 +937,11 @@ impl Model {
             }
             p.mode = mode;
         }
+        // Fullscreen in front: it covers the windows kept above.
+        if mode == Mode::Fullscreen && self.focused == Some(id) {
+            self.covering = Some(id);
+        }
+        self.settle_above();
     }
 
     /// Where `id` goes back to floating: its screen changed (§12).
@@ -1329,5 +1394,32 @@ mod tests {
         model.remove(parent);
         model.raise(other);
         assert_eq!(model.stack(), &[dialog, inner, other]);
+    }
+
+    #[test]
+    fn a_window_kept_above_stays_on_top_until_a_fullscreen_one_covers_it() {
+        let mut model = Model::default();
+        let above = model.add();
+        model.set_above(above, true);
+        let a = model.add();
+        model.focus(Some(a));
+        assert_eq!(model.stack(), &[a, above], "a new window opens under it");
+        // Its dialog goes with it; the others raised stay under them.
+        let dialog = model.add_dialog(above);
+        let b = model.add_below_focus();
+        model.focus(Some(b));
+        assert_eq!(model.stack(), &[a, b, above, dialog]);
+        // Fullscreen in front: it covers them, until another is raised.
+        model.set_mode(a, Mode::Fullscreen, OUTPUT);
+        model.focus(Some(a));
+        assert_eq!(model.stack(), &[b, above, dialog, a]);
+        model.focus(Some(b));
+        assert_eq!(model.stack(), &[a, b, above, dialog]);
+        // No longer kept above: it stacks as the others.
+        model.set_above(above, false);
+        model.focus(Some(a));
+        assert_eq!(model.stack(), &[b, above, dialog, a]);
+        model.focus(Some(b));
+        assert_eq!(model.stack(), &[above, dialog, a, b]);
     }
 }

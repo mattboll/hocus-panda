@@ -1,9 +1,10 @@
 //! The connections above the levels (bar.md §4 group 9, §5): the Wi-Fi's
 //! row, its popover's data, and what the popover asks of NetworkManager.
 //!
-//! NetworkManager is read on a thread of its own ([`nm`]), never on the
-//! loop that draws: it pushes a [`Network`] each time what it says changes,
-//! and takes the popover's asks ([`Ask`]) through a channel. The row draws
+//! NetworkManager is read on a thread of its own (`hocus_network::nm`,
+//! shared with the Settings' Réseau page), never on the loop that draws:
+//! it pushes a [`Network`] each time what it says changes, and takes the
+//! popover's asks ([`Ask`]) through a channel. The row draws
 //! on a surface of its own ([`draw`]), woken through the compositor only
 //! when what it shows changes (`wake hocus-bar-connections`), so that
 //! neither the levels nor the clock draw for a network, nor the row for a
@@ -11,30 +12,12 @@
 
 pub mod draw;
 pub mod model;
-pub mod nm;
-pub mod secret;
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-pub use self::model::Network;
-use self::secret::Secret;
+pub use hocus_network::{Ask, secret};
 
-/// What the popover asks of NetworkManager.
-#[derive(Debug)]
-pub enum Ask {
-    /// Look for networks (as the popover opens).
-    Scan,
-    /// The Wi-Fi on or off.
-    Enable(bool),
-    /// Join a saved or open network.
-    Connect { ssid: Vec<u8> },
-    /// Join a protected network with this password.
-    ConnectWith { ssid: Vec<u8>, secret: Secret },
-    /// Disconnect the Wi-Fi device.
-    Disconnect,
-    /// Give up the connection under way.
-    Abandon,
-}
+pub use self::model::Network;
 
 /// What changed, for whoever shows it: the row, or only the popover's
 /// contents.
@@ -64,7 +47,11 @@ pub fn start() {
         asks,
     };
     if SERVICE.set(service).is_ok() {
-        nm::start(incoming);
+        hocus_network::nm::start(incoming, |heard| {
+            if let hocus_network::Heard::Now(view) = heard {
+                publish(view.network());
+            }
+        });
     }
 }
 

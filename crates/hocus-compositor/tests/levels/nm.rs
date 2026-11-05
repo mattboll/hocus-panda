@@ -11,6 +11,14 @@
 //! switched off takes the device down. Every change is signalled with its
 //! values (`PropertiesChanged`), and what the shell asked is recorded,
 //! passwords included, for the tests to compare.
+//!
+//! For the Settings' Réseau page (6.6) too: saved connections with their
+//! UUID, when they were last used and whether they join by themselves;
+//! their secrets read (`GetSecrets`), changed (`Update2`, keeping those an
+//! update leaves out, as NetworkManager does) and given back
+//! (`AddConnection`); a connection deleted while in use is left first;
+//! the Wi-Fi device's IPv4 configuration. Changes can be refused as polkit
+//! would ([`Nm::refuse`]).
 #![allow(dead_code)]
 
 use std::{
@@ -32,6 +40,7 @@ const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 const SETTINGS_IFACE: &str = "org.freedesktop.NetworkManager.Settings";
+const IP4: &str = "/org/freedesktop/NetworkManager/IP4Config/1";
 
 /// How long a connection takes, and a scan.
 const TAKES: Duration = Duration::from_millis(400);
@@ -51,6 +60,8 @@ pub struct FakeAp {
     pub ssid: &'static str,
     pub strength: u8,
     pub security: Security,
+    /// In MHz: 5 GHz unless said.
+    pub frequency: u32,
 }
 
 impl FakeAp {
@@ -59,6 +70,7 @@ impl FakeAp {
             ssid,
             strength,
             security,
+            frequency: 5180,
         }
     }
 }
@@ -79,6 +91,9 @@ pub struct Setup {
     pub wired: bool,
     pub enabled: bool,
     pub check_uri: &'static str,
+    /// When saved networks were last used, in seconds before now; the
+    /// others never were.
+    pub used: Vec<(&'static str, u64)>,
 }
 
 impl Default for Setup {
@@ -93,6 +108,7 @@ impl Default for Setup {
             wired: false,
             enabled: true,
             check_uri: "http://check.hocus.test/portal",
+            used: Vec::new(),
         }
     }
 }
@@ -102,10 +118,36 @@ impl Default for Setup {
 pub enum Call {
     Scan,
     Enable(bool),
-    Activate { ssid: String },
-    AddAndActivate { ssid: String, psk: Option<String> },
-    Update { ssid: String, psk: Option<String> },
-    Delete { ssid: String },
+    Activate {
+        ssid: String,
+    },
+    AddAndActivate {
+        ssid: String,
+        psk: Option<String>,
+    },
+    Update {
+        ssid: String,
+        psk: Option<String>,
+    },
+    /// The Settings' change of a saved connection: the password and
+    /// `autoconnect` it sends, if it does.
+    Update2 {
+        ssid: String,
+        psk: Option<String>,
+        autoconnect: Option<bool>,
+    },
+    GetSecrets {
+        ssid: String,
+    },
+    /// A connection given back: its UUID, its password.
+    AddConnection {
+        ssid: String,
+        uuid: String,
+        psk: Option<String>,
+    },
+    Delete {
+        ssid: String,
+    },
     Disconnect,
     Deactivate,
 }
@@ -121,6 +163,10 @@ struct Saved {
     path: String,
     ssid: String,
     psk: Option<String>,
+    uuid: String,
+    /// Seconds since the epoch; 0: never used.
+    timestamp: u64,
+    autoconnect: bool,
 }
 
 #[derive(Debug, Default)]
@@ -145,6 +191,8 @@ struct State {
     calls: Vec<Call>,
     /// How long a connection takes.
     takes: Duration,
+    /// Changes to saved connections refused, as polkit would.
+    refuse: bool,
 }
 
 impl State {
@@ -233,8 +281,19 @@ impl Nm {
             for ap in setup.aps {
                 add_ap(&served, ap, false).await?;
             }
+            server.at(IP4, Ip4Config).await?;
             for (ssid, psk) in setup.saved {
-                add_saved(&served, ssid, psk.map(str::to_owned), false).await?;
+                let p = add_saved(&served, ssid, psk.map(str::to_owned), None, false).await?;
+                let ago = setup.used.iter().find(|(s, _)| *s == ssid).map(|(_, a)| *a);
+                state(&served, |s| {
+                    if let Some(saved) = s.saved.iter_mut().find(|c| c.path == p) {
+                        saved.timestamp = match (ago, setup.current) {
+                            (_, Some(current)) if current == ssid => now(),
+                            (Some(ago), _) => now().saturating_sub(ago),
+                            (None, _) => 0,
+                        };
+                    }
+                });
             }
             if let Some(current) = setup.current {
                 let ap = state(&served, |s| {
@@ -286,6 +345,22 @@ impl Nm {
 
     pub fn enabled(&self) -> bool {
         state(&self.shared, |s| s.enabled)
+    }
+
+    /// Changes to saved connections refused from now on, as polkit would
+    /// (or no longer).
+    pub fn refuse(&self, refuse: bool) {
+        state(&self.shared, |s| s.refuse = refuse);
+    }
+
+    /// The saved connections' UUIDs, SSIDs and `autoconnect`.
+    pub fn saved_uuids(&self) -> Vec<(String, String, bool)> {
+        state(&self.shared, |s| {
+            s.saved
+                .iter()
+                .map(|c| (c.uuid.clone(), c.ssid.clone(), c.autoconnect))
+                .collect()
+        })
     }
 
     /// The saved connections' SSIDs and passwords.
@@ -469,18 +544,30 @@ async fn add_ap(shared: &Shared, fake: FakeAp, announce: bool) -> anyhow::Result
     Ok(p)
 }
 
+/// Now, in seconds since the epoch.
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 async fn add_saved(
     shared: &Shared,
     ssid: &str,
     psk: Option<String>,
+    uuid: Option<String>,
     announce: bool,
 ) -> anyhow::Result<String> {
     let p = state(shared, |s| {
-        let p = format!("/org/freedesktop/NetworkManager/Settings/{}", s.next());
+        let n = s.next();
+        let p = format!("/org/freedesktop/NetworkManager/Settings/{n}");
         s.saved.push(Saved {
             path: p.clone(),
             ssid: ssid.to_owned(),
             psk,
+            uuid: uuid.unwrap_or_else(|| format!("{n:08x}-7e57-4000-8000-000000000000")),
+            timestamp: 0,
+            autoconnect: true,
         });
         p
     });
@@ -607,6 +694,10 @@ async fn activate(
         });
         if right {
             let connectivity = state(&task, |s| {
+                let saved = s.active.as_ref().map(|a| a.1.clone());
+                if let Some(c) = s.saved.iter_mut().find(|c| Some(&c.path) == saved.as_ref()) {
+                    c.timestamp = now();
+                }
                 s.active_ap.clone_from(&ap);
                 s.connectivity = if s.portals.contains(&ssid) { 2 } else { 4 };
                 if let Some(a) = &mut s.active {
@@ -771,7 +862,7 @@ impl Manager {
                 psk: psk.clone(),
             });
         });
-        let saved = add_saved(&self.0, &ssid, psk.clone(), true)
+        let saved = add_saved(&self.0, &ssid, psk.clone(), None, true)
             .await
             .map_err(failed)?;
         let active = activate(
@@ -815,6 +906,13 @@ impl Device {
         if self.2 == 2 { "wlan0" } else { "eth0" }.to_owned()
     }
 
+    /// The Wi-Fi device's IPv4 configuration, the same whatever its
+    /// network; none for the cable.
+    #[zbus(property)]
+    fn ip4_config(&self) -> OwnedObjectPath {
+        if self.2 == 2 { path(IP4) } else { none() }
+    }
+
     async fn disconnect(&self) -> zbus::fdo::Result<()> {
         state(&self.0, |s| s.calls.push(Call::Disconnect));
         drop_active(&self.0, 2).await.map_err(failed)?;
@@ -839,6 +937,17 @@ impl Wireless {
     #[zbus(property)]
     fn last_scan(&self) -> i64 {
         state(&self.0, |s| s.last_scan)
+    }
+
+    #[zbus(property)]
+    fn hw_address(&self) -> String {
+        "3C:A9:F4:12:5B:7E".to_owned()
+    }
+
+    /// Kb/s.
+    #[zbus(property)]
+    fn bitrate(&self) -> u32 {
+        866_000
     }
 
     async fn request_scan(&self, _options: HashMap<String, OwnedVariant>) -> zbus::fdo::Result<()> {
@@ -909,6 +1018,46 @@ impl AccessPoint {
             _ => 0,
         }
     }
+
+    #[zbus(property)]
+    fn frequency(&self) -> u32 {
+        self.fake().map_or(2412, |f| f.frequency)
+    }
+}
+
+/// The Wi-Fi device's IPv4 configuration.
+struct Ip4Config;
+
+type Dicts = Vec<HashMap<String, OwnedVariant>>;
+
+fn dict(values: &[(&str, &str)]) -> HashMap<String, OwnedVariant> {
+    values
+        .iter()
+        .filter_map(|(k, v)| {
+            Some((
+                (*k).to_owned(),
+                OwnedVariant::try_from(Variant::from(*v)).ok()?,
+            ))
+        })
+        .collect()
+}
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager.IP4Config")]
+impl Ip4Config {
+    #[zbus(property)]
+    fn address_data(&self) -> Dicts {
+        vec![dict(&[("address", "192.168.1.24")])]
+    }
+
+    #[zbus(property)]
+    fn gateway(&self) -> String {
+        "192.168.1.1".to_owned()
+    }
+
+    #[zbus(property)]
+    fn nameserver_data(&self) -> Dicts {
+        vec![dict(&[("address", "192.168.1.1")])]
+    }
 }
 
 struct Settings(Shared);
@@ -918,6 +1067,54 @@ impl Settings {
     fn list_connections(&self) -> Vec<OwnedObjectPath> {
         state(&self.0, |s| s.saved.iter().map(|c| path(&c.path)).collect())
     }
+
+    async fn add_connection(
+        &self,
+        settings: HashMap<String, HashMap<String, OwnedVariant>>,
+    ) -> zbus::fdo::Result<OwnedObjectPath> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        let ssid = ssid_of(&settings).ok_or_else(|| failed("no SSID"))?;
+        let psk = psk_of(&settings);
+        let uuid = settings
+            .get("connection")
+            .and_then(|c| c.get("uuid"))
+            .and_then(|v| v.downcast_ref::<String>().ok())
+            .ok_or_else(|| failed("no UUID"))?;
+        let autoconnect = settings
+            .get("connection")
+            .and_then(|c| c.get("autoconnect"))
+            .and_then(|v| v.downcast_ref::<bool>().ok())
+            .unwrap_or(true);
+        let timestamp = settings
+            .get("connection")
+            .and_then(|c| c.get("timestamp"))
+            .and_then(|v| v.downcast_ref::<u64>().ok())
+            .unwrap_or(0);
+        state(&self.0, |s| {
+            s.calls.push(Call::AddConnection {
+                ssid: ssid.clone(),
+                uuid: uuid.clone(),
+                psk: psk.clone(),
+            });
+        });
+        let p = add_saved(&self.0, &ssid, psk, Some(uuid), true)
+            .await
+            .map_err(failed)?;
+        state(&self.0, |s| {
+            if let Some(saved) = s.saved.iter_mut().find(|c| c.path == p) {
+                saved.autoconnect = autoconnect;
+                saved.timestamp = timestamp;
+            }
+        });
+        Ok(path(&p))
+    }
+}
+
+/// What polkit says to a change it does not allow.
+fn refused() -> zbus::fdo::Error {
+    zbus::fdo::Error::AccessDenied("Not authorized to modify system connections".to_owned())
 }
 
 struct SavedConnection(Shared, String);
@@ -925,23 +1122,94 @@ struct SavedConnection(Shared, String);
 #[zbus::interface(name = "org.freedesktop.NetworkManager.Settings.Connection")]
 impl SavedConnection {
     fn get_settings(&self) -> HashMap<String, HashMap<String, OwnedVariant>> {
-        let ssid = state(&self.0, |s| {
-            s.saved
-                .iter()
-                .find(|c| c.path == self.1)
-                .map(|c| c.ssid.clone())
-        })
-        .unwrap_or_default();
+        let found = state(&self.0, |s| {
+            s.saved.iter().find(|c| c.path == self.1).map(|c| {
+                (
+                    c.ssid.clone(),
+                    c.uuid.clone(),
+                    c.timestamp,
+                    c.autoconnect,
+                    c.psk.is_some(),
+                )
+            })
+        });
+        let (ssid, uuid, timestamp, autoconnect, protected) = found.unwrap_or_default();
         let owned = |v: Variant<'_>| OwnedVariant::try_from(v).ok();
         let mut settings = HashMap::new();
         let mut connection = HashMap::new();
         connection.extend(owned(Variant::from(ssid.as_str())).map(|v| ("id".to_owned(), v)));
+        connection.extend(owned(Variant::from(uuid.as_str())).map(|v| ("uuid".to_owned(), v)));
         connection.extend(owned(Variant::from("802-11-wireless")).map(|v| ("type".to_owned(), v)));
+        connection.extend(owned(Variant::from(timestamp)).map(|v| ("timestamp".to_owned(), v)));
+        connection.extend(owned(Variant::from(autoconnect)).map(|v| ("autoconnect".to_owned(), v)));
         settings.insert("connection".to_owned(), connection);
         let mut wifi = HashMap::new();
         wifi.extend(owned(Variant::from(ssid.as_bytes())).map(|v| ("ssid".to_owned(), v)));
         settings.insert("802-11-wireless".to_owned(), wifi);
+        if protected {
+            let mut security = HashMap::new();
+            security.extend(owned(Variant::from("wpa-psk")).map(|v| ("key-mgmt".to_owned(), v)));
+            settings.insert("802-11-wireless-security".to_owned(), security);
+        }
         settings
+    }
+
+    fn get_secrets(
+        &self,
+        setting: &str,
+    ) -> zbus::fdo::Result<HashMap<String, HashMap<String, OwnedVariant>>> {
+        let (ssid, psk) = state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.path == self.1)
+                .map(|c| (c.ssid.clone(), c.psk.clone()))
+        })
+        .ok_or_else(|| failed("no such connection"))?;
+        state(&self.0, |s| s.calls.push(Call::GetSecrets { ssid }));
+        let mut values = HashMap::new();
+        if setting == "802-11-wireless-security"
+            && let Some(psk) = psk
+            && let Ok(v) = OwnedVariant::try_from(Variant::from(psk.as_str()))
+        {
+            values.insert("psk".to_owned(), v);
+        }
+        Ok([(setting.to_owned(), values)].into_iter().collect())
+    }
+
+    async fn update2(
+        &self,
+        settings: HashMap<String, HashMap<String, OwnedVariant>>,
+        _flags: u32,
+        _args: HashMap<String, OwnedVariant>,
+    ) -> zbus::fdo::Result<HashMap<String, OwnedVariant>> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        let psk = psk_of(&settings);
+        let autoconnect = settings
+            .get("connection")
+            .and_then(|c| c.get("autoconnect"))
+            .and_then(|v| v.downcast_ref::<bool>().ok());
+        state(&self.0, |s| {
+            if let Some(saved) = s.saved.iter_mut().find(|c| c.path == self.1) {
+                // The secrets an update leaves out are kept.
+                if psk.is_some() {
+                    saved.psk.clone_from(&psk);
+                }
+                if let Some(on) = autoconnect {
+                    saved.autoconnect = on;
+                }
+                s.calls.push(Call::Update2 {
+                    ssid: saved.ssid.clone(),
+                    psk,
+                    autoconnect,
+                });
+            }
+        });
+        emit(&self.0, &self.1, CONNECTION, "Updated", &())
+            .await
+            .map_err(failed)?;
+        Ok(HashMap::new())
     }
 
     async fn update(
@@ -964,12 +1232,29 @@ impl SavedConnection {
     }
 
     async fn delete(&self) -> zbus::fdo::Result<()> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        // In use: left first, as NetworkManager does.
+        let in_use = state(&self.0, |s| {
+            s.active.as_ref().is_some_and(|a| a.1 == self.1)
+        });
+        if in_use {
+            drop_active(&self.0, 2).await.map_err(failed)?;
+            device_state(&self.0, 30, 0).await.map_err(failed)?;
+        }
         state(&self.0, |s| {
             if let Some(at) = s.saved.iter().position(|c| c.path == self.1) {
                 let gone = s.saved.remove(at);
                 s.calls.push(Call::Delete { ssid: gone.ssid });
             }
         });
+        if let Some(connection) = self.0.connection.get() {
+            let _ = connection
+                .object_server()
+                .remove::<SavedConnection, _>(self.1.as_str())
+                .await;
+        }
         emit(
             &self.0,
             SETTINGS,
