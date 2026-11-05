@@ -783,19 +783,36 @@ impl State {
     }
 
     /// Puts `window` at `at` in the space, where it is in the stack.
-    /// smithay's `map_element` takes a window already there to the top of
-    /// the space, the order the pointer finds windows in, while the screen
-    /// draws the model's: a window moved behind another (one that follows
-    /// the bar, a resize's neighbour) would take the clicks of the one in
-    /// front of it (#647).
+    /// smithay's `map_element` takes a window to the top of the space, the
+    /// order the pointer finds windows in, while the screen draws the
+    /// model's: a window moved behind another (one that follows the bar, a
+    /// resize's neighbour) or shown again under others (a desktop coming
+    /// in sight) would take the clicks of the one in front of it (#647).
     pub fn place_in_space(&mut self, window: Window, at: (i32, i32)) {
-        let above: Vec<Window> = self
-            .space
-            .elements()
-            .skip_while(|w| **w != window)
-            .skip(1)
-            .cloned()
-            .collect();
+        let above: Vec<Window> = if self.space.elements().any(|w| *w == window) {
+            self.space
+                .elements()
+                .skip_while(|w| **w != window)
+                .skip(1)
+                .cloned()
+                .collect()
+        } else {
+            // Not in the space: under the windows above it in the model.
+            let id = self
+                .windows
+                .iter()
+                .find(|(_, m)| m.window == window)
+                .map(|(id, _)| *id);
+            self.model
+                .stack()
+                .iter()
+                .skip_while(|w| Some(**w) != id)
+                .skip(1)
+                .filter_map(|w| self.windows.get(w))
+                .map(|m| m.window.clone())
+                .filter(|w| self.space.elements().any(|e| e == w))
+                .collect()
+        };
         self.space.map_element(window, at, false);
         for w in &above {
             self.space.raise_element(w, false);
