@@ -29,6 +29,7 @@ use smithay::{
     },
 };
 
+use crate::grabs::EdgesExt as _;
 use crate::{App, State, grabs::BTN_LEFT};
 
 impl State {

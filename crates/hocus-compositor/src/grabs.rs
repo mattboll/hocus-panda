@@ -35,7 +35,7 @@ use crate::{
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
 /// How far a snapped or maximised window is pulled before it lets go.
-const TEAR_OFF: f64 = 12.0;
+const TEAR_OFF: f64 = hocus_geometry::TEAR_OFF;
 
 /// The pointer events a grab passes on as they are.
 macro_rules! forward_other_events {
@@ -547,8 +547,17 @@ impl PointerGrab<State> for ResizeGrab {
     }
 }
 
-impl Edges {
-    pub fn from_xdg(edge: xdg_toplevel::ResizeEdge) -> Self {
+/// What the compositor makes of a resize's edges: from a client's
+/// request, and the cursor they show.
+pub trait EdgesExt {
+    fn from_xdg(edge: xdg_toplevel::ResizeEdge) -> Self;
+    fn from_x11(edge: smithay::xwayland::xwm::ResizeEdge) -> Self;
+    /// The cursor shape these edges show.
+    fn cursor(self) -> CursorIcon;
+}
+
+impl EdgesExt for Edges {
+    fn from_xdg(edge: xdg_toplevel::ResizeEdge) -> Self {
         use xdg_toplevel::ResizeEdge as E;
         Self {
             left: matches!(edge, E::Left | E::TopLeft | E::BottomLeft),
@@ -558,7 +567,7 @@ impl Edges {
         }
     }
 
-    pub fn from_x11(edge: smithay::xwayland::xwm::ResizeEdge) -> Self {
+    fn from_x11(edge: smithay::xwayland::xwm::ResizeEdge) -> Self {
         use smithay::xwayland::xwm::ResizeEdge as E;
         Self {
             left: matches!(edge, E::Left | E::TopLeft | E::BottomLeft),
@@ -568,8 +577,7 @@ impl Edges {
         }
     }
 
-    /// The cursor shape these edges show.
-    pub fn cursor(self) -> CursorIcon {
+    fn cursor(self) -> CursorIcon {
         match self.cursor_name() {
             "ew-resize" => CursorIcon::EwResize,
             "ns-resize" => CursorIcon::NsResize,

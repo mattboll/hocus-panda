@@ -765,8 +765,8 @@ rows are dropped, the group is "ALT+TAB"); a desktop removed while it has
 windows gives them to the one before it; Super chosen to move turns the
 ink off; every key is followed live (windows.md §5, §6, §9, §11, §12,
 ink.md). Section `desktops` (`hocus settings desktops`), TRAVAIL's first
-row. The trial area ("ESSAYER ICI") and the rules per application
-("RÈGLES PAR APPLICATION") come with their own pull requests.
+row. The rules per application ("RÈGLES PAR APPLICATION") come with their
+own pull request.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
@@ -806,6 +806,29 @@ row. The trial area ("ESSAYER ICI") and the rules per application
   glisser déplace les fenêtres : l'encre ne se lance plus. Choisis Alt
   pour la retrouver.", and choosing Super says so in its toast
   ("Déplacer : Super + glisser · l'encre ne se lance plus").
+- **ESSAYER ICI** ("Ce que tu fais ici n'est pas écrit"), under
+  DÉPLACER ET ANCRER: a 30 px "Tenir Alt" button (it follows the move key:
+  "Tenir Super"; "Aucune touche" at 45 %, inert; held, the accent and
+  "Alt tenue"; `Space` toggles it) with "Comme si tu tenais Alt : glisse
+  « Notes » par son contenu."; a 640 × 230 screen at the desktop's real
+  sizes, a fixed "Terminal" (210 × 140 at 24, 28) and "Notes" (184 × 124,
+  the focused rim, a 22 px title bar); then what happened ("Collée au
+  Terminal, à 8 px : glisse encore pour la décoller.", "Lâche-la ici : la
+  moitié gauche.", "Ancrée : la moitié gauche. Glisse-la pour lui rendre
+  sa taille.", "Sans Alt, le clic irait à l'application. Tiens Alt (le
+  bouton au-dessus) pour la saisir ici.") and the motion's state ("Elle
+  ondule pendant le geste et se pose en 400 ms.", "Mouvements réduits :
+  elle se déplace d'un bloc…"). Notes moves by its title bar, or by its
+  content while the key is held (the button, or the real key when the
+  host lets it through). It follows the page's switches live, with the
+  compositor's own code: the crate `hocus-geometry` holds the rectangles,
+  the snap zones (the compositor's 24 px edges and 48 px corners, the
+  zone taken in a 200 ms spring, its size given back when dragged 12 px
+  away) and the magnet (12 px, the 8 px gap), which both use. The wobble
+  is a shear of its top following the window's speed (not the magnet's
+  jumps), settling with an overshoot in about 400 ms; none without it or
+  with reduced motion, where the zone is taken at once. Nothing in it is
+  written.
 - **The search** finds the rows by their names, the spec's words in both
   languages (espaces de travail, aimant, moitié, quart, ondule, encre,
   laser; workspaces, magnet, snap, tiling, wobbly, ink) and their keys
@@ -814,7 +837,9 @@ row. The trial area ("ESSAYER ICI") and the rules per application
 - **Choices made here (to confirm on the machine)**: the toast of a name
   says "Nom du bureau N : …"; the ink's line in amber like the wobble's;
   the stepper's − and + are text glyphs; a chip with its field open grows
-  and the chips after it wrap.
+  and the chips after it wrap; the trial's zones use the compositor's
+  thresholds (24 px edges, 48 px corners) rather than the mockup's smaller
+  ones, and its preview shows at once, without the desktop's 80 ms wait.
 
 ## Saving
 

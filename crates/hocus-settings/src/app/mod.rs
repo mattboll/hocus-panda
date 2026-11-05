@@ -13,6 +13,7 @@
 mod appearance_page;
 mod bar_page;
 mod desktops_page;
+mod desktops_trial;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -578,6 +579,7 @@ impl App {
             || self.screens_moving(now)
             || self.mouse.moving(now)
             || self.bar_moving(now)
+            || self.trial_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -789,7 +791,13 @@ impl App {
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
-            Message::Keys(msg) => self.keys_update(msg),
+            Message::Keys(msg) => {
+                // The trial area's move key, held for real (6.14).
+                if let keyboard_page::Msg::Mods(mods) = &msg {
+                    self.trial_mods(*mods);
+                }
+                self.keys_update(msg)
+            }
         }
     }
 

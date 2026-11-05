@@ -51,6 +51,8 @@ pub struct State {
     /// The desktops taken out: the change written, which desktop, and the
     /// windows that moved, for "Annuler" and its redo.
     removals: Vec<Removal>,
+    /// "ESSAYER ICI".
+    pub trial: super::desktops_trial::TrialState,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +104,12 @@ pub enum Msg {
     Link(&'static str),
     /// The answer waited for `serial` did not come.
     Late(u64),
+    /// The trial area: a press, the pointer moved (its coordinates), let
+    /// go; the move key's button.
+    TrialPress(f32, f32),
+    TrialMove(f32, f32),
+    TrialRelease(f32, f32),
+    Hold,
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -113,6 +121,7 @@ pub enum Stop {
     Name(usize),
     Remove(usize),
     Add,
+    Hold,
 }
 
 impl App {
@@ -165,8 +174,11 @@ impl App {
                 continue;
             }
             out.push(Control::Setting(Slot::of(setting, self.source)));
-            if setting.id == model::WOBBLE && self.reduced_motion {
-                out.push(Control::Desktops(Stop::Link(REDUCED)));
+            if setting.id == model::WOBBLE {
+                if self.reduced_motion {
+                    out.push(Control::Desktops(Stop::Link(REDUCED)));
+                }
+                out.push(Control::Desktops(Stop::Hold));
             }
         }
         out
@@ -184,6 +196,10 @@ impl App {
             self.desktops_commit();
         }
         match msg {
+            Msg::TrialPress(..) | Msg::TrialMove(..) | Msg::TrialRelease(..) | Msg::Hold => {
+                self.trial_update(&msg);
+                iced::Task::none()
+            }
             Msg::Step(true) | Msg::Add => {
                 self.desktop_add();
                 iced::Task::none()
@@ -499,6 +515,7 @@ impl App {
             Stop::Name(i) => Msg::Edit(*i),
             Stop::Remove(i) => Msg::Remove(*i),
             Stop::Add => Msg::Add,
+            Stop::Hold => Msg::Hold,
         };
         self.desktops_update(msg)
     }
@@ -654,6 +671,24 @@ impl App {
             .map(model_row)
             .collect(),
         ));
+        // ESSAYER ICI, under what it lets one feel.
+        page = page.push(
+            column![
+                head(
+                    w("ESSAYER ICI", "TRY IT HERE").get(lang),
+                    Some(
+                        w(
+                            "Ce que tu fais ici n’est pas écrit",
+                            "Nothing done here is written",
+                        )
+                        .get(lang)
+                        .to_owned(),
+                    ),
+                ),
+                card_box(self.trial_card()),
+            ]
+            .spacing(8),
+        );
         page = page.push(group(
             head(model::ALT_TAB.label.get(lang), None),
             vec![model_row(model::ALT_TAB_ROW)],
@@ -962,6 +997,7 @@ impl App {
             "windows": self.desktops.windows,
             "editing": self.desktops.editing.as_ref().map(|(i, now)| serde_json::json!([i, now])),
             "waiting": self.desktops.waiting.is_some(),
+            "trial": self.trial_shown(),
             "wobble_off": why(model::WOBBLE),
             "ink_off": why(model::INK),
         })

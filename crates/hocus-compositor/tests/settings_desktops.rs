@@ -193,6 +193,9 @@ impl Bed {
     /// `id` scrolled into the window with the wheel over the page.
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
         let mut last = self.place_of(id)?;
+        // Wheels that moved nothing: three, and the page is at its end (a
+        // wheel may also come before the window has the pointer back).
+        let mut still = 0;
         for _ in 0..60 {
             let window = self.window()?;
             let (top, bottom) = (last[1], last[1] + last[3]);
@@ -213,6 +216,9 @@ impl Bed {
                 f64::from(window.x) + 500.0,
                 f64::from(window.y) + f64::from(window.height) / 2.0,
             );
+            // The window takes the pointer before the wheel: one that
+            // came back into it a moment ago may not have it yet.
+            wait(&mut self.hp, Duration::from_millis(50))?;
             self.hp.wheel(notches);
             let before = last;
             let log = self.log.clone();
@@ -221,8 +227,13 @@ impl Bed {
                 read_place(&log, &key).is_some_and(|p| p != before)
             })?;
             if !moved {
-                return Ok(());
+                still += 1;
+                if still >= 3 {
+                    return Ok(());
+                }
+                continue;
             }
+            still = 0;
             last = self.place_of(id)?;
         }
         anyhow::bail!("{id} never came into view")
@@ -556,6 +567,143 @@ fn the_shortcuts_link_opens_the_keyboard_with_its_row_lit() -> anyhow::Result<()
     Ok(())
 }
 
+/// The trial area's notes window, its place in the trial's screen.
+const NOTES: (f64, f64) = (318.0, 64.0);
+/// The trial's Terminal's right edge, and the gap.
+const TERMINAL_RIGHT: f64 = 24.0 + 210.0;
+
+impl Bed {
+    /// A point of the trial's screen, in the compositor's space, once it
+    /// shows.
+    fn trial_point(&mut self, (x, y): (f64, f64)) -> anyhow::Result<(f64, f64)> {
+        self.reveal("desktops:trial")?;
+        // Where it stays: not while the page still moves (a scroll, a row
+        // growing).
+        let mut place = self.place_of("desktops:trial")?;
+        for _ in 0..20 {
+            wait(&mut self.hp, Duration::from_millis(150))?;
+            let now = self.place_of("desktops:trial")?;
+            if now == place {
+                break;
+            }
+            place = now;
+        }
+        let [tx, ty, _, _] = place;
+        let window = self.window()?;
+        Ok((f64::from(window.x) + tx + x, f64::from(window.y) + ty + y))
+    }
+
+    /// A drag in the trial's screen from `from` to `to`, in steps.
+    fn trial_drag(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
+        let a = self.trial_point(from)?;
+        let b = self.trial_point(to)?;
+        self.hp.pointer_move(a.0 - 1.0, a.1);
+        self.hp.pointer_move(a.0, a.1);
+        wait(&mut self.hp, Duration::from_millis(30))?;
+        self.hp.button(BTN_LEFT, true);
+        wait(&mut self.hp, Duration::from_millis(30))?;
+        for i in 1..=10 {
+            let t = f64::from(i) / 10.0;
+            self.hp
+                .pointer_move(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            wait(&mut self.hp, Duration::from_millis(16))?;
+        }
+        Ok(())
+    }
+
+    fn trial_release(&mut self) -> anyhow::Result<()> {
+        self.hp.button(BTN_LEFT, false);
+        wait(&mut self.hp, Duration::from_millis(30))
+    }
+}
+
+#[test]
+fn in_the_trial_notes_sticks_to_the_terminal_and_nothing_is_written() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let before = std::fs::read_to_string(bed.file())?;
+    // By its title bar, to 10 px short of the gap right of the Terminal.
+    let grab = (NOTES.0 + 40.0, NOTES.1 + 10.0);
+    let to = (grab.0 - (NOTES.0 - TERMINAL_RIGHT - 8.0 - 10.0), grab.1);
+    bed.trial_drag(grab, to)?;
+    let shown = bed.shows(|s| {
+        s["desktops"]["trial"]["said"]
+            == "Collée au Terminal, à 8 px : glisse encore pour la décoller."
+    })?;
+    assert_eq!(shown["desktops"]["trial"]["notes"][0], 242);
+    bed.trial_release()?;
+    // The magnet off: it stops where it is let go.
+    bed.click("control:windows.magnet")?;
+    bed.written(|t| t.contains("magnet = false"))?;
+    let grab = (242.0 + 40.0, NOTES.1 + 10.0);
+    bed.trial_drag(grab, (grab.0 + 10.0, grab.1))?;
+    bed.trial_release()?;
+    bed.shows(|s| s["desktops"]["trial"]["notes"][0] == 252)?;
+    // Only the magnet's switch was written.
+    let after = std::fs::read_to_string(bed.file())?;
+    assert_eq!(after.replace("\n[windows]\nmagnet = false\n", ""), before);
+    Ok(())
+}
+
+#[test]
+fn in_the_trial_the_content_needs_the_key_and_its_button_holds_it() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let content = (NOTES.0 + 60.0, NOTES.1 + 70.0);
+    bed.trial_drag(content, (content.0 + 30.0, content.1))?;
+    bed.trial_release()?;
+    bed.shows(|s| {
+        s["desktops"]["trial"]["said"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("Sans Alt, le clic irait à l’application."))
+            && s["desktops"]["trial"]["notes"][0] == 318
+    })?;
+    bed.click("trial:hold")?;
+    bed.shows(|s| s["desktops"]["trial"]["held"] == true)?;
+    bed.trial_drag(content, (content.0 + 30.0, content.1 + 4.0))?;
+    bed.trial_release()?;
+    bed.shows(|s| {
+        s["desktops"]["trial"]["notes"][0] == 348 && s["desktops"]["trial"]["notes"][1] == 68
+    })?;
+    // Super to move: the button follows the key.
+    bed.choose("windows.move-modifier", 1)?;
+    bed.written(|t| t.contains("move-modifier = \"super\""))?;
+    bed.shows(|s| s["desktops"]["trial"]["hold"] == "Super tenue")?;
+    Ok(())
+}
+
+#[test]
+fn in_the_trial_a_side_takes_the_half_unless_snapping_is_off() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let grab = (NOTES.0 + 40.0, NOTES.1 + 10.0);
+    bed.trial_drag(grab, (3.0, 120.0))?;
+    bed.shows(|s| s["desktops"]["trial"]["said"] == "Lâche-la ici : la moitié gauche.")?;
+    bed.trial_release()?;
+    // The left half of the screen's work area (640 × 230, 8 px in).
+    let shown = bed.shows(|s| s["desktops"]["trial"]["snapped"] == "Left")?;
+    assert_eq!(
+        shown["desktops"]["trial"]["notes"],
+        serde_json::json!([8, 8, 308, 214])
+    );
+    // Snapping off: against the right side, it stays a window.
+    bed.click("control:windows.snap-by-drag")?;
+    bed.written(|t| t.contains("snap-by-drag = false"))?;
+    bed.trial_drag((100.0, 15.0), (637.0, 120.0))?;
+    bed.shows(|s| {
+        s["desktops"]["trial"]["preview"].is_null() && s["desktops"]["trial"]["notes"][2] == 184
+    })?;
+    bed.trial_release()?;
+    bed.shows(|s| s["desktops"]["trial"]["snapped"].is_null())?;
+    Ok(())
+}
+
 /// The pull request's screenshots, into `HOCUS_SHOTS`.
 #[test]
 #[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
@@ -618,6 +766,25 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         f64::from(window.y) + y + h / 2.0,
     );
     save(&mut bed, "desktops-tooltip.png", false)?;
+    // The trial: Notes stuck to the Terminal, then over the left half.
+    let grab = (NOTES.0 + 40.0, NOTES.1 + 10.0);
+    let to = (grab.0 - (NOTES.0 - TERMINAL_RIGHT - 8.0 - 10.0), grab.1);
+    bed.trial_drag(grab, to)?;
+    bed.shows(|s| s["desktops"]["trial"]["notes"][0] == 242)?;
+    save(&mut bed, "desktops-trial-stuck.png", false)?;
+    let at = (242.0 + 40.0, NOTES.1 + 10.0);
+    let a = bed.trial_point(at)?;
+    let b = bed.trial_point((3.0, 120.0))?;
+    for i in 1..=10 {
+        let t = f64::from(i) / 10.0;
+        bed.hp
+            .pointer_move(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        wait(&mut bed.hp, Duration::from_millis(16))?;
+    }
+    bed.shows(|s| s["desktops"]["trial"]["preview"].is_array())?;
+    save(&mut bed, "desktops-trial-preview.png", false)?;
+    bed.trial_release()?;
+    bed.reveal("row:desktops.names")?;
     bed.click("chip:3")?;
     bed.shows(|s| s["desktops"]["editing"].is_array())?;
     wait(&mut bed.hp, Duration::from_millis(100))?;

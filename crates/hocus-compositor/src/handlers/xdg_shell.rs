@@ -27,6 +27,7 @@ use smithay::{
     },
 };
 
+use crate::grabs::EdgesExt as _;
 use crate::{
     State,
     model::{Edges, Mode, Zone},
