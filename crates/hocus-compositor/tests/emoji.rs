@@ -8,7 +8,8 @@
 //! the text input and closes, `Shift+Enter` inserts and keeps it open; a
 //! window without a text input gets it pasted and the clipboard back; the
 //! skin tone applies; the recent emoji come first, kept on disk; the
-//! launcher's `:chat` row inserts into the window that had the keyboard.
+//! launcher's `:chat` row inserts into the window that had the keyboard; a
+//! window opening while it is open leaves it the keys (#617).
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
@@ -327,6 +328,36 @@ fn it_opens_under_the_caret_else_centred_on_the_window() -> anyhow::Result<()> {
         "{picker:?} {:?}",
         plain.rect
     );
+    Ok(())
+}
+
+/// A window opening while the picker is open shows in the bar's windows
+/// (#604): the picker keeps the keys (#617; the shell's surfaces made
+/// later took them).
+#[test]
+fn a_window_opening_while_it_is_open_leaves_it_the_keys() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    // Open on the screen, no window yet: the bar lists none. Typed as the
+    // window maps, while the bar's windows take it in.
+    bed.open()?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.behind", (500, 400), false)?;
+    let mark = bed.mark();
+    bed.type_text("chat");
+    let line = bed.picker_after(mark, "query=\"chat\"")?;
+    assert!(line.contains("holding=true"), "{line}");
+    let listed = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::WINDOWS_NAMESPACE)
+            .iter()
+            .any(|(_, r)| r.height > 30)
+    })?;
+    anyhow::ensure!(listed, "the bar never listed the window");
+    // And typed once they show it.
+    let mark = bed.mark();
+    bed.type_text("s");
+    bed.picker_after(mark, "query=\"chats\"")?;
     Ok(())
 }
 
