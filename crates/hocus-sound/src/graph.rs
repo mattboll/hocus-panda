@@ -925,17 +925,30 @@ fn is_monitor(props: &Value) -> bool {
             .is_some_and(|n| n.ends_with(".monitor"))
 }
 
-/// `{"name": "…"}`, as WirePlumber writes it, or the same as a string.
+/// `{"name": "…"}`, as WirePlumber writes it, or the same as a string;
+/// or `{ name = … }`, as PipeWire 1.0's `pw-metadata` lists it.
 fn sink_name(value: &Value) -> Option<String> {
     let parsed;
     let value = match value {
-        Value::String(text) => {
-            parsed = serde_json::from_str::<Value>(text).ok()?;
-            &parsed
-        }
+        Value::String(text) => match serde_json::from_str::<Value>(text) {
+            Ok(json) => {
+                parsed = json;
+                &parsed
+            }
+            Err(_) => return spa_name(text),
+        },
         other => other,
     };
     value.get("name")?.as_str().map(str::to_owned)
+}
+
+/// The name in SPA's `{ name = tsink }` (or `{ name = "tsink" }`).
+fn spa_name(text: &str) -> Option<String> {
+    let inner = text.trim().strip_prefix('{')?.strip_suffix('}')?;
+    let value = inner.trim().strip_prefix("name")?.trim_start();
+    let value = value.strip_prefix(['=', ':'])?.trim();
+    let value = value.trim_matches('"');
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 /// A `Props` object's volume (as `wpctl` shows it: the cube root of the
@@ -1561,7 +1574,8 @@ mod tests {
         graph.reset_metadata(&[(
             0,
             "default.audio.sink".into(),
-            "{\"name\":\"speakers\"}".into(),
+            // PipeWire 1.0's pw-metadata lists it in SPA's words.
+            "{ name = speakers }".into(),
         )]);
         let mixer = graph.mixer(|_, _| None::<()>);
         assert_eq!(mixer.apps[0].target, None);
