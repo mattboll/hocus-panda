@@ -9,8 +9,11 @@
 //! `tab.list`) and each pane's foreground processes
 //! (`pane.process_info`: the same agent seen by a hook is the same
 //! process), then follows their status events and the renames
-//! (`events.subscribe`) on a blocking read; panes coming or going list
-//! them again. When herdr goes, it says so and waits for the socket again.
+//! (`events.subscribe`) on a blocking read. Panes coming or going list
+//! them again, once their burst of events is over; another pane's state
+//! asks nothing (#624). At rest the thread sleeps on its read and herdr is
+//! asked nothing. When herdr goes, it says so and waits for the socket
+//! again.
 //!
 //! An agent is named by its tab's own name when the user gave it one
 //! ("refacto"), else by its workspace's label (#503); never by its kind
@@ -30,7 +33,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
@@ -103,19 +106,40 @@ pub fn start(
     proc: PathBuf,
     sink: impl Fn(News) -> bool + Send + 'static,
 ) -> std::io::Result<()> {
+    spawn(socket, proc, CALM, sink)
+}
+
+/// How a burst of events is waited out before herdr is asked again: once
+/// they stop for `quiet`, and at the latest `most` after the first, so
+/// that a stream of them lists a few times, never in a loop (#624).
+#[derive(Debug, Clone, Copy)]
+struct Calm {
+    quiet: Duration,
+    most: Duration,
+}
+
+const CALM: Calm = Calm {
+    quiet: Duration::from_millis(500),
+    most: Duration::from_secs(2),
+};
+
+fn spawn(
+    socket: PathBuf,
+    proc: PathBuf,
+    calm: Calm,
+    sink: impl Fn(News) -> bool + Send + 'static,
+) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("herdr".to_owned())
-        .spawn(move || follow(&socket, &proc, &sink))
+        .spawn(move || follow(&socket, &proc, calm, &sink))
         .map(drop)
 }
 
-fn follow(socket: &Path, proc: &Path, sink: &dyn Fn(News) -> bool) {
+fn follow(socket: &Path, proc: &Path, calm: Calm, sink: &dyn Fn(News) -> bool) {
     let mut connected = false;
     loop {
-        match session(socket, proc, sink, &mut connected) {
-            // Panes came or went: listed again.
-            Ok(true) => continue,
-            Ok(false) => return,
+        match session(socket, proc, calm, sink, &mut connected) {
+            Ok(()) => return,
             Err(err) => {
                 if connected {
                     connected = false;
@@ -180,53 +204,266 @@ fn wait_for(socket: &Path) -> bool {
     }
 }
 
-/// One listing, then its events: `Ok(true)` when panes came or went,
-/// `Ok(false)` when told to stop, `Err` when the connection ends.
+/// One listing, then its events, listing again when a burst of pane
+/// events is over: `Ok` when told to stop, `Err` when the connection ends.
 fn session(
     socket: &Path,
     proc: &Path,
+    calm: Calm,
     sink: &dyn Fn(News) -> bool,
     connected: &mut bool,
-) -> Result<bool, String> {
-    let listed = call(socket, "agent.list", json!({}))?;
-    let mut labels = Labels::of(socket);
-    let mut agents = parse_agents(&listed, &labels);
-    for agent in &mut agents {
-        if let Ok(info) = call(
-            socket,
-            "pane.process_info",
-            json!({ "pane_id": agent.pane }),
-        ) {
-            agent.pids = pids(&info);
-        }
-        if agent.folder.is_none() {
-            agent.folder = agent
-                .pids
-                .iter()
-                .rev()
-                .find_map(|pid| crate::process::folder_in(proc, *pid));
-        }
-    }
-    let panes: Vec<String> = agents.iter().map(|a| a.pane.clone()).collect();
-    // Where each is, and its name, for the renames.
-    let mut named: Vec<(String, String, String, Option<String>)> = agents
-        .iter()
-        .map(|a| {
-            (
-                a.pane.clone(),
-                a.workspace.clone(),
-                a.tab.clone(),
-                a.name.clone(),
-            )
-        })
-        .collect();
+) -> Result<(), String> {
+    let mut listing = Listing::read(socket, proc, None)?;
     *connected = true;
-    if !sink(News::Agents {
-        agents,
-        terminals: terminal_processes(proc),
-    }) {
-        return Ok(false);
+    if !sink(listing.news()) {
+        return Ok(());
     }
+    let mut panes = listing.panes();
+    let mut events = subscribe(socket, &panes)?;
+    // The read's timeout as set: none, a blocking read, while no burst is
+    // under way, so that at rest the thread sleeps until herdr says
+    // something.
+    let mut timeout = None;
+    let mut burst: Option<Burst> = None;
+    let mut line = Vec::new();
+    loop {
+        if let Some(over) = burst.filter(|b| Instant::now() >= b.deadline(calm)) {
+            burst = None;
+            match over.again {
+                Again::Agents => {
+                    listing = Listing::read(socket, proc, Some(&listing))?;
+                    if !sink(listing.news()) {
+                        return Ok(());
+                    }
+                    // The agents' panes changed: their states subscribed
+                    // to again.
+                    if listing.panes() != panes {
+                        panes = listing.panes();
+                        events = subscribe(socket, &panes)?;
+                        timeout = None;
+                        line.clear();
+                    }
+                }
+                Again::Labels => {
+                    listing.labels = Labels::of(socket);
+                    if let Some(names) = listing.renamed()
+                        && !sink(News::Names(names))
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            continue;
+        }
+        // Never zero: a zero timeout is refused.
+        let wanted = burst.map(|b| {
+            b.deadline(calm)
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_millis(1))
+        });
+        if wanted != timeout {
+            events
+                .get_ref()
+                .set_read_timeout(wanted)
+                .map_err(|e| e.to_string())?;
+            timeout = wanted;
+        }
+        match events.read_until(b'\n', &mut line) {
+            Ok(0) => return Err("herdr closed the connection".into()),
+            Ok(_) => {
+                let value = serde_json::from_slice::<Value>(&line);
+                line.clear();
+                let Ok(value) = value else {
+                    continue;
+                };
+                if let Some(err) = value.get("error") {
+                    return Err(format!("herdr refused to subscribe: {err}"));
+                }
+                let news = match event(&value) {
+                    Some(Event::State { pane, state }) if panes.contains(&pane) => {
+                        Some(News::State { pane, state })
+                    }
+                    // Another pane's, not an agent's: nothing changes.
+                    Some(Event::State { .. }) | None => None,
+                    Some(Event::Panes) => {
+                        burst = Some(Burst::after(burst, Again::Agents));
+                        None
+                    }
+                    Some(Event::Tabs) => {
+                        burst = Some(Burst::after(burst, Again::Labels));
+                        None
+                    }
+                    Some(Event::Focused(pane)) => Some(News::Focused(pane)),
+                    Some(Event::Workspace { id, label }) => {
+                        listing.labels.workspaces.insert(id, label);
+                        listing.renamed().map(News::Names)
+                    }
+                    Some(Event::Tab { id, label }) => {
+                        if let Some(tab) = listing.labels.tabs.iter_mut().find(|t| t.id == id) {
+                            tab.label = label;
+                        }
+                        listing.renamed().map(News::Names)
+                    }
+                };
+                if let Some(news) = news
+                    && !sink(news)
+                {
+                    return Ok(());
+                }
+            }
+            // A partial line stays in `line`, read on after.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+/// What a burst of events asks of herdr once it is over; the agents'
+/// listing reads the labels too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Again {
+    /// Tabs came, went or moved: the labels.
+    Labels,
+    /// Panes came, went or got an agent, or another tab or workspace was
+    /// focused: the agents.
+    Agents,
+}
+
+/// A burst of events under way.
+#[derive(Debug, Clone, Copy)]
+struct Burst {
+    again: Again,
+    first: Instant,
+    last: Instant,
+}
+
+impl Burst {
+    /// `burst` with one more event, asking for `again`.
+    fn after(burst: Option<Self>, again: Again) -> Self {
+        let now = Instant::now();
+        match burst {
+            Some(b) => Self {
+                again: b.again.max(again),
+                first: b.first,
+                last: now,
+            },
+            None => Self {
+                again,
+                first: now,
+                last: now,
+            },
+        }
+    }
+
+    fn deadline(&self, calm: Calm) -> Instant {
+        (self.last + calm.quiet).min(self.first + calm.most)
+    }
+}
+
+/// The agents as herdr listed them last, with what names them.
+#[derive(Debug)]
+struct Listing {
+    agents: Vec<Agent>,
+    terminals: Vec<Vec<u32>>,
+    labels: Labels,
+}
+
+impl Listing {
+    /// Asked of herdr. `/proc` (every process, for herdr's clients) is read
+    /// only when the agents' panes or their processes differ from
+    /// `before`'s.
+    fn read(socket: &Path, proc: &Path, before: Option<&Self>) -> Result<Self, String> {
+        let listed = call(socket, "agent.list", json!({}))?;
+        let labels = Labels::of(socket);
+        let mut agents = parse_agents(&listed, &labels);
+        for agent in &mut agents {
+            if let Ok(info) = call(
+                socket,
+                "pane.process_info",
+                json!({ "pane_id": agent.pane }),
+            ) {
+                agent.pids = pids(&info);
+            }
+        }
+        let same = before.filter(|b| panes_of(&b.agents) == panes_of(&agents));
+        for agent in &mut agents {
+            if agent.folder.is_some() {
+                continue;
+            }
+            agent.folder = match same {
+                Some(before) => before
+                    .agents
+                    .iter()
+                    .find(|a| a.pane == agent.pane)
+                    .and_then(|a| a.folder.clone()),
+                None => agent
+                    .pids
+                    .iter()
+                    .rev()
+                    .find_map(|pid| crate::process::folder_in(proc, *pid)),
+            };
+        }
+        let terminals = match same {
+            Some(before) => before.terminals.clone(),
+            None => terminal_processes(proc),
+        };
+        Ok(Self {
+            agents,
+            terminals,
+            labels,
+        })
+    }
+
+    fn news(&self) -> News {
+        News::Agents {
+            agents: self.agents.clone(),
+            terminals: self.terminals.clone(),
+        }
+    }
+
+    /// The panes whose states are followed.
+    fn panes(&self) -> Vec<String> {
+        self.agents.iter().map(|a| a.pane.clone()).collect()
+    }
+
+    /// The agents' names as the labels give them now, when one changed.
+    fn renamed(&mut self) -> Option<Vec<(String, Option<String>)>> {
+        let mut changed = false;
+        for agent in &mut self.agents {
+            let now = self.labels.name(&agent.workspace, &agent.tab);
+            if agent.name != now {
+                agent.name = now;
+                changed = true;
+            }
+        }
+        changed.then(|| {
+            self.agents
+                .iter()
+                .map(|a| (a.pane.clone(), a.name.clone()))
+                .collect()
+        })
+    }
+}
+
+/// The agents' panes and their processes, in an order of their own.
+fn panes_of(agents: &[Agent]) -> Vec<(&str, &[u32])> {
+    let mut panes: Vec<_> = agents
+        .iter()
+        .map(|a| (a.pane.as_str(), a.pids.as_slice()))
+        .collect();
+    panes.sort_unstable();
+    panes
+}
+
+/// The subscription to `panes`' states and to what lists or renames
+/// them, on a connection of its own.
+fn subscribe(socket: &Path, panes: &[String]) -> Result<BufReader<UnixStream>, String> {
     let stream = UnixStream::connect(socket).map_err(|e| e.to_string())?;
     stream
         .set_write_timeout(Some(ANSWER))
@@ -234,71 +471,12 @@ fn session(
     let request = json!({
         "id": "hocus-events",
         "method": "events.subscribe",
-        "params": { "subscriptions": subscriptions(&panes) },
+        "params": { "subscriptions": subscriptions(panes) },
     });
     (&stream)
         .write_all(format!("{request}\n").as_bytes())
         .map_err(|e| e.to_string())?;
-    // Blocking: the thread sleeps until herdr says something.
-    let mut reader = BufReader::new(&stream);
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line) {
-            Ok(0) => return Err("herdr closed the connection".into()),
-            Ok(_) => {
-                let Ok(value) = serde_json::from_slice::<Value>(&line) else {
-                    continue;
-                };
-                if let Some(err) = value.get("error") {
-                    return Err(format!("herdr refused to subscribe: {err}"));
-                }
-                match event(&value) {
-                    Some(Event::State { pane, state }) if panes.contains(&pane) => {
-                        if !sink(News::State { pane, state }) {
-                            return Ok(false);
-                        }
-                    }
-                    Some(Event::State { .. } | Event::Panes) => return Ok(true),
-                    Some(Event::Focused(pane)) => {
-                        if !sink(News::Focused(pane)) {
-                            return Ok(false);
-                        }
-                        continue;
-                    }
-                    Some(Event::Workspace { id, label }) => {
-                        labels.workspaces.insert(id, label);
-                    }
-                    Some(Event::Tab { id, label }) => {
-                        if let Some(tab) = labels.tabs.iter_mut().find(|t| t.id == id) {
-                            tab.label = label;
-                        }
-                    }
-                    Some(Event::Tabs) => labels = Labels::of(socket),
-                    None => continue,
-                }
-                let mut changed = false;
-                for (_, workspace, tab, name) in &mut named {
-                    let now = labels.name(workspace, tab);
-                    if *name != now {
-                        *name = now;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    let names = named
-                        .iter()
-                        .map(|(pane, _, _, name)| (pane.clone(), name.clone()))
-                        .collect();
-                    if !sink(News::Names(names)) {
-                        return Ok(false);
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    Ok(BufReader::new(stream))
 }
 
 /// What the subscription follows: each agent's state, panes coming and
@@ -647,6 +825,11 @@ pub fn terminal_processes(proc: &Path) -> Vec<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        os::unix::net::UnixListener,
+        sync::{Arc, Mutex, mpsc},
+    };
+
     use super::*;
     use crate::process::Process;
 
@@ -893,6 +1076,306 @@ mod tests {
         process(500, "500 (claude) S 400 500 400 0", b"claude\0")?;
         assert_eq!(terminal_processes(proc.path()), vec![vec![200, 100]]);
         assert!(terminal_processes(&proc.path().join("none")).is_empty());
+        Ok(())
+    }
+
+    /// A herdr of the test's own, on a socket in a directory of its own,
+    /// never the user's: it answers the lists from [`listed`] and counts
+    /// what it is asked.
+    struct Fake {
+        _dir: tempfile::TempDir,
+        socket: PathBuf,
+        agents: Arc<Mutex<Value>>,
+        calls: Arc<Mutex<Vec<String>>>,
+        subscriptions: mpsc::Receiver<UnixStream>,
+    }
+
+    impl Fake {
+        fn start() -> std::io::Result<Self> {
+            let dir = tempfile::tempdir()?;
+            let socket = dir.path().join("herdr.sock");
+            let listener = UnixListener::bind(&socket)?;
+            let (workspaces, tabs, agents) = listed();
+            let agents = Arc::new(Mutex::new(agents));
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let (subscribed, subscriptions) = mpsc::channel();
+            let (answers, asked) = (Arc::clone(&agents), Arc::clone(&calls));
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else {
+                        return;
+                    };
+                    let mut line = String::new();
+                    if BufReader::new(&stream).read_line(&mut line).is_err() {
+                        continue;
+                    }
+                    let Ok(request) = serde_json::from_str::<Value>(&line) else {
+                        continue;
+                    };
+                    let method = request["method"].as_str().unwrap_or_default().to_owned();
+                    lock(&asked).push(method.clone());
+                    let result = match method.as_str() {
+                        "events.subscribe" => {
+                            if subscribed.send(stream).is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        "agent.list" => lock(&answers).clone(),
+                        "workspace.list" => workspaces.clone(),
+                        "tab.list" => tabs.clone(),
+                        "pane.process_info" => json!({ "shell": { "pid": 4_000_000 } }),
+                        _ => json!({}),
+                    };
+                    let answer = json!({ "id": request["id"], "result": result });
+                    let _ = (&stream).write_all(format!("{answer}\n").as_bytes());
+                }
+            });
+            Ok(Self {
+                _dir: dir,
+                socket,
+                agents,
+                calls,
+                subscriptions,
+            })
+        }
+
+        /// How many times `method` was asked.
+        fn asked(&self, method: &str) -> usize {
+            lock(&self.calls).iter().filter(|m| *m == method).count()
+        }
+
+        fn all_asked(&self) -> Vec<String> {
+            lock(&self.calls).clone()
+        }
+
+        /// The next subscription made.
+        fn subscription(&self) -> Option<UnixStream> {
+            self.subscriptions.recv_timeout(LONG).ok()
+        }
+    }
+
+    fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Short, for the tests to last little; long enough that events
+    /// written at once are read as one burst.
+    const TEST_CALM: Calm = Calm {
+        quiet: Duration::from_millis(250),
+        most: Duration::from_secs(1),
+    };
+
+    /// Longer than anything awaited should take.
+    const LONG: Duration = Duration::from_secs(10);
+
+    /// The fake followed by the thread, its first listing heard and its
+    /// subscription made.
+    fn followed(fake: &Fake, proc: &Path) -> (mpsc::Receiver<News>, UnixStream) {
+        let (tell, heard) = mpsc::channel();
+        assert!(
+            spawn(
+                fake.socket.clone(),
+                proc.to_owned(),
+                TEST_CALM,
+                move |news| { tell.send(news).is_ok() }
+            )
+            .is_ok()
+        );
+        assert!(matches!(next_agents(&heard), Some(News::Agents { .. })));
+        let Some(events) = fake.subscription() else {
+            panic!("no subscription: {:?}", fake.all_asked());
+        };
+        (heard, events)
+    }
+
+    /// The next listing heard, past other news.
+    fn next_agents(heard: &mpsc::Receiver<News>) -> Option<News> {
+        loop {
+            match heard.recv_timeout(LONG) {
+                Ok(news @ News::Agents { .. }) => return Some(news),
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// `events` written at once, as one burst.
+    fn say(stream: &UnixStream, events: &[Value]) {
+        let text: String = events.iter().map(|e| format!("{e}\n")).collect();
+        assert!((&*stream).write_all(text.as_bytes()).is_ok());
+    }
+
+    fn state_of(pane: &str, status: &str) -> Value {
+        json!({ "event": "pane.agent_status_changed",
+            "data": { "pane_id": pane, "workspace_id": &pane[..2], "agent_status": status } })
+    }
+
+    fn pane_event(kind: &str, pane: &str) -> Value {
+        json!({ "event": kind, "data": { "type": kind, "pane_id": pane } })
+    }
+
+    /// Five agents in [`listed`], each asked its processes.
+    const AGENTS: usize = 5;
+
+    #[test]
+    fn other_panes_states_list_nothing() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let (heard, events) = followed(&fake, proc.path());
+        let before = fake.all_asked();
+        // Shells and agents herdr does not list, changing state all the
+        // time (#624), then an agent followed.
+        let mut storm: Vec<Value> = (0..500)
+            .map(|i| {
+                let status = ["working", "idle", "blocked", "done"][i % 4];
+                state_of(&format!("w{}:p{}", 4 + i % 3, 10 + i % 7), status)
+            })
+            .collect();
+        storm.push(state_of("w1:p1", "working"));
+        say(&events, &storm);
+        // The followed agent's, read after the storm, is the only news.
+        assert_eq!(
+            heard.recv_timeout(LONG).ok(),
+            Some(News::State {
+                pane: "w1:p1".into(),
+                state: Some(State::Working)
+            })
+        );
+        std::thread::sleep(TEST_CALM.quiet * 2);
+        assert!(heard.try_recv().is_err());
+        assert_eq!(fake.all_asked(), before);
+        assert_eq!(fake.asked("agent.list"), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn a_burst_of_pane_events_lists_once() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let (heard, events) = followed(&fake, proc.path());
+        assert_eq!(fake.asked("pane.process_info"), AGENTS);
+        let burst: Vec<Value> = (0..10)
+            .map(|i| {
+                let kind = ["pane_created", "pane.closed", "pane_moved", "tab_focused"][i % 4];
+                pane_event(kind, &format!("w1:p{}", 5 + i))
+            })
+            .collect();
+        say(&events, &burst);
+        assert!(matches!(next_agents(&heard), Some(News::Agents { .. })));
+        std::thread::sleep(TEST_CALM.quiet * 2);
+        assert_eq!(fake.asked("agent.list"), 2);
+        assert_eq!(fake.asked("pane.process_info"), 2 * AGENTS);
+        // The same agents: the same subscription.
+        assert_eq!(fake.asked("events.subscribe"), 1);
+
+        // One agent gone: its state no longer followed.
+        if let Some(agents) = lock(&fake.agents)["agents"].as_array_mut() {
+            agents.remove(0);
+        }
+        say(&events, &[pane_event("pane_closed", "w1:p1")]);
+        let Some(News::Agents { agents, .. }) = next_agents(&heard) else {
+            panic!("not listed again");
+        };
+        assert_eq!(agents.len(), AGENTS - 1);
+        assert!(fake.subscription().is_some());
+        assert_eq!(fake.asked("events.subscribe"), 2);
+        assert_eq!(fake.asked("agent.list"), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn a_followed_agents_state_is_told_at_once() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let (heard, events) = followed(&fake, proc.path());
+        // A burst under way does not hold it back.
+        say(
+            &events,
+            &[
+                pane_event("pane_created", "w1:p9"),
+                state_of("w2:p1", "blocked"),
+            ],
+        );
+        assert_eq!(
+            heard.recv_timeout(LONG).ok(),
+            Some(News::State {
+                pane: "w2:p1".into(),
+                state: Some(State::Waiting)
+            })
+        );
+        assert_eq!(fake.asked("agent.list"), 1);
+        assert!(matches!(next_agents(&heard), Some(News::Agents { .. })));
+        assert_eq!(fake.asked("agent.list"), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn at_rest_herdr_is_asked_nothing() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let (heard, _events) = followed(&fake, proc.path());
+        let asked = fake.all_asked();
+        assert_eq!(
+            asked.len(),
+            // The agents, the labels, each agent's processes, the
+            // subscription.
+            1 + 2 + AGENTS + 1,
+            "{asked:?}"
+        );
+        std::thread::sleep(TEST_CALM.most + TEST_CALM.quiet * 2);
+        assert_eq!(fake.all_asked(), asked);
+        assert!(heard.try_recv().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn a_stream_of_pane_events_lists_a_few_times() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let (_heard, events) = followed(&fake, proc.path());
+        // 60 events over about 1.2 s, never quiet: listed when the
+        // longest wait is over, and once they stop.
+        for i in 0..60 {
+            say(&events, &[pane_event("pane_moved", &format!("w1:p{i}"))]);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(TEST_CALM.quiet * 2);
+        let listings = fake.asked("agent.list") - 1;
+        assert!((1..=4).contains(&listings), "{listings} listings");
+        Ok(())
+    }
+
+    /// `/proc` (every process) read again only when the agents' panes
+    /// change: herdr's client gone from it is not seen until then.
+    #[test]
+    fn proc_is_read_only_when_the_agents_panes_change() -> std::io::Result<()> {
+        let fake = Fake::start()?;
+        let proc = tempfile::tempdir()?;
+        let process = |pid: u32, stat: &str| -> std::io::Result<()> {
+            let dir = proc.path().join(pid.to_string());
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(dir.join("stat"), stat)?;
+            std::fs::write(dir.join("cmdline"), b"x\0")
+        };
+        process(100, "100 (kitty) S 1 100 100 0")?;
+        process(300, "300 (herdr) S 100 300 100 0")?;
+        let read = |before: Option<&Listing>| {
+            Listing::read(&fake.socket, proc.path(), before).map_err(std::io::Error::other)
+        };
+        let first = read(None)?;
+        assert_eq!(first.terminals, vec![vec![100]]);
+        std::fs::remove_dir_all(proc.path().join("300"))?;
+        let same = read(Some(&first))?;
+        assert_eq!(same.terminals, vec![vec![100]]);
+        assert_eq!(same.agents, first.agents);
+        if let Some(agents) = lock(&fake.agents)["agents"].as_array_mut() {
+            agents.remove(0);
+        }
+        let fewer = read(Some(&same))?;
+        assert!(fewer.terminals.is_empty());
         Ok(())
     }
 }
