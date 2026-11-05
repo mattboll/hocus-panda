@@ -1402,6 +1402,12 @@ impl App {
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("f") => {
                 self.focus = Focus::Search;
                 self.menu = None;
+                // Only a query to replace is selected: iced selects after
+                // the keys already received, so a key typed right after
+                // Ctrl+F would be selected and replaced by the next (#637).
+                if self.query.is_empty() {
+                    return operation::focus(SEARCH);
+                }
                 return Task::batch([operation::focus(SEARCH), operation::select_all(SEARCH)]);
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("w") => {
