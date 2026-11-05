@@ -51,6 +51,8 @@ fn letter(c: char) -> Option<u32> {
         'c' => 46,
         'd' => 32,
         'e' => 18,
+        'g' => 34,
+        'h' => 35,
         'n' => 49,
         'o' => 24,
         'p' => 25,
@@ -251,7 +253,7 @@ impl Bed {
     }
 
     fn click(&mut self, id: &str) -> anyhow::Result<()> {
-        if !id.starts_with("option:") && id != "toast-action" {
+        if !id.starts_with("option:") && !id.starts_with("toast-") {
             self.reveal(id)?;
         }
         let [x, y, w, h] = self.place_of(id)?;
@@ -347,6 +349,7 @@ fn the_page_shows_its_groups_a_row_per_screen_and_the_preview() -> anyhow::Resul
     assert_eq!(
         rows,
         [
+            "bar.side",
             "bar.screens",
             "bar.meeting",
             "bar.today",
@@ -480,7 +483,10 @@ fn moving_to_do_up_writes_the_order_and_the_keyboard_follows_its_button() -> any
     bed.written(|t| !t.contains("order"))?;
     // The keyboard: Tab to the agents' ↑, Space twice; it stays on the
     // agents' buttons, ↓ once ↑ is at the top.
-    let target = 3 + 2 + 1 + 1 + 3 + 3; // the agents' ↑ among the controls
+    // The agents' ↑ among the controls: the link, the side, the screens,
+    // the link, two screens' forms, the link, the meeting, Today's and To
+    // do's three each.
+    let target = 4 + 2 + 1 + 1 + 3 + 3;
     for _ in 0..80 {
         let now = bed.shows(|_| true)?["focus"].clone();
         if now == format!("control:{target}") {
@@ -504,6 +510,38 @@ fn moving_to_do_up_writes_the_order_and_the_keyboard_follows_its_button() -> any
         strings(&s["bar"]["order"]) == ["agents", "today", "tasks"]
             && s["focus"] == format!("control:{}", target - 6 + 1)
     })?;
+    Ok(())
+}
+
+#[test]
+fn gauche_writes_panel_side_and_the_bar_and_the_preview_move_to_the_left() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(shown["bar"]["preview"]["side"], "right");
+    // The room kept for the full bar on the right of the laptop's screen.
+    assert_eq!(bed.hp.work_area_of(LAPTOP).map(|a| a.x), Some(8));
+    bed.click("segment:bar.side:1")?;
+    bed.written(|t| t.contains("[panel]\nside = \"left\""))?;
+    bed.shows(|s| {
+        s["bar"]["preview"]["side"] == "left"
+            && s["toast"] == "Côté de l’écran : Gauche"
+            && s["rows"][0]["value"] == "Gauche"
+    })?;
+    // The compositor follows: the bar's room on the left.
+    let left = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.work_area_of(LAPTOP).map(|a| a.x) == Some(8 + 196 + 8)
+    })?;
+    anyhow::ensure!(left, "the work area: {:?}", bed.hp.work_area_of(LAPTOP));
+    // Annuler: back on the right.
+    bed.click("toast-action")?;
+    bed.written(|t| !t.contains("side"))?;
+    bed.shows(|s| s["bar"]["preview"]["side"] == "right")?;
+    let right = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.work_area_of(LAPTOP).map(|a| a.x) == Some(8))?;
+    anyhow::ensure!(right, "the work area: {:?}", bed.hp.work_area_of(LAPTOP));
     Ok(())
 }
 
@@ -560,6 +598,7 @@ fn searching_super_b_ordre_and_secondes_finds_their_rows() -> anyhow::Result<()>
     for (word, found, lit) in [
         ("ordre", "Ordre des groupes", "bar.order"),
         ("secondes", "Les secondes", "bar.seconds"),
+        ("gauche", "Côté de l’écran", "bar.side"),
         ("bord", "Changer de forme à la main", "bar.by-hand"),
     ] {
         chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
@@ -705,5 +744,12 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     save(&mut bed, "bar-page-order.png")?;
     bed.reveal("row:bar.color")?;
     save(&mut bed, "bar-page-clock.png")?;
+    // Gauche, the page at its top.
+    bed.click("segment:bar.side:1")?;
+    bed.shows(|s| s["bar"]["preview"]["side"] == "left")?;
+    bed.click("toast-close")?;
+    bed.shows(|s| s["toast"].is_null())?;
+    bed.reveal("row:bar.side")?;
+    save(&mut bed, "bar-page-left.png")?;
     Ok(())
 }

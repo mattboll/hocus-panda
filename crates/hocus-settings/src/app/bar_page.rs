@@ -218,6 +218,7 @@ impl App {
         let setting = |id: &str| self.bar_slot(id).map(Control::Setting);
         let mut out: Vec<Control> =
             vec![Control::Bar(Stop::Link("appearance.reduce-transparency"))];
+        out.extend(setting(model::SIDE));
         out.extend(setting(model::SCREENS));
         out.push(Control::Bar(Stop::Link(crate::screens::PRIMARY)));
         for r in self.form_rows().into_iter().filter(|r| r.plugged) {
@@ -658,6 +659,33 @@ impl App {
         }
     }
 
+    /// "Nouveau" beside a key new with the page: the side (10.5/700,
+    /// `#8FB3FF` on its 16 %, radius 5).
+    pub(super) fn bar_chip(&self, setting: &Setting) -> Option<El<'_>> {
+        if setting.id != model::SIDE {
+            return None;
+        }
+        Some(
+            container(
+                t(
+                    w("Nouveau", "New").get(self.lang).to_owned(),
+                    10.5,
+                    BLUE.get(),
+                )
+                .font(BOLD),
+            )
+            .padding([1, 6])
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    143, 179, 255, 0.16,
+                )))),
+                border: border(5.0, 0.0, Color::TRANSPARENT),
+                ..container::Style::default()
+            })
+            .into(),
+        )
+    }
+
     /// A link in the accent's text colour.
     fn bar_link<'a>(&self, target: &'static str, said: &str, ink: f32) -> El<'a> {
         let focused = self.bar_focused(&Stop::Link(target));
@@ -779,7 +807,7 @@ impl App {
         // EMPLACEMENT.
         rows = rows.push(group(
             head(model::PLACE.label.get(lang), None),
-            vec![model_row(model::SCREENS)],
+            vec![model_row(model::SIDE), model_row(model::SCREENS)],
         ));
         // FORME: a row per screen, then by hand.
         let mut forms: Vec<El<'_>> = self
@@ -1260,6 +1288,8 @@ impl App {
             colour,
             played,
             lang,
+            left: self.bar_slot(model::SIDE).and_then(|s| self.value(s))
+                == Some(Value::Word("left")),
             hint: w(
                 "La barre de l’écran du portable, à 55 %. Un clic sur un groupe allume sa ligne.",
                 "The laptop screen’s bar, at 55 %. A click on a group lights its row.",
@@ -1345,6 +1375,7 @@ impl App {
                 "groups": groups,
                 "screens": screens,
                 "seconds": preview.ss.is_some(),
+                "side": if preview.left { "left" } else { "right" },
                 "played": preview.played.map(|(word, _)| word),
             },
         })
@@ -1442,6 +1473,8 @@ struct Preview {
     colour: Color,
     played: Option<(&'static str, f32)>,
     lang: Lang,
+    /// The bars stand on the screens' left.
+    left: bool,
     /// Under it: what it is, and that a click lights a row.
     hint: String,
 }
@@ -1560,11 +1593,20 @@ impl Preview {
         out
     }
 
-    /// The bar's top left in the canvas, and the screen's edge's x.
+    /// The bar's top left in the canvas, and the screen's edge's x: the
+    /// edge on the bar's outer side, 8 px (at 55 %) from it.
     fn bar_origin(&self, bounds: Rectangle) -> (Point, f32) {
-        let edge_x = bounds.width - 2.0;
-        let x = edge_x - 8.0 * BAR_SCALE - self.width * BAR_SCALE;
-        (Point::new(x, self.bar_top()), edge_x)
+        if self.left {
+            let edge_x = 0.0;
+            (
+                Point::new(edge_x + 2.0 + 8.0 * BAR_SCALE, self.bar_top()),
+                edge_x,
+            )
+        } else {
+            let edge_x = bounds.width - 2.0;
+            let x = edge_x - 8.0 * BAR_SCALE - self.width * BAR_SCALE;
+            (Point::new(x, self.bar_top()), edge_x)
+        }
     }
 }
 
@@ -1725,7 +1767,14 @@ impl canvas::Program<Message> for Preview {
                     let w = bar.max(2.0);
                     rounded(
                         &mut frame,
-                        Point::new(rect.x + rect.width - 1.0 - w, rect.y + 1.0),
+                        Point::new(
+                            if self.left {
+                                rect.x + 1.0
+                            } else {
+                                rect.x + rect.width - 1.0 - w
+                            },
+                            rect.y + 1.0,
+                        ),
                         Size::new(w, (rect.height - 2.0).max(1.0)),
                         2.0,
                         rgba(238, 241, 246, 0.55),

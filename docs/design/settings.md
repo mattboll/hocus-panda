@@ -688,12 +688,12 @@ h format is not here (it is 6.2's `[locale] time`, the preview follows
 it); one form row per screen; the order of Today, To do and the agents is
 a setting with ↑ and ↓; the windows' switch is here; every `[panel]` key
 is followed live (bar.md "6.4, the bar followed live"). Section `bar`
-(`hocus settings bar`), PERSONNALISATION's third row. `[panel] side`
-comes with its own pull request.
+(`hocus settings bar`), PERSONNALISATION's third row.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
-| EMPLACEMENT | Sur quels écrans (its line: one screen plugged, the primary's name, or a bar per screen; link "L'écran principal se choisit dans Écrans ›") | menu "L'écran principal \| Tous les écrans" | `[panel] screens` |
+| EMPLACEMENT | Côté de l'écran ("Nouveau": 10.5/700, `#8FB3FF` on its 16 %, radius 5) | segmented "Droite \| Gauche" | `[panel] side` |
+| | Sur quels écrans (its line: one screen plugged, the primary's name, or a bar per screen; link "L'écran principal se choisit dans Écrans ›") | menu "L'écran principal \| Tous les écrans" | `[panel] screens` |
 | FORME ("Pleine 196 px · mini 56 px") | one row per screen known (plugged, unplugged with a form remembered, or with `panel-form` in the file), named as Écrans names it; its line says what applies now | segmented "Auto \| Pleine \| Mini" | `[outputs.NAME] panel-form` |
 | | Changer de forme à la main (the shortcut as bound now; link to Clavier et raccourcis' row) | the shortcut | `[shortcuts] toggle-bar` (read only) |
 | CE QU'ELLE MONTRE, DE HAUT EN BAS ("Un groupe vide ne prend pas de place") | L'horloge et la date, Micro, caméra ou écran en cours, Bureaux, connexions, niveaux, boutons du bas | "Toujours" | |
@@ -732,10 +732,11 @@ comes with its own pull request.
 - **The preview** (214 wide, 20 px right of the rows; drawn over the
   page at its place and held at the page's top as it scrolls): "APERÇU"
   and the laptop's screen's form ("Portable · pleine"); the screens as
-  Écrans places them, at 1/30, each with its bar's strip on its side and
+  Écrans places them, at 1/30, each with its bar's strip on the chosen side and
   its caption ("Écran 2 · sans barre", "· débranché" dashed); then the
   laptop's bar drawn at its logical sizes (960 high) at 55 %, 8 px from a
-  line standing for the screen's edge, with the mockup's sample content
+  line standing for the screen's edge, on the chosen side (the line on the
+  bar's outer side), with the mockup's sample content
   in the column's order, the groups shown or not, the windows over the
   desktops, the connections, the levels and the footer. Its clock is the
   real time with the chosen seconds, font, colour and the 6.2 time
@@ -1005,12 +1006,13 @@ of two screens (a laptop's 2560 × 1600 at 1, 3440 × 1440), the
 Settings alone:
 
 - `the_page_shows_its_groups_a_row_per_screen_and_the_preview`
+- `gauche_writes_panel_side_and_the_bar_and_the_preview_move_to_the_left`
 - `a_screens_form_is_written_at_once_and_annuler_takes_it_back`
 - `back_to_the_form_of_its_width_forgets_the_click`
 - `moving_to_do_up_writes_the_order_and_the_keyboard_follows_its_button`
 - `hiding_today_writes_panel_today_and_a_group_with_nothing_to_show_says_so`
 - `the_clock_rows_write_panel_clock_and_a_colour_of_the_files_own_stays`
-- `searching_super_b_ordre_and_secondes_finds_their_rows`
+- `searching_super_b_ordre_and_secondes_finds_their_rows` (and "gauche")
 - `the_links_open_their_pages_with_their_row_lit`
 - `at_rest_the_bar_page_draws_only_its_clock`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)

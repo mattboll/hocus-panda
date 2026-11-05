@@ -43,7 +43,8 @@ impl App {
     ) -> El<'_> {
         let alpha = if inert { INERT } else { 1.0 };
         let current = self.value(slot);
-        let mono = setting.id != "appearance.theme";
+        // Words in Manrope, numbers and times in Martian Mono.
+        let mono = !matches!(setting.id, "appearance.theme" | crate::bar::SIDE);
         let mut segments = row![];
         let mut shown: Vec<(String, Value)> = choices
             .iter()

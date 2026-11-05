@@ -40,6 +40,7 @@ pub const CLOCK: RowGroup = RowGroup {
     per_source: false,
 };
 
+pub const SIDE: &str = "bar.side";
 pub const SCREENS: &str = "bar.screens";
 pub const MEETING: &str = "bar.meeting";
 pub const TODAY: &str = "bar.today";
@@ -69,6 +70,7 @@ pub const COLOURS: [(&str, Words); 4] = [
 
 const TRANSITIONS: &[&str] = &["odometer", "roll", "flip", "neon", "none"];
 const SCREENS_WORDS: &[&str] = &["primary", "all"];
+const SIDES: &[&str] = &["right", "left"];
 
 /// A group's setting, by its group.
 pub fn group_setting(group: BarGroup) -> &'static str {
@@ -296,6 +298,26 @@ pub fn settings() -> &'static [Setting] {
             value: Value::Text((*name).to_owned()),
         }));
         vec![
+            Setting {
+                id: SIDE,
+                section: SectionId::Bar,
+                group: PLACE,
+                name: w("Côté de l’écran", "Side of the screen"),
+                line: Some(w(
+                    "La barre, son bord à cliquer et la place gardée pour elle passent de l’autre côté, sur chaque écran.",
+                    "The bar, its edge to click and the room kept for it move to the other side, on every screen.",
+                )),
+                keywords: (
+                    &["gauche", "droite", "côté", "bord", "side"],
+                    &["left", "right", "side", "edge"],
+                ),
+                kind: Kind::Segmented(vec![
+                    word("Droite", "Right", "right"),
+                    word("Gauche", "Left", "left"),
+                ]),
+                places: one(&["panel", "side"], Codec::Word(SIDES), Value::Word("right")),
+                needs: None,
+            },
             Setting {
                 id: SCREENS,
                 section: SectionId::Bar,
