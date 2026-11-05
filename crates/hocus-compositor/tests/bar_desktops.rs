@@ -285,6 +285,22 @@ impl Bed {
         Ok(n)
     }
 
+    /// Waits until the screen shows what `test` looks for: the shell logs
+    /// a draw before its buffer comes, and on a loaded machine the
+    /// compositor may draw it well after.
+    fn shows(
+        &mut self,
+        what: &str,
+        mut test: impl FnMut(&mut Self) -> anyhow::Result<bool>,
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+        while !test(self)? {
+            anyhow::ensure!(start.elapsed() < WAIT, "the screen never showed {what}");
+            wait(&mut self.hp, Duration::from_millis(50))?;
+        }
+        Ok(())
+    }
+
     /// The accent's green along the top of desktop `index`'s tile, where
     /// its ring is.
     fn ringed(&mut self, index: usize) -> anyhow::Result<bool> {
@@ -469,7 +485,9 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     // An empty desktop shows its number.
     let t = bed.tile(0);
     let number = Rect::new(t.x + t.width / 2 - 4, t.y + 9, 8, 12);
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no number");
+    bed.shows("the number", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     // A window opens: its sketch where it is on the screen, the focused
     // one's light.
     let mark = bed.mark();
@@ -478,7 +496,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let drawn = bed.sketch(0, window);
     let (x, y) = centre(drawn);
-    assert!(light(bed.pixel(x, y)?) > 95, "{:?}", bed.pixel(x, y)?);
+    bed.shows("the sketch", |bed| Ok(light(bed.pixel(x, y)?) > 95))?;
     // Dragged with Alt: nothing told on the way, where it lands at the
     // end.
     let commits = bed.hp.desktops_commits();
@@ -510,7 +528,9 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let now = bed.sketch(0, moved);
     let (nx, ny) = centre(now);
-    assert!(light(bed.pixel(nx, ny)?) > 95, "not where it went");
+    bed.shows("the sketch where it went", |bed| {
+        Ok(light(bed.pixel(nx, ny)?) > 95)
+    })?;
     let left = (drawn.x + 1, drawn.y + drawn.height / 2);
     assert!(left.0 + 2 < now.x, "{drawn:?} {now:?}");
     assert!(light(bed.pixel(left.0, left.1)?) < 60, "still where it was");
@@ -518,8 +538,9 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     let mark = bed.mark();
     client.commands.send(Command::Close)?;
     bed.logged_after(mark, "said=Bureau 1, aucune fenêtre")?;
-    bed.settle()?;
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no number");
+    bed.shows("the number back", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     Ok(())
 }
 
@@ -540,7 +561,7 @@ fn the_current_desktop_is_ringed_in_the_accent() -> anyhow::Result<()> {
         "the desktops' tiles show it bar=\"HEADLESS-1\" current=2",
     )?;
     bed.settle()?;
-    assert!(bed.ringed(1)?, "the second not ringed");
+    bed.shows("the second ringed", |bed| bed.ringed(1))?;
     assert!(!bed.ringed(0)?, "the first still ringed");
     Ok(())
 }
@@ -570,7 +591,7 @@ fn a_click_on_a_tile_slides_to_its_desktop() -> anyhow::Result<()> {
     );
     bed.on(2)?;
     bed.settle()?;
-    assert!(bed.ringed(2)?);
+    bed.shows("the third ringed", |bed| bed.ringed(2))?;
     Ok(())
 }
 
@@ -634,7 +655,9 @@ fn six_desktops_take_two_rows() -> anyhow::Result<()> {
     let fifth = bed.tile(4);
     assert_eq!(fifth.x, bed.tile(0).x);
     let number = Rect::new(fifth.x + fifth.width / 2 - 4, fifth.y + 9, 8, 12);
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no fifth");
+    bed.shows("the fifth", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     let seventh = bed.tile(6);
     assert_eq!(bed.count(seventh, |p| light(p) > 60)?, 0, "a seventh");
     // The sixth, clicked.
@@ -720,7 +743,7 @@ fn the_keyboard_reaches_the_tiles_where_enter_and_space_go_there() -> anyhow::Re
     // Its ring, around the tile.
     let t = bed.tile(3);
     let under = Rect::new(t.x + 8, t.y + t.height + 2, t.width - 16, 2);
-    assert!(bed.count(under, green)? > 10, "no ring");
+    bed.shows("the ring", |bed| Ok(bed.count(under, green)? > 10))?;
     // Enter: there; Shift+Tab, then Space: the third.
     bed.press(KEY_ENTER);
     bed.on(3)?;
@@ -1150,7 +1173,7 @@ fn a_minimised_window_is_listed_last_greyed_and_a_click_brings_it_back() -> anyh
         let (_, y) = Bed::row(list, i);
         Rect::new(list.x + 13, y as i32 - 8, 16, 16)
     };
-    assert!(bed.count(icon(1), red)? > 100, "Alpha's icon");
+    bed.shows("Alpha's icon", |bed| Ok(bed.count(icon(1), red)? > 100))?;
     assert_eq!(bed.count(icon(2), red)?, 0, "Beta's icon at full");
     let brightest = |bed: &mut Bed, i: usize| -> anyhow::Result<u32> {
         let (_, y) = Bed::row(list, i);
