@@ -18,6 +18,7 @@ mod config;
 mod cursor;
 mod decoration;
 pub mod desktops;
+mod displays;
 mod emoji;
 mod focus;
 mod foreign;
@@ -348,6 +349,9 @@ impl App {
         // The session's end (7.4): the windows that closed, the lock drawn
         // before suspending.
         state.leave_after_turn();
+        // The screens' settings (6.9): the layout applied when it was
+        // asked, then the Settings told what changed.
+        state.displays_after_turn(backend);
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

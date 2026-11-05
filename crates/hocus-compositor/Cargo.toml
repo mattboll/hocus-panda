@@ -42,6 +42,8 @@ pipewire = { version = "0.10.1", features = ["v0_3_77"] }
 # (5.10).
 rustix = { version = "1.1.6", features = ["fs", "process", "rand", "time"] }
 serde = { version = "1.0.229", features = ["derive"] }
+# The screens as the Settings read them (6.9), one JSON line each time.
+serde_json = "1.0.154"
 smithay = { version = "0.7.0", default-features = false, features = [
     "backend_winit",
     "backend_drm",

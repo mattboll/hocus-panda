@@ -170,8 +170,8 @@ impl SectionId {
                 Devices,
                 w("Écrans", "Screens"),
                 w(
-                    "La résolution, l’échelle et la place de chaque écran.",
-                    "Each screen's resolution, scale and place.",
+                    "La place de chaque écran, sa résolution, sa fréquence et son échelle ; l’écran où vont la barre et les nouvelles fenêtres.",
+                    "Where each screen sits, its resolution, refresh rate and scale; the screen the bar and new windows go to.",
                 ),
                 Icon::Screens,
                 "6.9",
@@ -688,13 +688,17 @@ pub enum Places {
         battery: Place,
         ac: Place,
     },
+    /// Written by its page's own code, its key holding a screen's name
+    /// (`[outputs.NAME] mode`, 6.9): the place is for the search; the
+    /// window reads and writes nothing of it as a slot.
+    Page(Place),
 }
 
 impl Places {
     /// The place of the value for `source` (ignored by a setting with one).
     pub fn of(&self, source: Source) -> &Place {
         match self {
-            Self::One(place) => place,
+            Self::One(place) | Self::Page(place) => place,
             Self::PerSource { battery, ac } => match source {
                 Source::Battery => battery,
                 Source::Ac => ac,
@@ -708,7 +712,7 @@ impl Places {
 
     pub fn all(&self) -> Vec<&Place> {
         match self {
-            Self::One(place) => vec![place],
+            Self::One(place) | Self::Page(place) => vec![place],
             Self::PerSource { battery, ac } => vec![battery, ac],
         }
     }
@@ -867,6 +871,7 @@ pub fn say_seconds(s: u64, lang: Lang) -> String {
 pub fn settings_of(section: SectionId) -> &'static [Setting] {
     match section {
         SectionId::Power => crate::power::settings(),
+        SectionId::Screens => crate::screens::settings(),
         SectionId::Mouse => crate::mouse::settings(),
         SectionId::Keyboard => crate::keyboard::settings(),
         _ => &[],

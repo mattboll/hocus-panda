@@ -93,6 +93,10 @@ pub struct Snapshot {
     pub readings: BTreeMap<Slot, Reading>,
     /// `[appearance] reduced-motion`: motions only fade.
     pub reduced_motion: bool,
+    /// The screens the file places (`[outputs.NAME] position`), by name.
+    pub screens_placed: Vec<String>,
+    /// `[panel] output`, the primary screen named.
+    pub primary_output: Option<String>,
 }
 
 impl Snapshot {
@@ -115,6 +119,10 @@ impl Snapshot {
 pub fn slots() -> Vec<Slot> {
     let mut slots = Vec::new();
     for setting in all_settings() {
+        // A page's own (the screens'): not a slot of the file.
+        if matches!(setting.places, crate::model::Places::Page(_)) {
+            continue;
+        }
         if setting.places.per_source() {
             for source in [Source::Battery, Source::Ac] {
                 slots.push(Slot::of(setting, source));
@@ -140,6 +148,22 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(|a| a.get("reduced-motion"))
                 .and_then(Item::as_bool)
                 .unwrap_or(false),
+            screens_placed: doc
+                .get("outputs")
+                .and_then(Item::as_table_like)
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter(|(_, o)| o.get("position").is_some())
+                        .map(|(name, _)| name.to_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            primary_output: doc
+                .get("panel")
+                .and_then(|p| p.get("output"))
+                .and_then(Item::as_str)
+                .map(ToOwned::to_owned),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -148,6 +172,8 @@ pub fn read(text: &str) -> Snapshot {
             },
             readings: BTreeMap::new(),
             reduced_motion: false,
+            screens_placed: Vec::new(),
+            primary_output: None,
         },
     }
 }
@@ -341,6 +367,121 @@ pub fn check(text: &str, slot: Slot, raw: &Raw) -> Result<(), String> {
     }
 }
 
+/// One key written by a page itself (6.9's screens): its tables then its
+/// name (`["outputs", "DP-2", "mode"]`), and its value as TOML, or `None`
+/// to take it out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyEdit {
+    pub key: Vec<String>,
+    pub value: Option<String>,
+}
+
+/// What `doc` says at each of `keys`, as edits that would write it back.
+pub fn keys_now(doc: &DocumentMut, keys: &[Vec<String>]) -> Vec<KeyEdit> {
+    keys.iter()
+        .map(|key| KeyEdit {
+            key: key.clone(),
+            value: value_at(doc.as_table(), key).map(|v| v.to_string().trim().to_owned()),
+        })
+        .collect()
+}
+
+fn value_at<'a>(table: &'a dyn TableLike, key: &[String]) -> Option<&'a toml_edit::Value> {
+    let (name, tables) = key.split_last()?;
+    let mut table = table;
+    for part in tables {
+        table = table.get(part)?.as_table_like()?;
+    }
+    table.get(name)?.as_value()
+}
+
+/// `doc` with `edits`: each key's line only, its comment kept; the tables
+/// they need made; a table emptied by a key taken out, with no comment of
+/// its own, taken out too (the file then is what it was before the key
+/// came).
+pub fn write_keys(doc: &mut DocumentMut, edits: &[KeyEdit]) -> Result<(), String> {
+    for edit in edits {
+        let (name, tables) = edit.key.split_last().ok_or("an empty key")?;
+        let new = edit
+            .value
+            .as_ref()
+            .map(|text| {
+                text.parse::<toml_edit::Value>()
+                    .map_err(|err| format!("{text}: {err}"))
+            })
+            .transpose()?;
+        let Some(mut new) = new else {
+            remove_key(doc.as_table_mut(), &edit.key);
+            continue;
+        };
+        let mut table: &mut dyn TableLike = doc.as_table_mut();
+        for (i, part) in tables.iter().enumerate() {
+            let item = table.entry(part).or_insert_with(|| {
+                let mut made = Table::new();
+                made.set_implicit(i + 1 < tables.len());
+                Item::Table(made)
+            });
+            table = item
+                .as_table_like_mut()
+                .ok_or_else(|| format!("{} is not a table", tables[..=i].join(".")))?;
+        }
+        match table.get_mut(name).and_then(Item::as_value_mut) {
+            Some(old) => {
+                *new.decor_mut() = old.decor().clone();
+                *old = new;
+            }
+            None => {
+                table.insert(name, Item::Value(new));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `key` taken out of `table`; the tables it empties go too, unless they
+/// hold a comment.
+fn remove_key(table: &mut Table, key: &[String]) {
+    let Some((first, rest)) = key.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        table.remove(first);
+        return;
+    }
+    let emptied = match table.get_mut(first).and_then(Item::as_table_mut) {
+        Some(inner) => {
+            remove_key(inner, rest);
+            let bare = inner
+                .decor()
+                .prefix()
+                .and_then(|p| p.as_str())
+                .is_none_or(|p| p.trim().is_empty());
+            inner.is_empty() && bare
+        }
+        None => false,
+    };
+    if emptied {
+        table.remove(first);
+    }
+}
+
+/// Whether `text` says what `edits` wrote.
+pub fn check_keys(text: &str, edits: &[KeyEdit]) -> Result<(), String> {
+    let doc = hocus_config::parse(text).map_err(|err| err.to_string())?;
+    for edit in edits {
+        let now = value_at(doc.as_table(), &edit.key).map(|v| v.to_string().trim().to_owned());
+        let asked = edit
+            .value
+            .as_ref()
+            .and_then(|t| t.parse::<toml_edit::Value>().ok())
+            .map(|v| v.to_string().trim().to_owned());
+        if now != asked {
+            return Err(format!("{} would read {now:?}", edit.key.join(".")));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,6 +581,49 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(written("[idle\n", slot("power.lid", Source::Ac), &Raw::Remove).is_err());
+    }
+
+    #[test]
+    fn keys_written_then_taken_out_leave_the_file_as_it_was() -> anyhow::Result<()> {
+        let key = |parts: &[&str]| parts.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        let scale = key(&["outputs", "HEADLESS-1", "scale"]);
+        let mut doc = hocus_config::parse(FILE)?;
+        let before = keys_now(&doc, std::slice::from_ref(&scale));
+        assert_eq!(before[0].value, None);
+        let set = [KeyEdit {
+            key: scale.clone(),
+            value: Some("1.25".to_owned()),
+        }];
+        write_keys(&mut doc, &set).map_err(anyhow::Error::msg)?;
+        let out = doc.to_string();
+        assert!(
+            out.ends_with("[outputs.HEADLESS-1]\nscale = 1.25\n"),
+            "{out}"
+        );
+        check_keys(&out, &set).map_err(anyhow::Error::msg)?;
+        let mut doc = hocus_config::parse(&out)?;
+        write_keys(&mut doc, &before).map_err(anyhow::Error::msg)?;
+        assert_eq!(doc.to_string(), FILE);
+        // Places, both screens at once, as arrays.
+        let mut doc = hocus_config::parse(FILE)?;
+        write_keys(
+            &mut doc,
+            &[
+                KeyEdit {
+                    key: key(&["outputs", "A", "position"]),
+                    value: Some("[3440, 0]".to_owned()),
+                },
+                KeyEdit {
+                    key: key(&["outputs", "B", "position"]),
+                    value: Some("[0, 80]".to_owned()),
+                },
+            ],
+        )
+        .map_err(anyhow::Error::msg)?;
+        let out = doc.to_string();
+        assert!(out.contains("[outputs.A]\nposition = [3440, 0]\n"), "{out}");
+        assert!(out.contains("[outputs.B]\nposition = [0, 80]\n"), "{out}");
+        Ok(())
     }
 
     #[test]

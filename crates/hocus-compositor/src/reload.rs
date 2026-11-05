@@ -201,6 +201,10 @@ impl State {
             self.keyboard_changed(new.keyboard.clone(), keymap);
             followed.push("[keyboard]");
         }
+        // The screens and the primary screen (6.9, displays.rs).
+        if self.displays_config_changed(&new) {
+            followed.push("[outputs] [panel] output");
+        }
         if new.pointer != self.config.pointer || new.touchpad != self.config.touchpad {
             self.config.pointer = new.pointer;
             self.config.touchpad = new.touchpad;

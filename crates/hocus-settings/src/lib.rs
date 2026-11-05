@@ -4,7 +4,8 @@
 //!
 //! - [`model`]: the 17 sections in 5 groups, and the settings each holds;
 //!   a section's ticket fills its own ([`power`] is the first, [`mouse`]
-//!   the mice and touchpads).
+//!   the mice and touchpads; [`screens`] draws its page itself, from the
+//!   compositor's line).
 //! - [`devices`]: the mice and touchpads plugged in, as the compositor says.
 //! - [`keyboard`], [`keys`] and [`xkb`]: the keyboard's settings and the
 //!   desktop's shortcuts, the chords as written and shown, XKB's layouts.
@@ -24,6 +25,7 @@ pub mod model;
 pub mod mouse;
 pub mod power;
 pub mod renderer;
+pub mod screens;
 pub mod search;
 pub mod single;
 pub mod store;

@@ -35,6 +35,8 @@ iced = { version = "0.14", default-features = false, features = [
     "svg",
     # The places of what it draws, for its log (tests and screen readers).
     "advanced",
+    # The screens' drawing and the trial's ring (6.9).
+    "canvas",
 ] }
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
 # the shell does).

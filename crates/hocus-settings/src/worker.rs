@@ -22,7 +22,7 @@ use std::{
 
 use crate::{
     model::{Source, Value},
-    store::{self, FileState, Raw, Reading, Slot, Snapshot},
+    store::{self, FileState, KeyEdit, Raw, Reading, Slot, Snapshot},
 };
 
 /// What the window asks.
@@ -31,6 +31,8 @@ pub enum Ask {
     /// `raw` written at `slot`; `undoing`: the change is an undo or a redo,
     /// not a new one.
     Write { slot: Slot, raw: Raw, id: u64 },
+    /// Keys a page writes itself, together (6.9's screens).
+    Keys { edits: Vec<KeyEdit>, id: u64 },
     /// The last version that read takes the broken file's place.
     Restore,
     /// The file may have changed on disk.
@@ -66,6 +68,8 @@ pub enum Heard {
         why: Why,
         /// What the raw values were before, for an undo of each change.
         before: Vec<(Slot, Raw)>,
+        /// What the keys a page wrote held before, for its undo.
+        before_keys: Vec<KeyEdit>,
         /// When the last version that read was kept, if one is.
         last_good: Option<SystemTime>,
     },
@@ -165,6 +169,7 @@ fn run(
     while let Ok(ask) = taken.recv() {
         let going = match ask {
             Ask::Write { slot, raw, id } => run.write(slot, &raw, id),
+            Ask::Keys { edits, id } => run.write_keys(&edits, id),
             Ask::Restore => run.restore(),
             Ask::Changed => {
                 // An editor's save is a few events: read once for all.
@@ -178,6 +183,7 @@ fn run(
                 for ask in more {
                     going &= match ask {
                         Ask::Write { slot, raw, id } => run.write(slot, &raw, id),
+                        Ask::Keys { edits, id } => run.write_keys(&edits, id),
                         Ask::Restore => run.restore(),
                         Ask::Changed => true,
                     };
@@ -208,7 +214,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
                 return (self.heard)(Heard::Failed { id: None, why: err });
             }
         };
-        self.said(text, why, Vec::new())
+        self.said(text, why, Vec::new(), Vec::new())
     }
 
     /// The file changed on disk: read again, unless it is what was last
@@ -252,10 +258,16 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             changed = changed.len(),
             "the configuration changed on disk: read again"
         );
-        self.said(text, Why::ByHand(changed), Vec::new())
+        self.said(text, Why::ByHand(changed), Vec::new(), Vec::new())
     }
 
-    fn said(&mut self, text: String, why: Why, before: Vec<(Slot, Raw)>) -> bool {
+    fn said(
+        &mut self,
+        text: String,
+        why: Why,
+        before: Vec<(Slot, Raw)>,
+        before_keys: Vec<KeyEdit>,
+    ) -> bool {
         let mut snapshot = store::read(&text);
         if self.places.file.is_none() {
             snapshot.state = FileState::NoFile;
@@ -289,6 +301,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             snapshot,
             why,
             before,
+            before_keys,
             last_good,
         })
     }
@@ -321,10 +334,40 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
                     });
                 }
                 let before = before.map(|b| vec![(slot, b)]).unwrap_or_default();
-                self.said(text, Why::Written(id), before)
+                self.said(text, Why::Written(id), before, Vec::new())
             }
             Err(why) => {
                 tracing::warn!(slot = slot.word(), why, "not written");
+                (self.heard)(Heard::Failed { id: Some(id), why })
+            }
+        }
+    }
+
+    /// Keys a page writes itself, all or none.
+    fn write_keys(&mut self, edits: &[KeyEdit], id: u64) -> bool {
+        let Some(file) = self.places.file.clone() else {
+            return (self.heard)(Heard::Failed {
+                id: Some(id),
+                why: "no configuration file".to_owned(),
+            });
+        };
+        let mut before = Vec::new();
+        let keys: Vec<Vec<String>> = edits.iter().map(|e| e.key.clone()).collect();
+        let done = hocus_config::edit(
+            &file,
+            |doc| {
+                before = store::keys_now(doc, &keys);
+                store::write_keys(doc, edits)
+            },
+            |text| store::check_keys(text, edits),
+        );
+        match done {
+            Ok(text) => {
+                tracing::info!(?edits, file = %file.display(), "written");
+                self.said(text, Why::Written(id), Vec::new(), before)
+            }
+            Err(why) => {
+                tracing::warn!(?edits, why, "not written");
                 (self.heard)(Heard::Failed { id: Some(id), why })
             }
         }

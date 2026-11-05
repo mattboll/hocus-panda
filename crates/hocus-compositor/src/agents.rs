@@ -88,6 +88,8 @@ pub enum Heard {
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
+    /// A Settings' line (`msg screens`, 6.9).
+    Screens(crate::displays::FromSettings),
     /// A connection that follows the mice and touchpads (`hocus msg
     /// input-devices follow`): the loop writes to it as they change.
     Follow(std::os::unix::net::UnixStream),
@@ -277,6 +279,20 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
             let Ok(line) = line else {
                 break;
             };
+            if line.trim_end() == "msg screens" {
+                // The Settings' line stays open, on threads of its own.
+                let sender = sender.clone();
+                let Ok(line_stream) = stream.try_clone() else {
+                    break;
+                };
+                let started = std::thread::Builder::new()
+                    .name("settings' line".to_owned())
+                    .spawn(move || crate::displays::serve(line_stream, sender));
+                if let Err(err) = started {
+                    tracing::warn!(%err, "the Settings' line is not served");
+                }
+                break;
+            }
             if Question::of(&line) == Some(Question::InputDevices { follow: true }) {
                 // The loop keeps it, and writes without waiting.
                 if let Ok(kept) = stream.try_clone()
@@ -330,12 +346,17 @@ impl Compositor {
                 return;
             }
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
+            Heard::Screens(heard) => self.displays_heard(heard),
             Heard::Asked(question, reply) => {
                 let answer = match question {
                     Question::Idle => {
                         // What changed this turn, judged first.
                         self.flush_idle();
                         format!("{}{}", self.idle_said(), self.away_said())
+                    }
+                    Question::Outputs => {
+                        // The layout this turn asked for, applied first.
+                        format!("{}\n", self.displays_json())
                     }
                     Question::Lock => {
                         tracing::info!("hocus msg lock: the session locks");
