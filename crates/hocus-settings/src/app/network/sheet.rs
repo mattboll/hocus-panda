@@ -231,6 +231,9 @@ pub(in crate::app) struct Sheet {
     pub failed: Option<Failure>,
     /// The menu open.
     pub menu: Option<MenuFor>,
+    /// An OpenVPN file's user name and password, asked before it is
+    /// imported: the file, its kind, its name.
+    pub vpn: Option<(PathBuf, &'static str, String)>,
 }
 
 impl Sheet {
@@ -255,7 +258,15 @@ impl Sheet {
             sent: None,
             failed: None,
             menu: None,
+            vpn: None,
         }
+    }
+
+    /// A VPN's file's user name and password.
+    pub(super) fn vpn(file: PathBuf, kind: &'static str, name: String) -> Self {
+        let mut sheet = Self::new(false, Vec::new(), name.clone(), Security::Enterprise);
+        sheet.vpn = Some((file, kind, name));
+        sheet
     }
 
     /// A network around's.
@@ -275,6 +286,9 @@ impl Sheet {
 
     /// Its text fields, in order.
     pub(super) fn fields(&self) -> Vec<Field> {
+        if self.vpn.is_some() {
+            return vec![Field::Identity, Field::Password];
+        }
         let mut fields = Vec::new();
         if self.hidden {
             fields.push(Field::Name);
@@ -330,6 +344,9 @@ impl Sheet {
     /// password or certificate and key, the authority's file if one is
     /// asked; a hidden network's name.
     pub(super) fn filled(&self) -> bool {
+        if self.vpn.is_some() {
+            return !self.identity.trim().is_empty() && !self.password.is_empty();
+        }
         if self.hidden && self.typed_name.trim().is_empty() {
             return false;
         }
@@ -587,6 +604,17 @@ impl App {
         if sheet.waiting() || !sheet.filled() {
             return Task::none();
         }
+        // An OpenVPN file's: imported with them, the sheet closed.
+        if let Some((file, kind, _)) = sheet.vpn.clone() {
+            let credentials = super::vpn::credentials(&sheet.identity, &sheet.password);
+            self.network.ask(Ask::Import {
+                file,
+                kind,
+                credentials: Some(credentials),
+            });
+            self.network_close_sheet();
+            return Task::none();
+        }
         if sheet.hidden {
             sheet.ssid = sheet.typed_name.trim().as_bytes().to_vec();
         }
@@ -615,6 +643,10 @@ impl App {
         let sheet = self.network.sheet.as_ref()?;
         let lang = self.lang;
         let title = match (sheet.hidden, lang) {
+            _ if sheet.vpn.is_some() => match lang {
+                Lang::French => format!("VPN « {} »", sheet.name),
+                Lang::English => format!("VPN \u{201c}{}\u{201d}", sheet.name),
+            },
             (true, _) => w("Rejoindre un réseau masqué", "Join a hidden network")
                 .get(lang)
                 .to_owned(),
@@ -631,7 +663,24 @@ impl App {
             .align_y(Alignment::Center)
         ]
         .spacing(14);
-        if sheet.security == Security::Enterprise {
+        if sheet.vpn.is_some() {
+            body = body.push(
+                t(
+                    w(
+                        "Ce fichier demande un identifiant et un mot de passe : ceux que te donne ton fournisseur. Ils sont gardés avec le VPN.",
+                        "This file asks for a user name and a password: those your provider gives you. They are kept with the VPN.",
+                    )
+                    .get(lang),
+                    13.0,
+                    DIM.get(),
+                )
+                .line_height(1.5),
+            );
+            body =
+                body.push(self.sheet_field(sheet, Field::Identity, w("Identifiant", "User name")));
+            body =
+                body.push(self.sheet_field(sheet, Field::Password, w("Mot de passe", "Password")));
+        } else if sheet.security == Security::Enterprise {
             body = body.push(
                 t(
                     w(
@@ -667,8 +716,10 @@ impl App {
                     w("Mot de passe", "Password"),
                 ));
             }
-            Security::Enterprise => body = self.sheet_enterprise(sheet, body),
-            Security::Open => {}
+            Security::Enterprise if sheet.vpn.is_none() => {
+                body = self.sheet_enterprise(sheet, body);
+            }
+            Security::Enterprise | Security::Open => {}
         }
         if let Some(failure) = sheet.failed {
             let said = match failure {
