@@ -32,6 +32,7 @@ mod harness;
 pub mod idle;
 mod ink;
 mod input;
+pub mod input_devices;
 mod launcher;
 mod layouts;
 mod leave;
@@ -48,6 +49,7 @@ mod popover;
 mod popups;
 mod programs;
 pub mod record;
+mod reload;
 mod reminders;
 mod render;
 mod screens;
@@ -235,7 +237,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
-    state.start_displays();
+    if let Some(file) = state.config.file.clone() {
+        reload::start(&event_loop.handle(), &file);
+    }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
     if options.xwayland {

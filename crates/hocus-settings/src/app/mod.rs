@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod mouse;
 mod places;
 mod screens;
 mod style;
@@ -240,6 +241,8 @@ pub enum Message {
     Rescaled(f32),
     Placed(Places),
     Scrolled,
+    /// The mice and touchpads page's (6.12).
+    Mouse(mouse::Msg),
     Nothing,
 }
 
@@ -285,6 +288,8 @@ pub struct App {
     screens: screens::Page,
     /// The scale the window draws at, as the compositor told it.
     scale: f32,
+    /// The mice and touchpads, and the test area (6.12).
+    mouse: mouse::Mouse,
     /// What the log said last.
     said: String,
     said_places: String,
@@ -306,6 +311,14 @@ impl App {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         let to_screens = sender.clone();
+        if let Some(socket) = crate::devices::socket() {
+            let devices = sender.clone();
+            crate::devices::follow(socket, move |list| {
+                devices
+                    .unbounded_send(Message::Mouse(mouse::Msg::Devices(list)))
+                    .is_ok()
+            });
+        }
         if let Some(listener) = listener {
             let again: UnboundedSender<Message> = sender;
             crate::single::listen(listener, move |ask| {
@@ -346,6 +359,7 @@ impl App {
             life: Life::Open,
             screens: screens::Page::default(),
             scale: 1.0,
+            mouse: mouse::Mouse::default(),
             said: String::new(),
             said_places: String::new(),
         };
@@ -385,6 +399,10 @@ impl App {
                 }),
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
                 Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
+                // The test area says which device scrolled (6.12).
+                Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::Mouse(mouse::Msg::Wheel(delta)))
+                }
                 // A close the compositor asks: what is pending is written
                 // first, as for ours.
                 Event::Window(window::Event::CloseRequested) => Some(Message::Close),
@@ -430,6 +448,7 @@ impl App {
                 .is_some_and(|(_, since)| within(since, LIGHT_END))
             || self.knobs.values().any(|since| within(*since, KNOB))
             || self.screens_moving(now)
+            || self.mouse.moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -575,6 +594,7 @@ impl App {
                 Task::none()
             }
             Message::Placed(places) => self.placed(places),
+            Message::Mouse(msg) => self.mouse_update(msg),
         }
     }
 
@@ -773,7 +793,18 @@ impl App {
         {
             return Some(Value::Int(sliding.value));
         }
-        self.snapshot.as_ref()?.value(slot)
+        let snapshot = self.snapshot.as_ref()?;
+        match snapshot.reading(slot) {
+            Reading::Value(value) => Some(value.clone()),
+            _ => Some(self.default_of(slot)?),
+        }
+    }
+
+    /// What applies to `slot` when the file says nothing: its default, or
+    /// what a device says (the touchpad's own right click).
+    fn default_of(&self, slot: Slot) -> Option<Value> {
+        self.device_default(slot)
+            .or_else(|| slot.place().map(|p| p.default.clone()))
     }
 
     fn reading(&self, slot: Slot) -> Reading {
@@ -792,9 +823,11 @@ impl App {
     /// `Mettre en veille après, sur batterie`.
     fn slot_name(&self, setting: &Setting, slot: Slot) -> String {
         let name = setting.name.get(self.lang);
-        match slot.source {
-            Some(source) => format!("{name}{}", source.aside().get(self.lang)),
-            None => name.to_owned(),
+        match (slot.source, crate::mouse::aside(setting.id)) {
+            (Some(source), _) => format!("{name}{}", source.aside().get(self.lang)),
+            // "Défilement naturel, pavé tactile".
+            (None, Some(device)) => format!("{name}{}", device.get(self.lang)),
+            (None, None) => name.to_owned(),
         }
     }
 
@@ -1079,6 +1112,15 @@ impl App {
                 .map(Control::Screens)
                 .collect();
         }
+        if section == SectionId::Mouse {
+            let mut out: Vec<Control> = self
+                .mouse_visible()
+                .into_iter()
+                .map(|s| Control::Setting(Slot::of(s, self.source)))
+                .collect();
+            out.extend([Control::Try(TryPart::List), Control::Try(TryPart::Target)]);
+            return out;
+        }
         let settings = settings_of(section);
         let mut out = Vec::new();
         if settings.iter().any(|s| s.group.per_source) {
@@ -1252,6 +1294,23 @@ impl App {
                 }
                 Task::none()
             }
+            Control::Try(TryPart::List) => {
+                let by = match named {
+                    Named::ArrowDown => 30.0,
+                    Named::ArrowUp => -30.0,
+                    _ => return Task::none(),
+                };
+                operation::scroll_by(
+                    mouse::TRY_LIST,
+                    widget::scrollable::AbsoluteOffset { x: 0.0, y: by },
+                )
+            }
+            Control::Try(TryPart::Target) => match named {
+                Named::Space | Named::Enter => {
+                    self.update(Message::Mouse(mouse::Msg::Press(mouse::Press::Left)))
+                }
+                _ => Task::none(),
+            },
             Control::Setting(slot) => {
                 let Some(setting) = slot.setting() else {
                     return Task::none();
@@ -1280,6 +1339,25 @@ impl App {
                             Named::ArrowRight => now + step,
                             Named::PageDown => now - quarter,
                             Named::PageUp => now + quarter,
+                            Named::Home => *min,
+                            Named::End => *max,
+                            _ => return Task::none(),
+                        };
+                        self.slide(slot, to.clamp(*min, *max))
+                    }
+                    // A speed: a tenth, a half, the ends (6.12).
+                    (Kind::Speed { min, max }, _) => {
+                        let now = match self.value(slot) {
+                            Some(Value::Int(n)) => n,
+                            _ => 0,
+                        };
+                        let to = match named {
+                            Named::ArrowLeft => now - 1,
+                            Named::ArrowRight => now + 1,
+                            Named::PageDown => now - 5,
+                            Named::PageUp => now + 5,
+                            Named::Home => *min,
+                            Named::End => *max,
                             _ => return Task::none(),
                         };
                         self.slide(slot, to.clamp(*min, *max))
@@ -1313,7 +1391,7 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() {
+        if !self.writable() || self.not_here(setting).is_some() {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -1391,6 +1469,14 @@ enum Control {
     Setting(Slot),
     /// The Écrans page's own.
     Screens(screens::Control),
+    /// The mice and touchpads page's test area.
+    Try(TryPart),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TryPart {
+    List,
+    Target,
 }
 
 /// The places of what the window draws, after it is laid out.

@@ -33,7 +33,7 @@ const KEY_F: u32 = 33;
 /// A configuration of the user's own, its screens not set.
 const FILE: &str = "# My desktop, by hand.\n\
     [keyboard]\n\
-    layouts = [\"fr\", \"us\"]   # both\n\
+    layouts = [\"us\", \"fr\"]   # both\n\
     \n\
     [panel]\n\
     form = \"full\"\n";

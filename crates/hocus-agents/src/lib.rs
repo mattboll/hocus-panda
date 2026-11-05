@@ -49,6 +49,11 @@ pub enum Question {
     /// The screens: their modes, places, scales and settings, as JSON
     /// (docs/design/settings.md, "Écrans").
     Outputs,
+    /// The mice and touchpads plugged in, with what they were given of
+    /// `[pointer]` and `[touchpad]` (6.12, [`hocus_link::input`]).
+    /// Followed, the connection stays open and hears each device plugged,
+    /// changed or unplugged.
+    InputDevices { follow: bool },
 }
 
 impl Question {
@@ -58,6 +63,8 @@ impl Question {
             Self::Idle => "msg idle",
             Self::Lock => "msg lock",
             Self::Outputs => "msg outputs",
+            Self::InputDevices { follow: false } => "msg input-devices",
+            Self::InputDevices { follow: true } => "msg input-devices follow",
         }
     }
 
@@ -67,6 +74,8 @@ impl Question {
             "msg idle" => Some(Self::Idle),
             "msg lock" => Some(Self::Lock),
             "msg outputs" => Some(Self::Outputs),
+            "msg input-devices" => Some(Self::InputDevices { follow: false }),
+            "msg input-devices follow" => Some(Self::InputDevices { follow: true }),
             _ => None,
         }
     }
@@ -347,6 +356,10 @@ mod tests {
         assert_eq!(Question::of("agent command k idle - k"), None);
         assert_eq!(Question::of("msg"), None);
         assert_eq!(Question::of(Question::Lock.line()), Some(Question::Lock));
+        for follow in [false, true] {
+            let question = Question::InputDevices { follow };
+            assert_eq!(Question::of(question.line()), Some(question));
+        }
     }
 
     #[test]

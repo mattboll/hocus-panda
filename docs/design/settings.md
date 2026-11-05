@@ -207,9 +207,9 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Écran principal | `[panel] output` (Automatique: taken out) |
 
 **The compositor follows the file** (`crates/hocus-compositor/src/
-displays.rs`): a thread waits in inotify on its folder, reads and parses
-it, and the loop takes `[outputs]` and `[panel] output` from it at once
-(windows.md §13). A file that does not read changes nothing.
+displays.rs`): the one watcher of the file (`reload.rs`, 6.12's) hands
+the loop what it says, and the loop takes `[outputs]` and `[panel]
+output` from it at once (windows.md §13). A file that does not read changes nothing.
 
 **A screen missing**: unplugged, its dashed ghost stays at its place,
 "Débranché · sa place est gardée", not chosen, with a note ("Écran
@@ -236,6 +236,80 @@ compositor does not draw one screen's picture on another; the row is
 nothing yet); a drop that would split three screens or more (only two are
 drawn against each other); the night light.
 
+## Souris et pavé tactile (6.12)
+
+Built 2026-11-05 (issue #446), variant A of
+[the mockup](https://claude.ai/artifact/8huWi8Vafj8QZgLrCUT9aF), from the
+spec in the issue's last comment. The maintainer decided: two groups,
+the touchpad then the mouse, then the gestures, then a test area; the
+gestures as switches on this page; "Coupé quand une souris est branchée"
+kept, off by default; tap to click on by default.
+
+- `src/mouse.rs` holds the rows, `src/app/mouse.rs` lays the page out
+  and keeps the test area's state, `src/devices.rs` follows the devices.
+- Under the title, a line links to Apparence et langue for the cursor's
+  theme and size (6.2's keys; nothing is duplicated here).
+- **PAVÉ TACTILE**, `[touchpad]` (every device that taps): Vitesse du
+  pointeur `speed`, Toucher pour cliquer `tap-to-click`, Toucher puis
+  glisser `tap-and-drag` (at 45 % while tap is off), Clic droit en
+  appuyant `right-click` (`"two-fingers"` or `"corner"`; without the key,
+  the touchpad's own, which the row shows), Désactivé pendant la frappe
+  `disable-while-typing`, Défilement naturel `natural-scroll`, Défiler
+  `scroll` (`"two-fingers"` or `"edge"`), Coupé quand une souris est
+  branchée `off-with-mouse`.
+- **SOURIS**, `[pointer]` (every other pointer): Vitesse du pointeur
+  `speed`, Accélération `acceleration` (`"adaptive"`, `"flat"`),
+  Défilement naturel `natural-scroll`, Gaucher `left-handed`.
+- **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
+  côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
+  to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
+  (written and read, but the four-finger launcher is 6.13's, #447: not
+  built yet).
+- The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
+  the middle, the fill from the middle to the knob, no number), written
+  as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
+  search say très lente, lente, moyenne, rapide, très rapide. `←`/`→`
+  move it a tenth, `Page Up`/`Page Down` a half, `Home`/`End` to its ends.
+- The toast adds the device: "Défilement naturel, pavé tactile : oui".
+- **The devices** are the compositor's: the window follows `hocus msg
+  input-devices follow` on `$HOCUS_SOCKET` on a thread of its own. Each
+  group's label line names its device by kind and bus, never its
+  vendor's name: "Intégré au portable", "Souris USB", "Souris Bluetooth",
+  "2 souris". With no mouse the group is one line, "Aucune souris
+  branchée" and that its settings stay in the file; with no touchpad, the
+  same, "Aucun pavé tactile", and no gestures. With `off-with-mouse` on
+  and a mouse plugged, the touchpad's line says "Coupé : une souris est
+  branchée" in amber. A row no device plugged can take (edge scrolling on
+  a pad without it, a choice of right click on a pad with one way) is at
+  45 %, "Pas sur ce pavé tactile". Started outside Hocuspanda, the window
+  knows no device and shows every row.
+- **ESSAYER ICI**: a list of 16 lines to scroll and a target to click.
+  The label line says what was recognised: "Reconnu : pavé tactile" for
+  a finger's pixels, "Reconnu : molette de la souris" for a wheel's
+  notches (Wayland's axis source, as winit gives it); under the list, the
+  direction in force for that device; under the target, the last press
+  ("Clic droit", with ": boutons inversés pour un gaucher" when
+  left-handed is on); a double click (the toolkit's time) lights its dot
+  for 1.4 s. Nothing done there is written.
+
+**The compositor's side.** `Config` gains `pointer` and `touchpad`
+(kebab-case; a key not known refuses the file as elsewhere, a value that
+does not read is logged and its default applies). The tty backend gives
+them to each libinput device as it is plugged in (`input_devices.rs`;
+tap with the left-right-middle map), skipping and logging what a device
+cannot take, and again to every device when the file changes: a thread
+of the compositor's follows `config.toml` with inotify and sends the loop
+what it now reads (`reload.rs`; a file that does not read changes
+nothing). `hocus msg input-devices` says each device, what it can and
+what it was given; `--follow` stays and says each one plugged, changed or
+unplugged (`hocus_link::input`). Headless and winit have no libinput:
+tests plug devices of their own, which keep what they would be given.
+
+Choices made here (to confirm on the machine): the dashed rims of the
+empty groups and of the target are drawn solid (iced draws no dashes);
+a USB mouse is "Souris USB" (a wireless receiver is not knowable); the
+list's lines read "Ligne N de la liste".
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -255,8 +329,9 @@ drawn against each other); the night light.
   8 px and fades in over 160 ms (with reduced motion it only appears), and
   goes after 6 s or when the next replaces it.
 - **Undo** writes the previous value back: the line as it was, the key
-  taken out when the file did not hold it (the file then is byte for byte
-  what it was). "Annulé : … revient à 5 min." for 3.5 s, the row lit.
+  taken out when the file did not hold it, and a table the change made
+  with it when it is left empty and says nothing (the file then is byte
+  for byte what it was). "Annulé : … revient à 5 min." for 3.5 s, the row lit.
   `Ctrl+Z` undoes the changes one by one while the window is open,
   `Ctrl+Shift+Z` redoes.
 
@@ -403,9 +478,10 @@ file.
 
 ## Not built here
 
-- What the desktop does with the rest of `[power]` (6.10), and the
-  compositor following the file's changes live (each setting's ticket;
-  the screens' and the primary screen's are followed since 6.9).
+- What the desktop does with the rest of `[power]` (6.10). The
+  compositor follows the file live for `[pointer]` and `[touchpad]`
+  (6.12), `[outputs]` and `[panel] output` (6.9), through one watcher
+  (`reload.rs`); each other setting's ticket adds its own.
 - The other sixteen pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
@@ -445,6 +521,21 @@ of two screens (2560 × 1600 at 1, 3440 × 1440):
 - `a_window_goes_back_to_its_screen_turned_on_again`
 - `searching_hidpi_and_miroir_finds_the_scale_and_mirroring`
 - `at_rest_the_screens_page_commits_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_mouse.rs` (6.12), the same bed
+with the harness's touchpad and mouse:
+
+- `the_page_lists_the_touchpad_and_the_mouse`
+- `unplugging_the_mouse_leaves_one_line_in_its_group`
+- `natural_scrolling_on_the_touchpad_writes_touchpad_natural_scroll`
+- `the_test_area_says_which_device_scrolled`
+- `tap_and_drag_is_inert_while_tap_is_off`
+- `annuler_takes_the_touchpad_setting_back`
+- `searching_tap_finds_tap_to_click`
+- `a_touchpad_gets_tap_to_click_by_default`
+- `a_hand_edit_of_the_file_reaches_every_device`
+- `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's

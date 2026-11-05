@@ -5,11 +5,10 @@
 //! itself after 15 s unless kept; and what the Settings are told of the
 //! screens.
 //!
-//! - **The file, followed**: a thread waits in inotify on its folder (and
-//!   its link's target's), reads and parses it when it changes, and hands
-//!   the loop the configuration; the loop takes `[outputs]` and
-//!   `[panel] output` from it (the rest still applies as the compositor
-//!   starts). A file that does not read changes nothing.
+//! - **The file, followed**: the configuration's one watcher
+//!   ([`crate::reload`]) hands the loop what the file says; the screens
+//!   take `[outputs]` and `[panel] output` from it. A file that does not
+//!   read changes nothing.
 //! - **The layout**, after the turn that asked for it, with the backend at
 //!   hand: the modes asked (or each screen's preferred one at its highest
 //!   rate), the scales, VRR; then the places: the file's when every screen
@@ -30,7 +29,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
-    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -42,8 +40,7 @@ use smithay::{
     desktop::layer_map_for_output,
     output::{Mode, Output},
     reexports::calloop::{
-        RegistrationToken,
-        channel::{self, Event},
+        RegistrationToken, channel,
         timer::{TimeoutAction, Timer},
     },
 };
@@ -171,10 +168,6 @@ pub enum FromSettings {
     },
 }
 
-/// What the file's thread hands the loop.
-#[derive(Debug)]
-pub struct Reread(pub Box<Config>);
-
 /// The screens' settings and what goes on with them.
 #[derive(Debug, Default)]
 pub struct Displays {
@@ -204,30 +197,13 @@ pub struct Displays {
 static SESSIONS: AtomicU64 = AtomicU64::new(1);
 
 impl State {
-    /// As the loop starts: the file followed, when there is one.
-    pub fn start_displays(&mut self) {
-        let (sender, receiver) = channel::channel::<Reread>();
-        let inserted = self.loop_handle.insert_source(receiver, |event, _, app| {
-            if let Event::Msg(Reread(config)) = event {
-                app.state.config_changed(*config);
-            }
-        });
-        if let Err(err) = inserted {
-            tracing::warn!(%err.error, "the configuration's changes are not followed");
-            return;
-        }
-        if let Some(file) = self.config.file.clone() {
-            follow(file, sender);
-        }
-    }
-
-    /// The file changed and reads: its screens' settings and the primary
-    /// screen apply now.
-    pub(crate) fn config_changed(&mut self, config: Config) {
+    /// The file changed and reads (`reload.rs`): its screens' settings
+    /// and the primary screen apply now. Whether they changed.
+    pub(crate) fn displays_config_changed(&mut self, config: &Config) -> bool {
         let outputs_changed = config.outputs != self.config.outputs;
         let primary_changed = config.panel.output != self.config.panel.output;
         if !outputs_changed && !primary_changed {
-            return;
+            return false;
         }
         tracing::info!(
             outputs_changed,
@@ -241,13 +217,14 @@ impl State {
             }
         }
         // A screen's bar form chosen in the file is the bar's own (6.4).
-        self.config.outputs = config.outputs;
+        self.config.outputs = config.outputs.clone();
         if primary_changed {
-            self.config.panel.output = config.panel.output;
+            self.config.panel.output = config.panel.output.clone();
             self.panel.home = None;
         }
         self.displays.wanted = true;
         self.displays.dirty = true;
+        true
     }
 
     /// `output` joined the desktop (the backend made it): its settings
@@ -1036,87 +1013,6 @@ pub fn serve(stream: UnixStream, loop_: channel::Sender<crate::agents::Heard>) {
     let _ = loop_.send(crate::agents::Heard::Screens(FromSettings::Closed {
         session,
     }));
-}
-
-/// Follows `file`: a thread blocked in inotify's read on its folder (and
-/// its link's target's), which reads and parses it when it changes and
-/// hands it to the loop.
-fn follow(file: PathBuf, sender: channel::Sender<Reread>) {
-    use rustix::fs::inotify;
-    let Some(name) = file.file_name().map(ToOwned::to_owned) else {
-        return;
-    };
-    let mut dirs: Vec<PathBuf> = file.parent().map(Path::to_path_buf).into_iter().collect();
-    let mut names = vec![name];
-    if let Ok(real) = std::fs::canonicalize(&file)
-        && real != file
-    {
-        dirs.extend(real.parent().map(Path::to_path_buf));
-        names.extend(real.file_name().map(ToOwned::to_owned));
-    }
-    let fd = match inotify::init(inotify::CreateFlags::CLOEXEC) {
-        Ok(fd) => fd,
-        Err(err) => {
-            tracing::warn!(%err, "the configuration's changes are not followed");
-            return;
-        }
-    };
-    let flags = inotify::WatchFlags::CLOSE_WRITE
-        | inotify::WatchFlags::MOVED_TO
-        | inotify::WatchFlags::CREATE
-        | inotify::WatchFlags::DELETE;
-    let mut watched = false;
-    for dir in &dirs {
-        match inotify::add_watch(&fd, dir, flags) {
-            Ok(_) => watched = true,
-            Err(err) => tracing::info!(%err, dir = %dir.display(), "a folder is not followed"),
-        }
-    }
-    if !watched {
-        return;
-    }
-    let started = std::thread::Builder::new()
-        .name("configuration".to_owned())
-        .spawn(move || {
-            let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 4096];
-            let mut reader = inotify::Reader::new(&fd, &mut buffer);
-            // Nothing read yet: the first change is always handed on (a
-            // text read now could already be that change's), the loop
-            // telling what it changes.
-            let mut last: Option<String> = None;
-            loop {
-                match reader.next() {
-                    Ok(event) => {
-                        let ours = event.file_name().is_some_and(|n| {
-                            names
-                                .iter()
-                                .any(|name| name.as_encoded_bytes() == n.to_bytes())
-                        });
-                        if !ours {
-                            continue;
-                        }
-                        let text = std::fs::read_to_string(&file).ok();
-                        if text == last {
-                            continue;
-                        }
-                        last = text;
-                        if let Some(config) = Config::read_again(&file)
-                            && sender.send(Reread(Box::new(config))).is_err()
-                        {
-                            return;
-                        }
-                    }
-                    Err(rustix::io::Errno::INTR) => {}
-                    Err(err) => {
-                        tracing::warn!(%err, "the configuration's changes are no longer followed");
-                        return;
-                    }
-                }
-            }
-        });
-    if let Err(err) = started {
-        tracing::warn!(%err, "the configuration's changes are not followed");
-    }
 }
 
 /// The `Facts` of a screen made by hand (headless): its one mode, or the

@@ -1278,6 +1278,21 @@ impl Headless {
         );
     }
 
+    /// A mouse or touchpad plugged in, as libinput would (6.12): given
+    /// `[pointer]` or `[touchpad]` at once; its number.
+    pub fn plug_device(&mut self, device: crate::input_devices::FakeDevice) -> u64 {
+        self.app.state.fake_device_added(device)
+    }
+
+    pub fn unplug_device(&mut self, id: u64) {
+        self.app.state.fake_device_removed(id);
+    }
+
+    /// The mice and touchpads, and what each was given.
+    pub fn input_devices(&self) -> Vec<hocus_link::input::InputDevice> {
+        self.app.state.input_devices.list()
+    }
+
     /// Two fingers on a touchpad moved `pixels` down, in one event.
     pub fn finger_scroll(&mut self, pixels: f64) {
         self.scroll(smithay::backend::input::AxisSource::Finger, pixels, None);

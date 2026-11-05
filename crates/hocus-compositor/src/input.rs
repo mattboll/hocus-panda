@@ -779,8 +779,9 @@ impl State {
         }
     }
 
-    /// A touchpad gesture: three fingers across move the desktops (§12);
-    /// the others go to the client under the pointer.
+    /// A touchpad gesture: three fingers across move the desktops (§12),
+    /// unless `[touchpad] swipe-desktops` is off; the others go to the
+    /// client under the pointer.
     pub(crate) fn gesture(&mut self, gesture: Gesture) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -793,7 +794,9 @@ impl State {
             // Locked (7.1): no desktop swipe; the lock's surface has the
             // pointer.
             _ if self.locked() => {}
-            Gesture::SwipeBegin { fingers: 3, .. } if !pointer.is_grabbed() => {
+            Gesture::SwipeBegin { fingers: 3, .. }
+                if !pointer.is_grabbed() && self.config.touchpad.swipe_desktops =>
+            {
                 self.desktop_swipe_begin();
                 return;
             }
