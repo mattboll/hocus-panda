@@ -35,8 +35,26 @@ jobs:
   # A pull request runs the tests of what it changes (scripts/ci/pr-tests.sh):
   # building and running the whole suite took 15 min and more, and a test
   # failing by chance anywhere held every pull request.
-  pr-tests:
+  # Whether a pull request runs everything (a harness, the lock file, the
+  # label `full-tests`…): then it runs as main does, in `build` and the four
+  # `linux` jobs, not in one job (that took 53 min, #650).
+  plan:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: plan
+        env:
+          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-tests') && 'full' || '' }}
+        run: scripts/ci/pr-tests.sh --plan HEAD^1 $FULL
+
+  pr-tests:
+    needs: plan
+    if: needs.plan.outputs.full == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,19 +86,18 @@ jobs:
         with:
           tool: cargo-nextest
       - name: Tests of what changed
-        # A line `Tests: NAME, NAME` in the description adds test files; the
-        # label `full-tests` runs everything.
+        # A line `Tests: NAME, NAME` in the description adds test files.
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-tests') && 'full' || '' }}
-        run: scripts/ci/pr-tests.sh HEAD^1 $FULL
+        run: scripts/ci/pr-tests.sh HEAD^1
 
   # On main, after each merge, the whole suite: every Rust build happens once,
   # in `build`; four `linux (N/4)` jobs then run a quarter of the tests each
   # from its nextest archive (#633). Nobody waits on it; a failure is fixed
   # at once.
   build:
-    if: github.event_name != 'pull_request'
+    needs: plan
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.plan.outputs.full == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -147,7 +164,7 @@ jobs:
 
   linux:
     needs: build
-    if: github.event_name != 'pull_request'
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
