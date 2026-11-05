@@ -294,12 +294,15 @@ impl Bed {
         self.click_at(id, 0.5)
     }
 
-    /// The page scrolled with the wheel until `id` is in the window.
+    /// The page scrolled with the wheel until `id` is in the window, each
+    /// notch taken by the window before the next: a notch sent while the
+    /// window lags would move the page after `id` is read in view, under
+    /// the click that follows.
     fn scroll_to_show(&mut self, id: &str) -> anyhow::Result<()> {
         let window = self.window()?;
+        let mut place = self.places_with(id)?[id].clone();
         for _ in 0..60 {
-            let places = self.places_with(id)?;
-            let n = |i: usize| places[id][i].as_f64().unwrap_or_default();
+            let n = |i: usize| place[i].as_f64().unwrap_or_default();
             if n(1) >= 60.0 && n(1) + n(3) <= f64::from(window.height) - 10.0 {
                 return Ok(());
             }
@@ -310,7 +313,16 @@ impl Bed {
             self.hp.pointer_move(middle.0 - 1.0, middle.1);
             self.hp.pointer_move(middle.0, middle.1);
             self.hp.wheel(if n(1) < 60.0 { -1 } else { 1 });
-            wait(&mut self.hp, Duration::from_millis(50))?;
+            // The notch taken: `id` placed elsewhere.
+            let log = self.log.clone();
+            let mut moved = None;
+            self.hp.dispatch_until(WAIT, |_| {
+                moved = Self::last(&log, " places {")
+                    .and_then(|p| p.get(id).cloned())
+                    .filter(|p| *p != place);
+                moved.is_some()
+            })?;
+            place = moved.ok_or_else(|| anyhow::anyhow!("{id} never came into view: {place}"))?;
         }
         anyhow::bail!("{id} never came into view")
     }
