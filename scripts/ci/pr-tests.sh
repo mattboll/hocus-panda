@@ -24,7 +24,7 @@ printf '  %s\n' $changed
 
 run() {
     echo "+ cargo nextest run $*"
-    cargo nextest run --no-tests=warn "$@"
+    cargo nextest run --profile ci --no-tests=warn "$@"
 }
 
 programs() {

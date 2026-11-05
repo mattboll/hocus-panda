@@ -89,7 +89,9 @@ line `Tests: settings_sound, appearance` (test files' names). Name there
 the tests of a behaviour the change can affect but whose files it does not
 touch. A change to a test harness, `Cargo.lock` or the label `full-tests`
 runs everything. After each merge, main runs the whole suite; a failure
-there is fixed at once. Update this section as commands land.
+there is fixed at once; a test that fails by chance is quarantined from
+CI (`[profile.ci]` in `.config/nextest.toml`) until its issue's fix
+takes it out. Update this section as commands land.
 
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on

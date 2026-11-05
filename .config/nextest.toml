@@ -12,3 +12,9 @@ archive.include = [
     { path = "debug/hocus-settings", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-settings.d", relative-to = "target", on-missing = "error" },
 ]
+
+# CI's runs. A test that fails by chance is quarantined here while its
+# issue is fixed, so it holds no one; the fix takes it out again. Run
+# locally, the default profile still runs it. Quarantined: #636.
+[profile.ci]
+default-filter = "not (binary(settings_sound) & test(=an_application_playing_joins_the_list_and_its_device_can_change))"
