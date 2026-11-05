@@ -116,10 +116,12 @@ pub struct Choice {
 }
 
 impl Choice {
-    /// `[appearance]`'s, else the environment's, else `default` at 24.
+    /// `[appearance]`'s, else the environment's, else `default` at 24; an
+    /// empty theme is the system's (the Settings' "Celui du système").
     pub fn of(theme: Option<&str>, size: Option<u32>, env: &CursorEnv) -> Self {
         Self {
             theme: theme
+                .filter(|t| !t.trim().is_empty())
                 .or(env.theme.as_deref())
                 .unwrap_or(DEFAULT_THEME)
                 .to_owned(),

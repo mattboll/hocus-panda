@@ -9,7 +9,10 @@
 
 use std::{path::Path, time::Duration};
 
+use hocus_link::locale::DateFormat;
 use jiff::{SignedDuration, Timestamp, Zoned, civil::Weekday, tz::TimeZone};
+
+use crate::popover::calendar::words::Hours;
 
 /// Past the second's start: a timer may fire a little early, and a look
 /// just before the second would show the one before and look again at once.
@@ -24,20 +27,26 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// From `LC_ALL`, `LC_TIME` and `LANG`, the first one set, as the C
-    /// library takes them; English unless French.
+    /// `[locale] language` when the file chooses one (#402), else from
+    /// `LC_ALL`, `LC_TIME` and `LANG`, the first one set, as the C library
+    /// takes them; English unless French.
     pub fn from_env() -> Self {
-        Self::from_vars(["LC_ALL", "LC_TIME", "LANG"])
+        crate::locale::chosen_lang()
+            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_TIME", "LANG"]))
     }
 
-    /// The messages' language: `LC_ALL`, `LC_MESSAGES`, then `LANG`.
+    /// The messages' language: `[locale] language`, else `LC_ALL`,
+    /// `LC_MESSAGES`, then `LANG`.
     pub fn of_messages() -> Self {
-        Self::from_vars(["LC_ALL", "LC_MESSAGES", "LANG"])
+        crate::locale::chosen_lang()
+            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_MESSAGES", "LANG"]))
     }
 
-    /// How numbers are written: `LC_ALL`, `LC_NUMERIC`, then `LANG`.
+    /// How numbers are written: `[locale] language`, else `LC_ALL`,
+    /// `LC_NUMERIC`, then `LANG`.
     pub fn of_numbers() -> Self {
-        Self::from_vars(["LC_ALL", "LC_NUMERIC", "LANG"])
+        crate::locale::chosen_lang()
+            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_NUMERIC", "LANG"]))
     }
 
     fn from_vars(names: [&str; 3]) -> Self {
@@ -55,6 +64,51 @@ impl Lang {
             Self::French
         } else {
             Self::English
+        }
+    }
+
+    /// The weekday and the month, short: "jeu.", "nov."; "Thu", "Nov".
+    fn short_weekday(self, day: Weekday) -> &'static str {
+        let i = usize::from(day.to_monday_zero_offset().unsigned_abs());
+        match self {
+            Self::English => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
+            Self::French => ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."][i],
+        }
+    }
+
+    fn short_month(self, month: i8) -> &'static str {
+        let i = usize::from(month.unsigned_abs().clamp(1, 12)) - 1;
+        match self {
+            Self::English => [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ][i],
+            Self::French => [
+                "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.",
+                "nov.", "déc.",
+            ][i],
+        }
+    }
+
+    /// `date` as `format` writes it: "jeudi 5 novembre", "jeu. 5 nov.",
+    /// "05/11/2026", "2026-11-05".
+    pub fn date(self, date: jiff::civil::Date, format: DateFormat) -> String {
+        match format {
+            DateFormat::Long => format!(
+                "{} {} {}",
+                self.weekday(date.weekday()),
+                date.day(),
+                self.month(date.month())
+            ),
+            DateFormat::Short => format!(
+                "{} {} {}",
+                self.short_weekday(date.weekday()),
+                date.day(),
+                self.short_month(date.month())
+            ),
+            DateFormat::Numeric => {
+                format!("{:02}/{:02}/{}", date.day(), date.month(), date.year())
+            }
+            DateFormat::Iso => format!("{}-{:02}-{:02}", date.year(), date.month(), date.day()),
         }
     }
 
@@ -114,31 +168,58 @@ impl Lang {
 /// What the clock shows at one moment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shown {
-    /// `HH:MM`, 24 hours, leading zeros.
+    /// `HH:MM`, leading zeros over 24 hours; over 12, the hour's first
+    /// digit a space when it has one digit (` 2:25`), drawn as nothing.
     pub hm: [char; 5],
     /// The seconds, leading zero.
     pub ss: [char; 2],
-    /// "Wednesday 28 October", "mercredi 28 octobre".
+    /// Over 12 hours, "AM" or "PM": the bar shows it in the seconds'
+    /// place.
+    pub half: Option<&'static str>,
+    /// "Wednesday 28 October", "mercredi 28 octobre", or as `[locale]
+    /// date` says.
     pub date: String,
 }
 
 impl Shown {
+    /// As the desktop's formats say ([`crate::locale`]).
     pub fn at(time: &Zoned, lang: Lang) -> Self {
+        Self::with(time, lang, Hours::from_env(), crate::locale::date_format())
+    }
+
+    pub fn with(time: &Zoned, lang: Lang, hours: Hours, date: DateFormat) -> Self {
         let digits = |n: i8| {
             let n = n.unsigned_abs();
             [char::from(b'0' + n / 10 % 10), char::from(b'0' + n % 10)]
         };
-        let [h1, h2] = digits(time.hour());
+        let (hour, half) = match hours {
+            Hours::TwentyFour => (time.hour(), None),
+            Hours::Twelve => match time.hour() {
+                0 => (12, Some("AM")),
+                h @ 1..=11 => (h, Some("AM")),
+                12 => (12, Some("PM")),
+                h => (h - 12, Some("PM")),
+            },
+        };
+        let [mut h1, h2] = digits(hour);
+        if half.is_some() && h1 == '0' {
+            h1 = ' ';
+        }
         let [m1, m2] = digits(time.minute());
         Self {
             hm: [h1, h2, ':', m1, m2],
             ss: digits(time.second()),
-            date: format!(
-                "{} {} {}",
-                lang.weekday(time.weekday()),
-                time.day(),
-                lang.month(time.month())
-            ),
+            half,
+            date: lang.date(time.date(), date),
+        }
+    }
+
+    /// The time as written: "14:25", "2:25 PM".
+    pub fn time(&self) -> String {
+        let hm: String = self.hm.iter().collect();
+        match self.half {
+            Some(half) => format!("{} {half}", hm.trim_start()),
+            None => hm,
         }
     }
 }
@@ -293,7 +374,44 @@ mod tests {
             .parse::<Timestamp>()
             .expect("a timestamp")
             .to_zoned(paris());
-        Shown::at(&time, lang)
+        Shown::with(&time, lang, Hours::TwentyFour, DateFormat::Long)
+    }
+
+    #[test]
+    fn over_12_hours_the_hour_has_no_leading_zero_and_says_am_or_pm() {
+        let time = |at: &str| {
+            at.parse::<Timestamp>()
+                .expect("a timestamp")
+                .to_zoned(paris())
+        };
+        let twelve = |at| Shown::with(&time(at), Lang::English, Hours::Twelve, DateFormat::Long);
+        let s = twelve("2026-11-05T13:25:00Z");
+        assert_eq!(s.hm, [' ', '2', ':', '2', '5']);
+        assert_eq!((s.half, s.time().as_str()), (Some("PM"), "2:25 PM"));
+        assert_eq!(twelve("2026-11-05T23:05:00Z").time(), "12:05 AM");
+        assert_eq!(twelve("2026-11-05T11:59:00Z").time(), "12:59 PM");
+        assert_eq!(twelve("2026-11-05T09:00:00Z").time(), "10:00 AM");
+        let s = Shown::with(
+            &time("2026-11-05T13:25:00Z"),
+            Lang::French,
+            Hours::TwentyFour,
+            DateFormat::Long,
+        );
+        assert_eq!((s.half, s.time().as_str()), (None, "14:25"));
+    }
+
+    #[test]
+    fn the_date_is_written_in_each_format() {
+        let day = jiff::civil::date(2026, 11, 5);
+        assert_eq!(Lang::French.date(day, DateFormat::Long), "jeudi 5 novembre");
+        assert_eq!(
+            Lang::English.date(day, DateFormat::Long),
+            "Thursday 5 November"
+        );
+        assert_eq!(Lang::French.date(day, DateFormat::Short), "jeu. 5 nov.");
+        assert_eq!(Lang::English.date(day, DateFormat::Short), "Thu 5 Nov");
+        assert_eq!(Lang::French.date(day, DateFormat::Numeric), "05/11/2026");
+        assert_eq!(Lang::English.date(day, DateFormat::Iso), "2026-11-05");
     }
 
     #[test]
@@ -387,10 +505,12 @@ mod tests {
             zone: paris(),
             shift,
         };
-        let now = Shown::at(&wall(SignedDuration::ZERO).now(), Lang::English);
-        let later = Shown::at(&wall(SignedDuration::from_hours(3)).now(), Lang::English);
+        let at =
+            |w: Wall| Shown::with(&w.now(), Lang::English, Hours::TwentyFour, DateFormat::Long);
+        let now = at(wall(SignedDuration::ZERO));
+        let later = at(wall(SignedDuration::from_hours(3)));
         assert_ne!(now.hm, later.hm);
-        let back = Shown::at(&wall(SignedDuration::from_hours(-3)).now(), Lang::English);
+        let back = at(wall(SignedDuration::from_hours(-3)));
         assert_ne!(now.hm, back.hm);
     }
 }

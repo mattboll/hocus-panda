@@ -267,7 +267,12 @@ impl Hours {
     /// As the locale of the time (`LC_ALL`, `LC_TIME`, `LANG`) says: 24
     /// hours in French and in most of the world; 12 in the English of the
     /// countries that write it so.
+    /// `[locale] time` when the file says it (#402), for the whole
+    /// desktop: the bar's clock, the calendar, the reminders, the lock.
     pub fn from_env() -> Self {
+        if let Some(hours) = crate::locale::chosen_hours() {
+            return hours;
+        }
         let locale = ["LC_ALL", "LC_TIME", "LANG"]
             .into_iter()
             .filter_map(|name| std::env::var(name).ok())

@@ -4123,3 +4123,19 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   words, the surface's placement, the lines' parts, the popover's height
   (`hocus-shell`); the room shared (`column`). With `HOCUS_SHOTS=dir`,
   the screenshots of the pull request.
+
+### 6.2, the themes, the accent and the formats (2026-11-05)
+
+Issue #402 (settings.md's "Apparence et langue"). The bar, its popovers
+and every shell surface draw in `[appearance] theme` and `accent` (§13),
+redrawn once when the file changes. The clock writes the time as `[locale]
+time` says: over 12 hours the hour has no leading zero and "AM" or "PM"
+takes the seconds' place, in their size and colour ("2:25 PM" fits the
+163 px); its date line as `[locale] date` says ("jeudi 5 novembre", "jeu.
+5 nov.", "05/11/2026", "2026-11-05"). The calendar, the next meeting's
+card, Today and the reminders write their times the same way, and the lock
+screen's clock puts "AM"/"PM" after its minutes. `[locale] language` wins
+over the session's locale for the shell's words; a surface drawn once
+(the layouts' names, the bar's measured texts) takes it as it is next
+laid out. The clock logs what it shows ("the clock shows", its time and
+date) when they change.

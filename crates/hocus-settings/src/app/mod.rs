@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod appearance_page;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -275,6 +276,10 @@ pub enum Message {
 #[derive(Debug)]
 pub struct App {
     lang: Lang,
+    /// The session's language, which `[locale] language = "system"` means.
+    system_lang: Lang,
+    /// `[appearance] text-scale`: the window is drawn this much larger.
+    text_scale: f32,
     user: String,
     window: Option<window::Id>,
     worker: Worker,
@@ -361,6 +366,8 @@ impl App {
         }
         let mut app = Self {
             lang: start.lang,
+            system_lang: start.lang,
+            text_scale: 1.0,
             user: start.user,
             window: None,
             worker,
@@ -692,6 +699,12 @@ impl App {
                 self.last_good = last_good;
                 if snapshot.state == FileState::Reads {
                     self.reduced_motion = snapshot.reduced_motion;
+                    let lang = snapshot.language.unwrap_or(self.system_lang);
+                    if lang != self.lang {
+                        tracing::info!(?lang, "the window's language");
+                        self.lang = lang;
+                    }
+                    self.text_scale = snapshot.text_scale as f32 / 100.0;
                     if crate::theme::set(snapshot.theme) {
                         tracing::info!(
                             theme = %snapshot.theme.scheme,
@@ -1264,6 +1277,11 @@ impl App {
         out
     }
 
+    /// How much larger the window is drawn: `[appearance] text-scale`.
+    pub fn text_scale(&self) -> f32 {
+        self.text_scale
+    }
+
     fn choice_index(&self, slot: Slot) -> Option<usize> {
         let setting = slot.setting()?;
         let Kind::Menu(choices) = &setting.kind else {
@@ -1468,6 +1486,21 @@ impl App {
                     (Kind::Menu(_), Named::ArrowDown) if modifiers.alt() => {
                         self.update(Message::Menu(slot))
                     }
+                    // 6.2's: ← and → move and choose.
+                    (Kind::Segmented(choices), Named::ArrowLeft | Named::ArrowRight) => {
+                        let values: Vec<Value> = choices.iter().map(|c| c.value.clone()).collect();
+                        self.step_choice(slot, &values, named == Named::ArrowRight)
+                    }
+                    (Kind::Swatches, Named::ArrowLeft | Named::ArrowRight) => {
+                        let values: Vec<Value> = hocus_link::theme::Accent::ALL
+                            .iter()
+                            .map(|a| Value::Word(a.word()))
+                            .collect();
+                        self.step_choice(slot, &values, named == Named::ArrowRight)
+                    }
+                    (Kind::Link(to), Named::Space | Named::Enter) => {
+                        self.update(Message::Section(*to))
+                    }
                     (Kind::Slider { min, max, step, .. }, _) => {
                         let now = match self.value(slot) {
                             Some(Value::Int(n)) => n,
@@ -1505,6 +1538,23 @@ impl App {
                     _ => Task::none(),
                 }
             }
+        }
+    }
+
+    /// The choice before or after the current one among `values`, chosen.
+    fn step_choice(&mut self, slot: Slot, values: &[Value], next: bool) -> Task<Message> {
+        let at = self
+            .value(slot)
+            .and_then(|v| values.iter().position(|c| *c == v))
+            .unwrap_or(0);
+        let to = if next {
+            (at + 1).min(values.len().saturating_sub(1))
+        } else {
+            at.saturating_sub(1)
+        };
+        match values.get(to) {
+            Some(value) if to != at => self.update(Message::Choose(slot, value.clone())),
+            _ => Task::none(),
         }
     }
 

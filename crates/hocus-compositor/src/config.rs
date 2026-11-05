@@ -24,6 +24,9 @@ pub struct Config {
     pub shortcuts: Shortcuts,
     pub programs: Programs,
     pub appearance: Appearance,
+    /// The desktop's language and formats (6.2).
+    #[serde(deserialize_with = "locale")]
+    pub locale: hocus_link::locale::Locale,
     pub desktops: Desktops,
     pub panel: Panel,
     pub recording: Recording,
@@ -578,6 +581,69 @@ pub struct Appearance {
     /// `"wallpaper"`: what is chosen, on or focused.
     #[serde(deserialize_with = "accent")]
     pub accent: hocus_link::theme::Accent,
+    /// The Settings' text, from 80 to 150 %: written as `1.2`, held in
+    /// hundredths.
+    #[serde(deserialize_with = "text_scale")]
+    pub text_scale: TextScale,
+}
+
+/// `[appearance] text-scale`, in hundredths: 100 by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextScale(pub u32);
+
+impl Default for TextScale {
+    fn default() -> Self {
+        Self(100)
+    }
+}
+
+fn text_scale<'de, D: Deserializer<'de>>(deserializer: D) -> Result<TextScale, D::Error> {
+    let scale = f64::deserialize(deserializer)?;
+    let hundredths = (scale * 100.0).round();
+    if (80.0..=150.0).contains(&hundredths) {
+        Ok(TextScale(hundredths as u32))
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "text scale {scale}: from 0.8 to 1.5"
+        )))
+    }
+}
+
+/// `[locale]`: its three keys, each a word.
+fn locale<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::locale::Locale, D::Error> {
+    use hocus_link::locale::{DateFormat, Language, Locale, TimeFormat};
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Words {
+        language: Option<String>,
+        date: Option<String>,
+        time: Option<String>,
+    }
+    let words = Words::deserialize(deserializer)?;
+    let bad = |key: &str, word: &str, choices: &str| {
+        serde::de::Error::custom(format!("[locale] {key} = {word:?}: {choices}"))
+    };
+    Ok(Locale {
+        language: match words.language.as_deref() {
+            None => Language::System,
+            Some(word) => {
+                Language::of(word).ok_or_else(|| bad("language", word, "system, fr or en"))?
+            }
+        },
+        date: match words.date.as_deref() {
+            None => DateFormat::Long,
+            Some(word) => DateFormat::of(word)
+                .ok_or_else(|| bad("date", word, "long, short, numeric or iso"))?,
+        },
+        time: match words.time.as_deref() {
+            None => None,
+            Some(word) => {
+                Some(TimeFormat::of(word).ok_or_else(|| bad("time", word, "24h or 12h"))?)
+            }
+        },
+    })
 }
 
 impl Appearance {
@@ -1270,6 +1336,30 @@ mod tests {
         for bad in ["theme = \"neon\"", "accent = \"amber\"", "theme = 1"] {
             let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_locale_and_the_text_scale_are_read() -> anyhow::Result<()> {
+        use hocus_link::locale::{DateFormat, Language, TimeFormat};
+        let config: Config = toml::from_str(
+            "[locale]\nlanguage = \"en\"\ndate = \"iso\"\ntime = \"12h\"\n\
+             [appearance]\ntext-scale = 1.2\n",
+        )?;
+        assert_eq!(config.locale.language, Language::English);
+        assert_eq!(config.locale.date, DateFormat::Iso);
+        assert_eq!(config.locale.time, Some(TimeFormat::H12));
+        assert_eq!(config.appearance.text_scale, TextScale(120));
+        let config: Config = toml::from_str("")?;
+        assert_eq!(config.locale, Default::default());
+        for bad in [
+            "[locale]\nlanguage = \"de\"",
+            "[locale]\ntime = \"13h\"",
+            "[locale]\ncalendar = \"iso\"",
+            "[appearance]\ntext-scale = 2.0",
+        ] {
+            assert!(toml::from_str::<Config>(bad).is_err(), "{bad}");
         }
         Ok(())
     }

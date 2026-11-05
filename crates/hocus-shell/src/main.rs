@@ -44,6 +44,7 @@ mod in_use;
 mod launcher;
 mod layouts;
 mod levels;
+mod locale;
 mod lock;
 mod meeting;
 mod network;
@@ -551,6 +552,15 @@ impl Shell {
                     self.clock = clock_style(&self.clock_look);
                 }
                 tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme");
+                Task::none()
+            }
+            // The words and the formats: every surface draws again in them.
+            ToShell::Locale(locale) => {
+                locale::set(locale);
+                self.lang = clock::time::Lang::from_env();
+                self.words = levels::model::Words::new(clock::time::Lang::of_messages());
+                let lang = clock::time::Lang::of_messages();
+                tracing::info!(%locale, ?lang, "the language and formats");
                 Task::none()
             }
             ToShell::Bar {

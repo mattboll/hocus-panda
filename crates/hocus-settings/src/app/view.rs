@@ -869,7 +869,9 @@ impl App {
         ]
         .spacing(2)
         .width(Length::Fill);
-        if let Some(line) = setting.line {
+        if setting.kind == Kind::Swatches {
+            words = words.push(t(self.accent_line(slot), 12.5, fade(DIM.get(), ink)));
+        } else if let Some(line) = setting.line {
             words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
         if let Some(not_here) = not_here {
@@ -973,7 +975,7 @@ impl App {
             }
             Kind::Menu(_) => {
                 let said = value
-                    .map(|v| setting.say(&v, self.lang))
+                    .map(|v| self.menu_said(setting, &v))
                     .unwrap_or_default();
                 // 158 wide at least: its value, the chevron, their gap and
                 // its sides.
@@ -1062,8 +1064,15 @@ impl App {
                     handle: slider::Handle {
                         shape: slider::HandleShape::Circle { radius: 8.0 },
                         background: Background::Color(fade(Color::WHITE, alpha)),
-                        border_width: if focused { 3.0 } else { 0.0 },
-                        border_color: ACCENT.get(),
+                        // On light, a rim so that the knob shows on the card.
+                        border_width: if focused {
+                            3.0
+                        } else if crate::theme::light() {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                        border_color: if focused { ACCENT.get() } else { RIM_12.get() },
                     },
                 });
                 row![
@@ -1084,6 +1093,12 @@ impl App {
             Kind::Speed { min, max } => self.speed_control(slot, *min, *max, inert, focused),
             // Drawn by their pages (6.8).
             Kind::Shortcut | Kind::Layouts => Space::new().into(),
+            // 6.2's.
+            Kind::Segmented(choices) => {
+                self.segmented_control(setting, slot, choices, inert, focused)
+            }
+            Kind::Swatches => self.swatches(slot, inert, focused),
+            Kind::Link(to) => self.link_control(*to),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
@@ -1111,7 +1126,11 @@ impl App {
         } else {
             ease_out(self.now.saturating_duration_since(since), super::MENU_IN)
         };
-        let width = at.width.max(200.0);
+        // Wider when its choices say something beside them (6.2's dates).
+        let wide = choices
+            .iter()
+            .any(|c| self.choice_aside(setting, c).is_some());
+        let width = at.width.max(if wide { 330.0 } else { 200.0 });
         let mut list = column![].spacing(0);
         for (i, choice) in choices.iter().enumerate() {
             let chosen = current.as_ref() == Some(&choice.value);
@@ -1128,6 +1147,13 @@ impl App {
                             container(check).width(18).center_x(18),
                             t(choice.label.get(self.lang), 13.5, fade(TEXT.get(), opened))
                                 .font(if chosen { SEMIBOLD } else { MANROPE }),
+                            Space::new().width(Length::Fill),
+                            t(
+                                self.choice_aside(setting, choice).unwrap_or_default(),
+                                11.5,
+                                fade(DIM.get(), opened)
+                            )
+                            .font(MONO),
                         ]
                         .spacing(6)
                         .height(Length::Fill)
@@ -1161,7 +1187,17 @@ impl App {
             })
             .id("menu".to_owned());
         let x = (at.x + at.width - width).max(0.0);
-        let y = at.y + 38.0 - 4.0 * (1.0 - opened);
+        // Under its button; over it when the page's bottom would cut it.
+        let height = choices.len() as f32 * 32.0 + 10.0;
+        let bottom = self
+            .places
+            .page
+            .map_or(f32::INFINITY, |p| p.viewport.y + p.viewport.height);
+        let y = if at.y + 38.0 + height > bottom {
+            at.y - 6.0 - height + 4.0 * (1.0 - opened)
+        } else {
+            at.y + 38.0 - 4.0 * (1.0 - opened)
+        };
         Some(pin(panel).x(x).y(y).into())
     }
 
@@ -1527,6 +1563,8 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "toast_action": action,
         "file": file,
         "theme": crate::theme::now().scheme.word(),
+        "lang": if app.lang == Lang::French { "fr" } else { "en" },
+        "text_scale": app.text_scale,
         "accent": crate::theme::now().accent.word(),
         "banner": banner,
         "restore": if banner.is_some() { app.restore_label() } else { None },

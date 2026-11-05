@@ -53,6 +53,8 @@ const PLAIN: Ink = Ink::Dark(Color::from_rgb(0.055, 0.059, 0.071));
 const CLOCK: f32 = 112.0;
 const COLON: f32 = 0.55;
 const DATE: f32 = 22.0;
+/// Over 12 hours, between the minutes and AM or PM.
+const HALF_GAP: f32 = 10.0;
 const DATE_GAP: f32 = 16.0;
 const LINE: f32 = 1.366;
 /// The clock's top above the middle: with the form, alone.
@@ -392,7 +394,7 @@ impl<Message> canvas::Program<Message> for View {
             phase: lock.shown.phase,
             chars: lock.shown.chars,
             caps: lock.shown.caps,
-            hm: shown.hm.iter().collect(),
+            hm: shown.time(),
             photo: super::avatar::photo().is_some(),
         };
         let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
@@ -497,9 +499,18 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
     let cells: Vec<f32> = shown
         .hm
         .iter()
-        .map(|c| if *c == ':' { zero * COLON } else { zero })
+        .map(|c| match c {
+            ':' => zero * COLON,
+            ' ' => 0.0,
+            _ => zero,
+        })
         .collect();
-    let width: f32 = cells.iter().sum();
+    // Over 12 hours, AM or PM after the minutes, at the date's size, on
+    // their baseline's side.
+    let half = shown
+        .half
+        .map(|h| (h, HALF_GAP + 2.0 * zero * DATE / CLOCK * 1.25));
+    let width: f32 = cells.iter().sum::<f32>() + half.map_or(0.0, |(_, w)| w);
     let mut x = cx - width / 2.0;
     for (ch, w) in shown.hm.iter().zip(&cells) {
         let mut glyph = text(
@@ -513,6 +524,16 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
         glyph.line_height = LineHeight::Absolute(Pixels(CLOCK));
         f.fill_text(glyph);
         x += w;
+    }
+    if let Some((half, _)) = half {
+        f.fill_text(text(
+            half.to_owned(),
+            Point::new(x + HALF_GAP, top + CLOCK - DATE * 1.6),
+            DATE,
+            MARTIAN,
+            DIM.get(),
+            Alignment::Left,
+        ));
     }
     f.fill_text(text(
         shown.date.clone(),

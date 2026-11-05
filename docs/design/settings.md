@@ -384,7 +384,52 @@ key; the window's keyboard reaches combinations by the mouse only (not
 `Tab`); on the CPU at scale 2 the sub-page takes a few seconds to draw
 its 64 rows the first time.
 
-## Apparence et langue (6.2): the themes and the accent
+## Apparence et langue (6.2)
+
+Issue #402, variant A, as the issue's last comment specifies it;
+decided 2026-11-05: dark and light themes in v1, the whole desktop
+following; the 12/24 h and date formats here, once for the desktop; an
+accent among six chosen hues and the wallpaper's. Section `appearance`
+(`hocus settings appearance`), PERSONNALISATION's first row. Every change
+applies at once to the whole desktop, the Settings window first: the
+window is the preview.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| THÈME ET COULEUR | Thème | segmented "Sombre \| Clair" | `[appearance] theme = "dark" \| "light"` |
+| | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper"` |
+| TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
+| CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
+| | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
+| MOUVEMENT ET LISIBILITÉ | Mouvements réduits, Transparence réduite, Contraste élevé ("En partie") | switches | `[appearance] reduced-motion`, `reduce-transparency`, `high-contrast` |
+| LANGUE ET FORMATS | Langue | menu "Celle du système (français)", "Français", "English" | `[locale] language = "system" \| "fr" \| "en"` |
+| | Date | menu, each choice with today's date beside it: "En toutes lettres" (jeudi 5 novembre), "Abrégée" (jeu. 5 nov.), "En chiffres" (05/11/2026), "Année d'abord" (2026-11-05) | `[locale] date = "long" \| "short" \| "numeric" \| "iso"` |
+| | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
+| | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
+
+- **The keyboard**: 6.1's; the segmented controls and the swatches move
+  and choose with `←` and `→`; the link opens with `Enter`.
+- **The search** finds the rows by the spec's nearby words and their keys
+  (`theme`, `accent`, `text-scale`, `cursor-size`…).
+- **The language** (`src/lang.rs`'s words hold both): the window and the
+  shell switch at once; `[locale] language` wins over `LC_ALL`,
+  `LC_MESSAGES` and `LANG` for the desktop's own words, and is given as
+  `LANGUAGE` to programs started afterwards.
+- **The formats**: the compositor gives the shell `locale LANGUAGE DATE
+  TIME` as the file changes; the bar's clock (over 12 hours "AM"/"PM" in
+  the seconds' place: "2:25 PM"), its date line, the calendar's times, the
+  next meeting's card, Today, the reminders and the lock's clock follow.
+- **Text size** draws the Settings window that much larger (iced's scale
+  factor); the bar keeps its sizes.
+- **Choices made here (to confirm on the machine)**: the spec's "Police"
+  and "Thème d'icônes" rows are not built (nothing in the desktop reads
+  them yet: a ticket of their own); text size draws the Settings window
+  larger, not yet the shell's popovers, launcher and notifications; the
+  cursor's preview is a drawn arrow, not the theme's image; a menu near
+  the page's bottom opens over its button; the compositor's own rim
+  around the focused window keeps the pandas' green.
+
+### The themes and the accent
 
 Issue #402, decided 2026-11-05: dark and light themes in v1, the whole
 desktop following; an accent among six (bar.md §13 gives every value).
@@ -595,9 +640,9 @@ file.
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
-  `[shortcuts]` (6.8), `[appearance]` (6.2), through one watcher
+  `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The other sixteen pages (6.2 to 6.17, Day.1).
+- The other fifteen pages (6.3 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
 
@@ -631,6 +676,16 @@ real shell and Settings, the portal on a D-Bus daemon of the test's own:
 - `the_settings_window_draws_in_the_theme_and_follows_the_file`
 - `the_portal_answers_color_scheme_and_signals_its_change`
 - `once_the_switch_is_drawn_nothing_commits_at_rest`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_appearance.rs` (6.2, the page):
+
+- `the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light`
+- `a_swatch_writes_the_accent_and_the_row_says_its_name`
+- `twelve_hours_shows_2_25_pm_in_the_bar_the_calendar_and_the_lock`
+- `the_language_switch_turns_the_shell_and_the_window_to_english_at_once`
+- `at_rest_the_appearance_page_and_the_bar_commit_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
 of two screens (2560 × 1600 at 1, 3440 × 1440):

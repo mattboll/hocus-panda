@@ -1,9 +1,10 @@
-//! `[appearance]` followed live (#402): the theme and the accent go to the
+//! `[appearance]` and `[locale]` followed live (#402): the theme and the accent go to the
 //! shell and to the applications (the settings portal, [`portal`]); reduced
 //! motion and reduced transparency to the shell's bars and to what the
 //! compositor moves; high contrast to the focused window's rim; the
 //! cursor's theme and size to the cursor, and to the programs started
-//! afterwards.
+//! afterwards; the language and the formats to the shell, the language to
+//! the programs started afterwards (`LANGUAGE`).
 
 pub mod portal;
 
@@ -48,6 +49,17 @@ impl State {
         self.share.portal_appearance(self.portal_appearance());
         // The rims, the glass and what moves are drawn from it.
         self.redraw = true;
+        true
+    }
+
+    /// The file's `[locale]` is now `new`: whether it changed.
+    pub fn locale_changed(&mut self, new: hocus_link::locale::Locale) -> bool {
+        if new == self.config.locale {
+            return false;
+        }
+        self.config.locale = new;
+        tracing::info!(locale = %new, "the language and formats changed");
+        self.tell_shell(ToShell::Locale(new));
         true
     }
 }

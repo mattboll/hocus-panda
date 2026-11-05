@@ -1,8 +1,9 @@
 # Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
-# starts; [pointer], [touchpad], [keyboard], [shortcuts] and [appearance]
-# also as soon as the file changes. A file that does not read is refused as a whole, and the
+# starts; the keyboard, the shortcuts, the pointer, the touchpad, the
+# appearance and the locale sections also as soon as the file changes. A
+# file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
 # [keyboard]
@@ -301,6 +302,9 @@
 # "wallpaper" (its dominant hue). Applications are told it as the portal's
 # accent-color.
 # accent = "green"
+# How much larger the Settings window draws its text and pieces, from
+# 0.8 to 1.5; the bar keeps its sizes.
+# text-scale = 1.0
 # Windows fade instead of moving, and do not wobble; desktops fade
 # instead of sliding; the bar changes its form at once.
 # reduced-motion = false
@@ -317,6 +321,21 @@
 # For example:
 #   cursor-theme = "Adwaita"
 #   cursor-size = 32
+# (an empty cursor-theme is the system's).
+
+# [locale]
+# The desktop's own words: "system" (LC_ALL, LC_MESSAGES, LANG), "fr" or
+# "en". Programs started afterwards are given it as LANGUAGE.
+# language = "system"
+# How the bar, the lock screen and the calendar write the date: "long"
+# (jeudi 5 novembre), "short" (jeu. 5 nov.), "numeric" (05/11/2026) or
+# "iso" (2026-11-05).
+# date = "long"
+# The time over "24h" (14:05) or "12h" (2:05 PM): the bar's clock, the
+# calendar, the next meeting, the reminders, the lock. Unset: the
+# session's locale decides (12 hours in en_US and a few others). For
+# example:
+#   time = "12h"
 
 # [day]
 # "Your day" in the bar: meetings from calendar accounts, and tasks from

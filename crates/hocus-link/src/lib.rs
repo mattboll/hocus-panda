@@ -50,6 +50,7 @@ mod capture;
 mod curtain;
 pub mod input;
 mod leave;
+pub mod locale;
 mod lock;
 mod record;
 mod share;
@@ -371,6 +372,10 @@ pub enum ToShell {
     /// and `accent`, #402): sent as the shell connects and when the file
     /// changes them. Written `theme SCHEME ACCENT`.
     Theme(theme::Choice),
+    /// The desktop's language and formats (`[locale]`, #402): sent as the
+    /// shell connects and when the file changes them. Written `locale
+    /// LANGUAGE DATE TIME`.
+    Locale(locale::Locale),
     /// A bar on `output`, in `form`; `since`: when it switched to it, in
     /// microseconds of `CLOCK_MONOTONIC` (0: it shows in that form at once);
     /// `scale`: its screen's, in 120ths as its surfaces' fractional scale
@@ -1480,6 +1485,7 @@ impl fmt::Display for ToShell {
                 if *motion { "motion" } else { "still" }
             ),
             Self::Theme(choice) => write!(f, "theme {} {}", choice.scheme, choice.accent),
+            Self::Locale(locale) => write!(f, "locale {locale}"),
             Self::Bar {
                 output,
                 form,
@@ -1868,6 +1874,9 @@ impl FromStr for ToShell {
                 output: output.to_owned(),
                 titles,
             }));
+        }
+        if let Some(rest) = line.strip_prefix("locale ") {
+            return rest.parse().map(Self::Locale);
         }
         let mut words = line.split_whitespace();
         match words.next() {
@@ -2501,6 +2510,11 @@ mod tests {
             ToShell::Theme(theme::Choice {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
+            }),
+            ToShell::Locale(locale::Locale {
+                language: locale::Language::English,
+                date: locale::DateFormat::Short,
+                time: Some(locale::TimeFormat::H12),
             }),
             ToShell::Bar {
                 output: "eDP-1".into(),

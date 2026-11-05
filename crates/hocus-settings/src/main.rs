@@ -42,6 +42,8 @@ fn main() -> ExitCode {
         Start::First(listener) => listener,
     };
     hocus_settings::renderer::choose();
+    // Before the window: it reads folders.
+    hocus_settings::appearance::find_cursor_themes();
     let start = app::Start {
         lang: Lang::of_messages(),
         places: worker::Places {
@@ -68,6 +70,7 @@ fn main() -> ExitCode {
     let ran = iced::application(move || App::new(start.clone()), App::update, App::view)
         .title(App::title)
         .subscription(App::subscription)
+        .scale_factor(App::text_scale)
         .theme(|_: &App| {
             if hocus_settings::theme::now().scheme == hocus_link::theme::Scheme::Light {
                 iced::Theme::Light

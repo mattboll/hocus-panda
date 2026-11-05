@@ -78,11 +78,9 @@ impl Row {
     }
 }
 
-/// `HH:MM` of an instant in `now`'s zone.
+/// An instant's time in `now`'s zone, as the desktop writes it.
 fn hhmm(t: jiff::Timestamp, now: &Zoned) -> String {
-    t.to_zoned(now.time_zone().clone())
-        .strftime("%H:%M")
-        .to_string()
+    crate::meeting::hhmm(t, now)
 }
 
 /// Today's events but the card's, at `now`.

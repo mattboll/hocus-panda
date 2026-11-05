@@ -479,6 +479,9 @@ pub enum Codec {
     Chords,
     /// A list of texts: `["fr", "us"]`.
     Texts,
+    /// A number from `min` to `max` hundredths, written as a decimal
+    /// (`1.2`): 6.2's text size, held as a percentage.
+    Hundredths { min: i64, max: i64 },
     /// One XKB option of a family in `[keyboard] options` (`grp:`,
     /// `caps:`, `compose:`): these words, the first `""` for none; the
     /// other options of the line are kept as they are, in their place.
@@ -585,6 +588,15 @@ impl Codec {
                         .map(|f| Value::Word(f)),
                 }
             }
+            Self::Hundredths { min, max } => {
+                let number = item
+                    .as_float()
+                    .or_else(|| item.as_integer().map(|n| n as f64))?;
+                let hundredths = (number * 100.0).round();
+                ((hundredths - number * 100.0).abs() < 1e-6
+                    && (min as f64..=max as f64).contains(&hundredths))
+                .then_some(Value::Int(hundredths as i64))
+            }
             Self::Tenths { min, max } => {
                 let number = item
                     .as_float()
@@ -611,6 +623,9 @@ impl Codec {
             (Self::Text, Value::Text(t)) => t.as_str().into(),
             (Self::Tenths { min, max }, Value::Int(n)) if (min..=max).contains(n) => {
                 (*n as f64 / 10.0).into()
+            }
+            (Self::Hundredths { min, max }, Value::Int(n)) if (min..=max).contains(n) => {
+                (*n as f64 / 100.0).into()
             }
             (Self::Chords, Value::List(list)) => match list.as_slice() {
                 [] => "".into(),
@@ -749,6 +764,13 @@ pub enum Kind {
     Shortcut,
     /// The keyboard's layouts, a list of its own (6.8).
     Layouts,
+    /// A few choices side by side, one lit (6.2's theme, cursor size and
+    /// time); a value of the file that is none of them shows as one more.
+    Segmented(Vec<Choice>),
+    /// The accents' round swatches, a radio group (6.2).
+    Swatches,
+    /// A link to another section's page: "La barre ›" (6.2).
+    Link(SectionId),
 }
 
 /// A group of rows on a section's page: its label, in capitals.
@@ -782,10 +804,17 @@ pub struct Setting {
 impl Setting {
     /// What `value` reads as on its row and in the toast.
     pub fn say(&self, value: &Value, lang: Lang) -> String {
-        if let Kind::Menu(choices) = &self.kind
+        if let Kind::Menu(choices) | Kind::Segmented(choices) = &self.kind
             && let Some(choice) = choices.iter().find(|c| &c.value == value)
         {
             return choice.label.get(lang).to_owned();
+        }
+        if self.kind == Kind::Swatches
+            && let Value::Word(word) = value
+            && let Some(accent) = hocus_link::theme::Accent::of(word)
+        {
+            let (fr, en) = accent.names();
+            return if lang.fr() { fr } else { en }.to_owned();
         }
         let fr = lang.fr();
         match value {
@@ -874,6 +903,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Screens => crate::screens::settings(),
         SectionId::Mouse => crate::mouse::settings(),
         SectionId::Keyboard => crate::keyboard::settings(),
+        SectionId::Appearance => crate::appearance::settings(),
         _ => &[],
     }
 }
@@ -1018,6 +1048,22 @@ mod tests {
                 .map(|v| v.to_string()),
             Some("\"Super+L\"".to_owned())
         );
+    }
+
+    #[test]
+    fn hundredths_are_written_as_decimals() {
+        let codec = Codec::Hundredths { min: 80, max: 150 };
+        let read = |text: &str| {
+            text.parse::<toml_edit::Value>()
+                .ok()
+                .and_then(|v| codec.read(&v))
+        };
+        assert_eq!(read("1.2"), Some(Value::Int(120)));
+        assert_eq!(read("1"), Some(Value::Int(100)));
+        assert_eq!(read("1.6"), None);
+        let written = |n| codec.write(&Value::Int(n)).map(|v| v.to_string());
+        assert_eq!(written(110).as_deref(), Some("1.1"));
+        assert_eq!(written(100).as_deref(), Some("1.0"));
     }
 
     #[test]

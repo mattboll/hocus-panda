@@ -31,6 +31,8 @@ pub struct Env {
     /// The configuration file read (`HOCUS_CONFIG`): the Settings started
     /// from the desktop write into this one.
     pub config: Option<PathBuf>,
+    /// `LANGUAGE`, when `[locale] language` is not the system's (#402).
+    pub language: Option<&'static str>,
 }
 
 impl Env {
@@ -46,6 +48,7 @@ impl Env {
                 _ => None,
             },
             config: state.config.file.clone(),
+            language: state.config.locale.language.env(),
         }
     }
 
@@ -89,6 +92,9 @@ impl Env {
         }
         if let Some(bus) = &self.session_bus {
             cmd.env("DBUS_SESSION_BUS_ADDRESS", bus);
+        }
+        if let Some(language) = self.language {
+            cmd.env("LANGUAGE", language);
         }
         // Empty: no file, never the one a program would look for.
         cmd.env(
@@ -315,6 +321,7 @@ mod tests {
             cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
             session_bus: None,
             config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
+            language: None,
         };
         // The Settings it starts write the file it read.
         let command = env("/run/user/1000/hocus-0").command("hocus-settings");

@@ -96,6 +96,11 @@ pub struct Snapshot {
     /// `[appearance] theme` and `accent`: the window draws in them (a
     /// word not understood: the default's).
     pub theme: hocus_link::theme::Choice,
+    /// `[locale] language`: the window speaks it (`None`: the system's).
+    pub language: Option<crate::lang::Lang>,
+    /// `[appearance] text-scale`, in hundredths: the window is drawn this
+    /// much larger.
+    pub text_scale: u32,
     /// The screens the file places (`[outputs.NAME] position`), by name.
     pub screens_placed: Vec<String>,
     /// `[panel] output`, the primary screen named.
@@ -152,6 +157,21 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(Item::as_bool)
                 .unwrap_or(false),
             theme: theme_of(&doc),
+            language: match doc
+                .get("locale")
+                .and_then(|l| l.get("language"))
+                .and_then(Item::as_str)
+            {
+                Some("fr") => Some(crate::lang::Lang::French),
+                Some("en") => Some(crate::lang::Lang::English),
+                _ => None,
+            },
+            text_scale: doc
+                .get("appearance")
+                .and_then(|a| a.get("text-scale"))
+                .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)))
+                .filter(|s| (0.8..=1.5).contains(s))
+                .map_or(100, |s| (s * 100.0).round() as u32),
             screens_placed: doc
                 .get("outputs")
                 .and_then(Item::as_table_like)
@@ -177,6 +197,8 @@ pub fn read(text: &str) -> Snapshot {
             readings: BTreeMap::new(),
             reduced_motion: false,
             theme: hocus_link::theme::Choice::default(),
+            language: None,
+            text_scale: 100,
             screens_placed: Vec::new(),
             primary_output: None,
         },

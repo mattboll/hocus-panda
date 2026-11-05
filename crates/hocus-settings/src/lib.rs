@@ -17,6 +17,7 @@
 
 pub mod activate;
 pub mod app;
+pub mod appearance;
 pub mod devices;
 pub mod keyboard;
 pub mod keys;
