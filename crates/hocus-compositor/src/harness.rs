@@ -1425,6 +1425,25 @@ impl Headless {
         (strip.current(), strip.position(state.now()))
     }
 
+    /// Each output's desktops, by name: how many, and the one it shows
+    /// (from 0).
+    pub fn strips(&self) -> Vec<(String, usize, usize)> {
+        let state = &self.app.state;
+        state
+            .space
+            .outputs()
+            .map(|o| {
+                let strip = state.strip(o);
+                (o.name(), strip.count(), strip.current())
+            })
+            .collect()
+    }
+
+    /// The desktops' names as the compositor has them (6.14).
+    pub fn desktop_names(&self) -> Vec<String> {
+        self.app.state.config.desktops.names.clone()
+    }
+
     /// The desktop the output under the pointer shows (from 0).
     pub fn desktop_under_pointer(&self) -> usize {
         let state = &self.app.state;

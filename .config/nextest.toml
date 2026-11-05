@@ -18,4 +18,7 @@ archive.include = [
 # locally, the default profile still runs it. To quarantine one:
 #   default-filter = "not (binary(NAME) & test(=TEST))"   # its issue
 [profile.ci]
+# A test still running after 3 min is stopped and fails: one that hangs once
+# held a pull request's run for more than half an hour (#645).
+slow-timeout = { period = "60s", terminate-after = 3 }
 default-filter = "all()"

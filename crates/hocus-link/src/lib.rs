@@ -482,6 +482,12 @@ pub enum ToShell {
     /// #604): sent as the shell connects and when the configuration
     /// changes it. Written `bar-windows shown` or `bar-windows hidden`.
     BarWindows(bool),
+    /// The desktops' names (`[desktops] names`, 6.14), by position, the
+    /// same on every screen; an empty one or one missing is "Bureau N":
+    /// sent as the shell connects and when the configuration changes
+    /// them. Written `desktop-names`, then for each a tab and its name (on
+    /// one line, without tabs).
+    DesktopNames(Vec<String>),
     /// Which of the bar's column's groups show, and the order of those
     /// that move (`[panel] meeting`, `today`, `tasks`, `agents`, `order`,
     /// 6.4): sent as the shell connects and when the configuration changes
@@ -1662,6 +1668,13 @@ impl fmt::Display for ToShell {
                 Ok(())
             }
             Self::BarSide(side) => write!(f, "bar-side {}", side.name()),
+            Self::DesktopNames(names) => {
+                write!(f, "desktop-names")?;
+                for name in names {
+                    write!(f, "\t{}", title_text(name))?;
+                }
+                Ok(())
+            }
             Self::BarWindows(shown) => {
                 write!(f, "bar-windows {}", if *shown { "shown" } else { "hidden" })
             }
@@ -2010,6 +2023,14 @@ impl FromStr for ToShell {
         }
         if line.starts_with("recorded ") {
             return Recorded::read(line).map(Self::Recorded);
+        }
+        if let Some(fields) = line.strip_prefix("desktop-names") {
+            let names = match fields.strip_prefix('\t') {
+                Some(fields) => fields.split('\t').map(ToOwned::to_owned).collect(),
+                None if fields.is_empty() => Vec::new(),
+                None => return Err(BadLine(format!("desktops' names: {line:?}"))),
+            };
+            return Ok(Self::DesktopNames(names));
         }
         if let Some(fields) = line.strip_prefix("titles ") {
             let mut fields = fields.split('\t');
@@ -2879,6 +2900,8 @@ mod tests {
             }),
             ToShell::BarWindows(true),
             ToShell::BarWindows(false),
+            ToShell::DesktopNames(Vec::new()),
+            ToShell::DesktopNames(vec!["Travail".into(), String::new(), "Mail · perso".into()]),
             ToShell::BarSide(Side::Left),
             ToShell::BarSide(Side::Right),
             ToShell::BarGroups(BarGroups::default()),
