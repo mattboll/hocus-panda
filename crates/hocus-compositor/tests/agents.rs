@@ -2549,17 +2549,21 @@ fn the_reminder_wave_comes_once_after_five_minutes() -> anyhow::Result<()> {
     bed.agent_is("build", "waiting")?;
     bed.settle()?;
     assert_eq!(bed.hp.halo_waves(), 1);
-    // As if it had waited 4 min 59 s by now, the motions' clock held and
-    // stepped a refresh at a time: the reminder falls due on it, however
-    // late a loaded machine runs its timer.
+    // At 4 min 59 s of waiting: the motions' clock held and moved on
+    // there, then stepped a refresh at a time, so that the reminder falls
+    // due on it however late a loaded machine runs its timer. The clock
+    // moves, not the agent's start: that is on the machine's clock, which
+    // counts from boot, and a test may run less than 5 min after it. A key
+    // before and after, so that the session is not idle meanwhile.
+    nudge(&mut bed.hp);
     bed.hp.hold_clock();
     let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
-    let waited = bed.hp.state().now().saturating_sub(since);
-    bed.hp
-        .backdate_agents(Duration::from_secs(299).saturating_sub(waited));
-    let start = bed.hp.now();
+    let to = (since + Duration::from_secs(299)).saturating_sub(bed.hp.now());
     let mut glimpses = Vec::new();
     let stepped = (|| {
+        bed.hp.step(to)?;
+        nudge(&mut bed.hp);
+        let start = bed.hp.now();
         while bed.hp.now() - start < Duration::from_millis(2500) {
             bed.hp.step(common::STEP)?;
             glimpses.push(Glimpse {
@@ -2570,6 +2574,7 @@ fn the_reminder_wave_comes_once_after_five_minutes() -> anyhow::Result<()> {
         anyhow::Ok(())
     })();
     bed.hp.release_clock();
+    nudge(&mut bed.hp);
     stepped?;
     let came = glimpses
         .iter()
@@ -3023,6 +3028,24 @@ fn a_finished_agents_panda_peeks_out_but_not_a_stuck_ones() -> anyhow::Result<()
     Ok(())
 }
 
+/// A key pressed and let go: input, the session not idle from then.
+fn nudge(hp: &mut Headless) {
+    hp.key(common::KEY_LEFTSHIFT, true);
+    hp.key(common::KEY_LEFTSHIFT, false);
+}
+
+/// Waits until the machine has been up `time`: its clock (`CLOCK_MONOTONIC`,
+/// the agents' starts and the shell's minutes) counts from boot, and an
+/// agent cannot be backdated before it.
+fn up_for(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
+    let up = Duration::from(hp.state().clock.now());
+    if up < time {
+        eprintln!("up for {up:?} only: waiting until {time:?}");
+        wait(hp, time - up)?;
+    }
+    Ok(())
+}
+
 /// Still waiting at its fifth minute, the agent's panda comes out once
 /// more, by the halo's reminder: "· 5 min"; then never again.
 #[test]
@@ -3035,7 +3058,10 @@ fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
     bed.peek_surface()?;
     assert_eq!(bed.hp.peeks_told(), 1);
     let from = bed.mark();
-    // As if it had waited 4 min 59 s by now.
+    // As if it had waited 4 min 59 s by now. The shell reads its wait on
+    // the machine's clock, which counts from boot: on a machine up for
+    // less than that, the test waits until it has been.
+    up_for(&mut bed.hp, Duration::from_secs(301))?;
     let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
     let waited = bed.hp.state().now().saturating_sub(since);
     bed.hp

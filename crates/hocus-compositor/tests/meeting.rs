@@ -265,6 +265,17 @@ impl Bed {
     /// The bar's colour beside the card, once the card's surface is drawn.
     fn bar_beside(&mut self) -> anyhow::Result<[u8; 3]> {
         self.card_surface()?;
+        // The bar there drawn too: before its buffer, the background shows.
+        common::drawn(&mut self.hp, hocus_link::NAMESPACE)?;
+        let (x, y) = (f64::from(BAR_BESIDE.0), f64::from(BAR_BESIDE.1));
+        let drawn = self
+            .hp
+            .dispatch_until(common::WAIT, |hp| hp.undrawn_at(x, y).is_empty())?;
+        anyhow::ensure!(
+            drawn,
+            "never drawn beside the card: {:?}",
+            self.hp.undrawn_at(x, y)
+        );
         self.pixel(BAR_BESIDE.0, BAR_BESIDE.1)
     }
 

@@ -331,7 +331,14 @@ impl Bed {
     ) -> anyhow::Result<()> {
         let start = Instant::now();
         while !test(self)? {
-            anyhow::ensure!(start.elapsed() < WAIT, "the screen never showed {what}");
+            anyhow::ensure!(
+                start.elapsed() < WAIT,
+                "the screen never showed {what}; the tiles last drew: {:?}",
+                plain(&self.log)
+                    .lines()
+                    .rev()
+                    .find(|l| l.contains("the desktops' tiles show it"))
+            );
             wait(&mut self.hp, Duration::from_millis(50))?;
         }
         Ok(())
