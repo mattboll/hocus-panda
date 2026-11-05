@@ -11,7 +11,8 @@ use hocus_bluetooth::{Action, Device, Failure, Kind};
 use iced::{
     Alignment, Background, Color, Length, Padding, Theme,
     widget::{
-        Column, Space, button, column, container, mouse_area, rich_text, row, span, svg, text,
+        Column, Space, button, column, container, mouse_area, pin, rich_text, row, span, svg, text,
+        text_input,
     },
 };
 
@@ -48,6 +49,14 @@ const PENCIL: &str = "M4 20 L4.5 16.5 L15.5 5.5 L18.5 8.5 L7.5 19.5 Z M13.5 7.5 
 const FILE: &str = "M6 3.5 H14 L18.5 8 V20.5 H6 Z M14 3.5 V8 H18.5";
 const INFO: &str = "M12 21 A9 9 0 1 0 12 3 A9 9 0 1 0 12 21 Z M12 11 V16.5 M12 7.8 V7.9";
 const SPINNER: &str = "M12 3.5 A8.5 8.5 0 1 1 3.5 12";
+const DOTS: &str = "M6 12 V12.1 M12 12 V12.1 M18 12 V12.1";
+const TICK: &str = "M5 12.5 L10 17.5 L19 7.5";
+
+/// The rename field's and the PIN field's ids.
+pub(super) const RENAME: &str = "bt-rename";
+pub(super) const PIN: &str = "bt-pin";
+/// The forget button's fill.
+const FORGET: Ink = Ink::Dark(rgb(0xF2945B));
 
 /// `path` stroked in `color`, `width` wide, drawn once.
 fn glyph(path: &'static str, color: Color, width: f32) -> svg::Handle {
@@ -166,6 +175,127 @@ fn small_button<'a>(said: String, press: Option<Message>, alpha: f32, id: String
     container(button).id(id).into()
 }
 
+/// A paired device's 30 px "⋯" button, lit while its menu is open.
+fn more_button<'a>(open: bool, press: Message, id: String) -> El<'a> {
+    container(
+        button(
+            container(draw(
+                DOTS,
+                16.0,
+                if open { TEXT.get() } else { DIM.get() },
+                3.0,
+            ))
+            .center(28),
+        )
+        .width(30)
+        .height(30)
+        .padding(0)
+        .on_press(press)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    255,
+                    255,
+                    255,
+                    if open || hovered { 0.10 } else { 0.04 },
+                )))),
+                text_color: TEXT.get(),
+                border: border(8.0, 1.0, crate::theme::ink(rgba(255, 255, 255, 0.10))),
+                ..button::Style::default()
+            }
+        }),
+    )
+    .id(id)
+    .into()
+}
+
+/// 6.6's input: 34 px, its rim green while it holds the keyboard.
+fn input_style(_: &Theme, status: text_input::Status) -> text_input::Style {
+    let focused = matches!(status, text_input::Status::Focused { .. });
+    text_input::Style {
+        background: Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.06))),
+        border: border(
+            9.0,
+            1.0,
+            if focused {
+                Ink::Accent(0.65).get()
+            } else {
+                crate::theme::ink(rgba(255, 255, 255, 0.12))
+            },
+        ),
+        icon: DIM.get(),
+        placeholder: FAINT.get(),
+        value: TEXT.get(),
+        selection: Ink::Accent(0.35).get(),
+    }
+}
+
+/// A device's name as a 240 px field, while it is renamed.
+fn rename_field<'a>(typed: &str) -> El<'a> {
+    container(
+        text_input("", typed)
+            .id(RENAME)
+            .on_input(|t| Message::Bluetooth(Msg::RenameText(t)))
+            .on_submit(Message::Bluetooth(Msg::RenameSave))
+            .size(14.0)
+            .font(SEMIBOLD)
+            .padding([6, 10])
+            .width(240)
+            .style(input_style),
+    )
+    .id("bt:rename".to_owned())
+    .into()
+}
+
+/// A sheet's button: plain, green (accepts) or orange (forgets).
+fn sheet_button<'a>(said: &'static str, fill: Option<Color>, press: Message, id: &str) -> El<'a> {
+    let ink = if fill.is_some() {
+        DEEP.get()
+    } else {
+        TEXT.get()
+    };
+    container(
+        button(
+            text(said)
+                .size(13)
+                .font(if fill.is_some() { BOLD } else { SEMIBOLD })
+                .color(ink),
+        )
+        .height(32)
+        .padding([7, 14])
+        .on_press(press)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            let base = fill.unwrap_or_else(|| crate::theme::ink(rgba(255, 255, 255, 0.06)));
+            button::Style {
+                background: Some(Background::Color(if hovered {
+                    Color {
+                        a: (base.a + 0.04).min(1.0),
+                        ..base
+                    }
+                } else {
+                    base
+                })),
+                text_color: ink,
+                border: border(8.0, 1.0, fill.unwrap_or_else(|| RIM_12.get())),
+                ..button::Style::default()
+            }
+        }),
+    )
+    .id(id.to_owned())
+    .into()
+}
+
+/// "482 913".
+fn grouped(code: &str) -> String {
+    if code.len() == 6 && code.is_ascii() {
+        format!("{} {}", &code[..3], &code[3..])
+    } else {
+        code.to_owned()
+    }
+}
+
 /// A group's label, and what it says on its right.
 fn group_head<'a>(words: &'static str, right: Option<El<'a>>) -> El<'a> {
     let mut head = row![label(words), Space::new().width(Length::Fill)]
@@ -198,6 +328,8 @@ fn lit_style(lit: f32) -> impl Fn(&Theme) -> container::Style {
 struct Line<'a> {
     tile: El<'a>,
     name: String,
+    /// Its name as a field, while it is renamed.
+    field: Option<El<'a>>,
     lines: Vec<El<'a>>,
     controls: Option<El<'a>>,
     compact: bool,
@@ -207,14 +339,15 @@ struct Line<'a> {
 
 impl<'a> Line<'a> {
     fn draw(self) -> El<'a> {
-        let mut words = column![
-            text(self.name)
+        let name: El<'a> = match self.field {
+            Some(field) => field,
+            None => text(self.name)
                 .size(14)
                 .font(SEMIBOLD)
                 .color(fade(TEXT.get(), self.alpha))
-        ]
-        .spacing(2)
-        .width(Length::Fill);
+                .into(),
+        };
+        let mut words = column![name].spacing(2).width(Length::Fill);
         for line in self.lines {
             words = words.push(line);
         }
@@ -366,6 +499,7 @@ impl App {
         let row = Line {
             tile: tile(SIGN, bt.powered, 1.0),
             name: "Bluetooth".to_owned(),
+            field: None,
             lines: vec![t(line, 12.5, colour).line_height(1.4).into()],
             controls: Some(switch.into()),
             compact: false,
@@ -419,19 +553,40 @@ impl App {
                 (w("Connecter", "Connect"), Msg::Connect(device.path.clone()))
             };
             let enabled = bt.powered && running.is_none();
-            let controls = asked.is_none().then(|| {
-                small_button(
+            let mut controls = row![].spacing(10).align_y(Alignment::Center);
+            if asked.is_none() {
+                controls = controls.push(small_button(
                     act.0.get(lang).to_owned(),
                     enabled.then_some(Message::Bluetooth(act.1)),
                     if enabled || !bt.powered { alpha } else { INERT },
                     format!("bt:act:{}", device.name),
-                )
-            });
+                ));
+            }
+            // Its menu, while Bluetooth is on.
+            if bt.powered {
+                let open = self
+                    .bluetooth
+                    .menu
+                    .as_ref()
+                    .is_some_and(|(p, _)| *p == device.path);
+                controls = controls.push(more_button(
+                    open,
+                    Message::Bluetooth(Msg::Menu(device.path.clone())),
+                    format!("bt:more:{}", device.name),
+                ));
+            }
+            let field = self
+                .bluetooth
+                .renaming
+                .as_ref()
+                .filter(|(p, ..)| *p == device.path)
+                .map(|(_, typed, _)| rename_field(typed));
             let line = Line {
                 tile: tile(kind_glyph(device.kind), device.connected, alpha),
                 name: device.name.clone(),
+                field,
                 lines,
-                controls,
+                controls: Some(controls.into()),
                 compact: false,
                 alpha,
                 focused: focused && self.bluetooth.cursor.0 == i,
@@ -586,6 +741,7 @@ impl App {
             let line = Line {
                 tile: tile(kind_glyph(device.kind), false, alpha),
                 name: device.name.clone(),
+                field: None,
                 lines,
                 controls,
                 compact: true,
@@ -748,6 +904,7 @@ impl App {
                         model::not_connected(d, lang)
                     },
                     "low": d.low(),
+                    "trusted": d.trusted,
                     "button": (!asked).then(|| if d.connected {
                         w("Déconnecter", "Disconnect").get(lang)
                     } else {
@@ -785,7 +942,436 @@ impl App {
             "mine": mine,
             "nearby": if bt.powered { serde_json::json!(nearby) } else { serde_json::Value::Null },
             "cursor": [self.bluetooth.cursor.0, self.bluetooth.cursor.1],
+            "menu": self.bluetooth.menu.as_ref().and_then(|(p, _)| self.bluetooth.device(p)).map(|d| d.name.clone()),
+            "renaming": self.bluetooth.renaming.as_ref().map(|(_, typed, _)| typed.clone()),
+            "forgetting": self.bluetooth.forgetting.as_ref().map(|(_, name)| name.clone()),
+            "sheet": self.bluetooth_sheet_request().map(|r| {
+                let left = r.until.map(|u| u.saturating_duration_since(std::time::Instant::now()).as_secs_f32().ceil() as u64);
+                let (kind, code, typed) = match &r.asked {
+                    hocus_bluetooth::Asked::Confirm(key) => ("confirm", Some(grouped(&format!("{key:06}"))), None),
+                    hocus_bluetooth::Asked::Display { code, typed } => ("display", Some(code.clone()), *typed),
+                    hocus_bluetooth::Asked::Pin => ("pin", None, None),
+                    hocus_bluetooth::Asked::Passkey => ("passkey", None, None),
+                    hocus_bluetooth::Asked::Authorize => ("authorize", None, None),
+                };
+                serde_json::json!({
+                    "kind": kind,
+                    "name": r.name,
+                    "code": code,
+                    "typed": typed,
+                    "left": left,
+                    "ours": r.ours,
+                })
+            }),
         })
+    }
+}
+
+impl App {
+    /// The open "⋯" menu: its list 36 px under its button's top, its right
+    /// on the button's.
+    pub(in crate::app) fn bluetooth_menu_list(&self) -> Option<El<'_>> {
+        let (path, since) = self.bluetooth.menu.as_ref()?;
+        let device = self.bluetooth.device(path)?;
+        let at = *self.places.at.get(&format!("bt:more:{}", device.name))?;
+        let lang = self.lang;
+        let opened = if self.reduced_motion {
+            1.0
+        } else {
+            super::super::view::ease_out(
+                self.now.saturating_duration_since(*since),
+                super::super::MENU_IN,
+            )
+        };
+        let mut list = column![].spacing(0);
+        for (i, item) in super::Item::ALL.into_iter().enumerate() {
+            let (said, colour, checked) = match item {
+                super::Item::Rename => (w("Renommer…", "Rename…"), TEXT.get(), false),
+                super::Item::Trust => (
+                    w("Se connecter seul", "Connect automatically"),
+                    TEXT.get(),
+                    device.trusted,
+                ),
+                super::Item::Forget => (
+                    w("Oublier cet appareil", "Forget this device"),
+                    PEACH.get(),
+                    false,
+                ),
+            };
+            if item == super::Item::Forget {
+                list =
+                    list.push(
+                        container(container(Space::new().width(Length::Fill).height(1)).style(
+                            boxed(crate::theme::ink(rgba(255, 255, 255, 0.08)), 0.0, None),
+                        ))
+                        .padding([4, 6]),
+                    );
+            }
+            let check: El<'_> = if checked {
+                draw(TICK, 13.0, fade(GREEN.get(), opened), 3.0)
+            } else {
+                Space::new().width(13).into()
+            };
+            let keyboard = i == self.bluetooth.menu_index;
+            list = list.push(
+                container(
+                    button(
+                        row![
+                            container(check).width(18).center_x(18),
+                            t(said.get(lang), 13.5, fade(colour, opened)).font(if checked {
+                                BOLD
+                            } else {
+                                MANROPE
+                            }),
+                        ]
+                        .spacing(6)
+                        .height(Length::Fill)
+                        .align_y(Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .height(32)
+                    .padding(Padding {
+                        top: 0.0,
+                        right: 14.0,
+                        bottom: 0.0,
+                        left: 6.0,
+                    })
+                    .on_press(Message::Bluetooth(Msg::Item(item)))
+                    .style(flat(
+                        keyboard.then_some(crate::theme::ink(rgba(255, 255, 255, 0.07))),
+                        crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                        7.0,
+                        false,
+                    )),
+                )
+                .id(format!("bt:item:{i}")),
+            );
+        }
+        let width = 210.0;
+        let panel = container(list)
+            .width(width)
+            .padding(5)
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(fade(MENU.get(), opened))),
+                border: border(10.0, 1.0, fade(RIM_12.get(), opened)),
+                shadow: iced::Shadow {
+                    color: rgba(0, 0, 0, 0.45 * opened),
+                    ..crate::app::style::shadow()
+                },
+                ..container::Style::default()
+            })
+            .id("menu".to_owned());
+        let x = (at.x + at.width - width).max(0.0);
+        let height = 3.0 * 32.0 + 9.0 + 10.0;
+        let bottom = self
+            .places
+            .page
+            .map_or(f32::INFINITY, |p| p.viewport.y + p.viewport.height);
+        let y = if at.y + 36.0 + height > bottom {
+            at.y - 6.0 - height + 4.0 * (1.0 - opened)
+        } else {
+            at.y + 36.0 - 4.0 * (1.0 - opened)
+        };
+        Some(pin(panel).x(x).y(y).into())
+    }
+
+    /// The sheet over the page: forgetting a device, or what the agent
+    /// asks (a code to compare, to type, a PIN, a device pairing itself).
+    pub(in crate::app) fn bluetooth_sheet(&self) -> Option<El<'_>> {
+        let lang = self.lang;
+        let (width, sheet, close) = if let Some((_, name)) = &self.bluetooth.forgetting {
+            let title = match lang {
+                Lang::French => format!("Oublier « {name} » ?"),
+                Lang::English => format!("Forget “{name}”?"),
+            };
+            let body = column![
+                text(title).size(17).font(BOLD).color(TEXT),
+                t(
+                    w(
+                        "L’ordinateur efface la clé qu’ils partagent. Pour le reconnecter, il faudra l’associer à nouveau, des deux côtés.",
+                        "The computer erases the key they share. To connect it again, it must be paired again, on both sides.",
+                    )
+                    .get(lang),
+                    13.0,
+                    DIM.get(),
+                )
+                .line_height(1.5),
+                row![
+                    Space::new().width(Length::Fill),
+                    sheet_button(
+                        w("Annuler", "Cancel").get(lang),
+                        None,
+                        Message::Bluetooth(Msg::ForgetCancel),
+                        "sheet:cancel"
+                    ),
+                    sheet_button(
+                        w("Oublier", "Forget").get(lang),
+                        Some(FORGET.get()),
+                        Message::Bluetooth(Msg::ForgetConfirm),
+                        "sheet:ok"
+                    ),
+                ]
+                .spacing(8),
+            ]
+            .spacing(14);
+            (400.0, body, Message::Bluetooth(Msg::ForgetCancel))
+        } else {
+            let request = self.bluetooth_sheet_request()?;
+            self.bluetooth_code_sheet(&request)?
+        };
+        let sheet = container(sheet)
+            .width(width)
+            .padding(Padding {
+                top: 20.0,
+                right: 22.0,
+                bottom: 18.0,
+                left: 22.0,
+            })
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(MENU.get())),
+                border: border(14.0, 1.0, RIM_12.get()),
+                shadow: crate::app::style::shadow(),
+                ..container::Style::default()
+            })
+            .id("sheet".to_owned());
+        Some(
+            iced::widget::stack![
+                mouse_area(
+                    container(Space::new().width(Length::Fill).height(Length::Fill)).style(boxed(
+                        crate::theme::ink(rgba(7, 9, 15, 0.62)),
+                        0.0,
+                        None
+                    ))
+                )
+                .on_press(close),
+                container(sheet).center(Length::Fill),
+            ]
+            .into(),
+        )
+    }
+
+    /// A pairing's sheet, by what the agent asks: its width, its body,
+    /// what a click beside it does.
+    fn bluetooth_code_sheet(
+        &self,
+        request: &hocus_bluetooth::Request,
+    ) -> Option<(f32, Column<'_, Message>, Message)> {
+        use hocus_bluetooth::{Answer, Asked};
+        let lang = self.lang;
+        let name = &request.name;
+        let cancel = if request.ours {
+            Message::Bluetooth(Msg::CancelPairing)
+        } else {
+            Message::Bluetooth(Msg::Answer(Answer::No))
+        };
+        let title_words = match (&request.asked, lang) {
+            (Asked::Authorize, Lang::French) => {
+                format!("« {name} » veut s’associer à cet ordinateur.")
+            }
+            (Asked::Authorize, Lang::English) => {
+                format!("“{name}” wants to pair with this computer.")
+            }
+            (_, Lang::French) => format!("Associer « {name} »"),
+            (_, Lang::English) => format!("Pair “{name}”"),
+        };
+        let title = row![
+            container(draw(kind_glyph(request.kind), 17.0, BLUE.get(), 1.8))
+                .width(32)
+                .height(32)
+                .center(32)
+                .style(boxed(
+                    crate::theme::ink(rgba(143, 179, 255, 0.16)),
+                    9.0,
+                    None
+                )),
+            text(title_words)
+                .size(17)
+                .font(BOLD)
+                .color(TEXT)
+                .width(Length::Fill),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        let say = |words: String| t(words, 13.0, DIM.get()).line_height(1.5);
+        let cancel_button = |words| sheet_button(words, None, cancel.clone(), "sheet:cancel");
+        let ok = |words, msg| sheet_button(words, Some(GREEN.get()), msg, "sheet:ok");
+        let buttons = |second: Option<El<'static>>| {
+            let mut buttons = row![Space::new().width(Length::Fill)].spacing(8);
+            let first = match request.asked {
+                Asked::Authorize => w("Refuser", "Refuse"),
+                _ => w("Annuler", "Cancel"),
+            };
+            buttons = buttons.push(cancel_button(first.get(lang)));
+            if let Some(second) = second {
+                buttons = buttons.push(second);
+            }
+            buttons
+        };
+        let the = |kind: Kind| match (kind, lang) {
+            (Kind::Phone, Lang::French) => "le téléphone",
+            (Kind::Tablet, Lang::French) => "la tablette",
+            (Kind::Computer, Lang::French) => "l’ordinateur",
+            (_, Lang::French) => "l’appareil",
+            (Kind::Phone, Lang::English) => "the phone",
+            (Kind::Tablet, Lang::English) => "the tablet",
+            (Kind::Computer, Lang::English) => "the computer",
+            (_, Lang::English) => "the device",
+        };
+        let body = match &request.asked {
+            Asked::Confirm(passkey) => {
+                let left = request.until.map_or(0, |until| {
+                    until
+                        .saturating_duration_since(std::time::Instant::now())
+                        .as_secs_f32()
+                        .ceil() as u64
+                });
+                column![
+                    title,
+                    say(match lang {
+                        Lang::French => format!(
+                            "Vérifie que {} affiche le même code, puis accepte des deux côtés.",
+                            the(request.kind)
+                        ),
+                        Lang::English => format!(
+                            "Check that {} shows the same code, then accept on both sides.",
+                            the(request.kind)
+                        ),
+                    }),
+                    container(
+                        text(grouped(&format!("{passkey:06}")))
+                            .size(34)
+                            .font(MONO)
+                            .color(TEXT)
+                    )
+                    .id("sheet:code".to_owned())
+                    .center_x(Length::Fill)
+                    .padding([4, 0]),
+                    container(t(
+                        match lang {
+                            Lang::French => format!("Il reste {left}\u{a0}s"),
+                            Lang::English => format!("{left}\u{a0}s left"),
+                        },
+                        12.0,
+                        FAINT.get()
+                    ))
+                    .center_x(Length::Fill),
+                    buttons(Some(ok(
+                        w("Le code est le même", "The code matches").get(lang),
+                        Message::Bluetooth(Msg::Answer(Answer::Yes)),
+                    ))),
+                ]
+            }
+            Asked::Display { code, typed } => {
+                let on_keyboard = request.kind == Kind::Keyboard;
+                let words = match (on_keyboard, lang) {
+                    (true, Lang::French) => "Tape ce code sur le clavier, puis Entrée.",
+                    (true, Lang::English) => "Type this code on the keyboard, then Enter.",
+                    (false, Lang::French) => "Tape ce code sur l’appareil, puis Entrée.",
+                    (false, Lang::English) => "Type this code on the device, then Enter.",
+                };
+                let lit = usize::from(typed.unwrap_or(0));
+                let mut cells = row![].spacing(6);
+                for (i, digit) in code.chars().enumerate() {
+                    let on = i < lit;
+                    cells = cells.push(
+                        container(text(digit.to_string()).size(24).font(MONO).color(if on {
+                            TEXT.get()
+                        } else {
+                            DIM.get()
+                        }))
+                        .width(36)
+                        .height(46)
+                        .center(46)
+                        .style(boxed(
+                            if on {
+                                GREEN.get().scale_alpha(0.16)
+                            } else {
+                                crate::theme::ink(rgba(255, 255, 255, 0.05))
+                            },
+                            9.0,
+                            Some((
+                                1.0,
+                                if on {
+                                    GREEN.get().scale_alpha(0.55)
+                                } else {
+                                    crate::theme::ink(rgba(255, 255, 255, 0.10))
+                                },
+                            )),
+                        )),
+                    );
+                }
+                let mut body = column![
+                    title,
+                    say(words.to_owned()),
+                    container(cells)
+                        .id("sheet:cells".to_owned())
+                        .center_x(Length::Fill)
+                        .padding([4, 0]),
+                ];
+                if let Some(typed) = typed {
+                    body = body.push(
+                        container(t(
+                            match lang {
+                                Lang::French => {
+                                    format!("{typed} chiffres tapés sur {}", code.len())
+                                }
+                                Lang::English => format!("{typed} of {} digits typed", code.len()),
+                            },
+                            12.0,
+                            FAINT.get(),
+                        ))
+                        .center_x(Length::Fill),
+                    );
+                }
+                body.push(buttons(None))
+            }
+            Asked::Pin | Asked::Passkey => {
+                let typed = if self.bluetooth.pin.0 == request.id {
+                    self.bluetooth.pin.1.as_str()
+                } else {
+                    ""
+                };
+                column![
+                    title,
+                    column![
+                        text(w("Code PIN", "PIN code").get(lang))
+                            .size(12)
+                            .font(BOLD)
+                            .color(DIM),
+                        text_input("", typed)
+                            .id(PIN)
+                            .on_input(|t| Message::Bluetooth(Msg::PinText(t)))
+                            .on_submit(Message::Bluetooth(Msg::PinGive))
+                            .size(13.5)
+                            .font(MONO)
+                            .padding([8, 10])
+                            .style(input_style),
+                        t(
+                            w(
+                                "Souvent 0000 ou 1234, ou celui écrit dans sa notice.",
+                                "Often 0000 or 1234, or the one in its manual.",
+                            )
+                            .get(lang),
+                            12.0,
+                            FAINT.get()
+                        ),
+                    ]
+                    .spacing(5),
+                    buttons(Some(ok(
+                        w("Associer", "Pair").get(lang),
+                        Message::Bluetooth(Msg::PinGive),
+                    ))),
+                ]
+            }
+            Asked::Authorize => column![
+                title,
+                buttons(Some(ok(
+                    w("Associer", "Pair").get(lang),
+                    Message::Bluetooth(Msg::Answer(Answer::Yes)),
+                ))),
+            ],
+        };
+        Some((440.0, body.spacing(14), cancel))
     }
 }
 
@@ -796,9 +1382,13 @@ fn failure_words(failure: Failure, lang: Lang) -> &'static str {
             "Il ne répond pas. Vérifie qu’il est allumé et à portée.",
             "It does not answer. Check that it is on and in range.",
         ),
-        Failure::Pairing | Failure::Code => w(
+        Failure::Pairing | Failure::Code | Failure::Stopped => w(
             "L’association a échoué. Mets l’appareil en mode association et réessaie.",
             "Pairing failed. Put the device in pairing mode and try again.",
+        ),
+        Failure::Cancelled => w(
+            "L’appareil a annulé l’association.",
+            "The device cancelled the pairing.",
         ),
     }
     .get(lang)

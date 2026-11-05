@@ -1,5 +1,6 @@
-//! `hocus-settings [SECTION]`: the Settings' window, on its section
-//! (`power`), or brought forward on it when it is open already.
+//! `hocus-settings [SECTION] [--pair ADDRESS]`: the Settings' window, on
+//! its section (`power`), or brought forward on it when it is open
+//! already; `--pair` pairs a Bluetooth device on its page.
 
 use std::{borrow::Cow, path::PathBuf, process::ExitCode};
 
@@ -25,14 +26,23 @@ fn main() -> ExitCode {
     let arg = std::env::args().nth(1);
     if arg.as_deref().is_some_and(|a| a == "--help" || a == "-h") {
         let slugs: Vec<&str> = SectionId::ALL.iter().map(|s| s.section().slug).collect();
-        println!("hocus-settings [SECTION]\n\nSections: {}", slugs.join(", "));
+        println!(
+            "hocus-settings [SECTION] [--pair ADDRESS]\n\nSections: {}",
+            slugs.join(", ")
+        );
         return ExitCode::SUCCESS;
     }
     let section = arg.as_deref().and_then(SectionId::from_slug);
     if arg.is_some() && section.is_none() {
         tracing::warn!(section = arg, "no such section: the home opens");
     }
+    // `--pair ADDRESS`: a Bluetooth device to pair (the bar's popover).
+    let pair = std::env::args()
+        .skip_while(|a| a != "--pair")
+        .nth(1)
+        .filter(|a| !a.is_empty() && !a.contains(char::is_whitespace));
     let again = Again {
+        pair: pair.clone(),
         section: section.map(|s| s.section().slug.to_owned()),
         token: std::env::var("XDG_ACTIVATION_TOKEN")
             .ok()
@@ -55,6 +65,7 @@ fn main() -> ExitCode {
                 .map_or_else(|| PathBuf::from("/sys/class/power_supply"), PathBuf::from),
         },
         section,
+        pair,
         user: user_name(),
         listener: std::sync::Arc::new(std::sync::Mutex::new(listener)),
     };

@@ -17,14 +17,17 @@ pub struct Again {
     pub section: Option<String>,
     /// Its activation token, to take the focus with.
     pub token: Option<String>,
+    /// A Bluetooth device to pair, by its address (`--pair`).
+    pub pair: Option<String>,
 }
 
 impl Again {
     fn line(&self) -> String {
         format!(
-            "open {} {}\n",
+            "open {} {} {}\n",
             self.section.as_deref().unwrap_or("-"),
-            self.token.as_deref().unwrap_or("-")
+            self.token.as_deref().unwrap_or("-"),
+            self.pair.as_deref().unwrap_or("-")
         )
     }
 
@@ -35,6 +38,7 @@ impl Again {
         Some(Self {
             section: word(words.next()),
             token: word(words.next()),
+            pair: word(words.next()),
         })
     }
 }
@@ -143,13 +147,21 @@ mod tests {
         let again = Again {
             section: Some("power".to_owned()),
             token: Some("hocus-12".to_owned()),
+            pair: None,
+        };
+        assert_eq!(Again::parse(&again.line()), Some(again));
+        let again = Again {
+            section: Some("bluetooth".to_owned()),
+            token: None,
+            pair: Some("5C:12:AA:01:02:05".to_owned()),
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
         let bare = Again {
             section: None,
             token: None,
+            pair: None,
         };
-        assert_eq!(bare.line(), "open - -\n");
+        assert_eq!(bare.line(), "open - - -\n");
         assert_eq!(Again::parse(&bare.line()), Some(bare));
         assert_eq!(Again::parse("close"), None);
     }
