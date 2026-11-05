@@ -4072,6 +4072,9 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   knows its height (a place off a short screen ended the shell). iced_layershell hands
   the keys to the surface made last: one made as a window opens, while
   the emoji picker or the launcher holds the keyboard, took their typing.
+  Since #623 the shell hands every key to the surface the compositor
+  entered, whichever surface came since (a bubble, a reminder, the
+  meeting card): `hocus-shell`'s `keys` module.
   Its lines are placed from the surface's bottom, as the compositor has
   it: a press read while it still has the surface where it was finds
   the line it was on there.
