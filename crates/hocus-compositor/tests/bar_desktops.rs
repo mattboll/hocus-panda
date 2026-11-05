@@ -1196,7 +1196,13 @@ fn nothing_draws_at_rest_while_the_list_shows() -> anyhow::Result<()> {
     bed.settle()?;
     bed.rest_on(0);
     let list = bed.list()?;
+    // On its first row, lit: drawn, then at rest.
+    let lists = bed.hp.popover_commits();
     bed.leave_tile_for(Bed::row(list, 0))?;
+    let lit = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_commits() > lists)?;
+    anyhow::ensure!(lit, "the row under the pointer was not lit");
     assert_eq!(bed.at_rest()?, [0; 5], "at rest");
     assert!(!bed.hp.popover_surfaces().is_empty(), "the list closed");
     Ok(())
