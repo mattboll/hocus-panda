@@ -7,7 +7,8 @@
 # - a test file changed (crates/C/tests/NAME.rs): that test binary;
 # - a crate's sources changed: its unit tests;
 # - the pull request's description names more, on a line of its own:
-#   `Tests: settings_sound, appearance` (test files' names), from $PR_BODY;
+#   `Tests: settings_sound, appearance` (test files' names or paths), from
+#   $PR_BODY;
 # - a test harness, the lock file, the workspace's Cargo.toml or nextest's
 #   configuration changed, or `full` given: everything.
 #
@@ -61,6 +62,9 @@ done <<< "$changed"
 
 named=$(grep -iE '^[[:space:]]*Tests:' <<< "${PR_BODY:-}" | head -n1 | cut -d: -f2- | tr ',' ' ' || true)
 for name in $named; do
+    # A name, or a test file's path: `crates/C/tests/NAME.rs`, `NAME.rs`, in backticks.
+    name=${name//\`/}
+    name=$(basename "$name" .rs)
     add_test "$name"
 done
 

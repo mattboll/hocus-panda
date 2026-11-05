@@ -2,8 +2,8 @@
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
 # starts; the keyboard, the shortcuts, the pointer, the touchpad, the
-# appearance, the locale and the wallpaper sections also as soon as the
-# file changes. A
+# appearance, the locale, the wallpaper, the desktops, the windows and
+# the ink sections also as soon as the file changes. A
 # file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
@@ -310,7 +310,50 @@
 
 # [desktops]
 # Desktops on each screen, from 1 to 9. Each screen switches its own.
+# Followed as the file changes: more are added after the last, empty;
+# fewer take out the last ones, their windows going to the last that
+# stays.
 # count = 4
+# Their names, by position, the same on every screen: the bar's tiles and
+# Alt+Tab say them. One missing or "" is "Bureau N" / "Desktop N".
+# names = []
+
+# [windows]
+# The key held to move a window by a drag anywhere in it: "alt", "super"
+# (Super+drag then no longer draws on the screen) or "none" (title bars
+# and the grip only). In a window of another session, "super" is
+# Alt+Super.
+# move-modifier = "alt"
+# The key held to resize a window by a right-button drag anywhere in it,
+# the edge nearest the pointer following: "super", "alt" or "none" (the
+# frame only).
+# resize-modifier = "super"
+# A moved window's edges stick to other windows' (8 px apart) and to the
+# screen's edges within 12 px; drag on to free it.
+# magnet = true
+# Dragged against a side, a window takes that half; in a corner, a
+# quarter; at the top, the whole screen. Super+arrows snap all the same.
+# snap-by-drag = true
+# A moved window wobbles, then settles (never with reduced motion).
+# wobble = true
+# Alt+Tab lists "all" desktops' windows (this one's first) or this
+# "desktop"'s only.
+# alt-tab = "all"
+# Rules per application, in this order, the first of an application's
+# applying: its windows open on a desktop (from 1, on the screen they open
+# on), at a size ("last", their last size, by default; "maximized",
+# "left", "right", "fullscreen"), and above the others (a fullscreen
+# window in front covers them). A dialog follows its parent. For example:
+#   [[windows.rules]]
+#   app-id = "org.gnome.Evolution"
+#   desktop = 2
+#   size = "maximized"
+#   above = false
+
+# [ink]
+# Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt
+# held shows a laser. Off, they do nothing and pass to the window.
+# enabled = true
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the

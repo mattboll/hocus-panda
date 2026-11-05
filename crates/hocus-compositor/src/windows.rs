@@ -344,6 +344,12 @@ impl State {
         self.config.appearance.reduced_motion
     }
 
+    /// Whether a moved window wobbles: `[windows] wobble`, never with
+    /// reduced motion (6.14).
+    pub fn wobbles(&self) -> bool {
+        self.config.windows.wobble && !self.reduced_motion()
+    }
+
     /// A mapped window's geometry, global.
     pub fn rect_of(&self, id: WindowId) -> Option<Rect> {
         let managed = self.windows.get(&id)?;
@@ -447,7 +453,7 @@ impl State {
                 managed.away = Some(rect);
             }
         } else if !resizing {
-            self.space.map_element(window, (rect.x, rect.y), false);
+            self.place_in_space(window, (rect.x, rect.y));
         }
         self.redraw = true;
     }
@@ -465,7 +471,12 @@ impl State {
             return;
         };
         let app = app_id(&window).unwrap_or_default();
-        let opens_as = self.opens_as(&window);
+        // Its application's rule (6.14, rules.rs): its size was in its
+        // first configure, unless it asked for one.
+        let rule = self.opening_rule(&window);
+        let opens_as = self
+            .opens_as(&window)
+            .or_else(|| rule.as_ref().and_then(|r| r.size.mode()));
         let mut size = window.geometry().size;
         // An application's last size, when it did not choose one larger.
         if let Some((w, h)) = self.model.remembered_size(&app)
@@ -486,7 +497,17 @@ impl State {
             .map(|r| (r.x, r.y))
             .collect();
         let (x, y) = model::place(area, (size.w, size.h), &same_app);
-        let takes_focus = self.takes_focus(&window);
+        // On the desktop its screen shows, or its rule's there.
+        let current = self.strip(&output).current();
+        let desktop = rule
+            .as_ref()
+            .and_then(|r| r.desktop)
+            .map(|d| d - 1)
+            .filter(|d| *d < self.strip(&output).count())
+            .unwrap_or(current);
+        let elsewhere = desktop != current;
+        // Opening out of sight, it takes no focus.
+        let takes_focus = self.takes_focus(&window) && !elsewhere;
         // A dialog opens above its parent (#595).
         let parent = match window.wl_surface().and_then(|s| self.dialog_of(&s)) {
             Some(crate::foreign::DialogOf::Window(parent)) => Some(parent),
@@ -498,9 +519,10 @@ impl State {
             None => self.model.add_below_focus(),
         };
         self.model.set_parent(id, parent);
-        // On the desktop its screen shows.
-        let desktop = self.strip(&output).current();
         self.model.set_desktop(id, desktop);
+        if rule.as_ref().is_some_and(|r| r.above) {
+            self.model.set_above(id, true);
+        }
         let now = self.now();
         let mut managed = Managed::new(window.clone());
         let duration = if self.reduced_motion() {
@@ -509,7 +531,7 @@ impl State {
             motion::OPEN
         };
         managed.opening = Some(Tween::new(now, duration, Bezier::SPRING));
-        if !takes_focus {
+        if !takes_focus && !elsewhere {
             managed.pulse = Some((
                 Tween::new(now, motion::PULSE, Bezier::LINEAR),
                 self.going_moves(),
@@ -540,6 +562,10 @@ impl State {
                 }
             }
         }
+        if elsewhere {
+            // Its desktop out of sight: it shows there when it comes.
+            self.hide(id);
+        }
         tracing::debug!(
             window = id.0,
             app,
@@ -548,6 +574,7 @@ impl State {
             w = size.w,
             h = size.h,
             takes_focus,
+            desktop = desktop + 1,
             "window mapped"
         );
         if takes_focus {
@@ -780,6 +807,43 @@ impl State {
             (x - 24.0, y - 18.0).into(),
             (48.0, 36.0).into(),
         ))
+    }
+
+    /// Puts `window` at `at` in the space, where it is in the stack.
+    /// smithay's `map_element` takes a window to the top of the space, the
+    /// order the pointer finds windows in, while the screen draws the
+    /// model's: a window moved behind another (one that follows the bar, a
+    /// resize's neighbour) or shown again under others (a desktop coming
+    /// in sight) would take the clicks of the one in front of it (#647).
+    pub fn place_in_space(&mut self, window: Window, at: (i32, i32)) {
+        let above: Vec<Window> = if self.space.elements().any(|w| *w == window) {
+            self.space
+                .elements()
+                .skip_while(|w| **w != window)
+                .skip(1)
+                .cloned()
+                .collect()
+        } else {
+            // Not in the space: under the windows above it in the model.
+            let id = self
+                .windows
+                .iter()
+                .find(|(_, m)| m.window == window)
+                .map(|(id, _)| *id);
+            self.model
+                .stack()
+                .iter()
+                .skip_while(|w| Some(**w) != id)
+                .skip(1)
+                .filter_map(|w| self.windows.get(w))
+                .map(|m| m.window.clone())
+                .filter(|w| self.space.elements().any(|e| e == w))
+                .collect()
+        };
+        self.space.map_element(window, at, false);
+        for w in &above {
+            self.space.raise_element(w, false);
+        }
     }
 
     /// Puts smithay's stacking in the model's order.
@@ -1214,7 +1278,7 @@ impl State {
         }
         let window = managed.window.clone();
         if self.space.element_location(&window) != Some((x, y).into()) {
-            self.space.map_element(window, (x, y), false);
+            self.place_in_space(window, (x, y));
         }
     }
 

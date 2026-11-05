@@ -393,6 +393,7 @@ impl State {
         self.tell_shell(ToShell::Locale(self.config.locale));
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
         self.tell_shell(ToShell::BarWindows(self.config.panel.windows));
+        self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
         self.tell_shell(ToShell::BarGroups(self.config.panel.groups()));
         self.tell_shell(ToShell::BarSide(self.bar_side()));
         let bars: Vec<ToShell> = self

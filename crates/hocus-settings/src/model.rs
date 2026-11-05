@@ -214,8 +214,8 @@ impl SectionId {
                 Connections,
                 w("Réseau", "Network"),
                 w(
-                    "Les réseaux enregistrés, les VPN et le mode avion.",
-                    "The saved networks, the VPNs and airplane mode.",
+                    "Le Wi-Fi et ses réseaux enregistrés, les réseaux masqués et d’entreprise, le câble, les VPN et le mode avion.",
+                    "Wi-Fi and its saved networks, hidden and enterprise networks, the cable, VPNs and airplane mode.",
                 ),
                 Icon::Network,
                 "6.6",
@@ -943,6 +943,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Sound => crate::sound::outside(),
         SectionId::Bar => crate::bar::outside(),
         SectionId::Bluetooth => crate::bluetooth::outside(),
+        SectionId::Network => crate::network::outside(),
         _ => &[],
     }
 }

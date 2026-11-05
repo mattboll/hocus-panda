@@ -545,6 +545,58 @@ fn gauche_writes_panel_side_and_the_bar_and_the_preview_move_to_the_left() -> an
     Ok(())
 }
 
+/// The window on top of the stack, and whether it has the keyboard.
+fn in_front(hp: &Headless) -> (Option<String>, bool) {
+    hp.windows()
+        .last()
+        .map_or((None, false), |w| (w.app_id.clone(), w.keyboard))
+}
+
+/// After Gauche, the maximised window behind the Settings follows the bar
+/// to its new room; the next clicks on the Settings are still theirs, ✕
+/// closing them at the first (#647).
+#[test]
+fn after_gauche_the_next_clicks_on_the_window_are_its_own() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    common::open(&mut bed.hp, "behind", (600, 400))?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, common::KEY_UP]);
+    let maximised = bed.hp.dispatch_until(WAIT, |hp| {
+        common::rect_of(hp, "behind").is_some_and(|r| r.x == 8 && r.width > 2000)
+    })?;
+    anyhow::ensure!(
+        maximised,
+        "behind: {:?}",
+        common::rect_of(&bed.hp, "behind")
+    );
+    bed.open()?;
+    bed.click("segment:bar.side:1")?;
+    bed.written(|t| t.contains("[panel]\nside = \"left\""))?;
+    let followed = bed.hp.dispatch_until(WAIT, |hp| {
+        common::rect_of(hp, "behind").is_some_and(|r| r.x == 8 + 196 + 8)
+    })?;
+    anyhow::ensure!(followed, "behind: {:?}", common::rect_of(&bed.hp, "behind"));
+    // The next click: Apparence et langue opens, the Settings in front.
+    bed.click("nav:appearance")?;
+    bed.shows(|s| s["page"] == "appearance")?;
+    assert_eq!(in_front(&bed.hp), (Some(APP_ID.to_owned()), true));
+    // ✕, at the first click.
+    bed.click("close")?;
+    let closed = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(APP_ID))
+    })?;
+    anyhow::ensure!(
+        closed,
+        "✕ did not close the window: {:?}",
+        in_front(&bed.hp)
+    );
+    assert_eq!(in_front(&bed.hp), (Some("behind".to_owned()), true));
+    Ok(())
+}
+
 #[test]
 fn hiding_today_writes_panel_today_and_a_group_with_nothing_to_show_says_so() -> anyhow::Result<()>
 {
