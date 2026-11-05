@@ -886,14 +886,19 @@ impl App {
         // A row no device plugged can take is drawn at 45 % (6.12).
         let not_here = self.unavailable(setting);
         let ink = if not_here.is_some() { INERT } else { 1.0 };
-        let mut words = column![
-            text(setting.name.get(lang))
-                .size(14)
-                .font(SEMIBOLD)
-                .color(fade(TEXT.get(), ink))
-        ]
-        .spacing(2)
-        .width(Length::Fill);
+        let name = text(setting.name.get(lang))
+            .size(14)
+            .font(SEMIBOLD)
+            .color(fade(TEXT.get(), ink));
+        // A key new with its page (6.4's side): "Nouveau" beside its name.
+        let name: El<'_> = match self.bar_chip(setting) {
+            Some(chip) => row![name, chip]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into(),
+            None => name.into(),
+        };
+        let mut words = column![name].spacing(2).width(Length::Fill);
         if setting.kind == Kind::Swatches {
             words = words.push(t(self.accent_line(slot), 12.5, fade(DIM.get(), ink)));
         } else if setting.id == crate::wallpaper::COLOR {
@@ -1311,12 +1316,15 @@ impl App {
             );
         }
         line = line.push(
-            button(icon(Icon::Close, 13.0, fade(ink(dark.dim), came)))
-                .width(24)
-                .height(24)
-                .padding(5.5)
-                .on_press(Message::ToastClose)
-                .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
+            container(
+                button(icon(Icon::Close, 13.0, fade(ink(dark.dim), came)))
+                    .width(24)
+                    .height(24)
+                    .padding(5.5)
+                    .on_press(Message::ToastClose)
+                    .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
+            )
+            .id("toast-close".to_owned()),
         );
         let toast = container(line)
             .height(40)
