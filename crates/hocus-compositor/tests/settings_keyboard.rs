@@ -245,27 +245,46 @@ impl Bed {
 
     /// `id` scrolled into the window's view with the wheel, over the page.
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
-        for _ in 0..40 {
-            let places = self.places_with(id)?;
-            let place = &places[id];
-            let n = |i: usize| place[i].as_f64().unwrap_or_default();
+        let mut last = self.place_of(id)?;
+        for _ in 0..60 {
             let window = self.window()?;
-            let (top, bottom) = (n(1), n(1) + n(3));
+            let (top, bottom) = (last[1], last[1] + last[3]);
             let notches = if bottom > f64::from(window.height) - 16.0 {
                 2
             } else if top < 56.0 {
                 -2
             } else {
-                return Ok(());
+                // In view, and still there a moment later: the page has
+                // stopped moving.
+                wait(&mut self.hp, Duration::from_millis(100))?;
+                let now = self.place_of(id)?;
+                if now == last {
+                    return Ok(());
+                }
+                last = now;
+                continue;
             };
             self.hp.pointer_move(
                 f64::from(window.x) + 900.0,
                 f64::from(window.y) + f64::from(window.height) / 2.0,
             );
             self.hp.wheel(notches);
-            wait(&mut self.hp, Duration::from_millis(40))?;
+            // Until the window says it moved (or did not, at an end).
+            let before = last;
+            let log = self.log.clone();
+            let key = id.to_owned();
+            self.hp.dispatch_until(Duration::from_secs(2), |_| {
+                read_place(&log, &key).is_some_and(|p| p != before)
+            })?;
+            last = self.place_of(id)?;
         }
         anyhow::bail!("{id} never came into view")
+    }
+
+    /// `id`'s place in the window, as the log last said it.
+    fn place_of(&mut self, id: &str) -> anyhow::Result<[f64; 4]> {
+        self.places_with(id)?;
+        read_place(&self.log, id).ok_or_else(|| anyhow::anyhow!("{id} is nowhere"))
     }
 
     fn point(&mut self, id: &str) -> anyhow::Result<()> {
@@ -311,6 +330,17 @@ impl Bed {
         );
         Ok(text)
     }
+}
+
+/// `id`'s place in the window in the log's last "places" line.
+fn read_place(log: &Path, id: &str) -> Option<[f64; 4]> {
+    let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
+    let line = text.lines().rev().find(|l| l.contains(" places {"))?;
+    let at = line.find(" places {")? + " places ".len();
+    let places: Value = serde_json::from_str(&line[at..]).ok()?;
+    let place = places.get(id)?;
+    let n = |i: usize| place[i].as_f64();
+    Some([n(0)?, n(1)?, n(2)?, n(3)?])
 }
 
 /// The shortcuts' row `id`, as shown.
