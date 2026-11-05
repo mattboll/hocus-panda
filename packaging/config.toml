@@ -64,6 +64,11 @@
 # The bar: on the primary screen only ("primary"), or on every screen
 # ("all").
 # screens = "primary"
+# The side of every screen the bar stands on: "right" or "left". Its edge
+# to click, the room kept for it, its popovers (on its inner side), its
+# halo and the panda peeking out go with it; the notifications stay in
+# the top right corner.
+# side = "right"
 # The primary screen, by connector name. Empty: the built-in panel (eDP,
 # LVDS, DSI) when it is connected, else the first screen. When it is
 # unplugged, the bar goes to a screen still there, and comes back with it.

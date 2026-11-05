@@ -451,14 +451,15 @@ pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Mes
     let settings = NewLayerShellSettings {
         size: Some(size),
         layer: Layer::Top,
-        anchor: Anchor::Right | Anchor::Top,
+        anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
         exclusive_zone: Some(0),
-        margin: Some(margin),
+        margin: Some(crate::side::margin(margin)),
         keyboard_interactivity: KeyboardInteractivity::None,
         output_option: output,
         events_transparent: false,
         namespace: Some(TASKS_NAMESPACE.to_owned()),
     };
+    crate::side::opened(id);
     (id, vec![Message::NewLayerShell { settings, id }])
 }
 
@@ -512,7 +513,10 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
         .map(|(size, margin)| {
             vec![
                 Message::SizeChange { id, size },
-                Message::MarginChange { id, margin },
+                Message::MarginChange {
+                    id,
+                    margin: crate::side::moved(id, margin),
+                },
             ]
         })
         .unwrap_or_default()

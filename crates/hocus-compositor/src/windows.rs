@@ -769,7 +769,12 @@ impl State {
         let output = self.output_of(id)?;
         let geometry = self.space.output_geometry(&output)?;
         let bar = f64::from(self.panel.width(&output.name()).unwrap_or(0));
-        let x = f64::from(geometry.loc.x + geometry.size.w) - f64::from(model::GAP) - bar / 2.0;
+        let x = match self.bar_side() {
+            hocus_link::Side::Right => {
+                f64::from(geometry.loc.x + geometry.size.w) - f64::from(model::GAP) - bar / 2.0
+            }
+            hocus_link::Side::Left => f64::from(geometry.loc.x + model::GAP) + bar / 2.0,
+        };
         let y = f64::from(geometry.loc.y) + f64::from(geometry.size.h) / 2.0;
         Some(Rectangle::new(
             (x - 24.0, y - 18.0).into(),

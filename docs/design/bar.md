@@ -61,8 +61,10 @@ there.
 
 - All sizes are logical pixels; they follow each output's scale.
 - The bar sits against the right edge of its output, 8 px from the top,
-  right and bottom edges. Windows keep 8 px from the bar, as from the
-  screen edges.
+  right and bottom edges; `[panel] side = "left"` puts it against the
+  left edge of every output instead, and everything below that names the
+  right goes with it (6.4, [as built](#64-the-bar-on-the-left-2026-11-05)).
+  Windows keep 8 px from the bar, as from the screen edges.
 - **Under the windows** (decided 2026-11-02, #519): the bar sits under
   normal windows. The windows the desktop places (new, maximised,
   snapped) still keep off it: its space stays reserved. A window the user
@@ -4209,3 +4211,61 @@ writes, followed as the file changes, before the page itself.
   `[panel] form` (`a_form_written_for_a_screen_switches_its_bar_and_forgets_the_click`).
   The tests that set the bar's form in the compositor's configuration
   write it in their file too, since the compositor now follows it.
+
+### 6.4, the bar on the left (2026-11-05)
+
+Issue #404, its third part: `[panel] side = "right" | "left"` (`"right"`
+by default), on every screen, followed as the file changes.
+
+- **The compositor** (`panel.rs`, `front.rs`, `model::work_area`): the
+  space kept for the bar, 8 px from the screen's left edge, the windows
+  8 px right of it; the edge click (`bar_edge_at`) in the strip between
+  the screen's left edge and the bar and on the bar's first 6 px; the
+  pointer pushed against the left edge brings the bar in front after
+  300 ms, until it leaves the bar's column; on `Super+B` or the click,
+  snapped windows take their zone and a floating window whose left edge
+  touched the bar's room keeps touching it. The glass and the halo go
+  where the bar is (`bar_rect`); a minimised window goes into the bar on
+  its side; the streak to an agent leaves from its row's right edge.
+  Popovers, reminders' tabs and the peek slide from the bar's side
+  (`toward_bar`); the panda shows from the bar's right edge.
+- **The shell** (`side.rs`): told the side as it connects, before the
+  bars (`bar-side left|right`, `ToShell::BarSide`). Its surfaces placed
+  beside the bar are computed from the screen's right edge as before;
+  `side` mirrors their anchors and margins as they open and move (the
+  bar's own, its column's groups, the popovers, the peek, the reminders'
+  tabs, the tooltips beside the bar), so that what is beside the bar
+  stays beside it, on its inner side. What is drawn on a surface is not
+  mirrored, except where it leans on the bar's side: the bar's tint
+  against its surface's left edge, the peek's panda next to the bar and
+  its bubble past it, a reminder's tab with its shadow's room past it.
+  While the bar switches form, its groups' surfaces are the full form's
+  width and draw against their right edge: on the left their drawing is
+  moved left by what the bar lacks of the full form (`in_bar`), so that
+  the switch looks the same from either side.
+- **The notifications' bubbles and the capture's thumbnail** stay in the
+  screen's right corner: with the bar on the left there is no bar there,
+  and they keep the edge's gap only.
+- **Followed live** (`panel.rs`'s `move_bars`): the shell is told the side,
+  then each bar is made again (`nobar`, `bar`): the bar shows on the other
+  side at once. The windows follow along the switch's motion (240 ms, the
+  windows' spring; at once with reduced motion or a shell on the CPU):
+  snapped ones take their zone of the new work area; a floating window in
+  the bar's new room moves out of it, narrowed only if the area is
+  narrower; the others do not move.
+- **Tests** (`crates/hocus-compositor/tests/bar_side.rs`): the room on
+  every screen and the bar's place
+  (`on_the_left_every_screen_keeps_the_bars_room_on_its_left`); the edge
+  click (`a_press_on_the_left_edge_switches_the_form_and_no_client_sees_it`);
+  `Super+B` and the windows beside the bar
+  (`super_b_on_the_left_moves_the_windows_that_touch_the_bar`); the push
+  (`pushed_against_the_left_edge_the_bar_comes_in_front_after_300_ms`);
+  the side changed in the file, the windows that touch the bar moving in
+  240 ms and the others not (`the_side_follows_the_file_and_only_the_windows_the_bar_touches_move`),
+  at once with reduced motion (`with_reduced_motion_the_side_changes_at_once`);
+  with the shell, the bar and its groups moved there and back in both
+  forms (`the_shell_moves_the_bar_and_its_groups_to_the_left_and_back_live`),
+  the calendar opening 8 px right of the bar
+  (`a_popover_opens_on_the_inner_side_of_a_bar_on_the_left`), the halo
+  around the bar and the panda out of its right edge
+  (`the_halo_and_the_panda_come_out_of_a_bar_on_the_left`).

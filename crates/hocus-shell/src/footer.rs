@@ -186,14 +186,15 @@ pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Mes
     let settings = NewLayerShellSettings {
         size: Some(size),
         layer: Layer::Top,
-        anchor: Anchor::Right | Anchor::Bottom,
+        anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
         exclusive_zone: Some(0),
-        margin: Some(margin),
+        margin: Some(crate::side::margin(margin)),
         keyboard_interactivity: KeyboardInteractivity::None,
         output_option: output,
         events_transparent: false,
         namespace: Some(FOOTER_NAMESPACE.to_owned()),
     };
+    crate::side::opened(id);
     (
         id,
         vec![
@@ -224,7 +225,7 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
         if place.asked.1 != margin {
             messages.push(Message::MarginChange {
                 id: place.id,
-                margin,
+                margin: crate::side::moved(place.id, margin),
             });
         }
         place.asked = (size, margin);

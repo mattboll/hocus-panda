@@ -58,6 +58,7 @@ mod reminder;
 mod renderer;
 mod setup;
 mod share;
+mod side;
 mod tasks;
 mod theme;
 mod today;
@@ -81,7 +82,7 @@ use iced::{
     Background, Border, Color, Element, Font, Length, Size, Subscription, Task, Theme,
     futures::{SinkExt, StreamExt, channel::mpsc},
     gradient,
-    widget::{Space, canvas, container, row, space, stack},
+    widget::{Space, canvas, container, pin, row, space, stack},
     window,
 };
 use iced_layershell::{
@@ -706,6 +707,11 @@ impl Shell {
                 column::set_groups(groups);
                 Task::none()
             }
+            // Before the bars, made again on that side after it.
+            ToShell::BarSide(side) => {
+                side::set(side);
+                Task::none()
+            }
             ToShell::AgentTools(tools) => {
                 agents::set_tools(tools);
                 Task::none()
@@ -922,11 +928,11 @@ impl Shell {
         let settings = NewLayerShellSettings {
             size: Some((bar.surface, 0)),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Top | Anchor::Bottom,
+            anchor: side::anchor(Anchor::Right | Anchor::Top | Anchor::Bottom),
             // The compositor keeps the bar's space itself, shell or not.
             exclusive_zone: Some(0),
             // Top, right, bottom, left.
-            margin: Some((EDGE, EDGE, EDGE, 0)),
+            margin: Some(side::margin((EDGE, EDGE, EDGE, 0))),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: false,
@@ -938,9 +944,9 @@ impl Shell {
         let clock = NewLayerShellSettings {
             size: Some(bar.clock_surface),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Top,
+            anchor: side::anchor(Anchor::Right | Anchor::Top),
             exclusive_zone: Some(0),
-            margin: Some((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0)),
+            margin: Some(side::margin((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0))),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: true,
@@ -952,9 +958,9 @@ impl Shell {
         let levels = NewLayerShellSettings {
             size: Some(bar.levels_surface),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Bottom,
+            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
             exclusive_zone: Some(0),
-            margin: Some((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0)),
+            margin: Some(side::margin((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0))),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: false,
@@ -969,9 +975,9 @@ impl Shell {
         let connections = NewLayerShellSettings {
             size: Some(size),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Bottom,
+            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
             exclusive_zone: Some(0),
-            margin: Some(margin),
+            margin: Some(side::margin(margin)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: false,
@@ -989,9 +995,9 @@ impl Shell {
         let desktops = NewLayerShellSettings {
             size: Some(size),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Bottom,
+            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
             exclusive_zone: Some(0),
-            margin: Some(margin),
+            margin: Some(side::margin(margin)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: false,
@@ -1008,9 +1014,9 @@ impl Shell {
         let agents = NewLayerShellSettings {
             size: Some(size),
             layer: Layer::Top,
-            anchor: Anchor::Right | Anchor::Top,
+            anchor: side::anchor(Anchor::Right | Anchor::Top),
             exclusive_zone: Some(0),
-            margin: Some(margin),
+            margin: Some(side::margin(margin)),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
             events_transparent: false,
@@ -1021,6 +1027,16 @@ impl Shell {
             id: agents_id,
         });
         bar.agents = agents_id;
+        for id in [
+            id,
+            clock_id,
+            levels_id,
+            connections_id,
+            desktops_id,
+            agents_id,
+        ] {
+            side::opened(id);
+        }
         // Under the agents: the to-do list.
         let (tasks_id, open_tasks) = tasks::draw::open(&bar.output, form, option.clone());
         bar.tasks = tasks_id;
@@ -1166,7 +1182,10 @@ impl Shell {
         .flatten()
         {
             tasks.push(Task::done(Message::SizeChange { id, size }));
-            tasks.push(Task::done(Message::MarginChange { id, margin }));
+            tasks.push(Task::done(Message::MarginChange {
+                id,
+                margin: side::moved(id, margin),
+            }));
         }
         tasks.extend(
             footer::form(&bar.output, bar.form, switching)
@@ -1219,12 +1238,14 @@ impl Shell {
             surface_width: width as f32,
             backdrop,
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The levels of the bar whose levels' surface is `id`.
@@ -1249,12 +1270,14 @@ impl Shell {
             backdrop,
             bar: bar.output.clone(),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The connections of the bar whose connections' surface is `id`.
@@ -1277,12 +1300,14 @@ impl Shell {
             backdrop,
             bar: bar.output.clone(),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The desktops of the bar whose desktops' surface is `id`.
@@ -1307,12 +1332,14 @@ impl Shell {
             backdrop,
             bar: bar.output.clone(),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The agents' group of the bar whose agents' surface is `id`.
@@ -1332,12 +1359,14 @@ impl Shell {
             bar: bar.output.clone(),
             motion: self.look.motion,
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The to-do list of the bar whose to-do list's surface is `id`.
@@ -1356,12 +1385,14 @@ impl Shell {
             backdrop,
             bar: bar.output.clone(),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The footer of the bar whose footer's surface is `id`.
@@ -1384,12 +1415,14 @@ impl Shell {
             words: footer::Words::new(clock::time::Lang::of_messages()),
             backdrop,
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The sign of what is in use (5.12), if its surface is `id`.
@@ -1414,12 +1447,14 @@ impl Shell {
             motion: self.look.motion,
             words: in_use::Words::new(clock::time::Lang::of_messages()),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The next meeting (Day.2), if its surface is `id`.
@@ -1444,12 +1479,14 @@ impl Shell {
             motion: self.look.motion,
             words: meeting::Words::new(clock::time::Lang::of_messages()),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The windows over the desktops (#604), if their surface is `id`.
@@ -1468,12 +1505,14 @@ impl Shell {
             words: windows::Words::new(clock::time::Lang::of_messages()),
             backdrop,
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// Today (Day.3), if its surface is `id`.
@@ -1497,12 +1536,14 @@ impl Shell {
             motion: self.look.motion,
             words: today::Words::new(clock::time::Lang::of_messages()),
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The tray of the bar whose tray's surface is `id` (5.14).
@@ -1528,12 +1569,14 @@ impl Shell {
             motion: self.look.motion,
             backdrop,
         };
-        Some(
+        Some(in_bar(
+            bar,
+            at,
             canvas(program)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        )
+        ))
     }
 
     /// The lock (7.1), if its surface is `id`.
@@ -1952,14 +1995,34 @@ impl Shell {
                 },
                 ..container::Style::default()
             });
-        let bar = container(row![space::horizontal(), column])
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let bar = container(if side::left() {
+            row![column, space::horizontal()]
+        } else {
+            row![space::horizontal(), column]
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
         let pointer = canvas(popover::BarPointer { bar: output })
             .width(Length::Fill)
             .height(Length::Fill);
         stack![bar, pointer].into()
     }
+}
+
+/// `content`, one of `bar`'s surfaces in its column. While the bar
+/// switches form those are the full form's width and draw the bar's
+/// inside against their right edge; on the left (`[panel] side`) their
+/// left edge is against the bar's, so their drawing is moved left by what
+/// the bar lacks of the full form at `at`.
+fn in_bar<'a>(bar: &Bar, at: Instant, content: Element<'a, Message>) -> Element<'a, Message> {
+    if !side::left() || bar.switch.is_none() {
+        return content;
+    }
+    let full = (Form::Full.width() - 2) as f32;
+    let shift = (bar.width(at) - 2.0 - full).min(0.0);
+    pin(container(content).width(full).height(Length::Fill))
+        .x(shift)
+        .into()
 }
 
 fn mix(a: Color, b: Color, t: f32) -> Color {

@@ -295,6 +295,21 @@ impl Headless {
             .collect()
     }
 
+    /// Where screen `name`'s bar is drawn now, global: the place of its
+    /// glass and its halo.
+    pub fn bar_place(&self, name: &str) -> Option<Rect> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == name)?;
+        let at = state.space.output_geometry(output)?.loc;
+        let bar = state.bar_rect(output, state.now())?;
+        Some(Rect::new(
+            at.x + bar.loc.x.round() as i32,
+            at.y + bar.loc.y.round() as i32,
+            bar.size.w.round() as i32,
+            bar.size.h.round() as i32,
+        ))
+    }
+
     /// Commits of the windows' surfaces so far, all windows together.
     pub fn window_commits(&self) -> u64 {
         self.app.state.window_commits

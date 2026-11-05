@@ -86,12 +86,27 @@ impl Rect {
 
 /// Where the desktop places windows on an output: what layer surfaces
 /// leave of it (`non_exclusive`, global) less the space of its bar, `bar`
-/// pixels wide, on the output's right, and the gap.
-pub fn work_area(non_exclusive: Rect, output: Rect, bar: Option<i32>) -> Rect {
+/// pixels wide, on the output's `side`, and the gap.
+pub fn work_area(
+    non_exclusive: Rect,
+    output: Rect,
+    bar: Option<i32>,
+    side: hocus_link::Side,
+) -> Rect {
     let mut zone = non_exclusive;
     if let Some(bar) = bar {
-        let bar_left = output.right() - GAP - bar;
-        zone.width = zone.width.min(bar_left - zone.x).max(0);
+        match side {
+            hocus_link::Side::Right => {
+                let bar_left = output.right() - GAP - bar;
+                zone.width = zone.width.min(bar_left - zone.x).max(0);
+            }
+            hocus_link::Side::Left => {
+                let bar_right = output.x + GAP + bar;
+                let right = zone.right();
+                zone.x = zone.x.max(bar_right);
+                zone.width = (right - zone.x).max(0);
+            }
+        }
     }
     zone.inset(GAP)
 }
@@ -922,20 +937,35 @@ mod tests {
     fn the_work_area_keeps_a_gap_and_the_bars_space() {
         // The full bar, 196 px and 8 px from the edge.
         assert_eq!(
-            work_area(OUTPUT, OUTPUT, Some(196)),
+            work_area(OUTPUT, OUTPUT, Some(196), hocus_link::Side::Right),
             Rect::new(8, 8, 1920 - 8 - 196 - 8 - 8, 1064)
         );
         // A 40 px bar along the top (a layer's exclusive zone).
         let zone = Rect::new(0, 40, 1920, 1040);
         assert_eq!(
-            work_area(zone, OUTPUT, Some(196)),
+            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Right),
             Rect::new(8, 48, 1700, 1024)
         );
         // The mini bar.
         let small = Rect::new(0, 0, 1366, 768);
-        assert_eq!(work_area(small, small, Some(56)).right(), 1366 - 8 - 56 - 8);
+        assert_eq!(
+            work_area(small, small, Some(56), hocus_link::Side::Right).right(),
+            1366 - 8 - 56 - 8
+        );
+        // On the left (6.4): the same room, from the other edge.
+        assert_eq!(
+            work_area(small, small, Some(56), hocus_link::Side::Left),
+            Rect::new(8 + 56 + 8, 8, 1366 - 8 - 56 - 8 - 8, 768 - 16)
+        );
+        assert_eq!(
+            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Left),
+            Rect::new(8 + 196 + 8, 48, 1700, 1024)
+        );
         // No bar on that screen: only the gap.
-        assert_eq!(work_area(OUTPUT, OUTPUT, None), OUTPUT.inset(8));
+        assert_eq!(
+            work_area(OUTPUT, OUTPUT, None, hocus_link::Side::Left),
+            OUTPUT.inset(8)
+        );
         assert_eq!(Rect::new(0, 0, 10, 10).inset(8), Rect::new(8, 8, 0, 0));
     }
 

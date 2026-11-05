@@ -363,6 +363,46 @@ impl FromStr for Form {
     }
 }
 
+/// The side of the screens the bar stands on (`[panel] side`, 6.4): its
+/// edge zone, the room kept for it and what opens from it go with it, the
+/// popovers on its inner side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Side {
+    #[default]
+    Right,
+    Left,
+}
+
+impl Side {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Right => "right",
+            Self::Left => "left",
+        }
+    }
+
+    /// Which way is away from the screen's edge the bar stands on, along
+    /// x: toward the windows. `-1` with the bar on the right.
+    pub const fn inward(self) -> f64 {
+        match self {
+            Self::Right => -1.0,
+            Self::Left => 1.0,
+        }
+    }
+}
+
+impl FromStr for Side {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "right" => Ok(Self::Right),
+            "left" => Ok(Self::Left),
+            _ => Err(BadLine(format!("no side {s:?}"))),
+        }
+    }
+}
+
 /// What the compositor tells the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToShell {
@@ -448,6 +488,11 @@ pub enum ToShell {
     /// them. Written `bar-groups`, the order, then the hidden groups (`-`
     /// for none): `bar-groups tasks,today,agents meeting,today`.
     BarGroups(BarGroups),
+    /// The side the bars stand on (`[panel] side`, 6.4): sent as the shell
+    /// connects, before the bars, and when the configuration changes it,
+    /// each bar then made again on that side (`nobar`, then `bar`).
+    /// Written `bar-side left` or `bar-side right`.
+    BarSide(Side),
     /// The agents' tools on this computer and what each is to the desktop
     /// (4.0): sent as the shell connects and when they change. Written
     /// `agent-tools`, then for each a tab, its name, a space, its state, a
@@ -1616,6 +1661,7 @@ impl fmt::Display for ToShell {
                 }
                 Ok(())
             }
+            Self::BarSide(side) => write!(f, "bar-side {}", side.name()),
             Self::BarWindows(shown) => {
                 write!(f, "bar-windows {}", if *shown { "shown" } else { "hidden" })
             }
@@ -2139,6 +2185,7 @@ impl FromStr for ToShell {
                     .collect::<Result<_, _>>()?,
             })),
             Some("bar-windows") => Ok(Self::BarWindows(flag(words.next(), "shown", "hidden")?)),
+            Some("bar-side") => Ok(Self::BarSide(word(&mut words, "side")?.parse()?)),
             Some("bar-groups") => {
                 let order: Vec<BarGroup> = word(&mut words, "order")?
                     .split(',')
@@ -2832,6 +2879,8 @@ mod tests {
             }),
             ToShell::BarWindows(true),
             ToShell::BarWindows(false),
+            ToShell::BarSide(Side::Left),
+            ToShell::BarSide(Side::Right),
             ToShell::BarGroups(BarGroups::default()),
             ToShell::BarGroups(BarGroups {
                 order: [BarGroup::Tasks, BarGroup::Today, BarGroup::Agents],
@@ -2988,6 +3037,8 @@ mod tests {
             "recent eDP-1 12 x",
             "bar-windows",
             "bar-windows maybe",
+            "bar-side",
+            "bar-side up",
             "day slept",
             "day slept soon",
             "fullscreenHDMI-A-1",

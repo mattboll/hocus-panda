@@ -609,15 +609,22 @@ impl State {
                     layer.namespace(),
                     hocus_link::POPOVER_NAMESPACE | hocus_link::EMOJI_NAMESPACE
                 );
+                // Popovers and reminders' tabs slide from the bar, on its
+                // side; the bubbles from the screen's right edge.
                 let look = if popover {
                     self.panel
                         .popovers
                         .look(&layer, now, self.popover_motion())
-                        .map(|l| (l.alpha, l.shift, l.rise))
+                        .map(|l| (l.alpha, l.shift * self.toward_bar(), l.rise))
                 } else if hocus_link::slides_in(layer.namespace()) {
+                    let toward = if hocus_link::is_reminder(layer.namespace()) {
+                        self.toward_bar()
+                    } else {
+                        1.0
+                    };
                     self.bubbles
                         .look(&layer, now, self.bubbles_slide())
-                        .map(|l| (l.alpha, l.shift, 0.0))
+                        .map(|l| (l.alpha, l.shift * toward, 0.0))
                 } else {
                     Some((1.0, 0.0, 0.0))
                 };
@@ -1127,9 +1134,18 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let scale = output.current_scale().fractional_scale();
-        let edge = self
-            .bar_rect(output, now)
-            .map_or(i32::MAX, |bar| (bar.loc.x * scale).round() as i32);
+        let left = self.bar_side() == hocus_link::Side::Left;
+        // The panda shows only out of the bar, from its inner edge.
+        let edge =
+            self.bar_rect(output, now)
+                .map_or(if left { i32::MIN } else { i32::MAX }, |bar| {
+                    let x = if left {
+                        bar.loc.x + bar.size.w
+                    } else {
+                        bar.loc.x
+                    };
+                    (x * scale).round() as i32
+                });
         let map = layer_map_for_output(output);
         for layer in map
             .layers()
@@ -1141,14 +1157,20 @@ impl State {
                 continue;
             };
             let mut at = geometry.loc.to_f64();
-            at.x += look.shift;
+            at.x += look.shift * self.toward_bar();
             let loc: Point<i32, Physical> = at.to_physical_precise_round(scale);
-            let size = geometry.size.to_physical_precise_round(scale);
-            let width = (edge - loc.x).min(size.w);
+            let size: smithay::utils::Size<i32, Physical> =
+                geometry.size.to_physical_precise_round(scale);
+            let (from, width) = if left {
+                let from = edge.max(loc.x);
+                (from, loc.x + size.w - from)
+            } else {
+                (loc.x, (edge - loc.x).min(size.w))
+            };
             if width <= 0 {
                 continue;
             }
-            let clip = Rectangle::new(loc, (width, size.h).into());
+            let clip = Rectangle::new((from, loc.y).into(), (width, size.h).into());
             let radius = if self.shell.software {
                 (crate::peek::CARD_RADIUS * scale).round() as i32
             } else {
@@ -1244,8 +1266,12 @@ impl State {
         let full = f64::from(hocus_link::Form::Full.width());
         let reach = crate::glass::REACH;
         let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
+        let x = match self.bar_side() {
+            hocus_link::Side::Right => f64::from(size.w) - edge - full - reach,
+            hocus_link::Side::Left => edge - reach,
+        };
         let around = Rectangle::<f64, Logical>::new(
-            (f64::from(size.w) - edge - full - reach, edge - reach).into(),
+            (x, edge - reach).into(),
             (
                 full + 2.0 * reach,
                 f64::from(size.h) - 2.0 * edge + 2.0 * reach,
@@ -1331,7 +1357,7 @@ impl State {
                 continue;
             };
             let mut at = rect;
-            at.loc.x += look.shift.round();
+            at.loc.x += (look.shift * self.toward_bar()).round();
             at.loc.y -= look.rise.round();
             let pane: Rectangle<i32, Physical> = at.to_physical_precise_round(scale);
             panes.extend(glass_piece(

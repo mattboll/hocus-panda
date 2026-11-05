@@ -848,11 +848,13 @@ impl Stack {
     }
 
     /// From the screen's right edge to the cards': past the bar and its
-    /// gap, or the edge's gap without a bar.
+    /// gap, or the edge's gap without a bar there (none on the left: the
+    /// bubbles stay in the right corner).
     fn right(&self, screen: &str) -> f32 {
         let bar = self
             .bars
             .iter()
+            .filter(|_| !crate::side::left())
             .find(|(s, _)| s == screen)
             .map_or(0, |(_, form)| form.width() + EDGE);
         (EDGE + bar) as f32

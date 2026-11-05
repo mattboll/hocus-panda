@@ -21,8 +21,14 @@
 //!   motion, in the same frames as the glass behind the bar. Nothing is
 //!   sent per frame. With reduced motion, or a shell drawing on the CPU
 //!   (which does not animate), the form changes at once.
+//! - **Which side:** `[panel] side`, the right (the default) or the left
+//!   of every screen. Everything below goes with it: the edge, the space
+//!   kept, the windows that touch the bar, the popovers (on its inner
+//!   side), the halo and the peeking panda. A change of side made live
+//!   makes each bar again on the other side; the windows it touches settle
+//!   along the switch's motion (at once with reduced motion).
 //! - **The edge click:** a left press in the strip between a bar and its
-//!   screen's right edge, or on the bar's first pixels from that edge,
+//!   screen's edge, or on the bar's first pixels from that edge,
 //!   switches the form. The compositor takes it itself (`bar_edge_at`): it
 //!   knows where the pointer is even when it entered the bar pushed against
 //!   the screen's edge, with no motion after.
@@ -36,7 +42,7 @@ use std::{
     time::Duration,
 };
 
-use hocus_link::{Form, ToShell};
+use hocus_link::{Form, Side, ToShell};
 use serde::{Deserialize, Serialize};
 use smithay::{
     output::Output,
@@ -423,13 +429,110 @@ impl State {
             self.panel_refresh();
             followed.push("[panel] screens");
         }
+        if new.panel.side != self.config.panel.side {
+            self.move_bars(new.panel.side);
+            followed.push("[panel] side");
+        }
+    }
+
+    /// The side of the screens the bars stand on.
+    pub fn bar_side(&self) -> Side {
+        self.config.panel.side.link()
+    }
+
+    /// The sign of a shift along x toward the bar's side: what slides from
+    /// the bar (a popover, a reminder's tab, the peek) slides this way.
+    pub fn toward_bar(&self) -> f64 {
+        -self.bar_side().inward()
+    }
+
+    /// The bars go to `side` of their screens: the shell makes each again
+    /// there, and the windows that touch the space kept for it, or the
+    /// space it leaves, settle along the switch's motion.
+    fn move_bars(&mut self, side: crate::config::PanelSide) {
+        let now = self.now();
+        let reduced = self.reduced_motion() || self.shell.software;
+        let outputs: Vec<Output> = self
+            .space
+            .outputs()
+            .filter(|o| self.panel.bars.contains_key(&o.name()))
+            .cloned()
+            .collect();
+        let before: Vec<Option<Rect>> = outputs.iter().map(|o| self.work_area(o)).collect();
+        self.config.panel.side = side;
+        tracing::info!(side = side.link().name(), "the bars' side");
+        self.tell_shell(ToShell::BarSide(side.link()));
+        let bars: Vec<(String, Form)> = self
+            .panel
+            .bars
+            .iter_mut()
+            .map(|(name, bar)| {
+                // Made again on the other side: no switch carries over.
+                bar.switch = None;
+                (name.clone(), bar.form)
+            })
+            .collect();
+        for (name, form) in bars {
+            self.bar_front_gone(&name);
+            self.tell_shell(ToShell::NoBar {
+                output: name.clone(),
+            });
+            let scale = self.bar_scale(&name);
+            self.tell_shell(ToShell::Bar {
+                output: name,
+                form,
+                since: 0,
+                scale,
+            });
+        }
+        let motion = (!reduced).then(|| Tween::new(now, hocus_link::SWITCH, Bezier::SPRING));
+        for (output, before) in outputs.iter().zip(before) {
+            if let (Some(before), Some(after)) = (before, self.work_area(output)) {
+                self.follow_side(output, before, after, motion);
+            }
+        }
+        self.redraw = true;
+    }
+
+    /// The windows on `output` after the bar changed sides, its work area
+    /// from `before` to `after`: snapped ones take their zone of it,
+    /// floating ones in the bar's new space move out of it (narrowed only
+    /// if the area is narrower), the others stay; along `motion`, else at
+    /// once.
+    fn follow_side(&mut self, output: &Output, before: Rect, after: Rect, motion: Option<Tween>) {
+        let now = self.now();
+        for id in self.windows_on(output) {
+            if self.model.is_minimized(id) {
+                continue;
+            }
+            let Some(rect) = self.target_rect(id) else {
+                continue;
+            };
+            let to = match self.model.mode(id) {
+                Mode::Snapped(zone) => zone.rect(after),
+                Mode::Floating if rect.x < after.x || rect.right() > after.right() => {
+                    let width = rect.width.min(after.width).max(model::MIN_SIZE.0);
+                    let x = rect.x.clamp(after.x, (after.right() - width).max(after.x));
+                    Rect::new(x, rect.y, width, rect.height)
+                }
+                Mode::Floating | Mode::Fullscreen => continue,
+            };
+            if to == rect {
+                continue;
+            }
+            tracing::debug!(?id, ?before, ?after, ?to, "a window follows the bar's side");
+            let from = self.visual_rect(id, now);
+            self.configure(id, to);
+            self.settle_along(id, from, motion);
+        }
     }
 
     /// The screen whose bar's edge is under `at` (global): the strip
-    /// between the bar and the screen's right edge, and the bar's first
-    /// pixels from it, over the screen's whole height.
+    /// between the bar and the screen's edge on its side, and the bar's
+    /// first pixels from it, over the screen's whole height.
     pub fn bar_edge_at(&self, at: Point<f64, Logical>) -> Option<String> {
         let zone = f64::from(hocus_link::EDGE + EDGE_INSIDE);
+        let side = self.bar_side();
         self.space
             .outputs()
             .filter(|o| self.panel.bars.contains_key(&o.name()))
@@ -438,7 +541,11 @@ impl State {
             .find(|o| {
                 self.space.output_geometry(o).is_some_and(|g| {
                     let g = g.to_f64();
-                    g.contains(at) && at.x >= g.loc.x + g.size.w - zone
+                    g.contains(at)
+                        && match side {
+                            Side::Right => at.x >= g.loc.x + g.size.w - zone,
+                            Side::Left => at.x < g.loc.x + zone,
+                        }
                 })
             })
             .map(Output::name)
@@ -506,10 +613,11 @@ impl State {
     }
 
     /// The windows on `output` that touch the bar's side take the new work
-    /// area: snapped ones their zone of it, floating ones their right edge
-    /// at its right edge; along `motion`, else at once.
+    /// area: snapped ones their zone of it, floating ones their edge on the
+    /// bar's side at its edge; along `motion`, else at once.
     fn follow_bar(&mut self, output: &Output, before: Rect, after: Rect, motion: Option<Tween>) {
         let now = self.now();
+        let side = self.bar_side();
         for id in self.windows_on(output) {
             if self.model.is_minimized(id) {
                 continue;
@@ -519,7 +627,11 @@ impl State {
             };
             let to = match self.model.mode(id) {
                 Mode::Snapped(zone) => zone.rect(after),
-                Mode::Floating if rect.right() == before.right() => {
+                Mode::Floating if side == Side::Left && rect.x == before.x => {
+                    let width = (rect.right() - after.x).max(model::MIN_SIZE.0);
+                    Rect::new(rect.right() - width, rect.y, width, rect.height)
+                }
+                Mode::Floating if side == Side::Right && rect.right() == before.right() => {
                     let width = (after.right() - rect.x).max(model::MIN_SIZE.0);
                     Rect::new(after.right() - width, rect.y, width, rect.height)
                 }
@@ -554,8 +666,12 @@ impl State {
         let size = self.space.output_geometry(output)?.size;
         let width = bar.width_at(now);
         let edge = f64::from(hocus_link::EDGE);
+        let x = match self.bar_side() {
+            Side::Right => f64::from(size.w) - edge - width,
+            Side::Left => edge,
+        };
         Some(Rectangle::new(
-            (f64::from(size.w) - edge - width, edge).into(),
+            (x, edge).into(),
             (width, f64::from(size.h) - 2.0 * edge).into(),
         ))
     }

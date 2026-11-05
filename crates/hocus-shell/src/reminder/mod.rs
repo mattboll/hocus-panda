@@ -888,7 +888,8 @@ fn watch_clock_sets() {
 const ROOM: (f32, f32, f32, f32) = (45.0, 35.0, 8.0, 55.0);
 
 /// Bar `bar`'s tab `index` (0 at the top): its surface's size, its margins
-/// from the screen's top right (top, right, bottom, left), the tab in it.
+/// from the screen's top right (top, right, bottom, left; mirrored with the
+/// bar on the left), the tab in it.
 fn placed(places: &Places, bar: &str, form: Form, index: usize) -> Opened {
     let card_top = match form {
         // Its top on the meeting card's.
@@ -921,8 +922,10 @@ fn placed(places: &Places, bar: &str, form: Form, index: usize) -> Opened {
             0,
             0,
         ),
+        // The surface is mirrored on the left (`crate::side`): the room
+        // toward the bar is then on the tab's left.
         tab: Rectangle::new(
-            iced::Point::new(left, above),
+            iced::Point::new(if crate::side::left() { after } else { left }, above),
             iced::Size::new(WIDTH, HEIGHT),
         ),
     }
@@ -1013,9 +1016,9 @@ impl Shown {
                             size: Some(want.size),
                             // Over a fullscreen window too.
                             layer: Layer::Overlay,
-                            anchor: Anchor::Right | Anchor::Top,
+                            anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
                             exclusive_zone: Some(0),
-                            margin: Some(want.margin),
+                            margin: Some(crate::side::margin(want.margin)),
                             keyboard_interactivity: KeyboardInteractivity::None,
                             output_option: if key.0 == crate::ALONE {
                                 OutputOption::Active
@@ -1028,6 +1031,7 @@ impl Shown {
                         id: want.id,
                     });
                     messages.push(crate::notifications::region(want.id, Some(want.tab)));
+                    crate::side::opened(want.id);
                     self.opened.insert(key, want);
                 }
                 Some(opened) => {
@@ -1040,7 +1044,7 @@ impl Shown {
                         });
                         messages.push(Message::MarginChange {
                             id: opened.id,
-                            margin: want.margin,
+                            margin: crate::side::moved(opened.id, want.margin),
                         });
                         messages.push(crate::notifications::region(opened.id, Some(want.tab)));
                         opened.size = want.size;
