@@ -306,6 +306,7 @@ impl Bed {
     /// The commits a change made by `change` brings once the desktops'
     /// surface has drawn: tried again while the clock ticks through it.
     fn drawn_by(&mut self, mut change: impl FnMut(&mut Self)) -> anyhow::Result<[u64; 5]> {
+        let mut ticks = Vec::new();
         for _ in 0..5 {
             self.settle()?;
             let clocks = self.hp.clock_commits();
@@ -321,8 +322,20 @@ impl Bed {
             if self.hp.clock_commits() == clocks {
                 return Ok(std::array::from_fn(|i| after[i] - before[i]));
             }
+            ticks.push(self.hp.clock_commits() - clocks);
         }
-        anyhow::bail!("the clock ticked through every try")
+        // What the shell said meanwhile, to tell why the clock drew.
+        let said = std::fs::read_to_string(&self.log).unwrap_or_default();
+        let tail: Vec<&str> = said
+            .lines()
+            .filter(|l| !l.contains("TRACE"))
+            .rev()
+            .take(40)
+            .collect();
+        anyhow::bail!(
+            "the clock ticked through every try ({ticks:?} commits); the shell said:\n{}",
+            tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+        )
     }
 
     /// The commits in two seconds at rest.
