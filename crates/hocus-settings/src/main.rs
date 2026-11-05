@@ -43,6 +43,7 @@ fn main() -> ExitCode {
     };
     hocus_settings::renderer::choose();
     // Before the window: it reads folders.
+    hocus_settings::bar::find_fonts();
     hocus_settings::appearance::find_cursor_themes();
     let start = app::Start {
         lang: Lang::of_messages(),
@@ -78,8 +79,8 @@ fn main() -> ExitCode {
                 iced::Theme::Dark
             }
         })
-        .style(|_: &App, _: &iced::Theme| iced::theme::Style {
-            background_color: app::background(),
+        .style(|app: &App, _: &iced::Theme| iced::theme::Style {
+            background_color: app::background_of(app),
             text_color: app::text(),
         })
         .settings(settings)

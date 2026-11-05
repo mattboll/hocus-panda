@@ -51,6 +51,10 @@ impl App {
     pub fn view(&self) -> El<'_> {
         let base = row![self.sidebar(), self.content()];
         let mut layers: Vec<El<'_>> = vec![base.into()];
+        // The bar's preview, held at the page's top as it scrolls (6.4).
+        if let Some(preview) = self.bar_preview_layer() {
+            layers.push(preview);
+        }
         if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
@@ -430,14 +434,19 @@ impl App {
             body = body.push(banner);
         }
         body = body.push(page);
-        let scrolled = scrollable(container(container(body).max_width(PAGE_WIDTH)).padding(
-            Padding {
+        let widest = if self.page == Page::Section(SectionId::Bar) {
+            super::bar_page::PAGE_WIDTH
+        } else {
+            PAGE_WIDTH
+        };
+        let scrolled = scrollable(
+            container(container(body).max_width(widest)).padding(Padding {
                 top: 6.0,
                 right: 40.0,
                 bottom: 72.0,
                 left: 32.0,
-            },
-        ))
+            }),
+        )
         .id(PAGE)
         .on_scroll(|_| Message::Scrolled)
         .height(Length::Fill)
@@ -774,6 +783,9 @@ impl App {
         if id == SectionId::Wallpaper {
             return self.wallpaper_page(page);
         }
+        if id == SectionId::Bar {
+            return self.bar_page(page);
+        }
         let settings = settings_of(id);
         if settings.is_empty() {
             page = page.push(card_box(
@@ -888,6 +900,8 @@ impl App {
             words = words.push(t(self.colour_line(), 12.5, fade(DIM.get(), ink)));
         } else if setting.id == crate::wallpaper::FIT {
             words = words.push(t(self.fit_line(), 12.5, fade(DIM.get(), ink)));
+        } else if let Some(line) = self.bar_line(setting.id) {
+            words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = setting.line {
             words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
@@ -896,6 +910,9 @@ impl App {
         }
         if let Some(warning) = self.warning(setting, slot) {
             words = words.push(t(warning, 12.5, PEACH.get()));
+        }
+        if let Some(extra) = self.bar_row_extra(setting, ink) {
+            words = words.push(extra);
         }
         let inert = self.inert(setting);
         let focused = matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&super::Control::Setting(slot)));
@@ -942,6 +959,35 @@ impl App {
     }
 
     fn control(&self, setting: &'static Setting, slot: Slot, inert: bool, focused: bool) -> El<'_> {
+        let control = self.control_of(setting, slot, inert, focused);
+        // 6.4's: a movable group's ↑ and ↓, the clock colour's swatch.
+        if let Some(arrows) = self.bar_arrows(setting) {
+            let control = container(control).id(format!("switch:{}", setting.id));
+            return row![arrows, control]
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .into();
+        }
+        if setting.id == crate::bar::COLOR {
+            let hex = match self.value(slot) {
+                Some(crate::model::Value::Text(hex)) => hex,
+                _ => String::new(),
+            };
+            return row![swatch(&hex, if inert { INERT } else { 1.0 }), control]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into();
+        }
+        control
+    }
+
+    fn control_of(
+        &self,
+        setting: &'static Setting,
+        slot: Slot,
+        inert: bool,
+        focused: bool,
+    ) -> El<'_> {
         let alpha = if inert { INERT } else { 1.0 };
         let value = self.value(slot);
         if setting.id == crate::wallpaper::COLOR {
@@ -1159,6 +1205,13 @@ impl App {
                 icon(Icon::Check, 13.0, fade(ACCENT.get(), opened))
             } else {
                 Space::new().width(13).into()
+            };
+            // The clock's colours, each with its swatch (6.4).
+            let check: El<'_> = match &choice.value {
+                crate::model::Value::Text(hex) if setting.id == crate::bar::COLOR => {
+                    row![check, swatch(hex, opened)].spacing(6).into()
+                }
+                _ => check,
             };
             list = list.push(
                 container(
@@ -1600,6 +1653,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
+        "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),
@@ -1607,4 +1661,17 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
             Focus::Control(i) => format!("control:{i}"),
         },
     })
+}
+
+/// A 12 px swatch of `hex` (`#rrggbb`), its rim faint.
+fn swatch<'a>(hex: &str, alpha: f32) -> El<'a> {
+    let colour = hocus_link::wallpaper::colour_of(hex)
+        .map_or(Color::TRANSPARENT, |[r, g, b]| Color::from_rgb8(r, g, b));
+    container(Space::new().width(12).height(12))
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(fade(colour, alpha))),
+            border: border(4.0, 1.0, fade(rgba(255, 255, 255, 0.25), alpha)),
+            ..container::Style::default()
+        })
+        .into()
 }

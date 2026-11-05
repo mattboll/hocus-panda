@@ -176,6 +176,11 @@ impl App {
         self.screens.line = Some(line);
     }
 
+    /// `line` to the compositor's screens' line; whether it took it.
+    pub(super) fn screens_ask(&self, line: String) -> bool {
+        self.screens.line.as_ref().is_some_and(|l| l.ask(line))
+    }
+
     pub(super) fn screens_list(&self) -> Option<&Screens> {
         self.screens.known.as_ref()
     }

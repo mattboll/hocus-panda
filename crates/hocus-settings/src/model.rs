@@ -148,8 +148,8 @@ impl SectionId {
                 Personalisation,
                 w("La barre", "The bar"),
                 w(
-                    "Ce que la barre montre, dans quel ordre, et quand elle passe en forme mini.",
-                    "What the bar shows, in which order, and when it turns mini.",
+                    "Le côté où elle se tient, sa forme sur chaque écran, ce qu’elle montre de haut en bas, et son horloge.",
+                    "The side it stands on, its form on each screen, what it shows from top to bottom, and its clock.",
                 ),
                 Icon::Bar,
                 "6.4",
@@ -347,6 +347,8 @@ pub enum Icon {
     Warning,
     Close,
     Chevron,
+    /// The chevron pointing up: a group moved up (6.4).
+    ChevronUp,
     Check,
     Arrow,
 }
@@ -404,6 +406,7 @@ impl Icon {
             Self::Warning => "M12 4 L21 19.5 H3 Z M12 10 V14 M12 16.8 V17",
             Self::Close => "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5",
             Self::Chevron => "M7 10 L12 15 L17 10",
+            Self::ChevronUp => "M7 14 L12 9 L17 14",
             Self::Check => "M5 12.5 L10 17 L19 7.5",
             Self::Arrow => "M5 12 H19 M13.5 6.5 L19 12 L13.5 17.5",
         }
@@ -914,6 +917,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Keyboard => crate::keyboard::settings(),
         SectionId::Appearance => crate::appearance::settings(),
         SectionId::Wallpaper => crate::wallpaper::settings(),
+        SectionId::Bar => crate::bar::settings(),
         _ => &[],
     }
 }
@@ -937,6 +941,7 @@ pub struct Outside {
 pub fn outside_of(section: SectionId) -> &'static [Outside] {
     match section {
         SectionId::Sound => crate::sound::outside(),
+        SectionId::Bar => crate::bar::outside(),
         _ => &[],
     }
 }

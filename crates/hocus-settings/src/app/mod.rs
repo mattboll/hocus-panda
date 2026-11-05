@@ -11,6 +11,7 @@
 //! sliding, a menu opening) ask for frames only while they move.
 
 mod appearance_page;
+mod bar_page;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -52,6 +53,8 @@ pub const SIZE: (f32, f32) = (1100.0, 760.0);
 pub const LEAST: (f32, f32) = (860.0, 560.0);
 
 /// How long toasts stay.
+/// How long whole frames go on after what can leave pixels behind.
+const FRESH: Duration = Duration::from_millis(150);
 const TOAST: Duration = Duration::from_secs(6);
 const UNDONE: Duration = Duration::from_millis(3500);
 /// A slider is written this long after it stops moving.
@@ -74,6 +77,23 @@ const SEARCH: &str = "search";
 /// The window's background (the content's) and its text.
 pub fn background() -> iced::Color {
     style::CONTENT.get()
+}
+
+/// The window's background for `app`'s next frame: [`background`], its
+/// blue a 1024th apart on every other frame while the window is
+/// [`App::fresh`]. On the CPU, iced draws only what it finds changed
+/// between frames, and misses what is drawn past a piece's bounds (a
+/// shadow, an anti-aliased stroke, a canvas's text moved with the page):
+/// that stays on screen after a scroll, a toast or a motion. A changed
+/// background makes it draw the whole window, so these frames leave
+/// nothing behind; at rest nothing changes and nothing draws.
+#[must_use]
+pub fn background_of(app: &App) -> iced::Color {
+    let mut colour = background();
+    if app.parity {
+        colour.b = (colour.b + 1.0 / 1024.0).min(1.0);
+    }
+    colour
 }
 
 pub fn text() -> iced::Color {
@@ -290,6 +310,8 @@ pub enum Message {
     Keys(keyboard_page::Msg),
     /// The wallpaper's page (6.3).
     Wallpaper(wallpaper_page::Msg),
+    /// The bar's page (6.4).
+    Bar(bar_page::Msg),
     Nothing,
 }
 
@@ -350,6 +372,12 @@ pub struct App {
     sound: sound::Sound,
     /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
     wallpaper: wallpaper_page::State,
+    /// The bar's page: its preview's motions and clock (6.4).
+    bar: bar_page::State,
+    /// Until then, every frame draws the whole window ([`background_of`]),
+    /// and which of two backgrounds the next one has.
+    fresh: Option<Instant>,
+    parity: bool,
 }
 
 impl App {
@@ -431,6 +459,9 @@ impl App {
             said_places: String::new(),
             sound,
             wallpaper: wallpaper_page::State::default(),
+            bar: bar_page::State::default(),
+            fresh: None,
+            parity: false,
         };
         app.wallpaper_start(to_screens.clone());
         app.screens_open(to_screens);
@@ -510,8 +541,14 @@ impl App {
         Subscription::batch(subscriptions)
     }
 
-    /// Whether something moves at `now`, and frames are needed.
+    /// Whether frames are needed at `now`: something moves, or whole
+    /// frames go on ([`background_of`]).
     fn moving(&self, now: Instant) -> bool {
+        self.in_motion(now) || self.fresh.is_some_and(|until| now < until)
+    }
+
+    /// Whether something moves at `now`.
+    fn in_motion(&self, now: Instant) -> bool {
         let within = |since: Instant, d: Duration| now.saturating_duration_since(since) < d;
         if self.reduced_motion {
             return self
@@ -533,14 +570,28 @@ impl App {
             || self.knobs.values().any(|since| within(*since, KNOB))
             || self.screens_moving(now)
             || self.mouse.moving(now)
+            || self.bar_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
+        let framed = matches!(message, Message::Frame(_));
+        let scrolled = matches!(message, Message::Scrolled);
+        let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
+        let task = Task::batch([task, self.bar_after()]);
         self.sound_listen();
         self.wallpaper_want();
         self.now = Instant::now();
+        // Whole frames after a scroll, a toast coming or going, and through
+        // any motion and a moment after it: two at least, one in each of
+        // the window's buffers.
+        if scrolled || toast != self.toast.as_ref().map(|t| t.serial) || self.in_motion(self.now) {
+            self.fresh = Some(self.now + FRESH);
+        }
+        if framed {
+            self.parity = !self.parity;
+        }
         self.knobs
             .retain(|_, since| self.now.saturating_duration_since(*since) < KNOB);
         if self
@@ -638,6 +689,7 @@ impl App {
             }
             Message::Choose(slot, value) => {
                 self.menu = None;
+                self.bar_chose(slot, &value);
                 self.change(slot, value)
             }
             Message::Slide(slot, value) => self.slide(slot, value),
@@ -700,6 +752,7 @@ impl App {
             Message::Placed(places) => self.placed(places),
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
+            Message::Bar(msg) => self.bar_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -1352,6 +1405,9 @@ impl App {
         if section == SectionId::Wallpaper {
             return self.wallpaper_controls();
         }
+        if section == SectionId::Bar {
+            return self.bar_controls();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1548,6 +1604,7 @@ impl App {
         };
         match control {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
+            Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -1581,6 +1638,12 @@ impl App {
                 };
                 if self.inert(setting) {
                     return Task::none();
+                }
+                // 6.4's: Alt+↑ / Alt+↓ on a movable group's switch.
+                if modifiers.alt()
+                    && let Some(task) = self.bar_alt_move(slot, named)
+                {
+                    return task;
                 }
                 match (&setting.kind, named) {
                     (Kind::Switch, Named::Space | Named::Enter) => {
@@ -1716,7 +1779,7 @@ impl App {
         let Some((id, since)) = self.light else {
             return 0.0;
         };
-        if id != setting {
+        if Self::bar_lit_alias(id) != setting {
             return 0.0;
         }
         let t = self.now.saturating_duration_since(since);
@@ -1784,6 +1847,8 @@ enum Control {
     Try(TryPart),
     /// The wallpaper's page's own (6.3).
     Wallpaper(wallpaper_page::Stop),
+    /// The bar's page's own (6.4).
+    Bar(bar_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

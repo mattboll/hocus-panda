@@ -194,6 +194,9 @@ impl App {
     /// A menu's value as its button says it: the system's language with
     /// its name, "Celle du système (français)".
     pub(super) fn menu_said(&self, setting: &Setting, value: &Value) -> String {
+        if let Some(said) = self.bar_menu_said(setting, value) {
+            return said;
+        }
         let said = setting.say(value, self.lang);
         match (setting.id, value) {
             ("locale.language", Value::Word("system")) => {
