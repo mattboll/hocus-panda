@@ -197,7 +197,9 @@ update listing nothing: the metadata is then read again whole with
 
 **The meter** is a `pw-record` of the input in use (`target.object` its
 serial, 16 kHz, one channel), its node `hocus-settings-meter` and its
-application "Réglages", read on a thread: the peak of each 33 ms on a
+application "Réglages" (given in `PIPEWIRE_PROPS`: PipeWire 1.0's
+`pw-record` ignores `-P`), started and read on a thread of its own (raw
+where `pw-record` has `--raw`, else past its container's header): the peak of each 33 ms on a
 scale of decibels from −60, held and falling over 300 ms, sent only when
 it changes (silence sends nothing). It runs while the page shows the
 input group within the page's viewport and the microphone is not muted;

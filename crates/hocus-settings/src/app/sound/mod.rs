@@ -931,10 +931,8 @@ impl App {
                 let meter = Meter::start(serial, &app, move |level| {
                     to.unbounded_send(Message::Sound(Msg::Level(level))).is_ok()
                 });
-                if let Some(meter) = meter {
-                    tracing::info!(source = serial, pid = meter.pid(), "the meter listens");
-                    self.sound.meter = Some((serial, meter));
-                }
+                tracing::info!(source = serial, "the meter listens");
+                self.sound.meter = Some((serial, meter));
             }
         }
     }
