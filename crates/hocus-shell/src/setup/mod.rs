@@ -8,10 +8,11 @@
 //! - **The popover** ([`crate::popover::setup`]), from its "Choisir…":
 //!   step 1 the kinds of account (Google through GNOME Online Accounts, a
 //!   Planka board); step 2 a board's address and a pasted token, checked;
-//!   step 3 what to show (the calendars and their colours, or the board's
-//!   columns). "Terminé" writes the choice into the configuration file the
-//!   compositor names, keeps the token in the keyring (or its file), and
-//!   starts the day's workers again from it.
+//!   step 3 what to show (the calendars, their colours and their stars,
+//!   which feature them, or the board's columns). "Terminé" writes the
+//!   choice into the configuration file the compositor names, keeps the
+//!   token in the keyring (or its file), and starts the day's workers
+//!   again from it.
 //!
 //! What blocks (Online Accounts, the network, the files) runs on a thread
 //! of its own (`day: sources`), which puts what it finds in the flow and
@@ -166,6 +167,9 @@ pub struct Row {
     /// Its colour among the eight.
     pub colour: usize,
     pub shown: bool,
+    /// Its star, "Mettre en avant": its events feed the meeting card, the
+    /// reminders, the halo and `Super+J` (written in `featured`).
+    pub featured: bool,
     pub read_only: bool,
 }
 
@@ -482,6 +486,21 @@ pub fn toggle(index: usize) {
     changed();
 }
 
+/// A calendar's star lit or put out: featured or not.
+pub fn feature(index: usize) {
+    with(|flow| {
+        if let Some(Show::Google {
+            calendars: Calendars::Read(rows),
+            ..
+        }) = &mut flow.show
+            && let Some(row) = rows.get_mut(index)
+        {
+            row.featured = !row.featured;
+        }
+    });
+    changed();
+}
+
 /// What unfolds under a row (or folds, if it shows).
 pub fn unfold(what: Unfold) {
     with(|flow| {
@@ -565,6 +584,12 @@ pub fn done() {
                 shown: rows
                     .iter()
                     .filter(|r| r.shown)
+                    .map(|r| r.name.clone())
+                    .collect(),
+                // A star counts only on a calendar shown.
+                featured: rows
+                    .iter()
+                    .filter(|r| r.shown && r.featured)
                     .map(|r| r.name.clone())
                     .collect(),
                 colours: rows
@@ -871,6 +896,7 @@ fn calendars_read(n: u64, read: hocus_day::source::Result<Vec<Calendar>>) {
                         colour: nearest(c.colour),
                         name: c.name,
                         shown: c.shown,
+                        featured: c.featured,
                         read_only: c.read_only,
                     })
                     .collect();
@@ -1071,6 +1097,11 @@ impl Words {
         self.pick("AGENDAS", "CALENDARS")
     }
 
+    /// A calendar's star's name.
+    pub fn feature(self) -> &'static str {
+        self.pick("Mettre en avant", "Feature")
+    }
+
     pub fn read_only(self) -> &'static str {
         self.pick("lecture seule", "read-only")
     }
@@ -1177,6 +1208,8 @@ mod tests {
         );
         assert_eq!(fr.choice(2), "Ajout dans");
         assert_eq!(en.what_to_show(), "What to show?");
+        assert_eq!(fr.feature(), "Mettre en avant");
+        assert_eq!(en.feature(), "Feature");
     }
 
     #[test]

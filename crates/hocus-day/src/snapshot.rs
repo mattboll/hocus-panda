@@ -190,6 +190,17 @@ pub struct Shown<'a> {
     pub calendar: &'a Calendar,
 }
 
+impl Shown<'_> {
+    /// Whether it feeds what is about to start: the meeting card (Day.2),
+    /// the reminders (Day.6), the halo's meeting states and `Super+J`. Its
+    /// calendar is shown and featured (`[[day.calendars]] featured`, every
+    /// shown calendar without it). Today (Day.3) and the calendar (Day.5)
+    /// show every shown calendar's events, featured or not.
+    pub fn featured(&self) -> bool {
+        self.calendar.shown && self.calendar.featured
+    }
+}
+
 /// The day: every account's latest snapshot, in the configuration's order,
 /// the local list last.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -263,6 +274,15 @@ impl Day {
             })
             .collect();
         shown.sort_by(|a, b| crate::model::event_order(a.event, b.event, zone));
+        shown
+    }
+
+    /// The events of featured calendars overlapping `[from, to)`
+    /// ([`Shown::featured`]), in the bar's order: what the meeting card,
+    /// the reminders, the halo and `Super+J` read.
+    pub fn featured(&self, from: Timestamp, to: Timestamp, zone: &TimeZone) -> Vec<Shown<'_>> {
+        let mut shown = self.events(from, to, zone);
+        shown.retain(Shown::featured);
         shown
     }
 
@@ -481,13 +501,41 @@ mod tests {
     #[test]
     fn hidden_calendars_are_left_out() {
         let zone = TimeZone::UTC;
-        let calendar = |id: &str, shown: bool| Calendar {
+        let (day, from, to) = day_of(&zone, vec![("work", true, true), ("home", false, true)]);
+        let shown: Vec<&str> = day
+            .events(from, to, &zone)
+            .iter()
+            .map(|s| s.event.title.as_str())
+            .collect();
+        assert_eq!(shown, ["standup"]);
+    }
+
+    #[test]
+    fn only_featured_calendars_feed_what_is_about_to_start() {
+        let zone = TimeZone::UTC;
+        // "swim" at 7 in a shown calendar not featured, "standup" at 9.
+        let (day, from, to) = day_of(&zone, vec![("work", true, true), ("home", true, false)]);
+        let titles = |shown: Vec<Shown<'_>>| -> Vec<String> {
+            shown.iter().map(|s| s.event.title.clone()).collect()
+        };
+        assert_eq!(titles(day.events(from, to, &zone)), ["swim", "standup"]);
+        assert_eq!(titles(day.featured(from, to, &zone)), ["standup"]);
+        // Featured but hidden: neither.
+        let (day, from, to) = day_of(&zone, vec![("work", true, true), ("home", false, true)]);
+        assert_eq!(titles(day.featured(from, to, &zone)), ["standup"]);
+    }
+
+    /// A day of calendars `work` and `home` (each id, shown, featured):
+    /// "swim" at 7 in `home`, "standup" at 9 in `work`; today's bounds.
+    fn day_of(zone: &TimeZone, calendars: Vec<(&str, bool, bool)>) -> (Day, Timestamp, Timestamp) {
+        let calendar = |id: &str, shown: bool, featured: bool| Calendar {
             id: CalendarId::new(id),
             account: AccountId::new("fixture-1"),
             name: id.to_owned(),
             colour: Colour::DEFAULT,
             read_only: false,
             shown,
+            featured,
         };
         let event = |id: &str, calendar: &str, hour: i8| Event {
             id: EventId::new(id),
@@ -515,21 +563,18 @@ mod tests {
             alarms: Vec::new(),
         };
         let snapshot = Snapshot {
-            calendars: vec![calendar("work", true), calendar("home", false)],
+            calendars: calendars
+                .into_iter()
+                .map(|(id, shown, featured)| calendar(id, shown, featured))
+                .collect(),
             events: vec![event("swim", "home", 7), event("standup", "work", 9)],
             ..Snapshot::loading(account("fixture-1", Kind::Fixture, Holds::Calendars))
         };
-        let day = Day::new(vec![snapshot]);
         let now = jiff::civil::date(2026, 11, 4)
             .at(8, 0, 0, 0)
             .to_zoned(zone.clone())
             .expect("a time");
         let (from, to) = today(&now);
-        let shown: Vec<&str> = day
-            .events(from, to, &zone)
-            .iter()
-            .map(|s| s.event.title.as_str())
-            .collect();
-        assert_eq!(shown, ["standup"]);
+        (Day::new(vec![snapshot]), from, to)
     }
 }

@@ -534,7 +534,7 @@ fn entry_for<'a>(entries: &'a [CalendarEntry], account: &Listed) -> Option<&'a C
 }
 
 fn plan(account: Account, entry: &CalendarEntry, listed: &Listed, google: &Google) -> Plan {
-    let (shown, colours) = (entry.shown.clone(), entry.colors.clone());
+    let over = entry.over();
     let (id, bus, api, path) = (
         account.id.clone(),
         google.bus.clone(),
@@ -549,8 +549,7 @@ fn plan(account: Account, entry: &CalendarEntry, listed: &Listed, google: &Googl
                 Box::new(GoaToken::new(bus, path)),
                 api,
             )),
-            shown,
-            colours,
+            over,
         }),
         every: None,
         cache: None,

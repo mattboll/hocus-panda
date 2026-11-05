@@ -2972,8 +2972,9 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
 §6; issue #426). Its data is the day's (docs/design/day.md).
 
 - **Which meeting** (`crates/hocus-shell/src/meeting/mod.rs`): the first
-  of today's events of the shown calendars that take time (timed, neither
-  cancelled, declined nor free: `Event::takes_time`) and has not ended.
+  of today's events of the featured calendars (`Day::featured`, Day.7)
+  that take time (timed, neither cancelled, declined nor free:
+  `Event::takes_time`) and has not ended.
   One in progress keeps the card until its end, overlapping or not; then
   the next. Nothing left today: no card.
 - **When it changes**: the shell asks the day as it changes
@@ -3102,9 +3103,10 @@ maintainer's spec (§4 group 4; issue #427). Its data is the day's
 
 - **What it lists** (`crates/hocus-shell/src/today/mod.rs`): today's
   events that take time (`Event::takes_time`) and have not ended, in order
-  of start, the card's own left out (`meeting::ahead`, skipping the
+  of start (`meeting::today`), the card's own left out (`meeting::ahead`'s
   first). All-day events stay in Day.5's calendar; every calendar shown is
-  in it. Nothing after the card: no group. The mini form: nothing.
+  in it, featured or not (Day.7), and a featured one's events look the
+  same as the others'. Nothing after the card: no group. The mini form: nothing.
 - **Where**: a surface of its own on each bar (`hocus-bar-today`),
   opened while it lists something and removed after, 14 px under the
   card, or the sign of what is in use (since #599 the first of the day's
@@ -3487,7 +3489,8 @@ through do not disturb; on a shared screen the tab hides its title;
 
 - **When** (`crates/hocus-shell/src/reminder/mod.rs`): for each event that
   takes a slot of the day (`Event::takes_time`: timed, neither cancelled,
-  declined nor free) of the calendars shown, at its own earliest alarm
+  declined nor free) of the featured calendars (`Day::featured`, Day.7),
+  at its own earliest alarm
   (`Event::alarms`: Google's popup reminders, a fixture's `alarms`), else
   `[calendar] remind` minutes before its start (default 5; `0` turns the
   default off and keeps the events' own; `hocus_day::reminders`). The
@@ -3554,7 +3557,8 @@ through do not disturb; on a shared screen the tab hides its title;
 - **`Super+J`** (`[shortcuts] join`): the compositor tells the shell
   (`join`), which joins the meeting whose tab shows (the first with a
   link), else the one with a link starting next within 10 min, its tab
-  not coming after; with none, nothing (said in the log).
+  not coming after, of the featured calendars too; with none, nothing
+  (said in the log).
 - **Do not disturb** holds the bubbles, never a tab. **A screen shared**
   (5.11): the compositor says which screens are, by connector
   (`shared-screens`, with `shares`); on them the title reads "Réunion" /
@@ -3596,8 +3600,9 @@ through do not disturb; on a shared screen the tab hides its title;
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
 - **Not built**: the tab's keyboard (`Super+B` reaching the bar, then
   `Tab` through its buttons): the bar has no keyboard entry yet
-  (`Super+B` switches its form); calendars "without reminders" (Day.1's
-  settings); the halo on the CPU.
+  (`Super+B` switches its form); calendars "without reminders" that still
+  take the card (Day.1's settings; since Day.7 a calendar not featured
+  has neither); the halo on the CPU.
 
 ### Day.1, choosing the day's sources (2026-11-04)
 
@@ -3678,10 +3683,14 @@ are not part of it.
     `text.dim`: "alex@example.org · Google Agenda", "Alex ·
     planka.example.org"). For Google, "AGENDAS" and one 32 px row per
     calendar, as Online Accounts' token reads `calendarList`: a 16 px box
-    (`#6CC287` and a dark check when ticked), a 16 px swatch, the name (13
-    px, `text`, `text.dim` when unticked), "lecture seule" (11.5 px,
+    (`#6CC287` and a dark check when ticked), a 16 px swatch, a 16 px star
+    10 px after it ("Mettre en avant" / "Feature", Day.7: filled the eight's
+    yellow `#F5C46E` when featured, else a 1.3 px `rgba(255,255,255,0.38)`
+    outline; at half strength on a calendar unticked, where it counts for
+    nothing; a click, or `Space` on it, lights it or puts it out), the name
+    (13 px, `text`, `text.dim` when unticked), "lecture seule" (11.5 px,
     `text.faint`) on the right. Ticked at first: those the account marks
-    selected. The swatch unfolds under its row the eight colours (20 px, 6
+    selected; every star lit. The swatch unfolds under its row the eight colours (20 px, 6
     px apart; the chosen one ringed `text`), the account's own matched to
     the nearest; a click chooses and folds. For a board, "TÂCHES", its name
     (13.5 px, 600), then "Colonne des tâches" (TODO by name, else the
@@ -3699,7 +3708,8 @@ are not part of it.
   `toml_edit` (`hocus_day::edit`: its other sections, comments and order
   kept; through a symbolic link, with its mode; beside it, then renamed
   over it); a Google account's `[[day.calendars]]` (`account`, `shown`,
-  `colors`, replacing the entry that names it), a board's `[[day.tasks]]`
+  `featured`, the ticked calendars whose star is lit, `colors`, replacing
+  the entry that names it), a board's `[[day.tasks]]`
   (its `address`, `tasks`, `done`, `add`, replacing the first). The token
   is kept by `hocus_day::secrets` under the board's account (the keyring
   on the bus given, else its 0600 file), never in the file. Then the day's
@@ -3734,6 +3744,9 @@ are not part of it.
   `the_google_row_lists_online_accounts_and_step_3_its_calendars_and_colours`
   (the nearest colours, read-only, a colour chosen, a box unticked, the file
   written with its other sections, the account's events in the day);
+  `step_3s_stars_feature_calendars_and_done_writes_featured_keeping_the_files_other_lines`
+  (Day.7: every star lit at first, one put out and lit again, `featured`
+  written beside `shown`, the rest of the file kept);
   `without_an_account_the_google_row_opens_online_accounts_and_comes_back_with_one`;
   `the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_board_not_shared`
   (`Ctrl+V`, the token never logged nor in the file, the columns' menus,
@@ -3741,13 +3754,49 @@ are not part of it.
   `tab_goes_through_the_rows_and_esc_goes_back_a_step_then_closes`;
   `at_rest_the_card_and_the_popover_draw_nothing`. In `calendar.rs`,
   `with_no_calendar_the_agenda_says_none_is_connected_and_offers_day_1s_popover`.
-  Unit tests: the card's layout, the steps' layouts, the nearest colour,
+  Unit tests: the card's layout, the steps' layouts (step 3's star after
+  each swatch, `step_3_has_a_star_after_each_calendars_swatch`), the nearest colour,
   the first columns, the refusals, the words in both languages
   (`hocus-shell`); the configuration edited and written
   (`hocus_day::edit`), the workers started again (`hocus-day`).
 - **Not built**: the Settings page (sprint 6); Planka's own sign-in by
   user name and password; CalDAV and `.ics`; names for screen readers
   given to them (§11).
+
+### Day.7, featured calendars (2026-11-05)
+
+Asked by the maintainer (issue #607): following 5 or 6 calendars, only 2
+matter for what is about to start; a colleague's leave took the meeting
+card.
+
+- **Featured or not**: each shown calendar is featured or not
+  (`[[day.calendars]] featured = ["name", …]`, by name or id as `shown`
+  is; without it, every shown calendar is, as before; docs/design/day.md,
+  "The configuration"). The rule is in one place, `hocus_day::Day::featured`
+  (`Shown::featured`).
+- **What follows it**: the meeting card (Day.2) and the mini form's mark
+  and popover, the halo's meeting states (`meeting ten|two|none`, §6), the
+  reminders (Day.6) and `Super+J`. Today (Day.3) and the calendar (Day.5)
+  show every shown calendar's events, featured or not, alike; an event of
+  a calendar not featured that comes before the card's meeting is one of
+  Today's lines.
+- **Day.1's step 3** has a star per calendar after its swatch ("Mettre en
+  avant" / "Feature"), which "Terminé" writes as `featured` (Day.1 above).
+- **Measured headless** (`crates/hocus-compositor/tests/featured.rs`), the
+  real shell on the CPU, in French, a fixture's day of two calendars
+  ("Travail", featured, and a colleague's leave, "Congés", whose event
+  starts first, in 3 min): `an_event_of_a_calendar_not_featured_takes_no_card_reminder_nor_halo_and_still_shows_in_today_and_the_calendar`
+  (the card the featured meeting's, 35 min ahead, no halo, the next
+  reminder the featured meeting's, `Super+J` joins nothing, the leave in
+  Today and in the calendar);
+  `without_featured_every_shown_calendar_feeds_the_card_the_reminders_and_the_halo`
+  (the leave takes the card, the halo, a reminder and `Super+J`). Day.1's
+  in `day_sources.rs` (above).
+- **Choices made here** (to confirm on the machine): every star lit as
+  step 3 opens (as `featured` unset is); `featured` always written, as
+  `shown` is; a star on a calendar unticked drawn at half strength and
+  not written; the mini popover's "ENSUITE" (the event after the card's)
+  of the featured calendars too.
 
 ### The column's order, the agents under To do (2026-11-04)
 

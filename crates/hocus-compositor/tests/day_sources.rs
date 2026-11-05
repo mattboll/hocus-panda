@@ -710,9 +710,9 @@ fn the_google_row_lists_online_accounts_and_step_3_its_calendars_and_colours() -
     assert_eq!(
         listed(&line, "calendars"),
         [
-            "[x] Travail #6CC287",
-            "[x] Famille #F28FB1",
-            "[ ] Anniversaires #6FD3D8 lecture seule",
+            "[x] ★ Travail #6CC287",
+            "[x] ★ Famille #F28FB1",
+            "[ ] ★ Anniversaires #6FD3D8 lecture seule",
         ],
         "{line}"
     );
@@ -723,13 +723,13 @@ fn the_google_row_lists_online_accounts_and_step_3_its_calendars_and_colours() -
     bed.shows(&["colours of Travail"])?;
     bed.shot("step-3-colours")?;
     bed.click_target("Colour(0,3)")?;
-    let line = bed.shows(&["[x] Travail #C89BFF"])?;
+    let line = bed.shows(&["[x] ★ Travail #C89BFF"])?;
     assert!(!line.contains("colours of"), "{line}");
     // Unticked, ticked.
     bed.click_target("Calendar(1)")?;
-    bed.shows(&["[ ] Famille #F28FB1"])?;
+    bed.shows(&["[ ] ★ Famille #F28FB1"])?;
     bed.click_target("Calendar(2)")?;
-    bed.shows(&["[x] Anniversaires #6FD3D8"])?;
+    bed.shows(&["[x] ★ Anniversaires #6FD3D8"])?;
     bed.shot("step-3-google")?;
     // "Terminé": written, the rest of the file kept, the bar shows the day.
     let from = bed.mark();
@@ -757,6 +757,69 @@ fn the_google_row_lists_online_accounts_and_step_3_its_calendars_and_colours() -
         ],
     )?;
     bed.group_after(from, &["form=full", "card=false"])?;
+    Ok(())
+}
+
+#[test]
+fn step_3s_stars_feature_calendars_and_done_writes_featured_keeping_the_files_other_lines()
+-> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let google = Google::start(dir.path(), true)?;
+    let Some(mut bed) = Bed::start(
+        "featured",
+        "1920x1080",
+        MINE,
+        With {
+            bus: Some(&google.bus.address),
+            api: Some(&google.api.address),
+            ..With::default()
+        },
+    )?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click_target("Account(0)")?;
+    // Every calendar featured at first, its star after its swatch.
+    let line = bed.shows(&["step=show", "done=true", "star=«Mettre en avant»"])?;
+    assert_eq!(
+        listed(&line, "calendars"),
+        [
+            "[x] ★ Travail #6CC287",
+            "[x] ★ Famille #F28FB1",
+            "[ ] ★ Anniversaires #6FD3D8 lecture seule",
+        ],
+        "{line}"
+    );
+    // Its star put out, lit again, put out.
+    bed.click_target("Star(1)")?;
+    bed.shows(&["[x] ☆ Famille #F28FB1"])?;
+    bed.click_target("Star(1)")?;
+    bed.shows(&["[x] ★ Famille #F28FB1"])?;
+    bed.click_target("Star(1)")?;
+    let line = bed.shows(&["[x] ☆ Famille #F28FB1"])?;
+    assert!(line.contains("[x] ★ Travail #6CC287"), "{line}");
+    bed.hp.pointer_move(400.0, 700.0);
+    bed.shot("step-3-stars")?;
+    // "Terminé": `featured` written beside `shown`, the rest of the file
+    // kept; a star on a calendar not shown counts for nothing.
+    let from = bed.mark();
+    bed.click_target("Done")?;
+    bed.closed()?;
+    bed.logged_after(from, &["the day's sources written"])?;
+    let written = std::fs::read_to_string(&bed.config)?;
+    assert!(written.starts_with(MINE), "{written}");
+    assert!(
+        written.contains("shown = [\"Travail\", \"Famille\"]"),
+        "{written}"
+    );
+    assert!(written.contains("featured = [\"Travail\"]"), "{written}");
+    // The card is the featured calendar's meeting.
+    bed.logged_after(
+        from,
+        &["the day holds", "google-calendars-alex@example.org fresh"],
+    )?;
+    bed.logged_after(from, &["the meeting card shows", "Point produit"])?;
     Ok(())
 }
 

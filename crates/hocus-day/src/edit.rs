@@ -22,6 +22,9 @@ pub struct GoogleChoice {
     pub account: String,
     /// The calendars shown, by name.
     pub shown: Vec<String>,
+    /// Those of them featured (the meeting card, the reminders, the halo,
+    /// `Super+J`), by name.
+    pub featured: Vec<String>,
     /// Each calendar's colour, by name.
     pub colours: Vec<(String, Colour)>,
 }
@@ -110,6 +113,8 @@ fn fill_google(entry: &mut Table, google: &GoogleChoice) {
     entry.remove("file");
     let shown: Array = google.shown.iter().map(String::as_str).collect();
     entry.insert("shown", value(shown));
+    let featured: Array = google.featured.iter().map(String::as_str).collect();
+    entry.insert("featured", value(featured));
     let mut colours = InlineTable::new();
     for (name, colour) in &google.colours {
         colours.insert(name, colour.to_string().into());
@@ -162,6 +167,7 @@ terminal = "Super+Return"
         Choice::Google(GoogleChoice {
             account: "alex@example.org".to_owned(),
             shown: vec!["Travail".to_owned(), "Perso".to_owned()],
+            featured: vec!["Travail".to_owned()],
             colours: vec![
                 ("Travail".to_owned(), Colour([0x8F, 0xB3, 0xFF])),
                 ("Perso".to_owned(), Colour([0xF2, 0x8F, 0xB1])),
@@ -197,6 +203,7 @@ terminal = "Super+Return"
             entry.shown.as_deref(),
             Some(&["Travail".to_owned(), "Perso".to_owned()][..])
         );
+        assert_eq!(entry.featured.as_deref(), Some(&["Travail".to_owned()][..]));
         assert_eq!(entry.colors.get("Perso"), Some(&Colour([0xF2, 0x8F, 0xB1])));
         // After the fixture's entry, before [shortcuts].
         let at = written.find("\"google\"").unwrap_or(0);
@@ -208,6 +215,26 @@ terminal = "Super+Return"
         // The same account again replaces its entry.
         let again = apply(&written, &google()).map_err(anyhow::Error::msg)?;
         assert_eq!(again.matches("\"google\"").count(), 1, "{again}");
+        Ok(())
+    }
+
+    #[test]
+    fn featured_is_written_into_the_accounts_entry_its_other_lines_kept() -> anyhow::Result<()> {
+        let mine = format!(
+            "{FILE}\n# Work's calendars.\n[[day.calendars]]\nkind = \"google\"\n\
+             account = \"alex@example.org\"\nfeatured = [\"Perso\"]   # for now\n"
+        );
+        let written = apply(&mine, &google()).map_err(anyhow::Error::msg)?;
+        for line in FILE.lines().chain(["# Work's calendars."]) {
+            assert!(written.contains(line), "{line:?} lost:\n{written}");
+        }
+        assert!(written.contains("featured = [\"Travail\"]"), "{written}");
+        let config = crate::config::from_toml(&written).map_err(anyhow::Error::msg)?;
+        assert_eq!(config.calendars.len(), 2, "{written}");
+        assert_eq!(
+            config.calendars[1].featured.as_deref(),
+            Some(&["Travail".to_owned()][..])
+        );
         Ok(())
     }
 

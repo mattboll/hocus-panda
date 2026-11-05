@@ -37,7 +37,7 @@ config.toml [day] ──► hocus_day::Workers::start ──► one worker threa
 
 | Type | Holds |
 |---|---|
-| `Calendar` | `id`, `account`, `name`, `colour`, `read_only`, `shown` |
+| `Calendar` | `id`, `account`, `name`, `colour`, `read_only`, `shown`, `featured` (the configuration's `featured`, below) |
 | `Event` | `id`, `calendar`, `title`, `when`, `status` (`Confirmed`, `Tentative`, `Cancelled`), `answer` (`Accepted`, `Declined`, `Unanswered`), `free_busy` (`Busy`, `Free`), `place`, `video`, `page`, `description`, `alarms` (minutes before its start, earliest first) |
 | `When` | `Timed { start, end }` (instants, shown in the system's zone) or `AllDay { first, last }` (dates, `last` included) |
 | `TaskBoard` | `id`, `name`, `columns` (each `Column { id, name }`, in their order) |
@@ -52,7 +52,8 @@ Ids are newtypes over strings (`AccountId`, `CalendarId`, `EventId`,
   by position, then id.
 - `Event::takes_time()`: timed, not cancelled, not declined, not free:
   what takes the meeting card (Day.2), Today (Day.3) and the reminders
-  (Day.6).
+  (Day.6), the card and the reminders of the featured calendars only
+  (`Day::featured`, below).
 - Recurring events are expanded by the source, each occurrence its own
   event with its own id, exceptions honoured.
 - The video link is the source's to find: the event's conference data,
@@ -241,8 +242,10 @@ One thread per account (`day: <account id>`), never the shell's loop.
   and nothing of it after. `Day::apply` takes either; an account that
   comes later goes before the local list.
 - **Calendars**: listed whole once a day (the window moves), else synced
-  from each calendar's token; the configuration's `shown` and `colors`
-  apply over what the account says.
+  from each calendar's token; the configuration's `shown`, `featured` and
+  `colors` apply over what the account says (`config::Over`), and over
+  the cache's calendars as it is read, so that a configuration changed
+  since applies at once.
 - **Months outside the window** (Day.5b, #578): `Workers::months(days)`
   asks every calendars' account for the months of those days that the
   window does not hold whole (`Command::Months`, never blocking). A
@@ -288,6 +291,12 @@ local list last.
   calendars overlapping `[from, to)`, every account's, in order, each with
   its calendar (`Shown { event, calendar }`: its colour, its name).
   `model::today(now)` gives today's bounds.
+- `Day::featured(from, to, zone) -> Vec<Shown>`: those of them whose
+  calendar is featured (`Shown::featured`: shown, and named in its
+  entry's `featured`, or its entry has none). The one rule for what is
+  about to start: the meeting card (Day.2) and its halo's states, the
+  reminders (Day.6) and `Super+J` read it; Today (Day.3) and the calendar
+  (Day.5) read `Day::events`, every shown calendar's.
 - `Day::tasks() -> Option<&Snapshot>`: the bar's tasks' account, the first
   board set, else the local list. Whether To do shows when only the local
   list is there and it is empty is Day.4's to say.
@@ -362,6 +371,7 @@ kind = "google"                 # or "fixture"
 account = "alex@example.org"    # google: the Online Accounts' account
 file = "day.toml"               # fixture: its file, relative to config.toml's folder
 shown = ["Travail", "Perso"]    # by name or id; none: as the account marks them
+featured = ["Travail"]          # by name or id; none: every shown calendar
 colors = { "Perso" = "#F28FB1" }
 
 [[day.tasks]]
@@ -373,6 +383,14 @@ done = "DONE"
 add = ""
 file = "day.toml"               # fixture
 ```
+
+`featured` (Day.7, #607): the calendars that feed what is about to start,
+the meeting card, the reminders, the halo's meeting states and
+`Super+J`; the others stay in Today and in the calendar, and nothing
+else. By name (whatever its case) or id, as `shown` is; a featured
+calendar not shown is not featured; without `featured`, every shown
+calendar is, as before #607; `featured = []`, none. Day.1's step 3
+writes it, a star per calendar (bar.md, "Day.1").
 
 Only the first `[[day.tasks]]` is used (the bar's tasks are one board's).
 An account's id is made from its kind, what it holds and its name
@@ -504,7 +522,9 @@ never the loop. `Token`'s `Debug` never shows it.
   (`months_outside_the_window_are_read_once_kept_in_the_cache_and_shown_first`,
   `a_month_outside_the_window_loads_until_every_calendars_account_answers`,
   `the_months_a_range_does_not_hold_whole`), the configuration, the
-  secrets' file; Planka's
+  secrets' file, the featured calendars
+  (`featured_calendars_are_named_and_without_featured_every_shown_one_is`,
+  `only_featured_calendars_feed_what_is_about_to_start`); Planka's
   addresses (`a_boards_address_gives_its_server_and_its_id`) and pasted
   tokens (`a_token_is_pasted_alone_or_with_its_cookie_pair`).
 - `crates/hocus-day/tests/planka.rs`: the workers against a fake Planka
@@ -529,7 +549,9 @@ never the loop. `Token`'s `Debug` never shows it.
   Online Accounts reaches the shell. `crates/hocus-compositor/tests/calendar.rs`
   (Day.5, Day.5b): a month 14 months ahead asked for as the calendar
   turns to it, "Chargement…" then its dots and its agenda, not read again,
-  nothing read at rest (bar.md, Day.5).
+  nothing read at rest (bar.md, Day.5). `crates/hocus-compositor/tests/featured.rs`
+  (Day.7, #607): a fixture's day of two calendars, one featured (bar.md,
+  "Day.7").
 - `crates/hocus-day/tests/google.rs`, against fakes of the test's own
   (`tests/fakes`: a private `dbus-daemon` with an Online Accounts on it,
   a Calendar API on 127.0.0.1): the calendars and today's events reach the
@@ -544,7 +566,8 @@ never the loop. `Token`'s `Debug` never shows it.
   added starts its worker, one switched off or removed stops it; without a
   bus, no Google source.
 - Day.1 (#425): `hocus_day::edit`'s unit tests (a choice written, the rest
-  of the file kept; a board the first tasks' entry; a file that does not
+  of the file kept; `featured` written into the account's entry, its other
+  lines kept; a board the first tasks' entry; a file that does not
   read left alone; written through its link with its mode),
   `reconfigured_the_new_accounts_start_and_the_local_list_stays`; the
   popover end to end in `crates/hocus-compositor/tests/day_sources.rs`
