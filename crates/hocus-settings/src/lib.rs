@@ -17,8 +17,13 @@
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
 //!   and systemd's timedated followed and asked off the window's thread.
+//! - [`account`], [`accounts`], [`passwd`] and [`secret`]: the Compte
+//!   page's pandas and pictures, AccountsService followed and asked, the
+//!   password changed through the system's `passwd`, kept while typed.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
+pub mod account;
+pub mod accounts;
 pub mod activate;
 pub mod app;
 pub mod appearance;
@@ -29,11 +34,13 @@ pub mod keys;
 pub mod lang;
 pub mod model;
 pub mod mouse;
+pub mod passwd;
 pub mod portal;
 pub mod power;
 pub mod renderer;
 pub mod screens;
 pub mod search;
+pub mod secret;
 pub mod single;
 pub mod sound;
 pub mod store;

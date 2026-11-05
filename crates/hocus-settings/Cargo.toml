@@ -46,8 +46,11 @@ iced = { version = "0.14", default-features = false, features = [
 # the shell does).
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 # The file's changes (inotify on its folder), on its worker; the user's id,
-# for their name.
-rustix = { version = "1.1.6", features = ["fs", "process"] }
+# for their name; `passwd`'s pseudo-terminal (6.11).
+rustix = { version = "1.1.6", features = ["fs", "process", "pty", "event", "termios"] }
+# The avatars (6.11): a picture cut square and written as PNG (the codecs
+# to read one are hocus-link's).
+image = { version = "0.25", default-features = false, features = ["png"] }
 # The search ignores accents: words decomposed (NFD), their marks left out.
 unicode-normalization = "0.1.25"
 # When the last version that read was written, in the user's time zone.
@@ -70,7 +73,5 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
-# A picture to choose, in the wallpaper's tests.
-image = { version = "0.25", default-features = false, features = ["png"] }
 tempfile = "3.27.0"
 anyhow = "1.0.104"

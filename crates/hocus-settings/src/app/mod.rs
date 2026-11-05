@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod account;
 mod appearance_page;
 mod bar_page;
 mod keyboard_page;
@@ -213,6 +214,8 @@ enum Undo {
     Sound(sound::Choice),
     /// A time zone chosen (in timedated, 6.11).
     Time(time::Choice),
+    /// A display name or an avatar set (in AccountsService, 6.11).
+    Account(account::Choice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -317,6 +320,8 @@ pub enum Message {
     Bar(bar_page::Msg),
     /// The Date et heure page's (6.11).
     Time(time::Msg),
+    /// The Compte page's (6.11).
+    Account(account::Msg),
     Nothing,
 }
 
@@ -381,6 +386,9 @@ pub struct App {
     bar: bar_page::State,
     /// The Date et heure page: timedated as last heard (6.11).
     time: time::State,
+    /// The Compte page: AccountsService as last heard, the password's
+    /// sheet (6.11).
+    account: account::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -395,6 +403,7 @@ impl App {
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
         let time = time::State::new(sender.clone());
+        let account = account::State::new(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -469,6 +478,7 @@ impl App {
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
             time,
+            account,
             fresh: None,
             parity: false,
         };
@@ -528,6 +538,10 @@ impl App {
                 _ => None,
             }),
         ];
+        // The display name's field let go (6.11).
+        if let Some(pressed) = self.account_subscription() {
+            subscriptions.push(pressed);
+        }
         if self.moving(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
@@ -588,7 +602,12 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled);
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after(), self.time_after()]);
+        let task = Task::batch([
+            task,
+            self.bar_after(),
+            self.time_after(),
+            self.account_after(),
+        ]);
         self.sound_listen();
         self.wallpaper_want();
         self.now = Instant::now();
@@ -650,6 +669,10 @@ impl App {
                 }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
+                    return task;
+                }
+                // The avatar's popover, the password's sheet (6.11).
+                if let Some(task) = self.account_key_first(&key) {
                     return task;
                 }
                 self.key(&key, modifiers, text.as_deref(), captured)
@@ -767,6 +790,7 @@ impl App {
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
             Message::Time(msg) => self.time_update(msg),
+            Message::Account(msg) => self.account_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -1123,6 +1147,13 @@ impl App {
                 self.toast = None;
                 return self.time_undo(choice, false);
             }
+            Some(Undo::Account(_)) => {
+                let Some(Undo::Account(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.account_undo(choice, false);
+            }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
                     return Task::none();
@@ -1179,6 +1210,12 @@ impl App {
                     return Task::none();
                 };
                 return self.time_undo(choice, true);
+            }
+            Some(Undo::Account(_)) => {
+                let Some(Undo::Account(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.account_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1415,6 +1452,13 @@ impl App {
         if section == SectionId::DateTime {
             return self.time_stops().into_iter().map(Control::Time).collect();
         }
+        if section == SectionId::Account {
+            return self
+                .account_stops()
+                .into_iter()
+                .map(Control::Account)
+                .collect();
+        }
         if section == SectionId::Keyboard {
             if self.keys.sub {
                 return Vec::new();
@@ -1637,6 +1681,7 @@ impl App {
             Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
+            Control::Account(stop) => self.account_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1882,6 +1927,8 @@ enum Control {
     Bar(bar_page::Stop),
     /// The Date et heure page's own (6.11).
     Time(time::Stop),
+    /// The Compte page's own (6.11).
+    Account(account::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

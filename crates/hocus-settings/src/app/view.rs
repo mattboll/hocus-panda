@@ -73,9 +73,16 @@ impl App {
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
         }
-        // The time zone picker (6.11).
+        // The time zone picker, the avatar's popover, the password's
+        // sheet (6.11).
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
+        }
+        if let Some(popover) = self.account_popover() {
+            layers.push(popover);
+        }
+        if let Some(sheet) = self.account_sheet() {
+            layers.push(sheet);
         }
         stack(layers)
             .width(Length::Fill)
@@ -792,6 +799,9 @@ impl App {
         }
         if id == SectionId::DateTime {
             return self.time_page(page);
+        }
+        if id == SectionId::Account {
+            return self.account_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -1670,6 +1680,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
+        "account": if app.page == Page::Section(SectionId::Account) { app.account_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),
