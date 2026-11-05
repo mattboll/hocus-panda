@@ -1,0 +1,22 @@
+[package]
+name = "hocus-network"
+description = "The Hocuspanda network: NetworkManager followed on the system bus and the radios' rfkill, for the bar and the Settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# NetworkManager on the system bus (MIT), on a thread of its own.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy"] }
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }
+# The signals' stream.
+futures-util = { version = "0.3.34", default-features = false }
+# What zbus calls take.
+serde = "1.0.229"
+tracing = "0.1.44"
+# The radios' device, read whole then waited on (fcntl).
+rustix = { version = "1.1.6", features = ["fs"] }
