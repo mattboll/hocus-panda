@@ -284,6 +284,7 @@ pub fn read(text: &str, account: &AccountId, now: &Zoned) -> std::result::Result
             colour: c.color.unwrap_or(Colour::DEFAULT),
             read_only: c.read_only,
             shown: c.shown,
+            featured: true,
         })
         .collect();
     let mut events = Vec::new();

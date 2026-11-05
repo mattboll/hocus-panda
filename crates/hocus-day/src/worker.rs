@@ -28,8 +28,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Clock,
+    config::Over,
     model::{
-        Calendar, CalendarId, Colour, Event, EventId, Place, Task, TaskBoard, TaskId, sort_events,
+        Calendar, CalendarId, Event, EventId, Place, Task, TaskBoard, TaskId, sort_events,
         sort_tasks,
     },
     snapshot::{Account, Change, ChangeId, Holds, MonthState, Pending, Snapshot, State, Update},
@@ -40,9 +41,8 @@ use crate::{
 pub(crate) enum Source {
     Calendars {
         source: Box<dyn CalendarSource>,
-        /// The configuration's `shown`: names or ids.
-        shown: Option<Vec<String>>,
-        colours: BTreeMap<String, Colour>,
+        /// The configuration's `shown`, `featured` and `colors`.
+        over: Over,
     },
     Tasks {
         source: Box<dyn KanbanSource>,
@@ -453,14 +453,9 @@ impl Worker {
     /// Reads the source: whether it answered.
     fn fetch(&mut self) -> bool {
         let read = match &mut self.source {
-            Source::Calendars {
-                source,
-                shown,
-                colours,
-            } => read_calendars(
+            Source::Calendars { source, over } => read_calendars(
                 source.as_mut(),
-                shown.as_deref(),
-                colours,
+                over,
                 &self.clock,
                 Fetched {
                     events: &self.events,
@@ -733,6 +728,13 @@ impl Worker {
                     fetched: cached.fetched,
                 };
                 self.snapshot.calendars = cached.data.calendars.clone();
+                // The configuration as it is now, which may have changed
+                // since the cache was written.
+                if let Source::Calendars { over, .. } = &self.source {
+                    for calendar in &mut self.snapshot.calendars {
+                        over.apply(calendar);
+                    }
+                }
                 self.events = cached.data.events.clone();
                 self.far = cached
                     .data
@@ -802,25 +804,16 @@ struct CalendarsRead {
 /// window moves), else synced from their tokens.
 fn read_calendars(
     source: &mut dyn CalendarSource,
-    shown: Option<&[String]>,
-    colours: &BTreeMap<String, Colour>,
+    over: &Over,
     clock: &Clock,
     had: Fetched<'_>,
 ) -> Result<CalendarsRead, SourceError> {
     let now = clock.now();
     let zone = now.time_zone().clone();
     let window = Range::window(&now);
-    let names = |c: &Calendar, name: &str| {
-        c.id.as_str() == name || c.name.to_lowercase() == name.to_lowercase()
-    };
     let mut calendars = source.calendars()?;
     for calendar in &mut calendars {
-        if let Some(shown) = shown {
-            calendar.shown = shown.iter().any(|name| names(calendar, name));
-        }
-        if let Some((_, colour)) = colours.iter().find(|(name, _)| names(calendar, name)) {
-            calendar.colour = *colour;
-        }
+        over.apply(calendar);
     }
     let whole = had.window != Some(now.date());
     let mut events = Vec::new();
@@ -980,7 +973,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        model::{AccountId, BoardId, Column, ColumnId},
+        model::{AccountId, BoardId, Colour, Column, ColumnId},
         snapshot::{Holds, Kind},
         source::Listing,
     };
@@ -1191,6 +1184,7 @@ mod tests {
                 colour: Colour::DEFAULT,
                 read_only: false,
                 shown: true,
+                featured: true,
             }])
         }
 
@@ -1232,8 +1226,10 @@ mod tests {
                 },
                 make: Box::new(move || Source::Calendars {
                     source: Box::new(Counting(asked)),
-                    shown: None,
-                    colours: BTreeMap::from([("travail".to_owned(), Colour([1, 2, 3]))]),
+                    over: Over {
+                        colours: BTreeMap::from([("travail".to_owned(), Colour([1, 2, 3]))]),
+                        ..Over::default()
+                    },
                 }),
                 every: None,
                 cache: Some(cache.clone()),
@@ -1326,8 +1322,7 @@ mod tests {
                 },
                 make: Box::new(move || Source::Calendars {
                     source: Box::new(Monthly(ranges)),
-                    shown: None,
-                    colours: BTreeMap::new(),
+                    over: Over::default(),
                 }),
                 every: None,
                 cache: Some(cache.clone()),
