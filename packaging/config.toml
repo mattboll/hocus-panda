@@ -2,8 +2,8 @@
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
 # starts; the keyboard, the shortcuts, the pointer, the touchpad, the
-# appearance, the locale and the wallpaper sections also as soon as the
-# file changes. A
+# appearance, the locale, the wallpaper and the desktops sections also as
+# soon as the file changes. A
 # file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
@@ -310,7 +310,13 @@
 
 # [desktops]
 # Desktops on each screen, from 1 to 9. Each screen switches its own.
+# Followed as the file changes: more are added after the last, empty;
+# fewer take out the last ones, their windows going to the last that
+# stays.
 # count = 4
+# Their names, by position, the same on every screen: the bar's tiles and
+# Alt+Tab say them. One missing or "" is "Bureau N" / "Desktop N".
+# names = []
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the

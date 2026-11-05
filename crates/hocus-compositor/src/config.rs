@@ -856,13 +856,42 @@ pub struct Desktops {
     /// Desktops on each screen, from 1 to 9.
     #[serde(deserialize_with = "desktop_count")]
     pub count: usize,
+    /// Their names, by position (6.14): one missing or empty is "Bureau
+    /// N" (the shell's words).
+    pub names: Vec<String>,
 }
 
 impl Default for Desktops {
     fn default() -> Self {
         Self {
             count: crate::desktops::DEFAULT_COUNT,
+            names: Vec::new(),
         }
+    }
+}
+
+impl Desktops {
+    /// Desktop `index`'s name (from 0), if it has one.
+    pub fn name(&self, index: usize) -> Option<&str> {
+        self.names
+            .get(index)
+            .map(|n| n.trim())
+            .filter(|n| !n.is_empty())
+    }
+
+    /// The names the desktops there are have, the empty ones last left
+    /// out: what the shell is told.
+    pub fn shown_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .names
+            .iter()
+            .take(self.count)
+            .map(|n| n.trim().to_owned())
+            .collect();
+        while names.last().is_some_and(String::is_empty) {
+            names.pop();
+        }
+        names
     }
 }
 
@@ -1441,6 +1470,23 @@ mod tests {
             let text = format!("[desktops]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_desktops_names_are_by_position() -> anyhow::Result<()> {
+        let named: Config = toml::from_str(
+            "[desktops]\ncount = 3\nnames = [\"Travail\", \" \", \"Courrier\", \"Musique\"]\n",
+        )?;
+        let desktops = &named.desktops;
+        assert_eq!(desktops.name(0), Some("Travail"));
+        assert_eq!(desktops.name(1), None, "blank: \"Bureau 2\"");
+        assert_eq!(desktops.name(5), None);
+        // Past the count, not told; the blank ones last left out.
+        assert_eq!(desktops.shown_names(), ["Travail", "", "Courrier"]);
+        let first: Config = toml::from_str("[desktops]\nnames = [\"Travail\", \"\", \"\"]\n")?;
+        assert_eq!(first.desktops.shown_names(), ["Travail"]);
+        assert!(Config::default().desktops.shown_names().is_empty());
         Ok(())
     }
 

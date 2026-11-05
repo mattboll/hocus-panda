@@ -17,6 +17,7 @@ mod clipboard;
 mod config;
 mod cursor;
 mod decoration;
+mod desktop_set;
 pub mod desktops;
 mod displays;
 mod emoji;

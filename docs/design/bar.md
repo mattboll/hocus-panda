@@ -294,7 +294,7 @@ group where it is.
 - **The list** (approved 2026-10-30, issue #473, variant A + B): resting
   150 ms on a tile (or a mini form's dot) opens a 240 px popover beside the
   bar (§9's hover mechanics: it closes 300 ms after the pointer leaves both,
-  and stays while it moves toward it), its top on the tiles': "Bureau N"
+  and stays while it moves toward it), its top on the tiles': its name or "Bureau N"
   (14 px, 700) and "M fenêtres" / "M windows" on the right (12 px,
   `text.faint`); one 32 px row per window, front to back: its icon (16 px),
   its title (13.5 px, cut with an ellipsis). An empty desktop: "Aucune
@@ -312,8 +312,11 @@ group where it is.
   ring, from the desktop left to the one shown (none with reduced motion).
 - **Several screens**: a bar shows its own screen's desktops (sprint 8
   decides the rest).
-- **Names** of desktops (6.14) come later; for now a tile's name for
-  screen readers is "Bureau N, M fenêtres" / "Desktop N, M windows".
+- **Names** of desktops (`[desktops] names`, 6.14; windows.md §12): a
+  tile's name for screen readers is "Travail, M fenêtres", its list's
+  title "Travail"; without a name, "Bureau N, M fenêtres" / "Desktop N, M
+  windows" and "Bureau N". The compositor tells the shell the names on a
+  `desktop-names` line, as it connects and when the file changes them.
 
 When the output is too short (1366×768 gives 752 px of bar), groups give
 way in this order: Today, then To do, then the agent lines beyond the
