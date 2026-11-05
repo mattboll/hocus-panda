@@ -659,10 +659,10 @@ impl Fakes {
     /// chosen (`default.configured.audio.sink`, `….source`), and
     /// WirePlumber makes it the default (`default.audio.sink`, `….source`).
     /// Here a `pw-metadata` follows the first, and the second is set when
-    /// it changes. A stream's target set or taken away, WirePlumber moves
-    /// the stream: the graph changes, which PipeWire 1.0's pw-dump needs
-    /// to write the metadata's change out (without it, an undone target
-    /// stayed until something else changed).
+    /// it changes. Not the streams' targets: an idle client such as this
+    /// one is not told of a key on an object newer than its last request
+    /// (PipeWire 1.0 drops it as stale), so a stream's target never shows
+    /// here; the Settings make PipeWire's pw-dump write it out themselves.
     fn start_policy(&mut self) -> anyhow::Result<()> {
         use std::io::BufRead;
         let mut monitor = self
@@ -695,10 +695,6 @@ impl Fakes {
                 let Ok(line) = line else {
                     return;
                 };
-                if line.contains("key:'target.object'") {
-                    let _ = pw("wpctl").arg("status").status();
-                    continue;
-                }
                 let Some(key) = ["sink", "source"]
                     .into_iter()
                     .find(|k| line.contains(&format!("key:'default.configured.audio.{k}'")))

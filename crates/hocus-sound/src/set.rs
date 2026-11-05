@@ -270,6 +270,15 @@ impl Asked {
                 ),
             });
         }
+        // The metadata read once more after the targets written: before
+        // PipeWire 1.0.9 (Ubuntu 24.04 has 1.0.5), `pw-dump --monitor`
+        // writes a metadata change out only at the graph's next change, and
+        // the writing `pw-metadata` connected (its change) before writing.
+        // A client connecting after the write is such a change; without
+        // it, the target chosen would not show until something else moved.
+        if !self.targets.is_empty() {
+            commands.push(("pw-metadata", ["-n", "default"].map(str::to_owned).to_vec()));
+        }
         commands
     }
 
@@ -600,6 +609,9 @@ mod tests {
                     "pw-metadata",
                     &["-n", "default", "-d", "91", "target.object"]
                 ),
+                // Read once more, which an older pw-dump needs to write
+                // the targets out.
+                line("pw-metadata", &["-n", "default"]),
             ]
         );
         // A volume on a node whose balance is not centred keeps it: the

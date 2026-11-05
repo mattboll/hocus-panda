@@ -193,7 +193,11 @@ and a volume on an output whose balance is not centred, which `wpctl`
 would centre) and `pw-metadata` (an application's output), what was asked
 meanwhile taken together. `pw-dump` says a metadata key taken away as an
 update listing nothing: the metadata is then read again whole with
-`pw-metadata -n default`.
+`pw-metadata -n default`. Before PipeWire 1.0.9 (Ubuntu 24.04 has 1.0.5),
+`pw-dump` writes a metadata change out only at the graph's next change;
+after writing an application's output, the setter runs `pw-metadata -n
+default` once more, a client connecting after the write, so that the
+page shows the output chosen at once.
 
 **The meter** is a `pw-record` of the input in use (`target.object` its
 serial, 16 kHz, one channel), its node `hocus-settings-meter` and its
