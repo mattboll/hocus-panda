@@ -32,17 +32,56 @@ jobs:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
-  # Every Rust build happens once, in `build`; four `linux (N/4)` jobs then
-  # run a quarter of the tests each from its nextest archive (#633). Four
-  # jobs that each built everything took the run from 16 to 11-14 min at
-  # four times the runner time (#626).
-  build:
+  # A pull request runs the tests of what it changes (scripts/ci/pr-tests.sh):
+  # building and running the whole suite took 15 min and more, and a test
+  # failing by chance anywhere held every pull request.
+  pr-tests:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    env:
-      # Line numbers in backtraces, not the full debug information: the
-      # binaries are a fraction of the size, quicker to link, to send to
-      # the test jobs and to unpack there.
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The merge commit and main before it: what the pull request changes.
+          fetch-depth: 2
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-pr-v1-${{ runner.os }}
+      - name: Dependencies
+        # Those of `build` and of `linux` below, together.
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+            -o Dir::Cache::Archives="$HOME/apt-archives" \
+            clang mold pkg-config fonts-dejavu-core \
+            libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
+            mesa-vulkan-drivers libvulkan1
+          sudo chown -R "$USER" ~/apt-archives
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Tests of what changed
+        # A line `Tests: NAME, NAME` in the description adds test files; the
+        # label `full-tests` runs everything.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-tests') && 'full' || '' }}
+        run: scripts/ci/pr-tests.sh HEAD^1 $FULL
+
+  # On main, after each merge, the whole suite: every Rust build happens once,
+  # in `build`; four `linux (N/4)` jobs then run a quarter of the tests each
+  # from its nextest archive (#633). Nobody waits on it; a failure is fixed
+  # at once.
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: Free disk space
@@ -63,10 +102,9 @@ jobs:
             libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          # A pull request starts from main's build (cold, this job takes
-          # 20 min).
-          shared-key: build
-          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ci/633-nextest-archive' }}
+          # Saved by main's build; a pull request's tests start from it.
+          shared-key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -80,12 +118,7 @@ jobs:
         # archive takes them along (.config/nextest.toml).
         run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings
       - name: Tests' archive
-        run: cargo nextest archive --workspace --archive-file nextest.tar.zst --timings
-      - uses: actions/upload-artifact@v4
-        with:
-          name: timings
-          path: target/cargo-timings/cargo-timing.html
-          retention-days: 3
+        run: cargo nextest archive --workspace --archive-file nextest.tar.zst
       - uses: actions/upload-artifact@v4
         with:
           name: nextest
@@ -114,6 +147,7 @@ jobs:
 
   linux:
     needs: build
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
