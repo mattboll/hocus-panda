@@ -78,6 +78,34 @@ fn each_desktop_shows_its_own_windows_and_the_focus_follows() -> anyhow::Result<
     Ok(())
 }
 
+/// Windows shown again with their desktop keep their order for the
+/// pointer as on the screen: a click on the one in front is its own, even
+/// when it is not the last opened (#647).
+#[test]
+fn a_desktop_shown_again_keeps_its_windows_order_for_the_pointer() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let first = open(&mut hp, "test.first", (800, 600))?;
+    let second = open(&mut hp, "test.second", (300, 200))?;
+    // The first brought in front, over the second, by a click beside it.
+    common::click(&mut hp, (f64::from(first.x + 20), f64::from(first.y + 20)))?;
+    let raised = hp.dispatch_until(WAIT, |hp| focused(hp).as_deref() == Some("test.first"))?;
+    anyhow::ensure!(raised, "focused: {:?}", focused(&hp));
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_1]);
+    settle_on(&mut hp, 0)?;
+    // Where both are: the first, in front, takes the click.
+    let middle = (
+        f64::from(second.x + second.width / 2),
+        f64::from(second.y + second.height / 2),
+    );
+    common::click(&mut hp, middle)?;
+    wait(&mut hp, Duration::from_millis(100))?;
+    let front = hp.windows().last().and_then(|w| w.app_id.clone());
+    assert_eq!(front.as_deref(), Some("test.first"));
+    assert_eq!(focused(&hp).as_deref(), Some("test.first"));
+    Ok(())
+}
+
 #[test]
 fn a_window_sent_away_stays_there_and_one_taken_goes_along() -> anyhow::Result<()> {
     let mut hp = compositor()?;

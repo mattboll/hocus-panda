@@ -1699,6 +1699,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-network"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "rustix 1.1.6",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "hocus-settings"
 version = "0.2.0"
 dependencies = [
@@ -1706,6 +1718,7 @@ dependencies = [
  "hocus-agents",
  "hocus-config",
  "hocus-link",
+ "hocus-network",
  "hocus-sound",
  "iced",
  "image",
@@ -1733,6 +1746,7 @@ dependencies = [
  "fontdue",
  "hocus-day",
  "hocus-link",
+ "hocus-network",
  "hocus-sound",
  "iced",
  "iced_layershell",

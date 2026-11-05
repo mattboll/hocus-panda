@@ -67,6 +67,10 @@ impl App {
         if let Some(menu) = self.screens_menu_list() {
             layers.push(menu);
         }
+        // The network's sheet, over the page (6.6).
+        if let Some(sheet) = self.network_sheet() {
+            layers.push(sheet);
+        }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
         }
@@ -383,6 +387,12 @@ impl App {
                 self.title(),
                 SectionId::Keyboard.name(lang),
                 w("Raccourcis", "Shortcuts").get(lang)
+            ),
+            Page::Section(SectionId::Network) if self.network.sub => format!(
+                "{} › {} › {}",
+                self.title(),
+                SectionId::Network.name(lang),
+                w("Réseaux enregistrés", "Saved networks").get(lang)
             ),
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
@@ -746,6 +756,7 @@ impl App {
                 }
             }
             SectionId::Sound => self.sound_card(),
+            SectionId::Network => self.network_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
                 .to_owned(),
@@ -788,6 +799,9 @@ impl App {
         }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
+        }
+        if id == SectionId::Network {
+            return self.network_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -1676,6 +1690,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
+        "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),
