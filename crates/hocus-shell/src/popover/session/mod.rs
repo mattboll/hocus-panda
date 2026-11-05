@@ -901,7 +901,7 @@ impl Panel {
         tracing::info!(?target, "the session menu acts");
         let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
         match target {
-            Target::Row(Row::Settings) => settings(),
+            Target::Row(Row::Settings) => open_settings(None),
             Target::Row(Row::Lock) => {
                 super::send(vec![Effect::Tell(ToCompositor::Lock(LockAsk::Now))]);
                 event(Seen::Chosen);
@@ -957,16 +957,20 @@ impl Panel {
     }
 }
 
-/// The Settings open (or come forward), the popover closes: the program
-/// in `PATH`, else beside the shell's.
-fn settings() {
+/// The Settings open (or come forward) on `section` if given, the popover
+/// closes: the program in `PATH`, else beside the shell's. The compositor
+/// starts it with an activation token, which brings an open window
+/// forward.
+pub(in crate::popover) fn open_settings(section: Option<&str>) {
     let program = settings_program();
-    tracing::info!(program, "the Settings open from the footer");
+    tracing::info!(program, section, "the Settings open from the bar");
+    let mut argv = vec![program];
+    argv.extend(section.map(str::to_owned));
     let launch = Launch {
         id: "hocus-settings".to_owned(),
         terminal: false,
         dir: String::new(),
-        argv: vec![program],
+        argv,
     };
     super::send(vec![Effect::Tell(ToCompositor::Launch(launch))]);
     event(Seen::Chosen);

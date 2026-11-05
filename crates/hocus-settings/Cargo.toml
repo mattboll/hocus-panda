@@ -16,6 +16,8 @@ workspace = true
 [dependencies]
 # The configuration file read, edited in place and written back.
 hocus-config = { path = "../hocus-config", version = "0.2.0" }
+# The Son page's PipeWire: followed, set, metered, as the bar does.
+hocus-sound = { path = "../hocus-sound", version = "0.2.0" }
 toml_edit = "0.25.17"
 # The shell's toolkit and its settings (tech-choices, decision 2), as an
 # application window this time: winit's Wayland backend, no X11, no theme

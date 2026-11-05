@@ -11,6 +11,7 @@
 //! sliding, a menu opening) ask for frames only while they move.
 
 mod places;
+mod sound;
 mod style;
 mod view;
 
@@ -123,6 +124,8 @@ pub enum ToastAction {
     Undo,
     /// "Voir": the row changed by hand is shown.
     Show(Slot),
+    /// A sound device's toast: what its button does.
+    Sound(sound::Act),
 }
 
 /// A change written: what was there, what is there now.
@@ -131,6 +134,14 @@ struct Change {
     slot: Slot,
     before: Raw,
     after: Raw,
+}
+
+/// What `Ctrl+Z` takes back: a change of the file, or a choice of the
+/// Son page (in PipeWire).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Undo {
+    File(Change),
+    Sound(sound::Choice),
 }
 
 /// Why a write was asked.
@@ -208,6 +219,8 @@ pub enum Message {
     /// Closing has waited long enough for the writes.
     CloseAnyway,
     Drag,
+    /// The Son page's.
+    Sound(sound::Msg),
     Frame(Instant),
     Placed(Places),
     Scrolled,
@@ -240,8 +253,8 @@ pub struct App {
     light: Option<(&'static str, Instant)>,
     /// A found row to scroll to once the page is laid out.
     scroll_to: Option<&'static str>,
-    undo: Vec<Change>,
-    redo: Vec<Change>,
+    undo: Vec<Undo>,
+    redo: Vec<Undo>,
     pending: BTreeMap<u64, Pending>,
     sliding: Option<Sliding>,
     /// Switches sliding, since then.
@@ -255,6 +268,8 @@ pub struct App {
     /// What the log said last.
     said: String,
     said_places: String,
+    /// The Son page: PipeWire as last heard.
+    sound: sound::Sound,
 }
 
 impl App {
@@ -263,6 +278,7 @@ impl App {
         let (sender, receiver) = unbounded();
         *HEARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
         let file = start.places.file.clone();
+        let sound = sound::Sound::start(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -312,7 +328,12 @@ impl App {
             life: Life::Open,
             said: String::new(),
             said_places: String::new(),
+            sound,
         };
+        let mut app = app;
+        if start.section == Some(SectionId::Sound) {
+            app.light = Some(("sound.output", Instant::now()));
+        }
         (app, window::latest().map(Message::Window))
     }
 
@@ -372,6 +393,11 @@ impl App {
             .is_some_and(|t| within(t.since, TOAST_IN))
             || self.menu.is_some_and(|(_, since)| within(since, MENU_IN))
             || self
+                .sound
+                .menu
+                .as_ref()
+                .is_some_and(|(_, since)| within(*since, MENU_IN))
+            || self
                 .light
                 .is_some_and(|(_, since)| within(since, LIGHT_END))
             || self.knobs.values().any(|since| within(*since, KNOB))
@@ -380,6 +406,7 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
         let task = self.handle(message);
+        self.sound_listen();
         self.now = Instant::now();
         self.knobs
             .retain(|_, since| self.now.saturating_duration_since(*since) < KNOB);
@@ -458,6 +485,7 @@ impl App {
             }
             Message::CloseMenu => {
                 self.menu = None;
+                self.sound.menu = None;
                 Task::none()
             }
             Message::Choose(slot, value) => {
@@ -480,6 +508,7 @@ impl App {
                     self.toast = None;
                     self.show_row(slot.setting)
                 }
+                Some(ToastAction::Sound(act)) => self.sound_update(sound::Msg::Act(act)),
                 _ => Task::none(),
             },
             Message::ToastClose => {
@@ -513,6 +542,7 @@ impl App {
                 }
             }
             Message::Drag => self.window.map_or_else(Task::none, window::drag),
+            Message::Sound(msg) => self.sound_update(msg),
             Message::Frame(_) | Message::Scrolled | Message::Nothing => Task::none(),
             Message::Placed(places) => self.placed(places),
         }
@@ -599,7 +629,7 @@ impl App {
         let now = self.said_value(pending.slot);
         match pending.doing {
             Doing::New => {
-                self.undo.push(change);
+                self.undo.push(Undo::File(change));
                 self.redo.clear();
                 let text = match self.lang {
                     Lang::French => format!("{name} : {now}"),
@@ -609,9 +639,9 @@ impl App {
             }
             Doing::Undo | Doing::Redo => {
                 if pending.doing == Doing::Undo {
-                    self.redo.push(change);
+                    self.redo.push(Undo::File(change));
                 } else {
-                    self.undo.push(change);
+                    self.undo.push(Undo::File(change));
                 }
                 self.light = Some((setting.id, Instant::now()));
                 if let Some(source) = pending.slot.source {
@@ -736,11 +766,19 @@ impl App {
     }
 
     fn undo(&mut self) -> Task<Message> {
-        if !self.writable() {
-            return Task::none();
-        }
-        let Some(change) = self.undo.pop() else {
-            return Task::none();
+        let change = match self.undo.last() {
+            Some(Undo::Sound(_)) => {
+                let Some(Undo::Sound(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.sound_undo(choice, false);
+            }
+            Some(Undo::File(_)) if self.writable() => match self.undo.pop() {
+                Some(Undo::File(change)) => change,
+                _ => return Task::none(),
+            },
+            _ => return Task::none(),
         };
         self.toast = None;
         self.ask_write(
@@ -753,11 +791,18 @@ impl App {
     }
 
     fn redo(&mut self) -> Task<Message> {
-        if !self.writable() {
-            return Task::none();
-        }
-        let Some(change) = self.redo.pop() else {
-            return Task::none();
+        let change = match self.redo.last() {
+            Some(Undo::Sound(_)) => {
+                let Some(Undo::Sound(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.sound_undo(choice, true);
+            }
+            Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
+                Some(Undo::File(change)) => change,
+                _ => return Task::none(),
+            },
+            _ => return Task::none(),
         };
         self.ask_write(change.slot, change.after.clone(), Doing::Redo, Some(change));
         Task::none()
@@ -818,6 +863,7 @@ impl App {
 
     fn close_now(&mut self) -> Task<Message> {
         self.life = Life::Closed;
+        self.sound.stop();
         self.window.map_or_else(iced::exit, window::close)
     }
 
@@ -851,6 +897,7 @@ impl App {
             self.page = page;
             self.light = None;
             self.menu = None;
+            self.sound.menu = None;
         }
         self.opened = None;
     }
@@ -874,6 +921,10 @@ impl App {
                 tracing::info!(setting = setting.id, "a result opened");
                 self.show_row(setting.id)
             }
+            search::Target::Outside(outside) => {
+                tracing::info!(setting = outside.id, "a result opened");
+                self.show_row(outside.id)
+            }
             search::Target::Section(_) => {
                 operation::snap_to(places::PAGE, widget::scrollable::RelativeOffset::START)
             }
@@ -884,6 +935,8 @@ impl App {
     fn show_row(&mut self, setting: &'static str) -> Task<Message> {
         if let Some(s) = crate::model::setting(setting) {
             self.go(Page::Section(s.section));
+        } else if let Some(o) = crate::model::outside(setting) {
+            self.go(Page::Section(o.section));
         }
         self.scroll_to = Some(setting);
         self.light = Some((setting, Instant::now()));
@@ -922,6 +975,10 @@ impl App {
         tracing::info!(section = ?again.section, "launched again: the window comes forward");
         if let Some(section) = again.section.as_deref().and_then(SectionId::from_slug) {
             self.go(Page::Section(section));
+            // From the sound popover's link: the output in use lights.
+            if section == SectionId::Sound {
+                self.light = Some(("sound.output", Instant::now()));
+            }
         }
         let (Some(id), Some(token)) = (self.window, again.token) else {
             return Task::none();
@@ -941,6 +998,9 @@ impl App {
         let Page::Section(section) = self.page else {
             return Vec::new();
         };
+        if section == SectionId::Sound {
+            return self.sound_stops().into_iter().map(Control::Sound).collect();
+        }
         let settings = settings_of(section);
         let mut out = Vec::new();
         if settings.iter().any(|s| s.group.per_source) {
@@ -986,7 +1046,7 @@ impl App {
                 };
             }
             Key::Named(Named::Escape) => {
-                if self.menu.take().is_some() {
+                if self.menu.take().is_some() || self.sound.menu.take().is_some() {
                     return Task::none();
                 }
                 if !self.query.is_empty() {
@@ -1006,6 +1066,9 @@ impl App {
         }
         if let Some((slot, _)) = self.menu {
             return self.menu_key(slot, key);
+        }
+        if self.sound.menu.is_some() {
+            return self.sound_menu_key(key);
         }
         match key.as_ref() {
             Key::Named(Named::Tab) => return self.tab(modifiers.shift()),
@@ -1101,6 +1164,7 @@ impl App {
             _ => return Task::none(),
         };
         match control {
+            Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Segmented => {
                 match named {
                     Named::ArrowLeft => self.source = Source::Battery,
@@ -1246,6 +1310,7 @@ impl App {
 enum Control {
     Segmented,
     Setting(Slot),
+    Sound(sound::Stop),
 }
 
 /// The places of what the window draws, after it is laid out.

@@ -107,7 +107,7 @@ impl Bed {
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
-                 HOCUS_POWER_SUPPLY_DIR=/nonexistent ICED_BACKEND=tiny-skia \
+                 HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
                  PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \

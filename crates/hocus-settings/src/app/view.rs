@@ -25,14 +25,18 @@ use crate::{
     store::{FileState, Reading, Slot},
 };
 
-type El<'a> = Element<'a, Message>;
+pub(super) type El<'a> = Element<'a, Message>;
 
 const SIDEBAR_WIDTH: f32 = 240.0;
 const HEADER: f32 = 48.0;
 const PAGE_WIDTH: f32 = 720.0;
 
 /// A text in Manrope.
-fn t<'a>(content: impl text::IntoFragment<'a>, size: f32, color: Color) -> text::Text<'a> {
+pub(super) fn t<'a>(
+    content: impl text::IntoFragment<'a>,
+    size: f32,
+    color: Color,
+) -> text::Text<'a> {
     text(content).size(size).color(color).font(MANROPE)
 }
 
@@ -47,7 +51,7 @@ impl App {
     pub fn view(&self) -> El<'_> {
         let base = row![self.sidebar(), self.content()];
         let mut layers: Vec<El<'_>> = vec![base.into()];
-        if let Some(menu) = self.menu_list() {
+        if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .on_press(Message::CloseMenu)
@@ -295,6 +299,11 @@ impl App {
             };
             let mut path = match found.target {
                 Target::Section(_) => w("Toute la page", "The whole page").get(lang).to_owned(),
+                Target::Outside(outside) => format!(
+                    "{} › {}",
+                    section.name.get(lang),
+                    capitalised(outside.group.get(lang))
+                ),
                 Target::Setting(setting) => format!(
                     "{} › {}",
                     section.name.get(lang),
@@ -682,6 +691,7 @@ impl App {
                     (None, Lang::English) => format!("On AC · {suspend}"),
                 }
             }
+            SectionId::Sound => self.sound_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
                 .to_owned(),
@@ -703,6 +713,10 @@ impl App {
         ]
         .spacing(18)
         .padding(Padding::default().top(14));
+        if id == SectionId::Sound {
+            page = page.push(self.sound_groups());
+            return container(page).id(format!("page:{}", section.slug)).into();
+        }
         let settings = settings_of(id);
         if settings.is_empty() {
             page = page.push(card_box(
@@ -1097,22 +1111,18 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
-            ToastAction::Undo => Some(w("Annuler", "Undo")),
-            ToastAction::Show(_) => Some(w("Voir", "Show")),
+            ToastAction::Undo => Some(w("Annuler", "Undo").get(lang).to_owned()),
+            ToastAction::Show(_) => Some(w("Voir", "Show").get(lang).to_owned()),
+            ToastAction::Sound(act) => Some(self.sound_act_label(act)),
             ToastAction::None => None,
         };
         if let Some(action) = action {
             line = line.push(
                 container(
-                    button(
-                        text(action.get(lang))
-                            .size(13)
-                            .font(BOLD)
-                            .color(fade(MINT, came)),
-                    )
-                    .padding([4, 6])
-                    .on_press(Message::ToastAct)
-                    .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
+                    button(text(action).size(13).font(BOLD).color(fade(MINT, came)))
+                        .padding([4, 6])
+                        .on_press(Message::ToastAct)
+                        .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
                 )
                 .id("toast-action".to_owned()),
             );
@@ -1176,7 +1186,7 @@ fn capitalised(label: &str) -> String {
     }
 }
 
-fn label<'a>(words: &'static str) -> El<'a> {
+pub(super) fn label<'a>(words: &'static str) -> El<'a> {
     text(words).size(11.5).font(BOLD).color(DIM).into()
 }
 
@@ -1186,7 +1196,7 @@ fn group_box<'a>(head: El<'a>, body: El<'a>) -> El<'a> {
         .into()
 }
 
-fn card_box(body: El<'_>) -> El<'_> {
+pub(super) fn card_box(body: El<'_>) -> El<'_> {
     container(body)
         .width(Length::Fill)
         .style(boxed(CARD, 12.0, Some((1.0, CARD_RIM))))
@@ -1194,7 +1204,7 @@ fn card_box(body: El<'_>) -> El<'_> {
 }
 
 /// A row, with the divider over it after the first.
-fn divided(divider: bool, row: El<'_>) -> El<'_> {
+pub(super) fn divided(divider: bool, row: El<'_>) -> El<'_> {
     if !divider {
         return row;
     }
@@ -1254,7 +1264,7 @@ fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     }
 }
 
-fn ease_out(t: Duration, over: Duration) -> f32 {
+pub(super) fn ease_out(t: Duration, over: Duration) -> f32 {
     let x = (t.as_secs_f32() / over.as_secs_f32()).clamp(0.0, 1.0);
     1.0 - (1.0 - x).powi(3)
 }
@@ -1372,6 +1382,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
     let action = app.toast.as_ref().and_then(|t| match t.action {
         ToastAction::Undo => Some("undo"),
         ToastAction::Show(_) => Some("show"),
+        ToastAction::Sound(_) => Some("sound"),
         ToastAction::None => None,
     });
     let cards: Vec<serde_json::Value> = [
@@ -1402,6 +1413,11 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "menu": app.menu.map(|(slot, _)| slot.word()),
         "cards": if app.page == Page::Home { serde_json::json!(cards) } else { serde_json::Value::Null },
         "undo": app.undo.len(),
+        "sound": if app.page == Page::Section(SectionId::Sound) {
+            app.sound_shown()
+        } else {
+            serde_json::json!({ "listening": app.sound.listening() })
+        },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),
