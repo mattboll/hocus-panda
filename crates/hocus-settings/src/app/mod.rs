@@ -12,6 +12,7 @@
 
 mod appearance_page;
 mod bar_page;
+mod desktops_page;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -312,6 +313,8 @@ pub enum Message {
     Wallpaper(wallpaper_page::Msg),
     /// The bar's page (6.4).
     Bar(bar_page::Msg),
+    /// The desktops and windows' page (6.14).
+    Desktops(desktops_page::Msg),
     Nothing,
 }
 
@@ -374,6 +377,9 @@ pub struct App {
     wallpaper: wallpaper_page::State,
     /// The bar's page: its preview's motions and clock (6.4).
     bar: bar_page::State,
+    /// The desktops and windows' page: the compositor's windows, a name
+    /// changed, a desktop taken out waiting for it (6.14).
+    desktops: desktops_page::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -460,6 +466,7 @@ impl App {
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
+            desktops: desktops_page::State::default(),
             fresh: None,
             parity: false,
         };
@@ -614,6 +621,22 @@ impl App {
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
+        // A desktop's name being changed is written as the pointer goes
+        // elsewhere (6.14).
+        if self.desktops_editing()
+            && matches!(
+                message,
+                Message::Toggle(_)
+                    | Message::Menu(_)
+                    | Message::Section(_)
+                    | Message::Home
+                    | Message::Query(_)
+                    | Message::Close
+                    | Message::Result(_)
+            )
+        {
+            self.desktops_commit();
+        }
         match message {
             Message::Window(id) => {
                 self.window = id;
@@ -638,6 +661,17 @@ impl App {
                 if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     self.keys.adding = None;
                     return Task::none();
+                }
+                // A desktop's name: `Esc` keeps the old one, `Tab` writes.
+                if self.desktops_editing() {
+                    match key.as_ref() {
+                        Key::Named(Named::Escape) => {
+                            self.desktops_cancel();
+                            return operation::focus("nothing");
+                        }
+                        Key::Named(Named::Tab) => self.desktops_commit(),
+                        _ => {}
+                    }
                 }
                 self.key(&key, modifiers, text.as_deref(), captured)
             }
@@ -690,7 +724,8 @@ impl App {
             Message::Choose(slot, value) => {
                 self.menu = None;
                 self.bar_chose(slot, &value);
-                self.change(slot, value)
+                let say = self.desktops_toast(slot, &value);
+                self.change_saying(slot, value, say)
             }
             Message::Slide(slot, value) => self.slide(slot, value),
             Message::Settled(serial) => match self.sliding {
@@ -753,6 +788,7 @@ impl App {
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
+            Message::Desktops(msg) => self.desktops_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -1007,6 +1043,12 @@ impl App {
 
     /// `value` written at `slot`, at once.
     fn change(&mut self, slot: Slot, value: Value) -> Task<Message> {
+        self.change_saying(slot, value, None)
+    }
+
+    /// The same, its toast saying `say` instead of the setting and its
+    /// value, when given.
+    fn change_saying(&mut self, slot: Slot, value: Value, say: Option<String>) -> Task<Message> {
         if !self.writable() {
             return Task::none();
         }
@@ -1014,7 +1056,8 @@ impl App {
         if understood && self.value(slot) == Some(value.clone()) {
             return Task::none();
         }
-        self.ask_write(slot, Raw::Set(value), Doing::New, None);
+        let batch = None;
+        self.ask(slot, Raw::Set(value), Doing::New, None, batch, say);
         Task::none()
     }
 
@@ -1131,6 +1174,10 @@ impl App {
             }
         }
         for change in changes {
+            // A desktop taken out comes back with its windows first (6.14).
+            if let Some(task) = self.desktops_again(&change, true) {
+                return task;
+            }
             match &change {
                 Change::Slot { slot, before, .. } => {
                     let (slot, before) = (*slot, before.clone());
@@ -1172,6 +1219,9 @@ impl App {
             }
         }
         for change in changes {
+            if let Some(task) = self.desktops_again(&change, false) {
+                return task;
+            }
             match &change {
                 Change::Slot { slot, after, .. } => {
                     let (slot, after) = (*slot, after.clone());
@@ -1408,6 +1458,9 @@ impl App {
         if section == SectionId::Bar {
             return self.bar_controls();
         }
+        if section == SectionId::Desktops {
+            return self.desktops_controls();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1605,6 +1658,7 @@ impl App {
         match control {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Bar(stop) => self.bar_key(&stop, named),
+            Control::Desktops(stop) => self.desktops_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -1757,7 +1811,7 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.unavailable(setting).is_some() {
+        if !self.writable() || self.unavailable(setting).is_some() || self.desktops_inert(setting) {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -1849,6 +1903,8 @@ enum Control {
     Wallpaper(wallpaper_page::Stop),
     /// The bar's page's own (6.4).
     Bar(bar_page::Stop),
+    /// The desktops and windows' page's own (6.14).
+    Desktops(desktops_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
