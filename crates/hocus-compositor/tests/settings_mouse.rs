@@ -41,7 +41,7 @@ const BTN_RIGHT: u32 = 0x111;
 /// A configuration of the user's own, with a mouse's setting in it.
 const FILE: &str = "# My desktop, by hand.\n\
     [keyboard]\n\
-    layouts = [\"fr\", \"us\"]\n\
+    layouts = [\"us\", \"fr\"]\n\
     \n\
     [pointer]\n\
     left-handed = true # I am\n";

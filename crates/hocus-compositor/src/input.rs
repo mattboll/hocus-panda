@@ -269,6 +269,11 @@ impl State {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::InkClear);
                 }
+                // A client that takes every key (the Settings recording a
+                // shortcut, 6.8): none of the desktop's, the media keys too
+                // (they are shortcuts the user may record). The virtual
+                // terminal's switch above stays.
+                let inhibited = this.shortcuts_inhibited();
                 // The key of the layout's first level, Latin when the keyboard
                 // has a Latin layout: a shortcut stays on its key whatever the
                 // active layout.
@@ -291,7 +296,8 @@ impl State {
                         unshifted.shift = false;
                         shortcuts.action(&unshifted, typed, this.nested)
                     });
-                let action = action.filter(|(a, _)| !auth || matches!(a, Action::Level(_)));
+                let action =
+                    action.filter(|(a, _)| !inhibited && (!auth || matches!(a, Action::Level(_))));
                 if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action, chord));

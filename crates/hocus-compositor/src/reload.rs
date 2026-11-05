@@ -6,6 +6,11 @@
 //!
 //! A file that does not read is logged and changes nothing: the desktop
 //! keeps the last configuration that read.
+//!
+//! Followed live: `[pointer]` and `[touchpad]` (6.12), `[shortcuts]` and
+//! `[keyboard]` (6.8). A keyboard whose layouts or options changed has its
+//! keymap compiled on the thread too (XKB reads its files), the loop only
+//! taking it in; its repeat is given to clients again.
 
 use std::{
     ffi::OsString,
@@ -17,31 +22,78 @@ use smithay::reexports::calloop::{
     channel::{self, Event},
 };
 
+use smithay::input::keyboard::xkb;
+
 use crate::{App, Config, State};
 
-/// Starts following `file`; nothing when it cannot be watched (said in
-/// the log: its changes then wait for the next session).
-pub fn start(handle: &LoopHandle<'static, App>, file: &Path) {
-    let (sender, heard) = channel::channel::<Config>();
+/// What the file says now, and the keymap it makes when its keyboard's
+/// layouts or options changed (or why XKB refused them).
+#[derive(Debug)]
+pub struct Reread {
+    pub config: Config,
+    pub keymap: Option<Result<String, String>>,
+}
+
+/// Starts following `file`, its keyboard compiled as `current` (the
+/// configuration the session started with); nothing when it cannot be
+/// watched (said in the log: its changes then wait for the next session).
+pub fn start(handle: &LoopHandle<'static, App>, file: &Path, current: &Config) {
+    let (sender, heard) = channel::channel::<Reread>();
     if let Err(err) = handle.insert_source(heard, |event, (), app| {
-        if let Event::Msg(config) = event {
-            app.state.config_changed(config);
+        if let Event::Msg(reread) = event {
+            app.state.config_changed(reread);
         }
     }) {
         tracing::warn!(error = %err.error, "the configuration is not followed");
         return;
     }
     let file = file.to_path_buf();
+    let system = current.system_keyboard.clone();
+    let mut names = keymap_names(current);
     let started = std::thread::Builder::new()
         .name("configuration".to_owned())
-        .spawn(move || watch(&file, &sender));
+        .spawn(move || {
+            watch(&file, |mut config| {
+                config.system_keyboard = system.clone();
+                let now = keymap_names(&config);
+                let keymap = (now != names).then(|| compile(&now));
+                names = now;
+                sender.send(Reread { config, keymap }).is_ok()
+            });
+        });
     if let Err(err) = started {
         tracing::warn!(%err, "the configuration is not followed");
     }
 }
 
-/// The thread: blocked in inotify's read until the file may have changed.
-fn watch(file: &Path, sender: &channel::Sender<Config>) {
+/// What XKB is given for `config`'s keyboard.
+fn keymap_names(config: &Config) -> (String, String, String, String) {
+    let names = config.xkb_names();
+    (names.model, names.layout, names.variant, names.options)
+}
+
+/// The keymap of these names, as text for the loop to take in.
+fn compile(
+    (model, layout, variant, options): &(String, String, String, String),
+) -> Result<String, String> {
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    let keymap = xkb::Keymap::new_from_names(
+        &context,
+        "",
+        model,
+        layout,
+        variant,
+        (!options.is_empty()).then(|| options.clone()),
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    )
+    .ok_or_else(|| format!("XKB refused layouts {layout:?} ({variant:?}), options {options:?}"))?;
+    Ok(keymap.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1))
+}
+
+/// The thread: blocked in inotify's read until the file may have changed;
+/// `send` takes each new configuration, and says `false` once the loop is
+/// gone.
+fn watch(file: &Path, mut send: impl FnMut(Config) -> bool) {
     use rustix::fs::inotify;
     let Some(name) = file.file_name().map(ToOwned::to_owned) else {
         return;
@@ -79,26 +131,32 @@ fn watch(file: &Path, sender: &channel::Sender<Config>) {
         tracing::warn!(file = %file.display(), "the configuration's folder is not there: not followed");
         return;
     }
-    // What was last read, so that the loop hears only of changes.
-    let mut last = std::fs::read_to_string(file).ok();
+    // What was last read, so that the loop hears only of changes. The
+    // file is read once as soon as it is watched, without waiting: a
+    // change made before the watch began is not missed (the loop takes
+    // only what differs from what it has).
+    let mut last: Option<String> = None;
+    let mut first = true;
     let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 4096];
     let mut reader = inotify::Reader::new(&fd, &mut buffer);
     loop {
-        match reader.next() {
-            Ok(event) => {
-                let ours = event.file_name().is_some_and(|n| {
-                    names
-                        .iter()
-                        .any(|name| name.as_encoded_bytes() == n.to_bytes())
-                });
-                if !ours {
-                    continue;
+        if !std::mem::take(&mut first) {
+            match reader.next() {
+                Ok(event) => {
+                    let ours = event.file_name().is_some_and(|n| {
+                        names
+                            .iter()
+                            .any(|name| name.as_encoded_bytes() == n.to_bytes())
+                    });
+                    if !ours {
+                        continue;
+                    }
                 }
-            }
-            Err(rustix::io::Errno::INTR) => continue,
-            Err(err) => {
-                tracing::warn!(%err, "the configuration is no longer followed");
-                return;
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(err) => {
+                    tracing::warn!(%err, "the configuration is no longer followed");
+                    return;
+                }
             }
         }
         let text = match std::fs::read_to_string(file) {
@@ -115,7 +173,7 @@ fn watch(file: &Path, sender: &channel::Sender<Config>) {
         last = Some(text.clone());
         match toml::from_str::<Config>(&text) {
             Ok(config) => {
-                if sender.send(config).is_err() {
+                if !send(config) {
                     return;
                 }
             }
@@ -129,14 +187,70 @@ fn watch(file: &Path, sender: &channel::Sender<Config>) {
 
 impl State {
     /// The file says `new` now: the parts that follow it live take it.
-    pub fn config_changed(&mut self, new: Config) {
+    pub fn config_changed(&mut self, reread: Reread) {
+        let Reread {
+            config: new,
+            keymap,
+        } = reread;
         let mut followed = Vec::new();
+        if new.shortcuts != self.config.shortcuts {
+            self.config.shortcuts = new.shortcuts.clone();
+            followed.push("[shortcuts]");
+        }
+        if new.keyboard != self.config.keyboard || keymap.is_some() {
+            self.keyboard_changed(new.keyboard.clone(), keymap);
+            followed.push("[keyboard]");
+        }
         if new.pointer != self.config.pointer || new.touchpad != self.config.touchpad {
             self.config.pointer = new.pointer;
             self.config.touchpad = new.touchpad;
             self.input_settings_changed();
             followed.push("[pointer] [touchpad]");
         }
-        tracing::info!(?followed, "the configuration changed on disk");
+        if !followed.is_empty() {
+            tracing::info!(?followed, "the configuration changed on disk");
+        }
+    }
+
+    /// `[keyboard]` changed: the keymap taken in (compiled off the loop),
+    /// the repeat given again; Num Lock is the session's start's.
+    fn keyboard_changed(
+        &mut self,
+        keyboard: crate::config::Keyboard,
+        keymap: Option<Result<String, String>>,
+    ) {
+        let Some(handle) = self.seat.get_keyboard() else {
+            self.config.keyboard = keyboard;
+            return;
+        };
+        if (keyboard.repeat_rate, keyboard.repeat_delay)
+            != (
+                self.config.keyboard.repeat_rate,
+                self.config.keyboard.repeat_delay,
+            )
+        {
+            handle.change_repeat_info(keyboard.repeat_rate, keyboard.repeat_delay);
+        }
+        self.config.keyboard = keyboard;
+        match keymap {
+            None => {}
+            Some(Err(err)) => tracing::warn!(err, "the new layouts are refused: the keymap stays"),
+            Some(Ok(text)) => match handle.set_keymap_from_string(self, text) {
+                Ok(()) => {
+                    let names = self.config.xkb_names();
+                    tracing::info!(
+                        layout = names.layout,
+                        variant = names.variant,
+                        options = names.options,
+                        "the keyboard's new keymap"
+                    );
+                    self.layout_codes = crate::layouts::codes(&names);
+                    if self.shell_linked() {
+                        self.tell_layouts();
+                    }
+                }
+                Err(err) => tracing::warn!(?err, "the new keymap is refused: the old one stays"),
+            },
+        }
     }
 }

@@ -1,15 +1,21 @@
 //! The smaller protocols applications expect: activation, fractional
-//! scale, presentation time, viewports, cursor shapes, touchpad gestures
-//! and relative pointer motion.
+//! scale, presentation time, viewports, cursor shapes, touchpad gestures,
+//! relative pointer motion and keyboard shortcuts inhibited.
 
 use smithay::{
-    delegate_cursor_shape, delegate_fractional_scale, delegate_pointer_gestures,
-    delegate_presentation, delegate_relative_pointer, delegate_viewporter, delegate_xdg_activation,
+    delegate_cursor_shape, delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit,
+    delegate_pointer_gestures, delegate_presentation, delegate_relative_pointer,
+    delegate_viewporter, delegate_xdg_activation,
     input::Seat,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::with_states,
         fractional_scale::{FractionalScaleHandler, with_fractional_scale},
+        keyboard_shortcuts_inhibit::{
+            KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
+            KeyboardShortcutsInhibitor, KeyboardShortcutsInhibitorSeat,
+        },
+        seat::WaylandFocus,
         tablet_manager::TabletSeatHandler,
         xdg_activation::{
             XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
@@ -126,3 +132,38 @@ delegate_viewporter!(State);
 delegate_presentation!(State);
 delegate_pointer_gestures!(State);
 delegate_relative_pointer!(State);
+
+/// A client asking for every key (the Settings while they record a
+/// shortcut, 6.8) gets them at once: the desktop's shortcuts wait while
+/// its surface has the keyboard, and come back when it lets go.
+impl KeyboardShortcutsInhibitHandler for State {
+    fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
+        &mut self.shortcuts_inhibit_state
+    }
+
+    fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
+        tracing::info!("a client takes the desktop's shortcuts");
+        inhibitor.activate();
+    }
+
+    fn inhibitor_destroyed(&mut self, _: KeyboardShortcutsInhibitor) {
+        tracing::info!("the desktop's shortcuts are back");
+    }
+}
+
+delegate_keyboard_shortcuts_inhibit!(State);
+
+impl State {
+    /// The surface holding the keyboard has its shortcuts' inhibitor on.
+    pub fn shortcuts_inhibited(&self) -> bool {
+        let Some(focus) = self.seat.get_keyboard().and_then(|k| k.current_focus()) else {
+            return false;
+        };
+        let Some(surface) = focus.wl_surface() else {
+            return false;
+        };
+        self.seat
+            .keyboard_shortcuts_inhibitor_for_surface(&surface)
+            .is_some_and(|i| i.is_active())
+    }
+}

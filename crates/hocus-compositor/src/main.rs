@@ -134,11 +134,9 @@ fn main() -> ExitCode {
     let file = args.config.or_else(Config::default_path);
     let mut config = file.as_deref().map(Config::load).unwrap_or_default();
     config.file = file;
-    // Once, before the loop: the keyboard the system was set up with,
-    // unless the configuration names its own.
-    if config.keyboard.layouts.is_empty() {
-        config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
-    }
+    // Once, before the loop: the keyboard the system was set up with, for
+    // when the configuration names none (now, or once it changes).
+    config.system_keyboard = SystemKeyboard::read(Path::new(SystemKeyboard::PATH));
     config.cursor_env = CursorEnv::from_process();
     // PAM; a test's password only in a build for tests (docs/design/lock.md).
     config.lock_auth = hocus_compositor::Authenticator::from_env();

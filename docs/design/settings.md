@@ -195,6 +195,80 @@ empty groups and of the target are drawn solid (iced draws no dashes);
 a USB mouse is "Souris USB" (a wireless receiver is not knowable); the
 list's lines read "Ligne N de la liste".
 
+## Clavier et raccourcis (6.8)
+
+Built 2026-11-05 (issue #408), variant A of
+[the mockup](https://claude.ai/artifact/K49KfhL6QjVzEfBo1kc5oB), from the
+spec in the issue's last comment. The maintainer decided: the shortcuts
+on a sub-page with their own search; while a shortcut is recorded the
+Settings ask the compositor to suspend the desktop's own shortcuts
+(keyboard-shortcuts-inhibit); "Rétablir" takes the line out of the file,
+so that the default applies and follows future defaults; a family of
+nine is one folded row that unfolds.
+
+- `src/keyboard.rs` holds the rows and the 64 actions of `shortcuts.rs`
+  (each a setting of its own: the search, the undo and the file's
+  watching are 6.1's), `src/keys.rs` the chords as written, shown and
+  recorded, `src/xkb.rs` XKB's registry (`evdev.xml`) and its French
+  catalog, read on a thread; `src/app/keyboard_page.rs` lays out both
+  pages.
+- **The page**: DISPOSITIONS (each layout of `[keyboard] layouts`, its
+  chip, its name, ↑, ↓, ✕; the system's when the file names none, the
+  first change writing the list; "+ Ajouter une disposition" opens the
+  registry's search, accents and case aside, `Enter` adding the first,
+  `Esc` closing; "Changer de disposition", `grp:` of `[keyboard] options`,
+  at 45 % with one layout), RÉPÉTITION DES TOUCHES (`repeat_delay` 100 to
+  1000 ms by 50, `repeat_rate` 5 to 60 /s, and a field to try them),
+  TOUCHES SPÉCIALES (Verr. Maj., `caps:`; Touche Compose, `compose:`,
+  Verr. Maj. at 45 % while Compose takes it; Verr. Num. à l'ouverture,
+  `[keyboard] numlock`), RACCOURCIS (one row, "N modifiés", that opens
+  the sub-page). The options a menu does not own stay in the line, in
+  their place.
+- **The sub-page** ("Réglages › Clavier et raccourcis › Raccourcis",
+  "‹ Clavier et raccourcis" back): its search (names in both languages,
+  nearby words, the keys as shown and as XKB names them, the file's
+  key), "64 raccourcis · N modifiés", "Tout rétablir"; FENÊTRES, BUREAUX,
+  BARRE ET LANCEUR, CAPTURES, SESSION, TOUCHES MULTIMÉDIA, then FIXES.
+  Each row: its keycaps, "+", and once changed a green dot, "Par défaut :
+  …" and "↺ Rétablir". Desktops 1 to 9, send to and take to are one row
+  each ("Super + 1 … 9", or "Propres à chaque bureau" once they differ),
+  "Les 9" / "Replier"; a search shows the members.
+- **Recording**: a click on a combination (or "+") records the next one
+  pressed, the modifiers shown as they are held. The window holds the
+  keyboard-shortcuts-inhibit protocol meanwhile (`src/activate.rs`, on
+  the window's own connection, on a thread), so `Super+L` reaches it
+  instead of locking. `Esc` cancels, `Backspace` removes the combination.
+  Refused, in the row: a key that types without Super, Ctrl or Alt,
+  `Ctrl+Alt+F1`…`F12`, one the action has, `Super+Space` while it
+  switches the layouts. A combination another action holds opens the
+  amber box under the row: "Super + L sert déjà à « Verrouiller la
+  session ». Le remplacer le lui enlève.", "Remplacer" (both lines
+  written, one toast, its "Annuler" taking both back) or "Annuler".
+- Chords are written as the compositor reads them: Super, Ctrl, Alt,
+  Shift, then the XKB name (`Super+Shift+E`, `Super+period`, `Print`);
+  the top row's digits whatever the layout.
+
+**The compositor's side.** `reload.rs` follows `[shortcuts]` and
+`[keyboard]` too: the new shortcuts at once; new layouts or options make
+a keymap compiled on the configuration's thread (XKB reads its files
+there), which the loop takes in and the shell is told again (a keymap XKB
+refuses is logged, the old one stays); the repeat is given to clients
+again. `[keyboard] numlock = true` locks Num Lock in the keymap's state as
+the session opens. The keyboard-shortcuts-inhibit global is served: an
+inhibitor is granted at once, and while the surface holding the keyboard
+has one, no shortcut runs (the virtual terminals' switch stays).
+
+Choices made here (to confirm on the machine): layouts move with ↑ and
+↓, not by dragging; the add popover opens in the card, under its row,
+rather than floating; the Super+Space choice of the switch menu stays
+choosable (refused when recording, not greyed in the menu); with no file
+options the menus show "none", not the system's options; the keycaps'
+2 px bottom is a shadow; a layout's line says its XKB code, not
+"AZERTY"; Num Lock's LED on a physical keyboard follows on the first
+key; the window's keyboard reaches combinations by the mouse only (not
+`Tab`); on the CPU at scale 2 the sub-page takes a few seconds to draw
+its 64 rows the first time.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -365,7 +439,8 @@ file.
 
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
-  (6.12); each other setting's ticket adds its own.
+  (6.12), `[keyboard]` and `[shortcuts]` (6.8); each other setting's
+  ticket adds its own.
 - The other sixteen pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
@@ -405,6 +480,20 @@ with the harness's touchpad and mouse:
 - `a_touchpad_gets_tap_to_click_by_default`
 - `a_hand_edit_of_the_file_reaches_every_device`
 - `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_keyboard.rs` (6.8), the same bed
+with an XKB registry of the test's own:
+
+- `the_shortcuts_are_on_a_sub_page_with_their_own_search`
+- `desktops_one_to_nine_are_one_folded_row`
+- `recording_a_shortcut_suspends_the_desktops_own_and_a_conflict_shows`
+- `a_rebinding_takes_effect_live`
+- `retablir_takes_the_line_out_of_the_file`
+- `numlock_at_login_writes_keyboard_numlock`
+- `a_layout_added_writes_the_list`
+- `numlock_is_on_as_the_session_opens`
+- `the_keyboards_layouts_and_repeat_follow_the_file`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's

@@ -1,8 +1,8 @@
 # Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
-# starts; [pointer] and [touchpad] also as soon as the file changes. A file
-# that does not read is refused as a whole, and the
+# starts; [pointer], [touchpad], [keyboard] and [shortcuts] also as soon
+# as the file changes. A file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
 # [keyboard]
@@ -16,6 +16,8 @@
 # Milliseconds before a held key repeats, and repeats per second.
 # repeat_delay = 200
 # repeat_rate = 25
+# Num Lock on as the session opens, on every keyboard.
+# numlock = false
 
 # [pointer]
 # Every mouse, trackball and trackpoint, given these as it is plugged in

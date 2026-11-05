@@ -1276,6 +1276,28 @@ impl Headless {
         );
     }
 
+    /// The keyboard's repeat as the compositor last gave it to clients:
+    /// (rate, delay).
+    pub fn keyboard_repeat(&self) -> (i32, i32) {
+        let keyboard = &self.app.state.config.keyboard;
+        (keyboard.repeat_rate, keyboard.repeat_delay)
+    }
+
+    /// Num Lock is locked on the seat's keyboard.
+    pub fn num_lock(&self) -> bool {
+        self.app
+            .state
+            .seat
+            .get_keyboard()
+            .is_some_and(|k| k.modifier_state().num_lock)
+    }
+
+    /// The window holding the keyboard takes every key, the desktop's
+    /// shortcuts with them (keyboard-shortcuts-inhibit).
+    pub fn shortcuts_inhibited(&self) -> bool {
+        self.app.state.shortcuts_inhibited()
+    }
+
     /// A mouse or touchpad plugged in, as libinput would (6.12): given
     /// `[pointer]` or `[touchpad]` at once; its number.
     pub fn plug_device(&mut self, device: crate::input_devices::FakeDevice) -> u64 {
