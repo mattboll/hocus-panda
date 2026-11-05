@@ -25,18 +25,22 @@ use crate::{
     store::{FileState, Reading, Slot},
 };
 
-type El<'a> = Element<'a, Message>;
+pub(super) type El<'a> = Element<'a, Message>;
 
 const SIDEBAR_WIDTH: f32 = 240.0;
 const HEADER: f32 = 48.0;
 const PAGE_WIDTH: f32 = 720.0;
 
 /// A text in Manrope.
-fn t<'a>(content: impl text::IntoFragment<'a>, size: f32, color: Color) -> text::Text<'a> {
+pub(super) fn t<'a>(
+    content: impl text::IntoFragment<'a>,
+    size: f32,
+    color: Color,
+) -> text::Text<'a> {
     text(content).size(size).color(color).font(MANROPE)
 }
 
-fn icon<'a>(which: Icon, size: f32, color: Color) -> El<'a> {
+pub(super) fn icon<'a>(which: Icon, size: f32, color: Color) -> El<'a> {
     svg(style::icon(which, color, 1.8))
         .width(size)
         .height(size)
@@ -703,6 +707,9 @@ impl App {
         ]
         .spacing(18)
         .padding(Padding::default().top(14));
+        if id == SectionId::Mouse {
+            return self.mouse_page(page);
+        }
         let settings = settings_of(id);
         if settings.is_empty() {
             page = page.push(card_box(
@@ -793,19 +800,25 @@ impl App {
             .into()
     }
 
-    fn row(&self, setting: &'static Setting, controls: &[super::Control]) -> El<'_> {
+    pub(super) fn row(&self, setting: &'static Setting, controls: &[super::Control]) -> El<'_> {
         let lang = self.lang;
         let slot = Slot::of(setting, self.source);
+        // A row no device plugged can take is drawn at 45 % (6.12).
+        let not_here = self.not_here(setting);
+        let ink = if not_here.is_some() { INERT } else { 1.0 };
         let mut words = column![
             text(setting.name.get(lang))
                 .size(14)
                 .font(SEMIBOLD)
-                .color(TEXT)
+                .color(fade(TEXT, ink))
         ]
         .spacing(2)
         .width(Length::Fill);
         if let Some(line) = setting.line {
-            words = words.push(t(line.get(lang), 12.5, DIM));
+            words = words.push(t(line.get(lang), 12.5, fade(DIM, ink)));
+        }
+        if let Some(not_here) = not_here {
+            words = words.push(t(not_here, 12.5, FAINT));
         }
         if let Some(warning) = self.warning(setting, slot) {
             words = words.push(t(warning, 12.5, PEACH));
@@ -848,7 +861,7 @@ impl App {
         let Reading::NotUnderstood(raw) = self.reading(slot) else {
             return None;
         };
-        let applies = setting.say(&slot.place()?.default, self.lang);
+        let applies = setting.say(&self.default_of(slot)?, self.lang);
         Some(match self.lang {
             Lang::French => {
                 format!("Dans le fichier : « {raw} », non compris ; {applies} s’applique.")
@@ -1001,6 +1014,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
+            Kind::Speed { min, max } => self.speed_control(slot, *min, *max, inert, focused),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
@@ -1176,7 +1190,7 @@ fn capitalised(label: &str) -> String {
     }
 }
 
-fn label<'a>(words: &'static str) -> El<'a> {
+pub(super) fn label<'a>(words: &'static str) -> El<'a> {
     text(words).size(11.5).font(BOLD).color(DIM).into()
 }
 
@@ -1186,7 +1200,7 @@ fn group_box<'a>(head: El<'a>, body: El<'a>) -> El<'a> {
         .into()
 }
 
-fn card_box(body: El<'_>) -> El<'_> {
+pub(super) fn card_box(body: El<'_>) -> El<'_> {
     container(body)
         .width(Length::Fill)
         .style(boxed(CARD, 12.0, Some((1.0, CARD_RIM))))
@@ -1194,7 +1208,7 @@ fn card_box(body: El<'_>) -> El<'_> {
 }
 
 /// A row, with the divider over it after the first.
-fn divided(divider: bool, row: El<'_>) -> El<'_> {
+pub(super) fn divided(divider: bool, row: El<'_>) -> El<'_> {
     if !divider {
         return row;
     }
@@ -1227,7 +1241,7 @@ fn solid(fill: Color, ink: Color, status: button::Status) -> button::Style {
 }
 
 /// The scrollbars: thin, faint.
-fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
+pub(super) fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     let hovered = matches!(
         status,
         scrollable::Status::Hovered { .. } | scrollable::Status::Dragged { .. }
@@ -1252,6 +1266,10 @@ fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
             icon: DIM,
         },
     }
+}
+
+pub(super) fn ease(t: Duration, over: Duration) -> f32 {
+    ease_out(t, over)
 }
 
 fn ease_out(t: Duration, over: Duration) -> f32 {
@@ -1345,6 +1363,20 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         })
         .collect();
     let rows: Vec<serde_json::Value> = match app.page {
+        Page::Section(SectionId::Mouse) => app
+            .mouse_visible()
+            .into_iter()
+            .map(|s| {
+                let slot = Slot::of(s, app.source);
+                serde_json::json!({
+                    "id": s.id,
+                    "value": app.said_value(slot),
+                    "warn": app.warning(s, slot),
+                    "inert": app.inert(s),
+                    "not_here": app.not_here(s),
+                })
+            })
+            .collect(),
         Page::Section(id) => settings_of(id)
             .iter()
             .map(|s| {
@@ -1402,6 +1434,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "menu": app.menu.map(|(slot, _)| slot.word()),
         "cards": if app.page == Page::Home { serde_json::json!(cards) } else { serde_json::Value::Null },
         "undo": app.undo.len(),
+        "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

@@ -13,6 +13,10 @@
 //!
 //! - `hocus msg lock`: locks the session now (docs/design/lock.md).
 //!
+//! - `hocus msg input-devices [--follow]`: the mice and touchpads plugged
+//!   in and what they were given of `[pointer]` and `[touchpad]` (6.12);
+//!   followed, each one plugged, changed or unplugged as it happens.
+//!
 //! - `hocus msg idle`: the session's idle state, its time left and what
 //!   holds it off (docs/design/idle.md), as the compositor says it.
 //!
@@ -128,6 +132,13 @@ enum MsgCommand {
     Idle,
     /// Locks the session now (docs/design/lock.md).
     Lock,
+    /// The mice and touchpads plugged in, and what they were given of
+    /// [pointer] and [touchpad] (docs/design/settings.md).
+    InputDevices {
+        /// Stays, and says each device plugged, changed or unplugged.
+        #[arg(long)]
+        follow: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -188,6 +199,12 @@ fn main() -> ExitCode {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
                 MsgCommand::Lock => Question::Lock,
+                MsgCommand::InputDevices { follow: true } => {
+                    return follow(args.socket, Question::InputDevices { follow: true });
+                }
+                MsgCommand::InputDevices { follow: false } => {
+                    Question::InputDevices { follow: false }
+                }
             };
             match ask(args.socket, question) {
                 Ok(answer) => {
@@ -314,6 +331,39 @@ fn send(socket: Option<PathBuf>, report: &Report) -> Result<(), String> {
     stream
         .write_all(format!("{report}\n").as_bytes())
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Asks `question`, and prints what the desktop says as it says it, until
+/// it closes the connection.
+fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
+    let followed = (|| -> Result<(), String> {
+        let path = socket_path(socket)
+            .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
+        let place = |e: std::io::Error| format!("{}: {e}", path.display());
+        let mut stream = UnixStream::connect(&path).map_err(place)?;
+        stream.set_write_timeout(Some(WRITE)).map_err(place)?;
+        stream
+            .write_all(format!("{}\n", question.line()).as_bytes())
+            .map_err(place)?;
+        let mut out = std::io::stdout();
+        let mut buffer = [0; 4096];
+        loop {
+            match stream.read(&mut buffer).map_err(place)? {
+                0 => return Ok(()),
+                n => {
+                    out.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+                    out.flush().map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    })();
+    match followed {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("hocus: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Asks `question`, and reads the answer until the desktop closes the
