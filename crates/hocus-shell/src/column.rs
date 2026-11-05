@@ -9,8 +9,15 @@
 //! every one of them in its place again.
 //!
 //! On a short bar they give way in [`GIVES_WAY`]'s order: Today first
-//! (its lines, then the group), then the to-do list's lines, then the
-//! agents' rows, which fold into "+ N" ([`room`]).
+//! (its lines, then the group), then the windows over the desktops
+//! (#604), then the to-do list's lines, then the agents' rows, which fold
+//! into "+ N" ([`room`]).
+//!
+//! The windows' group is not in the column's order: it sits on the
+//! desktops, from the bottom, in the room the column leaves free (the
+//! spacer's), so that nothing in the column moves for it. Today, which
+//! fills the spacer, ends over it; the to-do list and the agents' group
+//! never give way to it.
 
 use hocus_link::Form;
 
@@ -40,6 +47,9 @@ pub enum Part {
     Tasks,
     /// The agents' group (4.0 to 4.7), or the mini form's agents' item.
     Agents,
+    /// The windows over the desktops (#604): not in the column's order,
+    /// placed from the bottom in the room it leaves.
+    Windows,
 }
 
 /// The full form's column, top to bottom (§4, #599).
@@ -57,7 +67,7 @@ pub const MINI: [Part; 4] = [Part::Meeting, Part::InUse, Part::Tasks, Part::Agen
 
 /// The order in which the full form's groups give way when the bar is
 /// short: the first gives way first.
-pub const GIVES_WAY: [Part; 3] = [Part::Today, Part::Tasks, Part::Agents];
+pub const GIVES_WAY: [Part; 4] = [Part::Today, Part::Windows, Part::Tasks, Part::Agents];
 
 /// The column in `form`, top to bottom.
 pub fn order(form: Form) -> &'static [Part] {
@@ -90,6 +100,7 @@ pub fn taken(bar: &str, form: Form, part: Part) -> f32 {
         },
         Part::Tasks => crate::tasks::draw::height(bar, form),
         Part::Agents => agents::draw::height(form),
+        Part::Windows => crate::windows::height(bar, form),
     };
     if height > 0.0 { height + GAP } else { 0.0 }
 }
@@ -107,6 +118,16 @@ fn top_with(form: Form, part: Part, mut taken: impl FnMut(Part) -> f32) -> f32 {
             .iter()
             .take_while(|p| **p != part)
             .map(|p| taken(*p))
+            .sum::<f32>()
+}
+
+/// Where bar `bar`'s column ends under its top in `form`: its start and
+/// what every part of it takes, the 14 px after the last included.
+pub fn end(bar: &str, form: Form) -> f32 {
+    start(form)
+        + order(form)
+            .iter()
+            .map(|p| taken(bar, form, *p))
             .sum::<f32>()
 }
 
@@ -171,12 +192,12 @@ fn room_with(
 }
 
 /// The least `part` takes of bar `bar`'s full form, the 14 px after it
-/// included, as it gives way: Today none, the to-do list its header and
-/// its last line ("+ N" or "Rien à faire."), the agents' group what it
-/// takes (it gives way last).
+/// included, as it gives way: Today and the windows none, the to-do list
+/// its header and its last line ("+ N" or "Rien à faire."), the agents'
+/// group what it takes (it gives way last).
 fn least(bar: &str, part: Part) -> f32 {
     match part {
-        Part::Today => 0.0,
+        Part::Today | Part::Windows => 0.0,
         Part::Tasks => {
             let least = crate::tasks::draw::least(bar);
             if least > 0.0 { least + GAP } else { 0.0 }
@@ -188,10 +209,11 @@ fn least(bar: &str, part: Part) -> f32 {
 /// One of the column's surfaces came, went or changed height, a bar
 /// changed height or form: every one of them in its place again, in an
 /// order where each reads what it depends on (the agents' rows' room, the
-/// to-do list's, Today's rows, then everyone's top).
+/// to-do list's, the windows', Today's rows, then everyone's top).
 pub fn moved() {
     agents::draw::fit_rows();
     crate::tasks::draw::fit_lines();
+    crate::windows::fit_all();
     crate::today::moved();
     crate::tasks::draw::moved();
     agents::draw::moved();
@@ -210,12 +232,25 @@ mod tests {
         tasks: f32,
         agents: f32,
     ) -> impl Fn(Part) -> f32 {
+        with_windows(meeting, in_use, today, tasks, agents, 0.0)
+    }
+
+    /// The same, the windows over the desktops taking `windows`.
+    fn with_windows(
+        meeting: f32,
+        in_use: f32,
+        today: f32,
+        tasks: f32,
+        agents: f32,
+        windows: f32,
+    ) -> impl Fn(Part) -> f32 {
         move |p| match p {
             Part::Meeting => meeting,
             Part::InUse => in_use,
             Part::Today => today,
             Part::Tasks => tasks,
             Part::Agents => agents,
+            Part::Windows => windows,
         }
     }
 
@@ -263,7 +298,7 @@ mod tests {
         let t = takes(58.0, 0.0, 92.0, 118.0, 200.0);
         // To do without its lines: its header and "+ N", and 14 px.
         let least = |p: Part| match p {
-            Part::Today => 0.0,
+            Part::Today | Part::Windows => 0.0,
             Part::Tasks => 18.0 + 20.0 + 14.0,
             _ => t(p),
         };
@@ -283,5 +318,39 @@ mod tests {
             room_with(Part::Agents, bottom, &t, least),
             bottom - 158.0 - 14.0 - 52.0
         );
+    }
+
+    #[test]
+    fn the_windows_take_what_to_do_and_the_agents_leave_and_today_ends_over_them() {
+        // Three windows over the desktops: 90 px and 14.
+        let t = with_windows(58.0, 0.0, 92.0, 118.0, 200.0, 104.0);
+        let least = |p: Part| match p {
+            Part::Today | Part::Windows => 0.0,
+            Part::Tasks => 18.0 + 20.0 + 14.0,
+            _ => t(p),
+        };
+        let bottom = 700.0;
+        // The windows: what To do and the agents leave, Today counting for
+        // nothing; they never make those give way.
+        assert_eq!(
+            room_with(Part::Windows, bottom, &t, least),
+            bottom - 158.0 - 14.0 - 118.0 - 200.0
+        );
+        assert_eq!(
+            room_with(Part::Tasks, bottom, &t, least),
+            bottom - 158.0 - 14.0 - 200.0
+        );
+        assert_eq!(
+            room_with(Part::Agents, bottom, &t, least),
+            bottom - 158.0 - 14.0 - 52.0
+        );
+        // Today ends 14 px over the windows.
+        assert_eq!(
+            room_with(Part::Today, bottom, &t, least),
+            bottom - 158.0 - 14.0 - 104.0 - 118.0 - 200.0
+        );
+        // They are not in the column's order: no part's top counts them.
+        assert!(!FULL.contains(&Part::Windows) && !MINI.contains(&Part::Windows));
+        assert_eq!(top_with(Form::Full, Part::Agents, &t), 368.0);
     }
 }

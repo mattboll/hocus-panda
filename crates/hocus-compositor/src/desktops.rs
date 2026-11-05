@@ -28,7 +28,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use hocus_link::{DeskWindow, DesktopTo, Desktops, Look, SHARE, Titles, ToShell};
+use hocus_link::{DeskWindow, DesktopTo, Desktops, Look, Recent, SHARE, Titles, ToShell};
 use smithay::{
     output::Output,
     reexports::calloop::timer::{TimeoutAction, Timer},
@@ -421,6 +421,7 @@ const SOON: Duration = Duration::from_millis(16);
 pub struct Told {
     desktops: HashMap<String, Desktops>,
     titles: HashMap<String, Titles>,
+    recent: HashMap<String, Recent>,
     /// The look asked after a change of title, until it runs.
     soon: Option<smithay::reexports::calloop::RegistrationToken>,
 }
@@ -447,16 +448,28 @@ impl Told {
         Some(now)
     }
 
+    /// The screen's windows' order is `now`: what to tell, if it changed
+    /// since it was told.
+    pub fn offer_recent(&mut self, now: Recent) -> Option<Recent> {
+        if self.recent.get(&now.output) == Some(&now) {
+            return None;
+        }
+        self.recent.insert(now.output.clone(), now.clone());
+        Some(now)
+    }
+
     /// Nothing told: a shell that connects is told everything.
     pub fn clear(&mut self) {
         self.desktops.clear();
         self.titles.clear();
+        self.recent.clear();
     }
 
     /// The screen has no bar any more.
     pub fn forget(&mut self, output: &str) {
         self.desktops.remove(output);
         self.titles.remove(output);
+        self.recent.remove(output);
     }
 }
 
@@ -524,9 +537,25 @@ impl crate::State {
         }
     }
 
+    /// `output`'s windows, every desktop's, the most recently focused
+    /// first: the order of the windows in its bar (#604).
+    pub fn recent_view(&self, output: &Output) -> Recent {
+        let on: std::collections::HashSet<WindowId> = self.windows_on(output).into_iter().collect();
+        Recent {
+            output: output.name(),
+            ids: self
+                .model
+                .recent()
+                .iter()
+                .filter(|id| on.contains(id))
+                .map(|id| id.0)
+                .collect(),
+        }
+    }
+
     /// A frame of `output` was drawn: its bar's tiles are told its desktops
-    /// if they changed, and its list its titles (see the module's
-    /// documentation).
+    /// if they changed, its list its titles, and its windows their order
+    /// (see the module's documentation).
     pub fn desktops_drawn(&mut self, output: &Output) {
         if !self.shell_linked() {
             return;
@@ -549,6 +578,10 @@ impl crate::State {
         let titles = self.titles_view(output);
         if let Some(told) = self.shell.desktops.offer_titles(titles) {
             self.tell_shell(ToShell::Titles(told));
+        }
+        let recent = self.recent_view(output);
+        if let Some(told) = self.shell.desktops.offer_recent(recent) {
+            self.tell_shell(ToShell::Recent(told));
         }
     }
 

@@ -1,8 +1,8 @@
 # Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
-# starts; [pointer] and [touchpad] also as soon as the file changes. A file
-# that does not read is refused as a whole, and the
+# starts; [pointer], [touchpad], [keyboard] and [shortcuts] also as soon
+# as the file changes. A file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
 # [keyboard]
@@ -16,6 +16,8 @@
 # Milliseconds before a held key repeats, and repeats per second.
 # repeat_delay = 200
 # repeat_rate = 25
+# Num Lock on as the session opens, on every keyboard.
+# numlock = false
 
 # [pointer]
 # Every mouse, trackball and trackpoint, given these as it is plugged in
@@ -70,6 +72,10 @@
 # ~/.local/state/hocuspanda/panel.toml). A screen may have its own, as
 # panel-form in its [outputs.NAME] section.
 # form = "auto"
+# The windows of the screen's current desktop over its desktops, the
+# focused one first, at most 3 (each with its close button), then "+ N
+# more"; in the mini form, an item that lists them. false hides them.
+# windows = true
 
 # [panel.clock]
 # The clock at the top of the bar. Its font: the bundled "Martian Mono",
@@ -99,6 +105,18 @@
 #   [outputs.DP-2]
 #   scale = 1.25
 #   panel-form = "mini"
+#
+# The Settings' Écrans page writes the rest; the desktop follows the file
+# as it changes. A mode, WIDTHxHEIGHT@HZ (without one: the screen's
+# preferred size at its highest rate; one it does not offer: the same):
+#   mode = "2560x1600@60"
+# Its top-left corner, logical pixels; used when every screen on has one
+# and they neither overlap nor leave one apart, else left to right:
+#   position = [0, 0]
+# Turned off, plugged (its windows go to another; the last one stays on):
+#   enabled = false
+# Variable refresh rate, when the screen offers it:
+#   vrr = true
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and

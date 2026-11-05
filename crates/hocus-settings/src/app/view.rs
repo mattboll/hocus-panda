@@ -29,7 +29,7 @@ pub(super) type El<'a> = Element<'a, Message>;
 
 const SIDEBAR_WIDTH: f32 = 240.0;
 const HEADER: f32 = 48.0;
-const PAGE_WIDTH: f32 = 720.0;
+pub(super) const PAGE_WIDTH: f32 = 720.0;
 
 /// A text in Manrope.
 pub(super) fn t<'a>(
@@ -59,8 +59,15 @@ impl App {
             );
             layers.push(menu);
         }
+        // The Écrans page's menu, and its "Garder ?" over everything.
+        if let Some(menu) = self.screens_menu_list() {
+            layers.push(menu);
+        }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
+        }
+        if let Some(dialog) = self.screens_dialog() {
+            layers.push(dialog);
         }
         stack(layers)
             .width(Length::Fill)
@@ -304,6 +311,12 @@ impl App {
                     section.name.get(lang),
                     capitalised(outside.group.get(lang))
                 ),
+                Target::Setting(setting) if setting.kind == Kind::Shortcut => format!(
+                    "{} › {} › {}",
+                    section.name.get(lang),
+                    w("Raccourcis", "Shortcuts").get(lang),
+                    capitalised(setting.group.label.get(lang))
+                ),
                 Target::Setting(setting) => format!(
                     "{} › {}",
                     section.name.get(lang),
@@ -351,9 +364,16 @@ impl App {
         let lang = self.lang;
         let here = match self.page {
             Page::Home => self.title(),
+            Page::Section(SectionId::Keyboard) if self.keys.sub => format!(
+                "{} › {} › {}",
+                self.title(),
+                SectionId::Keyboard.name(lang),
+                w("Raccourcis", "Shortcuts").get(lang)
+            ),
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
+            _ if self.screens_to_confirm() => (rgb(0xF5B44A), w("À confirmer", "To confirm")),
             Some(FileState::Reads) | None => (ACCENT, w("Enregistré", "Saved")),
             Some(FileState::Broken { .. }) => (ORANGE, w("Lecture seule", "Read-only")),
             Some(FileState::NoFile) => (ORANGE, w("Aucun fichier", "No file")),
@@ -703,6 +723,9 @@ impl App {
 
     fn section(&self, id: SectionId) -> El<'_> {
         let lang = self.lang;
+        if id == SectionId::Screens {
+            return self.screens_page();
+        }
         let section = id.section();
         let mut page = column![
             column![
@@ -719,6 +742,9 @@ impl App {
         }
         if id == SectionId::Mouse {
             return self.mouse_page(page);
+        }
+        if id == SectionId::Keyboard {
+            return self.keyboard_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -814,7 +840,7 @@ impl App {
         let lang = self.lang;
         let slot = Slot::of(setting, self.source);
         // A row no device plugged can take is drawn at 45 % (6.12).
-        let not_here = self.not_here(setting);
+        let not_here = self.unavailable(setting);
         let ink = if not_here.is_some() { INERT } else { 1.0 };
         let mut words = column![
             text(setting.name.get(lang))
@@ -1018,13 +1044,22 @@ impl App {
                 });
                 row![
                     bar,
-                    container(text(said).size(12.5).font(MONO).color(fade(TEXT, alpha))).width(44),
+                    container(
+                        text(said)
+                            .size(12.5)
+                            .font(MONO)
+                            .color(fade(TEXT, alpha))
+                            .wrapping(text::Wrapping::None),
+                    )
+                    .width(56),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
                 .into()
             }
             Kind::Speed { min, max } => self.speed_control(slot, *min, *max, inert, focused),
+            // Drawn by their pages (6.8).
+            Kind::Shortcut | Kind::Layouts => Space::new().into(),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
@@ -1369,6 +1404,22 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         })
         .collect();
     let rows: Vec<serde_json::Value> = match app.page {
+        Page::Section(SectionId::Keyboard) if app.keys.sub => Vec::new(),
+        Page::Section(SectionId::Keyboard) => settings_of(SectionId::Keyboard)
+            .iter()
+            .filter(|s| s.kind != Kind::Shortcut)
+            .map(|s| {
+                let slot = Slot::of(s, app.source);
+                serde_json::json!({
+                    "id": s.id,
+                    "value": app.said_value(slot),
+                    "warn": app.warning(s, slot),
+                    "inert": app.inert(s),
+                    "not_here": app.unavailable(s),
+                })
+            })
+            .collect(),
+        Page::Section(SectionId::Screens) => Vec::new(),
         Page::Section(SectionId::Mouse) => app
             .mouse_visible()
             .into_iter()
@@ -1446,7 +1497,10 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         } else {
             serde_json::json!({ "listening": app.sound.listening() })
         },
+        "scale": app.scale,
+        "screens": if app.page == Page::Section(SectionId::Screens) { app.screens_shown() } else { serde_json::Value::Null },
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
+        "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

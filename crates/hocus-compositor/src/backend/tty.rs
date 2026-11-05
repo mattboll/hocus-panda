@@ -122,6 +122,8 @@ struct Screen {
     pace: Option<RegistrationToken>,
     /// Lit (DPMS on), or turned off by idle or the lid (7.2).
     powered: bool,
+    /// Its connector's modes, as the kernel gives them.
+    modes: Vec<smithay::reexports::drm::control::Mode>,
 }
 
 /// Takes the seat, opens the primary GPU, lights the connected screens and
@@ -469,12 +471,42 @@ impl TtyBackend {
         let (make, model) = edid(drm, info.handle())
             .map(|e| identity(&e))
             .unwrap_or_default();
-        let drm_mode = preferred(info)
+        let preferred_mode = preferred(info)
             .map(|i| info.modes()[i])
             .or_else(|| info.modes().first().copied())
             .context("no mode")?;
-        let mode = Mode::from(drm_mode);
+        let modes: Vec<crate::displays::Mode3> = crate::displays::sorted_modes(
+            info.modes()
+                .iter()
+                .map(|m| crate::displays::mode3(Mode::from(*m)))
+                .collect(),
+        );
         let (width_mm, height_mm) = info.size().unwrap_or((0, 0));
+        let mut facts = crate::displays::Facts {
+            modes,
+            preferred: crate::displays::mode3(Mode::from(preferred_mode)),
+            vrr_capable: false,
+            millimetres: (width_mm as i32, height_mm as i32),
+            fixed_scale: None,
+            placed: (0, 0),
+            placed_size: (1, 1),
+        };
+        // Lit at once in the mode the file asks (6.9), else its preferred
+        // size at its highest rate.
+        let wanted = state
+            .config
+            .outputs
+            .get(&name)
+            .and_then(|o| o.mode)
+            .and_then(|m| m.pick(&facts.modes))
+            .unwrap_or_else(|| facts.default_mode());
+        let drm_mode = info
+            .modes()
+            .iter()
+            .copied()
+            .find(|m| crate::displays::mode3(Mode::from(*m)) == wanted)
+            .unwrap_or(preferred_mode);
+        let mode = Mode::from(drm_mode);
         let size_mm = (width_mm as i32, height_mm as i32);
         let output = Output::new(
             name.clone(),
@@ -535,6 +567,15 @@ impl TtyBackend {
             .map_err(|err| anyhow::anyhow!("{err}"))
             .with_context(|| format!("could not drive {name}"))?;
 
+        facts.vrr_capable = surface.with_compositor(|c| {
+            !matches!(
+                c.vrr_supported(info.handle()),
+                Ok(smithay::backend::drm::VrrSupport::NotSupported) | Err(_)
+            )
+        });
+        facts.placed = (x, 0);
+        facts.placed_size = crate::displays::logical_size(&output).unwrap_or((1, 1));
+        output.user_data().insert_if_missing(|| facts);
         add_output(state, &output, (x, 0));
         tracing::info!(
             "output {name} {}x{}@{:.2} {width_mm}x{height_mm} mm scale {output_scale} {}",
@@ -554,7 +595,64 @@ impl TtyBackend {
             health: None,
             pace: None,
             powered: true,
+            modes: info.modes().to_vec(),
         })
+    }
+
+    /// `output` driven in `mode` (6.9): the CRTC takes it with the next
+    /// frame.
+    pub fn set_mode(
+        &mut self,
+        state: &mut State,
+        output: &Output,
+        mode: crate::displays::Mode3,
+    ) -> anyhow::Result<()> {
+        let screen = self
+            .gpu
+            .screens
+            .values_mut()
+            .find(|s| s.output == *output)
+            .with_context(|| format!("no screen {}", output.name()))?;
+        let drm_mode = screen
+            .modes
+            .iter()
+            .copied()
+            .find(|m| crate::displays::mode3(Mode::from(*m)) == mode)
+            .with_context(|| format!("{} does not offer it", output.name()))?;
+        let mut renderer = self
+            .gpus
+            .single_renderer(&self.render_node)
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let gles: &mut GlesRenderer = renderer.as_mut();
+        screen
+            .surface
+            .use_mode::<_, OutputElement<GlesRenderer>>(
+                drm_mode,
+                gles,
+                &DrmOutputRenderElements::default(),
+            )
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        output.change_current_state(Some(Mode::from(drm_mode)), None, None, None);
+        screen.flip = Flip::Idle;
+        screen.dirty = true;
+        state.redraw = true;
+        Ok(())
+    }
+
+    /// Variable refresh rate on `output`, or off.
+    pub fn set_vrr(&mut self, output: &Output, on: bool) -> anyhow::Result<()> {
+        let screen = self
+            .gpu
+            .screens
+            .values_mut()
+            .find(|s| s.output == *output)
+            .with_context(|| format!("no screen {}", output.name()))?;
+        screen
+            .surface
+            .with_compositor(|c| c.use_vrr(on))
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        screen.dirty = true;
+        Ok(())
     }
 
     /// Every screen's state forgotten and drawn afresh, as after another

@@ -35,6 +35,7 @@ use smithay::{
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufGlobal, DmabufState},
         fractional_scale::FractionalScaleManagerState,
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
         pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
@@ -113,6 +114,9 @@ pub struct State {
     _cursor_shape: CursorShapeManagerState,
     _pointer_gestures: PointerGesturesState,
     _relative_pointer: RelativePointerManagerState,
+    /// Clients that take every key, the desktop's shortcuts with them
+    /// (the Settings while they record one, 6.8).
+    pub shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
 
     pub seat: Seat<State>,
     pub space: Space<Window>,
@@ -231,6 +235,8 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// The screens' settings, their trials and the Settings' lines (6.9).
+    pub(crate) displays: crate::displays::Displays,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
@@ -312,6 +318,15 @@ impl State {
             )
             .context("could not set up the keyboard")?;
         }
+        // Num Lock on as the session opens (6.8), locked in the keymap's
+        // state: every client hears it as it gets the keyboard.
+        if keyboard.numlock
+            && let Some(handle) = seat.get_keyboard()
+        {
+            let mut mods = handle.modifier_state();
+            mods.num_lock = true;
+            handle.set_modifier_state(mods);
+        }
         seat.add_pointer();
         crate::overlay::load_font(&loop_handle);
         let appearance = &config.appearance;
@@ -361,6 +376,7 @@ impl State {
             _cursor_shape: CursorShapeManagerState::new::<Self>(dh),
             _pointer_gestures: PointerGesturesState::new::<Self>(dh),
             _relative_pointer: RelativePointerManagerState::new::<Self>(dh),
+            shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<Self>(dh),
             seat,
             space: Space::default(),
             popups: PopupManager::default(),
@@ -420,6 +436,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            displays: crate::displays::Displays::default(),
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
             gpu: None,

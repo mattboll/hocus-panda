@@ -37,6 +37,8 @@ iced = { version = "0.14", default-features = false, features = [
     "svg",
     # The places of what it draws, for its log (tests and screen readers).
     "advanced",
+    # The screens' drawing and the trial's ring (6.9).
+    "canvas",
 ] }
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
 # the shell does).
@@ -59,7 +61,8 @@ serde_json = "1.0.154"
 # versions as winit's.
 wayland-client = "0.31.15"
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
-wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+# And keyboard-shortcuts-inhibit while a shortcut is recorded (6.8).
+wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

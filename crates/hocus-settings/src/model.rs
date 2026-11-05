@@ -170,8 +170,8 @@ impl SectionId {
                 Devices,
                 w("Écrans", "Screens"),
                 w(
-                    "La résolution, l’échelle et la place de chaque écran.",
-                    "Each screen's resolution, scale and place.",
+                    "La place de chaque écran, sa résolution, sa fréquence et son échelle ; l’écran où vont la barre et les nouvelles fenêtres.",
+                    "Where each screen sits, its resolution, refresh rate and scale; the screen the bar and new windows go to.",
                 ),
                 Icon::Screens,
                 "6.9",
@@ -451,6 +451,8 @@ pub enum Value {
     /// One of a few words (`"suspend"`).
     Word(&'static str),
     Text(String),
+    /// Several texts: a list of layouts, an action's shortcuts (6.8).
+    List(Vec<String>),
 }
 
 /// How a value is written in the file, and read back.
@@ -472,6 +474,53 @@ pub enum Codec {
     /// A number from `min` to `max` tenths, written as a decimal (`0.5`,
     /// `-1.0`; a whole number reads too): 6.12's speeds, held as tenths.
     Tenths { min: i64, max: i64 },
+    /// An action's shortcuts: `"Super+Q"`, or a list of them, `""` or
+    /// `[]` for none (6.8).
+    Chords,
+    /// A list of texts: `["fr", "us"]`.
+    Texts,
+    /// One XKB option of a family in `[keyboard] options` (`grp:`,
+    /// `caps:`, `compose:`): these words, the first `""` for none; the
+    /// other options of the line are kept as they are, in their place.
+    XkbOption(&'static [&'static str]),
+}
+
+/// What the options of a family start with (`grp:`), from its first
+/// named option.
+pub fn xkb_prefix(family: &[&str]) -> &'static str {
+    match family
+        .iter()
+        .find(|f| !f.is_empty())
+        .and_then(|f| f.split_once(':'))
+    {
+        Some(("grp", _)) => "grp:",
+        Some(("caps", _)) => "caps:",
+        Some(("compose", _)) => "compose:",
+        _ => "\u{0}",
+    }
+}
+
+/// `options` with `choice` in place of its family's option (or added at
+/// the end), every other option kept in its place; `compose:caps` takes
+/// Caps Lock, so a `caps:` option goes with it.
+pub fn xkb_options(options: &str, family: &[&str], choice: &str) -> String {
+    let prefix = xkb_prefix(family);
+    let mut out: Vec<String> = Vec::new();
+    let mut placed = false;
+    for option in options.split(',').map(str::trim).filter(|o| !o.is_empty()) {
+        if option.starts_with(prefix) {
+            if !placed && !choice.is_empty() {
+                out.push(choice.to_owned());
+            }
+            placed = true;
+        } else if !(choice == "compose:caps" && option.starts_with("caps:")) {
+            out.push(option.to_owned());
+        }
+    }
+    if !placed && !choice.is_empty() {
+        out.push(choice.to_owned());
+    }
+    out.join(",")
 }
 
 /// The longest idle delay the compositor takes (docs/design/idle.md).
@@ -501,6 +550,41 @@ impl Codec {
                 .and_then(|s| words.iter().find(|w| **w == s))
                 .map(|w| Value::Word(w)),
             Self::Text => item.as_str().map(|s| Value::Text(s.to_owned())),
+            Self::Chords => match (item.as_str(), item.as_array()) {
+                (Some(one), _) => Some(Value::List(
+                    (!one.trim().is_empty())
+                        .then(|| one.trim().to_owned())
+                        .into_iter()
+                        .collect(),
+                )),
+                (_, Some(list)) => list
+                    .iter()
+                    .map(|v| v.as_str().map(|s| s.trim().to_owned()))
+                    .collect::<Option<Vec<String>>>()
+                    .map(|l| Value::List(l.into_iter().filter(|s| !s.is_empty()).collect())),
+                _ => None,
+            },
+            Self::Texts => item
+                .as_array()?
+                .iter()
+                .map(|v| v.as_str().map(ToOwned::to_owned))
+                .collect::<Option<Vec<String>>>()
+                .map(Value::List),
+            Self::XkbOption(family) => {
+                let prefix = xkb_prefix(family);
+                let options = item.as_str()?;
+                match options
+                    .split(',')
+                    .map(str::trim)
+                    .find(|o| o.starts_with(prefix))
+                {
+                    None => Some(Value::Word(family[0])),
+                    Some(option) => family
+                        .iter()
+                        .find(|f| **f == option)
+                        .map(|f| Value::Word(f)),
+                }
+            }
             Self::Tenths { min, max } => {
                 let number = item
                     .as_float()
@@ -528,6 +612,16 @@ impl Codec {
             (Self::Tenths { min, max }, Value::Int(n)) if (min..=max).contains(n) => {
                 (*n as f64 / 10.0).into()
             }
+            (Self::Chords, Value::List(list)) => match list.as_slice() {
+                [] => "".into(),
+                [one] => one.as_str().into(),
+                many => toml_edit::Value::Array(many.iter().map(String::as_str).collect()),
+            },
+            (Self::Texts, Value::List(list)) => {
+                toml_edit::Value::Array(list.iter().map(String::as_str).collect())
+            }
+            // The option alone; the store puts it among the line's others.
+            (Self::XkbOption(family), Value::Word(word)) if family.contains(word) => (*word).into(),
             _ => return None,
         })
     }
@@ -594,13 +688,17 @@ pub enum Places {
         battery: Place,
         ac: Place,
     },
+    /// Written by its page's own code, its key holding a screen's name
+    /// (`[outputs.NAME] mode`, 6.9): the place is for the search; the
+    /// window reads and writes nothing of it as a slot.
+    Page(Place),
 }
 
 impl Places {
     /// The place of the value for `source` (ignored by a setting with one).
     pub fn of(&self, source: Source) -> &Place {
         match self {
-            Self::One(place) => place,
+            Self::One(place) | Self::Page(place) => place,
             Self::PerSource { battery, ac } => match source {
                 Source::Battery => battery,
                 Source::Ac => ac,
@@ -614,7 +712,7 @@ impl Places {
 
     pub fn all(&self) -> Vec<&Place> {
         match self {
-            Self::One(place) => vec![place],
+            Self::One(place) | Self::Page(place) => vec![place],
             Self::PerSource { battery, ac } => vec![battery, ac],
         }
     }
@@ -647,6 +745,10 @@ pub enum Kind {
         min: i64,
         max: i64,
     },
+    /// An action's shortcuts, recorded (6.8's sub-page).
+    Shortcut,
+    /// The keyboard's layouts, a list of its own (6.8).
+    Layouts,
 }
 
 /// A group of rows on a section's page: its label, in capitals.
@@ -698,6 +800,15 @@ impl Setting {
             Value::Seconds(Some(s)) => say_seconds(*s, lang),
             Value::Word(word) => (*word).to_owned(),
             Value::Text(text) => text.clone(),
+            Value::List(list) if list.is_empty() => if fr { "aucun" } else { "none" }.to_owned(),
+            Value::List(list) => match self.kind {
+                Kind::Shortcut => list
+                    .iter()
+                    .map(|c| crate::keys::shown(c, lang))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => list.join(", "),
+            },
         }
     }
 }
@@ -760,7 +871,9 @@ pub fn say_seconds(s: u64, lang: Lang) -> String {
 pub fn settings_of(section: SectionId) -> &'static [Setting] {
     match section {
         SectionId::Power => crate::power::settings(),
+        SectionId::Screens => crate::screens::settings(),
         SectionId::Mouse => crate::mouse::settings(),
+        SectionId::Keyboard => crate::keyboard::settings(),
         _ => &[],
     }
 }
@@ -890,6 +1003,52 @@ mod tests {
         assert_eq!(say_speed(2, Lang::French), "moyenne");
         assert_eq!(say_speed(6, Lang::English), "fast");
         assert_eq!(say_speed(7, Lang::French), "très rapide");
+    }
+
+    #[test]
+    fn an_xkb_option_is_one_of_the_line() {
+        const CAPS: &[&str] = &["", "caps:ctrl_modifier", "caps:escape"];
+        const COMPOSE: &[&str] = &["", "compose:ralt", "compose:caps"];
+        let read = |codec: Codec, text: &str| codec.read(&toml_edit::Value::from(text));
+        let line = "grp:alt_shift_toggle,caps:escape,lv3:ralt_switch";
+        assert_eq!(
+            read(Codec::XkbOption(CAPS), line),
+            Some(Value::Word("caps:escape"))
+        );
+        assert_eq!(read(Codec::XkbOption(COMPOSE), line), Some(Value::Word("")));
+        assert_eq!(read(Codec::XkbOption(CAPS), "caps:swapescape"), None);
+        assert_eq!(
+            xkb_options(line, CAPS, "caps:ctrl_modifier"),
+            "grp:alt_shift_toggle,caps:ctrl_modifier,lv3:ralt_switch"
+        );
+        assert_eq!(
+            xkb_options(line, CAPS, ""),
+            "grp:alt_shift_toggle,lv3:ralt_switch"
+        );
+        assert_eq!(
+            xkb_options(line, COMPOSE, "compose:caps"),
+            "grp:alt_shift_toggle,lv3:ralt_switch,compose:caps"
+        );
+        let chords = |text: &str| {
+            text.parse::<toml_edit::Value>()
+                .ok()
+                .and_then(|v| Codec::Chords.read(&v))
+        };
+        assert_eq!(
+            chords("\"Super+L\""),
+            Some(Value::List(vec!["Super+L".into()]))
+        );
+        assert_eq!(chords("\"\""), Some(Value::List(vec![])));
+        assert_eq!(
+            chords("[\"Super+Q\", \"Alt+F4\"]"),
+            Some(Value::List(vec!["Super+Q".into(), "Alt+F4".into()]))
+        );
+        assert_eq!(
+            Codec::Chords
+                .write(&Value::List(vec!["Super+L".into()]))
+                .map(|v| v.to_string()),
+            Some("\"Super+L\"".to_owned())
+        );
     }
 
     #[test]

@@ -42,7 +42,7 @@ const KEY_Z: u32 = 44;
 /// not know, an idle delay of five minutes.
 const FILE: &str = "# My desktop, by hand.\n\
     [keyboard]\n\
-    layouts = [\"fr\", \"us\"]   # both\n\
+    layouts = [\"us\", \"fr\"]   # both\n\
     \n\
     # When I step away.\n\
     [idle]\n\

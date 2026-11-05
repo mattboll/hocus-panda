@@ -32,7 +32,9 @@ its mark in the mini form and the halo's meeting states (section 4 group
 2, section 5, section 6; Day.2, issue #426), and Today, the list of
 today's events after it (section 4 group 4; Day.3, issue #427), and the
 column's order, the agents' group under the to-do list in both forms
-(sections 4 and 5; issue #599): see [as built](#as-built).
+(sections 4 and 5; issue #599), and the windows of the screen's current
+desktop over its desktops, each with its ✕, and the mini form's item
+listing them (sections 4 and 5; issue #604): see [as built](#as-built).
 
 References: the design report (slides) and the design canvas, sections
 "Proposition révisée" and "Prototype animé". The research behind the
@@ -130,7 +132,8 @@ Top to bottom (asked by the maintainer on 2026-11-04, issue #599): the
 clock (group 1), the next meeting's card (2), the sign of what is in use
 (5.12), Today (4), To do (5), the agents' group (3: its header, its rows
 and "+ N autres"), the spacer (6), the desktops (8), the connections (9),
-the levels (10), the footer (11). The groups keep their numbers, which
+the levels (10), the footer (11); the windows (#604) sit in the spacer,
+14 px over the desktops. The groups keep their numbers, which
 the rest of this document and the code use; the table lists them in that
 order. A group that does not show takes no room, nor its 14 px. On a
 short bar the groups over the spacer give way in this order: Today first
@@ -148,6 +151,7 @@ group where it is.
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
+| — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the desktop's list; none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
@@ -362,7 +366,10 @@ those with windows `rgba(255,255,255,0.30)`, the empty ones
 `rgba(255,255,255,0.10)` with a 1 px `rgba(255,255,255,0.12)` ring; a click
 goes to that desktop, the wheel as in the full form; resting 150 ms on a
 dot opens its desktop's list (§4.4, 3.9b; the dots are too small for
-icons); the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
+icons); 14 px over the dots, the windows' item (#604, as built): the
+first listed window's icon in a 44 × 34 button, which a 150 ms hover or
+a click opens the windows' popover from (their lines with their ✕, and
+"+ N"); the Wi-Fi's button (44 × 38 px, radius 10, a 20 px
 icon in the row's states, the sign-in page's dot 9 px from its right and
 7 px from its top), the sound's gauge
 (vertical, 8 × 48 px, filled from the bottom, grey when muted), Bluetooth's
@@ -3991,3 +3998,103 @@ close within 5 s is listed as holding it back, with "Revenir à …" and
   back (`hocus-link`); the inhibitors kept and polkit's actions
   (`leave/logind.rs`); the rows, the confirmation's and the list's
   layouts, the holders' names, the words (`hocus-shell`).
+
+### The windows in the bar (2026-11-05)
+
+Asked by the maintainer (issue #604): the windows of the screen in the
+bar, with a ✕ each. The approved spec is the issue's last comment:
+variant B (over the desktops) of the draft, changed by the maintainer
+from the focused window's controls into a list of the screen's windows.
+The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
+
+- **What it lists** (`crates/hocus-shell/src/windows`): the windows of
+  the bar's screen's current desktop, the focused one first, then by
+  most recent focus (the compositor's own order, Alt+Tab's), at most 3;
+  minimised ones too, greyed and their icon at half, as their desktop's
+  list has them (3.9c). Past 3, a 20 px "+ N autres" / "+ N more"
+  (12.5 px, `text.faint`) opens the current desktop's list (3.9b, every
+  window of the desktop) beside it, until the overview comes (8.5). No
+  window on the desktop: no group, and no surface.
+- **A line**: 30 px, 6 px past the group's sides, radius 8: the
+  application's icon (18 px, from the icon theme as the tiles find
+  theirs, else its letter on a colour), 8 px, its title (Manrope 13 px,
+  `text`, one line, cut with "…", whole in a tooltip after 600 ms when
+  cut), and on the right, 4 px in, a 22 × 22 ✕ (radius 6, a 10 px cross
+  of 1.5 px strokes, `text.dim`; under the pointer
+  `rgba(242,148,91,0.20)` and the cross `#F7B98A`, the draft's close).
+  The focused window's line is lit `rgba(255,255,255,0.06)`, a line under
+  the pointer too (`0.10` for the focused one's); the pointer is a hand.
+- **Clicks**: a line focuses and raises its window, back from minimised,
+  on its desktop (`bring`, as the desktop's list does; the lines are the
+  current desktop's, so no switch is needed from them); the ✕ asks the
+  window to close as `Super+Q` does (`close ID`, new on the link:
+  `xdg_toplevel.close`, X11's `WM_DELETE_WINDOW`), the application
+  deciding; nothing waits for it. Both name the window by its id, not
+  "the focused one". `Tab` reaches the lines and their ✕ from the bar's
+  other items; `Enter` acts.
+- **Its place**: a surface of its own (`hocus-bar-windows`) 14 px over
+  the desktops' tiles (over the dots in the mini form), placed from
+  them, in the room the column leaves free: the windows are not in the
+  column's order and nothing in it moves for them. In `GIVES_WAY` they
+  come after Today and before To do: Today, which fills the spacer, ends
+  14 px over them; To do's lines and the agents' rows never give way to
+  them; on a short bar their lines fold into "+ N", and without room for
+  one line and "+ N" the group does not show. A change of focus only
+  reorders the lines: its height stays, nothing moves.
+- **The mini form**: the first listed window's icon (20 px) in a 44 × 34
+  button (radius 10) 14 px over the dots, lit `0.06` under the pointer,
+  `0.08` while its popover shows; a 150 ms hover or a click opens the
+  popover: 240 px, the popovers' glass, its bottom on the item's, the
+  same lines (up to 3, with their ✕) and "+ N", which gives way to the
+  desktop's list. A line brings its window and closes the popover; a ✕
+  asks its window to close, the popover staying and following the
+  windows as they go. `Tab` and the arrows go through the lines, their
+  ✕ and "+ N"; `Esc` closes it.
+- **Several screens**: each bar lists its own screen's windows (the
+  focused window's line lit on the screen that has it only).
+- **The link** (`hocus-link`): `recent OUTPUT ID…` gives each bar's
+  screen's windows, the most recently focused first, told as the shell
+  connects and after a frame where it changed, at most once a frame;
+  `bar-windows shown|hidden` says `[panel] windows`; `close ID` asks a
+  window to close. The windows' titles and icons are the desktops'
+  (`desktops`, `titles`).
+- **Setting**: `[panel] windows = true` (default), followed live: `false`
+  hides the group in both forms. Settings › La barre (6.4) is not built
+  yet; its switch comes with it.
+- **At rest nothing draws**: the group draws when what it lists changes
+  (a window opening, closing, retitled, focused, minimised, the desktop
+  switched), never for a window moving or resizing.
+- **Choices the issue did not settle** (to confirm on the machine):
+  minimised windows are listed (greyed, in their focus order), so the
+  bar brings them back; the mini item shows the first listed window's
+  icon (the focused one when the focus is on this screen); the mini
+  popover has no header, "the same list" as the full form's; "+ N" opens
+  the existing desktop's list rather than a list of its own with ✕;
+  Today gives way to the windows (it fills the spacer the windows sit
+  in).
+- **Measured headless** (`crates/hocus-compositor/tests/bar_windows.rs`),
+  the real shell on the CPU, in French, test clients for windows, in a
+  home of the test's own: two lines, then three, the focused one first
+  and lit, 14 px over the tiles
+  (`up_to_three_lines_the_focused_first_and_lit`); a click focuses, a
+  minimised window greyed and brought back
+  (`a_click_on_a_line_focuses_its_window_even_minimised`); the ✕ asks
+  that window alone to close, which stays until it closes
+  (`the_close_button_asks_its_window_to_close`); five windows, three
+  lines and "+ 2 autres", which opens the desktop's list
+  (`past_three_windows_plus_n_opens_the_desktops_list`); none without a
+  window, on an empty desktop, once the last closes
+  (`no_window_no_group`); `[panel] windows = false`, then `true` written
+  in the file (`panel_windows_false_hides_them_and_true_brings_them_back_live`);
+  with the card, Today and To do, each window focused in turn from its
+  line and no surface moving
+  (`only_free_room_is_used_nothing_else_moves_when_the_focus_changes`);
+  the mini form's item 14 px over the dots and its popover, its ✕ and a
+  line (`the_mini_form_lists_them_in_a_popover`); two screens, each bar
+  its own windows (`each_screens_bar_lists_its_own_screens_windows`); a
+  window snapped draws the tiles and not the windows, a retitle draws
+  them (`nothing_draws_at_rest_and_a_move_draws_nothing`). Unit tests:
+  the lines read back (`hocus-link`); the order, the fitting and the
+  words, the surface's placement, the lines' parts, the popover's height
+  (`hocus-shell`); the room shared (`column`). With `HOCUS_SHOTS=dir`,
+  the screenshots of the pull request.

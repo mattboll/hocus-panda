@@ -260,7 +260,14 @@ impl State {
     /// Whether `output` is on: off while idle turned every screen off, or
     /// the lid closed over it.
     pub fn output_powered(&self, output: &Output) -> bool {
-        !(self.away.screens_off || (self.away.lid_closed && is_internal(output)))
+        !(self.away.screens_off
+            || (self.away.lid_closed && is_internal(output))
+            || self.display_off(output))
+    }
+
+    /// Whether the lid is closed.
+    pub fn lid_closed(&self) -> bool {
+        self.away.lid_closed
     }
 
     /// Whether every screen is off (idle).
@@ -534,6 +541,7 @@ impl State {
         }
         tracing::info!(closed, "the lid");
         self.away.lid_closed = closed;
+        self.displays.dirty = true;
         self.redraw = true;
         if !closed {
             self.felt(Felt::Other);

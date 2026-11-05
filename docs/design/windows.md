@@ -439,6 +439,12 @@ The configuration's `[shortcuts]` section holds them, by action: one
 shortcut, or a list of them (`close = ["Super+Q", "Alt+F4"]`); an empty
 string or list turns an action's off. The package ships every setting with its default
 (`/usr/share/doc/hocuspanda/config.toml`, from `packaging/config.toml`).
+The compositor reads the section again as the file changes, without a
+restart (6.8). The Settings' "Clavier et raccourcis › Raccourcis" lists
+every action below and records new combinations (settings.md); while it
+records one, it holds the keyboard-shortcuts-inhibit protocol, and the
+desktop runs none of these (media keys included) for the window that
+holds the keyboard; the virtual terminals' switch stays.
 
 | Action (`[shortcuts]`) | Default | What it does |
 |---|---|---|
@@ -458,11 +464,21 @@ string or list turns an action's off. The package ships every setting with its d
 | `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
+| `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
+| `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
+| `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
+| `capture`, `capture-screen`, `capture-window` | `Print`, `Shift+Print`, `Alt+Print` | The screen capture; the screen under the pointer or the focused window at once ([screenshots.md](screenshots.md)) |
+| `record` | `Super+Shift+R` | Records the screen with the last settings; while recording, stops ([screenshots.md](screenshots.md), 5.10) |
+| `volume-up`, `volume-down`, `mute` | the keyboard's sound keys | 5 % a press, stepping on while held; to the shell's gauges |
+| `brightness-up`, `brightness-down` | the keyboard's brightness keys | The same for the screen's brightness, down to 5 % |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
-without them, the system's `/etc/default/keyboard`, then XKB's `us`) and
+without them, the system's `/etc/default/keyboard`, then XKB's `us`;
+options, the keys' repeat and `numlock`, Num Lock on as the session
+opens; followed live as the file changes, the keymap compiled off the
+loop) and
 `[outputs.NAME] scale` per screen by connector name (`eDP-1`; the
 journal names each screen as it lights, with its density), from 0.5 to
 4. Otherwise a screen takes 1, or 2 when it is denser than 192 dpi and
@@ -470,6 +486,23 @@ stays at least 1280×800 logical at 2; never a fraction by itself, which
 would blur the applications that cannot draw at one (X11 ones). A screen
 without a believable size (none, a projector's, an impossible density)
 takes 1.
+
+The same section takes, since 6.9 (the Settings' Écrans page,
+settings.md): `mode = "2560x1600@60"` (width, height and refresh rate,
+whole or not; without one, its preferred size at its highest rate; one it
+does not offer is the same), `position = [x, y]` (its top-left corner,
+logical; used when every screen on has one and they neither overlap nor
+leave one apart, else they go left to right in the connectors' order,
+tops aligned), `enabled = false` (off, plugged: its windows go to another
+as for a screen unplugged; the last screen on stays on) and `vrr = true`.
+The compositor follows the file as it changes (a thread waits in inotify
+on its folder, then the loop applies `[outputs]` and `[panel] output`):
+windows go along with their screen, at the same share of its work area
+(a window the desktop moved so is still the one a screen turned on again,
+or plugged back, takes back).
+A mode can also be tried by the Settings without the file: the
+compositor takes it back by itself after 15 s, or when the Settings go,
+unless it is kept.
 
 `[appearance]` holds `reduced-motion` (windows fade instead of moving,
 and do not wobble; desktops cross-fade) and `high-contrast` (the focused

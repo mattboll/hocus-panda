@@ -331,6 +331,11 @@ impl Headless {
         self.app.state.panel.today_commits
     }
 
+    /// The commits of the windows' surfaces in the bar (#604), all bars'.
+    pub fn windows_commits(&self) -> u64 {
+        self.app.state.panel.windows_commits
+    }
+
     /// The commits of the next meeting's surfaces (Day.2), all bars'.
     pub fn meeting_commits(&self) -> u64 {
         self.app.state.panel.meeting_commits
@@ -840,6 +845,8 @@ impl Headless {
         state.lock_wait_tick();
         // So do the session menu's countdown and its windows' 5 s (7.4).
         state.leave_tick();
+        // And a screen's mode tried from the Settings (6.9).
+        state.trial_tick();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
@@ -1274,6 +1281,28 @@ impl Headless {
             15.0 * f64::from(notches),
             Some(120 * notches),
         );
+    }
+
+    /// The keyboard's repeat as the compositor last gave it to clients:
+    /// (rate, delay).
+    pub fn keyboard_repeat(&self) -> (i32, i32) {
+        let keyboard = &self.app.state.config.keyboard;
+        (keyboard.repeat_rate, keyboard.repeat_delay)
+    }
+
+    /// Num Lock is locked on the seat's keyboard.
+    pub fn num_lock(&self) -> bool {
+        self.app
+            .state
+            .seat
+            .get_keyboard()
+            .is_some_and(|k| k.modifier_state().num_lock)
+    }
+
+    /// The window holding the keyboard takes every key, the desktop's
+    /// shortcuts with them (keyboard-shortcuts-inhibit).
+    pub fn shortcuts_inhibited(&self) -> bool {
+        self.app.state.shortcuts_inhibited()
     }
 
     /// A mouse or touchpad plugged in, as libinput would (6.12): given

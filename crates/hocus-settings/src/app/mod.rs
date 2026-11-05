@@ -10,8 +10,10 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod keyboard_page;
 mod mouse;
 mod places;
+mod screens;
 mod sound;
 mod style;
 mod view;
@@ -39,7 +41,7 @@ use crate::{
     model::{Kind, SectionId, Setting, Source, Value, settings_of},
     search::{self, Found},
     single::Again,
-    store::{FileState, Raw, Reading, Slot, Snapshot},
+    store::{FileState, KeyEdit, Raw, Reading, Slot, Snapshot},
     worker::{self, Ask, Heard, Recent, Why, Worker},
 };
 
@@ -131,10 +133,48 @@ pub enum ToastAction {
 
 /// A change written: what was there, what is there now.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Change {
-    slot: Slot,
-    before: Raw,
-    after: Raw,
+enum Change {
+    Slot {
+        slot: Slot,
+        before: Raw,
+        after: Raw,
+        /// Changes made together (a shortcut taken from another action,
+        /// 6.8) are taken back together.
+        batch: Option<u64>,
+    },
+    /// Keys a page wrote itself (the screens'), and what it says of them.
+    Keys {
+        before: Vec<KeyEdit>,
+        after: Vec<KeyEdit>,
+        said: KeysSaid,
+    },
+}
+
+impl Change {
+    /// The batch it was made in, taken back with it.
+    fn batch(&self) -> Option<u64> {
+        match self {
+            Self::Slot { batch, .. } => *batch,
+            Self::Keys { .. } => None,
+        }
+    }
+}
+
+/// What the toasts say of keys a page wrote, done, undone or redone; the
+/// row lit by an undo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeysSaid {
+    done: String,
+    undone: String,
+    redone: String,
+    row: &'static str,
+}
+
+/// What a write asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Write {
+    Slot(Slot, Raw),
+    Keys(Vec<KeyEdit>, KeysSaid),
 }
 
 /// What `Ctrl+Z` takes back: a change of the file, or a choice of the
@@ -155,12 +195,15 @@ enum Doing {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pending {
-    slot: Slot,
-    raw: Raw,
+    write: Write,
     doing: Doing,
     /// The change undone or redone, which goes on the other stack once
     /// written.
     change: Option<Change>,
+    batch: Option<u64>,
+    /// What its toast says instead of the setting and its value; empty:
+    /// no toast (another write of its batch says it).
+    say: Option<String>,
 }
 
 /// Whether the window stays: asked to close, it goes once the writes it
@@ -192,6 +235,7 @@ pub enum Message {
     Again(Again),
     Key {
         key: Key,
+        physical: keyboard::key::Physical,
         modifiers: Modifiers,
         text: Option<String>,
         captured: bool,
@@ -222,11 +266,17 @@ pub enum Message {
     Drag,
     /// The Son page's.
     Sound(sound::Msg),
+    /// The Écrans page's own (6.9).
+    Screens(screens::Msg),
     Frame(Instant),
+    /// The screen's scale the window draws at, changed.
+    Rescaled(f32),
     Placed(Places),
     Scrolled,
     /// The mice and touchpads page's (6.12).
     Mouse(mouse::Msg),
+    /// The keyboard's page and its shortcuts' (6.8).
+    Keys(keyboard_page::Msg),
     Nothing,
 }
 
@@ -268,8 +318,14 @@ pub struct App {
     now: Instant,
     reduced_motion: bool,
     life: Life,
+    /// The Écrans page (6.9).
+    screens: screens::Page,
+    /// The scale the window draws at, as the compositor told it.
+    scale: f32,
     /// The mice and touchpads, and the test area (6.12).
     mouse: mouse::Mouse,
+    /// The layouts, the shortcuts' sub-page, a shortcut recorded (6.8).
+    keys: keyboard_page::Keys,
     /// What the log said last.
     said: String,
     said_places: String,
@@ -293,6 +349,7 @@ impl App {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
+        let to_screens = sender.clone();
         if let Some(socket) = crate::devices::socket() {
             let devices = sender.clone();
             crate::devices::follow(socket, move |list| {
@@ -301,13 +358,19 @@ impl App {
                     .is_ok()
             });
         }
+        let layouts = sender.clone();
+        keyboard_page::read_registry(start.lang, move |registry, system| {
+            let _ = layouts.unbounded_send(Message::Keys(keyboard_page::Msg::Registry(
+                registry, system,
+            )));
+        });
         if let Some(listener) = listener {
             let again: UnboundedSender<Message> = sender;
             crate::single::listen(listener, move |ask| {
                 again.unbounded_send(Message::Again(ask)).is_ok()
             });
         }
-        let app = Self {
+        let mut app = Self {
             lang: start.lang,
             user: start.user,
             window: None,
@@ -339,12 +402,15 @@ impl App {
             now: Instant::now(),
             reduced_motion: false,
             life: Life::Open,
+            screens: screens::Page::default(),
+            scale: 1.0,
             mouse: mouse::Mouse::default(),
+            keys: keyboard_page::Keys::default(),
             said: String::new(),
             said_places: String::new(),
             sound,
         };
-        let mut app = app;
+        app.screens_open(to_screens);
         if start.section == Some(SectionId::Sound) {
             app.light = Some(("sound.output", Instant::now()));
         }
@@ -372,16 +438,23 @@ impl App {
             event::listen_with(|event, status, _| match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key,
+                    physical_key,
                     modifiers,
                     text,
                     ..
                 }) => Some(Message::Key {
                     key,
+                    physical: physical_key,
                     modifiers,
                     text: text.map(|t| t.to_string()),
                     captured: status == event::Status::Captured,
                 }),
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
+                // The modifiers held while a shortcut is recorded (6.8).
+                Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
+                    Some(Message::Keys(keyboard_page::Msg::Mods(mods)))
+                }
+                Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
                 // The test area says which device scrolled (6.12).
                 Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                     Some(Message::Mouse(mouse::Msg::Wheel(delta)))
@@ -394,6 +467,22 @@ impl App {
         ];
         if self.moving(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
+        }
+        // The Écrans page's drawing: a screen pressed, then following the
+        // pointer wherever it goes in the window.
+        if self.screens_shown_now() {
+            subscriptions.push(event::listen_with(|event, _, _| match event {
+                Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::Screens(screens::Msg::Pointer(position)))
+                }
+                Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
+                    Some(Message::Screens(screens::Msg::PressAt))
+                }
+                Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                    Some(Message::Screens(screens::Msg::Release))
+                }
+                _ => None,
+            }));
         }
         Subscription::batch(subscriptions)
     }
@@ -419,6 +508,7 @@ impl App {
                 .light
                 .is_some_and(|(_, since)| within(since, LIGHT_END))
             || self.knobs.values().any(|since| within(*since, KNOB))
+            || self.screens_moving(now)
             || self.mouse.moving(now)
     }
 
@@ -458,10 +548,24 @@ impl App {
             Message::Again(again) => self.again(again),
             Message::Key {
                 key,
+                physical,
                 modifiers,
                 text,
                 captured,
-            } => self.key(&key, modifiers, text.as_deref(), captured),
+            } => {
+                // A shortcut recorded takes every key (6.8).
+                if self.keys.recording.is_some() {
+                    return self.record_key(&key, &physical, modifiers);
+                }
+                if self.keys.conflict.is_some() && key.as_ref() == Key::Named(Named::Escape) {
+                    return self.keys_update(keyboard_page::Msg::Cancel);
+                }
+                if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
+                    self.keys.adding = None;
+                    return Task::none();
+                }
+                self.key(&key, modifiers, text.as_deref(), captured)
+            }
             Message::Query(query) => {
                 self.focus = Focus::Search;
                 self.search(query);
@@ -478,6 +582,7 @@ impl App {
             }
             Message::Section(id) => {
                 self.go(Page::Section(id));
+                self.keys.sub = false;
                 Task::none()
             }
             Message::Result(i) => self.open_result(i),
@@ -562,9 +667,15 @@ impl App {
             }
             Message::Drag => self.window.map_or_else(Task::none, window::drag),
             Message::Sound(msg) => self.sound_update(msg),
+            Message::Screens(msg) => self.screens_update(msg),
             Message::Frame(_) | Message::Scrolled | Message::Nothing => Task::none(),
+            Message::Rescaled(scale) => {
+                self.scale = scale;
+                Task::none()
+            }
             Message::Placed(places) => self.placed(places),
             Message::Mouse(msg) => self.mouse_update(msg),
+            Message::Keys(msg) => self.keys_update(msg),
         }
     }
 
@@ -595,6 +706,7 @@ impl App {
                 snapshot,
                 why,
                 before,
+                before_keys,
                 last_good,
             } => {
                 let was_broken = self
@@ -612,7 +724,7 @@ impl App {
                 }
                 match why {
                     Why::Start => Task::none(),
-                    Why::Written(id) => self.written(id, before),
+                    Why::Written(id) => self.written(id, before, before_keys),
                     Why::ByHand(changed) => self.by_hand(&changed, was_broken),
                     Why::Restored => {
                         let text = self
@@ -629,31 +741,66 @@ impl App {
     }
 
     /// A change of ours written: kept for its undo, and said.
-    fn written(&mut self, id: u64, before: Vec<(Slot, Raw)>) -> Task<Message> {
+    fn written(
+        &mut self,
+        id: u64,
+        before: Vec<(Slot, Raw)>,
+        before_keys: Vec<KeyEdit>,
+    ) -> Task<Message> {
         let Some(pending) = self.pending.remove(&id) else {
             return Task::none();
         };
+        let (slot, raw) = match pending.write {
+            Write::Slot(slot, raw) => (slot, raw),
+            Write::Keys(edits, said) => {
+                let change = pending.change.clone().unwrap_or(Change::Keys {
+                    before: before_keys,
+                    after: edits,
+                    said: said.clone(),
+                });
+                return match pending.doing {
+                    Doing::New => {
+                        self.undo.push(Undo::File(change));
+                        self.redo.clear();
+                        self.toast(said.done, ToastAction::Undo, TOAST)
+                    }
+                    Doing::Undo => {
+                        self.redo.push(Undo::File(change));
+                        self.light = Some((said.row, Instant::now()));
+                        self.toast(said.undone, ToastAction::None, UNDONE)
+                    }
+                    Doing::Redo => {
+                        self.undo.push(Undo::File(change));
+                        self.light = Some((said.row, Instant::now()));
+                        self.toast(said.redone, ToastAction::None, UNDONE)
+                    }
+                };
+            }
+        };
         let before = before
             .into_iter()
-            .find(|(slot, _)| *slot == pending.slot)
+            .find(|(s, _)| *s == slot)
             .map_or(Raw::Remove, |(_, raw)| raw);
-        let change = pending.change.clone().unwrap_or(Change {
-            slot: pending.slot,
+        let change = pending.change.clone().unwrap_or(Change::Slot {
+            slot,
             before,
-            after: pending.raw.clone(),
+            after: raw,
+            batch: pending.batch,
         });
-        let Some(setting) = pending.slot.setting() else {
+        let Some(setting) = slot.setting() else {
             return Task::none();
         };
-        let name = self.slot_name(setting, pending.slot);
-        let now = self.said_value(pending.slot);
+        let name = self.slot_name(setting, slot);
+        let now = self.said_value(slot);
         match pending.doing {
             Doing::New => {
                 self.undo.push(Undo::File(change));
                 self.redo.clear();
-                let text = match self.lang {
-                    Lang::French => format!("{name} : {now}"),
-                    Lang::English => format!("{name}: {now}"),
+                let text = match (pending.say, self.lang) {
+                    (Some(said), _) if said.is_empty() => return Task::none(),
+                    (Some(said), _) => said,
+                    (None, Lang::French) => format!("{name} : {now}"),
+                    (None, Lang::English) => format!("{name}: {now}"),
                 };
                 self.toast(text, ToastAction::Undo, TOAST)
             }
@@ -664,7 +811,7 @@ impl App {
                     self.undo.push(Undo::File(change));
                 }
                 self.light = Some((setting.id, Instant::now()));
-                if let Some(source) = pending.slot.source {
+                if let Some(source) = slot.source {
                     self.source = source;
                 }
                 let text = match self.lang {
@@ -741,6 +888,7 @@ impl App {
     /// what a device says (the touchpad's own right click).
     fn default_of(&self, slot: Slot) -> Option<Value> {
         self.device_default(slot)
+            .or_else(|| self.keyboard_default(slot))
             .or_else(|| slot.place().map(|p| p.default.clone()))
     }
 
@@ -781,19 +929,77 @@ impl App {
         Task::none()
     }
 
+    /// `value` written at `slot` as one of a batch taken back together,
+    /// its toast saying `say` (empty: none).
+    fn write_batch(&mut self, slot: Slot, value: Value, batch: u64, say: Option<String>) {
+        if self.writable() {
+            self.ask(slot, Raw::Set(value), Doing::New, None, Some(batch), say);
+        }
+    }
+
+    /// `slot`'s line taken out of the file: its default applies, and
+    /// follows a changed default later ("Rétablir", 6.8).
+    fn remove(&mut self, slot: Slot, batch: Option<u64>) {
+        if self.writable() {
+            self.ask(slot, Raw::Remove, Doing::New, None, batch, None);
+        }
+    }
+
     fn ask_write(&mut self, slot: Slot, raw: Raw, doing: Doing, change: Option<Change>) {
+        let batch = change.as_ref().and_then(Change::batch);
+        self.ask(slot, raw, doing, change, batch, None);
+    }
+
+    fn ask(
+        &mut self,
+        slot: Slot,
+        raw: Raw,
+        doing: Doing,
+        change: Option<Change>,
+        batch: Option<u64>,
+        say: Option<String>,
+    ) {
         self.serial += 1;
         let id = self.serial;
         self.pending.insert(
             id,
             Pending {
-                slot,
-                raw: raw.clone(),
+                write: Write::Slot(slot, raw.clone()),
                 doing,
                 change,
+                batch,
+                say,
             },
         );
         if !self.worker.ask(Ask::Write { slot, raw, id }) {
+            self.pending.remove(&id);
+        }
+    }
+
+    /// Keys a page writes itself, together, with what the toasts say.
+    fn ask_keys(
+        &mut self,
+        edits: Vec<KeyEdit>,
+        said: KeysSaid,
+        doing: Doing,
+        change: Option<Change>,
+    ) {
+        if !self.writable() {
+            return;
+        }
+        self.serial += 1;
+        let id = self.serial;
+        self.pending.insert(
+            id,
+            Pending {
+                write: Write::Keys(edits.clone(), said),
+                doing,
+                change,
+                batch: None,
+                say: None,
+            },
+        );
+        if !self.worker.ask(Ask::Keys { edits, id }) {
             self.pending.remove(&id);
         }
     }
@@ -814,12 +1020,31 @@ impl App {
             _ => return Task::none(),
         };
         self.toast = None;
-        self.ask_write(
-            change.slot,
-            change.before.clone(),
-            Doing::Undo,
-            Some(change),
-        );
+        // Its batch's others with it, the last first.
+        let batch = change.batch();
+        let mut changes = vec![change];
+        while batch.is_some()
+            && self
+                .undo
+                .last()
+                .is_some_and(|c| matches!(c, Undo::File(c) if c.batch() == batch))
+        {
+            if let Some(Undo::File(change)) = self.undo.pop() {
+                changes.push(change);
+            }
+        }
+        for change in changes {
+            match &change {
+                Change::Slot { slot, before, .. } => {
+                    let (slot, before) = (*slot, before.clone());
+                    self.ask_write(slot, before, Doing::Undo, Some(change));
+                }
+                Change::Keys { before, said, .. } => {
+                    let (before, said) = (before.clone(), said.clone());
+                    self.ask_keys(before, said, Doing::Undo, Some(change));
+                }
+            }
+        }
         Task::none()
     }
 
@@ -837,7 +1062,30 @@ impl App {
             },
             _ => return Task::none(),
         };
-        self.ask_write(change.slot, change.after.clone(), Doing::Redo, Some(change));
+        let batch = change.batch();
+        let mut changes = vec![change];
+        while batch.is_some()
+            && self
+                .redo
+                .last()
+                .is_some_and(|c| matches!(c, Undo::File(c) if c.batch() == batch))
+        {
+            if let Some(Undo::File(change)) = self.redo.pop() {
+                changes.push(change);
+            }
+        }
+        for change in changes {
+            match &change {
+                Change::Slot { slot, after, .. } => {
+                    let (slot, after) = (*slot, after.clone());
+                    self.ask_write(slot, after, Doing::Redo, Some(change));
+                }
+                Change::Keys { after, said, .. } => {
+                    let (after, said) = (after.clone(), said.clone());
+                    self.ask_keys(after, said, Doing::Redo, Some(change));
+                }
+            }
+        }
         Task::none()
     }
 
@@ -930,6 +1178,10 @@ impl App {
             self.page = page;
             self.light = None;
             self.menu = None;
+            self.stop_recording();
+            self.keys.conflict = None;
+            self.keys.adding = None;
+            self.keys.sub = false;
             self.sound.menu = None;
         }
         self.opened = None;
@@ -968,6 +1220,8 @@ impl App {
     fn show_row(&mut self, setting: &'static str) -> Task<Message> {
         if let Some(s) = crate::model::setting(setting) {
             self.go(Page::Section(s.section));
+            // A shortcut's row is on the shortcuts' sub-page.
+            self.keys.sub = s.kind == Kind::Shortcut;
         } else if let Some(o) = crate::model::outside(setting) {
             self.go(Page::Section(o.section));
         }
@@ -1034,6 +1288,23 @@ impl App {
         if section == SectionId::Sound {
             return self.sound_stops().into_iter().map(Control::Sound).collect();
         }
+        if section == SectionId::Keyboard {
+            if self.keys.sub {
+                return Vec::new();
+            }
+            return settings_of(section)
+                .iter()
+                .filter(|s| !keyboard_page::own_kind(&s.kind))
+                .map(|s| Control::Setting(Slot::of(s, self.source)))
+                .collect();
+        }
+        if section == SectionId::Screens {
+            return self
+                .screens_controls()
+                .into_iter()
+                .map(Control::Screens)
+                .collect();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1071,6 +1342,10 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let ctrl = modifiers.control();
+        // The screens' "Garder ?" (anywhere), the page's menu.
+        if let Some(task) = self.screens_key_first(key) {
+            return task;
+        }
         match key.as_ref() {
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("f") => {
                 self.focus = Focus::Search;
@@ -1141,6 +1416,14 @@ impl App {
             && text.chars().any(char::is_alphanumeric)
             && !text.is_empty()
         {
+            // Into the layouts' popover's search while it is open (6.8).
+            if let Some(query) = &self.keys.adding {
+                let query = format!("{query}{text}");
+                return Task::batch([
+                    self.keys_update(keyboard_page::Msg::AddQuery(query)),
+                    self.keys_update(keyboard_page::Msg::FocusAdd),
+                ]);
+            }
             self.focus = Focus::Search;
             let query = format!("{}{text}", self.query);
             self.search(query);
@@ -1198,7 +1481,7 @@ impl App {
     }
 
     fn control_key(&mut self, i: usize, key: &Key, modifiers: Modifiers) -> Task<Message> {
-        let Some(control) = self.controls().get(i).copied() else {
+        let Some(control) = self.controls().get(i).cloned() else {
             return Task::none();
         };
         let named = match key.as_ref() {
@@ -1207,6 +1490,7 @@ impl App {
         };
         match control {
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
+            Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
                     Named::ArrowLeft => self.source = Source::Battery,
@@ -1312,7 +1596,7 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.not_here(setting).is_some() {
+        if !self.writable() || self.unavailable(setting).is_some() {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -1320,6 +1604,13 @@ impl App {
                 self.value(Slot::of(switch, self.source)) == Some(Value::Bool(false))
             })
         })
+    }
+
+    /// Why a row does not apply now: no device plugged takes it (6.12), or
+    /// another setting takes its key (6.8).
+    pub(super) fn unavailable(&self, setting: &Setting) -> Option<&'static str> {
+        self.not_here(setting)
+            .or_else(|| self.keyboard_not_here(setting))
     }
 
     /// The row lit, and how much (0 to 1), at the frame's time.
@@ -1384,11 +1675,13 @@ impl App {
 }
 
 /// A control of the page that takes the keyboard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
     Segmented,
     Setting(Slot),
     Sound(sound::Stop),
+    /// The Écrans page's own.
+    Screens(screens::Control),
     /// The mice and touchpads page's test area.
     Try(TryPart),
 }

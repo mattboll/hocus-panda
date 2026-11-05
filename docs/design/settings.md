@@ -229,6 +229,121 @@ application's menu, mute and slider.
 **The home's card** says the output in use and its volume
 ("Haut-parleurs · 62 %").
 
+## Écrans (6.9)
+
+Built 2026-11-05 (issue #409), variant A of the
+[mockup](https://claude.ai/artifact/NpviTjpi82usEsSWkM9XFA): the
+arrangement on top. The maintainer decided: variant A; rotation drawn but
+"Plus tard", with no effect; the scale written at once with "Annuler",
+the resolution and the refresh rate through the 15 s "Garder ?"; VRR an
+on/off switch, off by default. `src/screens.rs` (the compositor's line,
+the arrangement's geometry, the page's settings for the search) and
+`src/app/screens.rs` (the page, its drawing, its menus, the dialog): the
+page draws itself, its keys holding a screen's name.
+
+**The compositor is the source.** The window opens a line of the
+compositor's control socket (`HOCUS_SOCKET`, `msg screens`) on threads of
+its own; the compositor writes the screens on it as one JSON line each
+time they change (a screen plugged or unplugged, the file read again, a
+trial, the lid, the primary screen), then a trial's seconds left.
+`hocus msg outputs` prints the same JSON once. Each screen: its connector,
+whether it is built in, its size in mm, its modes (width, height, mHz,
+native), its mode, its scale and whether the file sets it, the scale it
+takes by itself, its logical place and size, VRR offered and on, on, plugged,
+lid closed, primary, the file's mode and whether the screen offers it; a
+screen unplugged this session is listed with its place and when. Nothing
+comes from the session bus.
+
+**The page**: "Écrans", its line; DISPOSITION with "Identifier", the
+drawing (196 high, a dot every 14 px; each screen at its logical size,
+0.1 px per logical px at most, centred; its number's disc, its name, its
+mode, its scale when the file sets one; the bar's strip on the primary
+screen, 196 or 56 logical wide; dashed for a screen off, unplugged or
+behind its closed lid) and its line; the notes of a screen missing (blue);
+the chosen screen's group (its number, its name in capitals, "Principal",
+its connector, size and density), its rows "Utiliser cet écran",
+"Résolution" (native first), "Fréquence" (inert with one rate), "Échelle"
+("Automatique (100 %)", 100 to 200 %; "Comme 2048 × 1280", its density,
+the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
+(inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
+ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
+ÉCLAIRAGE NOCTURNE, "Plus tard", inert. Screens are numbered 1 for the
+built-in panel, then by connector, and named "Écran du portable", "Écran
+externe 34 pouces" (its EDID's size), or "Écran 2" when its size is not
+known.
+
+**Dragging** a screen (4 px before it counts) shows where it lands, a
+dashed green outline: on the side of the other nearest its centre (the
+centres' offset over half their summed sizes, the larger axis wins),
+flush, at least 200 logical px shared, caught by aligned edges or
+middles within 120 logical px. Let go, it slides there in 200 ms (none
+with reduced motion) and both screens' places are written, normalised
+so that the smallest x and y are 0; dropped where it was, nothing is
+("Lâché à sa place : rien ne change."). A click chooses a screen; `Tab`
+reaches each, `Enter` or `Space` chooses it, the arrows put it on that
+side of the other, tops or lefts aligned. A size changed (mode, scale)
+while the file places the screens writes the places too, keeping the
+side and the alignment.
+
+**Tried first**: a resolution or a refresh rate (a new size keeps the
+rate when it has it, else takes its highest) is asked of the compositor
+(`try NAME mode=WxH@HZ`), which applies it without the file and counts 15 s
+on its own clock: the dialog over the window shows the seconds it is told
+(a ring, "Garder cette résolution ?", what the screen shows now and what
+it goes back to, "Revenir", "Garder" with the focus; `Tab` between them,
+`Esc` reverts), and the header says "À confirmer" with an amber dot.
+Nothing pressed, `Esc`, "Revenir", or the window gone (its line closes):
+the compositor takes it back and nothing is written. "Garder" keeps it
+(`keep ID`) and writes `mode`, with the toast "Gardé : 2560 × 1080 à 60 Hz
+sur l’écran externe 34 pouces" and its "Annuler", which goes straight
+back.
+
+**Written at once**, with the toast's "Annuler" and `Ctrl+Z`: a place,
+the scale, the primary screen, VRR, a screen turned off or on. "Annuler"
+takes each key back as the file had it: a key the file did not hold is
+taken out, with its table when that one is left empty and has no comment
+(the file then is byte for byte what it was). These keys go through the
+file's worker together (`Ask::Keys`), as 6.1's do one by one.
+
+| Row | Key |
+|---|---|
+| Disposition | `[outputs.NAME] position = [x, y]`, every screen plugged |
+| Utiliser cet écran | `[outputs.NAME] enabled = false` (on: taken out) |
+| Résolution, Fréquence | `[outputs.NAME] mode = "2560x1600@60"` |
+| Échelle | `[outputs.NAME] scale` (Automatique: taken out) |
+| Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
+| Écran principal | `[panel] output` (Automatique: taken out) |
+
+**The compositor follows the file** (`crates/hocus-compositor/src/
+displays.rs`): the one watcher of the file (`reload.rs`, 6.12's) hands
+the loop what it says, and the loop takes `[outputs]` and `[panel]
+output` from it at once (windows.md §13). A file that does not read changes nothing.
+
+**A screen missing**: unplugged, its dashed ghost stays at its place,
+"Débranché · sa place est gardée", not chosen, with a note ("Écran
+externe 34 pouces débranché à 14:02 — Sa place (…) et ses réglages sont
+gardés…"); off by the file, dashed "Éteint", still chosen and dragged,
+with its note; the lid closed over the built-in panel with another
+screen on, dashed "Couvercle fermé", its rows inert, with its note. The
+last screen on cannot be turned off (its switch is inert), and the
+compositor keeps one on whatever the file says. A file whose places
+overlap or leave a screen apart: the compositor puts them left to right
+and the page says so.
+
+**The search** finds the page's rows by their words and keys
+("Disposition des écrans", "Identifier les écrans", "Utiliser cet écran",
+"Résolution", "Fréquence", "Échelle" by « hidpi », "Fréquence variable
+(VRR)", "Rotation", "Écran principal", "Recopie" by « miroir »,
+"Éclairage nocturne"); they are model settings whose `Places::Page` say
+their keys (`outputs.NAME.scale`) but are not slots of the file.
+
+Not built here (to confirm): **mirroring** (no `mirror` key yet: the
+compositor does not draw one screen's picture on another; the row is
+"Plus tard", inert); **Identifier**'s overlay on the screens themselves
+(the drawing shows the numbers large for 3 s, the compositor draws
+nothing yet); a drop that would split three screens or more (only two are
+drawn against each other); the night light.
+
 ## Souris et pavé tactile (6.12)
 
 Built 2026-11-05 (issue #446), variant A of
@@ -302,6 +417,80 @@ Choices made here (to confirm on the machine): the dashed rims of the
 empty groups and of the target are drawn solid (iced draws no dashes);
 a USB mouse is "Souris USB" (a wireless receiver is not knowable); the
 list's lines read "Ligne N de la liste".
+
+## Clavier et raccourcis (6.8)
+
+Built 2026-11-05 (issue #408), variant A of
+[the mockup](https://claude.ai/artifact/K49KfhL6QjVzEfBo1kc5oB), from the
+spec in the issue's last comment. The maintainer decided: the shortcuts
+on a sub-page with their own search; while a shortcut is recorded the
+Settings ask the compositor to suspend the desktop's own shortcuts
+(keyboard-shortcuts-inhibit); "Rétablir" takes the line out of the file,
+so that the default applies and follows future defaults; a family of
+nine is one folded row that unfolds.
+
+- `src/keyboard.rs` holds the rows and the 64 actions of `shortcuts.rs`
+  (each a setting of its own: the search, the undo and the file's
+  watching are 6.1's), `src/keys.rs` the chords as written, shown and
+  recorded, `src/xkb.rs` XKB's registry (`evdev.xml`) and its French
+  catalog, read on a thread; `src/app/keyboard_page.rs` lays out both
+  pages.
+- **The page**: DISPOSITIONS (each layout of `[keyboard] layouts`, its
+  chip, its name, ↑, ↓, ✕; the system's when the file names none, the
+  first change writing the list; "+ Ajouter une disposition" opens the
+  registry's search, accents and case aside, `Enter` adding the first,
+  `Esc` closing; "Changer de disposition", `grp:` of `[keyboard] options`,
+  at 45 % with one layout), RÉPÉTITION DES TOUCHES (`repeat_delay` 100 to
+  1000 ms by 50, `repeat_rate` 5 to 60 /s, and a field to try them),
+  TOUCHES SPÉCIALES (Verr. Maj., `caps:`; Touche Compose, `compose:`,
+  Verr. Maj. at 45 % while Compose takes it; Verr. Num. à l'ouverture,
+  `[keyboard] numlock`), RACCOURCIS (one row, "N modifiés", that opens
+  the sub-page). The options a menu does not own stay in the line, in
+  their place.
+- **The sub-page** ("Réglages › Clavier et raccourcis › Raccourcis",
+  "‹ Clavier et raccourcis" back): its search (names in both languages,
+  nearby words, the keys as shown and as XKB names them, the file's
+  key), "64 raccourcis · N modifiés", "Tout rétablir"; FENÊTRES, BUREAUX,
+  BARRE ET LANCEUR, CAPTURES, SESSION, TOUCHES MULTIMÉDIA, then FIXES.
+  Each row: its keycaps, "+", and once changed a green dot, "Par défaut :
+  …" and "↺ Rétablir". Desktops 1 to 9, send to and take to are one row
+  each ("Super + 1 … 9", or "Propres à chaque bureau" once they differ),
+  "Les 9" / "Replier"; a search shows the members.
+- **Recording**: a click on a combination (or "+") records the next one
+  pressed, the modifiers shown as they are held. The window holds the
+  keyboard-shortcuts-inhibit protocol meanwhile (`src/activate.rs`, on
+  the window's own connection, on a thread), so `Super+L` reaches it
+  instead of locking. `Esc` cancels, `Backspace` removes the combination.
+  Refused, in the row: a key that types without Super, Ctrl or Alt,
+  `Ctrl+Alt+F1`…`F12`, one the action has, `Super+Space` while it
+  switches the layouts. A combination another action holds opens the
+  amber box under the row: "Super + L sert déjà à « Verrouiller la
+  session ». Le remplacer le lui enlève.", "Remplacer" (both lines
+  written, one toast, its "Annuler" taking both back) or "Annuler".
+- Chords are written as the compositor reads them: Super, Ctrl, Alt,
+  Shift, then the XKB name (`Super+Shift+E`, `Super+period`, `Print`);
+  the top row's digits whatever the layout.
+
+**The compositor's side.** `reload.rs` follows `[shortcuts]` and
+`[keyboard]` too: the new shortcuts at once; new layouts or options make
+a keymap compiled on the configuration's thread (XKB reads its files
+there), which the loop takes in and the shell is told again (a keymap XKB
+refuses is logged, the old one stays); the repeat is given to clients
+again. `[keyboard] numlock = true` locks Num Lock in the keymap's state as
+the session opens. The keyboard-shortcuts-inhibit global is served: an
+inhibitor is granted at once, and while the surface holding the keyboard
+has one, no shortcut runs (the virtual terminals' switch stays).
+
+Choices made here (to confirm on the machine): layouts move with ↑ and
+↓, not by dragging; the add popover opens in the card, under its row,
+rather than floating; the Super+Space choice of the switch menu stays
+choosable (refused when recording, not greyed in the menu); with no file
+options the menus show "none", not the system's options; the keycaps'
+2 px bottom is a shadow; a layout's line says its XKB code, not
+"AZERTY"; Num Lock's LED on a physical keyboard follows on the first
+key; the window's keyboard reaches combinations by the mouse only (not
+`Tab`); on the CPU at scale 2 the sub-page takes a few seconds to draw
+its 64 rows the first time.
 
 ## Saving
 
@@ -484,8 +673,10 @@ file.
 
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
-  (6.12); each other setting's ticket adds its own.
-- The other fourteen pages (6.2 to 6.17, Day.1).
+  (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
+  `[shortcuts]` (6.8), through one watcher (`reload.rs`); each other
+  setting's ticket adds its own.
+- The other twelve pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -541,6 +732,20 @@ offered by its call mode, the page's settings found by their words
 (`hocus-settings`); the sound popover's height and its link's place
 (`hocus-shell`).
 
+`crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
+of two screens (2560 × 1600 at 1, 3440 × 1440):
+
+- `the_arrangement_is_drawn_from_the_compositors_screens`
+- `dragging_the_external_above_the_laptop_writes_both_places`
+- `the_scale_is_written_at_once_and_annuler_puts_the_file_back`
+- `a_resolution_kept_with_garder_is_written`
+- `a_resolution_not_kept_goes_back_after_15_s_on_the_held_clock`
+- `the_compositor_follows_the_files_screens`
+- `windows_go_along_with_their_screen`
+- `a_window_goes_back_to_its_screen_turned_on_again`
+- `searching_hidpi_and_miroir_finds_the_scale_and_mirroring`
+- `at_rest_the_screens_page_commits_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_mouse.rs` (6.12), the same bed
 with the harness's touchpad and mouse:
@@ -555,6 +760,20 @@ with the harness's touchpad and mouse:
 - `a_touchpad_gets_tap_to_click_by_default`
 - `a_hand_edit_of_the_file_reaches_every_device`
 - `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_keyboard.rs` (6.8), the same bed
+with an XKB registry of the test's own:
+
+- `the_shortcuts_are_on_a_sub_page_with_their_own_search`
+- `desktops_one_to_nine_are_one_folded_row`
+- `recording_a_shortcut_suspends_the_desktops_own_and_a_conflict_shows`
+- `a_rebinding_takes_effect_live`
+- `retablir_takes_the_line_out_of_the_file`
+- `numlock_at_login_writes_keyboard_numlock`
+- `a_layout_added_writes_the_list`
+- `numlock_is_on_as_the_session_opens`
+- `the_keyboards_layouts_and_repeat_follow_the_file`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's
