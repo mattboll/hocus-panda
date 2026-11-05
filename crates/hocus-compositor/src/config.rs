@@ -927,6 +927,77 @@ pub struct Windows {
     pub wobble: bool,
     /// Which windows Alt+Tab lists.
     pub alt_tab: AltTab,
+    /// Rules per application, `[[windows.rules]]`, in the file's order:
+    /// the first of an application's applies.
+    pub rules: Vec<Rule>,
+}
+
+impl Windows {
+    /// The rule of the application that goes by `app_id`, if any.
+    pub fn rule(&self, app_id: &str) -> Option<&Rule> {
+        if app_id.is_empty() {
+            return None;
+        }
+        self.rules
+            .iter()
+            .find(|r| r.app_id.eq_ignore_ascii_case(app_id))
+    }
+}
+
+/// How an application's windows open (6.14): on a desktop, at a size,
+/// above the others. A dialog follows its parent, not the rule.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Rule {
+    pub app_id: String,
+    /// The desktop it opens on (from 1), on the screen it opens on; none:
+    /// the one the screen shows.
+    #[serde(default, deserialize_with = "rule_desktop")]
+    pub desktop: Option<usize>,
+    #[serde(default)]
+    pub size: OpenSize,
+    /// Kept above the others, even without the focus; a fullscreen
+    /// window in front covers it.
+    #[serde(default)]
+    pub above: bool,
+}
+
+fn rule_desktop<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<usize>, D::Error> {
+    let desktop = usize::deserialize(deserializer)?;
+    if (1..=crate::desktops::MAX_COUNT).contains(&desktop) {
+        Ok(Some(desktop))
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "desktop {desktop}: from 1 to 9"
+        )))
+    }
+}
+
+/// The size a window opens at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenSize {
+    /// Its application's last size (§5).
+    #[default]
+    Last,
+    Maximized,
+    Left,
+    Right,
+    Fullscreen,
+}
+
+impl OpenSize {
+    /// The mode it opens in, none for its last size.
+    pub fn mode(self) -> Option<crate::model::Mode> {
+        use crate::model::{Mode, Zone};
+        match self {
+            Self::Last => None,
+            Self::Maximized => Some(Mode::Snapped(Zone::Maximized)),
+            Self::Left => Some(Mode::Snapped(Zone::Left)),
+            Self::Right => Some(Mode::Snapped(Zone::Right)),
+            Self::Fullscreen => Some(Mode::Fullscreen),
+        }
+    }
 }
 
 impl Default for Windows {
@@ -938,6 +1009,7 @@ impl Default for Windows {
             snap_by_drag: true,
             wobble: true,
             alt_tab: AltTab::All,
+            rules: Vec::new(),
         }
     }
 }
@@ -1570,6 +1642,44 @@ mod tests {
             let text = format!("[windows]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_rules_read_in_the_files_order() -> anyhow::Result<()> {
+        let set: Config = toml::from_str(
+            "[[windows.rules]]\napp-id = \"org.example.Mail\"\ndesktop = 2\n\
+             size = \"maximized\"\nabove = true\n\n\
+             [[windows.rules]]\napp-id = \"foot\"\n\n\
+             [[windows.rules]]\napp-id = \"org.example.mail\"\nsize = \"left\"\n",
+        )?;
+        let rule = set.windows.rule("org.example.mail").cloned();
+        assert_eq!(
+            rule,
+            Some(Rule {
+                app_id: "org.example.Mail".into(),
+                desktop: Some(2),
+                size: OpenSize::Maximized,
+                above: true,
+            }),
+            "the first, whatever the case"
+        );
+        let foot = set
+            .windows
+            .rule("foot")
+            .map(|r| (r.desktop, r.size, r.above));
+        assert_eq!(foot, Some((None, OpenSize::Last, false)));
+        assert!(set.windows.rule("kitty").is_none());
+        for bad in [
+            "desktop = 0",
+            "desktop = 10",
+            "size = \"half\"",
+            "opacity = 0.5",
+        ] {
+            let text = format!("[[windows.rules]]\napp-id = \"foot\"\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<Config>("[[windows.rules]]\nabove = true\n").is_err());
         Ok(())
     }
 
