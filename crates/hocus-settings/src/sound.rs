@@ -408,7 +408,7 @@ mod tests {
         let found: Vec<&str> = casque.iter().map(|f| f.name).collect();
         assert_eq!(found, ["Sortie", "Entrée"], "{casque:?}");
         assert_eq!(casque[0].via.as_deref(), Some("casque"));
-        let balance = crate::search::find("left", Lang::French);
+        let balance = crate::search::find("stereo", Lang::French);
         assert_eq!(balance[0].name, "Balance");
         assert_eq!(
             crate::search::find("vumetre", Lang::English)[0].name,
