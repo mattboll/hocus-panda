@@ -484,7 +484,12 @@ impl State {
         let zone = self.non_exclusive_zone(output)?;
         let geometry = self.space.output_geometry(output)?;
         let bar = self.panel.width(&output.name());
-        Some(model::work_area(rect_of(zone), rect_of(geometry), bar))
+        Some(model::work_area(
+            rect_of(zone),
+            rect_of(geometry),
+            bar,
+            self.bar_side(),
+        ))
     }
 
     /// The window of `surface`, mapped or waiting for its first buffer.

@@ -259,9 +259,9 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
                 let settings = NewLayerShellSettings {
                     size: Some(size),
                     layer: Layer::Top,
-                    anchor: Anchor::Right | Anchor::Bottom,
+                    anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
                     exclusive_zone: Some(0),
-                    margin: Some(margin),
+                    margin: Some(crate::side::margin(margin)),
                     keyboard_interactivity: KeyboardInteractivity::None,
                     output_option: if bar == crate::ALONE {
                         OutputOption::Active
@@ -271,6 +271,7 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
                     events_transparent: false,
                     namespace: Some(TRAY_NAMESPACE.to_owned()),
                 };
+                crate::side::opened(id);
                 messages.push(Message::NewLayerShell { settings, id });
                 messages.push(region(id, form, switching, n));
             }
@@ -279,7 +280,10 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
                     messages.push(Message::SizeChange { id, size });
                 }
                 if place.asked.1 != margin {
-                    messages.push(Message::MarginChange { id, margin });
+                    messages.push(Message::MarginChange {
+                        id,
+                        margin: crate::side::moved(id, margin),
+                    });
                 }
                 place.asked = (size, margin);
                 if changed {

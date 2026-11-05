@@ -134,12 +134,32 @@ pub fn placed(form: Form, middle: f32, width: f32, card: bool) -> Placed {
         Point::new(-bar - FROM_BAR - PANDA, panda_top),
         Size::new(PANDA, PANDA),
     );
-    Placed {
+    let placed = Placed {
         size,
         margin,
         bubble,
         panda,
         in_bar,
+    };
+    if crate::side::left() {
+        mirrored(placed)
+    } else {
+        placed
+    }
+}
+
+/// `placed` beside a bar on the left: the surface's margins are mirrored
+/// as it opens (`crate::side`), and what is on it here, the panda next to
+/// the bar and the bubble past it; the panda in the bar's frame right of
+/// its right edge.
+fn mirrored(placed: Placed) -> Placed {
+    let width = placed.size.0 as f32;
+    let flip = |r: Rectangle| Rectangle::new(Point::new(width - r.x - r.width, r.y), r.size());
+    Placed {
+        bubble: flip(placed.bubble),
+        panda: flip(placed.panda),
+        in_bar: Rectangle::new(Point::new(FROM_BAR, placed.in_bar.y), placed.in_bar.size()),
+        ..placed
     }
 }
 

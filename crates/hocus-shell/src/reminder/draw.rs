@@ -319,9 +319,10 @@ impl View {
             crate::tray::tip::leave();
             return;
         };
-        let (top, right) = (shown.margin.0 as f32, shown.margin.1 as f32);
+        let top = shown.margin.0 as f32;
         let surface_width = shown.at.x + super::WIDTH + if shown.card { 0.0 } else { 8.0 };
-        let centre = right + surface_width - (shown.at.x + rect.center_x());
+        let centre =
+            crate::side::from_edge(shown.margin, surface_width, shown.at.x + rect.center_x());
         crate::tray::tip::hover_under(
             &shown.bar,
             top + shown.at.y + HEIGHT + TIP_GAP,

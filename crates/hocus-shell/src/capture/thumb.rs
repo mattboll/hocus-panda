@@ -310,11 +310,13 @@ pub fn is_surface(id: window::Id) -> bool {
 }
 
 /// Its margins from the screen's bottom right corner: past the bar and
-/// its gap, or the gap alone on a screen without a bar.
+/// its gap, or the gap alone on a screen without a bar there (the bar on
+/// the left).
 fn margin(output: &str) -> (i32, i32, i32, i32) {
     let bars = crate::popover::with(|c| c.bar_forms());
     let bar = bars
         .iter()
+        .filter(|_| !crate::side::left())
         .find(|(b, _)| b == output)
         .map_or(0, |(_, form)| form.width() + EDGE);
     (0, bar + GAP, GAP, 0)

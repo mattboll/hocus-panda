@@ -909,15 +909,24 @@ impl Compositor {
         }
     }
 
-    /// Where the streak starts from `row`, global: its left edge, at its
-    /// middle. The shell knows where the row is in its bar, the compositor
-    /// where the bar is.
+    /// Where the streak starts from `row`, global: its edge toward the
+    /// windows, at its middle. The shell knows where the row is in its bar,
+    /// the compositor where the bar is.
     fn row_start(&self, row: &Row) -> Option<(f64, f64)> {
         let output = self.space.outputs().find(|o| o.name() == row.output)?;
         let screen = self.space.output_geometry(output)?;
         let edge = hocus_link::EDGE;
+        // The bar's frame starts at its right edge; on the left, the
+        // streak leaves from the row's right edge, toward the windows.
+        let x = match self.bar_side() {
+            hocus_link::Side::Right => screen.loc.x + screen.size.w - edge + row.x,
+            hocus_link::Side::Left => {
+                let bar = self.panel.width(&row.output).unwrap_or(0);
+                screen.loc.x + edge + bar + row.x + row.width
+            }
+        };
         Some((
-            f64::from(screen.loc.x + screen.size.w - edge + row.x),
+            f64::from(x),
             f64::from(screen.loc.y + edge + row.y) + f64::from(row.height) / 2.0,
         ))
     }

@@ -452,6 +452,9 @@ impl<'de> Deserialize<'de> for Touchpad {
 pub struct Panel {
     /// The screens with a bar.
     pub screens: PanelScreens,
+    /// The side of every screen the bar stands on (6.4); its edge zone,
+    /// the windows' room and what opens from it go with it.
+    pub side: PanelSide,
     /// The primary screen, by connector name. Empty: the built-in panel
     /// (eDP, LVDS, DSI) when it is connected, else the first screen.
     pub output: String,
@@ -482,6 +485,7 @@ impl Default for Panel {
     fn default() -> Self {
         Self {
             screens: PanelScreens::default(),
+            side: PanelSide::default(),
             output: String::new(),
             form: FormChoice::default(),
             clock: Clock::default(),
@@ -590,6 +594,25 @@ pub enum PanelScreens {
     #[default]
     Primary,
     All,
+}
+
+/// The side of the screens the bar stands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PanelSide {
+    #[default]
+    Right,
+    Left,
+}
+
+impl PanelSide {
+    /// As the shell is told it.
+    pub const fn link(self) -> hocus_link::Side {
+        match self {
+            Self::Right => hocus_link::Side::Right,
+            Self::Left => hocus_link::Side::Left,
+        }
+    }
 }
 
 /// The bar's form on a screen.
@@ -1600,6 +1623,15 @@ mod tests {
         let config: Config = toml::from_str("[panel]\norder = [\"agents\", \"clock\"]\n")?;
         assert_eq!(config.panel.order, [Agents, Today, Tasks]);
         assert!(toml::from_str::<Config>("[panel]\norder = \"tasks\"\n").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn the_bar_stands_on_the_right_unless_told_left() -> anyhow::Result<()> {
+        assert_eq!(Config::default().panel.side, PanelSide::Right);
+        let config: Config = toml::from_str("[panel]\nside = \"left\"\n")?;
+        assert_eq!(config.panel.side.link(), hocus_link::Side::Left);
+        assert!(toml::from_str::<Config>("[panel]\nside = \"top\"\n").is_err());
         Ok(())
     }
 

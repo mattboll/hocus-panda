@@ -1712,10 +1712,14 @@ impl Open {
 }
 
 /// Whether a move from `from` to `to` heads for `popover`, on the bar's
-/// left: `to` is within the cone from `from` to the popover's near (right)
-/// corners.
+/// inner side: `to` is within the cone from `from` to the popover's near
+/// corners (its right ones beside a bar on the right).
 pub fn toward(from: Point, to: Point, popover: Rectangle) -> bool {
-    let near = popover.x + popover.width;
+    let near = if crate::side::left() {
+        popover.x
+    } else {
+        popover.x + popover.width
+    };
     let (a, b) = (
         Point::new(near, popover.y),
         Point::new(near, popover.y + popover.height),
@@ -1741,13 +1745,18 @@ fn margins(place: Place, rect: Rectangle) -> (i32, i32, i32, i32) {
 }
 
 /// Where a popover of `size` opened from `item` on the bar at `place` is,
-/// in the bar's frame: 8 px left of the bar, its top on the item's (or its
+/// in the bar's frame (from its right edge): 8 px left of the bar (right
+/// of it on the left, `crate::side`), its top on the item's (or its
 /// bottom on the bar's, `on_bottom`), pushed up to stay 8 px from the
 /// screen's bottom (the bar's own bottom), and down to stay 8 px from its
 /// top.
 pub fn placed(place: Place, item: Rectangle, (w, h): (u32, u32), on_bottom: bool) -> Rectangle {
     let (w, h) = (w as f32, h as f32);
-    let x = -(place.form.width() as f32) - EDGE as f32 - w;
+    let x = if crate::side::left() {
+        EDGE as f32
+    } else {
+        -(place.form.width() as f32) - EDGE as f32 - w
+    };
     let top = if on_bottom { place.height } else { item.y };
     let y = top.min(place.height - h).max(0.0);
     Rectangle::new(Point::new(x, y), Size::new(w, h))
@@ -2143,24 +2152,27 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             margin,
             keyboard,
             ..
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Top,
-                anchor: Anchor::Right | Anchor::Bottom,
-                exclusive_zone: Some(0),
-                margin: Some(margin),
-                keyboard_interactivity: keyboard,
-                output_option: if bar == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(bar)
+        } => {
+            crate::side::opened(id);
+            vec![Message::NewLayerShell {
+                settings: NewLayerShellSettings {
+                    size: Some(size),
+                    layer: Layer::Top,
+                    anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
+                    exclusive_zone: Some(0),
+                    margin: Some(crate::side::margin(margin)),
+                    keyboard_interactivity: keyboard,
+                    output_option: if bar == crate::ALONE {
+                        OutputOption::Active
+                    } else {
+                        OutputOption::OutputName(bar)
+                    },
+                    events_transparent: false,
+                    namespace: Some(POPOVER_NAMESPACE.to_owned()),
                 },
-                events_transparent: false,
-                namespace: Some(POPOVER_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
+                id,
+            }]
+        }
         Effect::Keyboard(id, keyboard_interactivity) => {
             vec![Message::KeyboardInteractivityChange {
                 id,
@@ -2168,13 +2180,19 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             }]
         }
         Effect::Resize { id, size, margin } => std::iter::once(Message::SizeChange { id, size })
-            .chain(margin.map(|margin| Message::MarginChange { id, margin }))
+            .chain(margin.map(|margin| Message::MarginChange {
+                id,
+                margin: crate::side::moved(id, margin),
+            }))
             .collect(),
         Effect::Closing => {
             tell(ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()));
             Vec::new()
         }
-        Effect::Remove(id) => vec![Message::RemoveWindow(id)],
+        Effect::Remove(id) => {
+            crate::side::gone(id);
+            vec![Message::RemoveWindow(id)]
+        }
         Effect::Wake(namespace) => {
             if tell(ToCompositor::Wake(namespace.to_owned())) {
                 Vec::new()
@@ -2261,24 +2279,27 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             namespace,
             size,
             margin,
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Top,
-                anchor: Anchor::Right | Anchor::Top,
-                exclusive_zone: Some(0),
-                margin: Some(margin),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if bar == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(bar)
+        } => {
+            crate::side::opened(id);
+            vec![Message::NewLayerShell {
+                settings: NewLayerShellSettings {
+                    size: Some(size),
+                    layer: Layer::Top,
+                    anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
+                    exclusive_zone: Some(0),
+                    margin: Some(crate::side::margin(margin)),
+                    keyboard_interactivity: KeyboardInteractivity::None,
+                    output_option: if bar == crate::ALONE {
+                        OutputOption::Active
+                    } else {
+                        OutputOption::OutputName(bar)
+                    },
+                    events_transparent: false,
+                    namespace: Some(namespace.to_owned()),
                 },
-                events_transparent: false,
-                namespace: Some(namespace.to_owned()),
-            },
-            id,
-        }],
+                id,
+            }]
+        }
         Effect::Region { id, rects } => {
             let rects: Vec<(i32, i32, i32, i32)> = rects
                 .iter()

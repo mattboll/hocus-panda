@@ -7,12 +7,12 @@
 //! over it. Its popovers, the halo, the peek, the bubbles and the launcher
 //! stay above the windows (`render.rs`).
 //!
-//! The pointer pushed against the screen's right edge over a bar, and
-//! still there [`PUSH`] later, brings that bar in front, until the pointer
-//! leaves the bar's column (the bar and the strip between it and the
-//! edge). One timer of the loop while the pointer is against the edge;
-//! nothing per frame. A fullscreen window in front covers the bar, pushed
-//! or not.
+//! The pointer pushed against the screen's edge over a bar (on its side,
+//! `[panel] side`), and still there [`PUSH`] later, brings that bar in
+//! front, until the pointer leaves the bar's column (the bar and the strip
+//! between it and the edge). One timer of the loop while the pointer is
+//! against the edge; nothing per frame. A fullscreen window in front
+//! covers the bar, pushed or not.
 
 use std::time::Duration;
 
@@ -198,8 +198,8 @@ impl State {
         }
     }
 
-    /// Whether `at` (global) is against the right edge of screen `name`,
-    /// level with its bar.
+    /// Whether `at` (global) is against the edge of screen `name` on its
+    /// bar's side, level with its bar.
     fn pushed_against(&self, name: &str, at: Point<f64, Logical>) -> bool {
         let Some(output) = self.space.outputs().find(|o| o.name() == name) else {
             return false;
@@ -212,13 +212,15 @@ impl State {
         };
         let g = g.to_f64();
         let top = g.loc.y + bar.loc.y;
-        g.contains(at)
-            && at.x >= g.loc.x + g.size.w - 1.0
-            && (top..top + bar.size.h).contains(&at.y)
+        let against = match self.bar_side() {
+            hocus_link::Side::Right => at.x >= g.loc.x + g.size.w - 1.0,
+            hocus_link::Side::Left => at.x < g.loc.x + 1.0,
+        };
+        g.contains(at) && against && (top..top + bar.size.h).contains(&at.y)
     }
 
     /// Whether `at` (global) is in the column of screen `name`'s bar: from
-    /// the bar's left edge to the screen's right one, top to bottom.
+    /// the bar's inner edge to the screen's edge behind it, top to bottom.
     fn in_bar_column(&self, name: &str, at: Point<f64, Logical>) -> bool {
         let Some(output) = self.space.outputs().find(|o| o.name() == name) else {
             return false;
@@ -230,7 +232,11 @@ impl State {
             return false;
         };
         let g = g.to_f64();
-        g.contains(at) && at.x >= g.loc.x + bar.loc.x
+        g.contains(at)
+            && match self.bar_side() {
+                hocus_link::Side::Right => at.x >= g.loc.x + bar.loc.x,
+                hocus_link::Side::Left => at.x < g.loc.x + bar.loc.x + bar.size.w,
+            }
     }
 
     /// Whether the window in front on `output`'s desktop is fullscreen.
