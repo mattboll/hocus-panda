@@ -680,6 +680,82 @@ the pointer; a picture removed is put back by "Annuler" but not by
 `Ctrl+Shift+Z`; the preview's dashed outline of a screen unplugged is
 solid (as 6.9's).
 
+## La barre (6.4)
+
+Issue #404, variant A (the rows, a live preview of the bar beside them),
+as the issue's spec and its "Decided (2026-11-05)" specify it: the 12/24
+h format is not here (it is 6.2's `[locale] time`, the preview follows
+it); one form row per screen; the order of Today, To do and the agents is
+a setting with ↑ and ↓; the windows' switch is here; every `[panel]` key
+is followed live (bar.md "6.4, the bar followed live"). Section `bar`
+(`hocus settings bar`), PERSONNALISATION's third row. `[panel] side`
+comes with its own pull request.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| EMPLACEMENT | Sur quels écrans (its line: one screen plugged, the primary's name, or a bar per screen; link "L'écran principal se choisit dans Écrans ›") | menu "L'écran principal \| Tous les écrans" | `[panel] screens` |
+| FORME ("Pleine 196 px · mini 56 px") | one row per screen known (plugged, unplugged with a form remembered, or with `panel-form` in the file), named as Écrans names it; its line says what applies now | segmented "Auto \| Pleine \| Mini" | `[outputs.NAME] panel-form` |
+| | Changer de forme à la main (the shortcut as bound now; link to Clavier et raccourcis' row) | the shortcut | `[shortcuts] toggle-bar` (read only) |
+| CE QU'ELLE MONTRE, DE HAUT EN BAS ("Un groupe vide ne prend pas de place") | L'horloge et la date, Micro, caméra ou écran en cours, Bureaux, connexions, niveaux, boutons du bas | "Toujours" | |
+| | La prochaine réunion | switch | `[panel] meeting` |
+| | Aujourd'hui, À faire, Les agents, in the file's order | ↑, ↓ (28 × 28, at 30 % and inert at an end), switch | `[panel] order`, `today`, `tasks`, `agents` |
+| | Les fenêtres | switch | `[panel] windows` |
+| L'HORLOGE | Les secondes | switch | `[panel.clock] seconds` |
+| | Quand la minute change | menu: Compteur, Rouleau, Volet, Néon, Sans mouvement | `[panel.clock] transition` |
+| | Police de l'horloge | menu: "Martian Mono (fournie)", then the installed monospaced families (`fc-list :spacing=mono`, on a thread as the program starts) | `[panel.clock] font` |
+| | Couleur de l'heure | a 12 px swatch, menu: Blanc doux, Vert, Bleu, Ambre (each with its swatch); a colour of the file's own shows "Personnalisée · #3DFFA2" and stays until another is chosen | `[panel.clock] color` |
+
+- **Under the title**: "La transparence de la barre et les mouvements
+  réduits se règlent dans Apparence et langue ›", which opens 6.2 with
+  its row lit.
+- **A screen's form**: written at once as that screen's `panel-form`
+  ("Forme de la barre, écran du portable : Mini", "Annuler"); the
+  compositor forgets the form chosen there with a click. In automatic,
+  the line says the width ("Automatique : pleine, l'écran fait 2560 px de
+  large (pleine dès 1796).") or the click's choice ("Automatique : mini,
+  choisie d'un clic sur son bord.") with "Revenir à la forme de sa
+  largeur", which asks the compositor (`bar-auto NAME` on the screens'
+  line) to forget it: nothing is written in `config.toml`. A screen with
+  no bar now adds "La barre n'y vient que si l'écran principal
+  s'éteint."; one unplugged is at 45 % and inert. The compositor's
+  screens' line now says each screen's bar (`bar`) and the form chosen
+  with a click (`bar_chosen`).
+- **The order**: ↑ or ↓ writes `[panel] order` whole ("Ordre de la barre
+  : À faire, Aujourd'hui, Les agents", "Annuler"). `Space` or `Enter`
+  on a button moves its group; the keyboard stays on that button as it
+  follows its row, and goes to the other one at an end. `Alt+↑` /
+  `Alt+↓` on a group's switch moves it too.
+- **Nothing to show**: without a calendar (`[[day.calendars]]`) the
+  meeting's and Today's rows, without a task board (`[[day.tasks]]`) To
+  do's, say in amber "Rien à montrer : aucun agenda ni tableau de tâches
+  branché." with "Agenda et tâches ›"; their switches stay.
+- **The preview** (214 wide, 20 px right of the rows; drawn over the
+  page at its place and held at the page's top as it scrolls): "APERÇU"
+  and the laptop's screen's form ("Portable · pleine"); the screens as
+  Écrans places them, at 1/30, each with its bar's strip on its side and
+  its caption ("Écran 2 · sans barre", "· débranché" dashed); then the
+  laptop's bar drawn at its logical sizes (960 high) at 55 %, 8 px from a
+  line standing for the screen's edge, with the mockup's sample content
+  in the column's order, the groups shown or not, the windows over the
+  desktops, the connections, the levels and the footer. Its clock is the
+  real time with the chosen seconds, font, colour and the 6.2 time
+  format, ticking while the page shows (each second with the seconds,
+  else each minute); a transition chosen plays once on its minutes. A
+  form change moves its width along the bar's switch (none with reduced
+  motion). A click on one of its groups lights that group's row. Under
+  it: "La barre de l'écran du portable, à 55 %. Un clic sur un groupe
+  allume sa ligne."
+- **The search** finds the rows by the spec's words and their keys;
+  "Forme de la barre", "Changer de forme à la main" (super+b, toggle-bar,
+  clic, bord) and "Ordre des groupes" (ordre, monter, descendre,
+  ranger; it lights Today's row) are the page's own rows.
+- **Choices made here (to confirm on the machine)**: the order's toast
+  says "Ordre de la barre : …" as the spec asks while its search result
+  is named "Ordre des groupes"; the colour's swatch sits beside the menu
+  button, not inside it; the preview's bar is a drawing of the bar, not
+  the shell's own surfaces; the sample agents are drawn as the mockup's
+  heads, not the pandas' pictures.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -865,7 +941,7 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The other ten pages (6.4 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.6, 6.7, 6.10, 6.11, 6.13 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -914,6 +990,25 @@ real shell and Settings, the portal on a D-Bus daemon of the test's own:
 - `the_language_switch_turns_the_shell_and_the_window_to_english_at_once`
 - `at_rest_the_appearance_page_and_the_bar_commit_nothing`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_bar.rs` (6.4), on a compositor
+of two screens (a laptop's 2560 × 1600 at 1, 3440 × 1440), the
+Settings alone:
+
+- `the_page_shows_its_groups_a_row_per_screen_and_the_preview`
+- `a_screens_form_is_written_at_once_and_annuler_takes_it_back`
+- `back_to_the_form_of_its_width_forgets_the_click`
+- `moving_to_do_up_writes_the_order_and_the_keyboard_follows_its_button`
+- `hiding_today_writes_panel_today_and_a_group_with_nothing_to_show_says_so`
+- `the_clock_rows_write_panel_clock_and_a_colour_of_the_files_own_stays`
+- `searching_super_b_ordre_and_secondes_finds_their_rows`
+- `the_links_open_their_pages_with_their_row_lit`
+- `at_rest_the_bar_page_draws_only_its_clock`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+Unit tests of 6.4: a group moved up or down, the file's forms and order,
+`fc-list`'s families (`hocus-settings`). What the bar does with the keys
+is `bar_live.rs`'s (bar.md).
 
 `crates/hocus-compositor/tests/settings_wallpaper.rs` (6.3), on a
 compositor of two screens (1920 × 1080, 1280 × 800), the real shell and

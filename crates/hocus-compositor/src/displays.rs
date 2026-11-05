@@ -511,6 +511,12 @@ impl State {
                     Some("no such trial".to_owned())
                 }
             }
+            // "Revenir à la forme de sa largeur" (6.4): the click's choice
+            // forgotten.
+            (Some("bar-auto"), Some(name), None) => {
+                self.bar_auto(name);
+                None
+            }
             _ => Some(format!("not understood: {line}")),
         };
         if let Some(why) = answer {
@@ -618,6 +624,10 @@ impl State {
                 "primary": primary.as_deref() == Some(name.as_str()),
                 "file_mode": file_mode.map(|m| m.to_string()),
                 "mode_offered": offered,
+                // The bar on it now, and the form chosen there with a
+                // click (6.4's page).
+                "bar": self.panel.bars.get(&name).map(|b| b.form.name()),
+                "bar_chosen": self.panel.chosen(&name).map(hocus_link::Form::name),
             }));
         }
         for gone in &self.displays.gone {
@@ -632,6 +642,7 @@ impl State {
                 "enabled": true,
                 "connected": false,
                 "unplugged_at": gone.at,
+                "bar_chosen": self.panel.chosen(&gone.name).map(hocus_link::Form::name),
             }));
         }
         serde_json::json!({

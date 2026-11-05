@@ -43,6 +43,7 @@ fn main() -> ExitCode {
     };
     hocus_settings::renderer::choose();
     // Before the window: it reads folders.
+    hocus_settings::bar::find_fonts();
     hocus_settings::appearance::find_cursor_themes();
     let start = app::Start {
         lang: Lang::of_messages(),

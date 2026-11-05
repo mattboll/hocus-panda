@@ -180,6 +180,11 @@ impl Panel {
         panel
     }
 
+    /// The form chosen on screen `name` with a click or `Super+B`.
+    pub fn chosen(&self, name: &str) -> Option<Form> {
+        self.chosen.get(name).copied()
+    }
+
     /// The bar's width on screen `name` once its switch is over: the space
     /// kept for it.
     pub fn width(&self, name: &str) -> Option<i32> {
@@ -415,6 +420,7 @@ impl State {
             }
             if forgot {
                 self.remember_forms();
+                self.displays.dirty = true;
             }
             followed.push("[panel] form");
         }
@@ -455,6 +461,29 @@ impl State {
             })
     }
 
+    /// Screen `name` forgets the form chosen there with a click (the
+    /// Settings' "Revenir à la forme de sa largeur", 6.4): in automatic, its
+    /// bar takes the form of its width.
+    pub(crate) fn bar_auto(&mut self, name: &str) {
+        if self.panel.chosen.remove(name).is_none() {
+            return;
+        }
+        tracing::info!(
+            output = name,
+            "the bar's form chosen with a click is forgotten"
+        );
+        self.remember_forms();
+        self.displays.dirty = true;
+        if self.config.form_choice(name) != FormChoice::Auto {
+            return;
+        }
+        let Some(output) = self.space.outputs().find(|o| o.name() == name).cloned() else {
+            return;
+        };
+        let width = self.space.output_geometry(&output).map_or(0, |g| g.size.w);
+        self.switch_bar(name, Form::default_for(width));
+    }
+
     /// The bar on screen `name` takes its other form (a click on its edge,
     /// `Super+B`); the windows beside it follow.
     pub fn toggle_bar(&mut self, name: &str) {
@@ -468,6 +497,7 @@ impl State {
         if self.config.form_choice(name) == FormChoice::Auto {
             self.remember_forms();
         }
+        self.displays.dirty = true;
     }
 
     /// The bar on screen `name` takes `form`, the windows beside it
@@ -491,6 +521,7 @@ impl State {
         bar.form = form;
         bar.switch = (!reduced).then_some((from, now));
         tracing::info!(output = name, form = form.name(), "the bar switches");
+        self.displays.dirty = true;
         self.tell_shell(ToShell::Bar {
             output: name.to_owned(),
             form,

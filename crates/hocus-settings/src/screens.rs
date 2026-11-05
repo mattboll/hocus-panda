@@ -64,6 +64,10 @@ pub struct Screen {
     pub unplugged_at: Option<i64>,
     /// 1 the built-in panel, then the others in the connectors' order.
     pub number: usize,
+    /// Its bar's form now (`"full"`, `"mini"`), none without a bar (6.4).
+    pub bar: Option<&'static str>,
+    /// The form chosen there with a click or Super+B, remembered.
+    pub bar_chosen: Option<&'static str>,
 }
 
 impl Screen {
@@ -201,6 +205,15 @@ pub enum Said {
     Gone,
 }
 
+/// A bar's form as the compositor says it.
+fn form_word(value: Option<&serde_json::Value>) -> Option<&'static str> {
+    match value?.as_str()? {
+        "full" => Some("full"),
+        "mini" => Some("mini"),
+        _ => None,
+    }
+}
+
 /// One JSON line of the compositor's.
 pub fn read_line(line: &str) -> Option<Said> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -262,6 +275,8 @@ pub fn read_line(line: &str) -> Option<Said> {
                     mode_offered: flag("mode_offered", true),
                     unplugged_at: o.get("unplugged_at").and_then(serde_json::Value::as_i64),
                     number: 0,
+                    bar: form_word(o.get("bar")),
+                    bar_chosen: form_word(o.get("bar_chosen")),
                 })
             })
             .collect();

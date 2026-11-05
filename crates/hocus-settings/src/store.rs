@@ -107,6 +107,8 @@ pub struct Snapshot {
     pub primary_output: Option<String>,
     /// `[wallpaper]` and the screens' wallpapers (6.3).
     pub wallpaper: Box<crate::wallpaper::File>,
+    /// The bar's keys the page writes itself (6.4).
+    pub bar: Box<crate::bar::File>,
 }
 
 impl Snapshot {
@@ -191,6 +193,7 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(Item::as_str)
                 .map(ToOwned::to_owned),
             wallpaper: Box::new(crate::wallpaper::File::of(&doc)),
+            bar: Box::new(crate::bar::File::of(&doc)),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -205,6 +208,7 @@ pub fn read(text: &str) -> Snapshot {
             screens_placed: Vec::new(),
             primary_output: None,
             wallpaper: Box::default(),
+            bar: Box::default(),
         },
     }
 }

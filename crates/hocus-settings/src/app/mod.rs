@@ -11,6 +11,7 @@
 //! sliding, a menu opening) ask for frames only while they move.
 
 mod appearance_page;
+mod bar_page;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -290,6 +291,8 @@ pub enum Message {
     Keys(keyboard_page::Msg),
     /// The wallpaper's page (6.3).
     Wallpaper(wallpaper_page::Msg),
+    /// The bar's page (6.4).
+    Bar(bar_page::Msg),
     Nothing,
 }
 
@@ -350,6 +353,8 @@ pub struct App {
     sound: sound::Sound,
     /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
     wallpaper: wallpaper_page::State,
+    /// The bar's page: its preview's motions and clock (6.4).
+    bar: bar_page::State,
 }
 
 impl App {
@@ -431,6 +436,7 @@ impl App {
             said_places: String::new(),
             sound,
             wallpaper: wallpaper_page::State::default(),
+            bar: bar_page::State::default(),
         };
         app.wallpaper_start(to_screens.clone());
         app.screens_open(to_screens);
@@ -533,11 +539,13 @@ impl App {
             || self.knobs.values().any(|since| within(*since, KNOB))
             || self.screens_moving(now)
             || self.mouse.moving(now)
+            || self.bar_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
         let task = self.handle(message);
+        let task = Task::batch([task, self.bar_after()]);
         self.sound_listen();
         self.wallpaper_want();
         self.now = Instant::now();
@@ -638,6 +646,7 @@ impl App {
             }
             Message::Choose(slot, value) => {
                 self.menu = None;
+                self.bar_chose(slot, &value);
                 self.change(slot, value)
             }
             Message::Slide(slot, value) => self.slide(slot, value),
@@ -700,6 +709,7 @@ impl App {
             Message::Placed(places) => self.placed(places),
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
+            Message::Bar(msg) => self.bar_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -1352,6 +1362,9 @@ impl App {
         if section == SectionId::Wallpaper {
             return self.wallpaper_controls();
         }
+        if section == SectionId::Bar {
+            return self.bar_controls();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1548,6 +1561,7 @@ impl App {
         };
         match control {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
+            Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -1581,6 +1595,12 @@ impl App {
                 };
                 if self.inert(setting) {
                     return Task::none();
+                }
+                // 6.4's: Alt+↑ / Alt+↓ on a movable group's switch.
+                if modifiers.alt()
+                    && let Some(task) = self.bar_alt_move(slot, named)
+                {
+                    return task;
                 }
                 match (&setting.kind, named) {
                     (Kind::Switch, Named::Space | Named::Enter) => {
@@ -1716,7 +1736,7 @@ impl App {
         let Some((id, since)) = self.light else {
             return 0.0;
         };
-        if id != setting {
+        if Self::bar_lit_alias(id) != setting {
             return 0.0;
         }
         let t = self.now.saturating_duration_since(since);
@@ -1784,6 +1804,8 @@ enum Control {
     Try(TryPart),
     /// The wallpaper's page's own (6.3).
     Wallpaper(wallpaper_page::Stop),
+    /// The bar's page's own (6.4).
+    Bar(bar_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
