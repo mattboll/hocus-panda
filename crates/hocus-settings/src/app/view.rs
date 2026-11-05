@@ -70,6 +70,14 @@ impl App {
         // The network's sheet, over the page (6.6).
         if let Some(sheet) = self.network_sheet() {
             layers.push(sheet);
+            if let Some(menu) = self.network_sheet_menu() {
+                layers.push(
+                    mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+                        .on_press(Message::Network(super::network::close_sheet_menu()))
+                        .into(),
+                );
+                layers.push(menu);
+            }
         }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);

@@ -118,6 +118,8 @@ pub struct Start {
     pub lang: Lang,
     pub places: worker::Places,
     pub section: Option<SectionId>,
+    /// A network whose sheet opens once it is around (`--join`, 6.6).
+    pub join: Option<String>,
     pub user: String,
     /// Where second launches knock, taken once by the window.
     pub listener: std::sync::Arc<Mutex<Option<std::os::unix::net::UnixListener>>>,
@@ -402,7 +404,8 @@ impl App {
         *HEARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
-        let network = network::State::start(&sender, start.places.state.clone());
+        let mut network = network::State::start(&sender, start.places.state.clone());
+        network.joining = start.join.clone();
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -1451,15 +1454,24 @@ impl App {
                 self.light = Some(("sound.output", Instant::now()));
             }
         }
-        let (Some(id), Some(token)) = (self.window, again.token) else {
-            return Task::none();
+        // From the Wi-Fi popover's "dans les Réglages": that network's
+        // sheet (6.6).
+        let join = if let Some(name) = again.join {
+            self.network.joining = Some(name);
+            self.network_try_join()
+        } else {
+            Task::none()
         };
-        window::run(id, move |window| {
+        let (Some(id), Some(token)) = (self.window, again.token) else {
+            return join;
+        };
+        let raise = window::run(id, move |window| {
             if let Some(surface) = activate::Surface::of(window) {
                 surface.activate(token);
             }
         })
-        .map(|()| Message::Nothing)
+        .map(|()| Message::Nothing);
+        Task::batch([raise, join])
     }
 
     // --- The keyboard -----------------------------------------------------------------

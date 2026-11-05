@@ -40,14 +40,16 @@ venir".
 - **Opened from** the launcher ("Réglages" / "Settings",
   `packaging/hocus-settings.desktop`, shown in the Hocuspanda session), from
   the bar's user popover ("Réglages", above "Se déconnecter"), and with
-  `hocus settings [SECTION]`. Sections by their names on the command line:
+  `hocus settings [SECTION]` (`--join SSID` on `network`: that network's
+  sheet, 6.6). Sections by their names on the command line:
   `appearance`, `wallpaper`, `bar`, `agenda`, `screens`, `sound`,
   `keyboard`, `mouse`, `network`, `bluetooth`, `desktops`, `applications`,
   `agents`, `captures`, `power`, `account`, `date-and-time`.
 - **One window at a time.** The first listens on
   `$XDG_RUNTIME_DIR/hocus-settings-<WAYLAND_DISPLAY>`. A second launch
   hands it its section and its activation token (`XDG_ACTIVATION_TOKEN`,
-  which the compositor gives the programs it starts for the user), then
+  which the compositor gives the programs it starts for the user) and the
+  network `--join` names (in hexadecimal, a name may hold spaces), then
   ends. The first opens that section and asks for the focus with the token
   over xdg-activation, on the connection winit drew the window on (winit
   has no focus request on Wayland: `src/activate.rs`, the crate's FFI
@@ -246,11 +248,12 @@ the spec in the issue's last comment. The maintainer decided:
 - the networks around are listed on the page too;
 - VPN in v1: a WireGuard or OpenVPN file imported, no form.
 
-Built in two parts. **The first** (this one): airplane mode, the Wi-Fi,
+Built in three parts. **The first** (#654): airplane mode, the Wi-Fi,
 the network in use, the saved networks, the networks around and the
 sheet of a WPA or WPA3 network. **The second**: the hidden network, the
-802.1X and WEP sheets, the cable, the VPNs, the bar's popover's "dans les
-Réglages" rows and "Réglages du Wi-Fi…", the bar's airplane mode.
+802.1X and WEP sheets, the cable, `--join`. **The third**: the VPNs, the
+bar's popover's "dans les Réglages" rows and "Réglages du Wi-Fi…", the
+bar's airplane mode.
 
 **The page**, under its title and its line ("Le Wi-Fi et ses réseaux
 enregistrés, les réseaux masqués et d'entreprise, le câble, les VPN et le
@@ -268,7 +271,9 @@ blue for airplane mode on):
   radio alone); the network in use (its signal, "Connecté · WPA2 · 5 GHz ·
   signal fort", "Adresse … · par la box …", the sign-in page's amber line
   behind one), "Déconnecter" and "Détails" (the sub-page, this network
-  unfolded); "Réseaux enregistrés" with their count and a chevron.
+  unfolded); "Réseaux enregistrés" with their count and a chevron;
+  "Réseau masqué" ("Un réseau qui ne dit pas son nom : on le tape pour le
+  rejoindre.") and its "Rejoindre…", while the Wi-Fi is on.
 - **RÉSEAUX DISPONIBLES** while the Wi-Fi is on: "Recherche…" with a
   12 px spinner while a scan runs; one 46 px row per network around but
   the one in use, strongest first (3.5's list), the order held while the
@@ -277,8 +282,12 @@ blue for airplane mode on):
   "Entreprise (802.1X) · …", "WEP · …" in `#F7B98A`, " · enregistré"),
   "Se connecter" (open or saved: joined at once, the row says
   "Connexion…" with a spinner, the others inert) or "Se connecter…" (the
-  sheet). 802.1X and WEP networks' "Se connecter…" is inert until the
-  second part. The note under it.
+  sheet). The note under it.
+- **CÂBLE**, with an Ethernet device: "Câble", its line the device
+  ("Adaptateur Ethernet USB" when its sysfs path is on USB, else "Port
+  Ethernet") and its state ("· débranché", "· connecté"); its value
+  "Débranché", or green "Connecté · 1 Gb/s · 192.168.1.30" (`Speed` of
+  `Device.Wired`, the IPv4 address). No control.
 - **PLUS TARD**: "Partage de connexion Wi-Fi", inert, amber chip.
 
 **The saved networks' sub-page**: "‹ Réseau", its title and line, one row
@@ -296,15 +305,48 @@ with its settings, its UUID and the secrets that could be read
 (`AddConnection`), and joins it again if it was in use ("… revient, sans
 son mot de passe." when a secret did not read).
 
-**The sheet** (a WPA or WPA3 network around): a 460 px panel over a
-`rgba(7,9,15,0.62)` scrim, "Se connecter à « … »", the password field
-(dots, its eye; the keyboard starts in it, what is typed before it takes
-the keyboard goes in it), "Annuler" and "Se connecter" (green once 8
-characters are typed; `Enter` connects). While it connects: "Connexion…"
-and a spinner, the field inert; refused: "Mot de passe incorrect.
-Vérifie-le et réessaie." under the field, its rim `#F2945B`, the sheet
-kept; another failure: "La connexion a échoué. Réessaie."; joined: the
-sheet closes. A connection added that fails is deleted (3.5's).
+**The sheet**: a 460 px panel over a `rgba(7,9,15,0.62)` scrim (one
+colour, `#1a202e`: the mockup's gradient redrawn in part on the CPU shows
+its seams), "Se connecter à « … »" or "Rejoindre un réseau masqué", its
+fields by kind; the keyboard starts in the first empty one, what is typed
+before a field takes the keyboard goes in it, `Tab` goes through the
+fields and the buttons and never out:
+
+- **WPA, WPA3**: "Mot de passe" (dots, its eye), 8 characters at least.
+- **WEP**: "Mot de passe": 5 or 13 characters, or 10 or 26 hexadecimal
+  digits, sent as a key (`wep-key-type` 1), anything else as a passphrase
+  (2); `key-mgmt` `none`.
+- **802.1X**: its line ("Un réseau d'entreprise ou d'école : …"),
+  "Méthode" (PEAP, TTLS, TLS) and "Authentification interne" (PEAP:
+  MSCHAPv2, GTC; TTLS: PAP, MSCHAPv2, MSCHAP, CHAP; none for TLS) side by
+  side, "Identifiant", "Mot de passe" (PEAP, TTLS) or "Certificat
+  personnel" and "Clé privée" (the portal's file chooser, `*.pem`,
+  `*.crt`, `*.key`…) and "Mot de passe de la clé" (TLS), "Certificat de
+  l'autorité" ("Ceux du système": `system-ca-certs`; "Choisir un
+  fichier…": the chooser, the file's name then shown; "Ne pas vérifier",
+  with its amber line) beside "Domaine du serveur"
+  (`domain-suffix-match`), its hint under them. Files go to
+  NetworkManager as `file://` blobs; secrets with their flags 0.
+- **Hidden**: "Nom du réseau" first, then "Sécurité" ("Aucune",
+  "WPA/WPA2 personnel", "WPA3 personnel", "WPA/WPA2 entreprise", "WEP"),
+  then that kind's fields; joined by its name (`802-11-wireless.hidden`),
+  no access point given.
+
+The menus are the sheet's own (6.1's look, the green tick, under their
+button or over it when the window ends first; `Esc` closes one first).
+"Annuler" and "Se connecter" (green once what is needed is filled in;
+`Enter` in a field connects). While it connects: "Connexion…" and a
+spinner, the fields inert; refused: "Mot de passe incorrect. Vérifie-le
+et réessaie.", the password's rim `#F2945B`, the sheet kept, the line
+gone once the password is edited; another failure: "La connexion a
+échoué. Réessaie."; joined: the sheet closes. Everything is sent in one
+`AddAndActivateConnection`, its secrets saved with it; a connection added
+that fails is deleted (3.5's).
+
+**`--join SSID`** (the bar's popover's "dans les Réglages" rows, part
+three): the page, then that network's sheet once NetworkManager lists it
+(joined at once if it is open or saved); a second launch with it brings
+the window forward on that sheet.
 
 **What lives where.** Nothing in `config.toml`; the header keeps
 "Enregistré". The connections live in NetworkManager; airplane mode in
@@ -339,15 +381,17 @@ themselves; the Bluetooth page's code is not touched.
 "NetworkManager ne répond pas", the rows "Inconnu" at 45 %, inert; the
 page fills in when NetworkManager gets an owner.
 
-**The search** finds "Mode avion", "Wi-Fi", "Réseaux enregistrés" and
-"Adresse IP" (the network in use's row) by the spec's words.
+**The search** finds "Mode avion", "Wi-Fi", "Réseaux enregistrés",
+"Réseau masqué", "Réseau d'entreprise" and "WEP" (the networks around),
+"Câble" and "Adresse IP" (the network in use's row) by the spec's words.
 
 **The keyboard**: the switches, "Déconnecter", "Détails", the saved
-networks' row, then the networks around as one `Tab` stop (`↑`/`↓`,
+networks' row, "Rejoindre…", then the networks around as one `Tab` stop (`↑`/`↓`,
 `Enter` or `Space` connects); on the sub-page "‹ Réseau", the saved
 networks as one stop (`↑`/`↓`, `Enter` unfolds, `Delete` forgets), then
 the unfolded one's switch, eye, "Changer…" and "Oublier". The sheet keeps
-`Tab` among its field and its buttons; `Esc` closes it.
+`Tab` among its fields and its buttons (its menus are the mouse's); `Esc`
+closes its menu, then it.
 
 **The home's card** says the connection in use: "Wi-Fi · Maison",
 "Câble", "Hors ligne", "Mode avion".
@@ -1155,9 +1199,9 @@ file.
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
 - The pages whose tickets are not built yet (6.7, 6.10, 6.11, 6.13 to 6.17, Day.1).
-- Réseau's second part (#406): the hidden network, the 802.1X and WEP
-  sheets, the cable, the VPNs, the popover's links, the bar's airplane
-  mode.
+- Réseau's third part (#406): the VPNs, the popover's links, the bar's
+  airplane mode. The 802.1X sheet's anonymous identity and advanced
+  options (the spec's "later").
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -1287,12 +1331,20 @@ socket given as `HOCUS_RFKILL`):
 - `airplane_mode_blocks_wifi_and_bluetooth_and_restores_what_was_on`
 - `without_networkmanager_the_page_is_read_only`
 - `at_rest_the_page_draws_nothing`
-- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+- `a_hidden_network_joins_with_its_name_typed`
+- `an_enterprise_network_sends_its_8021x_settings` (PEAP, then TLS with
+  its files from a portal's file chooser on the test's bus)
+- `a_wep_network_sends_its_key`
+- `the_cable_says_unplugged_then_connected`
+- `launched_with_join_opens_that_networks_sheet`
+- `screenshots_for_the_pull_request`, `screenshots_of_the_sheets`
+  (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests of 6.6: the radios' airplane mode and what was on kept once
 (`hocus-network`); the rows' words, the saved networks' order and age,
-the home's card, the page's settings found by their words
-(`hocus-settings`).
+the home's card, the cable's words, a WEP key told from a passphrase,
+the page's settings found by their words (`hocus-settings`); a second
+launch's line with `--join` (`single.rs`).
 
 `crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
 of two screens (2560 × 1600 at 1, 3440 × 1440):
