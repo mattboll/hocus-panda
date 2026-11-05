@@ -82,8 +82,14 @@ cargo fmt --check
 cargo deny check                              # licences and advisories
 ```
 
-CI runs the same on every pull request to `main`. Update this section as
-commands land.
+On a pull request, CI runs the tests of what it changes
+(`scripts/ci/pr-tests.sh`): the test files it touches, the unit tests of
+the crates whose sources it touches, and those its description names on a
+line `Tests: settings_sound, appearance` (test files' names). Name there
+the tests of a behaviour the change can affect but whose files it does not
+touch. A change to a test harness, `Cargo.lock` or the label `full-tests`
+runs everything. After each merge, main runs the whole suite; a failure
+there is fixed at once. Update this section as commands land.
 
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on
