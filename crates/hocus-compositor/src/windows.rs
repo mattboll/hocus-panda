@@ -471,7 +471,12 @@ impl State {
             return;
         };
         let app = app_id(&window).unwrap_or_default();
-        let opens_as = self.opens_as(&window);
+        // Its application's rule (6.14, rules.rs): its size was in its
+        // first configure, unless it asked for one.
+        let rule = self.opening_rule(&window);
+        let opens_as = self
+            .opens_as(&window)
+            .or_else(|| rule.as_ref().and_then(|r| r.size.mode()));
         let mut size = window.geometry().size;
         // An application's last size, when it did not choose one larger.
         if let Some((w, h)) = self.model.remembered_size(&app)
@@ -492,7 +497,17 @@ impl State {
             .map(|r| (r.x, r.y))
             .collect();
         let (x, y) = model::place(area, (size.w, size.h), &same_app);
-        let takes_focus = self.takes_focus(&window);
+        // On the desktop its screen shows, or its rule's there.
+        let current = self.strip(&output).current();
+        let desktop = rule
+            .as_ref()
+            .and_then(|r| r.desktop)
+            .map(|d| d - 1)
+            .filter(|d| *d < self.strip(&output).count())
+            .unwrap_or(current);
+        let elsewhere = desktop != current;
+        // Opening out of sight, it takes no focus.
+        let takes_focus = self.takes_focus(&window) && !elsewhere;
         // A dialog opens above its parent (#595).
         let parent = match window.wl_surface().and_then(|s| self.dialog_of(&s)) {
             Some(crate::foreign::DialogOf::Window(parent)) => Some(parent),
@@ -504,9 +519,10 @@ impl State {
             None => self.model.add_below_focus(),
         };
         self.model.set_parent(id, parent);
-        // On the desktop its screen shows.
-        let desktop = self.strip(&output).current();
         self.model.set_desktop(id, desktop);
+        if rule.as_ref().is_some_and(|r| r.above) {
+            self.model.set_above(id, true);
+        }
         let now = self.now();
         let mut managed = Managed::new(window.clone());
         let duration = if self.reduced_motion() {
@@ -515,7 +531,7 @@ impl State {
             motion::OPEN
         };
         managed.opening = Some(Tween::new(now, duration, Bezier::SPRING));
-        if !takes_focus {
+        if !takes_focus && !elsewhere {
             managed.pulse = Some((
                 Tween::new(now, motion::PULSE, Bezier::LINEAR),
                 self.going_moves(),
@@ -546,6 +562,10 @@ impl State {
                 }
             }
         }
+        if elsewhere {
+            // Its desktop out of sight: it shows there when it comes.
+            self.hide(id);
+        }
         tracing::debug!(
             window = id.0,
             app,
@@ -554,6 +574,7 @@ impl State {
             w = size.w,
             h = size.h,
             takes_focus,
+            desktop = desktop + 1,
             "window mapped"
         );
         if takes_focus {
