@@ -142,6 +142,7 @@ fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
     bed.logged("the desktops' tiles show it")?;
     bed.hp.pointer_move(600.0, 500.0);
     bed.settle()?;
+    bed.placed_drawn()?;
     Ok(bed)
 }
 
@@ -168,6 +169,41 @@ impl Bed {
             self.hp.popover_commits(),
             self.hp.desktops_commits(),
         ]
+    }
+
+    /// Waits until the desktops' surface shows what was asked of it at
+    /// its place: the shell resizes it as it learns how many desktops
+    /// there are, and a loaded machine draws the new size late.
+    fn placed_drawn(&mut self) -> anyhow::Result<()> {
+        let drawn = self.hp.dispatch_until(WAIT, |hp| {
+            let placed = hp.desktops_surfaces();
+            !placed.is_empty() && hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE) == placed
+        })?;
+        anyhow::ensure!(
+            drawn,
+            "the desktops placed at {:?}, drawn at {:?}",
+            self.hp.desktops_surfaces(),
+            self.hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+        );
+        Ok(())
+    }
+
+    /// Waits until the desktops' surface is drawn `size` large: the shell
+    /// resizes it as it learns how many desktops there are. Where it is.
+    fn drawn_sized(&mut self, size: (i32, i32)) -> anyhow::Result<Rect> {
+        let sized = |hp: &Headless| {
+            hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+                .first()
+                .map(|(_, r)| *r)
+                .filter(|r| (r.width, r.height) == size)
+        };
+        let drawn = self.hp.dispatch_until(WAIT, |hp| sized(hp).is_some())?;
+        anyhow::ensure!(
+            drawn,
+            "the desktops drawn at {:?}, not {size:?}",
+            self.hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+        );
+        sized(&self.hp).ok_or_else(|| anyhow::anyhow!("no desktops"))
     }
 
     fn surface(&self) -> Rect {
@@ -479,8 +515,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     };
     let mut bed = start(&shell, Setup::default())?;
     // Four tiles in a row, 14 px above the levels (no connection here).
-    let s = bed.surface();
-    assert_eq!((s.width, s.height), (194, 40));
+    bed.drawn_sized((194, 40))?;
     bed.logged("said=Bureau 1, aucune fenêtre · Bureau 2, aucune fenêtre")?;
     // An empty desktop shows its number.
     let t = bed.tile(0);
@@ -648,8 +683,7 @@ fn six_desktops_take_two_rows() -> anyhow::Result<()> {
     // Two rows of 30 px, 6 px apart, once drawn for six: the surface is
     // resized as the shell learns their number.
     bed.logged("Bureau 5, aucune fenêtre · Bureau 6, aucune fenêtre")?;
-    let s = common::drawn(&mut bed.hp, hocus_link::DESKTOPS_NAMESPACE)?[0].1;
-    assert_eq!((s.width, s.height), (194, 76));
+    bed.drawn_sized((194, 76))?;
     // The fifth under the first, its number drawn; nothing where a
     // seventh would be.
     let fifth = bed.tile(4);
@@ -680,8 +714,7 @@ fn the_mini_forms_dots_in_their_three_looks_and_a_click() -> anyhow::Result<()> 
         },
     )?;
     // Two to a row: 54 × 40.
-    let s = bed.surface();
-    assert_eq!((s.width, s.height), (54, 40));
+    bed.drawn_sized((54, 40))?;
     // A window, sent to the second desktop.
     let (_, _client) = bed.open("test.sent", (400, 300))?;
     let mark = bed.mark();

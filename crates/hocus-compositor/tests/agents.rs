@@ -2413,26 +2413,6 @@ impl Bed {
             .collect())
     }
 
-    /// The halo at each frame drawn for `time`, in real time: for what a
-    /// timer of the loop's starts.
-    fn halo_for(&mut self, time: Duration) -> anyhow::Result<Vec<Glimpse>> {
-        let start = Instant::now();
-        let mut frames = self.hp.frames();
-        let mut out = Vec::new();
-        while start.elapsed() < time {
-            self.hp.dispatch(Duration::from_millis(2))?;
-            let now = self.hp.frames();
-            if now != frames {
-                frames = now;
-                out.push(Glimpse {
-                    at: start.elapsed(),
-                    shown: self.hp.halo(),
-                });
-            }
-        }
-        Ok(out)
-    }
-
     /// Nothing draws but the clock's seconds for 2 s, once the panda that
     /// peeks out with a waiting or finished agent (4.5), if one does, is
     /// out and still: a busy machine's shell may draw it late.
@@ -2569,12 +2549,28 @@ fn the_reminder_wave_comes_once_after_five_minutes() -> anyhow::Result<()> {
     bed.agent_is("build", "waiting")?;
     bed.settle()?;
     assert_eq!(bed.hp.halo_waves(), 1);
-    // As if it had waited 4 min 59 s by now.
+    // As if it had waited 4 min 59 s by now, the motions' clock held and
+    // stepped a refresh at a time: the reminder falls due on it, however
+    // late a loaded machine runs its timer.
+    bed.hp.hold_clock();
     let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
     let waited = bed.hp.state().now().saturating_sub(since);
     bed.hp
         .backdate_agents(Duration::from_secs(299).saturating_sub(waited));
-    let glimpses = bed.halo_for(Duration::from_millis(2500))?;
+    let start = bed.hp.now();
+    let mut glimpses = Vec::new();
+    let stepped = (|| {
+        while bed.hp.now() - start < Duration::from_millis(2500) {
+            bed.hp.step(common::STEP)?;
+            glimpses.push(Glimpse {
+                at: bed.hp.now() - start,
+                shown: bed.hp.halo(),
+            });
+        }
+        anyhow::Ok(())
+    })();
+    bed.hp.release_clock();
+    stepped?;
     let came = glimpses
         .iter()
         .find(|g| g.wave().is_some())

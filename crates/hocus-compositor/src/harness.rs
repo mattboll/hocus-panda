@@ -847,6 +847,8 @@ impl Headless {
         state.leave_tick();
         // And a screen's mode tried from the Settings (6.9).
         state.trial_tick();
+        // And the halo's reminder of an agent waiting (4.4).
+        state.halo_reminder_due();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
