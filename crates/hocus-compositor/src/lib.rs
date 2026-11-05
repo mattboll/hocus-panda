@@ -53,6 +53,7 @@ pub mod record;
 mod reload;
 mod reminders;
 mod render;
+mod rules;
 mod screens;
 mod session;
 mod share;
@@ -80,9 +81,9 @@ pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
     AltTab, Appearance, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
-    Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OutputSettings, PanelScreens,
-    Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, ScaleFrom,
-    SystemKeyboard, Windows,
+    Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
+    PanelScreens, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
+    Rule as WindowRule, ScaleFrom, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.

@@ -68,6 +68,7 @@ use smithay::{
 pub use geometry::Area;
 pub use save::pictures_dir;
 
+use crate::grabs::EdgesExt as _;
 use crate::{
     State,
     grabs::BTN_LEFT,

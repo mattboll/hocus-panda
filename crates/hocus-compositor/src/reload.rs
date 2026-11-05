@@ -237,7 +237,11 @@ impl State {
         // where they are used. The ink turned off takes what it shows.
         if new.windows != self.config.windows || new.ink != self.config.ink {
             let was = self.ink_on();
+            let rules = new.windows.rules != self.config.windows.rules;
             self.config.windows = new.windows.clone();
+            if rules {
+                self.rules_changed();
+            }
             self.config.ink = new.ink.clone();
             if was && !self.ink_on() {
                 self.ink_turned_off();

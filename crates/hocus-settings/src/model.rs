@@ -236,8 +236,8 @@ impl SectionId {
                 Work,
                 w("Bureaux et fenêtres", "Desktops and windows"),
                 w(
-                    "Les bureaux, Alt+Tab et ce que chaque application fait en s’ouvrant.",
-                    "The desktops, Alt+Tab and what each application does as it opens.",
+                    "Combien de bureaux et leurs noms, comment une fenêtre se déplace et s’ancre, Alt+Tab, l’encre, et des règles par application.",
+                    "How many desktops and their names, how a window moves and snaps, Alt+Tab, the ink, and rules per application.",
                 ),
                 Icon::Desktops,
                 "6.14",
@@ -918,6 +918,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Appearance => crate::appearance::settings(),
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
+        SectionId::Desktops => crate::desktops::settings(),
         _ => &[],
     }
 }
@@ -942,6 +943,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
     match section {
         SectionId::Sound => crate::sound::outside(),
         SectionId::Bar => crate::bar::outside(),
+        SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         _ => &[],
     }

@@ -343,6 +343,16 @@
 # Alt+Tab lists "all" desktops' windows (this one's first) or this
 # "desktop"'s only.
 # alt-tab = "all"
+# Rules per application, in this order, the first of an application's
+# applying: its windows open on a desktop (from 1, on the screen they open
+# on), at a size ("last", their last size, by default; "maximized",
+# "left", "right", "fullscreen"), and above the others (a fullscreen
+# window in front covers them). A dialog follows its parent. For example:
+#   [[windows.rules]]
+#   app-id = "org.gnome.Evolution"
+#   desktop = 2
+#   size = "maximized"
+#   above = false
 
 # [ink]
 # Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt

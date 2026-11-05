@@ -94,6 +94,21 @@ open on), agents' badges on windows (slice 3).
 - **Closing:** to 97 % and 0 opacity in 160 ms, ease-in. The window's last
   frame is what fades; the application is not waited for.
 - Reduced motion: opening and closing fade in 120 ms, without scaling.
+- **Rules per application** (`[[windows.rules]]`, 6.14; the Settings'
+  "Bureaux et fenêtres"), in the file's order, the first of an
+  application's applying (its `app-id`, whatever the case): a window of
+  it opens on `desktop` (from 1; on the screen it opens on, without the
+  focus when that desktop does not show, its window out of sight until
+  it comes; none or one past the count: the desktop shown), at `size`
+  (`"last"`, its last size, by default; `"maximized"`, `"left"`,
+  `"right"`, `"fullscreen"`: given in its first configure, as a window
+  asking to open maximised is, so that its first frame fits; a window
+  asking for a size of its own keeps it), and with `above = true` is kept
+  above the others, its dialogs with it, even without the focus; a
+  fullscreen window in front covers it until another is raised. The rule
+  applies to its first window and the next ones; a dialog follows its
+  parent, not the rule. The desktop and the size apply as a window opens;
+  `above` follows the file as it changes, for the windows open too.
 
 ## 6. Moving, and the wobbly windows
 
@@ -235,6 +250,10 @@ While dragging a window:
 - `[windows] snap-by-drag = false` (6.14): no zone while dragging, and
   the magnet pulls at the edges too; the keys below still snap, and a
   snapped window dragged away still takes back its size.
+- The zones, the magnet and tearing a window off a zone are the crate
+  `hocus-geometry`'s, without smithay: the Settings' trial area
+  ("Bureaux et fenêtres", 6.14) moves its drawn windows with the same
+  code.
 
 Keyboard:
 
@@ -545,7 +564,8 @@ desktops on each screen (4), `names` their names (§12); both followed as
 the file changes.
 
 `[windows]` (6.14) holds `move-modifier` and `resize-modifier` (§6),
-`magnet` (§6), `snap-by-drag` (§9), `wobble` (§6) and `alt-tab` (§11);
+`magnet` (§6), `snap-by-drag` (§9), `wobble` (§6), `alt-tab` (§11) and
+the rules per application, `[[windows.rules]]` (§5);
 `[ink] enabled` turns drawing on the screen off; all followed as the
 file changes.
 

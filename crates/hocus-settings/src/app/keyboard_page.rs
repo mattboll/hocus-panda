@@ -675,12 +675,24 @@ impl App {
             container(icon(Icon::Chevron, 14.0, DIM.get()))
                 .style(|_: &Theme| container::Style::default()),
         );
+        // Lit when another page's link opens it (6.14's).
+        let lit = self.lit(crate::desktops::SHORTCUTS);
         let open = container(
-            button(line)
-                .width(Length::Fill)
-                .padding([10, 16])
-                .on_press(Message::Keys(Msg::Sub(true)))
-                .style(flat(None, HOVER.get(), 12.0, false)),
+            container(
+                button(line)
+                    .width(Length::Fill)
+                    .padding([10, 16])
+                    .on_press(Message::Keys(Msg::Sub(true)))
+                    .style(flat(None, HOVER.get(), 12.0, false)),
+            )
+            .style(move |_: &Theme| container::Style {
+                background: (lit > 0.0).then_some(iced::Background::Color(
+                    crate::theme::Ink::Accent(0.20 * lit).get(),
+                )),
+                border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
+                ..container::Style::default()
+            })
+            .id(format!("row:{}", crate::desktops::SHORTCUTS)),
         )
         .id("keyboard:shortcuts".to_owned());
         page = page.push(group(

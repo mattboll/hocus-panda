@@ -260,6 +260,21 @@ pub struct Details {
     pub current: Option<Current>,
     /// The saved Wi-Fi connections, in NetworkManager's order.
     pub saved: Vec<Saved>,
+    /// The Ethernet device, if there is one.
+    pub wired: Option<Wired>,
+}
+
+/// An Ethernet device.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Wired {
+    /// On USB (an adapter), else built in.
+    pub usb: bool,
+    /// Connected (NetworkManager's `ACTIVATED`).
+    pub connected: bool,
+    /// Its speed, in Mb/s.
+    pub speed: Option<u32>,
+    /// Its IPv4 address (IPv6 when there is none).
+    pub address: Option<String>,
 }
 
 /// The Wi-Fi network in use, as the page details it.
