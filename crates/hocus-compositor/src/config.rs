@@ -437,8 +437,8 @@ impl<'de> Deserialize<'de> for Touchpad {
 }
 
 /// The bar, `[panel]` (docs/design/bar.md §2, §3).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Panel {
     /// The screens with a bar.
     pub screens: PanelScreens,
@@ -449,6 +449,21 @@ pub struct Panel {
     /// screen's.
     pub form: FormChoice,
     pub clock: Clock,
+    /// The windows of the screen's current desktop over its desktops'
+    /// tiles (#604); `false` hides them in both forms.
+    pub windows: bool,
+}
+
+impl Default for Panel {
+    fn default() -> Self {
+        Self {
+            screens: PanelScreens::default(),
+            output: String::new(),
+            form: FormChoice::default(),
+            clock: Clock::default(),
+            windows: true,
+        }
+    }
 }
 
 /// The bar's clock, `[panel.clock]` (bar.md §4 group 1, §5): sent to the

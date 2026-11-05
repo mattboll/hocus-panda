@@ -55,6 +55,7 @@ pub mod sound;
 pub mod tasks;
 pub mod tray;
 pub mod wifi;
+pub mod windows;
 
 use std::{
     collections::HashMap,
@@ -66,7 +67,7 @@ use hocus_link::{
     AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
     FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE,
     POPOVER_NAMESPACE, POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE, TRAY_NAMESPACE,
-    ToCompositor,
+    ToCompositor, WINDOWS_NAMESPACE,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -156,6 +157,17 @@ pub enum Item {
     /// The clock's group, the date and the clock (Day.5): the calendar,
     /// by a click only, in both forms.
     Calendar,
+    /// A window's line over the desktops (#604), by the compositor's id: a
+    /// click, or `Enter`, focuses and raises it.
+    Window(u64),
+    /// Its ✕: a click, or `Enter`, asks it to close.
+    WindowClose(u64),
+    /// The windows' "+ N autres": the current desktop's list (3.9b), by a
+    /// click.
+    WindowsMore,
+    /// The mini form's windows' item: their popover, by a hover or a
+    /// click.
+    Windows,
 }
 
 impl Item {
@@ -176,6 +188,8 @@ impl Item {
                 | Self::TaskAdd
                 | Self::Task(_)
                 | Self::DayLater
+                | Self::Window(_)
+                | Self::WindowClose(_)
         )
     }
 
@@ -206,6 +220,7 @@ impl Item {
             | Self::TodayLine(_)
             | Self::TodayMore => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
+            Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore => false,
             Self::DayChoose | Self::DayLater => false,
             // Resting on the clock stays harmless (Day.5).
             Self::Calendar => false,
@@ -229,6 +244,8 @@ impl Item {
             Self::Tasks | Self::TasksMore => tasks::WIDTH,
             Self::DayChoose => setup::WIDTH,
             Self::Calendar => calendar::WIDTH,
+            Self::Windows => windows::WIDTH,
+            Self::WindowsMore => desktop::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -256,6 +273,11 @@ impl Item {
             Self::MeetingMark => meeting::height(),
             Self::Tasks | Self::TasksMore => tasks::height(),
             Self::DayChoose => setup::height(),
+            Self::Windows => windows::height(bar),
+            Self::WindowsMore => desktop::height(
+                bar,
+                u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
+            ),
             Self::Keyboard
             | Self::Decline
             | Self::Agent(_)
@@ -266,7 +288,9 @@ impl Item {
             | Self::TodayMore
             | Self::TaskAdd
             | Self::Task(_)
-            | Self::DayLater => 0,
+            | Self::DayLater
+            | Self::Window(_)
+            | Self::WindowClose(_) => 0,
         }
     }
 
@@ -298,6 +322,7 @@ impl Item {
             Self::DayChoose => crate::setup::opening(),
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
+            Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows => {}
         }
     }
 
@@ -326,7 +351,11 @@ impl Item {
             | Self::TaskAdd
             | Self::Task(_)
             | Self::DayLater
-            | Self::Clipboard => {}
+            | Self::Clipboard
+            | Self::Window(_)
+            | Self::WindowClose(_)
+            | Self::WindowsMore
+            | Self::Windows => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -366,6 +395,9 @@ impl Item {
                 _,
             ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
+            (Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows, _) => {
+                WINDOWS_NAMESPACE
+            }
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -398,6 +430,8 @@ impl Item {
                 | Self::Tasks
                 | Self::TasksMore
                 | Self::DayChoose
+                | Self::Windows
+                | Self::WindowsMore
         ) && !self.agents()
     }
 
@@ -414,6 +448,7 @@ impl Item {
             TODAY_NAMESPACE => place.today.unwrap_or(place.levels),
             TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
             TASKS_NAMESPACE => place.tasks.unwrap_or(place.levels),
+            WINDOWS_NAMESPACE => place.windows.unwrap_or(place.levels),
             // The bar's own surface hears the clock's group's keys.
             CLOCK_NAMESPACE => place.surface,
             _ => place.connections,
@@ -453,6 +488,8 @@ pub struct Place {
     pub today: Option<window::Id>,
     /// The to-do list's (Day.4), once the bar has told it.
     pub tasks: Option<window::Id>,
+    /// The windows' over the desktops (#604), while they show.
+    pub windows: Option<window::Id>,
 }
 
 /// A bar's height until its surface's is known.
@@ -780,6 +817,7 @@ impl Controller {
         let meeting = self.bars.get(bar).and_then(|p| p.meeting);
         let today = self.bars.get(bar).and_then(|p| p.today);
         let tasks = self.bars.get(bar).and_then(|p| p.tasks);
+        let windows = self.bars.get(bar).and_then(|p| p.windows);
         let place = Place {
             form,
             height,
@@ -794,6 +832,7 @@ impl Controller {
             meeting,
             today,
             tasks,
+            windows,
         };
         self.bars.insert(bar.to_owned(), place);
     }
@@ -850,6 +889,23 @@ impl Controller {
                 .focused
                 .as_ref()
                 .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == TODAY_NAMESPACE)
+            {
+                self.focused = None;
+            }
+        }
+    }
+
+    /// Bar `bar`'s windows' surface is `windows` (none: it went).
+    pub fn set_windows(&mut self, bar: &str, windows: Option<window::Id>) {
+        if let Some(place) = self.bars.get_mut(bar) {
+            place.windows = windows;
+        }
+        if windows.is_none() {
+            self.items.remove(&(bar.to_owned(), WINDOWS_NAMESPACE));
+            if self
+                .focused
+                .as_ref()
+                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == WINDOWS_NAMESPACE)
             {
                 self.focused = None;
             }
@@ -1517,7 +1573,9 @@ fn anchor(
     from: Rectangle,
     height: u32,
 ) -> Rectangle {
-    if matches!(item, Item::Tray(_)) {
+    // A tray icon's menu, and the windows' popovers (their item's over
+    // the desktops, near the bar's foot, #604): their bottom on the item's.
+    if matches!(item, Item::Tray(_) | Item::Windows | Item::WindowsMore) {
         return Rectangle {
             y: from.y + from.height - height as f32,
             ..from
@@ -1579,6 +1637,14 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
             crate::setup::later();
             None
         }
+        Item::Window(id) => {
+            tracing::debug!(window = id, "the bar's windows bring a window");
+            Some(Effect::Bring(id))
+        }
+        Item::WindowClose(id) => {
+            tracing::debug!(window = id, "the bar's windows ask a window to close");
+            Some(Effect::Tell(ToCompositor::Close(id)))
+        }
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1595,7 +1661,9 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::MeetingMark
         | Item::Tasks
         | Item::TasksMore
-        | Item::DayChoose => None,
+        | Item::DayChoose
+        | Item::WindowsMore
+        | Item::Windows => None,
     }
 }
 
@@ -2834,6 +2902,7 @@ mod tests {
             meeting: None,
             today: None,
             tasks: None,
+            windows: None,
         };
         // At the bar's foot: bottom-aligned, 8 px from the screen's bottom.
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
@@ -2865,6 +2934,7 @@ mod tests {
             meeting: None,
             today: None,
             tasks: None,
+            windows: None,
         };
         let item = Rectangle::new(Point::new(-190.0, 900.0), Size::new(184.0, 30.0));
         let small = placed(place, item, (280, 332), false);

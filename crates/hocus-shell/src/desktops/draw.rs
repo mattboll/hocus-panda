@@ -279,15 +279,16 @@ fn resize(placed: Option<crate::network::draw::Placed>) {
 /// How far above bar `bar`'s bottom its desktops' group's top is, in the
 /// full form (the column's room ends 14 px over it, `crate::column`).
 pub fn top_above_bottom(bar: &str) -> Option<f32> {
+    top_above_bottom_in(bar, Form::Full)
+}
+
+/// How far above bar `bar`'s bottom its desktops' tiles' (or dots') top is
+/// in `form` (the windows sit 14 px over it, `crate::windows`).
+pub fn top_above_bottom_in(bar: &str, form: Form) -> Option<f32> {
     places(|places| {
         let place = places.get(bar)?;
-        let (_, bottom) = placement(Form::Full, false, place.tops, place.count);
-        Some(
-            crate::levels::draw::BOTTOM as f32
-                + bottom
-                + ROOM
-                + group_height(Form::Full, place.count),
-        )
+        let (_, bottom) = placement(form, false, place.tops, place.count);
+        Some(crate::levels::draw::BOTTOM as f32 + bottom + ROOM + group_height(form, place.count))
     })
 }
 

@@ -1047,7 +1047,15 @@ impl State {
 
     /// Asks the focused window to close: the application decides.
     pub fn close_focused(&mut self) {
-        let Some(managed) = self.model.focused().and_then(|id| self.windows.get(&id)) else {
+        if let Some(id) = self.model.focused() {
+            self.close_window(id);
+        }
+    }
+
+    /// Asks window `id` to close, as `Super+Q` does (its ✕ in the bar,
+    /// #604): the application decides, and may ask first.
+    pub fn close_window(&mut self, id: WindowId) {
+        let Some(managed) = self.windows.get(&id) else {
             return;
         };
         if let Some(toplevel) = managed.window.toplevel() {

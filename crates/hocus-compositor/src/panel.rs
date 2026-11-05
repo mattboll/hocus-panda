@@ -113,6 +113,9 @@ pub struct Panel {
     pub reminder_commits: u64,
     /// Commits of Today's surfaces (Day.3), for tests: none at rest.
     pub today_commits: u64,
+    /// Commits of the windows' surfaces in the bar (#604), for tests: none
+    /// at rest.
+    pub windows_commits: u64,
     /// Commits of the connections' surfaces, for tests: none at rest.
     pub connections_commits: u64,
     /// Commits of the desktops' surfaces, for tests: none at rest.

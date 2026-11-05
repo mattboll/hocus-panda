@@ -61,6 +61,7 @@ mod today;
 mod tray;
 mod user;
 mod wayland;
+mod windows;
 
 use std::{
     borrow::Cow,
@@ -582,11 +583,13 @@ impl Shell {
                     let card = meeting::forget(&bar.output);
                     reminder::forget(&bar.output);
                     let today = today::forget(&bar.output);
+                    let windows = windows::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
                         card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
                         today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
+                        windows.map_or_else(Task::none, |w| Task::done(Message::RemoveWindow(w))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.tasks)),
@@ -635,6 +638,14 @@ impl Shell {
             }
             ToShell::Titles(titles) => {
                 desktops::set_titles(titles);
+                Task::none()
+            }
+            ToShell::Recent(recent) => {
+                desktops::set_recent(recent);
+                Task::none()
+            }
+            ToShell::BarWindows(shown) => {
+                windows::set_shown(shown);
                 Task::none()
             }
             ToShell::AgentTools(tools) => {
@@ -972,6 +983,7 @@ impl Shell {
             after.extend(in_use::bar_opened(&output, form));
             after.extend(meeting::bar_opened(&output, form));
             after.extend(today::bar_opened(&output, form));
+            windows::bar_opened(&output, form);
             reminder::bar_opened(&output, form);
         }
         open.chain(open_clock)
@@ -1113,6 +1125,7 @@ impl Shell {
         let output = bar.output.clone();
         let form = bar.form;
         today::form(&output, form, switching);
+        windows::form(&output, form, switching);
         // The column's groups to their places in the form: Today's rows,
         // the room the agents' rows have on a bar in the full form.
         column::moved();
@@ -1372,6 +1385,30 @@ impl Shell {
             backdrop,
             motion: self.look.motion,
             words: meeting::Words::new(clock::time::Lang::of_messages()),
+        };
+        Some(
+            canvas(program)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// The windows over the desktops (#604), if their surface is `id`.
+    fn windows_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = windows::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        let at = self.now + AHEAD;
+        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
+            top: OPAQUE_TOP,
+            bottom: OPAQUE_BOTTOM,
+        });
+        let program = windows::draw::View {
+            bar: bar.output.clone(),
+            forms: bar.forms(at),
+            bar_width: bar.width(at),
+            words: windows::Words::new(clock::time::Lang::of_messages()),
+            backdrop,
         };
         Some(
             canvas(program)
@@ -1660,15 +1697,25 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Desktop(_) => canvas(popover::desktop::Panel {
+            popover::Item::Windows => canvas(popover::windows::Panel {
                 id,
-                words: self.words,
+                words: windows::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-                software: self.software,
             })
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Desktop(_) | popover::Item::WindowsMore => {
+                canvas(popover::desktop::Panel {
+                    id,
+                    words: self.words,
+                    glass: self.look.glass,
+                    software: self.software,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            }
             popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
                 canvas(popover::agents::Panel {
                     id,
@@ -1773,7 +1820,9 @@ impl Shell {
             | popover::Item::TodayMore
             | popover::Item::TaskAdd
             | popover::Item::Task(_)
-            | popover::Item::DayLater => {
+            | popover::Item::DayLater
+            | popover::Item::Window(_)
+            | popover::Item::WindowClose(_) => {
                 return None;
             }
         };
@@ -1809,6 +1858,7 @@ impl Shell {
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
+                .or_else(|| self.windows_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .or_else(|| reminder::view(id, self.look.glass))
@@ -2106,9 +2156,20 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             desktops::set(screen);
                             continue;
                         }
-                        // Its windows' titles: only an open list draws.
+                        // Its windows' titles: only an open list draws,
+                        // and the windows over the tiles if they list it.
                         Ok(ToShell::Titles(titles)) => {
                             desktops::set_titles(titles);
+                            continue;
+                        }
+                        // Its windows' order, and whether the bar shows
+                        // them (#604): only their surface draws.
+                        Ok(ToShell::Recent(recent)) => {
+                            desktops::set_recent(recent);
+                            continue;
+                        }
+                        Ok(ToShell::BarWindows(shown)) => {
+                            windows::set_shown(shown);
                             continue;
                         }
                         // The agents' tools and the agents: only their

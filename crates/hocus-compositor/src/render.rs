@@ -660,6 +660,7 @@ impl State {
                     | hocus_link::IN_USE_NAMESPACE
                     | hocus_link::MEETING_NAMESPACE
                     | hocus_link::TODAY_NAMESPACE
+                    | hocus_link::WINDOWS_NAMESPACE
                     | hocus_link::BELL_NAMESPACE
                     | hocus_link::TRAY_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
