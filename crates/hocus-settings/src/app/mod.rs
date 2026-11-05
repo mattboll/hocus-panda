@@ -18,6 +18,7 @@ mod screens;
 mod sound;
 mod style;
 mod view;
+mod wallpaper_page;
 
 use std::{
     collections::BTreeMap,
@@ -183,12 +184,16 @@ enum Write {
     Keys(Vec<KeyEdit>, KeysSaid),
 }
 
-/// What `Ctrl+Z` takes back: a change of the file, or a choice of the
-/// Son page (in PipeWire).
+/// What `Ctrl+Z` takes back: a change of the file, a choice of the
+/// Son page (in PipeWire), or a picture of one's own removed (6.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Undo {
     File(Change),
     Sound(sound::Choice),
+    Picture {
+        path: PathBuf,
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
 }
 
 /// Why a write was asked.
@@ -283,6 +288,8 @@ pub enum Message {
     Mouse(mouse::Msg),
     /// The keyboard's page and its shortcuts' (6.8).
     Keys(keyboard_page::Msg),
+    /// The wallpaper's page (6.3).
+    Wallpaper(wallpaper_page::Msg),
     Nothing,
 }
 
@@ -341,6 +348,8 @@ pub struct App {
     said_places: String,
     /// The Son page: PipeWire as last heard.
     sound: sound::Sound,
+    /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
+    wallpaper: wallpaper_page::State,
 }
 
 impl App {
@@ -421,7 +430,9 @@ impl App {
             said: String::new(),
             said_places: String::new(),
             sound,
+            wallpaper: wallpaper_page::State::default(),
         };
+        app.wallpaper_start(to_screens.clone());
         app.screens_open(to_screens);
         if start.section == Some(SectionId::Sound) {
             app.light = Some(("sound.output", Instant::now()));
@@ -528,6 +539,7 @@ impl App {
         let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
         let task = self.handle(message);
         self.sound_listen();
+        self.wallpaper_want();
         self.now = Instant::now();
         self.knobs
             .retain(|_, since| self.now.saturating_duration_since(*since) < KNOB);
@@ -687,6 +699,7 @@ impl App {
             }
             Message::Placed(places) => self.placed(places),
             Message::Mouse(msg) => self.mouse_update(msg),
+            Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -734,15 +747,13 @@ impl App {
                         self.lang = lang;
                     }
                     self.text_scale = snapshot.text_scale as f32 / 100.0;
-                    if crate::theme::set(snapshot.theme) {
-                        tracing::info!(
-                            theme = %snapshot.theme.scheme,
-                            accent = %snapshot.theme.accent,
-                            "the window's theme"
-                        );
-                    }
                 }
+                let reads = snapshot.state == FileState::Reads;
                 self.snapshot = Some(snapshot);
+                // The theme, the wallpaper's accent the primary screen's.
+                if reads {
+                    self.wallpaper_theme();
+                }
                 if !self.writable() {
                     self.menu = None;
                     self.sliding = None;
@@ -1038,6 +1049,14 @@ impl App {
                 self.toast = None;
                 return self.sound_undo(choice, false);
             }
+            Some(Undo::Picture { .. }) => {
+                let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                self.wallpaper_put_back(path, bytes);
+                return Task::none();
+            }
             Some(Undo::File(_)) if self.writable() => match self.undo.pop() {
                 Some(Undo::File(change)) => change,
                 _ => return Task::none(),
@@ -1330,6 +1349,9 @@ impl App {
                 .map(Control::Screens)
                 .collect();
         }
+        if section == SectionId::Wallpaper {
+            return self.wallpaper_controls();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1519,6 +1541,7 @@ impl App {
             _ => return Task::none(),
         };
         match control {
+            Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -1565,6 +1588,13 @@ impl App {
                     }
                     // 6.2's: ← and → move and choose.
                     (Kind::Segmented(choices), Named::ArrowLeft | Named::ArrowRight) => {
+                        let values: Vec<Value> = choices.iter().map(|c| c.value.clone()).collect();
+                        self.step_choice(slot, &values, named == Named::ArrowRight)
+                    }
+                    // 6.3's plain colour: six swatches, a radio group.
+                    (Kind::Menu(choices), Named::ArrowLeft | Named::ArrowRight)
+                        if setting.id == crate::wallpaper::COLOR =>
+                    {
                         let values: Vec<Value> = choices.iter().map(|c| c.value.clone()).collect();
                         self.step_choice(slot, &values, named == Named::ArrowRight)
                     }
@@ -1746,6 +1776,8 @@ enum Control {
     Screens(screens::Control),
     /// The mice and touchpads page's test area.
     Try(TryPart),
+    /// The wallpaper's page's own (6.3).
+    Wallpaper(wallpaper_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

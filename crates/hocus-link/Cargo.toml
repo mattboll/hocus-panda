@@ -13,3 +13,6 @@ workspace = true
 # The clipboard's clips on a line (5.6), text and images alike (MIT or
 # Apache-2.0).
 base64 = "0.22.1"
+# The wallpapers' pictures (6.3), decoded off the loop by the compositor,
+# the shell and the Settings alike: JPEG, PNG and WebP (MIT or Apache-2.0).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

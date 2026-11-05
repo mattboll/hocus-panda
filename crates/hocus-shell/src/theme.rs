@@ -17,6 +17,7 @@ use iced::Color;
 static NOW: RwLock<Choice> = RwLock::new(Choice {
     scheme: Scheme::Dark,
     accent: Accent::Green,
+    wallpaper: hocus_link::theme::BACKDROP_ACCENT,
 });
 
 /// The theme from now on; whether it changed.
@@ -147,6 +148,7 @@ mod tests {
         let light = Choice {
             scheme: Scheme::Light,
             accent: Accent::Blue,
+            ..Choice::default()
         };
         assert_eq!(TEXT.in_theme(light), Color::from_rgb8(0x14, 0x19, 0x26));
         assert_eq!(ACCENT.in_theme(light), Color::from_rgb8(0x5B, 0x8D, 0xEF));

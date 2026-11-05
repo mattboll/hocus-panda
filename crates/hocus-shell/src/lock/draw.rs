@@ -25,7 +25,7 @@ use std::{
 use hocus_link::{LOCK_SHAKE, LockFocus, LockPhase};
 use iced::{
     Color, Font, Pixels, Point, Radians, Rectangle, Renderer, Size, Theme, Vector,
-    advanced::image::{FilterMethod, Handle},
+    advanced::image::FilterMethod,
     alignment, mouse,
     widget::{
         canvas::{self, Frame, Geometry, LineCap, LineJoin, Path, Stroke, gradient},
@@ -369,7 +369,7 @@ impl<Message> canvas::Program<Message> for View {
         let size = bounds.size();
         let now = Instant::now();
         if self.layer == Layer::Back {
-            background(&mut frame, size, lock.shown.wallpaper);
+            background(&mut frame, size, lock.shown.wallpaper, &self.output);
             return vec![frame.into_geometry()];
         }
         frame.fill_rectangle(Point::ORIGIN, size, VEIL.get());
@@ -443,31 +443,20 @@ struct Said {
 
 static SAID: Mutex<Option<HashMap<String, Said>>> = Mutex::new(None);
 
-/// The backgrounds made, by size: the desktop's gradient, made at twice
-/// the logical size's quarter (smooth either way).
-static BACKDROPS: Mutex<Option<HashMap<(u32, u32), Handle>>> = Mutex::new(None);
-
-fn background(f: &mut Frame, size: Size, wallpaper: bool) {
+/// The screen's wallpaper, or the lock's own picture (6.3), drawn off
+/// this thread ([`super::wallpaper`]); plain until it is.
+fn background(f: &mut Frame, size: Size, wallpaper: bool, output: &str) {
     let all = Rectangle::new(Point::ORIGIN, size);
-    if wallpaper {
-        let key = (size.width.round() as u32, size.height.round() as u32);
-        let handle = {
-            let mut made = BACKDROPS.lock().unwrap_or_else(PoisonError::into_inner);
-            made.get_or_insert_with(HashMap::new)
-                .entry(key)
-                .or_insert_with(|| {
-                    let (w, h, pixels) =
-                        hocus_link::backdrop::pixels(((key.0 * 2) as i32, (key.1 * 2) as i32));
-                    Handle::from_rgba(w as u32, h as u32, pixels)
-                })
-                .clone()
-        };
-        f.draw_image(
+    let key = (size.width.round() as u32, size.height.round() as u32);
+    match wallpaper
+        .then(|| super::wallpaper::background(output, key))
+        .flatten()
+    {
+        Some(handle) => f.draw_image(
             all,
             canvas::Image::new(handle).filter_method(FilterMethod::Linear),
-        );
-    } else {
-        f.fill_rectangle(Point::ORIGIN, size, PLAIN.get());
+        ),
+        None => f.fill_rectangle(Point::ORIGIN, size, PLAIN.get()),
     }
 }
 

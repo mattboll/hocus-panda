@@ -13,6 +13,8 @@
 //!   at once, its changes on disk followed, off the window's thread.
 //! - [`search`]: every setting found by its words, in French and English,
 //!   and its keys.
+//! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
+//!   thumbnails and one's own pictures, the desktop portal's file chooser.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
@@ -24,6 +26,7 @@ pub mod keys;
 pub mod lang;
 pub mod model;
 pub mod mouse;
+pub mod portal;
 pub mod power;
 pub mod renderer;
 pub mod screens;
@@ -32,5 +35,6 @@ pub mod single;
 pub mod sound;
 pub mod store;
 pub mod theme;
+pub mod wallpaper;
 pub mod worker;
 pub mod xkb;

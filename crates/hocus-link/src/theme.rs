@@ -84,21 +84,138 @@ pub enum Accent {
 
 /// An accent's three values: `base` fills the switches, the selection and
 /// the check; text in the accent is `on_dark` or `on_light`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AccentColours {
     pub base: [u8; 3],
     pub on_dark: [u8; 3],
     pub on_light: [u8; 3],
 }
 
-/// The default backdrop's hue lifted to the accents' lightness (the
-/// gradient of [`crate::backdrop`]). A wallpaper of the user's own gives
-/// its own when the wallpaper's page (6.3) lands.
+/// The default backdrop's hue lifted to the accents' lightness (Nuit, the
+/// gradient of [`crate::backdrop`]). The other wallpapers give their own
+/// ([`crate::wallpaper`]).
 pub const BACKDROP_ACCENT: AccentColours = AccentColours {
     base: [0x7A, 0x96, 0xE0],
     on_dark: [0xA4, 0xB8, 0xF0],
     on_light: [0x3A, 0x58, 0xB0],
 };
+
+impl Default for AccentColours {
+    fn default() -> Self {
+        BACKDROP_ACCENT
+    }
+}
+
+impl AccentColours {
+    /// A colour's hue lifted to the six accents' lightness: the base at
+    /// about theirs, text on dark lighter and on light darker, each until
+    /// it reads at 4.5 to 1 on the window. A colour without a hue (a grey)
+    /// gives a grey-blue.
+    pub fn lifted([r, g, b]: [u8; 3]) -> Self {
+        let (hue, saturation, _) = hsl([r, g, b]);
+        let saturation = if saturation < 0.08 {
+            0.25
+        } else {
+            saturation.clamp(0.45, 0.65)
+        };
+        let base = rgb_of(hue, saturation, 0.66);
+        let mut on_dark_l: f64 = 0.78;
+        let mut on_dark = rgb_of(hue, saturation, on_dark_l);
+        while contrast_rgb(on_dark, DARK.window) < 4.6 && on_dark_l < 0.97 {
+            on_dark_l += 0.01;
+            on_dark = rgb_of(hue, saturation, on_dark_l);
+        }
+        let mut on_light_l: f64 = 0.44;
+        let mut on_light = rgb_of(hue, saturation, on_light_l);
+        while contrast_rgb(on_light, LIGHT.window) < 4.6 && on_light_l > 0.05 {
+            on_light_l -= 0.01;
+            on_light = rgb_of(hue, saturation, on_light_l);
+        }
+        Self {
+            base,
+            on_dark,
+            on_light,
+        }
+    }
+
+    /// Written on the line: `RRGGBB,RRGGBB,RRGGBB`.
+    fn word(self) -> String {
+        let hex = |[r, g, b]: [u8; 3]| format!("{r:02x}{g:02x}{b:02x}");
+        format!(
+            "{},{},{}",
+            hex(self.base),
+            hex(self.on_dark),
+            hex(self.on_light)
+        )
+    }
+
+    fn of_word(word: &str) -> Option<Self> {
+        let colour = |s: &str| -> Option<[u8; 3]> {
+            let n = u32::from_str_radix(s, 16).ok().filter(|_| s.len() == 6)?;
+            Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
+        };
+        let mut parts = word.split(',');
+        let colours = Self {
+            base: colour(parts.next()?)?,
+            on_dark: colour(parts.next()?)?,
+            on_light: colour(parts.next()?)?,
+        };
+        parts.next().is_none().then_some(colours)
+    }
+}
+
+/// Hue (degrees), saturation and lightness of a colour.
+fn hsl([r, g, b]: [u8; 3]) -> (f64, f64, f64) {
+    let [r, g, b] = [r, g, b].map(|v| f64::from(v) / 255.0);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    if d <= f64::EPSILON {
+        return (220.0, 0.0, l);
+    }
+    let s = d / (1.0 - (2.0 * l - 1.0).abs());
+    let h = if max == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    (h, s, l)
+}
+
+fn rgb_of(h: f64, s: f64, l: f64) -> [u8; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h.rem_euclid(360.0) / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    [r, g, b].map(|v| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8)
+}
+
+/// WCAG's relative luminance.
+fn luminance_rgb([r, g, b]: [u8; 3]) -> f64 {
+    let lin = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.040_45 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+
+fn contrast_rgb(a: [u8; 3], b: Rgba) -> f64 {
+    let (x, y) = (luminance_rgb(a), luminance_rgb([b.r, b.g, b.b]));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
 
 impl Accent {
     pub const ALL: [Self; 6] = [
@@ -169,6 +286,46 @@ impl Accent {
     }
 }
 
+impl fmt::Display for Choice {
+    /// `SCHEME ACCENT WALLPAPER`, as `theme` on the line carries it.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {}",
+            self.scheme,
+            self.accent,
+            self.wallpaper.word()
+        )
+    }
+}
+
+impl FromStr for Choice {
+    type Err = BadLine;
+
+    /// `SCHEME ACCENT [WALLPAPER]`: without the wallpaper's colours, Nuit's.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut words = s.split_whitespace();
+        let scheme = words
+            .next()
+            .ok_or_else(|| BadLine("no theme".to_owned()))?
+            .parse()?;
+        let accent = words
+            .next()
+            .ok_or_else(|| BadLine("no accent".to_owned()))?
+            .parse()?;
+        let wallpaper = match words.next() {
+            None => AccentColours::default(),
+            Some(word) => AccentColours::of_word(word)
+                .ok_or_else(|| BadLine(format!("the wallpaper's accent {word:?}")))?,
+        };
+        Ok(Self {
+            scheme,
+            accent,
+            wallpaper,
+        })
+    }
+}
+
 impl fmt::Display for Accent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.word())
@@ -187,12 +344,16 @@ impl FromStr for Accent {
     }
 }
 
-/// The theme the desktop draws in: written `theme SCHEME ACCENT` on the
-/// line.
+/// The theme the desktop draws in: written `theme SCHEME ACCENT
+/// WALLPAPER` on the line (the wallpaper's accent's three colours,
+/// [`AccentColours`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Choice {
     pub scheme: Scheme,
     pub accent: Accent,
+    /// What `accent = "wallpaper"` is now: the primary screen's
+    /// wallpaper's (6.3), Nuit's by default.
+    pub wallpaper: AccentColours,
 }
 
 impl Choice {
@@ -201,12 +362,15 @@ impl Choice {
     }
 
     pub const fn accent(self) -> AccentColours {
-        self.accent.colours()
+        match self.accent {
+            Accent::Wallpaper => self.wallpaper,
+            accent => accent.colours(),
+        }
     }
 
     /// Text in the accent, on this theme's backgrounds.
     pub const fn accent_text(self) -> [u8; 3] {
-        let colours = self.accent.colours();
+        let colours = self.accent();
         match self.scheme {
             Scheme::Dark => colours.on_dark,
             Scheme::Light => colours.on_light,
@@ -477,6 +641,44 @@ mod tests {
         assert!((rim.a - 0.0875).abs() < 1e-6, "{rim:?}");
         // A gauge keeps its colour.
         assert_eq!(on_light(hex(0x5B8DEF)), hex(0x5B8DEF));
+    }
+
+    #[test]
+    fn a_lifted_hue_reads_on_both_themes() {
+        for rgb in [
+            [0x1B, 0x22, 0x33],
+            [0xFF, 0xE0, 0x10],
+            [0x10, 0x80, 0x20],
+            [0x80, 0x80, 0x80],
+            [0xF0, 0x30, 0x90],
+        ] {
+            let lifted = AccentColours::lifted(rgb);
+            let on = |rgb: [u8; 3]| Rgba {
+                r: rgb[0],
+                g: rgb[1],
+                b: rgb[2],
+                a: 1.0,
+            };
+            assert!(contrast(on(lifted.on_dark), DARK.window) >= 4.5, "{rgb:?}");
+            assert!(
+                contrast(on(lifted.on_light), LIGHT.window) >= 4.5,
+                "{rgb:?}"
+            );
+        }
+        // A slate stays blue.
+        let [r, _, b] = AccentColours::lifted([0x1B, 0x22, 0x33]).base;
+        assert!(b > r, "{r} {b}");
+        let choice = Choice {
+            scheme: Scheme::Light,
+            accent: Accent::Wallpaper,
+            wallpaper: AccentColours::lifted([0x1D, 0x3A, 0x2E]),
+        };
+        assert_eq!(choice.to_string().parse::<Choice>(), Ok(choice));
+        assert_eq!(choice.accent(), choice.wallpaper);
+        assert_eq!(
+            "dark green".parse::<Choice>().map(|c| c.wallpaper),
+            Ok(BACKDROP_ACCENT)
+        );
     }
 
     #[test]

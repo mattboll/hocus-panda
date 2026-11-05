@@ -812,8 +812,9 @@ The accents (base; text on dark; text on light): green, the default,
 `#6CC287` / `#7EE0A0` / `#2E7D4A`; blue `#5B8DEF` / `#8FB3FF` / `#2F5FC4`;
 violet `#9B84F0` / `#C3B4FF` / `#5B45B8`; rose `#E07AB5` / `#F2A6D0` /
 `#A8326F`; teal `#3FB8AF` / `#7FD8D0` / `#1D766F`; the wallpaper's, its
-dominant hue lifted to their lightness (the default backdrop gives
-`#7A96E0` / `#A4B8F0` / `#3A58B0`). The accent is what is chosen, on or
+dominant hue lifted to their lightness (the primary screen's, 6.3: Nuit
+gives `#7A96E0` / `#A4B8F0` / `#3A58B0`, Brume, Aube and Forêt their main
+glow's, the plain colour its own, a picture its strongest hue). The accent is what is chosen, on or
 focused (switches, the selection, the keyboard's ring, today in the
 calendar, the "Choisir…" button); the agents' states, the gauges and the
 pandas keep their own colours. Every text pair passes 4.5:1 (a unit test
@@ -908,9 +909,9 @@ are later slices'.
   no transparent strip left, no patched softbuffer is needed.
 - **At rest** neither the shell nor the compositor draws: no clock yet
   (since 3.2, the clock draws once a second, alone: see below).
-- **The background.** Until wallpapers, the compositor draws the mockup's
-  night-blue gradient and its glows under everything, so that the glass
-  has something to show.
+- **The background.** The compositor draws the wallpaper under everything
+  (6.3, settings.md): by default Nuit, the mockup's night-blue gradient
+  and its glows, so that the glass has something to show.
 - **Not built yet:** the glass's opaque fallback behind a maximised window
   (§11), the bar's keyboard access (§11), the contents' cross-fade (§3,
   nothing to fade yet), hover feedback on the edge strip (the mockup's

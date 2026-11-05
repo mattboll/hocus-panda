@@ -55,6 +55,7 @@ mod lock;
 mod record;
 mod share;
 pub mod theme;
+pub mod wallpaper;
 pub use auth::{
     AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
     AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
@@ -370,12 +371,17 @@ pub enum ToShell {
     Look { glass: bool, motion: bool },
     /// The theme and the accent the shell draws in (`[appearance] theme`
     /// and `accent`, #402): sent as the shell connects and when the file
-    /// changes them. Written `theme SCHEME ACCENT`.
+    /// changes them, or the primary screen's wallpaper while the accent is
+    /// the wallpaper's (6.3). Written `theme SCHEME ACCENT WALLPAPER`.
     Theme(theme::Choice),
     /// The desktop's language and formats (`[locale]`, #402): sent as the
     /// shell connects and when the file changes them. Written `locale
     /// LANGUAGE DATE TIME`.
     Locale(locale::Locale),
+    /// Each screen's wallpaper and the lock's (`[wallpaper]`, 6.3): sent
+    /// as the shell connects and when the file or the screens change them.
+    /// Written `wallpaper`, a space, then [`wallpaper::Wallpapers`]' tabs.
+    Wallpaper(wallpaper::Wallpapers),
     /// A bar on `output`, in `form`; `since`: when it switched to it, in
     /// microseconds of `CLOCK_MONOTONIC` (0: it shows in that form at once);
     /// `scale`: its screen's, in 120ths as its surfaces' fractional scale
@@ -1484,8 +1490,9 @@ impl fmt::Display for ToShell {
                 if *glass { "glass" } else { "opaque" },
                 if *motion { "motion" } else { "still" }
             ),
-            Self::Theme(choice) => write!(f, "theme {} {}", choice.scheme, choice.accent),
+            Self::Theme(choice) => write!(f, "theme {choice}"),
             Self::Locale(locale) => write!(f, "locale {locale}"),
+            Self::Wallpaper(wallpapers) => write!(f, "wallpaper {wallpapers}"),
             Self::Bar {
                 output,
                 form,
@@ -1878,16 +1885,18 @@ impl FromStr for ToShell {
         if let Some(rest) = line.strip_prefix("locale ") {
             return rest.parse().map(Self::Locale);
         }
+        if let Some(rest) = line.strip_prefix("theme ") {
+            return rest.parse().map(Self::Theme);
+        }
+        if let Some(rest) = line.strip_prefix("wallpaper ") {
+            return rest.parse().map(Self::Wallpaper);
+        }
         let mut words = line.split_whitespace();
         match words.next() {
             Some("look") => Ok(Self::Look {
                 glass: flag(words.next(), "glass", "opaque")?,
                 motion: flag(words.next(), "motion", "still")?,
             }),
-            Some("theme") => Ok(Self::Theme(theme::Choice {
-                scheme: word(&mut words, "theme")?.parse()?,
-                accent: word(&mut words, "accent")?.parse()?,
-            })),
             Some("bar") => Ok(Self::Bar {
                 output: word(&mut words, "output")?.to_owned(),
                 form: word(&mut words, "form")?.parse()?,
@@ -2510,6 +2519,15 @@ mod tests {
             ToShell::Theme(theme::Choice {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
+                wallpaper: theme::AccentColours::lifted([0x3A, 0x2A, 0x26]),
+            }),
+            ToShell::Wallpaper(wallpaper::Wallpapers {
+                lock: wallpaper::LockLook::Picture,
+                lock_picture: wallpaper::Picture::File("~/a b.jpg".into()),
+                picture: wallpaper::Picture::Builtin(backdrop::Backdrop::Forest),
+                fit: wallpaper::Fit::Center,
+                color: wallpaper::DEFAULT_COLOR,
+                outputs: vec![("eDP-1".into(), wallpaper::Picture::Plain)],
             }),
             ToShell::Locale(locale::Locale {
                 language: locale::Language::English,

@@ -10,7 +10,6 @@ mod agents;
 mod appearance;
 pub mod auth;
 pub mod away;
-mod backdrop;
 mod backend;
 mod bubbles;
 mod capture;
@@ -65,6 +64,7 @@ mod switcher;
 pub mod test_gpu;
 mod text_input;
 mod tray;
+mod wallpaper;
 mod windows;
 mod wobble;
 mod xwayland;
@@ -238,6 +238,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
+    wallpaper::start(&event_loop.handle(), &mut state);
     if let Some(file) = state.config.file.clone() {
         reload::start(&event_loop.handle(), &file, &state.config);
     }

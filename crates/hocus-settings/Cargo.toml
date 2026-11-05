@@ -39,6 +39,8 @@ iced = { version = "0.14", default-features = false, features = [
     "advanced",
     # The screens' drawing and the trial's ring (6.9).
     "canvas",
+    # The wallpapers' thumbnails (6.3), drawn by the page's thread.
+    "image-without-codecs",
 ] }
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
 # the shell does).
@@ -64,6 +66,11 @@ wayland-backend = { version = "0.3.17", features = ["client_system"] }
 # And keyboard-shortcuts-inhibit while a shortcut is recorded (6.8).
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 
+# The desktop portal's file chooser (6.3), from the wallpaper page's thread.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
+
 [dev-dependencies]
+# A picture to choose, in the wallpaper's tests.
+image = { version = "0.25", default-features = false, features = ["png"] }
 tempfile = "3.27.0"
 anyhow = "1.0.104"
