@@ -897,13 +897,27 @@ impl State {
     /// nested) it is the laser's, and the click goes to the window.
     pub fn ink_shape(&self, modifiers: &smithay::input::keyboard::ModifiersState) -> Option<Shape> {
         let with_alt = self.nested;
-        (modifiers.logo && !modifiers.ctrl && modifiers.alt == with_alt).then_some(
+        (self.ink_on() && modifiers.logo && !modifiers.ctrl && modifiers.alt == with_alt).then_some(
             if modifiers.shift {
                 Shape::Arrow
             } else {
                 Shape::Stroke
             },
         )
+    }
+
+    /// Whether the ink starts: `[ink] enabled`, and `Super`+drag not
+    /// taken to move windows (`[windows] move-modifier = "super"`, 6.14).
+    pub fn ink_on(&self) -> bool {
+        self.config.ink.enabled
+            && self.config.windows.move_modifier != crate::config::DragKey::Super
+    }
+
+    /// The ink was turned off (6.14): what it shows goes, the laser with
+    /// it.
+    pub(crate) fn ink_turned_off(&mut self) {
+        self.ink.laser_keys(false);
+        self.ink_clear();
     }
 
     /// Starts drawing `shape` from the pointer, with the pointer grabbed
@@ -963,7 +977,7 @@ impl State {
 
     /// The laser's keys after a key's press or release.
     pub(crate) fn ink_modifiers(&mut self, modifiers: &smithay::input::keyboard::ModifiersState) {
-        let held = modifiers.logo && modifiers.alt && !modifiers.ctrl;
+        let held = self.ink_on() && modifiers.logo && modifiers.alt && !modifiers.ctrl;
         // The dot shows at the pointer; its trail starts as it moves.
         if self.ink.laser_keys(held) {
             self.redraw = true;

@@ -231,7 +231,7 @@ impl PointerGrab<State> for MoveGrab {
             let moved = location - before;
             let moved = magnet::unpulled((moved.x, moved.y), self.pull, pull);
             let now = state.now();
-            let wobbles = !self.rigid && !state.reduced_motion();
+            let wobbles = !self.rigid && state.wobbles();
             if wobbles && state.wobble.as_ref().is_none_or(|(w, _)| *w != self.id) {
                 let held = self.from - self.initial.to_f64();
                 state.wobble = Some((
@@ -257,7 +257,7 @@ impl PointerGrab<State> for MoveGrab {
             .next()
             .cloned()
             .and_then(|o| Some((state.work_area(&o)?, o)))
-            .and_then(|(area, o)| Some((Zone::at(area, pointer.x, pointer.y)?, area, o)))
+            .and_then(|(area, o)| Some((state.snap_zone(area, pointer)?, area, o)))
             .map(|(zone, area, o)| (zone, zone.rect(area), o));
         state.set_preview(zone);
         state.redraw = true;

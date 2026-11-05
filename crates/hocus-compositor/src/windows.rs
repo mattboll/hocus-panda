@@ -344,6 +344,12 @@ impl State {
         self.config.appearance.reduced_motion
     }
 
+    /// Whether a moved window wobbles: `[windows] wobble`, never with
+    /// reduced motion (6.14).
+    pub fn wobbles(&self) -> bool {
+        self.config.windows.wobble && !self.reduced_motion()
+    }
+
     /// A mapped window's geometry, global.
     pub fn rect_of(&self, id: WindowId) -> Option<Rect> {
         let managed = self.windows.get(&id)?;

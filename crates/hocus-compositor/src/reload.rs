@@ -10,7 +10,7 @@
 //! Followed live: `[pointer]` and `[touchpad]` (6.12), `[shortcuts]` and
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
-//! screens' bar forms (6.4), `[desktops]` (6.14). A keyboard whose layouts or options changed has its
+//! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14). A keyboard whose layouts or options changed has its
 //! keymap compiled on the thread too (XKB reads its files), the loop only
 //! taking it in; its repeat is given to clients again.
 
@@ -232,6 +232,17 @@ impl State {
         // The desktops' count and names (6.14, desktop_set.rs).
         if self.desktops_config_changed(&new.desktops) {
             followed.push("[desktops]");
+        }
+        // How windows move, snap and switch, and the ink (6.14): read
+        // where they are used. The ink turned off takes what it shows.
+        if new.windows != self.config.windows || new.ink != self.config.ink {
+            let was = self.ink_on();
+            self.config.windows = new.windows.clone();
+            self.config.ink = new.ink.clone();
+            if was && !self.ink_on() {
+                self.ink_turned_off();
+            }
+            followed.push("[windows] [ink]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

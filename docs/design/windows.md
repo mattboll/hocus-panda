@@ -108,7 +108,15 @@ open on), agents' badges on windows (slice 3).
   with the user's current desktop's wobble as the reference to match or
   beat (the prototype's was found a little less pleasant).
 - The shadow deepens while moving (blur 48 px, 50 %). No transparency.
-- With reduced motion: no wobble; the window moves rigidly.
+- With reduced motion, or `[windows] wobble = false` (6.14): no wobble;
+  the window moves rigidly.
+- The key held to move from anywhere is `[windows] move-modifier`
+  (6.14): `"alt"` (the default), `"super"` (nested `Alt+Super`; the ink
+  then no longer starts, ink.md) or `"none"` (title bars and the grip
+  only). The key held to resize with the right button is
+  `[windows] resize-modifier`: `"super"` (the default, nested
+  `Alt+Super`), `"alt"` or `"none"` (the frame only). Both followed as the
+  file changes.
 
 ### Magnetic edges
 
@@ -128,7 +136,9 @@ window's side and line up with another's top. A window pulls only where
 the two overlap the other way, or come within the gap and the 12 px of
 it, so a window far above does not pull sideways. The magnet applies to
 where the pointer would put the window, nothing accumulates: dragging on
-past the 12 px frees it, with no modifier. Where the pointer is in a snap
+past the 12 px frees it, with no modifier. `[windows] magnet = false`
+(6.14) turns it off, for moves and resizes, followed as the file
+changes. Where the pointer is in a snap
 zone (section 9), snapping keeps priority and nothing sticks. The wobble
 follows the pointer's motion, not the magnet's jumps: a window catching
 or coming free jumps rigidly, and one held still by the magnet does not
@@ -222,6 +232,9 @@ While dragging a window:
   zone removes the preview in 120 ms.
 - Dragging a snapped or maximised window away restores its previous size
   under the pointer, at the same relative grab point.
+- `[windows] snap-by-drag = false` (6.14): no zone while dragging, and
+  the magnet pulls at the edges too; the keys below still snap, and a
+  snapped window dragged away still takes back its size.
 
 Keyboard:
 
@@ -292,6 +305,8 @@ Keyboard:
   Titles are the application's, ellipsed; another desktop's number
   follows in grey (`Firefox · 2`). Other desktops' and minimised windows
   show at 60 %. `←`/`→` move the selection too, `Return` switches.
+- `[windows] alt-tab = "desktop"` (6.14) lists this desktop's windows
+  only (minimised ones included); `"all"`, the default, as above.
 - Nested, `Alt+Tab` is `Alt+Super+Tab`, so that the host keeps its own.
 - Reduced motion: the panel fades without scaling, the ring jumps.
 
@@ -529,8 +544,12 @@ rim 2 px wide), both off by default. `[desktops] count` is the number of
 desktops on each screen (4), `names` their names (§12); both followed as
 the file changes.
 
-Not configurable yet: `Alt`+drag moves a window, `Super`+right-drag
-resizes it (`Alt+Super` nested); `Super`+drag draws on the screen,
+`[windows]` (6.14) holds `move-modifier` and `resize-modifier` (§6),
+`magnet` (§6), `snap-by-drag` (§9), `wobble` (§6) and `alt-tab` (§11);
+`[ink] enabled` turns drawing on the screen off; all followed as the
+file changes.
+
+Not configurable yet: `Super`+drag draws on the screen,
 `Super`+`Shift`+drag draws an arrow and `Super`+`Alt` held shows the
 laser (`Alt+Super` and `Alt+Super+Shift` drag nested; [ink.md](ink.md));
 `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
