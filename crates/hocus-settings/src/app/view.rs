@@ -40,7 +40,7 @@ pub(super) fn t<'a>(
     text(content).size(size).color(color).font(MANROPE)
 }
 
-fn icon<'a>(which: Icon, size: f32, color: Color) -> El<'a> {
+pub(super) fn icon<'a>(which: Icon, size: f32, color: Color) -> El<'a> {
     svg(style::icon(which, color, 1.8))
         .width(size)
         .height(size)
@@ -717,6 +717,9 @@ impl App {
             page = page.push(self.sound_groups());
             return container(page).id(format!("page:{}", section.slug)).into();
         }
+        if id == SectionId::Mouse {
+            return self.mouse_page(page);
+        }
         let settings = settings_of(id);
         if settings.is_empty() {
             page = page.push(card_box(
@@ -807,19 +810,25 @@ impl App {
             .into()
     }
 
-    fn row(&self, setting: &'static Setting, controls: &[super::Control]) -> El<'_> {
+    pub(super) fn row(&self, setting: &'static Setting, controls: &[super::Control]) -> El<'_> {
         let lang = self.lang;
         let slot = Slot::of(setting, self.source);
+        // A row no device plugged can take is drawn at 45 % (6.12).
+        let not_here = self.not_here(setting);
+        let ink = if not_here.is_some() { INERT } else { 1.0 };
         let mut words = column![
             text(setting.name.get(lang))
                 .size(14)
                 .font(SEMIBOLD)
-                .color(TEXT)
+                .color(fade(TEXT, ink))
         ]
         .spacing(2)
         .width(Length::Fill);
         if let Some(line) = setting.line {
-            words = words.push(t(line.get(lang), 12.5, DIM));
+            words = words.push(t(line.get(lang), 12.5, fade(DIM, ink)));
+        }
+        if let Some(not_here) = not_here {
+            words = words.push(t(not_here, 12.5, FAINT));
         }
         if let Some(warning) = self.warning(setting, slot) {
             words = words.push(t(warning, 12.5, PEACH));
@@ -862,7 +871,7 @@ impl App {
         let Reading::NotUnderstood(raw) = self.reading(slot) else {
             return None;
         };
-        let applies = setting.say(&slot.place()?.default, self.lang);
+        let applies = setting.say(&self.default_of(slot)?, self.lang);
         Some(match self.lang {
             Lang::French => {
                 format!("Dans le fichier : « {raw} », non compris ; {applies} s’applique.")
@@ -1015,6 +1024,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
+            Kind::Speed { min, max } => self.speed_control(slot, *min, *max, inert, focused),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
@@ -1237,7 +1247,7 @@ fn solid(fill: Color, ink: Color, status: button::Status) -> button::Style {
 }
 
 /// The scrollbars: thin, faint.
-fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
+pub(super) fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     let hovered = matches!(
         status,
         scrollable::Status::Hovered { .. } | scrollable::Status::Dragged { .. }
@@ -1262,6 +1272,10 @@ fn thin(_: &Theme, status: scrollable::Status) -> scrollable::Style {
             icon: DIM,
         },
     }
+}
+
+pub(super) fn ease(t: Duration, over: Duration) -> f32 {
+    ease_out(t, over)
 }
 
 pub(super) fn ease_out(t: Duration, over: Duration) -> f32 {
@@ -1355,6 +1369,20 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         })
         .collect();
     let rows: Vec<serde_json::Value> = match app.page {
+        Page::Section(SectionId::Mouse) => app
+            .mouse_visible()
+            .into_iter()
+            .map(|s| {
+                let slot = Slot::of(s, app.source);
+                serde_json::json!({
+                    "id": s.id,
+                    "value": app.said_value(slot),
+                    "warn": app.warning(s, slot),
+                    "inert": app.inert(s),
+                    "not_here": app.not_here(s),
+                })
+            })
+            .collect(),
         Page::Section(id) => settings_of(id)
             .iter()
             .map(|s| {
@@ -1418,6 +1446,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         } else {
             serde_json::json!({ "listening": app.sound.listening() })
         },
+        "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

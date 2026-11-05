@@ -300,7 +300,9 @@ Keyboard:
 - **Per screen**: each output has its own desktops and switches alone
   (first build's decision, kept). 4 desktops by default (1 to 9).
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
-  swipe on a touchpad (following the fingers), and the bar's tiles (a
+  swipe on a touchpad (following the fingers; `[touchpad] swipe-desktops
+  = false`, the Settings' "Trois doigts de côté", leaves it to
+  applications, settings.md), and the bar's tiles (a
   click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
   the pointer, the tiles on their bar's screen.
 - **Animation**: the desktops sit side by side, in their order, like one

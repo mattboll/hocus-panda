@@ -253,6 +253,9 @@ pub fn write(doc: &mut DocumentMut, slot: Slot, raw: &Raw) -> Result<(), String>
     match new {
         None => {
             table.remove(name);
+            if table.is_empty() {
+                prune(doc, tables);
+            }
         }
         Some(mut new) => match table.get_mut(name).and_then(Item::as_value_mut) {
             Some(old) => {
@@ -266,6 +269,36 @@ pub fn write(doc: &mut DocumentMut, slot: Slot, raw: &Raw) -> Result<(), String>
         },
     }
     Ok(())
+}
+
+/// The tables of `path`, innermost first, taken out while they hold
+/// nothing and say nothing (no comment of the user's over their header):
+/// undoing a change that made `[touchpad]` leaves the file as it was.
+fn prune(doc: &mut DocumentMut, path: &[&str]) {
+    for depth in (1..=path.len()).rev() {
+        let (parents, name) = path[..depth].split_at(depth - 1);
+        let mut table: &mut dyn TableLike = doc.as_table_mut();
+        for part in parents {
+            match table.get_mut(part).and_then(Item::as_table_like_mut) {
+                Some(inner) => table = inner,
+                None => return,
+            }
+        }
+        let empty = table.get(name[0]).is_some_and(|item| match item {
+            Item::Table(t) => {
+                let blank = |part: Option<&toml_edit::RawString>| {
+                    part.and_then(|p| p.as_str())
+                        .is_none_or(|p| p.trim().is_empty())
+                };
+                t.is_empty() && blank(t.decor().prefix()) && blank(t.decor().suffix())
+            }
+            _ => false,
+        });
+        if !empty {
+            return;
+        }
+        table.remove(name[0]);
+    }
 }
 
 /// `text` with `raw` at `slot`, checked to read back as asked.
@@ -364,9 +397,15 @@ mod tests {
             written(&out, lid, &Raw::Set(Value::Word("lock"))).map_err(anyhow::Error::msg)?;
         assert!(out2.contains("lid = \"lock\""), "{out2}");
         assert_eq!(read(&out2).value(ac), Some(Value::Seconds(Some(3600))));
-        // Removing what was added leaves its table, empty.
+        // Removing what was added takes its table out too: the file as it
+        // was.
         let gone = written(&out, ac, &Raw::Remove).map_err(anyhow::Error::msg)?;
         assert_eq!(read(&gone).reading(ac), &Reading::Absent);
+        assert_eq!(gone, text);
+        // A table of the user's own, with its comment, stays.
+        let own = "[power.ac] # mine\nsuspend-after = \"1h\"\n";
+        let kept = written(own, ac, &Raw::Remove).map_err(anyhow::Error::msg)?;
+        assert_eq!(kept, "[power.ac] # mine\n");
         // Removing what is not there changes nothing.
         assert_eq!(
             written(text, ac, &Raw::Remove).map_err(anyhow::Error::msg)?,

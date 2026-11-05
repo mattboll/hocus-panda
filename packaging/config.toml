@@ -1,7 +1,8 @@
 # Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
-# starts. A file that does not read is refused as a whole, and the
+# starts; [pointer] and [touchpad] also as soon as the file changes. A file
+# that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
 # [keyboard]
@@ -15,6 +16,45 @@
 # Milliseconds before a held key repeats, and repeats per second.
 # repeat_delay = 200
 # repeat_rate = 25
+
+# [pointer]
+# Every mouse, trackball and trackpoint, given these as it is plugged in
+# and again when this file changes (the Settings' "Souris et pavé
+# tactile"). A value a device cannot take is skipped for that device; a
+# value that does not read is logged, and its default applies.
+# The pointer's speed, from -1.0 (slow) to 1.0 (fast).
+# speed = 0.0
+# "adaptive": a quick move goes further; "flat": the same distance at any
+# speed.
+# acceleration = "adaptive"
+# Content follows the wheel, as under a finger.
+# natural-scroll = false
+# The right button is the main one.
+# left-handed = false
+
+# [touchpad]
+# Every touchpad, as [pointer].
+# speed = 0.0
+# One finger taps a click, two a right click, three a middle click.
+# tap-to-click = true
+# Tap twice and hold the second to drag.
+# tap-and-drag = true
+# Pressing clicks right "two-fingers" anywhere, or in the bottom right
+# "corner". By default, the touchpad's own (libinput's choice for it):
+#   right-click = "two-fingers"
+# Your palm does not move the pointer while you type.
+# disable-while-typing = true
+# Content follows your fingers.
+# natural-scroll = false
+# Scrolling with "two-fingers", or along the right "edge".
+# scroll = "two-fingers"
+# Off while an external mouse is plugged in.
+# off-with-mouse = false
+# Three fingers sideways change desktop, following them.
+# swipe-desktops = true
+# Four fingers up open the launcher, down close it (not built yet: read
+# and kept, for 6.13).
+# swipe-launcher = true
 
 # [panel]
 # The bar: on the primary screen only ("primary"), or on every screen

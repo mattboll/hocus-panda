@@ -203,8 +203,8 @@ impl SectionId {
                 Devices,
                 w("Souris et pavé tactile", "Mouse and touchpad"),
                 w(
-                    "Le pavé tactile et la souris.",
-                    "The touchpad and the mouse.",
+                    "Le pointeur, les clics et le défilement de chaque appareil branché, et les gestes du pavé tactile.",
+                    "The pointer, clicks and scrolling of each device plugged in, and the touchpad's gestures.",
                 ),
                 Icon::Mouse,
                 "6.12",
@@ -348,6 +348,7 @@ pub enum Icon {
     Close,
     Chevron,
     Check,
+    Arrow,
 }
 
 impl Icon {
@@ -404,6 +405,7 @@ impl Icon {
             Self::Close => "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5",
             Self::Chevron => "M7 10 L12 15 L17 10",
             Self::Check => "M5 12.5 L10 17 L19 7.5",
+            Self::Arrow => "M5 12 H19 M13.5 6.5 L19 12 L13.5 17.5",
         }
     }
 }
@@ -467,6 +469,9 @@ pub enum Codec {
     Word(&'static [&'static str]),
     /// Any text.
     Text,
+    /// A number from `min` to `max` tenths, written as a decimal (`0.5`,
+    /// `-1.0`; a whole number reads too): 6.12's speeds, held as tenths.
+    Tenths { min: i64, max: i64 },
 }
 
 /// The longest idle delay the compositor takes (docs/design/idle.md).
@@ -496,6 +501,15 @@ impl Codec {
                 .and_then(|s| words.iter().find(|w| **w == s))
                 .map(|w| Value::Word(w)),
             Self::Text => item.as_str().map(|s| Value::Text(s.to_owned())),
+            Self::Tenths { min, max } => {
+                let number = item
+                    .as_float()
+                    .or_else(|| item.as_integer().map(|n| n as f64))?;
+                let tenths = (number * 10.0).round();
+                ((tenths - number * 10.0).abs() < 1e-6
+                    && (min as f64..=max as f64).contains(&tenths))
+                .then_some(Value::Int(tenths as i64))
+            }
         }
     }
 
@@ -511,6 +525,9 @@ impl Codec {
             (Self::Delay, Value::Seconds(s)) => delay_word(*s).into(),
             (Self::Word(words), Value::Word(word)) if words.contains(word) => (*word).into(),
             (Self::Text, Value::Text(t)) => t.as_str().into(),
+            (Self::Tenths { min, max }, Value::Int(n)) if (min..=max).contains(n) => {
+                (*n as f64 / 10.0).into()
+            }
             _ => return None,
         })
     }
@@ -623,6 +640,13 @@ pub enum Kind {
         unit: &'static str,
     },
     Text,
+    /// A speed from `min` to `max` tenths around a middle at 0, by tenths:
+    /// a bipolar slider "Lente … Rapide" that shows no number, its value
+    /// said as a word (6.12).
+    Speed {
+        min: i64,
+        max: i64,
+    },
 }
 
 /// A group of rows on a section's page: its label, in capitals.
@@ -667,12 +691,55 @@ impl Setting {
             Value::Bool(false) => if fr { "non" } else { "off" }.to_owned(),
             Value::Int(n) => match &self.kind {
                 Kind::Slider { unit, .. } => format!("{n}{unit}"),
+                Kind::Speed { .. } => say_speed(*n, lang).to_owned(),
                 _ => n.to_string(),
             },
             Value::Seconds(None) => if fr { "Jamais" } else { "Never" }.to_owned(),
             Value::Seconds(Some(s)) => say_seconds(*s, lang),
             Value::Word(word) => (*word).to_owned(),
             Value::Text(text) => text.clone(),
+        }
+    }
+}
+
+/// A speed in tenths from -10 to 10, as a word: très lente to très rapide.
+pub fn say_speed(tenths: i64, lang: Lang) -> &'static str {
+    let fr = lang.fr();
+    match tenths {
+        n if n <= -7 => {
+            if fr {
+                "très lente"
+            } else {
+                "very slow"
+            }
+        }
+        n if n <= -3 => {
+            if fr {
+                "lente"
+            } else {
+                "slow"
+            }
+        }
+        n if n < 3 => {
+            if fr {
+                "moyenne"
+            } else {
+                "medium"
+            }
+        }
+        n if n < 7 => {
+            if fr {
+                "rapide"
+            } else {
+                "fast"
+            }
+        }
+        _ => {
+            if fr {
+                "très rapide"
+            } else {
+                "very fast"
+            }
         }
     }
 }
@@ -693,6 +760,7 @@ pub fn say_seconds(s: u64, lang: Lang) -> String {
 pub fn settings_of(section: SectionId) -> &'static [Setting] {
     match section {
         SectionId::Power => crate::power::settings(),
+        SectionId::Mouse => crate::mouse::settings(),
         _ => &[],
     }
 }
@@ -797,6 +865,31 @@ mod tests {
             idle.write(&Value::Seconds(None)).map(|v| v.to_string()),
             Some("\"off\"".to_owned())
         );
+    }
+
+    #[test]
+    fn speeds_are_tenths_written_as_decimals() {
+        let codec = Codec::Tenths { min: -10, max: 10 };
+        let read = |text: &str| {
+            text.parse::<toml_edit::Value>()
+                .ok()
+                .and_then(|v| codec.read(&v))
+        };
+        assert_eq!(read("0.5"), Some(Value::Int(5)));
+        assert_eq!(read("-1"), Some(Value::Int(-10)));
+        assert_eq!(read("0.0"), Some(Value::Int(0)));
+        assert_eq!(read("1.5"), None);
+        assert_eq!(read("0.25"), None);
+        assert_eq!(read("\"fast\""), None);
+        let written = |n| codec.write(&Value::Int(n)).map(|v| v.to_string());
+        assert_eq!(written(5).as_deref(), Some("0.5"));
+        assert_eq!(written(-10).as_deref(), Some("-1.0"));
+        assert_eq!(written(0).as_deref(), Some("0.0"));
+        assert_eq!(say_speed(-7, Lang::French), "très lente");
+        assert_eq!(say_speed(-3, Lang::French), "lente");
+        assert_eq!(say_speed(2, Lang::French), "moyenne");
+        assert_eq!(say_speed(6, Lang::English), "fast");
+        assert_eq!(say_speed(7, Lang::French), "très rapide");
     }
 
     #[test]

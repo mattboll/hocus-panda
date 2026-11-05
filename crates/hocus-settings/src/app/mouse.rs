@@ -1,0 +1,734 @@
+//! The "Souris et pavé tactile" page (6.12, variant A): the touchpad's
+//! group, the mouse's, the gestures', each named by its device on its
+//! label line, a dashed line in place of a group whose device is not
+//! plugged; then the test area, where scrolling says which device scrolled
+//! (Wayland's axis source: a wheel's notches or a finger's pixels) and a
+//! press says which button.
+//!
+//! The devices come from the compositor ([`crate::devices`], off this
+//! thread). The settings are the window's as on any page
+//! ([`crate::mouse`]); this module only lays them out and keeps the test
+//! area's state.
+
+use std::time::{Duration, Instant};
+
+use hocus_link::input::{DeviceKind, InputDevice};
+use iced::{
+    Alignment, Background, Color, Length, Theme,
+    mouse::ScrollDelta,
+    widget::{
+        Space, button, column, container, mouse_area, pin, row, scrollable, slider, stack, text,
+    },
+};
+
+use super::{
+    App, Message,
+    style::*,
+    view::{El, card_box, divided, icon, label, t},
+};
+use crate::{
+    lang::{Lang, w},
+    model::{Icon, SectionId, Setting, Value, settings_of},
+    mouse as model,
+    store::Slot,
+};
+
+/// How long the target's dot takes to light, and stays lit.
+pub const LIGHT_IN: Duration = Duration::from_millis(160);
+const LIGHT_HELD: Duration = Duration::from_millis(1400);
+
+/// The bipolar slider's width, and its knob's radius.
+const SPEED_WIDTH: f32 = 172.0;
+const KNOB: f32 = 8.0;
+
+/// What the test area last recognised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scrolled {
+    /// A wheel's notches (Wayland's `axis_source` wheel).
+    Wheel,
+    /// A finger's pixels: the touchpad.
+    Finger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Press {
+    Left,
+    Right,
+    Middle,
+    Double,
+}
+
+/// The page's own state: the devices, and the test area's.
+#[derive(Debug, Clone, Default)]
+pub struct Mouse {
+    /// `None` while the compositor has not said them (or cannot).
+    pub devices: Option<Vec<InputDevice>>,
+    hovered: bool,
+    scrolled: Option<Scrolled>,
+    press: Option<Press>,
+    /// The target's dot lit, since then; and the serial of its end.
+    lit: Option<(Instant, u64)>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Msg {
+    Devices(Vec<InputDevice>),
+    /// A wheel or a touchpad scrolled somewhere in the window.
+    Wheel(ScrollDelta),
+    /// The pointer over the test list, or off it.
+    Over(bool),
+    Press(Press),
+    Unlit(u64),
+    /// The Appearance page's cursor row (6.2's).
+    Cursor,
+}
+
+impl Mouse {
+    pub fn moving(&self, now: Instant) -> bool {
+        self.lit
+            .is_some_and(|(since, _)| now.saturating_duration_since(since) < LIGHT_IN)
+    }
+
+    fn of(&self, kind: DeviceKind) -> Vec<&InputDevice> {
+        self.devices
+            .iter()
+            .flatten()
+            .filter(|d| d.kind == kind)
+            .collect()
+    }
+
+    /// The devices are known and none of `kind` is plugged.
+    fn none(&self, kind: DeviceKind) -> bool {
+        self.devices.is_some() && self.of(kind).is_empty()
+    }
+}
+
+impl App {
+    pub(super) fn mouse_update(&mut self, msg: Msg) -> iced::Task<Message> {
+        match msg {
+            Msg::Devices(devices) => {
+                tracing::info!(devices = devices.len(), "the mice and touchpads");
+                self.mouse.devices = Some(devices);
+            }
+            Msg::Wheel(delta) => {
+                if self.mouse.hovered {
+                    self.mouse.scrolled = Some(match delta {
+                        ScrollDelta::Lines { .. } => Scrolled::Wheel,
+                        ScrollDelta::Pixels { .. } => Scrolled::Finger,
+                    });
+                }
+            }
+            Msg::Over(over) => self.mouse.hovered = over,
+            Msg::Press(press) => {
+                self.mouse.press = Some(press);
+                if press == Press::Double {
+                    self.serial += 1;
+                    let serial = self.serial;
+                    self.mouse.lit = Some((Instant::now(), serial));
+                    return iced::Task::perform(
+                        tokio::time::sleep(LIGHT_IN + LIGHT_HELD),
+                        move |()| Message::Mouse(Msg::Unlit(serial)),
+                    );
+                }
+            }
+            Msg::Unlit(serial) => {
+                if self.mouse.lit.is_some_and(|(_, s)| s == serial) {
+                    self.mouse.lit = None;
+                }
+            }
+            Msg::Cursor => self.go(super::Page::Section(SectionId::Appearance)),
+        }
+        iced::Task::none()
+    }
+
+    /// The settings of the page shown: a group whose device is not plugged
+    /// shows none.
+    pub(super) fn mouse_visible(&self) -> Vec<&'static Setting> {
+        let no_pad = self.mouse.none(DeviceKind::Touchpad);
+        let no_mouse = self.mouse.none(DeviceKind::Pointer);
+        settings_of(SectionId::Mouse)
+            .iter()
+            .filter(|s| match model::kind_of(s.id) {
+                Some(DeviceKind::Touchpad) => !no_pad,
+                Some(DeviceKind::Pointer) => !no_mouse,
+                None => true,
+            })
+            .collect()
+    }
+
+    /// The setting is on this page and no device plugged can take it.
+    pub(super) fn not_here(&self, setting: &Setting) -> Option<&'static str> {
+        if setting.section != SectionId::Mouse
+            || model::takes(setting.id, self.mouse.devices.as_deref())
+        {
+            return None;
+        }
+        Some(match model::kind_of(setting.id) {
+            Some(DeviceKind::Pointer) => self.say(w("Pas sur cette souris", "Not on this mouse")),
+            _ => self.say(w("Pas sur ce pavé tactile", "Not on this touchpad")),
+        })
+    }
+
+    /// What applies when the file says nothing, when a device says it.
+    pub(super) fn device_default(&self, slot: Slot) -> Option<Value> {
+        model::device_default(slot.setting, self.mouse.devices.as_deref())
+    }
+
+    /// The touchpad is off: `off-with-mouse` on, and a mouse plugged.
+    fn touchpad_off(&self) -> bool {
+        let off = model_setting("touchpad.off-with-mouse")
+            .and_then(|s| self.value(Slot::of(s, self.source)))
+            == Some(Value::Bool(true));
+        off && !self.mouse.of(DeviceKind::Pointer).is_empty()
+    }
+
+    fn switch_on(&self, id: &str) -> bool {
+        model_setting(id).and_then(|s| self.value(Slot::of(s, self.source)))
+            == Some(Value::Bool(true))
+    }
+
+    // --- The page -----------------------------------------------------------------
+
+    pub(super) fn mouse_page<'a>(&'a self, mut page: iced::widget::Column<'a, Message>) -> El<'a> {
+        let lang = self.lang;
+        let controls = self.controls();
+        let link = button(
+            row![
+                icon(Icon::Arrow, 14.0, FAINT),
+                t(
+                    w(
+                        "Le thème et la taille du curseur se règlent dans",
+                        "The cursor's theme and size are set in"
+                    )
+                    .get(lang),
+                    13.0,
+                    FAINT
+                ),
+                t(
+                    w("Apparence et langue ›", "Appearance and language ›").get(lang),
+                    13.0,
+                    MINT
+                )
+                .font(SEMIBOLD),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .padding(0)
+        .on_press(Message::Mouse(Msg::Cursor))
+        .style(|_, _| button::Style::default());
+        page = page.push(container(link).id("mouse:cursor-link".to_owned()));
+        let visible = self.mouse_visible();
+        let rows_of = |group: crate::model::RowGroup| -> Vec<&'static Setting> {
+            visible
+                .iter()
+                .copied()
+                .filter(|s| s.group == group)
+                .collect()
+        };
+        // Pavé tactile.
+        let pad = self.mouse.of(DeviceKind::Touchpad);
+        let pad_head: Option<El<'_>> = if self.touchpad_off() {
+            Some(device_tag(
+                Icon::Mouse,
+                self.say(w(
+                    "Coupé : une souris est branchée",
+                    "Off: a mouse is plugged in",
+                ))
+                .to_owned(),
+                AMBER,
+                AMBER,
+            ))
+        } else if pad.is_empty() {
+            self.mouse.devices.as_ref().map(|_| {
+                device_tag(
+                    Icon::Mouse,
+                    self.say(w("Aucun", "None")).to_owned(),
+                    FAINT,
+                    FAINT,
+                )
+            })
+        } else {
+            self.mouse
+                .devices
+                .as_deref()
+                .and_then(|d| model::named(DeviceKind::Touchpad, d, lang))
+                .map(|name| device_tag(Icon::Mouse, name, SOFT, ACCENT))
+        };
+        page = page.push(
+            self.mouse_group(
+                "touchpad",
+                model::TOUCHPAD.label.get(lang),
+                pad_head,
+                &rows_of(model::TOUCHPAD),
+                &controls,
+                self.mouse
+                    .none(DeviceKind::Touchpad)
+                    .then(|| (self.say(w("Aucun pavé tactile", "No touchpad")), None)),
+            ),
+        );
+        // Souris.
+        let mice = self.mouse.of(DeviceKind::Pointer);
+        let mouse_head: Option<El<'_>> = if mice.is_empty() {
+            self.mouse.devices.as_ref().map(|_| {
+                device_tag(
+                    Icon::Mouse,
+                    self.say(w("Aucune", "None")).to_owned(),
+                    FAINT,
+                    FAINT,
+                )
+            })
+        } else {
+            self.mouse
+                .devices
+                .as_deref()
+                .and_then(|d| model::named(DeviceKind::Pointer, d, lang))
+                .map(|name| device_tag(Icon::Mouse, name, SOFT, ACCENT))
+        };
+        page = page.push(self.mouse_group(
+            "mouse",
+            model::MOUSE.label.get(lang),
+            mouse_head,
+            &rows_of(model::MOUSE),
+            &controls,
+            self.mouse.none(DeviceKind::Pointer).then(|| {
+                (
+                    self.say(w("Aucune souris branchée", "No mouse plugged in")),
+                    Some(self.say(w(
+                        "Ses réglages restent dans le fichier et reviennent avec elle, ou avec toute autre souris.",
+                        "Its settings stay in the file and come back with it, or with any other mouse.",
+                    ))),
+                )
+            }),
+        ));
+        // Gestes: hidden with no touchpad.
+        if !self.mouse.none(DeviceKind::Touchpad) {
+            page = page.push(self.mouse_group(
+                "gestures",
+                model::GESTURES.label.get(lang),
+                None,
+                &rows_of(model::GESTURES),
+                &controls,
+                None,
+            ));
+        }
+        page = page.push(self.try_area(&controls));
+        container(page).id("page:mouse".to_owned()).into()
+    }
+
+    fn mouse_group<'a>(
+        &'a self,
+        id: &str,
+        name: &'static str,
+        head: Option<El<'a>>,
+        rows: &[&'static Setting],
+        controls: &[super::Control],
+        empty: Option<(&'static str, Option<&'static str>)>,
+    ) -> El<'a> {
+        let mut line = row![label(name), Space::new().width(Length::Fill)]
+            .align_y(Alignment::Center)
+            .height(28);
+        if let Some(head) = head {
+            line = line.push(container(head).id(format!("device:{id}")));
+        }
+        let body: El<'_> = match empty {
+            Some((title, more)) => {
+                let mut words = column![t(title, 14.0, TEXT).font(SEMIBOLD)].spacing(2);
+                if let Some(more) = more {
+                    words = words.push(t(more, 12.5, DIM));
+                }
+                container(
+                    row![icon(Icon::Mouse, 20.0, FAINT), words]
+                        .spacing(12)
+                        .align_y(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([9, 16])
+                .height(Length::Shrink)
+                .center_y(54)
+                .style(boxed(
+                    rgba(255, 255, 255, 0.02),
+                    12.0,
+                    Some((1.0, rgba(255, 255, 255, 0.12))),
+                ))
+                .id(format!("empty:{id}"))
+                .into()
+            }
+            None => {
+                let mut list = column![];
+                for (j, setting) in rows.iter().enumerate() {
+                    list = list.push(divided(j > 0, self.row(setting, controls)));
+                }
+                card_box(list.into())
+            }
+        };
+        column![line, body].spacing(8).into()
+    }
+
+    // --- The test area ------------------------------------------------------------
+
+    /// What the test area recognised, on its label line.
+    fn recognised(&self) -> &'static str {
+        match self.mouse.scrolled {
+            Some(Scrolled::Finger) => self.say(w("Reconnu : pavé tactile", "Recognised: touchpad")),
+            Some(Scrolled::Wheel) => self.say(w(
+                "Reconnu : molette de la souris",
+                "Recognised: the mouse's wheel",
+            )),
+            None => self.say(w(
+                "Ce que tu fais ici n’est pas écrit",
+                "Nothing done here is written",
+            )),
+        }
+    }
+
+    /// The direction in force for the device that scrolled (the
+    /// touchpad's before any).
+    fn direction(&self) -> &'static str {
+        let finger = match self.mouse.scrolled {
+            Some(Scrolled::Finger) => true,
+            Some(Scrolled::Wheel) => false,
+            None => !self.mouse.of(DeviceKind::Touchpad).is_empty() || self.mouse.devices.is_none(),
+        };
+        let natural = self.switch_on(if finger {
+            "touchpad.natural-scroll"
+        } else {
+            "pointer.natural-scroll"
+        });
+        self.say(match (finger, natural) {
+            (true, true) => w(
+                "Deux doigts · sens naturel : le contenu suit tes doigts.",
+                "Two fingers · natural: content follows your fingers.",
+            ),
+            (true, false) => w(
+                "Deux doigts · sens classique : le contenu monte quand tes doigts descendent.",
+                "Two fingers · classic: content goes up as your fingers go down.",
+            ),
+            (false, true) => w(
+                "Molette · sens naturel : le contenu suit la molette.",
+                "Wheel · natural: content follows the wheel.",
+            ),
+            (false, false) => w(
+                "Molette · sens classique : le contenu monte quand tu tournes la molette vers toi.",
+                "Wheel · classic: content goes up as you roll the wheel towards you.",
+            ),
+        })
+    }
+
+    /// The last press, as the target says it.
+    fn pressed(&self) -> String {
+        let lang = self.lang;
+        let swapped = self.switch_on("pointer.left-handed");
+        let said = match self.mouse.press {
+            None => {
+                return w(
+                    "Clique ici, avec chaque bouton.",
+                    "Click here, with each button.",
+                )
+                .get(lang)
+                .to_owned();
+            }
+            Some(Press::Double) => {
+                return w(
+                    "Double clic : le rond s’allume.",
+                    "Double click: the dot lights up.",
+                )
+                .get(lang)
+                .to_owned();
+            }
+            Some(Press::Left) => w("Clic gauche", "Left click"),
+            Some(Press::Right) => w("Clic droit", "Right click"),
+            Some(Press::Middle) => w("Clic du milieu", "Middle click"),
+        };
+        let said = said.get(lang);
+        match (swapped, lang) {
+            (false, _) => said.to_owned(),
+            (true, Lang::French) => format!("{said} : boutons inversés pour un gaucher"),
+            (true, Lang::English) => format!("{said}: buttons swapped for a left-hander"),
+        }
+    }
+
+    /// How lit the target's dot is (0 to 1).
+    fn dot_lit(&self) -> f32 {
+        match self.mouse.lit {
+            None => 0.0,
+            Some(_) if self.reduced_motion => 1.0,
+            Some((since, _)) => {
+                super::view::ease(self.now.saturating_duration_since(since), LIGHT_IN)
+            }
+        }
+    }
+
+    fn try_area(&self, controls: &[super::Control]) -> El<'_> {
+        let lang = self.lang;
+        let focused = |part| matches!(self.focus, super::Focus::Control(i) if controls.get(i) == Some(&super::Control::Try(part)));
+        let head = row![
+            label(w("ESSAYER ICI", "TRY IT HERE").get(lang)),
+            Space::new().width(Length::Fill),
+            container(t(self.recognised(), 12.0, FAINT)).id("try:recognised".to_owned()),
+        ]
+        .align_y(Alignment::Center)
+        .height(28);
+        let mut lines = column![];
+        for n in 1..=16 {
+            lines = lines.push(
+                container(
+                    row![
+                        text(format!("{n:02}")).size(11).font(MONO).color(FAINT),
+                        t(
+                            match lang {
+                                Lang::French => format!("Ligne {n} de la liste"),
+                                Lang::English => format!("Line {n} of the list"),
+                            },
+                            13.0,
+                            SOFT,
+                        ),
+                    ]
+                    .spacing(10)
+                    .align_y(Alignment::Center),
+                )
+                .height(30)
+                .center_y(30)
+                .padding([0, 12]),
+            );
+        }
+        let list_ring = focused(super::TryPart::List);
+        let list = container(
+            scrollable(lines)
+                .id(TRY_LIST)
+                .height(144)
+                .width(Length::Fill)
+                .style(super::view::thin),
+        )
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(rgba(0, 0, 0, 0.20))),
+            border: if list_ring {
+                ring(9.0)
+            } else {
+                border(9.0, 0.0, Color::TRANSPARENT)
+            },
+            ..container::Style::default()
+        });
+        let list = mouse_area(list)
+            .on_enter(Message::Mouse(Msg::Over(true)))
+            .on_exit(Message::Mouse(Msg::Over(false)));
+        let scroll = column![
+            t(w("Fais défiler", "Scroll").get(lang), 12.5, DIM).font(SEMIBOLD),
+            container(list).id("try:list".to_owned()),
+            container(t(self.direction(), 12.0, FAINT)).id("try:direction".to_owned()),
+        ]
+        .spacing(8)
+        .width(Length::FillPortion(1));
+        let lit = self.dot_lit();
+        let target_ring = focused(super::TryPart::Target);
+        let dot =
+            container(Space::new().width(42).height(42)).style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(mix(
+                    rgba(255, 255, 255, 0.10),
+                    ACCENT,
+                    lit,
+                ))),
+                border: border(21.0 + 8.0 * lit, 8.0 * lit, rgba(108, 194, 135, 0.22 * lit)),
+                ..container::Style::default()
+            });
+        let target = container(dot)
+            .width(Length::Fill)
+            .height(144)
+            .center(Length::Fill)
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(rgba(255, 255, 255, 0.02))),
+                // iced draws no dashed rim: a faint solid one.
+                border: if target_ring {
+                    ring(9.0)
+                } else {
+                    border(9.0, 1.0, rgba(255, 255, 255, 0.14))
+                },
+                ..container::Style::default()
+            });
+        let target = mouse_area(target)
+            .on_press(Message::Mouse(Msg::Press(Press::Left)))
+            .on_double_click(Message::Mouse(Msg::Press(Press::Double)))
+            .on_right_press(Message::Mouse(Msg::Press(Press::Right)))
+            .on_middle_press(Message::Mouse(Msg::Press(Press::Middle)));
+        let click = column![
+            t(w("Clique", "Click").get(lang), 12.5, DIM).font(SEMIBOLD),
+            container(target).id("try:target".to_owned()),
+            container(t(self.pressed(), 12.0, FAINT)).id("try:pressed".to_owned()),
+        ]
+        .spacing(8)
+        .width(Length::FillPortion(1));
+        let card = card_box(
+            container(row![scroll, click].spacing(18))
+                .padding([14, 16])
+                .into(),
+        );
+        column![
+            head,
+            card,
+            t(
+                w(
+                    "La vitesse et l’accélération s’appliquent au pointeur lui-même : bouge-le pour les sentir.",
+                    "Speed and acceleration apply to the pointer itself: move it to feel them.",
+                )
+                .get(lang),
+                12.0,
+                FAINT,
+            ),
+        ]
+        .spacing(8)
+        .into()
+    }
+
+    /// The bipolar speed slider: "Lente", the track with its middle tick,
+    /// the fill from the middle to the knob, "Rapide"; no number.
+    pub(super) fn speed_control(
+        &self,
+        slot: Slot,
+        min: i64,
+        max: i64,
+        inert: bool,
+        focused: bool,
+    ) -> El<'_> {
+        let alpha = if inert { INERT } else { 1.0 };
+        let now = match self.value(slot) {
+            Some(Value::Int(n)) => n,
+            _ => 0,
+        };
+        let narrow = |n: i64| i32::try_from(n).unwrap_or_default();
+        let share = (now - min) as f32 / (max - min).max(1) as f32;
+        let knob = KNOB + (SPEED_WIDTH - 2.0 * KNOB) * share;
+        let middle = SPEED_WIDTH / 2.0;
+        let (from, to) = if knob < middle {
+            (knob, middle)
+        } else {
+            (middle, knob)
+        };
+        let track = container(Space::new().width(SPEED_WIDTH).height(6)).style(boxed(
+            fade(rgba(255, 255, 255, 0.12), alpha),
+            3.0,
+            None,
+        ));
+        let fill = container(Space::new().width((to - from).max(0.0)).height(6)).style(boxed(
+            fade(ACCENT, alpha),
+            3.0,
+            None,
+        ));
+        let tick = container(Space::new().width(2).height(14)).style(boxed(
+            fade(rgba(255, 255, 255, 0.35), alpha),
+            1.0,
+            None,
+        ));
+        let bar = slider(narrow(min)..=narrow(max), narrow(now), move |n| {
+            if inert {
+                Message::Nothing
+            } else {
+                Message::Slide(slot, i64::from(n))
+            }
+        })
+        .step(1)
+        .width(SPEED_WIDTH)
+        .height(16)
+        .style(move |_, _| slider::Style {
+            rail: slider::Rail {
+                backgrounds: (
+                    Background::Color(Color::TRANSPARENT),
+                    Background::Color(Color::TRANSPARENT),
+                ),
+                width: 6.0,
+                border: border(3.0, 0.0, Color::TRANSPARENT),
+            },
+            handle: slider::Handle {
+                shape: slider::HandleShape::Circle { radius: KNOB },
+                background: Background::Color(fade(Color::WHITE, alpha)),
+                border_width: if focused { 3.0 } else { 0.0 },
+                border_color: ACCENT,
+            },
+        });
+        let drawn = stack![
+            pin(track).y(5),
+            pin(fill).x(from).y(5),
+            pin(tick).x(middle - 1.0).y(1),
+            bar,
+        ]
+        .width(SPEED_WIDTH)
+        .height(16);
+        let lang = self.lang;
+        row![
+            t(w("Lente", "Slow").get(lang), 11.5, fade(FAINT, alpha)),
+            drawn,
+            t(w("Rapide", "Fast").get(lang), 11.5, fade(FAINT, alpha)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    /// What the page shows, for the log.
+    pub(super) fn mouse_shown(&self) -> serde_json::Value {
+        let lang = self.lang;
+        let named = |kind| {
+            self.mouse
+                .devices
+                .as_deref()
+                .and_then(|d| model::named(kind, d, lang))
+        };
+        let group = |id: &str, group: crate::model::RowGroup, kind: Option<DeviceKind>| {
+            let empty = kind.is_some_and(|k| self.mouse.none(k));
+            let rows: Vec<&str> = self
+                .mouse_visible()
+                .into_iter()
+                .filter(|s| s.group == group)
+                .map(|s| s.id)
+                .collect();
+            serde_json::json!({ "id": id, "empty": empty, "rows": rows })
+        };
+        let mut groups = vec![
+            group("touchpad", model::TOUCHPAD, Some(DeviceKind::Touchpad)),
+            group("mouse", model::MOUSE, Some(DeviceKind::Pointer)),
+        ];
+        if !self.mouse.none(DeviceKind::Touchpad) {
+            groups.push(group("gestures", model::GESTURES, None));
+        }
+        serde_json::json!({
+            "touchpad": named(DeviceKind::Touchpad),
+            "mouse": named(DeviceKind::Pointer),
+            "touchpad_off": self.touchpad_off(),
+            "groups": groups,
+            "recognised": self.recognised(),
+            "direction": self.direction(),
+            "pressed": self.pressed(),
+            "lit": self.mouse.lit.is_some(),
+        })
+    }
+}
+
+/// The test list's scrollable.
+pub const TRY_LIST: &str = "try-list";
+
+/// The amber of a touchpad turned off.
+const AMBER: Color = rgb(0xF5B44A);
+
+fn model_setting(id: &str) -> Option<&'static Setting> {
+    crate::model::setting(id)
+}
+
+/// A device on its group's label line: its icon, its name, a dot.
+fn device_tag<'a>(which: Icon, name: String, ink: Color, dot: Color) -> El<'a> {
+    row![
+        icon(which, 15.0, ink),
+        t(name, 12.5, ink),
+        container(Space::new().width(7).height(7)).style(boxed(dot, 3.5, None)),
+    ]
+    .spacing(7)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+fn mix(from: Color, to: Color, by: f32) -> Color {
+    Color {
+        r: from.r + (to.r - from.r) * by,
+        g: from.g + (to.g - from.g) * by,
+        b: from.b + (to.b - from.b) * by,
+        a: from.a + (to.a - from.a) * by,
+    }
+}
