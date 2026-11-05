@@ -433,6 +433,10 @@ impl App {
                     return Task::none();
                 }
                 let asked = self.account.asked.remove(0);
+                // The name as typed gives way to AccountsService's.
+                if matches!(asked, Asked::Name(..)) {
+                    self.account.draft = None;
+                }
                 if let Err(why) = result {
                     tracing::info!(why, ?ask, "AccountsService refused");
                     let text = match self.lang {
@@ -552,6 +556,10 @@ impl App {
 
     /// The name typed, saved if it changed and is not empty.
     fn account_save_name(&mut self) -> Task<Message> {
+        // One at a time: the one asked shows until it is answered.
+        if self.account.asked.iter().any(|a| matches!(a, Asked::Name(..))) {
+            return Task::none();
+        }
         let Some(draft) = self.account.draft.take() else {
             return Task::none();
         };

@@ -876,11 +876,88 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   the shell's own surfaces; the sample agents are drawn as the mockup's
   heads, not the pandas' pictures.
 
+## Compte (6.11)
+
+Issue #411, variant A of the mockup (`s611`), as the issue's last
+comment, approved 2026-11-05, specifies it, the pandas made larger than
+the mockup's at the maintainer's word. Section `account` (`hocus settings
+account`), SYSTÈME's second row. Nothing is written in `config.toml`: the
+name and the avatar are AccountsService's, the password the system's
+(`passwd`, PAM). The header keeps "Enregistré".
+
+| Group | Row | Control | Where |
+|---|---|---|---|
+| PROFIL | the avatar's row: the avatar (88 px circle: the picture, or the initial on the accent's gradient), the name (18/700), "Sur l'écran de verrouillage, à l'ouverture de session et dans la barre." | "Changer l'avatar…" (image icon), opening the popover | `IconFile`; `SetIconFile` |
+| | Nom affiché: "Ton nom complet, tel que le bureau te salue." | a 240 px field with a pencil; `Enter` or the keyboard leaving it saves (if changed and not empty), `Esc` puts it back | `RealName`; `SetRealName` |
+| | Identifiant: "Le nom de connexion ; il ne se change pas ici." | Martian Mono 12.5, read only | `UserName` |
+| | Type de compte: "Peut installer des logiciels et changer les réglages du système." / "Les réglages du système demandent le mot de passe d'un administrateur." | "Administrateur" / "Standard", read only | `AccountType` |
+| SÉCURITÉ | Mot de passe: "Il ouvre la session, la déverrouille et confirme les actions d'administrateur." (without `passwd`: "Le mot de passe se change avec les outils du système.", the button inert) | "Changer…" (key icon), opening the sheet | `passwd` |
+| | Verrouillage automatique: "Quand la session se verrouille d'elle-même." | link "Énergie ›", opening 6.10 with "Verrouiller après" lit | |
+| PLUS TARD | Comptes en ligne (globe, amber chip) | inert | |
+
+- **The popover** (400 px, under its button, its right on the button's):
+  "LES PANDAS", the eight pandas at 76 px in a 4 × 2 grid, the current one
+  ringed 2 px with the accent; a divider; "Choisir une image…" and
+  "Retirer"; "Une image est recadrée en carré au centre ; « Retirer »
+  remet l'initiale." A panda applies at once and closes it; toast
+  "Avatar changé." with "Annuler" (`Ctrl+Z`), which sets the previous
+  picture's bytes back. "Choisir une image…" opens the portal's file
+  chooser (PNG, JPEG, WebP); the picture is cut to its centred square,
+  made 512 px at most, written as PNG in `$XDG_RUNTIME_DIR` and set
+  (AccountsService copies it; the file is removed). `←` `→` `↑` `↓` move
+  in the grid, `Enter` chooses, `Esc` or a click elsewhere closes.
+- **The pandas**: eight 512 px PNGs, the mockup's panda on eight
+  backgrounds (`crates/hocus-settings/data/avatars`, drawn by
+  `scripts/avatars/generate.py`), carried in the program and installed in
+  `share/hocuspanda/avatars/` by `packaging/install.sh`; an installed
+  panda is set by its path, else its bytes are written as a picture is.
+  The current one is known by its bytes (AccountsService keeps a copy).
+- **The sheet** (420 px): "Changer le mot de passe", its line, "Mot de
+  passe actuel", "Nouveau mot de passe", "Encore une fois" (dots, an eye),
+  under the last "Les deux sont identiques." or "Les deux ne sont pas
+  identiques." as it is typed; the hint "Le système peut refuser un mot de
+  passe trop court ou trop simple : sa raison s'affiche ici."; "Annuler"
+  and "Changer" (green once the current is filled and both new ones
+  match; "Changement…" while it runs, the fields inert). The current one
+  refused: "Ce n'est pas le mot de passe actuel. Vérifie-le et réessaie."
+  under it, its border `#F2945B`, the keyboard back in it, all of it
+  chosen; the new one refused: PAM's reason under it ("BAD PASSWORD:"
+  left out); anything else: "Le mot de passe n'a pas changé : …"; no
+  answer for 10 s: "Le système ne répond pas." Success closes it; toast
+  "Mot de passe changé." without "Annuler". Nothing of it joins `Ctrl+Z`.
+- **`passwd`** (`passwd.rs`) runs on a thread of its own, on a
+  pseudo-terminal of its own (its own session, the terminal its
+  controlling one, echo off), its prompts answered in turn: a prompt is
+  what it writes without ending its line, so the session's language does
+  not matter; what it says between the new password and the next prompt
+  is PAM's refusal; ending in an error before the new one is asked is the
+  current one refused. The three values are `Secret`s (`secret.rs`: one
+  buffer that never grows, zeroed when set again, cleared or dropped, its
+  `Debug` saying nothing, not even its length), copied once for the
+  thread, never logged; the window's log says only whether each field is
+  filled.
+- **AccountsService** (`accounts.rs`) is followed on a thread of its own,
+  started the first time the page shows: `FindUserById` of the process's
+  uid, its properties read again on its `Changed` (or
+  `PropertiesChanged`), its picture read and made round there. Only a
+  change reaches the window; at rest nothing draws. Without it, the rows
+  are empty and inert. A refusal (polkit) toasts "Le système a refusé."
+- **The search** finds "Avatar" (photo, image, panda, profil), "Nom
+  affiché" (nom, prénom), "Identifiant" (login, utilisateur), "Mot de
+  passe" (changer, sécurité, passwd), "Type de compte" (administrateur,
+  sudo), and lights their rows.
+- **Choices made here (to confirm on the machine)**: the avatar is 88 px
+  and the pandas 76 px (the mockup's 72 and 52), for the pandas to show;
+  the sheet's fields have an eye but no paste button (`Ctrl+V` pastes);
+  "Changement…" has no spinner; `Tab` in the sheet goes from field to
+  field; a picture removed toasts "Avatar retiré."; the home's greeting,
+  the bar's popover and the lock still draw what they drew (the lock
+  already reads AccountsService's picture).
+
 ## Date et heure (6.11)
 
 Issue #411, variant A of the mockup (`s611`), as the issue's last
-comment, approved 2026-11-05, specifies it; the Compte page is the
-ticket's second part. Section `date-and-time` (`hocus settings
+comment, approved 2026-11-05, specifies it. Section `date-and-time` (`hocus settings
 date-and-time`), SYSTÈME's last row. Nothing is written in
 `config.toml`: the time, the zone and the automatic time are systemd's
 timedated's; their format is 6.2's `[locale] time` and `[locale] date`,
@@ -1104,7 +1181,8 @@ file.
 
 - The battery's screen delay in `[power.battery] screen-off` (above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
-  No picture yet (AccountsService, 6.11).
+  No picture yet on the home (the Compte page sets it in AccountsService,
+  6.11).
 - The home's cards say "À venir" for Écrans, Réseau and Bluetooth until
   their tickets give their state (Son's says its output, 6.5); Énergie's says the battery (or "Sur
   secteur") and the suspend delay; Apparence's "Sombre · français".
@@ -1137,7 +1215,7 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.7, 6.10, 6.11's Compte, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.7, 6.10, 6.13 to 6.17, Day.1).
 - Réseau's second part (#406): the hidden network, the 802.1X and WEP
   sheets, the cable, the VPNs, the popover's links, the bar's airplane
   mode.
@@ -1321,6 +1399,25 @@ with an XKB registry of the test's own:
 - `the_keyboards_layouts_and_repeat_follow_the_file`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
+`crates/hocus-compositor/tests/settings_account.rs` (6.11, Compte), the
+same bed with AccountsService faked on a D-Bus daemon of the test's own
+(`levels/accounts.rs`), the portal's file chooser on it, and a fake
+`passwd` first on the `PATH` (never the system's: without it, the `PATH`
+holds no system folder):
+
+- `the_account_page_shows_the_name_login_type_and_avatar`
+- `choosing_a_panda_sets_the_icon_file_and_annuler_takes_it_back`
+- `a_picture_is_cropped_square_before_it_is_set`
+- `the_display_name_is_saved_on_enter`
+- `a_wrong_current_password_is_said_on_its_field`
+- `a_new_password_refused_by_the_system_shows_its_reason`
+- `the_password_is_changed_and_never_reaches_the_log`
+- `a_refusal_by_polkit_leaves_the_values_unchanged`
+- `without_passwd_the_button_is_inert`
+- `the_lock_link_and_the_search_light_their_rows`
+- `at_rest_the_page_commits_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
 `crates/hocus-compositor/tests/settings_time.rs` (6.11, Date et heure),
 the same bed with timedated faked on a D-Bus daemon of the test's own
 (`levels/timedate.rs`):
@@ -1342,6 +1439,8 @@ codecs, the search's order, accents and keys, the store's edits (only the
 line, its comment kept, tables made, a value written back as it was), the
 power source from the kernel's supplies, the recent changes kept, the
 second launch's line, the ids' names; the zones' offsets, next changes
-and the picker's search, the dates and times typed; `hocus-config`'s edit
+and the picker's search, the dates and times typed; a picture cut
+square, the pandas known by their bytes, `passwd`'s reasons, the
+`Secret` never said; `hocus-config`'s edit
 through a link with its mode; the user popover's rows; the launcher
 reading the package's entry as "Réglages".
