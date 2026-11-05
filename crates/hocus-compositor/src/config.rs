@@ -30,6 +30,10 @@ pub struct Config {
     #[serde(deserialize_with = "locale")]
     pub locale: hocus_link::locale::Locale,
     pub desktops: Desktops,
+    /// How windows move, snap and switch (6.14).
+    pub windows: Windows,
+    /// Drawing on the screen (6.14, docs/design/ink.md).
+    pub ink: Ink,
     pub panel: Panel,
     pub recording: Recording,
     pub idle: Idle,
@@ -906,6 +910,73 @@ fn desktop_count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D:
     }
 }
 
+/// How windows move, snap and switch, `[windows]` (6.14;
+/// docs/design/windows.md §6, §8, §9, §11).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Windows {
+    /// The key held to move a window by a drag anywhere in it (`Alt`).
+    pub move_modifier: DragKey,
+    /// The key held to resize one by a right-button drag (`Super`).
+    pub resize_modifier: DragKey,
+    /// A moved window's edges stick to others' and the work area's.
+    pub magnet: bool,
+    /// Dragged against an edge of the work area, it snaps there.
+    pub snap_by_drag: bool,
+    /// A moved window wobbles (never with reduced motion).
+    pub wobble: bool,
+    /// Which windows Alt+Tab lists.
+    pub alt_tab: AltTab,
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        Self {
+            move_modifier: DragKey::Alt,
+            resize_modifier: DragKey::Super,
+            magnet: true,
+            snap_by_drag: true,
+            wobble: true,
+            alt_tab: AltTab::All,
+        }
+    }
+}
+
+/// The key held for a drag anywhere in a window: nested, `Super` is
+/// `Alt+Super`, as every shortcut there (windows.md §13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DragKey {
+    Alt,
+    Super,
+    /// None: title bars, the grip and the frame only.
+    None,
+}
+
+/// Which windows Alt+Tab lists (windows.md §11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AltTab {
+    /// This desktop's first, then the others' after a line, dimmed.
+    All,
+    /// This desktop's only.
+    Desktop,
+}
+
+/// Drawing on the screen, `[ink]` (docs/design/ink.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Ink {
+    /// Off, `Super`+drag and the laser do nothing, and pass to the window.
+    pub enabled: bool,
+}
+
+impl Default for Ink {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// One screen's settings, `[outputs.eDP-1]`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -1468,6 +1539,35 @@ mod tests {
         assert_eq!(six.desktops.count, 6);
         for bad in ["count = 0", "count = 10", "count = -1", "number = 3"] {
             let text = format!("[desktops]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_windows_and_the_ink_read_as_the_settings_write_them() -> anyhow::Result<()> {
+        let none = Config::default();
+        assert_eq!(none.windows.move_modifier, DragKey::Alt);
+        assert_eq!(none.windows.resize_modifier, DragKey::Super);
+        assert!(none.windows.magnet && none.windows.snap_by_drag && none.windows.wobble);
+        assert_eq!(none.windows.alt_tab, AltTab::All);
+        assert!(none.ink.enabled);
+        let set: Config = toml::from_str(
+            "[windows]\nmove-modifier = \"super\"\nresize-modifier = \"none\"\n\
+             magnet = false\nsnap-by-drag = false\nwobble = false\nalt-tab = \"desktop\"\n\
+             [ink]\nenabled = false\n",
+        )?;
+        assert_eq!(set.windows.move_modifier, DragKey::Super);
+        assert_eq!(set.windows.resize_modifier, DragKey::None);
+        assert!(!set.windows.magnet && !set.windows.snap_by_drag && !set.windows.wobble);
+        assert_eq!(set.windows.alt_tab, AltTab::Desktop);
+        assert!(!set.ink.enabled);
+        for bad in [
+            "move-modifier = \"ctrl\"",
+            "alt-tab = \"some\"",
+            "focus = \"hover\"",
+        ] {
+            let text = format!("[windows]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }
         Ok(())

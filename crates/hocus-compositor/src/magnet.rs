@@ -113,6 +113,16 @@ impl State {
     /// How far window `id`, which the pointer at `pointer` would put at
     /// `rect`, moves to stick: nothing where the pointer would snap it
     /// (§9), which keeps priority.
+    /// The zone a window dragged with the pointer at `pointer` snaps to
+    /// in work area `area`: none with `[windows] snap-by-drag` off (6.14).
+    pub(crate) fn snap_zone(&self, area: Rect, pointer: Point<f64, Logical>) -> Option<Zone> {
+        self.config
+            .windows
+            .snap_by_drag
+            .then(|| Zone::at(area, pointer.x, pointer.y))
+            .flatten()
+    }
+
     pub(crate) fn move_pull(&self, id: WindowId, rect: Rect, pointer: Point<f64, Logical>) -> Pull {
         let Some(output) = self.space.output_under(pointer).next().cloned() else {
             return Pull::default();
@@ -120,7 +130,7 @@ impl State {
         let Some(area) = self.work_area(&output) else {
             return Pull::default();
         };
-        if Zone::at(area, pointer.x, pointer.y).is_some() {
+        if !self.config.windows.magnet || self.snap_zone(area, pointer).is_some() {
             return Pull::default();
         }
         pull(rect, ALL, &self.magnet_neighbours(id, &output, &[]), area)
@@ -135,6 +145,9 @@ impl State {
         edges: Edges,
         follow: &[WindowId],
     ) -> Pull {
+        if !self.config.windows.magnet {
+            return Pull::default();
+        }
         let Some(output) = self.output_of(id) else {
             return Pull::default();
         };
