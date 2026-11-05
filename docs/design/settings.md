@@ -121,6 +121,114 @@ The mockup's page, its rows and choices. The keys:
   is the compositor's, 5 min on AC and 3 min on battery (7.2; the menu
   has a "3 min"); the others are the mockup's.
 
+## Son (6.5)
+
+Built 2026-11-05 (issue #405), from the approved mockup
+([variant A](https://claude.ai/artifact/LBfcAFNRETnVMi6Kj4HThi)) and the
+spec in the issue's last comment. The maintainer decided on 2026-11-05:
+
+- variant A: two groups of ticked rows, the output's then the input's,
+  then the applications;
+- no `[sound]` table in `config.toml`: PipeWire remembers everything;
+- the microphone's meter listens while the input group is on screen, and
+  the bar's in-use sign shows "Réglages" meanwhile;
+- the alert sound and volume above 100 % stay out until their ticket (no
+  "PLUS TARD" group).
+
+**The page**, under its title and its line ("Les sorties, les entrées et
+leurs profils ; le volume de chaque application."):
+
+- **SORTIE**: the outputs' card, one row each in PipeWire's order (the
+  sink's node id), the row one button: a 32 px tile (blue for the one in
+  use) with the popover's icon (speaker, headphones, screen), the name
+  (`node.description`, as the popover says it), a line of what it is
+  ("Intégrés au portable" for a built-in or PCI device, "Bluetooth" with
+  " · mode appel" in call mode, "Écran externe", "USB", else its device's
+  description), its own volume ("45 %", "muet"), and the green check on
+  the one in use. A click makes it the default (`wpctl set-default`),
+  which keeps its own volume. Then the chosen output's card: its caption,
+  "Volume" (mute button, 220 px slider of the sound's gauge, the value;
+  0–100 %, applied as it moves, moving it unmutes), "Profil" (a menu when
+  its device has more than one profile, its "Off" never offered; else the
+  profile as text, "Le seul que propose cet appareil."; no row for a sink
+  of no device), "Balance" ("G" … "D", −100 to +100 by tens, its fill
+  from the centre; inert for a mono output) with "Tester" on its row.
+- **ENTRÉE**: the same for the sources, "coupé" for a muted one; a
+  Bluetooth headset in high quality whose microphone is not there yet is
+  listed as "Micro du casque" ("… · le passe en mode appel (HFP)"): it
+  switches the headset to its call mode's profile, then makes its source
+  the default once it comes; choosing another input then takes the
+  headset back to the profile it was in, if the page switched it. The
+  input in use says " · Visioconférence l'utilise" (in `#F5A35B`) while an
+  application records it. Its card: "Volume", and "Niveau": 24 segments
+  of 7 px, 2 px apart, blue to `#8FB3FF`, the top tenth `#F5B44A`, empty
+  while muted. The note under it.
+- **APPLICATIONS**, "2 en cours" on the label's right: one row per
+  application playing or recording now (grouped as 3.4b; a new one joins
+  at the bottom, one goes with its last stream; none of the meter's own),
+  its letter tile in the bar's colours, "Joue sur …" (+ " · enregistre
+  …"), a menu ("Suit la sortie", with the output in use's name, then each
+  output; `pw-metadata … target.object SERIAL`, `-d` to follow the default
+  again), its mute button and a 140 px slider. None: "Aucune application
+  ne joue de son." and its line. The note under it.
+
+**What lives where.** Nothing of the page is in `config.toml`; the header
+keeps "Enregistré". Choices (an output, an input, a profile, an
+application's output) toast with "Annuler" and join `Ctrl+Z` with the
+file's changes ("Sortie : Casque", "Musique joue sur Casque", "Annulé : la
+sortie revient à Haut-parleurs.", the row lit); volumes, mutes and the
+balance are heard at once, with no toast and no undo. Changes from
+elsewhere (the popover, the keys) show as PipeWire says them. An output of
+a device that goes while in use toasts "… déconnecté : le son passe par
+…"; one that comes toasts that the sound goes back to it (with "Garder
+…") or stays where it is (with "Passer à …").
+
+**How it reads and writes.** The crate `hocus-sound` (no smithay, no
+iced), shared with the bar: its follower runs `pw-dump --monitor` on a
+thread of the Settings' own and sends the window what the page lists
+when it changes; its setter's thread runs `wpctl` (`set-default`,
+`set-volume`, `set-mute`, `set-profile`), `pw-cli set-param ID Props '{
+channelVolumes: [ … ] }'` (the balance: the louder side at the volume;
+and a volume on an output whose balance is not centred, which `wpctl`
+would centre) and `pw-metadata` (an application's output), what was asked
+meanwhile taken together. `pw-dump` says a metadata key taken away as an
+update listing nothing: the metadata is then read again whole with
+`pw-metadata -n default`.
+
+**The meter** is a `pw-record` of the input in use (`target.object` its
+serial, 16 kHz, one channel), its node `hocus-settings-meter` and its
+application "Réglages" (given in `PIPEWIRE_PROPS`: PipeWire 1.0's
+`pw-record` ignores `-P`), started and read on a thread of its own (raw
+where `pw-record` has `--raw`, else past its container's header): the peak of each 33 ms on a
+scale of decibels from −60, held and falling over 300 ms, sent only when
+it changes (silence sends nothing). It runs while the page shows the
+input group within the page's viewport and the microphone is not muted;
+it stops when the page changes, the microphone is muted or the window
+closes. Its capture stream, linked from the source, is what the bar's
+in-use sign lists (5.12).
+
+**"Tester"** plays, with `pw-play --target`, the freedesktop sound
+theme's `audio-channel-front-left` then `-right` when installed, else a
+0.4 s tone of 660 Hz on one channel then the other; each side 0.9 s, its
+dot lit and its words ("À gauche…", "À droite…"); once in the middle on a
+mono output.
+
+**The search** finds the page's settings (`model::Outside`, settings that
+live outside the file: their page draws their row `row:{id}`): "Sortie",
+"Volume de la sortie", "Profil", "Balance", "Tester les haut-parleurs",
+"Entrée", "Volume du micro", "Niveau du micro", "Volume des
+applications", with the spec's nearby words; "casque" finds Sortie and
+Entrée by « casque ».
+
+**The keyboard**: the outputs' group is one `Tab` stop (`↑`/`↓` move the
+ring, `Space`/`Enter` choose), then the mute button, the slider (`←`/`→`
+5 %, `Page Up`/`Page Down` 25 %, `Home`/`End`), the profile's menu, the
+balance (`←`/`→` 10), "Tester"; the input the same way; then each
+application's menu, mute and slider.
+
+**The home's card** says the output in use and its volume
+("Haut-parleurs · 62 %").
+
 ## Écrans (6.9)
 
 Built 2026-11-05 (issue #409), variant A of the
@@ -577,8 +685,8 @@ file.
 - The battery's screen delay in `[power.battery] screen-off` (above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet (AccountsService, 6.11).
-- The home's cards say "À venir" for Écrans, Son, Réseau and Bluetooth
-  until their tickets give their state; Énergie's says the battery (or "Sur
+- The home's cards say "À venir" for Écrans, Réseau and Bluetooth until
+  their tickets give their state (Son's says its output, 6.5); Énergie's says the battery (or "Sur
   secteur") and the suspend delay; Apparence's "Sombre · français".
 - The keyboard's ring is drawn on the piece's own edge, not 2 px outside
   it; the labels' 0.1 em letter spacing is not drawn (iced has none).
@@ -589,6 +697,17 @@ file.
   laptop's screen); it moves by the compositor's grip or by its header.
 - Under a compositor without xdg-decoration, winit draws its own frame
   around the window: the Settings are made for Hocuspanda's.
+- Son (6.5): the meter's stream is not `node.passive` as the spec draft
+  said: a passive stream never wakes the microphone, so the meter would
+  stay empty unless another application recorded. It records only while
+  the input group shows, which is what the sign says.
+- Son: the applications' tiles are their letters on the bar's colours;
+  their icons are not read yet. A Bluetooth headset's battery is not on
+  its line yet (BlueZ's `Battery1` is read by the bar, not the Settings),
+  nor an external screen's name and size from the compositor's outputs:
+  the line says "Bluetooth", "Écran externe".
+- Son: a menu at the page's bottom opens over its button when the window
+  ends under it.
 
 ## Not built here
 
@@ -597,9 +716,14 @@ file.
   (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` (6.2), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The other sixteen pages (6.2 to 6.17, Day.1).
+- The other twelve pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
-  ticket; `hocus settings SECTION` is there for them).
+  ticket; `hocus settings SECTION` is there for them), but the sound's
+  (6.5).
+- Son: the alert sound and volume above 100 % (their ticket); the device
+  events' toasts are not tested headless (null sinks have no device), nor
+  the headset's call mode (null nodes have no profiles): the graph's and
+  the page's unit tests cover them.
 
 ## Tests
 
@@ -631,6 +755,31 @@ real shell and Settings, the portal on a D-Bus daemon of the test's own:
 - `the_settings_window_draws_in_the_theme_and_follows_the_file`
 - `the_portal_answers_color_scheme_and_signals_its_change`
 - `once_the_switch_is_drawn_nothing_commits_at_rest`
+
+`crates/hocus-compositor/tests/settings_sound.rs` (6.5): the same window
+against a PipeWire of the test's own (null sinks and a null source;
+WirePlumber's part a `pw-metadata` of the test's; the meter's stream
+linked by the test as a session manager would; never WirePlumber nor the
+session's PipeWire), the shell too where the bar is part of it:
+
+- `the_sound_page_lists_the_sinks_and_sources_with_the_default_checked`
+- `choosing_an_output_sets_the_default_and_annuler_takes_it_back`
+- `a_volume_and_a_mute_moved_on_the_page_reach_pipewire`
+- `an_application_playing_joins_the_list_and_its_device_can_change`
+- `no_application_says_aucune_application_ne_joue_de_son`
+- `the_meter_listens_only_while_the_input_shows`
+- `the_popovers_link_opens_settings_on_son`
+- `at_rest_the_page_commits_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+Unit tests of 6.5: the graph's devices and profiles (never "Off"), a
+stream's target and the chosen defaults, a metadata key taken away, the
+channels' volumes, the setter's commands (balance, profile, target, a
+volume keeping the balance), the meter's scale, the tone's side
+(`hocus-sound`); the balance read and written, a headset's microphone
+offered by its call mode, the page's settings found by their words
+(`hocus-settings`); the sound popover's height and its link's place
+(`hocus-shell`).
 
 `crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
 of two screens (2560 × 1600 at 1, 3440 × 1440):

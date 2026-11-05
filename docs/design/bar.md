@@ -555,8 +555,16 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   output's name; the master volume (a mute button, a slider, the value or
   "muet" / "muted"); "SORTIE" / "OUTPUT" and one row per output, its icon
   (speaker, headphones, screen), its name, a check on the default one. A
-  row makes its output the default, which keeps its own volume. No
-  "Sound settings…" link until the Settings sprint.
+  row makes its output the default, which keeps its own volume. At its
+  bottom (6.5, issue #405), under the applications and the same divider,
+  "Réglages du son…" / "Sound settings…": a 36 px row, the sliders' glyph
+  in a 24 px tile (`rgba(255,255,255,0.07)`), the words (13.5, 600), a
+  chevron in `text.faint`, lit `rgba(255,255,255,0.06)` under the
+  pointer; the last `Tab` stop. A click, `Enter` or `Space` starts
+  `hocus-settings sound` through the compositor (with an activation token,
+  as the user popover's "Réglages") and closes the popover; an open
+  Settings window comes forward on Son, the output in use lit. The popover
+  is 45 px taller for it.
 - **Its microphone and applications** (3.4b, issue #380), under the
   outputs with the same divider and labels: "MICRO" / "MICROPHONE", a
   36 px row (a 32 px mute button, the mic icon crossed and `#F7B98A` on
@@ -735,7 +743,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Tasks | a kanban board behind a `KanbanSource` adapter (Planka first), else the local list in `$XDG_STATE_HOME/hocuspanda/tasks.json` ([day.md](day.md)) | the tasks' column's cards in its order; ticks, unticks and additions queued per account and tried again when the source answers |
 | Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
 | Bluetooth | BlueZ | on the system bus: the object manager's objects (`GetManagedObjects`, then `InterfacesAdded`, `InterfacesRemoved`), `PropertiesChanged` under `/org/bluez`; the first adapter's `Powered`, its devices' `Name`, `Alias`, `Icon` (else `Class`, else `Appearance`), `Paired`, `Connected`, `RSSI`, and `Battery1`'s `Percentage`; set with `Powered`, `StartDiscovery` and `StopDiscovery`, `Connect`, `Disconnect`, `Pair` (through the shell's `NoInputNoOutput` agent), `Trusted`, `CancelPairing` (as built, 3.6) |
-| Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`) |
+| Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`); read and set by the crate `hocus-sound`, which the Settings' Son page shares (6.5). A volume is the loudest channel's, as `wpctl` shows it; on an output whose balance is not centred, a volume is set on its channels with `pw-cli`, keeping the balance |
 | Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `OnBattery` (on AC: the bolt); the first battery powering the machine among `EnumerateDevices` (`Type` 2, `PowerSupply`), its `Capacity` (the health; 0 or none: unknown); followed by `PropertiesChanged` under `/org/freedesktop/UPower`, `DeviceAdded` and `DeviceRemoved`. `org.freedesktop.UPower.PowerProfiles`: `ActiveProfile` (set by the popover), `Profiles` (those there), `PerformanceDegraded` (as built, 3.7) |
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |

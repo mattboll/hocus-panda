@@ -126,9 +126,18 @@ pub fn key(key: LevelKey) {
         return;
     };
     let sent = match key {
-        LevelKey::VolumeUp | LevelKey::VolumeDown | LevelKey::Mute => {
-            service.sound.send(sound::Ask::Key(key)).is_ok()
-        }
+        LevelKey::VolumeUp => service
+            .sound
+            .send(sound::Ask::Step(sound::Step::Up))
+            .is_ok(),
+        LevelKey::VolumeDown => service
+            .sound
+            .send(sound::Ask::Step(sound::Step::Down))
+            .is_ok(),
+        LevelKey::Mute => service
+            .sound
+            .send(sound::Ask::Step(sound::Step::Mute))
+            .is_ok(),
         LevelKey::BrightnessUp | LevelKey::BrightnessDown => {
             service.power.send(power::Ask::Key(key)).is_ok()
         }
@@ -145,7 +154,7 @@ pub fn key(key: LevelKey) {
 pub fn ask(ask: sound::Ask) {
     let sent = SERVICE
         .get()
-        .is_some_and(|service| service.sound.send(ask).is_ok());
+        .is_some_and(|service| service.sound.send(ask.clone()).is_ok());
     if !sent {
         tracing::warn!(?ask, "the sound's service has stopped: dropped");
     }

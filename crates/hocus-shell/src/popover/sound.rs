@@ -2,7 +2,8 @@
 //! default output's name; the master volume, its mute button and its
 //! value; the outputs, the default one checked; the microphone, its mute
 //! button, its volume and, when there are several, the one to use; then
-//! the applications playing sound, each with its volume and its mute. A
+//! the applications playing sound, each with its volume and its mute; at
+//! its bottom, "Réglages du son…", which opens the Settings on Son (6.5). A
 //! click on an output makes it the default, which keeps its own volume
 //! (PipeWire's, per sink): the slider then shows that one's.
 //!
@@ -23,7 +24,8 @@
 //!
 //! The keyboard: `Tab` and `Shift+Tab` go through the mute button, the
 //! slider, the outputs, the microphone's mute button and slider, the
-//! microphones, then each application's tile and slider; `Enter` or
+//! microphones, then each application's tile and slider, then the
+//! Settings' link; `Enter` or
 //! `Space` acts; the arrows move a slider by 5 % (and go through the
 //! outputs and the microphones); `Esc` closes.
 
@@ -89,6 +91,13 @@ const APP_NAME_GAP: f32 = 2.0;
 /// The value sits on the row's bottom, 2 px up.
 const APP_VALUE_PAD: f32 = 2.0;
 const LETTER: f32 = 14.0;
+/// The Settings' link: its row, its tile and their sizes (6.5).
+const LINK: f32 = 36.0;
+const LINK_TILE: f32 = 24.0;
+const LINK_TILE_RADIUS: f32 = 7.0;
+const LINK_TEXT: f32 = 13.5;
+const LINK_TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.07);
+const LINK_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
 /// "No application…", and the others' number: a note, 2 px under it.
 const NOTE_BOTTOM: f32 = 2.0;
 /// Applications listed at most; the others are counted under them.
@@ -194,12 +203,25 @@ impl Layout {
         }
     }
 
-    fn end(self) -> f32 {
+    fn applications_end(self) -> f32 {
         if self.applications == 0 || self.more {
             self.note_top() + NOTE_TOP + NOTE * LINE + NOTE_BOTTOM
         } else {
             self.app_row(self.applications) - GAP
         }
+    }
+
+    /// The Settings' link's divider, under the applications.
+    fn link_rule(self) -> f32 {
+        self.applications_end() + RULE
+    }
+
+    fn link_top(self) -> f32 {
+        self.link_rule() + 1.0 + RULE
+    }
+
+    fn end(self) -> f32 {
+        self.link_top() + LINK
     }
 
     /// The popover's height, logical pixels.
@@ -270,6 +292,8 @@ enum Target {
     Mic(usize),
     Tile(usize),
     AppSlider(usize),
+    /// "Réglages du son…".
+    Settings,
 }
 
 /// A slider, by what it sets: an application's by its key, so that it
@@ -354,6 +378,7 @@ impl<Message> canvas::Program<Message> for Panel {
         let (rule, top, _) = layout.applications_section();
         label(&mut frame, &state.labels[2], rule, top);
         self.applications(&mut frame, state);
+        self.link(&mut frame, state);
         if let Some(target) = state.focus {
             let (rect, radius) = target.shape(layout);
             ring(&mut frame, rect, radius);
@@ -429,6 +454,13 @@ impl Target {
                 BUTTON_RADIUS,
             ),
             Self::AppSlider(i) => (layout.app_parts(i).1.rect(APP_SLIDER), APP_SLIDER / 2.0),
+            Self::Settings => (
+                Rectangle::new(
+                    Point::new(LEFT - ROW_OUT, layout.link_top()),
+                    Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, LINK),
+                ),
+                BUTTON_RADIUS,
+            ),
         }
     }
 }
@@ -468,6 +500,7 @@ impl State {
         for i in 0..self.apps.len() {
             order.extend([Target::Tile(i), Target::AppSlider(i)]);
         }
+        order.push(Target::Settings);
         order
     }
 
@@ -743,6 +776,7 @@ impl Panel {
                     }
                 }
             }
+            Some(Target::Settings) => super::session::open_settings(Some("sound")),
             Some(Target::Slider | Target::MicSlider | Target::AppSlider(_)) | None => {}
         }
     }
@@ -936,6 +970,55 @@ impl Panel {
         if let Some(note) = note {
             f.fill_text(kit::note(note, layout.note_top()));
         }
+    }
+
+    /// "Réglages du son…": the sliders' glyph in its tile, its words, a
+    /// chevron; lit under the pointer.
+    fn link(&self, f: &mut Frame, state: &State) {
+        let layout = state.layout;
+        kit::rule(f, layout.link_rule());
+        let (rect, radius) = Target::Settings.shape(layout);
+        if state.pointer.hover == Some(Target::Settings) {
+            f.fill(&rounded(rect, radius), LINK_HOVER);
+        }
+        let middle = rect.center_y();
+        let tile = Rectangle::new(
+            Point::new(LEFT, middle - LINK_TILE / 2.0),
+            Size::new(LINK_TILE, LINK_TILE),
+        );
+        f.fill(&rounded(tile, LINK_TILE_RADIUS), LINK_TILE_FILL);
+        // The sliders, 15 px in the tile.
+        let at = Point::new(tile.x + 4.5, tile.y + 4.5);
+        let s = 15.0 / 24.0;
+        for segment in [
+            [(4.0, 7.0), (13.0, 7.0)],
+            [(17.0, 7.0), (20.0, 7.0)],
+            [(15.0, 4.5), (15.0, 9.5)],
+            [(4.0, 17.0), (7.0, 17.0)],
+            [(11.0, 17.0), (20.0, 17.0)],
+            [(9.0, 14.5), (9.0, 19.5)],
+        ] {
+            lines(f, at, s, 2.2, DIM.get(), &segment);
+        }
+        let mut words = text(
+            self.words.sound_settings().to_owned(),
+            Point::new(LEFT + LINK_TILE + ICON_GAP, middle),
+            LINK_TEXT,
+            TEXT.get(),
+            Alignment::Left,
+        );
+        words.font = kit::MANROPE_SEMIBOLD;
+        f.fill_text(words);
+        // The chevron, pointing right.
+        let at = Point::new(RIGHT - 14.0, middle - 7.0);
+        lines(
+            f,
+            at,
+            14.0 / 24.0,
+            2.4,
+            FAINT.get(),
+            &[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)],
+        );
     }
 
     /// An application's tile: its icon, else its letter on a colour of its
@@ -1138,16 +1221,17 @@ mod tests {
         assert_eq!(layout(3, 0, 0).outputs_end().round() + 15.0, 261.0);
         assert_eq!(layout(1, 0, 0).outputs_end().round() + 15.0, 185.0);
         // Then each section: its divider, its label, its rows.
-        assert_eq!(layout(3, 0, 0).height(), 332);
-        assert_eq!(layout(1, 0, 0).height(), 256);
+        // The Settings' link at the bottom adds 45 px (6.5).
+        assert_eq!(layout(3, 0, 0).height(), 332 + 45);
+        assert_eq!(layout(1, 0, 0).height(), 256 + 45);
         // One microphone: its row; two, their list.
-        assert_eq!(layout(3, 1, 0).height(), 332 + 47 + 36);
-        assert_eq!(layout(3, 2, 0).height(), 332 + 47 + 36 + 6 + 74);
+        assert_eq!(layout(3, 1, 0).height(), 332 + 45 + 47 + 36);
+        assert_eq!(layout(3, 2, 0).height(), 332 + 45 + 47 + 36 + 6 + 74);
         // Two applications instead of "No application…".
-        assert_eq!(layout(3, 2, 2).height(), 568);
+        assert_eq!(layout(3, 2, 2).height(), 568 + 45);
         // At most five, and a line for the others.
         assert_eq!(layout(3, 2, 5).height(), layout(3, 2, 2).height() + 3 * 52);
-        assert_eq!(layout(3, 2, 7).height(), 755);
+        assert_eq!(layout(3, 2, 7).height(), 755 + 45);
     }
 
     #[test]
@@ -1181,6 +1265,7 @@ mod tests {
             for i in 0..layout.applications {
                 targets.extend([Target::Tile(i), Target::AppSlider(i)]);
             }
+            targets.push(Target::Settings);
             let out = crate::levels::draw::RING_OUT + crate::levels::draw::RING;
             for target in &targets {
                 let (rect, _) = target.shape(layout);
@@ -1207,9 +1292,12 @@ mod tests {
             key: key.to_owned(),
             name: key.to_owned(),
             icon: None,
+            icon_names: Vec::new(),
             streams: vec![1],
             sound: None,
             playing,
+            sink: None,
+            target: None,
         }
     }
 

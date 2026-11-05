@@ -101,14 +101,9 @@ impl Degraded {
     }
 }
 
-/// The default output's volume.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Sound {
-    /// In percent, as `wpctl` shows it (the cube root of the linear
-    /// volume); above 100 when amplified.
-    pub volume: f32,
-    pub muted: bool,
-}
+/// The default output's volume (`hocus-sound`'s, shared with the
+/// Settings).
+pub use hocus_sound::Sound;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Battery {
@@ -267,6 +262,15 @@ impl Words {
     /// In place of the microphone's volume, muted.
     pub fn off(self) -> &'static str {
         if self.fr() { "coupé" } else { "off" }
+    }
+
+    /// The sound popover's last row: the Settings' Son page (6.5).
+    pub fn sound_settings(self) -> &'static str {
+        if self.fr() {
+            "Réglages du son…"
+        } else {
+            "Sound settings…"
+        }
     }
 
     /// In place of the applications' list.
