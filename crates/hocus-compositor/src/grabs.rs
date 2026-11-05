@@ -218,7 +218,7 @@ impl PointerGrab<State> for MoveGrab {
         let pull = state.move_pull(self.id, at, pointer);
         let location = location + Point::from(pull.offset());
         let before = state.space.element_location(&window);
-        state.space.map_element(window.clone(), location, true);
+        state.place_in_space(window.clone(), (location.x, location.y));
         if let Some(x11) = window.x11_surface() {
             let mut geometry = x11.geometry();
             geometry.loc = location;

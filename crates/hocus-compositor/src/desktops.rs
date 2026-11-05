@@ -760,7 +760,7 @@ impl crate::State {
             return;
         };
         let window = managed.window.clone();
-        self.space.map_element(window, (rect.x, rect.y), false);
+        self.place_in_space(window, (rect.x, rect.y));
     }
 
     /// `output` shows its desktop `to` (from 0), sliding; `carried` goes

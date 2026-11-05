@@ -5,7 +5,8 @@
 //! - [`model`]: the 17 sections in 5 groups, and the settings each holds;
 //!   a section's ticket fills its own ([`power`] is the first, [`mouse`]
 //!   the mice and touchpads; [`screens`] draws its page itself, from the
-//!   compositor's line; [`sound`]'s live in PipeWire, not in the file).
+//!   compositor's line; [`sound`]'s live in PipeWire, [`network`]'s in
+//!   NetworkManager and rfkill, not in the file).
 //! - [`devices`]: the mice and touchpads plugged in, as the compositor says.
 //! - [`keyboard`], [`keys`] and [`xkb`]: the keyboard's settings and the
 //!   desktop's shortcuts, the chords as written and shown, XKB's layouts.
@@ -27,6 +28,7 @@ pub mod keys;
 pub mod lang;
 pub mod model;
 pub mod mouse;
+pub mod network;
 pub mod portal;
 pub mod power;
 pub mod renderer;
