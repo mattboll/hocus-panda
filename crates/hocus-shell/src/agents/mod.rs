@@ -406,7 +406,12 @@ fn change(with: impl FnOnce(&mut Said)) {
 /// shell's fonts (as it draws: they are loaded by then).
 pub fn lay_out() -> Layout {
     let said = said();
-    let shows = said.shows(now_us());
+    // Hidden (`[panel] agents`, 6.4): nothing, as with no tool followed.
+    let shows = if crate::column::groups().agents {
+        said.shows(now_us())
+    } else {
+        Shows::Hidden
+    };
     let words = Words::new(Lang::of_messages());
     layout(
         &words,
@@ -442,6 +447,13 @@ pub fn minute() {
         draw::stale();
         popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
     }
+}
+
+/// The group comes or goes (`[panel] agents`, 6.4): laid out again as it
+/// next draws.
+pub fn shown_changed() {
+    draw::stale();
+    popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
 }
 
 /// The compositor says the tools.

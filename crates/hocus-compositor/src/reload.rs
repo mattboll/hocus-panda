@@ -9,7 +9,8 @@
 //!
 //! Followed live: `[pointer]` and `[touchpad]` (6.12), `[shortcuts]` and
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
-//! and the screens' wallpapers (6.3). A keyboard whose layouts or options changed has its
+//! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
+//! screens' bar forms (6.4). A keyboard whose layouts or options changed has its
 //! keymap compiled on the thread too (XKB reads its files), the loop only
 //! taking it in; its repeat is given to clients again.
 
@@ -202,6 +203,9 @@ impl State {
             self.keyboard_changed(new.keyboard.clone(), keymap);
             followed.push("[keyboard]");
         }
+        // The bar (6.4, panel.rs): before the screens, which take the rest
+        // of `[outputs]`, its screens' forms among them.
+        self.panel_config_changed(&new, &mut followed);
         // The wallpaper (6.3, wallpaper.rs): before the screens, which
         // take the rest of `[outputs]`.
         if self.wallpaper_changed(&new) {

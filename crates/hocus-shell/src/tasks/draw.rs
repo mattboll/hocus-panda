@@ -951,8 +951,9 @@ impl Group {
     fn lay(&self, lines: &Lines, most: usize) -> Laid {
         let field = super::field().is_some_and(|f| f.at == At::Group(self.bar.clone()));
         // The mini form shows no card (Day.5's calendar carries the offer).
-        let card =
-            crate::setup::card_shows() && self.forms.iter().any(|(form, _)| *form == Form::Full);
+        let card = crate::setup::card_shows()
+            && crate::column::groups().tasks
+            && self.forms.iter().any(|(form, _)| *form == Form::Full);
         let card_words = crate::setup::Words::new(crate::clock::time::Lang::of_messages());
         let fonts = iced::advanced::graphics::text::font_system().write();
         match fonts {

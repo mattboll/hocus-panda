@@ -115,8 +115,14 @@ struct Bed {
 /// day's sources, `[panel] windows`.
 fn config_text(machine: &Machine) -> String {
     let mut text = format!(
-        "[keyboard]\nlayouts = [\"us\"]\n\n[panel]\nwindows = {}\n\n",
-        machine.windows
+        "[keyboard]\nlayouts = [\"us\"]\n\n[panel]\nwindows = {}\nform = \"{}\"\nscreens = \"{}\"\n\n",
+        machine.windows,
+        machine.form.name(),
+        if machine.screens.len() > 1 {
+            "all"
+        } else {
+            "primary"
+        }
     );
     if machine.day {
         text.push_str(DAY_SOURCES);

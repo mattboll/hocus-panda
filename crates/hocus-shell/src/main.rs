@@ -650,6 +650,12 @@ impl Shell {
                 }))
             }
             ToShell::Clock(look) => {
+                tracing::info!(
+                    seconds = look.seconds,
+                    transition = look.transition.name(),
+                    font = look.font,
+                    "the clock's look"
+                );
                 self.clock = clock_style(&look);
                 self.clock_look = look;
                 Task::none()
@@ -694,6 +700,10 @@ impl Shell {
             }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
+                Task::none()
+            }
+            ToShell::BarGroups(groups) => {
+                column::set_groups(groups);
                 Task::none()
             }
             ToShell::AgentTools(tools) => {
@@ -2231,6 +2241,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::BarWindows(shown)) => {
                             windows::set_shown(shown);
+                            continue;
+                        }
+                        // What the column shows (6.4): only its parts draw.
+                        Ok(ToShell::BarGroups(groups)) => {
+                            column::set_groups(groups);
                             continue;
                         }
                         // The agents' tools and the agents: only their

@@ -4165,3 +4165,47 @@ over the session's locale for the shell's words; a surface drawn once
 (the layouts' names, the bar's measured texts) takes it as it is next
 laid out. The clock logs what it shows ("the clock shows", its time and
 date) when they change.
+
+### 6.4, the bar followed live (2026-11-05)
+
+Issue #404 (settings.md's "La barre"), its first part: what the page
+writes, followed as the file changes, before the page itself.
+
+- **The keys** (`[panel]`): `meeting`, `today`, `tasks` and `agents`
+  (`true` by default) beside `windows`; `false` hides that group in both
+  forms, as an empty group (it takes no room, the groups under it move
+  up), the day still read. `order = ["today", "tasks", "agents"]` is the
+  order of the three under the meeting's card and the sign of what is in
+  use, in both forms (Today is not in the mini form); an unknown name is
+  skipped, one left out comes after those named. A screen's
+  `[outputs.NAME] panel-form` now takes `"auto"` too, over `[panel]
+  form` (which a screen without one takes).
+- **The column** (`column.rs`) reads them (`bar-groups ORDER HIDDEN` on
+  the line, `ToShell::BarGroups`): its order is the meeting's card, the
+  sign, then the three in the configuration's order. A group hidden lays
+  out as if it had nothing to show: no card (`meeting`), no lines
+  (`today`), no list and no Day.1 card in its place (`tasks`), the agents'
+  group `Hidden` (`agents`). Which group gives way first on a short bar
+  does not change with the order (`GIVES_WAY`: Today, the windows, To
+  do's lines, the agents' rows); the room each has is the same in any
+  order.
+- **Followed live** (`reload.rs`, `panel.rs`'s `panel_config_changed`):
+  `[panel.clock]` (the shell told the clock's look again), the groups,
+  `[panel] screens` (bars come and go, the windows' room with them), and
+  each screen's form: a screen whose form asked changed (its own, or
+  `[panel] form` for one without its own) forgets the form chosen there
+  with a click or `Super+B` (`panel.toml` written again) and switches to
+  what is asked now, along the switch's motion. `[panel] output` and
+  `windows` were already followed.
+- **Tests** (`crates/hocus-compositor/tests/bar_live.rs`): Today and the
+  agents hidden then shown, To do hidden
+  (`hiding_today_and_the_agents_gives_their_room_back_and_showing_them_brings_them_back`);
+  the meeting's card and mark (`hiding_the_meeting_takes_its_card_and_its_mark_away`);
+  the order in both forms (`the_order_moves_the_groups_in_both_forms`);
+  the clock's colour and seconds
+  (`the_clock_takes_its_colour_and_loses_its_seconds_live`); a bar on
+  every screen and back (`every_screen_takes_a_bar_and_gives_it_back_as_the_file_says`);
+  a screen's form, the click forgotten, then automatic again over
+  `[panel] form` (`a_form_written_for_a_screen_switches_its_bar_and_forgets_the_click`).
+  The tests that set the bar's form in the compositor's configuration
+  write it in their file too, since the compositor now follows it.

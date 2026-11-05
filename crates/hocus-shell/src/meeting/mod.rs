@@ -334,7 +334,8 @@ pub fn linked() {
 /// come, go or draw again, the groups under it move, the halo is told.
 pub fn refresh() {
     let now = crate::notifications::wall();
-    let card = card_of(&crate::day::snapshot(), &now);
+    // Hidden (`[panel] meeting`, 6.4): no card, as with nothing left.
+    let card = card_of(&crate::day::snapshot(), &now).filter(|_| crate::column::groups().meeting);
     let mut moved = false;
     let mut redraw = false;
     let mut effects = Vec::new();

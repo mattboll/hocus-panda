@@ -859,7 +859,7 @@ file.
   compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
-  (6.3), through one watcher
+  (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
 - The other ten pages (6.4 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's

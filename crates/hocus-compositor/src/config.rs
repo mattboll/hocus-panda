@@ -462,6 +462,20 @@ pub struct Panel {
     /// The windows of the screen's current desktop over its desktops'
     /// tiles (#604); `false` hides them in both forms.
     pub windows: bool,
+    /// The next meeting's card and mark (6.4); `false` hides them in both
+    /// forms, the day still read.
+    pub meeting: bool,
+    /// Today's events after the meeting (6.4).
+    pub today: bool,
+    /// The to-do list and its mini item (6.4).
+    pub tasks: bool,
+    /// The agents' group and its mini item (6.4).
+    pub agents: bool,
+    /// The order of Today, the to-do list and the agents under the
+    /// meeting's card and the sign of what is in use (6.4): an unknown
+    /// name is skipped, a missing one comes after those named.
+    #[serde(deserialize_with = "bar_order")]
+    pub order: [hocus_link::BarGroup; 3],
 }
 
 impl Default for Panel {
@@ -472,8 +486,34 @@ impl Default for Panel {
             form: FormChoice::default(),
             clock: Clock::default(),
             windows: true,
+            meeting: true,
+            today: true,
+            tasks: true,
+            agents: true,
+            order: hocus_link::BarGroup::DEFAULT,
         }
     }
+}
+
+impl Panel {
+    /// What the bar's column shows, as the shell is told it.
+    pub fn groups(&self) -> hocus_link::BarGroups {
+        hocus_link::BarGroups {
+            order: self.order,
+            meeting: self.meeting,
+            today: self.today,
+            tasks: self.tasks,
+            agents: self.agents,
+        }
+    }
+}
+
+fn bar_order<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[hocus_link::BarGroup; 3], D::Error> {
+    Ok(hocus_link::BarGroup::order_of(&Vec::<String>::deserialize(
+        deserializer,
+    )?))
 }
 
 /// The bar's clock, `[panel.clock]` (bar.md §4 group 1, §5): sent to the
@@ -562,6 +602,17 @@ pub enum FormChoice {
     Auto,
     Full,
     Mini,
+}
+
+impl FormChoice {
+    /// As the file writes it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Full => "full",
+            Self::Mini => "mini",
+        }
+    }
 }
 
 /// How the desktop looks and moves, `[appearance]`.
@@ -811,8 +862,9 @@ pub struct OutputSettings {
     /// (`output_spec::default_scale`).
     #[serde(deserialize_with = "scale")]
     pub scale: Option<f64>,
-    /// The bar's form on this screen, over `[panel] form`.
-    pub panel_form: FormChoice,
+    /// The bar's form on this screen, over `[panel] form` (`auto` too:
+    /// the Settings write each screen's, 6.4). None: `[panel] form`.
+    pub panel_form: Option<FormChoice>,
     /// `mode = "2560x1600@60"`: its size in pixels and its refresh rate
     /// (Hz, whole or not). None: the mode it prefers.
     #[serde(deserialize_with = "mode")]
@@ -846,7 +898,7 @@ impl Default for OutputSettings {
     fn default() -> Self {
         Self {
             scale: None,
-            panel_form: FormChoice::default(),
+            panel_form: None,
             mode: None,
             position: None,
             enabled: true,
@@ -1187,10 +1239,10 @@ impl Config {
 
     /// The form asked for the screen `name`: its own, else `[panel]`'s.
     pub fn form_choice(&self, name: &str) -> FormChoice {
-        match self.outputs.get(name).map(|o| o.panel_form) {
-            Some(choice @ (FormChoice::Full | FormChoice::Mini)) => choice,
-            _ => self.panel.form,
-        }
+        self.outputs
+            .get(name)
+            .and_then(|o| o.panel_form)
+            .unwrap_or(self.panel.form)
     }
 
     /// `$XDG_CONFIG_HOME/hocuspanda/config.toml`, or under `~/.config`.
@@ -1529,6 +1581,26 @@ mod tests {
         config.keyboard.layouts.clear();
         config.system_keyboard = None;
         assert_eq!(config.xkb_names().layout, "");
+    }
+
+    #[test]
+    fn the_bars_groups_show_by_default_and_take_an_order() -> anyhow::Result<()> {
+        use hocus_link::BarGroup::{Agents, Tasks, Today};
+        assert_eq!(
+            Config::default().panel.groups(),
+            hocus_link::BarGroups::default()
+        );
+        let config: Config = toml::from_str(
+            "[panel]\nmeeting = false\nagents = false\norder = [\"tasks\", \"today\"]\n",
+        )?;
+        let groups = config.panel.groups();
+        assert_eq!(groups.order, [Tasks, Today, Agents]);
+        assert!(!groups.meeting && groups.today && groups.tasks && !groups.agents);
+        // An unknown name is skipped, not refused.
+        let config: Config = toml::from_str("[panel]\norder = [\"agents\", \"clock\"]\n")?;
+        assert_eq!(config.panel.order, [Agents, Today, Tasks]);
+        assert!(toml::from_str::<Config>("[panel]\norder = \"tasks\"\n").is_err());
+        Ok(())
     }
 
     #[test]
