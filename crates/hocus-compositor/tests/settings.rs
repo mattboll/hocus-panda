@@ -11,7 +11,10 @@
 //! file shows in the window; a file that does not read turns it read-only
 //! with the offer to take back the last version that read, which works; a
 //! value not understood warns on its row; a second launch brings the first
-//! forward; at rest, the window commits nothing.
+//! forward; at rest, the window commits nothing. And of #603: the grip
+//! shows on hover at the top edge and a drag on it moves the window; ✕,
+//! `Esc` and `Ctrl+W` close it; a change made just before closing is on
+//! disk.
 //!
 //! What the window shows is read from its log, as it says it ("shows" and
 //! "places" lines, JSON): the places are the window's own, the window's
@@ -32,6 +35,7 @@ use serde_json::Value;
 const APP_ID: &str = "hocus-settings";
 const KEY_ENTER: u32 = 28;
 const KEY_F: u32 = 33;
+const KEY_W: u32 = 17;
 const KEY_Z: u32 = 44;
 
 /// A configuration of the user's own: comments, sections the Settings do
@@ -631,6 +635,163 @@ fn at_rest_it_commits_nothing() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The grip's middle on the screen: 4 px inside the window's top edge, 4
+/// high (windows.md §7).
+fn grip_middle(window: Rect) -> (f64, f64) {
+    (
+        f64::from(window.x) + f64::from(window.width) / 2.0,
+        f64::from(window.y) + 6.0,
+    )
+}
+
+/// How light the screen is at `at` (0 to 255, the brightest channel).
+fn lightness(hp: &mut Headless, at: (f64, f64)) -> anyhow::Result<u8> {
+    let (w, _, px) = hp.screenshot(0)?;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let i = (at.1 as usize * w as usize + at.0 as usize) * 4;
+    Ok(px[i..i + 3].iter().copied().max().unwrap_or(0))
+}
+
+#[test]
+fn the_grip_shows_on_hover_at_the_top_edge_and_a_drag_on_it_moves_the_window() -> anyhow::Result<()>
+{
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    // The window asked for the compositor's decorations: the grip is its.
+    let id = bed
+        .hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some(APP_ID))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no settings window"))?;
+    let server_side = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !hp.state().has_own_header(id))?;
+    anyhow::ensure!(server_side, "the window draws its own header");
+    let window = bed.window()?;
+    let grip = grip_middle(window);
+    // Read off the pill's middle, where the cursor is not drawn.
+    let pill = (grip.0 + 18.0, grip.1);
+    // Away from the top edge, the window's own dark header there.
+    bed.hp.pointer_move(grip.0, grip.1 + 300.0);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let dark = lightness(&mut bed.hp, pill)?;
+    assert!(dark < 80, "the header is light under the grip: {dark}");
+    // Over it: the pill shows, light.
+    bed.hp.pointer_move(grip.0 - 1.0, grip.1);
+    bed.hp.pointer_move(grip.0, grip.1);
+    let start = std::time::Instant::now();
+    loop {
+        bed.hp.dispatch(Duration::from_millis(10))?;
+        if lightness(&mut bed.hp, pill)? > 150 {
+            break;
+        }
+        anyhow::ensure!(start.elapsed() < WAIT, "the grip never showed");
+    }
+    assert_eq!(bed.hp.frame_cursor().as_deref(), Some("grab"));
+    // Dragged: the window follows.
+    bed.hp.button(BTN_LEFT, true);
+    for step in 1..=10 {
+        let k = f64::from(step) / 10.0;
+        bed.hp.pointer_move(grip.0 - 200.0 * k, grip.1 + 100.0 * k);
+        wait(&mut bed.hp, Duration::from_millis(16))?;
+    }
+    bed.hp.button(BTN_LEFT, false);
+    let moved = Rect {
+        x: window.x - 200,
+        y: window.y + 100,
+        ..window
+    };
+    common::wait_for_rect(&mut bed.hp, APP_ID, moved)?;
+    Ok(())
+}
+
+/// The window closed, and its program ended.
+fn closed(bed: &mut Bed, how: &str) -> anyhow::Result<()> {
+    let log = bed.log.clone();
+    let ended =
+        |log: &Path| std::fs::read_to_string(log).is_ok_and(|t| t.contains("the Settings closed"));
+    let gone = bed.hp.dispatch_until(WAIT, |hp| {
+        ended(&log)
+            && !hp
+                .windows()
+                .iter()
+                .any(|w| w.app_id.as_deref() == Some(APP_ID))
+    })?;
+    anyhow::ensure!(gone, "{how} did not close the window: {}", bed.plain());
+    // The next one's log starts afresh.
+    std::fs::write(&bed.log, "")?;
+    Ok(())
+}
+
+#[test]
+fn the_close_button_esc_and_ctrl_w_close_the_window() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("close")?;
+    closed(&mut bed, "✕")?;
+    // Esc, once a menu and the search have each taken their own.
+    bed.open()?;
+    bed.power()?;
+    bed.click("control:power.lid")?;
+    bed.shows(|s| s["menu"] == "power.lid")?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.shows(|s| s["menu"].is_null())?;
+    bed.type_text("veille")?;
+    bed.shows(|s| s["query"] == "veille")?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.shows(|s| s["query"] == "")?;
+    // The field still has the keyboard: Esc leaves it.
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.shows(|s| s["focus"] == "nothing")?;
+    assert!(bed.window().is_ok(), "Esc closed a window in use");
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    closed(&mut bed, "Esc")?;
+    bed.open()?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_W]);
+    closed(&mut bed, "Ctrl+W")?;
+    Ok(())
+}
+
+#[test]
+fn a_change_made_just_before_closing_is_on_disk() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    // The slider is written 450 ms after it stops: closed before that.
+    let (x, y) = bed.at("control:power.auto-saver-below")?;
+    let places = bed.places_with("control:power.auto-saver-below")?;
+    let width = places["control:power.auto-saver-below"][2]
+        .as_f64()
+        .unwrap_or_default();
+    // The slider's right end, 50 %: it is the control's first 220 px.
+    let end = x - width / 2.0 + 219.0;
+    bed.hp.pointer_move(end - 1.0, y);
+    bed.hp.pointer_move(end, y);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    bed.hp.button(BTN_LEFT, true);
+    bed.hp.button(BTN_LEFT, false);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_W]);
+    closed(&mut bed, "Ctrl+W")?;
+    let text = bed.text();
+    assert!(
+        text.starts_with(FILE) && text.contains("[power]\nauto-saver-below = 50\n"),
+        "{text}"
+    );
+    Ok(())
+}
+
 /// The pull request's screenshots, the window at scale 2 on the CPU:
 /// written to `$HOCUS_SHOTS` when it names a folder. Run by hand
 /// (`--run-ignored only`).
@@ -683,6 +844,15 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.open()?;
     bed.hp.pointer_move(5.0, 5.0);
     shoot(&mut bed, "home.png")?;
+    // The compositor's grip, the pointer at the top edge (#603).
+    let grip = grip_middle(bed.window()?);
+    bed.hp.pointer_move(grip.0, grip.1);
+    let start = std::time::Instant::now();
+    while lightness(&mut bed.hp, ((grip.0 + 18.0) * 2.0, grip.1 * 2.0))? <= 150 {
+        anyhow::ensure!(start.elapsed() < WAIT, "the grip never showed");
+        bed.hp.dispatch(Duration::from_millis(10))?;
+    }
+    shoot(&mut bed, "grip.png")?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
     bed.type_text("veille")?;
     bed.shows(|s| s["results"].as_array().is_some_and(|r| r.len() == 3))?;
@@ -709,6 +879,9 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, "menu.png")?;
     bed.hp.key(KEY_ESC, true);
     bed.hp.key(KEY_ESC, false);
+    // Closed by its Esc before the file breaks, or the Esc would close the
+    // window.
+    bed.shows(|s| s["menu"].is_null())?;
     std::fs::write(bed.file(), format!("{}\n[idle\ndelay = 3\n", bed.text()))?;
     bed.shows(|s| s["file"] == "read-only")?;
     wait(&mut bed.hp, Duration::from_secs(7))?;

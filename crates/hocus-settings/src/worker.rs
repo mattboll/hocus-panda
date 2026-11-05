@@ -89,10 +89,13 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn ask(&self, ask: Ask) {
-        if self.asks.send(ask).is_err() {
+    /// Whether the worker took it.
+    pub fn ask(&self, ask: Ask) -> bool {
+        let taken = self.asks.send(ask).is_ok();
+        if !taken {
             tracing::warn!("the file's worker is gone");
         }
+        taken
     }
 }
 

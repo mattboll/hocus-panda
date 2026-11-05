@@ -356,12 +356,15 @@ impl App {
                 container(Space::new().width(7).height(7)).style(boxed(dot, 3.5, None)),
                 t(state.get(lang), 12.0, dot),
                 container(
-                    button(icon(Icon::Close, 16.0, DIM))
-                        .width(30)
-                        .height(30)
-                        .padding(7)
-                        .on_press(Message::Close)
-                        .style(flat(None, HOVER, 8.0, false)),
+                    container(
+                        button(icon(Icon::Close, 16.0, DIM))
+                            .width(30)
+                            .height(30)
+                            .padding(7)
+                            .on_press(Message::Close)
+                            .style(flat(None, HOVER, 8.0, false)),
+                    )
+                    .id("close".to_owned()),
                 )
                 .padding(Padding::default().left(10)),
             ]
@@ -1399,5 +1402,11 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "menu": app.menu.map(|(slot, _)| slot.word()),
         "cards": if app.page == Page::Home { serde_json::json!(cards) } else { serde_json::Value::Null },
         "undo": app.undo.len(),
+        "focus": match app.focus {
+            Focus::Nothing => "nothing".to_owned(),
+            Focus::Search => "search".to_owned(),
+            Focus::Nav(i) => format!("nav:{i}"),
+            Focus::Control(i) => format!("control:{i}"),
+        },
     })
 }

@@ -28,8 +28,12 @@ venir".
   shell is (tech-choices, decision 2), with the bar's tokens (bar.md §13)
   and its fonts (Manrope, Martian Mono, carried in the binary). App id
   `hocus-settings`. 1100 × 760, 860 × 560 at least, placed by the
-  compositor (the centre of the screen under the pointer); no title bar of
-  the compositor's: its own header moves it, its ✕ closes it.
+  compositor (the centre of the screen under the pointer). It asks for the
+  compositor's decorations (xdg-decoration, #603): under Hocuspanda that is
+  no title bar but the grip at its top edge (windows.md §7: a drag moves
+  the window, a double click maximises or restores it); its own header
+  moves it too. Its ✕ closes it, as do `Esc` and `Ctrl+W` (see
+  "Closing").
 - It draws on the GPU with wgpu, preferring the integrated one
   (`WGPU_POWER_PREF=low`), or on the CPU with tiny-skia when wgpu offers
   only a software adapter, as the shell chooses (its `renderer.rs`).
@@ -193,7 +197,19 @@ sidebar's rows or the results, `Enter` opens; `Space` toggles a switch;
 `Space`, `Enter` or `Alt+↓` open a menu, `↑`/`↓` and `Enter` choose in it;
 `←`/`→` move a slider by a step, `Page Up`/`Page Down` by a quarter;
 `←`/`→` choose on the segmented control; `Esc` closes a menu, then empties
-the search; `Ctrl+Z` / `Ctrl+Shift+Z`; `Ctrl+W` closes.
+the search, then leaves the search field, then closes the window;
+`Ctrl+Z` / `Ctrl+Shift+Z`; `Ctrl+W` closes.
+
+## Closing
+
+✕, `Esc` (when no menu is open and the search field neither holds text
+nor has the keyboard), `Ctrl+W` and a close the compositor asks (its
+shortcut, for one) all close the window the same way, never
+waiting on its thread: a slider still moving is written at once instead
+of 450 ms later, and the window goes once the file's worker has written
+every change asked (after 5 s at most, with a warning in the log, should
+the disk hang). The program ends with the window ("the Settings closed"
+in its log).
 
 ## The model, for the sections' tickets
 
@@ -266,7 +282,9 @@ file.
   lights as the spec says.
 - "Ouvrir le fichier" opens the file with `xdg-open`, not at the line.
 - The window has no resize edges of its own yet (its 1100 × 760 fits a
-  laptop's screen); it moves by its header.
+  laptop's screen); it moves by the compositor's grip or by its header.
+- Under a compositor without xdg-decoration, winit draws its own frame
+  around the window: the Settings are made for Hocuspanda's.
 
 ## Not built here
 
@@ -293,6 +311,9 @@ that nothing draws at rest.
 - `a_value_not_understood_warns_on_its_row`
 - `a_second_launch_brings_the_first_forward`
 - `at_rest_it_commits_nothing`
+- `the_grip_shows_on_hover_at_the_top_edge_and_a_drag_on_it_moves_the_window`
+- `the_close_button_esc_and_ctrl_w_close_the_window`
+- `a_change_made_just_before_closing_is_on_disk`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's

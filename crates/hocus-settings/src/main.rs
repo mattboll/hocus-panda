@@ -77,7 +77,13 @@ fn main() -> ExitCode {
         .window(window::Settings {
             size: iced::Size::new(app::SIZE.0, app::SIZE.1),
             min_size: Some(iced::Size::new(app::LEAST.0, app::LEAST.1)),
-            decorations: false,
+            // The compositor's decorations (xdg-decoration): under
+            // Hocuspanda, no title bar but its grip at the top edge
+            // (windows.md §7); the header is still the window's own.
+            decorations: true,
+            // ✕, Esc, Ctrl+W and the compositor's close all go through the
+            // window, which writes what is pending first.
+            exit_on_close_request: false,
             platform_specific: window::settings::PlatformSpecific {
                 application_id: "hocus-settings".to_owned(),
                 ..Default::default()
@@ -86,6 +92,7 @@ fn main() -> ExitCode {
         })
         .run();
     single::stop();
+    tracing::info!("the Settings closed");
     match ran {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
