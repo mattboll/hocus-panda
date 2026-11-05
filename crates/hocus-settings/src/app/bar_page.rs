@@ -1460,6 +1460,13 @@ const FOOTER_TOP: f32 = BAR_HIGH - 12.0 - 34.0;
 const LEVELS_TOP: f32 = FOOTER_TOP - GAP - 74.0;
 const CONNS_TOP: f32 = LEVELS_TOP - GAP - 94.0;
 const DESKTOPS_TOP: f32 = CONNS_TOP - GAP - 30.0;
+/// The mini form's, from its bottom up (10 px of padding): the
+/// notifications' bell and the avatar, the battery and the layout, the
+/// Wi-Fi, the volume and Bluetooth, the desktops.
+const MINI_FOOTER_TOP: f32 = BAR_HIGH - 10.0 - 70.0;
+const MINI_LEVELS_TOP: f32 = MINI_FOOTER_TOP - GAP - 82.0;
+const MINI_CONNS_TOP: f32 = MINI_LEVELS_TOP - GAP - 152.0;
+const MINI_DESKTOPS_TOP: f32 = MINI_CONNS_TOP - GAP - 30.0;
 
 /// The mockup's colours.
 const INK: Color = Color::from_rgb(
@@ -1535,7 +1542,7 @@ impl Preview {
                 (BarGroup::Tasks, true) => TASKS,
                 (BarGroup::Tasks, false) => 34.0,
                 (BarGroup::Agents, true) => AGENTS,
-                (BarGroup::Agents, false) => 62.0,
+                (BarGroup::Agents, false) => 68.0,
             };
             put(model::group_setting(*g), high, &mut out);
         }
@@ -1543,7 +1550,7 @@ impl Preview {
             let (top, high) = if full {
                 (DESKTOPS_TOP - GAP - WINDOWS, WINDOWS)
             } else {
-                (BAR_HIGH - 200.0 - GAP - 34.0, 34.0)
+                (MINI_DESKTOPS_TOP - GAP - 34.0, 34.0)
             };
             out.push((
                 model::WINDOWS,
@@ -1908,70 +1915,7 @@ impl Preview {
         }
         for (id, r) in self.layout() {
             if !full {
-                let c = Point::new(bw / 2.0, r.y + r.height / 2.0);
-                match id {
-                    model::MEETING => rounded(
-                        f,
-                        Point::new(c.x - 15.0, r.y),
-                        Size::new(30.0, 4.0),
-                        2.0,
-                        BLUE_SOFT,
-                    ),
-                    model::TASKS => {
-                        f.stroke(
-                            &canvas::Path::rounded_rectangle(
-                                Point::new(c.x - 13.0, c.y - 6.0),
-                                Size::new(12.0, 12.0),
-                                3.0.into(),
-                            ),
-                            canvas::Stroke::default()
-                                .with_color(INK_DIM)
-                                .with_width(1.5),
-                        );
-                        write(
-                            f,
-                            "3",
-                            Point::new(c.x + 7.0, c.y - 8.0),
-                            11.0,
-                            MONO,
-                            INK_DIM,
-                            true,
-                        );
-                    }
-                    model::AGENTS => {
-                        head(f, Point::new(c.x, r.y + 20.0), 20.0, AMBER);
-                        f.fill(
-                            &canvas::Path::circle(Point::new(c.x + 14.0, r.y + 34.0), 8.0),
-                            AMBER,
-                        );
-                        write(
-                            f,
-                            "1",
-                            Point::new(c.x + 14.0, r.y + 27.0),
-                            10.0,
-                            BOLD,
-                            Color::from_rgb8(0x1C, 0x14, 0x06),
-                            true,
-                        );
-                        write(
-                            f,
-                            "1",
-                            Point::new(c.x, r.y + 44.0),
-                            11.0,
-                            SEMIBOLD,
-                            INK_DIM,
-                            true,
-                        );
-                    }
-                    model::WINDOWS => rounded(
-                        f,
-                        Point::new(c.x - 22.0, r.y),
-                        Size::new(44.0, 34.0),
-                        10.0,
-                        soft(0.05),
-                    ),
-                    _ => {}
-                }
+                draw_mini_item(f, bw, id, r, lang);
                 continue;
             }
             match id {
@@ -2348,30 +2292,284 @@ impl Preview {
                 true,
             );
         } else {
-            for i in 0..4 {
-                let at = Point::new(
-                    bw / 2.0 - 20.0 + (i % 2) as f32 * 22.0,
-                    BAR_HIGH - 200.0 + (i / 2) as f32 * 17.0,
-                );
-                rounded(
-                    f,
-                    at,
-                    Size::new(18.0, 13.0),
-                    4.0,
-                    if i == 0 { GREEN } else { soft(0.10) },
-                );
-            }
-            for i in 0..3 {
-                rounded(
-                    f,
-                    Point::new(bw / 2.0 - 20.0, BAR_HIGH - 150.0 + i as f32 * 44.0),
-                    Size::new(40.0, 34.0),
-                    10.0,
-                    soft(0.05),
-                );
-            }
+            draw_mini_lower(f, bw);
         }
     }
+}
+
+/// A 44 × `high` button of the mini form, centred, its top at `y`.
+fn mini_button(f: &mut canvas::Frame, centre: f32, y: f32, high: f32) {
+    rounded(
+        f,
+        Point::new(centre - 22.0, y),
+        Size::new(44.0, high),
+        10.0,
+        rgba(255, 255, 255, 0.05),
+    );
+}
+
+/// A line through `points` (an icon's strokes), in a 24 px box at `at`
+/// drawn `size` px.
+fn icon_lines(f: &mut canvas::Frame, at: Point, size: f32, points: &[(f32, f32)], colour: Color) {
+    let k = size / 24.0;
+    let path = canvas::Path::new(|b| {
+        for (i, (x, y)) in points.iter().enumerate() {
+            let p = Point::new(at.x + x * k, at.y + y * k);
+            if i == 0 {
+                b.move_to(p);
+            } else {
+                b.line_to(p);
+            }
+        }
+    });
+    f.stroke(
+        &path,
+        canvas::Stroke::default()
+            .with_color(colour)
+            .with_width(1.8 * k)
+            .with_line_cap(canvas::LineCap::Round)
+            .with_line_join(canvas::LineJoin::Round),
+    );
+}
+
+/// The mini form's item of group `id`, in `r` (the mockup's §5 items).
+fn draw_mini_item(f: &mut canvas::Frame, bw: f32, id: &str, r: Rectangle, lang: Lang) {
+    let c = bw / 2.0;
+    match id {
+        model::MEETING => rounded(
+            f,
+            Point::new(c - 15.0, r.y),
+            Size::new(30.0, 4.0),
+            2.0,
+            BLUE_SOFT,
+        ),
+        model::TASKS => {
+            mini_button(f, c, r.y, 34.0);
+            f.stroke(
+                &canvas::Path::rounded_rectangle(
+                    Point::new(c - 14.0, r.y + 10.0),
+                    Size::new(13.0, 13.0),
+                    3.5.into(),
+                ),
+                canvas::Stroke::default()
+                    .with_color(INK_DIM)
+                    .with_width(1.5),
+            );
+            write(
+                f,
+                "3",
+                Point::new(c + 2.0, r.y + 9.0),
+                11.0,
+                MONO,
+                INK_DIM,
+                false,
+            );
+        }
+        model::AGENTS => {
+            head(f, Point::new(c, r.y + 20.0), 20.0, AMBER);
+            f.fill(
+                &canvas::Path::circle(Point::new(c + 14.0, r.y + 34.0), 10.0),
+                Color::from_rgb8(0x12, 0x17, 0x26),
+            );
+            f.fill(
+                &canvas::Path::circle(Point::new(c + 14.0, r.y + 34.0), 8.0),
+                AMBER,
+            );
+            write(
+                f,
+                "1",
+                Point::new(c + 14.0, r.y + 28.0),
+                10.0,
+                BOLD,
+                Color::from_rgb8(0x1C, 0x14, 0x06),
+                true,
+            );
+            write(
+                f,
+                "1",
+                Point::new(c, r.y + 44.0),
+                11.0,
+                SEMIBOLD,
+                INK_DIM,
+                true,
+            );
+            write(
+                f,
+                w("au travail", "working").get(lang),
+                Point::new(c, r.y + 55.0),
+                11.0,
+                SEMIBOLD,
+                Color::from_rgb8(0x7C, 0x86, 0x98),
+                true,
+            );
+        }
+        model::WINDOWS => {
+            mini_button(f, c, r.y, 34.0);
+            // A window: its frame and its title bar.
+            let at = Point::new(c - 9.0, r.y + 8.0);
+            icon_lines(
+                f,
+                at,
+                18.0,
+                &[
+                    (3.5, 5.0),
+                    (20.5, 5.0),
+                    (20.5, 19.0),
+                    (3.5, 19.0),
+                    (3.5, 5.0),
+                ],
+                BLUE_SOFT,
+            );
+            icon_lines(f, at, 18.0, &[(3.5, 9.0), (20.5, 9.0)], BLUE_SOFT);
+        }
+        _ => {}
+    }
+}
+
+/// The mini form's lower groups: the desktops, the connections, the
+/// levels, the footer.
+fn draw_mini_lower(f: &mut canvas::Frame, bw: f32) {
+    let c = bw / 2.0;
+    let soft = |a: f32| rgba(255, 255, 255, a);
+    // The desktops: two by two, the current one green.
+    for i in 0..4 {
+        let at = Point::new(
+            c - 20.0 + (i % 2) as f32 * 22.0,
+            MINI_DESKTOPS_TOP + (i / 2) as f32 * 17.0,
+        );
+        let fill = match i {
+            0 => GREEN,
+            1 => soft(0.30),
+            _ => soft(0.10),
+        };
+        rounded(f, at, Size::new(18.0, 13.0), 4.0, fill);
+    }
+    // The Wi-Fi, the volume's gauge, Bluetooth.
+    let y = MINI_CONNS_TOP;
+    mini_button(f, c, y, 38.0);
+    let wifi = Point::new(c, y + 26.0);
+    for (radius, alpha) in [(4.0_f32, 1.0), (8.5, 1.0), (13.0, 1.0)] {
+        f.stroke(
+            &canvas::Path::new(|b| {
+                b.arc(canvas::path::Arc {
+                    center: wifi,
+                    radius,
+                    start_angle: iced::Radians(-2.4),
+                    end_angle: iced::Radians(-0.74),
+                });
+            }),
+            canvas::Stroke::default()
+                .with_color(Color { a: alpha, ..INK })
+                .with_width(1.8)
+                .with_line_cap(canvas::LineCap::Round),
+        );
+    }
+    let gauge = Point::new(c - 4.0, y + 38.0 + 2.0 + 12.0);
+    rounded(f, gauge, Size::new(8.0, 48.0), 4.0, soft(0.10));
+    f.fill(
+        &canvas::Path::rounded_rectangle(
+            Point::new(gauge.x, gauge.y + 48.0 * 0.4),
+            Size::new(8.0, 48.0 * 0.6),
+            4.0.into(),
+        ),
+        canvas::Gradient::Linear(
+            canvas::gradient::Linear::new(
+                Point::new(0.0, gauge.y + 48.0),
+                Point::new(0.0, gauge.y + 48.0 * 0.4),
+            )
+            .add_stop(0.0, Color::from_rgb8(0x5B, 0x8D, 0xEF))
+            .add_stop(1.0, BLUE_SOFT),
+        ),
+    );
+    let bt = y + 38.0 + 2.0 + 72.0 + 2.0;
+    mini_button(f, c, bt, 38.0);
+    icon_lines(
+        f,
+        Point::new(c - 10.0, bt + 9.0),
+        20.0,
+        &[
+            (7.0, 7.5),
+            (17.0, 16.5),
+            (12.0, 20.5),
+            (12.0, 3.5),
+            (17.0, 7.5),
+            (7.0, 16.5),
+        ],
+        INK,
+    );
+    // The battery at 82 %, its words, the layout.
+    let y = MINI_LEVELS_TOP;
+    let battery = Point::new(c - 13.0, y);
+    f.stroke(
+        &canvas::Path::rounded_rectangle(battery, Size::new(26.0, 15.0), 3.0.into()),
+        canvas::Stroke::default().with_color(INK).with_width(1.5),
+    );
+    rounded(
+        f,
+        Point::new(battery.x + 3.0, y + 3.0),
+        Size::new(20.0 * 0.82, 9.0),
+        1.5,
+        Color::from_rgb8(0x7E, 0xE0, 0xA0),
+    );
+    write(
+        f,
+        "82 %",
+        Point::new(c, y + 19.0),
+        14.0,
+        BOLD,
+        Color::from_rgb8(0x7E, 0xE0, 0xA0),
+        true,
+    );
+    mini_button(f, c, y + 52.0, 30.0);
+    write(f, "FR", Point::new(c, y + 59.0), 13.0, BOLD, INK, true);
+    // The bell, the avatar.
+    let y = MINI_FOOTER_TOP;
+    mini_button(f, c, y, 34.0);
+    icon_lines(
+        f,
+        Point::new(c - 9.0, y + 8.0),
+        18.0,
+        &[
+            (6.0, 16.5),
+            (6.0, 11.0),
+            (8.0, 7.0),
+            (12.0, 5.5),
+            (16.0, 7.0),
+            (18.0, 11.0),
+            (18.0, 16.5),
+            (19.5, 18.0),
+            (4.5, 18.0),
+            (6.0, 16.5),
+        ],
+        INK,
+    );
+    icon_lines(
+        f,
+        Point::new(c - 9.0, y + 8.0),
+        18.0,
+        &[(10.0, 20.5), (14.0, 20.5)],
+        INK,
+    );
+    f.fill(
+        &canvas::Path::circle(Point::new(c, y + 36.0 + 5.0 + 12.0), 12.0),
+        canvas::Gradient::Linear(
+            canvas::gradient::Linear::new(
+                Point::new(c - 10.0, y + 41.0),
+                Point::new(c + 10.0, y + 65.0),
+            )
+            .add_stop(0.0, GREEN)
+            .add_stop(1.0, Color::from_rgb8(0x5B, 0x8D, 0xEF)),
+        ),
+    );
+    write(
+        f,
+        "A",
+        Point::new(c, y + 46.0),
+        10.0,
+        BOLD,
+        Color::from_rgb8(0x0b, 0x10, 0x20),
+        true,
+    );
 }
 
 /// Ease-out, cubic.

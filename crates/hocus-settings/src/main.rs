@@ -79,8 +79,8 @@ fn main() -> ExitCode {
                 iced::Theme::Dark
             }
         })
-        .style(|_: &App, _: &iced::Theme| iced::theme::Style {
-            background_color: app::background(),
+        .style(|app: &App, _: &iced::Theme| iced::theme::Style {
+            background_color: app::background_of(app),
             text_color: app::text(),
         })
         .settings(settings)

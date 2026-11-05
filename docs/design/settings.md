@@ -892,6 +892,15 @@ file.
   while they move; toasts go and sliders are written on one-shot timers.
   The caret of the search field blinks while the field has the keyboard
   (iced's), and draws then.
+- **Whole frames where pixels could stay behind.** On the CPU, iced
+  (tiny-skia) draws only what it finds changed between frames, and
+  misses what is drawn past a piece's bounds: a shadow (the toast's), an
+  anti-aliased stroke, a canvas's text moved with the page (6.4's
+  preview). Those pixels stayed on screen after a scroll. For 150 ms
+  after a scroll, a toast coming or going, and any motion, each frame's
+  background is a 1024th of blue apart from the last one's
+  (`app::background_of`), which makes iced draw the whole window; at
+  rest nothing changes and nothing draws.
 - The worker's threads: one owns the file (reads, writes, the last
   version that read, the recent changes in
   `$XDG_STATE_HOME/hocuspanda/settings-recent`), one waits in inotify's
