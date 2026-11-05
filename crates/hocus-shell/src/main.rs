@@ -41,6 +41,7 @@ mod ending;
 mod footer;
 mod foreign;
 mod in_use;
+mod keys;
 mod launcher;
 mod layouts;
 mod levels;
@@ -169,6 +170,7 @@ fn main() -> ExitCode {
             paste::start(&connection);
             outputs::start(&connection);
             pointer::start(&connection);
+            keys::start(&connection);
             Some(connection)
         }
         Err(err) => {
@@ -401,6 +403,9 @@ enum Message {
     Resized(window::Id, Size),
     /// A screen moved on in giving its name ([`outputs`]).
     Screens,
+    /// A key went to another surface than the one holding the keyboard:
+    /// every surface is woken, that one's widgets taking it ([`keys`]).
+    Keys,
 }
 
 impl Shell {
@@ -522,6 +527,9 @@ impl Shell {
                 Task::batch(ids.into_iter().map(|id| self.fit(id)))
             }
             Message::Screens => self.screens_named(),
+            // Its update is the wake: iced_layershell redraws every surface
+            // after one.
+            Message::Keys => Task::none(),
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -1870,9 +1878,15 @@ impl Shell {
     }
 
     /// A surface's widgets, whose pointer's shape is set again each time
-    /// the pointer enters it ([`pointer`]).
+    /// the pointer enters it ([`pointer`]), and which get the keys the
+    /// compositor gives their surface ([`keys`]).
     fn view(&self, id: window::Id) -> Element<'_, Message> {
-        pointer::Entered::new(self.surface_view(id)).into()
+        keys::Held::new(
+            id,
+            pointer::Entered::new(self.surface_view(id)),
+            Message::Keys,
+        )
+        .into()
     }
 
     fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
