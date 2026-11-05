@@ -57,6 +57,7 @@ use crate::levels::{
     model::{STEP, Sound, Words},
     sound::{App, Ask, Kind, Mixer, Set, Sink},
 };
+use crate::theme::Ink;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -98,12 +99,12 @@ const RULE_TOP: f32 = MASTER_TOP + MASTER + GAP + RULE;
 const LABEL_TOP: f32 = RULE_TOP + 1.0 + RULE + GAP;
 const ROWS_TOP: f32 = LABEL_TOP + LABEL_PAD * 2.0 + LABEL * LINE + GAP;
 
-const BUTTON_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const BUTTON_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 /// The microphone muted: its button tinted, its icon `gauge.critical`'s
 /// light end.
-const MIC_OFF_FILL: Color = Color::from_rgba8(229, 121, 63, 0.18);
-const MIC_OFF_HOVER: Color = Color::from_rgba8(229, 121, 63, 0.26);
-const MIC_OFF: Color = rgb(0xF7B98A);
+const MIC_OFF_FILL: Ink = Ink::Dark(Color::from_rgba8(229, 121, 63, 0.18));
+const MIC_OFF_HOVER: Ink = Ink::Dark(Color::from_rgba8(229, 121, 63, 0.26));
+const MIC_OFF: Ink = Ink::Dark(rgb(0xF7B98A));
 /// A muted application's tile.
 const TILE_MUTED: f32 = 0.45;
 
@@ -806,7 +807,7 @@ impl Panel {
         } else {
             FILL
         };
-        f.fill(&rounded(button, radius), fill);
+        f.fill(&rounded(button, radius), fill.get());
         let icon = Point::new(
             button.center_x() - ICON / 2.0,
             button.center_y() - ICON / 2.0,
@@ -818,7 +819,7 @@ impl Panel {
         let at = Point::new(RIGHT, track.middle);
         let word = state.sound.filter(|s| s.muted).map(|_| self.words.muted());
         if state.sound.is_some() {
-            value(f, state, at, word, volume, DIM);
+            value(f, state, at, word, volume, DIM.get());
         }
     }
 
@@ -837,7 +838,7 @@ impl Panel {
             name.clone(),
             Point::new(LEFT + ICON + ICON_GAP, middle),
             ROW_TEXT,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ));
         if sink.default {
@@ -858,7 +859,7 @@ impl Panel {
             (false, false) => FILL,
             (false, true) => BUTTON_HOVER,
         };
-        f.fill(&rounded(button, radius), fill);
+        f.fill(&rounded(button, radius), fill.get());
         let icon = Point::new(
             button.center_x() - ICON / 2.0,
             button.center_y() - ICON / 2.0,
@@ -868,7 +869,14 @@ impl Panel {
         let volume = state.shown(&Slider::Mic);
         slide(f, track, volume, muted);
         let word = muted.then(|| self.words.off());
-        value(f, state, Point::new(RIGHT, track.middle), word, volume, DIM);
+        value(
+            f,
+            state,
+            Point::new(RIGHT, track.middle),
+            word,
+            volume,
+            DIM.get(),
+        );
         if state.mixer.sources.len() < 2 {
             return;
         }
@@ -881,7 +889,7 @@ impl Panel {
                 name.clone(),
                 Point::new(rect.x + MIC_INDENT, rect.center_y()),
                 ROW_TEXT,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ));
             if source.default {
@@ -903,7 +911,7 @@ impl Panel {
                 name.clone(),
                 Point::new(track.left, name_middle),
                 APP_NAME,
-                if muted { FAINT } else { TEXT },
+                if muted { FAINT.get() } else { TEXT.get() },
                 Alignment::Left,
             ));
             let volume = state.shown(&Slider::App(app.key.clone()));
@@ -911,7 +919,14 @@ impl Panel {
             let middle = layout.app_row(i) + APP_ROW - APP_VALUE_PAD - VALUE * LINE / 2.0;
             let word = muted.then(|| self.words.muted());
             let colour = if master_muted { FAINT } else { DIM };
-            value(f, state, Point::new(RIGHT, middle), word, volume, colour);
+            value(
+                f,
+                state,
+                Point::new(RIGHT, middle),
+                word,
+                volume,
+                colour.get(),
+            );
         }
         let note = match (state.apps.is_empty(), state.more) {
             (true, _) => Some(self.words.no_application().to_owned()),
@@ -947,7 +962,13 @@ fn slide(f: &mut Frame, track: Track, volume: f32, grey: bool) {
 /// else the volume in tabular figures, in `colour`.
 fn value(f: &mut Frame, state: &State, at: Point, word: Option<&str>, volume: f32, colour: Color) {
     if let Some(word) = word {
-        f.fill_text(text(word.to_owned(), at, VALUE, FAINT, Alignment::Right));
+        f.fill_text(text(
+            word.to_owned(),
+            at,
+            VALUE,
+            FAINT.get(),
+            Alignment::Right,
+        ));
         return;
     }
     kit::figures(f, at, volume, state.zero.unwrap_or(kit::ZERO), colour);
@@ -1007,21 +1028,21 @@ fn speaker(f: &mut Frame, at: Point, muted: bool) {
         (11.0, 5.0),
         (6.0, 9.0),
     ];
-    lines(f, at, s, 2.0, colour, &cone);
+    lines(f, at, s, 2.0, colour.get(), &cone);
     if muted {
-        lines(f, at, s, 2.0, colour, &[(16.0, 9.0), (21.0, 15.0)]);
-        lines(f, at, s, 2.0, colour, &[(21.0, 9.0), (16.0, 15.0)]);
+        lines(f, at, s, 2.0, colour.get(), &[(16.0, 9.0), (21.0, 15.0)]);
+        lines(f, at, s, 2.0, colour.get(), &[(21.0, 9.0), (16.0, 15.0)]);
     } else {
         // `M15.5 8.5a5 5 0 0 1 0 7` and `M18.5 6a9 9 0 0 1 0 12`.
-        wave(f, at, s, (15.5, 8.5), 5.0, 7.0, colour);
-        wave(f, at, s, (18.5, 6.0), 9.0, 12.0, colour);
+        wave(f, at, s, (15.5, 8.5), 5.0, 7.0, colour.get());
+        wave(f, at, s, (18.5, 6.0), 9.0, 12.0, colour.get());
     }
 }
 
 fn device(f: &mut Frame, at: Point, kind: Kind) {
     let s = ICON / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let line = stroke(2.0 * s, DIM);
+    let line = stroke(2.0 * s, DIM.get());
     let rect = |f: &mut Frame, x: f32, y: f32, w: f32, h: f32, r: f32| {
         f.stroke(
             &Path::rounded_rectangle(p(x, y), Size::new(w * s, h * s), (r * s).into()),
@@ -1031,7 +1052,7 @@ fn device(f: &mut Frame, at: Point, kind: Kind) {
     match kind {
         Kind::Speaker => {
             rect(f, 3.0, 7.0, 18.0, 11.0, 2.0);
-            lines(f, at, s, 2.0, DIM, &[(7.0, 21.0), (17.0, 21.0)]);
+            lines(f, at, s, 2.0, DIM.get(), &[(7.0, 21.0), (17.0, 21.0)]);
         }
         Kind::Headphones => {
             // `M4 15v-3a8 8 0 0 1 16 0v3`.
@@ -1052,8 +1073,8 @@ fn device(f: &mut Frame, at: Point, kind: Kind) {
         }
         Kind::Screen => {
             rect(f, 2.0, 4.0, 20.0, 13.0, 2.0);
-            lines(f, at, s, 2.0, DIM, &[(8.0, 21.0), (16.0, 21.0)]);
-            lines(f, at, s, 2.0, DIM, &[(12.0, 17.0), (12.0, 21.0)]);
+            lines(f, at, s, 2.0, DIM.get(), &[(8.0, 21.0), (16.0, 21.0)]);
+            lines(f, at, s, 2.0, DIM.get(), &[(12.0, 17.0), (12.0, 21.0)]);
         }
     }
 }
@@ -1066,7 +1087,7 @@ fn check(f: &mut Frame, at: Point) {
         at,
         s,
         2.6,
-        ACCENT,
+        ACCENT.get(),
         &[(5.0, 12.5), (10.0, 17.0), (19.0, 7.0)],
     );
 }
@@ -1077,7 +1098,7 @@ fn microphone(f: &mut Frame, at: Point, muted: bool) {
     let s = ICON / 24.0;
     let colour = if muted { MIC_OFF } else { TEXT };
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let line = stroke(2.0 * s, colour);
+    let line = stroke(2.0 * s, colour.get());
     f.stroke(
         &Path::rounded_rectangle(p(9.0, 3.0), Size::new(6.0 * s, 11.0 * s), (3.0 * s).into()),
         line,
@@ -1091,9 +1112,9 @@ fn microphone(f: &mut Frame, at: Point, muted: bool) {
         });
     });
     f.stroke(&cup, line);
-    lines(f, at, s, 2.0, colour, &[(12.0, 18.0), (12.0, 21.0)]);
+    lines(f, at, s, 2.0, colour.get(), &[(12.0, 18.0), (12.0, 21.0)]);
     if muted {
-        lines(f, at, s, 2.0, colour, &[(4.0, 4.0), (20.0, 20.0)]);
+        lines(f, at, s, 2.0, colour.get(), &[(4.0, 4.0), (20.0, 20.0)]);
     }
 }
 

@@ -37,6 +37,7 @@ use iced::{
 };
 
 use super::{Shot, Words, marks};
+use crate::theme::Ink;
 use crate::{
     levels::{
         draw::{MANROPE_BOLD, TEXT, rgb},
@@ -75,18 +76,18 @@ const DRAG: f32 = 6.0;
 /// Its gap to the bar, and to the screen's bottom.
 const GAP: i32 = 8;
 
-const TOP: Color = Color::from_rgba8(22, 27, 42, 0.96);
-const BOTTOM: Color = Color::from_rgba8(14, 17, 28, 0.98);
-const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const IMAGE_RIM: Color = Color::from_rgba8(255, 255, 255, 0.18);
-const IMAGE_BACK: Color = Color::from_rgba8(0, 0, 0, 0.25);
-const STATUS_COLOUR: Color = rgb(0xA9B2C2);
-const GREEN_TINT: Color = Color::from_rgba8(108, 194, 135, 0.22);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const CLOSE_COLOUR: Color = rgb(0xC9D0DC);
-const RUNNING: Color = Color::from_rgba8(108, 194, 135, 0.7);
-const PAUSED: Color = Color::from_rgba8(255, 255, 255, 0.35);
+const TOP: Ink = Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96));
+const BOTTOM: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.98));
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const IMAGE_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.18));
+const IMAGE_BACK: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.25));
+const STATUS_COLOUR: Ink = Ink::Dark(rgb(0xA9B2C2));
+const GREEN_TINT: Ink = Ink::Accent(0.22);
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const CLOSE_COLOUR: Ink = Ink::Dark(rgb(0xC9D0DC));
+const RUNNING: Ink = Ink::Accent(0.7);
+const PAUSED: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.35));
 /// A recording's play sign: a 40 px disc of `rgba(255,255,255,0.18)`, a
 /// white triangle of 16; its length in Martian Mono 10.5 px on
 /// `rgba(0,0,0,0.6)`, 1 px by 6 px in, radius 6, 6 px from the corner.
@@ -676,7 +677,11 @@ impl View {
     fn draw_card(&self, f: &mut Frame, thumb: &Thumb, now: Instant) {
         let size = Size::new(WIDTH, HEIGHT);
         let radius = CAPTURE_THUMB_RADIUS as f32;
-        let (top, bottom) = if self.software { OPAQUE } else { (TOP, BOTTOM) };
+        let (top, bottom) = if self.software {
+            (OPAQUE.0.get(), OPAQUE.1.get())
+        } else {
+            (TOP.get(), BOTTOM.get())
+        };
         let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top)
             .add_stop(1.0, bottom);
@@ -690,13 +695,13 @@ impl View {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (radius - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
         let video = thumb.shot.video.as_ref();
         let layout = Layout::of(self.words, video.is_some());
         // The image, scaled to fit, in the middle of its place.
         let place = layout.image;
-        f.fill(&kit::rounded(place, IMAGE_RADIUS), IMAGE_BACK);
+        f.fill(&kit::rounded(place, IMAGE_RADIUS), IMAGE_BACK.get());
         let (w, h) = thumb.made.size;
         let scale = (place.width / w as f32)
             .min(place.height / h as f32)
@@ -714,7 +719,9 @@ impl View {
                 ),
                 IMAGE_RADIUS - 0.5,
             ),
-            Stroke::default().with_color(IMAGE_RIM).with_width(1.0),
+            Stroke::default()
+                .with_color(IMAGE_RIM.get())
+                .with_width(1.0),
         );
         // "Copiée · enregistrée", "Annoter", ✕; a recording's "Enregistrée ·
         // MP4" and "Ouvrir".
@@ -726,13 +733,13 @@ impl View {
             status,
             Point::new(PAD, layout.row_middle),
             STATUS,
-            STATUS_COLOUR,
+            STATUS_COLOUR.get(),
             Alignment::Left,
         ));
         let annotate = layout.annotate;
-        f.fill(&kit::rounded(annotate, BUTTON_RADIUS), GREEN_TINT);
+        f.fill(&kit::rounded(annotate, BUTTON_RADIUS), GREEN_TINT.get());
         if thumb.hover == Some(Spot::Annotate) {
-            f.fill(&kit::rounded(annotate, BUTTON_RADIUS), HOVER);
+            f.fill(&kit::rounded(annotate, BUTTON_RADIUS), HOVER.get());
         }
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
@@ -740,15 +747,15 @@ impl View {
                 button.to_owned(),
                 annotate.center(),
                 BUTTON_TEXT,
-                TEXT,
+                TEXT.get(),
                 Alignment::Center,
             ),
         ));
         let close = layout.close;
         if thumb.hover == Some(Spot::Close) {
-            f.fill(&kit::rounded(close, BUTTON_RADIUS), HOVER);
+            f.fill(&kit::rounded(close, BUTTON_RADIUS), HOVER.get());
         }
-        cross(f, close.center(), CLOSE_SIZE * 0.6, CLOSE_COLOUR);
+        cross(f, close.center(), CLOSE_SIZE * 0.6, CLOSE_COLOUR.get());
         // The countdown.
         let left = thumb.countdown.left(now);
         let full = WIDTH - 2.0 * COUNTDOWN_IN;
@@ -760,7 +767,7 @@ impl View {
             f.fill_rectangle(
                 Point::new(COUNTDOWN_IN, HEIGHT - COUNTDOWN),
                 Size::new((full * left).round(), COUNTDOWN),
-                colour,
+                colour.get(),
             );
         }
     }
@@ -774,7 +781,7 @@ fn draw_play(f: &mut Frame, shown: Rectangle, video: &super::Video) {
     let centre = Point::new(shown.x + badge.center_x(), shown.y + badge.center_y());
     f.fill_text(kit::text_in(
         MONO,
-        kit::text(said, centre, LENGTH, TEXT, Alignment::Center),
+        kit::text(said, centre, LENGTH, TEXT.get(), Alignment::Center),
     ));
 }
 

@@ -19,6 +19,7 @@ use iced::{
 };
 
 use super::{App, Doing, Focus, Message, ToastAction, style::*};
+use crate::theme::Ink;
 use crate::{
     lang::{Lang, w},
     model::Icon,
@@ -45,7 +46,7 @@ const SLIDE: Duration = Duration::from_millis(200);
 const IDENTIFY_FOR: Duration = Duration::from_secs(3);
 /// The bar's widths, logical: full from this wide.
 const FULL_FROM: i32 = 1796;
-const AMBER: Color = rgb(0xF5B44A);
+const AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
 
 /// What the page's pieces send.
 #[derive(Debug, Clone)]
@@ -1095,7 +1096,7 @@ impl App {
                         "Where each screen sits, its resolution, refresh rate and scale; the screen the bar and new windows go to.",
                     )),
                     13.5,
-                    DIM,
+                    DIM.get(),
                 )
                 .line_height(1.5),
             ]
@@ -1108,8 +1109,8 @@ impl App {
         let identify = container(
             button(
                 row![
-                    icon(Icon::Screens, 13.0, DIM),
-                    t(self.say(w("Identifier", "Identify")), 12.0, TEXT).font(SEMIBOLD),
+                    icon(Icon::Screens, 13.0, DIM.get()),
+                    t(self.say(w("Identifier", "Identify")), 12.0, TEXT.get()).font(SEMIBOLD),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
@@ -1120,17 +1121,17 @@ impl App {
             .style(move |_, status| {
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
-                    background: Some(Background::Color(rgba(
+                    background: Some(Background::Color(crate::theme::ink(rgba(
                         255,
                         255,
                         255,
                         if hovered { 0.09 } else { 0.06 },
-                    ))),
-                    text_color: TEXT,
+                    )))),
+                    text_color: TEXT.get(),
                     border: if identify_focus {
                         ring(7.0)
                     } else {
-                        border(7.0, 1.0, RIM_12)
+                        border(7.0, 1.0, RIM_12.get())
                     },
                     ..button::Style::default()
                 }
@@ -1167,7 +1168,7 @@ impl App {
         )
         .id("drawing".to_owned());
         let arrangement = column![
-            container(drawing).style(boxed(rgba(0, 0, 0, 0.20), 8.0, None)),
+            container(drawing).style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.20)), 8.0, None)),
             container(
                 t(
                     self.say(w(
@@ -1175,7 +1176,7 @@ impl App {
                         "Drag a screen against the other; click one to show its settings below. The light strip is the bar.",
                     )),
                     12.0,
-                    FAINT,
+                    FAINT.get(),
                 ),
             )
             .padding([2, 6]),
@@ -1497,7 +1498,7 @@ impl App {
             .width(20)
             .height(20)
             .center(20)
-            .style(boxed(ACCENT, 10.0, None)),
+            .style(boxed(ACCENT.get(), 10.0, None)),
             label_owned(screen.title(lang).to_uppercase()),
         ]
         .spacing(8)
@@ -1505,9 +1506,13 @@ impl App {
         .height(28);
         if screen.primary {
             head = head.push(
-                container(t(self.say(w("Principal", "Primary")), 11.0, BLUE).font(BOLD))
+                container(t(self.say(w("Principal", "Primary")), 11.0, BLUE.get()).font(BOLD))
                     .padding([2, 8])
-                    .style(boxed(rgba(143, 179, 255, 0.12), 10.0, None)),
+                    .style(boxed(
+                        crate::theme::ink(rgba(143, 179, 255, 0.12)),
+                        10.0,
+                        None,
+                    )),
             );
         }
         let mut facts = vec![screen.name.clone()];
@@ -1765,18 +1770,23 @@ impl App {
         } else {
             1.0
         };
-        let mut title = row![text(name).size(14).font(SEMIBOLD).color(fade(TEXT, alpha))]
-            .spacing(8)
-            .align_y(Alignment::Center);
+        let mut title = row![
+            text(name)
+                .size(14)
+                .font(SEMIBOLD)
+                .color(fade(TEXT.get(), alpha))
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
         if let Some(chip) = chip {
             title = title.push(chip);
         }
         let mut words = column![title].spacing(2).width(Length::Fill);
         if let Some(line) = line.filter(|l| !l.is_empty()) {
-            words = words.push(t(line, 12.5, fade(DIM, alpha)));
+            words = words.push(t(line, 12.5, fade(DIM.get(), alpha)));
         }
         if let Some(warn) = warn {
-            words = words.push(t(warn, 12.5, PEACH));
+            words = words.push(t(warn, 12.5, PEACH.get()));
         }
         let lit = self.lit(id);
         container(
@@ -1794,8 +1804,10 @@ impl App {
             left: 16.0,
         })
         .style(move |_: &Theme| container::Style {
-            background: (lit > 0.0).then_some(Background::Color(rgba(108, 194, 135, 0.20 * lit))),
-            border: border(11.0, 1.5, rgba(108, 194, 135, 0.85 * lit)),
+            background: (lit > 0.0).then_some(Background::Color(
+                crate::theme::Ink::Accent(0.20 * lit).get(),
+            )),
+            border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
             ..container::Style::default()
         })
         .id(format!("row:{id}"))
@@ -1819,7 +1831,7 @@ impl App {
         for (i, (choice, label)) in self.screens_choices(row).into_iter().enumerate() {
             let chosen = current.as_ref() == Some(&choice);
             let check: El<'_> = if chosen {
-                icon(Icon::Check, 13.0, fade(ACCENT, opened))
+                icon(Icon::Check, 13.0, fade(ACCENT.get(), opened))
             } else {
                 Space::new().width(13).into()
             };
@@ -1828,7 +1840,7 @@ impl App {
                     button(
                         row![
                             container(check).width(18).center_x(18),
-                            t(label, 13.5, fade(TEXT, opened)).font(if chosen {
+                            t(label, 13.5, fade(TEXT.get(), opened)).font(if chosen {
                                 SEMIBOLD
                             } else {
                                 MANROPE
@@ -1843,8 +1855,9 @@ impl App {
                     .padding([0, 8])
                     .on_press(Message::Screens(Msg::Choose(row, choice)))
                     .style(flat(
-                        (i == self.screens.menu_index).then_some(rgba(255, 255, 255, 0.07)),
-                        rgba(255, 255, 255, 0.07),
+                        (i == self.screens.menu_index)
+                            .then_some(crate::theme::ink(rgba(255, 255, 255, 0.07))),
+                        crate::theme::ink(rgba(255, 255, 255, 0.07)),
                         7.0,
                         false,
                     )),
@@ -1856,8 +1869,8 @@ impl App {
             .width(width)
             .padding(5)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(fade(MENU, opened))),
-                border: border(10.0, 1.0, fade(RIM_12, opened)),
+                background: Some(Background::Color(fade(MENU.get(), opened))),
+                border: border(10.0, 1.0, fade(RIM_12.get(), opened)),
                 shadow: Shadow {
                     color: rgba(0, 0, 0, 0.45 * opened),
                     ..shadow()
@@ -1938,12 +1951,16 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(
-                button(t(self.say(w("Revenir", "Revert")), 13.0, TEXT).font(SEMIBOLD))
+                button(t(self.say(w("Revenir", "Revert")), 13.0, TEXT.get()).font(SEMIBOLD))
                     .height(32)
                     .padding([7, 14])
                     .on_press(Message::Screens(Msg::Revert))
                     .style(move |_, status| {
-                        let mut style = solid(rgba(255, 255, 255, 0.08), TEXT, status);
+                        let mut style = solid(
+                            crate::theme::ink(rgba(255, 255, 255, 0.08)),
+                            TEXT.get(),
+                            status,
+                        );
                         if !on_keep {
                             style.border = ring_border(8.0);
                         }
@@ -1952,14 +1969,15 @@ impl App {
             )
             .id("dialog:revert".to_owned()),
             container(
-                button(t(self.say(w("Garder", "Keep")), 13.0, DEEP).font(BOLD))
+                button(t(self.say(w("Garder", "Keep")), 13.0, DEEP.get()).font(BOLD))
                     .height(32)
                     .padding([7, 16])
                     .on_press(Message::Screens(Msg::Keep))
                     .style(move |_, status| {
-                        let mut style = solid(ACCENT, DEEP, status);
+                        let mut style = solid(ACCENT.get(), DEEP.get(), status);
                         if on_keep {
-                            style.border = border(8.0, 2.0, rgba(255, 255, 255, 0.85));
+                            style.border =
+                                border(8.0, 2.0, crate::theme::ink(rgba(255, 255, 255, 0.85)));
                         }
                         style
                     }),
@@ -1973,14 +1991,14 @@ impl App {
                     ring,
                     column![
                         text(question).size(17).font(BOLD).color(TEXT),
-                        t(body, 13.0, SOFT).line_height(1.5),
+                        t(body, 13.0, SOFT.get()).line_height(1.5),
                         t(
                             self.say(w(
                                 "Échap revient aussitôt. Si la fenêtre se ferme, l’écran revient aussi.",
                                 "Esc goes back at once. If the window closes, the screen goes back too.",
                             )),
                             12.0,
-                            FAINT,
+                            FAINT.get(),
                         ),
                     ]
                     .spacing(6)
@@ -1994,8 +2012,8 @@ impl App {
         .width(440)
         .padding(20)
         .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(MENU)),
-            border: border(14.0, 1.0, RIM_12),
+            background: Some(Background::Color(MENU.get())),
+            border: border(14.0, 1.0, RIM_12.get()),
             shadow: shadow(),
             ..container::Style::default()
         })
@@ -2004,7 +2022,7 @@ impl App {
             stack![
                 mouse_area(
                     container(Space::new().width(Length::Fill).height(Length::Fill)).style(boxed(
-                        rgba(0, 0, 0, 0.58),
+                        crate::theme::ink(rgba(0, 0, 0, 0.58)),
                         0.0,
                         None
                     ))
@@ -2240,7 +2258,7 @@ impl canvas::Program<Message> for Drawing {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         // A dot every 14 px.
-        let dot = rgba(255, 255, 255, 0.07);
+        let dot = crate::theme::ink(rgba(255, 255, 255, 0.07));
         let mut y = 7.0;
         while y < bounds.height {
             let mut x = 7.0;
@@ -2254,7 +2272,7 @@ impl canvas::Program<Message> for Drawing {
             frame.fill_text(canvas::Text {
                 content: empty.clone(),
                 position: Point::new(bounds.width / 2.0, bounds.height / 2.0),
-                color: FAINT,
+                color: FAINT.get(),
                 size: 12.5.into(),
                 font: MANROPE,
                 align_x: iced::alignment::Horizontal::Center.into(),
@@ -2272,7 +2290,9 @@ impl canvas::Program<Message> for Drawing {
                         segments: &[5.0, 4.0],
                         offset: 0,
                     },
-                    ..canvas::Stroke::default().with_color(ACCENT).with_width(2.0)
+                    ..canvas::Stroke::default()
+                        .with_color(ACCENT.get())
+                        .with_width(2.0)
                 },
             );
         }
@@ -2288,7 +2308,7 @@ impl canvas::Program<Message> for Drawing {
                     r.size(),
                     6.0.into(),
                 );
-                frame.fill(&shadow, rgba(0, 0, 0, 0.35));
+                frame.fill(&shadow, crate::theme::ink(rgba(0, 0, 0, 0.35)));
             }
             let alpha = if d.lifted { 0.88 } else { 1.0 };
             match (&d.dashed, d.selected) {
@@ -2302,46 +2322,52 @@ impl canvas::Program<Message> for Drawing {
                             },
                             ..canvas::Stroke::default()
                                 .with_color(if selected {
-                                    ACCENT
+                                    ACCENT.get()
                                 } else {
-                                    rgba(169, 178, 194, 0.55)
+                                    crate::theme::ink(rgba(169, 178, 194, 0.55))
                                 })
                                 .with_width(1.5)
                         },
                     );
                 }
                 (None, true) => {
-                    frame.fill(&path, fade(rgba(108, 194, 135, 0.13), alpha));
+                    frame.fill(&path, fade(crate::theme::Ink::Accent(0.13).get(), alpha));
                     frame.stroke(
                         &path,
                         canvas::Stroke::default()
-                            .with_color(fade(ACCENT, alpha))
+                            .with_color(fade(ACCENT.get(), alpha))
                             .with_width(2.0),
                     );
                 }
                 (None, false) => {
-                    frame.fill(&path, fade(rgba(143, 179, 255, 0.10), alpha));
+                    frame.fill(
+                        &path,
+                        fade(crate::theme::ink(rgba(143, 179, 255, 0.10)), alpha),
+                    );
                     frame.stroke(
                         &path,
                         canvas::Stroke::default()
-                            .with_color(fade(rgba(143, 179, 255, 0.50), alpha))
+                            .with_color(fade(crate::theme::ink(rgba(143, 179, 255, 0.50)), alpha))
                             .with_width(1.5),
                     );
                 }
             }
             if let Some(bar) = d.bar {
                 let strip = canvas::Path::rounded_rectangle(bar.position(), bar.size(), 2.0.into());
-                frame.fill(&strip, fade(rgba(238, 241, 246, 0.24), alpha));
+                frame.fill(
+                    &strip,
+                    fade(crate::theme::ink(rgba(238, 241, 246, 0.24)), alpha),
+                );
             }
             // The number's disc, the name, the mode.
             let disc = Point::new(r.x + 8.0 + 9.0, r.y + 8.0 + 9.0);
             let (fill, ink) = if d.selected {
-                (ACCENT, DEEP)
+                (ACCENT.get(), DEEP)
             } else {
-                (rgba(143, 179, 255, 0.85), DEEP)
+                (crate::theme::ink(rgba(143, 179, 255, 0.85)), DEEP)
             };
             let (fill, ink) = if d.dashed.is_some() && !d.selected {
-                (rgba(169, 178, 194, 0.55), DEEP)
+                (crate::theme::ink(rgba(169, 178, 194, 0.55)), DEEP)
             } else {
                 (fill, ink)
             };
@@ -2349,7 +2375,7 @@ impl canvas::Program<Message> for Drawing {
             frame.fill_text(canvas::Text {
                 content: d.number.to_string(),
                 position: disc,
-                color: ink,
+                color: ink.get(),
                 size: 10.5.into(),
                 font: BOLD,
                 align_x: iced::alignment::Horizontal::Center.into(),
@@ -2359,7 +2385,7 @@ impl canvas::Program<Message> for Drawing {
             frame.fill_text(canvas::Text {
                 content: d.title.clone(),
                 position: Point::new(r.x + 33.0, r.y + 10.0),
-                color: fade(TEXT, alpha),
+                color: fade(TEXT.get(), alpha),
                 size: 12.5.into(),
                 font: BOLD,
                 max_width: (r.width - 41.0).max(0.0),
@@ -2369,7 +2395,7 @@ impl canvas::Program<Message> for Drawing {
             frame.fill_text(canvas::Text {
                 content: under,
                 position: Point::new(r.x + 10.0, r.y + 32.0),
-                color: fade(DIM, alpha),
+                color: fade(DIM.get(), alpha),
                 size: if d.dashed.is_some() {
                     11.5.into()
                 } else {
@@ -2383,7 +2409,7 @@ impl canvas::Program<Message> for Drawing {
                 frame.fill_text(canvas::Text {
                     content: d.number.to_string(),
                     position: Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0 + 6.0),
-                    color: TEXT,
+                    color: TEXT.get(),
                     size: 40.0.into(),
                     font: BOLD,
                     align_x: iced::alignment::Horizontal::Center.into(),
@@ -2434,7 +2460,7 @@ impl canvas::Program<Message> for Countdown {
         frame.stroke(
             &canvas::Path::circle(centre, radius),
             canvas::Stroke::default()
-                .with_color(rgba(255, 255, 255, 0.10))
+                .with_color(crate::theme::ink(rgba(255, 255, 255, 0.10)))
                 .with_width(4.0),
         );
         let share = self.left as f32 / self.of.max(1) as f32;
@@ -2451,7 +2477,7 @@ impl canvas::Program<Message> for Countdown {
             frame.stroke(
                 &arc,
                 canvas::Stroke::default()
-                    .with_color(ACCENT)
+                    .with_color(ACCENT.get())
                     .with_width(4.0)
                     .with_line_cap(canvas::LineCap::Round),
             );
@@ -2459,7 +2485,7 @@ impl canvas::Program<Message> for Countdown {
         frame.fill_text(canvas::Text {
             content: self.left.to_string(),
             position: centre,
-            color: TEXT,
+            color: TEXT.get(),
             size: 14.0.into(),
             font: MONO,
             align_x: iced::alignment::Horizontal::Center.into(),
@@ -2494,15 +2520,17 @@ fn label_owned<'a>(words: String) -> El<'a> {
 fn card_box(body: El<'_>) -> El<'_> {
     container(body)
         .width(Length::Fill)
-        .style(boxed(CARD, 12.0, Some((1.0, CARD_RIM))))
+        .style(boxed(CARD.get(), 12.0, Some((1.0, CARD_RIM.get()))))
         .into()
 }
 
 /// The 1 px line between two rows, 16 px in.
 fn rule<'a>() -> El<'a> {
-    container(container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE, 0.0, None)))
-        .padding([0, 16])
-        .into()
+    container(
+        container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE.get(), 0.0, None)),
+    )
+    .padding([0, 16])
+    .into()
 }
 
 fn divided(divider: bool, row: El<'_>) -> El<'_> {
@@ -2511,7 +2539,11 @@ fn divided(divider: bool, row: El<'_>) -> El<'_> {
     }
     column![
         container(
-            container(Space::new().width(Length::Fill).height(1)).style(boxed(LINE, 0.0, None))
+            container(Space::new().width(Length::Fill).height(1)).style(boxed(
+                LINE.get(),
+                0.0,
+                None
+            ))
         )
         .padding([0, 16]),
         row,
@@ -2528,7 +2560,11 @@ fn later<'a>(lang: Lang) -> El<'a> {
             .color(AMBER),
     )
     .padding([1, 7])
-    .style(boxed(rgba(245, 180, 74, 0.12), 8.0, None))
+    .style(boxed(
+        crate::theme::ink(rgba(245, 180, 74, 0.12)),
+        8.0,
+        None,
+    ))
     .into()
 }
 
@@ -2548,9 +2584,9 @@ fn note<'a>(head: String, body: String, id: String) -> El<'a> {
     .width(Length::Fill)
     .padding([12, 14])
     .style(boxed(
-        rgba(143, 179, 255, 0.08),
+        crate::theme::ink(rgba(143, 179, 255, 0.08)),
         10.0,
-        Some((1.0, rgba(143, 179, 255, 0.22))),
+        Some((1.0, crate::theme::ink(rgba(143, 179, 255, 0.22)))),
     ))
     .id(id)
     .into()
@@ -2560,9 +2596,9 @@ fn switch<'a>(on: bool, inert: bool, focused: bool, moved: f32, press: Option<Me
     let alpha = if inert { INERT } else { 1.0 };
     let at = if on { moved } else { 1.0 - moved };
     let track = if on {
-        ACCENT
+        ACCENT.get()
     } else {
-        rgba(255, 255, 255, 0.18)
+        crate::theme::Ink::Token(|t| t.switch_off).get()
     };
     let knob =
         container(Space::new().width(18).height(18)).style(move |_: &Theme| container::Style {
@@ -2582,7 +2618,7 @@ fn switch<'a>(on: bool, inert: bool, focused: bool, moved: f32, press: Option<Me
             .padding(0)
             .style(move |_, _| button::Style {
                 background: Some(Background::Color(fade(track, alpha))),
-                text_color: TEXT,
+                text_color: TEXT.get(),
                 border: if focused {
                     ring(11.0)
                 } else {
@@ -2610,9 +2646,9 @@ fn menu_button<'a>(
             text(said)
                 .size(13.5)
                 .font(SEMIBOLD)
-                .color(fade(TEXT, alpha)),
+                .color(fade(TEXT.get(), alpha)),
             Space::new().width(Length::Fill),
-            icon(Icon::Chevron, 12.0, fade(DIM, alpha)),
+            icon(Icon::Chevron, 12.0, fade(DIM.get(), alpha)),
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -2625,14 +2661,19 @@ fn menu_button<'a>(
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
             background: Some(Background::Color(fade(
-                rgba(255, 255, 255, if hovered || open { 0.09 } else { 0.06 }),
+                crate::theme::ink(rgba(
+                    255,
+                    255,
+                    255,
+                    if hovered || open { 0.09 } else { 0.06 },
+                )),
                 alpha,
             ))),
-            text_color: TEXT,
+            text_color: TEXT.get(),
             border: if focused {
                 ring(8.0)
             } else {
-                border(8.0, 1.0, fade(RIM_12, alpha))
+                border(8.0, 1.0, fade(RIM_12.get(), alpha))
             },
             ..button::Style::default()
         }

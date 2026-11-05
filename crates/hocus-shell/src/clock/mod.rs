@@ -37,6 +37,8 @@ use iced::{
     window,
 };
 
+use crate::theme::Ink;
+
 use self::{
     motion::{Pivot, Pose},
     time::{Lang, Shown, Wall},
@@ -57,8 +59,8 @@ pub const FONTS: [&[u8]; 5] = [
 const MANROPE: Font = Font::with_name("Manrope");
 
 /// `text.dim` and `text.faint` (bar.md §13): the date and the seconds.
-const DIM: Color = Color::from_rgb8(0xA9, 0xB2, 0xC2);
-const FAINT: Color = Color::from_rgb8(0x8C, 0x96, 0xA8);
+const DIM: Ink = Ink::Dark(Color::from_rgb8(0xA9, 0xB2, 0xC2));
+const FAINT: Ink = Ink::Dark(Color::from_rgb8(0x8C, 0x96, 0xA8));
 
 /// The clock's surface starts this far below the bar's top: the mini
 /// form's padding (§5). The full form's 14 px are 2 px further, inside.
@@ -372,7 +374,7 @@ impl Clock {
                     font: self.style.light(),
                     size: SECONDS,
                     line: SECONDS,
-                    colour: faded(FAINT, alpha),
+                    colour: faded(FAINT.get(), alpha),
                 };
                 draw.glyph(cell, glyph, ch, Pose::REST);
                 x += small.zero;
@@ -385,7 +387,7 @@ impl Clock {
                 content: shown.date.clone(),
                 position: Point::new(centre, top),
                 max_width: f32::INFINITY,
-                color: faded(DIM, alpha),
+                color: faded(DIM.get(), alpha),
                 size: Pixels(DATE),
                 line_height: LineHeight::Relative(DATE_LINE),
                 font: MANROPE,

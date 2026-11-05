@@ -26,6 +26,7 @@ use super::{
     style::*,
     view::{El, card_box, divided, icon, label, t},
 };
+use crate::theme::Ink;
 use crate::{
     lang::{Lang, w},
     model::{Icon, SectionId, Setting, Value, settings_of},
@@ -194,7 +195,7 @@ impl App {
         let controls = self.controls();
         let link = button(
             row![
-                icon(Icon::Arrow, 14.0, FAINT),
+                icon(Icon::Arrow, 14.0, FAINT.get()),
                 t(
                     w(
                         "Le thème et la taille du curseur se règlent dans",
@@ -202,12 +203,12 @@ impl App {
                     )
                     .get(lang),
                     13.0,
-                    FAINT
+                    FAINT.get()
                 ),
                 t(
                     w("Apparence et langue ›", "Appearance and language ›").get(lang),
                     13.0,
-                    MINT
+                    MINT.get()
                 )
                 .font(SEMIBOLD),
             ]
@@ -236,16 +237,16 @@ impl App {
                     "Off: a mouse is plugged in",
                 ))
                 .to_owned(),
-                AMBER,
-                AMBER,
+                AMBER.get(),
+                AMBER.get(),
             ))
         } else if pad.is_empty() {
             self.mouse.devices.as_ref().map(|_| {
                 device_tag(
                     Icon::Mouse,
                     self.say(w("Aucun", "None")).to_owned(),
-                    FAINT,
-                    FAINT,
+                    FAINT.get(),
+                    FAINT.get(),
                 )
             })
         } else {
@@ -253,7 +254,7 @@ impl App {
                 .devices
                 .as_deref()
                 .and_then(|d| model::named(DeviceKind::Touchpad, d, lang))
-                .map(|name| device_tag(Icon::Mouse, name, SOFT, ACCENT))
+                .map(|name| device_tag(Icon::Mouse, name, SOFT.get(), ACCENT.get()))
         };
         page = page.push(
             self.mouse_group(
@@ -274,8 +275,8 @@ impl App {
                 device_tag(
                     Icon::Mouse,
                     self.say(w("Aucune", "None")).to_owned(),
-                    FAINT,
-                    FAINT,
+                    FAINT.get(),
+                    FAINT.get(),
                 )
             })
         } else {
@@ -283,7 +284,7 @@ impl App {
                 .devices
                 .as_deref()
                 .and_then(|d| model::named(DeviceKind::Pointer, d, lang))
-                .map(|name| device_tag(Icon::Mouse, name, SOFT, ACCENT))
+                .map(|name| device_tag(Icon::Mouse, name, SOFT.get(), ACCENT.get()))
         };
         page = page.push(self.mouse_group(
             "mouse",
@@ -333,12 +334,12 @@ impl App {
         }
         let body: El<'_> = match empty {
             Some((title, more)) => {
-                let mut words = column![t(title, 14.0, TEXT).font(SEMIBOLD)].spacing(2);
+                let mut words = column![t(title, 14.0, TEXT.get()).font(SEMIBOLD)].spacing(2);
                 if let Some(more) = more {
-                    words = words.push(t(more, 12.5, DIM));
+                    words = words.push(t(more, 12.5, DIM.get()));
                 }
                 container(
-                    row![icon(Icon::Mouse, 20.0, FAINT), words]
+                    row![icon(Icon::Mouse, 20.0, FAINT.get()), words]
                         .spacing(12)
                         .align_y(Alignment::Center),
                 )
@@ -347,9 +348,9 @@ impl App {
                 .height(Length::Shrink)
                 .center_y(54)
                 .style(boxed(
-                    rgba(255, 255, 255, 0.02),
+                    crate::theme::ink(rgba(255, 255, 255, 0.02)),
                     12.0,
-                    Some((1.0, rgba(255, 255, 255, 0.12))),
+                    Some((1.0, crate::theme::ink(rgba(255, 255, 255, 0.12)))),
                 ))
                 .id(format!("empty:{id}"))
                 .into()
@@ -465,7 +466,7 @@ impl App {
         let head = row![
             label(w("ESSAYER ICI", "TRY IT HERE").get(lang)),
             Space::new().width(Length::Fill),
-            container(t(self.recognised(), 12.0, FAINT)).id("try:recognised".to_owned()),
+            container(t(self.recognised(), 12.0, FAINT.get())).id("try:recognised".to_owned()),
         ]
         .align_y(Alignment::Center)
         .height(28);
@@ -481,7 +482,7 @@ impl App {
                                 Lang::English => format!("Line {n} of the list"),
                             },
                             13.0,
-                            SOFT,
+                            SOFT.get(),
                         ),
                     ]
                     .spacing(10)
@@ -501,7 +502,7 @@ impl App {
                 .style(super::view::thin),
         )
         .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(rgba(0, 0, 0, 0.20))),
+            background: Some(Background::Color(crate::theme::ink(rgba(0, 0, 0, 0.20)))),
             border: if list_ring {
                 ring(9.0)
             } else {
@@ -513,9 +514,9 @@ impl App {
             .on_enter(Message::Mouse(Msg::Over(true)))
             .on_exit(Message::Mouse(Msg::Over(false)));
         let scroll = column![
-            t(w("Fais défiler", "Scroll").get(lang), 12.5, DIM).font(SEMIBOLD),
+            t(w("Fais défiler", "Scroll").get(lang), 12.5, DIM.get()).font(SEMIBOLD),
             container(list).id("try:list".to_owned()),
-            container(t(self.direction(), 12.0, FAINT)).id("try:direction".to_owned()),
+            container(t(self.direction(), 12.0, FAINT.get())).id("try:direction".to_owned()),
         ]
         .spacing(8)
         .width(Length::FillPortion(1));
@@ -524,11 +525,15 @@ impl App {
         let dot =
             container(Space::new().width(42).height(42)).style(move |_: &Theme| container::Style {
                 background: Some(Background::Color(mix(
-                    rgba(255, 255, 255, 0.10),
-                    ACCENT,
+                    crate::theme::ink(rgba(255, 255, 255, 0.10)),
+                    ACCENT.get(),
                     lit,
                 ))),
-                border: border(21.0 + 8.0 * lit, 8.0 * lit, rgba(108, 194, 135, 0.22 * lit)),
+                border: border(
+                    21.0 + 8.0 * lit,
+                    8.0 * lit,
+                    crate::theme::Ink::Accent(0.22 * lit).get(),
+                ),
                 ..container::Style::default()
             });
         let target = container(dot)
@@ -536,12 +541,14 @@ impl App {
             .height(144)
             .center(Length::Fill)
             .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(rgba(255, 255, 255, 0.02))),
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    255, 255, 255, 0.02,
+                )))),
                 // iced draws no dashed rim: a faint solid one.
                 border: if target_ring {
                     ring(9.0)
                 } else {
-                    border(9.0, 1.0, rgba(255, 255, 255, 0.14))
+                    border(9.0, 1.0, crate::theme::ink(rgba(255, 255, 255, 0.14)))
                 },
                 ..container::Style::default()
             });
@@ -551,9 +558,9 @@ impl App {
             .on_right_press(Message::Mouse(Msg::Press(Press::Right)))
             .on_middle_press(Message::Mouse(Msg::Press(Press::Middle)));
         let click = column![
-            t(w("Clique", "Click").get(lang), 12.5, DIM).font(SEMIBOLD),
+            t(w("Clique", "Click").get(lang), 12.5, DIM.get()).font(SEMIBOLD),
             container(target).id("try:target".to_owned()),
-            container(t(self.pressed(), 12.0, FAINT)).id("try:pressed".to_owned()),
+            container(t(self.pressed(), 12.0, FAINT.get())).id("try:pressed".to_owned()),
         ]
         .spacing(8)
         .width(Length::FillPortion(1));
@@ -572,7 +579,7 @@ impl App {
                 )
                 .get(lang),
                 12.0,
-                FAINT,
+                FAINT.get(),
             ),
         ]
         .spacing(8)
@@ -604,17 +611,17 @@ impl App {
             (middle, knob)
         };
         let track = container(Space::new().width(SPEED_WIDTH).height(6)).style(boxed(
-            fade(rgba(255, 255, 255, 0.12), alpha),
+            fade(crate::theme::ink(rgba(255, 255, 255, 0.12)), alpha),
             3.0,
             None,
         ));
         let fill = container(Space::new().width((to - from).max(0.0)).height(6)).style(boxed(
-            fade(ACCENT, alpha),
+            fade(ACCENT.get(), alpha),
             3.0,
             None,
         ));
         let tick = container(Space::new().width(2).height(14)).style(boxed(
-            fade(rgba(255, 255, 255, 0.35), alpha),
+            fade(crate::theme::ink(rgba(255, 255, 255, 0.35)), alpha),
             1.0,
             None,
         ));
@@ -641,7 +648,7 @@ impl App {
                 shape: slider::HandleShape::Circle { radius: KNOB },
                 background: Background::Color(fade(Color::WHITE, alpha)),
                 border_width: if focused { 3.0 } else { 0.0 },
-                border_color: ACCENT,
+                border_color: ACCENT.get(),
             },
         });
         let drawn = stack![
@@ -654,9 +661,13 @@ impl App {
         .height(16);
         let lang = self.lang;
         row![
-            t(w("Lente", "Slow").get(lang), 11.5, fade(FAINT, alpha)),
+            t(w("Lente", "Slow").get(lang), 11.5, fade(FAINT.get(), alpha)),
             drawn,
-            t(w("Rapide", "Fast").get(lang), 11.5, fade(FAINT, alpha)),
+            t(
+                w("Rapide", "Fast").get(lang),
+                11.5,
+                fade(FAINT.get(), alpha)
+            ),
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -706,7 +717,7 @@ impl App {
 pub const TRY_LIST: &str = "try-list";
 
 /// The amber of a touchpad turned off.
-const AMBER: Color = rgb(0xF5B44A);
+const AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
 
 fn model_setting(id: &str) -> Option<&'static Setting> {
     crate::model::setting(id)

@@ -26,6 +26,7 @@ use super::{
     Event as Seen, Pressed, event,
     kit::{self, Input, MANROPE_SEMIBOLD, Pointer, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, ring},
     meeting::{
@@ -56,10 +57,10 @@ const JOIN_ICON: f32 = 16.0;
 const JOIN_ICON_GAP: f32 = 7.0;
 const CALENDAR: f32 = 30.0;
 const CALENDAR_RADIUS: f32 = 8.0;
-const CALENDAR_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const CALENDAR_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const JOIN_HOVER: Color = Color::from_rgb8(0x6E, 0x9B, 0xF2);
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const CALENDAR_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const CALENDAR_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const JOIN_HOVER: Ink = Ink::Dark(Color::from_rgb8(0x6E, 0x9B, 0xF2));
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const THEN_GAP: f32 = 7.0;
 const THEN_TIME: f32 = 11.0;
 
@@ -250,7 +251,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     line.clone(),
                     Point::new(x, *middle),
                     TITLE,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ),
             ));
@@ -263,7 +264,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 times.clone(),
                 Point::new(x, layout.times),
                 TIMES,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ),
         ));
@@ -272,7 +273,7 @@ impl<Message> canvas::Program<Message> for Panel {
             " · ".to_owned(),
             Point::new(at, layout.times),
             DETAIL,
-            DIM,
+            DIM.get(),
             Alignment::Left,
         ));
         at += kit::measure(" · ", DETAIL, MANROPE);
@@ -290,9 +291,9 @@ impl<Message> canvas::Program<Message> for Panel {
         if let (Some(middle), Some((said, call))) = (layout.place, where_of(&card)) {
             let icon = Rectangle::new(Point::new(x, middle - ICON / 2.0), Size::new(ICON, ICON));
             if call {
-                camera(f, icon, FAINT);
+                camera(f, icon, FAINT.get());
             } else {
-                pin(f, icon, FAINT);
+                pin(f, icon, FAINT.get());
             }
             let tx = x + ICON + ICON_GAP;
             let said = kit::elide(&said, left + room - tx, |t| {
@@ -302,7 +303,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 said,
                 Point::new(tx, middle),
                 DETAIL,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ));
         }
@@ -311,7 +312,7 @@ impl<Message> canvas::Program<Message> for Panel {
             match target {
                 Target::Join => {
                     let fill = if hover { JOIN_HOVER } else { JOIN_BLUE };
-                    f.fill(&kit::rounded(*rect, JOIN_RADIUS), fill);
+                    f.fill(&kit::rounded(*rect, JOIN_RADIUS), fill.get());
                     let word = self.words.join();
                     let wide =
                         JOIN_ICON + JOIN_ICON_GAP + kit::measure(word, JOIN_TEXT, MANROPE_BOLD);
@@ -340,14 +341,14 @@ impl<Message> canvas::Program<Message> for Panel {
                 }
                 Target::Calendar => {
                     let fill = if hover { CALENDAR_HOVER } else { CALENDAR_FILL };
-                    f.fill(&kit::rounded(*rect, CALENDAR_RADIUS), fill);
+                    f.fill(&kit::rounded(*rect, CALENDAR_RADIUS), fill.get());
                     f.fill_text(text_in(
                         MANROPE_SEMIBOLD,
                         text(
                             self.words.show_in_calendar().to_owned(),
                             rect.center(),
                             DETAIL,
-                            DIM,
+                            DIM.get(),
                             Alignment::Center,
                         ),
                     ));
@@ -358,7 +359,7 @@ impl<Message> canvas::Program<Message> for Panel {
             }
         }
         if let (Some((rule, middle)), Some((time, title))) = (layout.then, &card.then) {
-            f.fill_rectangle(Point::new(left, rule), Size::new(room, 1.0), RULE);
+            f.fill_rectangle(Point::new(left, rule), Size::new(room, 1.0), RULE.get());
             let mut at = spaced(f, self.words.then(), left, middle) + THEN_GAP;
             f.fill_text(text_in(
                 MONO,
@@ -366,7 +367,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     time.clone(),
                     Point::new(at, middle),
                     THEN_TIME,
-                    DIM,
+                    DIM.get(),
                     Alignment::Left,
                 ),
             ));
@@ -378,7 +379,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 title,
                 Point::new(at, middle),
                 DETAIL,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ));
         }
@@ -407,7 +408,7 @@ fn spaced(f: &mut Frame, word: &str, x: f32, middle: f32) -> f32 {
                 ch.clone(),
                 Point::new(at, middle),
                 LABEL,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ),
         ));

@@ -266,7 +266,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.desktop_title(usize::from(shown.index) + 1),
                 Point::new(LEFT, HEADER_MIDDLE),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -275,7 +275,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 count,
                 Point::new(RIGHT, HEADER_MIDDLE),
                 COUNT,
-                FAINT,
+                FAINT.get(),
                 Alignment::Right,
             ));
         }
@@ -284,7 +284,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.no_window().to_owned(),
                 Point::new(LEFT, CONTENT_TOP + EMPTY_PAD + EMPTY * LINE / 2.0),
                 EMPTY,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ));
         }
@@ -299,7 +299,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 continue;
             }
             if state.pointer.hover == Some(row.id) {
-                rows.fill(&kit::rounded(rect, SMALL_RADIUS), FILL);
+                rows.fill(&kit::rounded(rect, SMALL_RADIUS), FILL.get());
             }
             let icon = Rectangle::new(
                 Point::new(rect.x + ROW_PAD, rect.center_y() - ICON / 2.0),
@@ -330,7 +330,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     title.clone(),
                     Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
                     NAME,
-                    colour,
+                    colour.get(),
                     Alignment::Left,
                 ),
             );

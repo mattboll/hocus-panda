@@ -774,17 +774,50 @@ polled from the loop.
 
 ## 13. Theme tokens
 
-| Token | Dark theme value |
-|---|---|
-| `bar.bg` | `linear(rgba(22,27,42,0.70) → rgba(14,17,28,0.78))`, blur 26 px, saturation 1.35 |
-| `bar.border` | `rgba(255,255,255,0.10)` |
-| `text` / `text.dim` / `text.faint` | `#EEF1F6` / `#A9B2C2` / `#8C96A8` |
-| `accent` | `#6CC287` (the pandas' green) |
-| `state.wait` / `state.meeting` / `state.stuck` | `#F5B44A` / `#8FB3FF` / `#F2945B` |
-| `gauge.sound` / `gauge.light` / `gauge.battery` | `#5B8DEF→#8FB3FF` / `#E8B44E→#FFE08A` / `#3FA66B→#7EE0A0` |
-| fonts | Martian Mono (clock), Unbounded (counts), Manrope (text) |
+Two themes, dark (the default) and light, chosen by `[appearance] theme`;
+the accent by `[appearance] accent` (#402, settings.md's "Apparence et
+langue"). One table holds both values of each token
+(`hocus_link::theme::Tokens`); the shell, the Settings, the lock and the
+authentication dialog draw from it, and the compositor tells them as the
+file changes.
 
-The light and neon themes give their own values for the same tokens.
+| Token | Dark | Light |
+|---|---|---|
+| `bar.bg` | `linear(rgba(22,27,42,0.70) → rgba(14,17,28,0.78))`, blur 26 px, saturation 1.35; opaque `#161B2A → #0E111C` | `linear(rgba(245,246,249,0.62) → rgba(238,240,245,0.70))`; opaque `#F3F4F8 → #EEF0F5` |
+| `bar.border` | `rgba(255,255,255,0.10)` | `rgba(20,25,38,0.12)` |
+| popovers' background | `rgba(22,27,42,0.72) → rgba(14,17,28,0.82)`; opaque `#161B2A → #0E111C` | `rgba(245,246,249,0.84) → rgba(238,240,245,0.90)`; opaque `#F5F6F9 → #EEF0F5` |
+| `text` / `text.2` / `text.dim` / `text.faint` | `#EEF1F6` / `#D5DBE5` / `#A9B2C2` / `#8C96A8` | `#141926` / `#2A3142` / `#4A5466` / `#5C6678` |
+| window / sidebar (the Settings, the dialogs) | `#141926` / `#0F131C` | `#F5F6F9` / `#E9ECF2` |
+| card, its rim, a divider | `rgba(255,255,255,0.035)`, `0.07`, `0.06` | `#FFFFFF`, `rgba(20,25,38,0.09)`, `0.08` |
+| control, its rim; menu | `rgba(255,255,255,0.06)`, `0.12`; `#1F2534` | `#FFFFFF`, `rgba(20,25,38,0.16)`; `#FFFFFF` |
+| switch off; segmented; chosen segment | `rgba(255,255,255,0.18)`; `0.05`; `0.13` | `rgba(20,25,38,0.22)`; `0.06`; `#FFFFFF` |
+| hovers and fills | white at their opacity | `#141926` at 1.25 times it |
+| the Settings' toast | `#262C3C` | `#262C3C` (dark in both) |
+| on the accent's fill | `#0B1020` | `#0B1020` |
+| `accent` | the accent's base (below) | the same |
+| text in the accent | its "on dark" | its "on light" |
+| `state.wait` / `state.meeting` / `state.stuck` | `#F5B44A` / `#8FB3FF` / `#F2945B` | as fills the same; as text `#8F5E0A` / `#2F5FC4` / `#A84A14` |
+| `gauge.sound` / `gauge.light` / `gauge.battery` | `#5B8DEF→#8FB3FF` / `#E8B44E→#FFE08A` / `#3FA66B→#7EE0A0` | the same |
+| fonts | Martian Mono (clock), Unbounded (counts), Manrope (text) | the same |
+
+The accents (base; text on dark; text on light): green, the default,
+`#6CC287` / `#7EE0A0` / `#2E7D4A`; blue `#5B8DEF` / `#8FB3FF` / `#2F5FC4`;
+violet `#9B84F0` / `#C3B4FF` / `#5B45B8`; rose `#E07AB5` / `#F2A6D0` /
+`#A8326F`; teal `#3FB8AF` / `#7FD8D0` / `#1D766F`; the wallpaper's, its
+dominant hue lifted to their lightness (the default backdrop gives
+`#7A96E0` / `#A4B8F0` / `#3A58B0`). The accent is what is chosen, on or
+focused (switches, the selection, the keyboard's ring, today in the
+calendar, the "Choisir…" button); the agents' states, the gauges and the
+pandas keep their own colours. Every text pair passes 4.5:1 (a unit test
+of `hocus-link` checks it).
+
+A colour the programs draw that is not one of these tokens is read on
+light by rule (`hocus_link::theme::on_light`): a white at some opacity
+becomes `#141926` at 1.25 times it, a near-white the text, a dark
+background the light window's at the same opacity, a shadow half as
+strong, the states as text their darker values above; the others keep
+theirs. A "neon" theme, the Matrix one and a theme by the time of day are
+for later.
 
 ## 14. Open questions
 

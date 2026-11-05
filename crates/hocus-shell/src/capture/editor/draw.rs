@@ -15,6 +15,7 @@ use iced::{
 };
 
 use super::{COLOURS, Drag, Editor, Phase, TEXT, TEXT_IN, Target, Tool, Typing, marks::Mark};
+use crate::theme::Ink;
 use crate::{
     capture::{Words, marks},
     levels::draw::{MANROPE_BOLD, TEXT as TEXT_COLOUR, rgb},
@@ -62,22 +63,22 @@ const FIELD_RADIUS: f32 = 6.0;
 /// The icons' strokes: 1.9 of their 24.
 const STROKE: f32 = 1.9;
 
-const SHADE: Color = Color::from_rgba8(6, 8, 14, 0.6);
-const PANEL_TOP: Color = Color::from_rgba8(22, 27, 42, 0.97);
-const PANEL_BOTTOM: Color = Color::from_rgba8(14, 17, 28, 0.98);
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const CHOSEN: Color = Color::from_rgba8(108, 194, 135, 0.22);
-const CHOSEN_RING: Color = Color::from_rgba8(108, 194, 135, 0.6);
-const SWATCH_OFF: Color = Color::from_rgba8(255, 255, 255, 0.15);
-const IMAGE_BACK: Color = Color::from_rgba8(0, 0, 0, 0.3);
-const NAME_COLOUR: Color = rgb(0x7C8698);
-const DELETE: Color = rgb(0xF7A77A);
-const FOOT_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const GREEN: Color = rgb(0x6CC287);
-const ON_GREEN: Color = rgb(0x0B1020);
-const FIELD_BACK: Color = Color::from_rgba8(0, 0, 0, 0.35);
-const HINT: Color = Color::from_rgba8(255, 255, 255, 0.6);
+const SHADE: Ink = Ink::Fixed(Color::from_rgba8(6, 8, 14, 0.6));
+const PANEL_TOP: Ink = Ink::Dark(Color::from_rgba8(22, 27, 42, 0.97));
+const PANEL_BOTTOM: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.98));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const CHOSEN: Ink = Ink::Accent(0.22);
+const CHOSEN_RING: Ink = Ink::Accent(0.6);
+const SWATCH_OFF: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.15));
+const IMAGE_BACK: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.3));
+const NAME_COLOUR: Ink = Ink::Dark(rgb(0x7C8698));
+const DELETE: Ink = Ink::Dark(rgb(0xF7A77A));
+const FOOT_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const GREEN: Ink = Ink::Accent(1.0);
+const ON_GREEN: Ink = Ink::Dark(rgb(0x0B1020));
+const FIELD_BACK: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.35));
+const HINT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.6));
 
 /// Where the editor's pieces are on its surface.
 #[derive(Debug, Clone, PartialEq)]
@@ -358,7 +359,7 @@ impl<Message> canvas::Program<Message> for View {
         });
         match (self.layer, shown) {
             (Layer::Panel, editor) => {
-                frame.fill_rectangle(Point::ORIGIN, bounds.size(), SHADE);
+                frame.fill_rectangle(Point::ORIGIN, bounds.size(), SHADE.get());
                 if let Some(editor) = editor {
                     let layout = Layout::of(bounds.size(), self.words, logical(&editor));
                     self.draw_panel(&mut frame, &editor, &layout);
@@ -532,26 +533,26 @@ impl View {
             panel.position(),
             Point::new(panel.x, panel.y + panel.height),
         )
-        .add_stop(0.0, PANEL_TOP)
-        .add_stop(1.0, PANEL_BOTTOM);
+        .add_stop(0.0, PANEL_TOP.get())
+        .add_stop(1.0, PANEL_BOTTOM.get());
         let radius = PANEL_RADIUS * z;
         f.fill(&kit::rounded(panel, radius), canvas::Fill::from(tint));
         f.stroke(
             &kit::rounded(inset(panel, 0.5), radius - 0.5),
-            Stroke::default().with_color(RIM).with_width(1.0),
+            Stroke::default().with_color(RIM.get()).with_width(1.0),
         );
         self.draw_toolbar(f, e, layout);
         // The image, and its marks over it.
         let room = layout.room;
         let image_radius = IMAGE_RADIUS * z;
-        f.fill(&kit::rounded(room, image_radius), IMAGE_BACK);
+        f.fill(&kit::rounded(room, image_radius), IMAGE_BACK.get());
         // Its corners rounded: the radius cuts the image's clip.
         let mut picture = canvas::Image::new(e.shown.clone());
         picture.border_radius = image_radius.into();
         f.with_clip(layout.image, |f| f.draw_image(layout.image, picture));
         f.stroke(
             &kit::rounded(inset(room, 0.5), image_radius - 0.5),
-            Stroke::default().with_color(RIM).with_width(1.0),
+            Stroke::default().with_color(RIM.get()).with_width(1.0),
         );
         self.draw_footer(f, e, layout);
     }
@@ -574,13 +575,15 @@ impl View {
         for (tool, rect) in &layout.tools {
             let shape = kit::rounded(*rect, radius);
             if e.tool == *tool {
-                f.fill(&shape, CHOSEN);
+                f.fill(&shape, CHOSEN.get());
                 f.stroke(
                     &kit::rounded(inset(*rect, 0.5), radius - 0.5),
-                    Stroke::default().with_color(CHOSEN_RING).with_width(1.0),
+                    Stroke::default()
+                        .with_color(CHOSEN_RING.get())
+                        .with_width(1.0),
                 );
             } else if e.hover == Some(Target::Tool(*tool)) {
-                f.fill(&shape, HOVER);
+                f.fill(&shape, HOVER.get());
             }
             let icon = Rectangle::new(
                 Point::new(rect.x + TOOL_PAD * z, rect.center_y() - ICON * z / 2.0),
@@ -593,12 +596,16 @@ impl View {
                     self.words.tool(*tool).to_owned(),
                     Point::new(icon.x + icon.width + ICON_GAP * z, rect.center_y()),
                     LABEL * z,
-                    TEXT_COLOUR,
+                    TEXT_COLOUR.get(),
                     Alignment::Left,
                 ),
             ));
         }
-        f.fill_rectangle(layout.separator.position(), layout.separator.size(), RIM);
+        f.fill_rectangle(
+            layout.separator.position(),
+            layout.separator.size(),
+            RIM.get(),
+        );
         for (i, rect) in layout.colours.iter().enumerate() {
             let [r, g, b] = COLOURS[i];
             let centre = rect.center();
@@ -611,12 +618,14 @@ impl View {
             };
             f.stroke(
                 &Path::circle(centre, side - SWATCH_RIM * z / 2.0),
-                Stroke::default().with_color(rim).with_width(SWATCH_RIM * z),
+                Stroke::default()
+                    .with_color(rim.get())
+                    .with_width(SWATCH_RIM * z),
             );
         }
         let undo = layout.undo;
         if e.hover == Some(Target::Undo) {
-            f.fill(&kit::rounded(undo, radius), HOVER);
+            f.fill(&kit::rounded(undo, radius), HOVER.get());
         }
         let icon = Rectangle::new(
             Point::new(
@@ -636,7 +645,7 @@ impl View {
             Size::new(FIELD.0 * z, FIELD.1 * z),
         );
         let shape = kit::rounded(field, FIELD_RADIUS * z);
-        f.fill(&shape, FIELD_BACK);
+        f.fill(&shape, FIELD_BACK.get());
         f.stroke(
             &kit::rounded(inset(field, 0.5), FIELD_RADIUS * z - 0.5),
             Stroke {
@@ -650,7 +659,7 @@ impl View {
         let at = Point::new(typing.at.x + TEXT_IN * z, typing.at.y);
         let size = TEXT.0 * z;
         let (said, shade) = if typing.text.is_empty() {
-            (self.words.text_hint().to_owned(), HINT)
+            (self.words.text_hint().to_owned(), HINT.get())
         } else {
             (typing.text.clone(), colour)
         };
@@ -684,25 +693,30 @@ impl View {
             }),
             layout.name_at,
             NAME * z,
-            NAME_COLOUR,
+            NAME_COLOUR.get(),
             Alignment::Left,
         ));
         let radius = FOOT_RADIUS * z;
         for (target, rect, word, colour) in [
-            (Target::Delete, layout.delete, self.words.delete(), DELETE),
+            (
+                Target::Delete,
+                layout.delete,
+                self.words.delete(),
+                DELETE.get(),
+            ),
             (
                 Target::SaveAs,
                 layout.save_as,
                 self.words.save_as(),
-                TEXT_COLOUR,
+                TEXT_COLOUR.get(),
             ),
         ] {
             if e.hover == Some(target) {
-                f.fill(&kit::rounded(rect, radius), HOVER);
+                f.fill(&kit::rounded(rect, radius), HOVER.get());
             }
             f.stroke(
                 &kit::rounded(inset(rect, 0.5), radius - 0.5),
-                Stroke::default().with_color(FOOT_RIM).with_width(1.0),
+                Stroke::default().with_color(FOOT_RIM.get()).with_width(1.0),
             );
             f.fill_text(kit::text_in(
                 MANROPE_SEMIBOLD,
@@ -715,14 +729,14 @@ impl View {
                 ),
             ));
         }
-        f.fill(&kit::rounded(layout.copy, radius), GREEN);
+        f.fill(&kit::rounded(layout.copy, radius), GREEN.get());
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
             kit::text(
                 self.words.copy_and_close().to_owned(),
                 layout.copy.center(),
                 FOOT_TEXT * z,
-                ON_GREEN,
+                ON_GREEN.get(),
                 Alignment::Center,
             ),
         ));
@@ -893,7 +907,7 @@ fn draw_icon(f: &mut Frame, icon: Icon, rect: Rectangle) {
     f.stroke(
         &path,
         Stroke::default()
-            .with_color(TEXT_COLOUR)
+            .with_color(TEXT_COLOUR.get())
             .with_width(STROKE * k)
             .with_line_join(LineJoin::Round)
             .with_line_cap(LineCap::Round),

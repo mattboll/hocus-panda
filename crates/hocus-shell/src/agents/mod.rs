@@ -31,6 +31,7 @@ use std::sync::{
 use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, Note, ToolState};
 use iced::{Color, Font, Point, Rectangle, Size};
 
+use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
     levels::draw::{LINE, MANROPE, MANROPE_BOLD, rgb},
@@ -74,7 +75,7 @@ impl Tool {
 /// herdr's mark.
 pub const HERDR_MARK: (&str, Color) = ("H", rgb(0x8FB3FF));
 /// A mark's letter.
-pub const MARK_INK: Color = rgb(0x0B1020);
+pub const MARK_INK: Ink = Ink::Dark(rgb(0x0B1020));
 
 /// The tools and the agents as last said.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

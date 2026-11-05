@@ -37,6 +37,7 @@ use iced::{
 };
 
 use super::{ITEM, LINE, Line, MORE, Row, Words};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, FAINT, HOVER, MANROPE, OPEN, TEXT, faded, pointer, rgb, ring},
     popover::{self, Item, kit},
@@ -68,11 +69,11 @@ const CROSS_STROKE: f32 = 1.5;
 /// Between the title and the ✕.
 const TITLE_END: f32 = 6.0;
 const MORE_TEXT: f32 = 12.5;
-pub const CLOSE_HOVER: Color = Color::from_rgba8(242, 148, 91, 0.20);
-pub const CLOSE_INK: Color = rgb(0xF7B98A);
+pub const CLOSE_HOVER: Ink = Ink::Dark(Color::from_rgba8(242, 148, 91, 0.20));
+pub const CLOSE_INK: Ink = Ink::Dark(rgb(0xF7B98A));
 /// The focused window's line, and a line under the pointer.
-pub const LIT: Color = HOVER;
-pub const LIT_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
+pub const LIT: Ink = HOVER;
+pub const LIT_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 /// A minimised window's icon (3.9c).
 const MINIMIZED_ICON: f32 = 0.5;
 /// The mini item: 44 × 34, radius 10, its icon 20 px.
@@ -133,7 +134,7 @@ pub fn draw_line(f: &mut Frame, rect: Rectangle, line: &Line, title: &str, lit: 
         (false, false) => None,
     };
     if let Some(ground) = ground {
-        f.fill(&kit::rounded(rect, RADIUS), faded(ground, alpha));
+        f.fill(&kit::rounded(rect, RADIUS), faded(ground.get(), alpha));
     }
     let icon = icon_rect(rect);
     let found = crate::desktops::icons::of(&line.app);
@@ -151,18 +152,18 @@ pub fn draw_line(f: &mut Frame, rect: Rectangle, line: &Line, title: &str, lit: 
         title.to_owned(),
         Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
         TITLE,
-        faded(colour, alpha),
+        faded(colour.get(), alpha),
         Alignment::Left,
     ));
     let close = close_rect(rect);
     if lit.close {
         f.fill(
             &kit::rounded(close, CLOSE_RADIUS),
-            faded(CLOSE_HOVER, alpha),
+            faded(CLOSE_HOVER.get(), alpha),
         );
     }
     let ink = if lit.close { CLOSE_INK } else { DIM };
-    cross(f, close.center(), faded(ink, alpha));
+    cross(f, close.center(), faded(ink.get(), alpha));
 }
 
 /// What a window's letter tile, when its application has no icon, is
@@ -200,13 +201,13 @@ fn cross(f: &mut Frame, at: Point, colour: Color) {
 /// "+ N autres" at `rect`, lit under the pointer.
 pub fn draw_more(f: &mut Frame, rect: Rectangle, said: String, lit: bool, alpha: f32) {
     if lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(LIT, alpha));
+        f.fill(&kit::rounded(rect, RADIUS), faded(LIT.get(), alpha));
     }
     f.fill_text(kit::text(
         said,
         Point::new(rect.x + OUT, rect.center_y()),
         MORE_TEXT,
-        faded(FAINT, alpha),
+        faded(FAINT.get(), alpha),
         Alignment::Left,
     ));
 }
@@ -578,7 +579,7 @@ impl View {
             (false, false) => None,
         };
         if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit, alpha));
+            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
         }
         if focused {
             ring(f, rect, MINI_RADIUS);

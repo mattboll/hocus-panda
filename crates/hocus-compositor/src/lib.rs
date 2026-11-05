@@ -7,6 +7,7 @@
 //! Work that could block (starting programs) runs on threads of its own.
 
 mod agents;
+mod appearance;
 pub mod auth;
 pub mod away;
 mod backdrop;

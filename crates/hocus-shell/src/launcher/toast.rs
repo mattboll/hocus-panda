@@ -25,6 +25,7 @@ use iced::{
 };
 
 use super::draw::ZOOM;
+use crate::theme::Ink;
 use crate::{
     levels::draw::{LINE, TEXT},
     popover::{
@@ -39,8 +40,8 @@ const SIZE: f32 = 13.0 * ZOOM;
 const PAD: Size = Size::new(16.0 * ZOOM, 10.0 * ZOOM);
 const RADIUS: f32 = 12.0 * ZOOM;
 pub const BOTTOM: i32 = (40.0 * ZOOM) as i32;
-const FILL: Color = Color::from_rgba8(14, 17, 28, 0.94);
-const RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
+const FILL: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.94));
+const RIM: Ink = Ink::Accent(0.45);
 /// The compositor's fade out ends a little after the shell's clock says:
 /// both count from the toast's first frame.
 const LINGER: Duration = Duration::from_millis(100);
@@ -151,9 +152,12 @@ impl<Message> canvas::Program<Message> for View {
 fn draw(f: &mut Frame, said: &str, size: Size, software: bool) {
     let rect = Rectangle::new(Point::ORIGIN, size);
     let fill = if software {
-        Color { a: 1.0, ..FILL }
+        Color {
+            a: 1.0,
+            ..FILL.get()
+        }
     } else {
-        FILL
+        FILL.get()
     };
     f.fill(&kit::rounded(rect, RADIUS), fill);
     let rim = Rectangle::new(
@@ -162,7 +166,7 @@ fn draw(f: &mut Frame, said: &str, size: Size, software: bool) {
     );
     f.stroke(
         &kit::rounded(rim, RADIUS - 0.5),
-        Stroke::default().with_color(RIM).with_width(1.0),
+        Stroke::default().with_color(RIM.get()).with_width(1.0),
     );
     f.fill_text(kit::text_in(
         MANROPE_SEMIBOLD,
@@ -170,7 +174,7 @@ fn draw(f: &mut Frame, said: &str, size: Size, software: bool) {
             said.to_owned(),
             rect.center(),
             SIZE,
-            TEXT,
+            TEXT.get(),
             Alignment::Center,
         ),
     ));

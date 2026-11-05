@@ -44,6 +44,7 @@ use super::{
     Event as Seen, Item, Pressed, event,
     kit::{self, Clip, Input, Pointer, Switch, Wheel, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     clock::{motion::bezier, time::Lang},
     levels::{
@@ -143,17 +144,20 @@ const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
 }
 
 /// The bubbles' tint (the mockup's), opaque without glass.
-const GLASS_TOP: Color = rgba(22, 27, 42, 0.95);
-const GLASS_BOTTOM: Color = rgba(14, 17, 28, 0.97);
-const OPAQUE_TOP: Color = rgb(0x161B2A);
-const OPAQUE_BOTTOM: Color = rgb(0x0E111C);
-const RIM: Color = rgba(255, 255, 255, 0.10);
-const GHOST_HOVER: Color = rgba(255, 255, 255, 0.08);
-const ITEM_HOVER: Color = rgba(255, 255, 255, 0.05);
-const CARD_OFF: (Color, Color) = (rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08));
+const GLASS_TOP: Ink = Ink::Dark(rgba(22, 27, 42, 0.95));
+const GLASS_BOTTOM: Ink = Ink::Dark(rgba(14, 17, 28, 0.97));
+const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
+const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
+const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const GHOST_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.08));
+const ITEM_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.05));
+const CARD_OFF: (Ink, Ink) = (
+    Ink::Dark(rgba(255, 255, 255, 0.04)),
+    Ink::Dark(rgba(255, 255, 255, 0.08)),
+);
 const CARD_ON: (Color, Color) = (rgba(245, 196, 110, 0.08), rgba(245, 196, 110, 0.35));
-const SWITCH_ON: Color = rgb(0xF5B44A);
-const SWITCH_OFF: Color = rgba(255, 255, 255, 0.18);
+const SWITCH_ON: Ink = Ink::Dark(rgb(0xF5B44A));
+const SWITCH_OFF: Ink = Ink::Dark(rgba(255, 255, 255, 0.18));
 const CHIP_ON: (Color, Color, Color) = (
     rgba(245, 196, 110, 0.18),
     rgba(245, 196, 110, 0.6),
@@ -164,12 +168,12 @@ const CHIP_OFF: (Color, Color, Color) = (
     rgba(255, 255, 255, 0.14),
     rgb(0xC9D0DC),
 );
-const QUIET: Color = rgb(0x7C8698);
-const UNSEEN: Color = rgb(0x8FB3FF);
-const NOTHING_INK: Color = rgb(0xC9D0DC);
-const ACTION_FILL: Color = rgba(255, 255, 255, 0.06);
-const ACTION_HOVER: Color = rgba(255, 255, 255, 0.12);
-const ACTION_RIM: Color = rgba(255, 255, 255, 0.14);
+const QUIET: Ink = Ink::Dark(rgb(0x7C8698));
+const UNSEEN: Ink = Ink::Dark(rgb(0x8FB3FF));
+const NOTHING_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+const ACTION_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.06));
+const ACTION_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
+const ACTION_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.14));
 /// The launcher's letter tile for an application without an icon.
 const NEUTRAL: (Color, Color) = (rgb(0x5C6576), rgb(0x9AA3B4));
 
@@ -896,7 +900,13 @@ fn head(f: &mut Frame, clip: Clip, word: &str, middle: f32) {
             f,
             text_in(
                 MANROPE_BOLD,
-                text(letter, Point::new(x, middle), HEAD, QUIET, Alignment::Left),
+                text(
+                    letter,
+                    Point::new(x, middle),
+                    HEAD,
+                    QUIET.get(),
+                    Alignment::Left,
+                ),
             ),
         );
         x += width + HEAD_SPACING;
@@ -912,8 +922,8 @@ impl Panel {
         };
         let shape = Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into());
         let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
+            .add_stop(0.0, top.get())
+            .add_stop(1.0, bottom.get());
         f.fill(&shape, canvas::Fill::from(tint));
         f.stroke(
             &Path::rounded_rectangle(
@@ -922,7 +932,7 @@ impl Panel {
                 (RADIUS - BORDER / 2.0).into(),
             ),
             Stroke {
-                style: canvas::Style::Solid(RIM),
+                style: canvas::Style::Solid(RIM.get()),
                 width: BORDER,
                 ..Stroke::default()
             },
@@ -937,14 +947,14 @@ impl Panel {
                 words.title().to_owned(),
                 Point::new(BORDER + SIDE, middle),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
         if let Some((rect, _)) = laid.clear {
             let lit = hover == Some(Target::Clear);
             if lit {
-                f.fill(&kit::rounded(rect, GHOST_RADIUS), GHOST_HOVER);
+                f.fill(&kit::rounded(rect, GHOST_RADIUS), GHOST_HOVER.get());
             }
             f.fill_text(text_in(
                 MANROPE_SEMIBOLD,
@@ -952,7 +962,7 @@ impl Panel {
                     words.clear().to_owned(),
                     rect.center(),
                     GHOST_TEXT,
-                    if lit { TEXT } else { DIM },
+                    if lit { TEXT.get() } else { DIM.get() },
                     Alignment::Center,
                 ),
             ));
@@ -961,7 +971,11 @@ impl Panel {
 
     fn card(&self, f: &mut Frame, laid: &Laid, words: Words, state: &State, now: Instant) {
         let on = laid.dnd.is_on();
-        let (fill, rim) = if on { CARD_ON } else { CARD_OFF };
+        let (fill, rim) = if on {
+            CARD_ON
+        } else {
+            (CARD_OFF.0.get(), CARD_OFF.1.get())
+        };
         f.fill(&kit::rounded(laid.card, CARD_RADIUS), fill);
         f.stroke(
             &Path::rounded_rectangle(
@@ -991,11 +1005,11 @@ impl Panel {
                 words.dnd().to_owned(),
                 Point::new(x, column + DND_NAME * LINE / 2.0),
                 DND_NAME,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
-        for said in kit::lines(&laid.said, (x, laid.said_top), DND_SAID, LINE, FAINT) {
+        for said in kit::lines(&laid.said, (x, laid.said_top), DND_SAID, LINE, FAINT.get()) {
             f.fill_text(said);
         }
         // The switch, its knob sliding.
@@ -1004,7 +1018,7 @@ impl Panel {
         let rect = laid.switch;
         f.fill(
             &kit::rounded(rect, SWITCH.height / 2.0),
-            mix(SWITCH_OFF, SWITCH_ON, p),
+            mix(SWITCH_OFF.get(), SWITCH_ON.get(), p),
         );
         let centre = Point::new(
             rect.x + 3.0 + (SWITCH.width - KNOB - 6.0) * p + KNOB / 2.0,
@@ -1020,7 +1034,7 @@ impl Panel {
             };
             let fill =
                 if state.pointer.hover == Some(Target::Chip(*choice)) && chosen != Some(*choice) {
-                    ACTION_HOVER
+                    ACTION_HOVER.get()
                 } else {
                     fill
                 };
@@ -1078,7 +1092,7 @@ impl Panel {
                 words.nothing().to_owned(),
                 Point::new(centre, y),
                 NOTHING,
-                faded(NOTHING_INK, p),
+                faded(NOTHING_INK.get(), p),
                 Alignment::Center,
             ),
         ));
@@ -1087,7 +1101,7 @@ impl Panel {
             words.all_read().to_owned(),
             Point::new(centre, y),
             ALL_READ,
-            faded(QUIET, p),
+            faded(QUIET.get(), p),
             Alignment::Center,
         ));
     }
@@ -1102,7 +1116,10 @@ impl Panel {
         let hover = state.pointer.hover;
         let over = hover.and_then(Target::key) == Some(row.key) && state.leaving.is_none();
         if over || state.focus == Some(Target::Item(row.key)) {
-            f.fill(&kit::rounded(rect, ITEM_RADIUS), faded(ITEM_HOVER, alpha));
+            f.fill(
+                &kit::rounded(rect, ITEM_RADIUS),
+                faded(ITEM_HOVER.get(), alpha),
+            );
         }
         // The icon, else the application's first letter on a square.
         let icon = Rectangle::new(
@@ -1152,7 +1169,7 @@ impl Panel {
                     row.cut.app.clone(),
                     Point::new(x, meta),
                     META,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 ),
             ),
@@ -1163,7 +1180,7 @@ impl Panel {
                 "·".to_owned(),
                 Point::new(x + row.cut.app_width + META_GAP, meta),
                 META,
-                faded(QUIET, alpha),
+                faded(QUIET.get(), alpha),
                 Alignment::Left,
             ),
         );
@@ -1173,14 +1190,14 @@ impl Panel {
                 row.when.clone(),
                 Point::new(row.when_x + dx, meta),
                 META,
-                faded(QUIET, alpha),
+                faded(QUIET.get(), alpha),
                 Alignment::Left,
             ),
         );
         if let Some(dot_x) = row.dot_x {
             f.fill(
                 &Path::circle(Point::new(dot_x + dx + DOT / 2.0, meta), DOT / 2.0),
-                faded(UNSEEN, alpha),
+                faded(UNSEEN.get(), alpha),
             );
         }
         y += META * LINE + TEXT_GAP;
@@ -1192,7 +1209,7 @@ impl Panel {
                     row.cut.title.clone(),
                     Point::new(x, y + ITEM_TITLE * LINE / 2.0),
                     ITEM_TITLE,
-                    faded(TEXT, alpha),
+                    faded(TEXT.get(), alpha),
                     Alignment::Left,
                 ),
             ),
@@ -1200,7 +1217,13 @@ impl Panel {
         y += ITEM_TITLE * LINE;
         if !row.cut.body.is_empty() {
             y += TEXT_GAP;
-            for line in kit::lines(&row.cut.body, (x, y), BODY, BODY_LINE, faded(DIM, alpha)) {
+            for line in kit::lines(
+                &row.cut.body,
+                (x, y),
+                BODY,
+                BODY_LINE,
+                faded(DIM.get(), alpha),
+            ) {
                 clip.fill(f, line);
             }
         }
@@ -1211,7 +1234,14 @@ impl Panel {
             let lit = hover == Some(Target::Action(row.key, i));
             f.fill(
                 &kit::rounded(rect, 8.0),
-                faded(if lit { ACTION_HOVER } else { ACTION_FILL }, alpha),
+                faded(
+                    if lit {
+                        ACTION_HOVER.get()
+                    } else {
+                        ACTION_FILL.get()
+                    },
+                    alpha,
+                ),
             );
             f.stroke(
                 &Path::rounded_rectangle(
@@ -1220,7 +1250,7 @@ impl Panel {
                     7.5.into(),
                 ),
                 Stroke {
-                    style: canvas::Style::Solid(faded(ACTION_RIM, alpha)),
+                    style: canvas::Style::Solid(faded(ACTION_RIM.get(), alpha)),
                     width: 1.0,
                     ..Stroke::default()
                 },
@@ -1233,7 +1263,7 @@ impl Panel {
                         label.clone(),
                         rect.center(),
                         CHIP_TEXT,
-                        faded(TEXT, alpha),
+                        faded(TEXT.get(), alpha),
                         Alignment::Center,
                     ),
                 ),
@@ -1247,7 +1277,7 @@ impl Panel {
             if lit {
                 f.fill(
                     &kit::rounded(close, CLOSE_RADIUS),
-                    faded(GHOST_HOVER, alpha),
+                    faded(GHOST_HOVER.get(), alpha),
                 );
             }
             let c = close.center();
@@ -1261,7 +1291,10 @@ impl Panel {
             f.stroke(
                 &cross,
                 Stroke {
-                    style: canvas::Style::Solid(faded(if lit { TEXT } else { FAINT }, alpha)),
+                    style: canvas::Style::Solid(faded(
+                        if lit { TEXT.get() } else { FAINT.get() },
+                        alpha,
+                    )),
                     width: 1.4,
                     line_cap: canvas::LineCap::Round,
                     ..Stroke::default()

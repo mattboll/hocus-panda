@@ -16,6 +16,7 @@ use super::layout::{
     TIME_LINES_GAP, TITLE, TODAY_TEXT, Target, View, WEEK_NUMBER, WEEK_WORD,
 };
 use super::words::Words;
+use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring, stroke},
@@ -23,35 +24,35 @@ use crate::{
 };
 
 /// The arrows, and "Aujourd'hui", lit under the pointer.
-const BUTTON_LIT: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const BUTTON_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const BUTTON_RADIUS: f32 = 7.0;
 /// The arrows' chevrons: 16 px.
 const CHEVRON: f32 = 16.0;
 /// A day lit under the pointer; chosen; chosen and today.
-const DAY_LIT: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const DAY_CHOSEN: Color = Color::from_rgba8(255, 255, 255, 0.16);
-const TODAY_CHOSEN: Color = Color::from_rgba8(108, 194, 135, 0.24);
+const DAY_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const DAY_CHOSEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
+const TODAY_CHOSEN: Ink = Ink::Accent(0.24);
 const DAY_RADIUS: f32 = 9.0;
 /// Today's ring inside its button.
 const TODAY_RING: f32 = 1.5;
 /// The keyboard's outline: 2 px, 1 px outside, white.
 const OUTLINE: f32 = 2.0;
 const OUTLINE_OUT: f32 = 1.0;
-const OUTLINE_COLOUR: Color = rgb(0xEEF1F6);
+const OUTLINE_COLOUR: Ink = Ink::Dark(rgb(0xEEF1F6));
 /// A day's dot, in the month and around it.
-const DOT_IN: Color = Color::from_rgba8(238, 241, 246, 0.6);
-const DOT_AROUND: Color = Color::from_rgba8(140, 150, 168, 0.6);
+const DOT_IN: Ink = Ink::Dark(Color::from_rgba8(238, 241, 246, 0.6));
+const DOT_AROUND: Ink = Ink::Dark(Color::from_rgba8(140, 150, 168, 0.6));
 const WHITE: Color = Color::WHITE;
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 /// A row under the pointer; unfolded.
-const ROW_LIT: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const ROW_UNFOLDED: Color = Color::from_rgba8(255, 255, 255, 0.05);
+const ROW_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const ROW_UNFOLDED: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const ALL_DAY_RADIUS: f32 = 8.0;
 const EVENT_RADIUS: f32 = 9.0;
 /// An all-day row's tint: its calendar's colour at 14 %.
 const TINT: f32 = 0x24 as f32 / 255.0;
 /// A video call's address and its camera.
-const VIDEO: Color = rgb(0xA9C4FF);
+const VIDEO: Ink = Ink::Dark(rgb(0xA9C4FF));
 /// Today's events over: at half their opacity.
 const PAST: f32 = 0.5;
 
@@ -105,7 +106,7 @@ pub(super) fn calendar(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Ta
     f.fill_rectangle(
         Point::new(LEFT, laid.rule),
         Size::new(RIGHT - LEFT, 1.0),
-        RULE,
+        RULE.get(),
     );
     day_line(f, laid);
     if let Some(rect) = laid.choose {
@@ -121,7 +122,7 @@ pub(super) fn calendar(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Ta
             rect.center(),
             (TODAY_TEXT, LINE),
             MANROPE_SEMIBOLD,
-            TEXT,
+            TEXT.get(),
             Alignment::Center,
         ));
         if view.focus == Some(Stop::Choose) {
@@ -134,7 +135,7 @@ pub(super) fn calendar(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Ta
             Point::new((LEFT + RIGHT) / 2.0, *middle),
             (NOTE, LINE),
             MANROPE,
-            DIM,
+            DIM.get(),
             Alignment::Center,
         )),
         Body::Rows { list, rows } => {
@@ -167,7 +168,7 @@ fn header(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Target>) {
         laid.title.at,
         (TITLE, LINE),
         MANROPE_BOLD,
-        TEXT,
+        TEXT.get(),
         Alignment::Left,
     ));
     let today = laid.today_button;
@@ -184,7 +185,11 @@ fn header(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Target>) {
         today.center(),
         (TODAY_TEXT, LINE),
         MANROPE_SEMIBOLD,
-        if laid.today_faint { FAINT } else { TEXT },
+        if laid.today_faint {
+            FAINT.get()
+        } else {
+            TEXT.get()
+        },
         Alignment::Center,
     ));
     for (target, rect, back) in [
@@ -192,7 +197,7 @@ fn header(f: &mut Frame, laid: &Laid, view: &View, hover: Option<Target>) {
         (Target::Next, laid.next, false),
     ] {
         if hover == Some(target) {
-            f.fill(&kit::rounded(rect, BUTTON_RADIUS), BUTTON_LIT);
+            f.fill(&kit::rounded(rect, BUTTON_RADIUS), BUTTON_LIT.get());
         }
         chevron(f, rect.center(), back);
     }
@@ -223,7 +228,7 @@ fn chevron(f: &mut Frame, at: Point, back: bool) {
             b.line_to(p(9.0, 18.0));
         }
     });
-    f.stroke(&path, stroke(2.0 * s, DIM));
+    f.stroke(&path, stroke(2.0 * s, DIM.get()));
 }
 
 fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
@@ -233,7 +238,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
         Point::new(laid.week_centre, laid.letters_middle),
         (WEEK_WORD, LINE),
         MANROPE_SEMIBOLD,
-        FAINT,
+        FAINT.get(),
         Alignment::Center,
     ));
     for (letter, x) in words.letters().into_iter().zip(laid.columns) {
@@ -242,7 +247,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
             Point::new(x, laid.letters_middle),
             (LETTER, LINE),
             MANROPE_BOLD,
-            FAINT,
+            FAINT.get(),
             Alignment::Center,
         ));
     }
@@ -252,7 +257,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
             Point::new(laid.week_centre, week.middle),
             (WEEK_NUMBER, MONO_LINE),
             MARTIAN,
-            FAINT,
+            FAINT.get(),
             Alignment::Center,
         ));
         for cell in &week.days {
@@ -260,7 +265,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
             if cell.selected {
                 f.fill(&shape, if cell.today { TODAY_CHOSEN } else { DAY_CHOSEN });
             } else if hover == Some(Target::Day(cell.date)) {
-                f.fill(&shape, DAY_LIT);
+                f.fill(&shape, DAY_LIT.get());
             }
             if cell.today {
                 let inset = TODAY_RING / 2.0;
@@ -272,18 +277,19 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
                     &kit::rounded(ring, DAY_RADIUS - inset),
                     Stroke {
                         width: TODAY_RING,
-                        ..stroke(TODAY_RING, ACCENT)
+                        ..stroke(TODAY_RING, ACCENT.get())
                     },
                 );
             }
+            // White on the chosen day's fill; on light, the text.
             let number = if cell.selected {
-                WHITE
+                crate::theme::ink(WHITE)
             } else if !cell.in_month {
-                FAINT
+                FAINT.get()
             } else if cell.weekend {
-                DIM
+                DIM.get()
             } else {
-                TEXT
+                TEXT.get()
             };
             let centre = cell.rect.center_x();
             f.fill_text(said(
@@ -308,7 +314,7 @@ fn month(f: &mut Frame, laid: &Laid, hover: Option<Target>) {
                 );
                 f.stroke(
                     &kit::rounded(outline, DAY_RADIUS + out),
-                    stroke(OUTLINE, OUTLINE_COLOUR),
+                    stroke(OUTLINE, OUTLINE_COLOUR.get()),
                 );
             }
         }
@@ -324,7 +330,7 @@ fn day_line(f: &mut Frame, laid: &Laid) {
             line.title.at,
             (DAY_NAME, LINE),
             MANROPE_BOLD,
-            TEXT,
+            TEXT.get(),
             Alignment::Left,
         ),
         line.title.at,
@@ -336,7 +342,7 @@ fn day_line(f: &mut Frame, laid: &Laid) {
                 relative.at,
                 (RELATIVE, LINE),
                 MANROPE,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ),
             relative.at,
@@ -349,7 +355,7 @@ fn day_line(f: &mut Frame, laid: &Laid) {
                 count.at,
                 (COUNT, LINE),
                 MANROPE,
-                FAINT,
+                FAINT.get(),
                 Alignment::Right,
             ),
             count.at,
@@ -369,7 +375,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
             let shape = kit::rounded(rect, ALL_DAY_RADIUS);
             f.fill(&shape, fade(calendar.scale_alpha(TINT)));
             if lit {
-                f.fill(&shape, ROW_LIT);
+                f.fill(&shape, ROW_LIT.get());
             }
             let middle = rect.y + row.base / 2.0;
             f.fill(
@@ -386,7 +392,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                     Point::new(x + row.inset, middle),
                     (ALL_DAY_TITLE, LINE),
                     MANROPE_SEMIBOLD,
-                    fade(TEXT),
+                    fade(TEXT.get()),
                     Alignment::Left,
                 ),
             );
@@ -397,7 +403,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                     Point::new(rect.x + rect.width - ALL_DAY_PAD, middle),
                     (SPAN, LINE),
                     MANROPE,
-                    fade(DIM),
+                    fade(DIM.get()),
                     Alignment::Right,
                 ),
             );
@@ -405,10 +411,10 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
         RowKind::Timed { start, end, meta } => {
             let shape = kit::rounded(rect, EVENT_RADIUS);
             if !row.details.is_empty() {
-                f.fill(&shape, ROW_UNFOLDED);
+                f.fill(&shape, ROW_UNFOLDED.get());
             }
             if lit {
-                f.fill(&shape, ROW_LIT);
+                f.fill(&shape, ROW_LIT.get());
             }
             // Text centred on its line: the CPU's clip reads it so.
             let top = rect.y + EVENT_PAD_Y;
@@ -420,7 +426,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                     Point::new(left, top + START * MONO_LINE / 2.0),
                     (START, MONO_LINE),
                     MARTIAN,
-                    fade(TEXT),
+                    fade(TEXT.get()),
                     Alignment::Left,
                 ),
             );
@@ -432,7 +438,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                     Point::new(left, end_top + END * MONO_LINE / 2.0),
                     (END, MONO_LINE),
                     MARTIAN,
-                    fade(FAINT),
+                    fade(FAINT.get()),
                     Alignment::Left,
                 ),
             );
@@ -450,7 +456,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                     Point::new(title_x, top + EVENT_TITLE * LINE / 2.0),
                     (EVENT_TITLE, LINE),
                     MANROPE_SEMIBOLD,
-                    fade(TEXT),
+                    fade(TEXT.get()),
                     Alignment::Left,
                 ),
             );
@@ -459,9 +465,9 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                 let tint = if meta.video { VIDEO } else { DIM };
                 let icon = Point::new(title_x + ICON / 2.0, middle);
                 if meta.video {
-                    camera(f, icon, fade(tint));
+                    camera(f, icon, fade(tint.get()));
                 } else {
-                    pin(f, icon, fade(tint));
+                    pin(f, icon, fade(tint.get()));
                 }
                 clip.fill(
                     f,
@@ -470,7 +476,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                         Point::new(title_x + ICON + ICON_GAP, middle),
                         (META, LINE),
                         MANROPE,
-                        fade(tint),
+                        fade(tint.get()),
                         Alignment::Left,
                     ),
                 );
@@ -482,7 +488,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
             Point::new(rect.x, rect.y + row.base),
             Size::new(rect.width, row.height - row.base),
         );
-        f.fill(&kit::rounded(block, ALL_DAY_RADIUS), ROW_UNFOLDED);
+        f.fill(&kit::rounded(block, ALL_DAY_RADIUS), ROW_UNFOLDED.get());
     }
     let details_top = rect.y + row.base - EVENT_PAD_Y + 2.0;
     for (i, line) in row.details.iter().enumerate() {
@@ -494,7 +500,7 @@ fn event_row(f: &mut Frame, row: &Row, rect: Rectangle, lit: bool, focused: bool
                 Point::new(x + row.inset, middle),
                 (DETAILS, DETAILS_LINE),
                 MANROPE,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ),
         );

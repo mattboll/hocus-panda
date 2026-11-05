@@ -41,6 +41,7 @@ use crate::levels::{
     model::{BRIGHTNESS_FLOOR, Keyboard, STEP, Words},
     power::Ask,
 };
+use crate::theme::Ink;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -66,9 +67,9 @@ const NOTE: f32 = 12.5;
 const NOTE_LINE: f32 = 1.4;
 const NOTE_PAD: f32 = 2.0;
 
-const STRIP: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const CHOSEN: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const SEGMENT_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const STRIP: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const CHOSEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const SEGMENT_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 
 /// A slider shows what was asked this long at most, until it is said.
 const ASKED_FOR: Duration = Duration::from_secs(1);
@@ -325,13 +326,19 @@ impl<Message> canvas::Program<Message> for Panel {
         );
         let zero = state.zero.unwrap_or(kit::ZERO);
         if state.brightness.is_some() {
-            kit::figures(&mut frame, Point::new(RIGHT, middle), light, zero, DIM);
+            kit::figures(
+                &mut frame,
+                Point::new(RIGHT, middle),
+                light,
+                zero,
+                DIM.get(),
+            );
         }
         if let Some(keyboard) = state.keyboard.filter(|_| layout.keyboard) {
             self.keyboard(&mut frame, state, keyboard, zero);
         }
         for (top, lines) in &layout.notes {
-            for note in kit::lines(lines, (LEFT, *top), NOTE, NOTE_LINE, FAINT) {
+            for note in kit::lines(lines, (LEFT, *top), NOTE, NOTE_LINE, FAINT.get()) {
                 frame.fill_text(note);
             }
         }
@@ -426,10 +433,10 @@ impl Panel {
         if !keyboard.segmented() {
             let share = level as f32 / keyboard.max as f32;
             kit::slider(f, track(KEYBOARD_TOP), share, Some(LIGHT_GAUGE));
-            kit::figures(f, Point::new(RIGHT, middle), share * 100.0, zero, DIM);
+            kit::figures(f, Point::new(RIGHT, middle), share * 100.0, zero, DIM.get());
             return;
         }
-        f.fill(&rounded(strip(), STRIP_RADIUS), STRIP);
+        f.fill(&rounded(strip(), STRIP_RADIUS), STRIP.get());
         let names = self.words.keyboard_levels(keyboard.levels());
         for i in 0..keyboard.levels() {
             let rect = segment(i, keyboard.levels());
@@ -442,7 +449,7 @@ impl Panel {
                 None
             };
             if let Some(fill) = fill {
-                f.fill(&rounded(rect, SEGMENT_RADIUS), fill);
+                f.fill(&rounded(rect, SEGMENT_RADIUS), fill.get());
             }
             f.fill_text(kit::text_in(
                 MANROPE_SEMIBOLD,
@@ -454,7 +461,7 @@ impl Panel {
                         .to_owned(),
                     rect.center(),
                     SEGMENT_TEXT,
-                    if chosen { TEXT } else { DIM },
+                    if chosen { TEXT.get() } else { DIM.get() },
                     Alignment::Center,
                 ),
             ));
@@ -611,13 +618,13 @@ fn keys(f: &mut Frame, at: Point) {
     use crate::levels::draw::stroke;
     let s = ICON / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
-    let line = stroke(2.0 * s, TEXT);
+    let line = stroke(2.0 * s, TEXT.get());
     f.stroke(
         &Path::rounded_rectangle(p(2.0, 6.0), Size::new(20.0 * s, 12.0 * s), (2.0 * s).into()),
         line,
     );
     for x in [6.0, 10.0, 14.0, 18.0] {
-        f.fill(&Path::circle(p(x, 10.0), s), TEXT);
+        f.fill(&Path::circle(p(x, 10.0), s), TEXT.get());
     }
     f.stroke(&Path::line(p(7.0, 14.0), p(17.0, 14.0)), line);
 }

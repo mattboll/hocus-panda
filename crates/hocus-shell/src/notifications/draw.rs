@@ -35,6 +35,7 @@ use super::{
     note::{Note, Urgency},
     stack::Countdown,
 };
+use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
     levels::{
@@ -103,28 +104,28 @@ const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
     Color::from_rgba8(r, g, b, a)
 }
 
-const GLASS_TOP: Color = rgba(22, 27, 42, 0.95);
-const GLASS_BOTTOM: Color = rgba(14, 17, 28, 0.97);
-const OPAQUE_TOP: Color = rgb(0x161B2A);
-const OPAQUE_BOTTOM: Color = rgb(0x0E111C);
-const RIM: Color = rgba(255, 255, 255, 0.10);
-const RIM_CRITICAL: Color = rgba(242, 148, 91, 0.75);
-const BODY_TEXT: Color = rgb(0xC9D0DC);
-const URGENT: Color = rgb(0xF7A77A);
-const HOVER: Color = rgba(255, 255, 255, 0.03);
-const CLOSE_HOVER: Color = rgba(255, 255, 255, 0.10);
-const ACTION_FILL: Color = rgba(255, 255, 255, 0.06);
-const ACTION_FILL_HOVER: Color = rgba(255, 255, 255, 0.12);
-const ACTION_RIM: Color = rgba(255, 255, 255, 0.14);
-const TRACK: Color = rgba(255, 255, 255, 0.10);
-const PROGRESS_FILL: Color = rgb(0x8FB3FF);
-const RUNNING: Color = rgba(108, 194, 135, 0.7);
-const PAUSED: Color = rgba(255, 255, 255, 0.35);
+const GLASS_TOP: Ink = Ink::Dark(rgba(22, 27, 42, 0.95));
+const GLASS_BOTTOM: Ink = Ink::Dark(rgba(14, 17, 28, 0.97));
+const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
+const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
+const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const RIM_CRITICAL: Ink = Ink::Dark(rgba(242, 148, 91, 0.75));
+const BODY_TEXT: Ink = Ink::Dark(rgb(0xC9D0DC));
+const URGENT: Ink = Ink::Dark(rgb(0xF7A77A));
+const HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.03));
+const CLOSE_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const ACTION_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.06));
+const ACTION_FILL_HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
+const ACTION_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.14));
+const TRACK: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const PROGRESS_FILL: Ink = Ink::Dark(rgb(0x8FB3FF));
+const RUNNING: Ink = Ink::Accent(0.7);
+const PAUSED: Ink = Ink::Dark(rgba(255, 255, 255, 0.35));
 /// The launcher's letter tile (5.1), its letter at the launcher's 19 px
 /// for 48 px, here for 32 px.
 const NEUTRAL: (Color, Color) = (rgb(0x5C6576), rgb(0x9AA3B4));
 const LETTER: f32 = 13.0;
-const NEUTRAL_RIM: Color = rgba(255, 255, 255, 0.14);
+const NEUTRAL_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.14));
 /// The shadow `0 14px 40px rgba(0,0,0,0.42)` and a critical one's glow
 /// `0 0 24px rgba(242,148,91,0.25)`: offset, deviation, alpha.
 const SHADOW: (f32, f32, f32) = (14.0, 20.0, 0.42);
@@ -134,8 +135,8 @@ const GLOW: (f32, f32, f32) = (0.0, 12.0, 0.25);
 const CHIP_TEXT: f32 = 11.5;
 const CHIP_PAD: (f32, f32) = (4.0, 10.0);
 const CHIP_RADIUS: f32 = 10.0;
-const CHIP_FILL: Color = rgba(14, 17, 28, 0.9);
-const CHIP_RIM: Color = rgba(255, 255, 255, 0.12);
+const CHIP_FILL: Ink = Ink::Dark(rgba(14, 17, 28, 0.9));
+const CHIP_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
 
 // --- Words ---------------------------------------------------------------------
 
@@ -518,15 +519,15 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
     };
     let shape = Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into());
     let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-        .add_stop(0.0, top)
-        .add_stop(1.0, bottom);
+        .add_stop(0.0, top.get())
+        .add_stop(1.0, bottom.get());
     f.fill(&shape, canvas::Fill::from(tint));
     if spot != Spot::Off {
         let button = Rectangle::new(
             Point::new(BORDER, BORDER),
             Size::new(WIDTH - 2.0 * BORDER, laid.button),
         );
-        f.fill(&kit::rounded(button, RADIUS - BORDER), HOVER);
+        f.fill(&kit::rounded(button, RADIUS - BORDER), HOVER.get());
     }
     let critical = note.urgency == Urgency::Critical;
     let rim = Path::rounded_rectangle(
@@ -537,7 +538,11 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
     f.stroke(
         &rim,
         Stroke {
-            style: canvas::Style::Solid(if critical { RIM_CRITICAL } else { RIM }),
+            style: canvas::Style::Solid(if critical {
+                RIM_CRITICAL.get()
+            } else {
+                RIM.get()
+            }),
             width: BORDER,
             ..Stroke::default()
         },
@@ -568,7 +573,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                     (radius - 0.5).into(),
                 ),
                 Stroke {
-                    style: canvas::Style::Solid(NEUTRAL_RIM),
+                    style: canvas::Style::Solid(NEUTRAL_RIM.get()),
                     width: 1.0,
                     ..Stroke::default()
                 },
@@ -606,7 +611,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
         COLUMN_X,
         middle,
         SMALL,
-        DIM,
+        DIM.get(),
         MANROPE_BOLD,
     ));
     f.fill_text(text(
@@ -614,7 +619,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
         laid.when_x,
         middle,
         SMALL,
-        FAINT,
+        FAINT.get(),
         MANROPE,
     ));
     if let Some(x) = laid.urgent_x {
@@ -623,7 +628,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             x,
             middle,
             SMALL,
-            URGENT,
+            URGENT.get(),
             MANROPE_BOLD,
         ));
     }
@@ -637,7 +642,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                 COLUMN_X,
                 y + h / 2.0,
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 MANROPE_BOLD,
             ));
             y += h;
@@ -652,7 +657,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                 COLUMN_X,
                 y + h / 2.0,
                 BODY,
-                BODY_TEXT,
+                BODY_TEXT.get(),
                 MANROPE,
             ));
             y += h;
@@ -660,20 +665,23 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
     }
     if let (Some(top), Some(value)) = (laid.progress, note.progress) {
         let track = Rectangle::new(Point::new(COLUMN_X, top), Size::new(COLUMN, PROGRESS));
-        f.fill(&kit::rounded(track, PROGRESS / 2.0), TRACK);
+        f.fill(&kit::rounded(track, PROGRESS / 2.0), TRACK.get());
         let width = COLUMN * f32::from(value) / 100.0;
         if width > 0.0 {
             let fill = Rectangle::new(track.position(), Size::new(width, PROGRESS));
             f.fill(
                 &kit::rounded(fill, (PROGRESS / 2.0).min(width / 2.0)),
-                PROGRESS_FILL,
+                PROGRESS_FILL.get(),
             );
         }
     }
     // The ✕, two strokes.
     let close = close_rect();
     if spot == Spot::Close {
-        f.fill(&Path::circle(close.center(), CLOSE / 2.0), CLOSE_HOVER);
+        f.fill(
+            &Path::circle(close.center(), CLOSE / 2.0),
+            CLOSE_HOVER.get(),
+        );
     }
     let c = close.center();
     let arm = 3.75;
@@ -686,7 +694,11 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
     f.stroke(
         &cross,
         Stroke {
-            style: canvas::Style::Solid(if spot == Spot::Close { TEXT } else { FAINT }),
+            style: canvas::Style::Solid(if spot == Spot::Close {
+                TEXT.get()
+            } else {
+                FAINT.get()
+            }),
             width: 1.4,
             line_cap: canvas::LineCap::Round,
             ..Stroke::default()
@@ -706,7 +718,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                 (ACTION_RADIUS - 0.5).into(),
             ),
             Stroke {
-                style: canvas::Style::Solid(ACTION_RIM),
+                style: canvas::Style::Solid(ACTION_RIM.get()),
                 width: 1.0,
                 ..Stroke::default()
             },
@@ -717,7 +729,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
                 label.clone(),
                 rect.center(),
                 ACTION_TEXT,
-                TEXT,
+                TEXT.get(),
                 Alignment::Center,
             ),
         ));
@@ -734,7 +746,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             let colour = if shown.paused { PAUSED } else { RUNNING };
             f.fill(
                 &kit::rounded(line, (COUNTDOWN / 2.0).min(width / 2.0)),
-                colour,
+                colour.get(),
             );
         }
     }
@@ -813,9 +825,9 @@ impl<Message> canvas::Program<Message> for Chip {
         };
         let size = bounds.size();
         let fill = if self.card {
-            over(CHIP_FILL, Color::BLACK)
+            over(CHIP_FILL.get(), Color::BLACK)
         } else {
-            CHIP_FILL
+            CHIP_FILL.get()
         };
         f.fill(
             &Path::rounded_rectangle(Point::ORIGIN, size, CHIP_RADIUS.into()),
@@ -828,7 +840,7 @@ impl<Message> canvas::Program<Message> for Chip {
                 (CHIP_RADIUS - 0.5).into(),
             ),
             Stroke {
-                style: canvas::Style::Solid(CHIP_RIM),
+                style: canvas::Style::Solid(CHIP_RIM.get()),
                 width: 1.0,
                 ..Stroke::default()
             },
@@ -839,7 +851,7 @@ impl<Message> canvas::Program<Message> for Chip {
                 Words::now().waiting(n),
                 Point::new(size.width / 2.0, size.height / 2.0),
                 CHIP_TEXT,
-                DIM,
+                DIM.get(),
                 Alignment::Center,
             ),
         ));

@@ -12,6 +12,7 @@ use iced::{
     widget::{canvas::Frame, text::Alignment},
 };
 
+use crate::theme::Ink;
 use crate::{
     levels::draw::{MANROPE_BOLD, faded, rgb, ring},
     popover::kit,
@@ -29,12 +30,12 @@ const BADGE: f32 = 15.0;
 const BADGE_PAD: f32 = 3.0;
 const BADGE_TEXT: f32 = 9.5;
 const BADGE_RING: f32 = 2.0;
-const BADGE_FILL: Color = rgb(0x8FB3FF);
-const BADGE_INK: Color = rgb(0x0B1020);
-const BADGE_RIM: Color = Color::from_rgba8(14, 17, 28, 0.95);
+const BADGE_FILL: Ink = Ink::Dark(rgb(0x8FB3FF));
+const BADGE_INK: Ink = Ink::Dark(rgb(0x0B1020));
+const BADGE_RIM: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.95));
 /// A footer's button lit under the pointer, and while its popover shows.
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 
 /// The footer's glyphs' stroke, and the bell's in amber while the user is
 /// not to be disturbed.
@@ -90,7 +91,7 @@ pub fn lit(f: &mut Frame, button: Rectangle, open: bool, hover: bool, focused: b
         None
     };
     if let Some(lit) = lit {
-        f.fill(&kit::rounded(button, RADIUS), lit);
+        f.fill(&kit::rounded(button, RADIUS), lit.get());
     }
     if focused {
         ring(f, button, RADIUS);
@@ -129,16 +130,19 @@ pub fn draw(f: &mut Frame, button: Rectangle, shows: Shows, alpha: f32) {
     );
     f.fill(
         &kit::rounded(rim, BADGE / 2.0 + BADGE_RING),
-        faded(BADGE_RIM, alpha),
+        faded(BADGE_RIM.get(), alpha),
     );
-    f.fill(&kit::rounded(badge, BADGE / 2.0), faded(BADGE_FILL, alpha));
+    f.fill(
+        &kit::rounded(badge, BADGE / 2.0),
+        faded(BADGE_FILL.get(), alpha),
+    );
     f.fill_text(kit::text_in(
         MANROPE_BOLD,
         kit::text(
             count,
             badge.center(),
             BADGE_TEXT,
-            faded(BADGE_INK, alpha),
+            faded(BADGE_INK.get(), alpha),
             Alignment::Center,
         ),
     ));

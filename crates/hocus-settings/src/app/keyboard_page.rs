@@ -565,7 +565,7 @@ impl App {
                     t(
                         w("Ajouter une disposition", "Add a layout").get(lang),
                         13.5,
-                        MINT
+                        MINT.get()
                     )
                     .font(BOLD),
                 ]
@@ -577,7 +577,7 @@ impl App {
             .width(Length::Fill)
             .padding([0, 16])
             .on_press(Message::Keys(Msg::Adding(self.keys.adding.is_none())))
-            .style(flat(None, HOVER, 0.0, false)),
+            .style(flat(None, HOVER.get(), 0.0, false)),
         )
         .id("layouts:add".to_owned());
         list = list.push(divided(true, add.into()));
@@ -609,13 +609,13 @@ impl App {
             true,
             container(
                 row![
-                    t(w("Essayer ici", "Try it here").get(lang), 14.0, TEXT)
+                    t(w("Essayer ici", "Try it here").get(lang), 14.0, TEXT.get())
                         .font(SEMIBOLD)
                         .width(Length::Fill),
                     container(field).style(boxed(
-                        rgba(255, 255, 255, 0.06),
+                        crate::theme::ink(rgba(255, 255, 255, 0.06)),
                         8.0,
-                        Some((1.0, RIM_12))
+                        Some((1.0, RIM_12.get()))
                     )),
                 ]
                 .align_y(Alignment::Center),
@@ -648,7 +648,7 @@ impl App {
             t(
                 w("Raccourcis du bureau", "Desktop shortcuts").get(lang),
                 14.0,
-                TEXT
+                TEXT.get()
             )
             .font(SEMIBOLD),
             t(
@@ -658,7 +658,7 @@ impl App {
                 )
                 .get(lang),
                 12.5,
-                DIM
+                DIM.get()
             ),
         ]
         .spacing(2)
@@ -672,7 +672,7 @@ impl App {
             }));
         }
         line = line.push(
-            container(icon(Icon::Chevron, 14.0, DIM))
+            container(icon(Icon::Chevron, 14.0, DIM.get()))
                 .style(|_: &Theme| container::Style::default()),
         );
         let open = container(
@@ -680,7 +680,7 @@ impl App {
                 .width(Length::Fill)
                 .padding([10, 16])
                 .on_press(Message::Keys(Msg::Sub(true)))
-                .style(flat(None, HOVER, 12.0, false)),
+                .style(flat(None, HOVER.get(), 12.0, false)),
         )
         .id("keyboard:shortcuts".to_owned());
         page = page.push(group(
@@ -708,14 +708,14 @@ impl App {
                     text(glyph)
                         .size(13)
                         .font(BOLD)
-                        .color(fade(DIM, if inert { 0.3 } else { 1.0 })),
+                        .color(fade(DIM.get(), if inert { 0.3 } else { 1.0 })),
                 )
                 .center(26),
             )
             .width(26)
             .height(26)
             .padding(0)
-            .style(flat(None, HOVER, 6.0, false));
+            .style(flat(None, HOVER.get(), 6.0, false));
             if let Some(on) = on {
                 b = b.on_press(on);
             }
@@ -740,10 +740,14 @@ impl App {
                 )
                 .width(Length::Shrink)
                 .padding([3, 8])
-                .style(boxed(rgba(143, 179, 255, 0.14), 6.0, None)),
+                .style(boxed(
+                    crate::theme::ink(rgba(143, 179, 255, 0.14)),
+                    6.0,
+                    None
+                )),
                 column![
-                    t(self.layout_name(code), 14.0, TEXT).font(SEMIBOLD),
-                    t(line, 12.5, DIM),
+                    t(self.layout_name(code), 14.0, TEXT.get()).font(SEMIBOLD),
+                    t(line, 12.5, DIM.get()),
                 ]
                 .spacing(2)
                 .width(Length::Fill),
@@ -846,7 +850,7 @@ impl App {
             };
             let mut line = row![
                 column![
-                    t(known.name.clone(), 13.5, fade(TEXT, ink)).font(SEMIBOLD),
+                    t(known.name.clone(), 13.5, fade(TEXT.get(), ink)).font(SEMIBOLD),
                     t(
                         if there {
                             w("déjà là", "already there").get(lang).to_owned()
@@ -854,14 +858,14 @@ impl App {
                             kind
                         },
                         11.5,
-                        fade(DIM, ink)
+                        fade(DIM.get(), ink)
                     ),
                 ]
                 .width(Length::Fill),
                 text(known.code.clone())
                     .size(10.5)
                     .font(MONO)
-                    .color(fade(FAINT, ink)),
+                    .color(fade(FAINT.get(), ink)),
             ]
             .align_y(Alignment::Center)
             .spacing(10);
@@ -869,7 +873,7 @@ impl App {
             let mut b = button(line)
                 .width(Length::Fill)
                 .padding([0, 10])
-                .style(flat(None, HOVER, 7.0, false));
+                .style(flat(None, HOVER.get(), 7.0, false));
             if !there {
                 b = b.on_press(Message::Keys(Msg::Pick(known.code.clone())));
             }
@@ -877,7 +881,7 @@ impl App {
         }
         container(
             column![
-                container(field).style(boxed(rgba(255, 255, 255, 0.06), 9.0, Some((1.0, RIM_12)))),
+                container(field).style(boxed(crate::theme::ink(rgba(255, 255, 255, 0.06)), 9.0, Some((1.0, RIM_12.get())))),
                 iced::widget::scrollable(list).height(Length::Shrink).style(super::view::thin),
                 t(
                     w(
@@ -886,14 +890,14 @@ impl App {
                     )
                     .get(lang),
                     11.5,
-                    FAINT
+                    FAINT.get()
                 ),
             ]
             .spacing(8),
         )
         .padding(10)
         .max_height(340)
-        .style(boxed(MENU, 12.0, Some((1.0, RIM_12))))
+        .style(boxed(MENU.get(), 12.0, Some((1.0, RIM_12.get()))))
         .id("layouts:popover".to_owned())
         .into()
     }
@@ -942,7 +946,7 @@ impl App {
             t(
                 w("‹ Clavier et raccourcis", "‹ Keyboard and shortcuts").get(lang),
                 13.0,
-                MINT,
+                MINT.get(),
             )
             .font(SEMIBOLD),
         )
@@ -960,7 +964,7 @@ impl App {
                     )
                     .get(lang),
                     13.5,
-                    DIM
+                    DIM.get()
                 ),
             ]
             .spacing(6),
@@ -1003,13 +1007,18 @@ impl App {
             t(
                 w("Tout rétablir", "Reset all").get(lang),
                 12.5,
-                fade(TEXT, if changed > 0 { 1.0 } else { INERT }),
+                fade(TEXT.get(), if changed > 0 { 1.0 } else { INERT }),
             )
             .font(SEMIBOLD),
         )
         .height(32)
         .padding([7, 12])
-        .style(flat(Some(rgba(255, 255, 255, 0.06)), HOVER, 8.0, false));
+        .style(flat(
+            Some(crate::theme::ink(rgba(255, 255, 255, 0.06))),
+            HOVER.get(),
+            8.0,
+            false,
+        ));
         if changed > 0 && self.writable() {
             reset_all = reset_all.on_press(Message::Keys(Msg::ResetAll));
         }
@@ -1017,9 +1026,13 @@ impl App {
             row![
                 container(field)
                     .width(Length::Fill)
-                    .style(boxed(rgba(255, 255, 255, 0.06), 9.0, Some((1.0, RIM_12))))
+                    .style(boxed(
+                        crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                        9.0,
+                        Some((1.0, RIM_12.get()))
+                    ))
                     .id("shortcuts:search".to_owned()),
-                t(count, 12.5, FAINT),
+                t(count, 12.5, FAINT.get()),
                 container(reset_all).id("shortcuts:reset-all".to_owned()),
             ]
             .spacing(12)
@@ -1081,10 +1094,11 @@ impl App {
             }
             line = line.push(keycap(cap.to_owned(), 1.0));
         }
-        let mut b = button(line)
-            .height(30)
-            .padding([0, 4])
-            .style(flat(None, HOVER, 7.0, false));
+        let mut b =
+            button(line)
+                .height(30)
+                .padding([0, 4])
+                .style(flat(None, HOVER.get(), 7.0, false));
         if self.writable() {
             b = b.on_press(Message::Keys(Msg::Record(id, Some(index))));
         }
@@ -1113,15 +1127,15 @@ impl App {
         } else {
             format!("{} + …", held.join(" + "))
         };
-        container(t(said, 12.5, MINT).font(SEMIBOLD))
+        container(t(said, 12.5, MINT.get()).font(SEMIBOLD))
             .width(Length::Shrink)
             .height(30)
             .padding([0, 12])
             .center_y(30)
             .style(boxed(
-                rgba(108, 194, 135, 0.10),
+                crate::theme::Ink::Accent(0.10).get(),
                 7.0,
-                Some((1.0, rgba(108, 194, 135, 0.8))),
+                Some((1.0, crate::theme::Ink::Accent(0.8).get())),
             ))
             .id("recording".to_owned())
             .into()
@@ -1134,10 +1148,13 @@ impl App {
         let recording = self.keys.recording.as_ref().filter(|r| r.setting == id);
         let mut name = row![].spacing(8).align_y(Alignment::Center);
         if changed {
-            name = name
-                .push(container(Space::new().width(6).height(6)).style(boxed(ACCENT, 3.0, None)));
+            name = name.push(container(Space::new().width(6).height(6)).style(boxed(
+                ACCENT.get(),
+                3.0,
+                None,
+            )));
         }
-        name = name.push(t(setting.name.get(lang), 13.5, TEXT).font(SEMIBOLD));
+        name = name.push(t(setting.name.get(lang), 13.5, TEXT.get()).font(SEMIBOLD));
         let mut words = column![name].spacing(2).width(Length::Fill);
         if let Some(recording) = recording {
             let line = match recording.index {
@@ -1150,9 +1167,9 @@ impl App {
                     "One more shortcut. Esc cancels.",
                 ),
             };
-            words = words.push(t(line.get(lang), 12.0, DIM));
+            words = words.push(t(line.get(lang), 12.0, DIM.get()));
             if let Some(refused) = &recording.refused {
-                words = words.push(t(refused.clone(), 12.0, PEACH));
+                words = words.push(t(refused.clone(), 12.0, PEACH.get()));
             }
         } else if changed {
             let defaults = Self::defaults(id);
@@ -1171,13 +1188,13 @@ impl App {
                     Lang::English => format!("Default: {said}"),
                 },
                 12.0,
-                FAINT,
+                FAINT.get(),
             ));
         }
         let chords = self.chords(id);
         let mut right = row![].spacing(6).align_y(Alignment::Center);
         if chords.is_empty() && recording.is_none() {
-            right = right.push(t(w("Aucun", "None").get(lang), 12.5, FAINT));
+            right = right.push(t(w("Aucun", "None").get(lang), 12.5, FAINT.get()));
         }
         for (i, chord) in chords.iter().enumerate() {
             match recording {
@@ -1193,7 +1210,7 @@ impl App {
                         .width(26)
                         .height(26)
                         .padding(0)
-                        .style(flat(None, HOVER, 6.0, false));
+                        .style(flat(None, HOVER.get(), 6.0, false));
                 if self.writable() {
                     plus = plus.on_press(Message::Keys(Msg::Record(id, None)));
                 }
@@ -1202,9 +1219,9 @@ impl App {
         }
         if changed {
             let mut reset =
-                button(t(w("↺ Rétablir", "↺ Reset").get(lang), 12.5, MINT).font(SEMIBOLD))
+                button(t(w("↺ Rétablir", "↺ Reset").get(lang), 12.5, MINT.get()).font(SEMIBOLD))
                     .padding([4, 6])
-                    .style(flat(None, HOVER, 6.0, false));
+                    .style(flat(None, HOVER.get(), 6.0, false));
             if self.writable() {
                 reset = reset.on_press(Message::Keys(Msg::Reset(id)));
             }
@@ -1214,13 +1231,10 @@ impl App {
         let line = container(row![words, right].spacing(12).align_y(Alignment::Center))
             .padding([8, 16])
             .style(move |_: &Theme| container::Style {
-                background: (lit > 0.0).then_some(Background::Color(rgba(
-                    108,
-                    194,
-                    135,
-                    0.20 * lit,
-                ))),
-                border: border(11.0, 1.5, rgba(108, 194, 135, 0.85 * lit)),
+                background: (lit > 0.0).then_some(Background::Color(
+                    crate::theme::Ink::Accent(0.20 * lit).get(),
+                )),
+                border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
                 ..container::Style::default()
             })
             .id(format!("row:{id}"));
@@ -1241,29 +1255,34 @@ impl App {
                 format!("{shown} is already used by “{other}”. Replacing it takes it away.")
             }
         };
-        let amber = rgb(0xF5B44A);
+        let amber = crate::theme::ink(rgb(0xF5B44A));
         container(
             row![
-                container(t(said, 12.5, TEXT))
+                container(t(said, 12.5, TEXT.get()))
                     .width(Length::Fill)
                     .id("conflict:text".to_owned()),
                 container(
-                    button(t(w("Remplacer", "Replace").get(lang), 12.5, DEEP).font(BOLD))
+                    button(t(w("Remplacer", "Replace").get(lang), 12.5, DEEP.get()).font(BOLD))
                         .padding([6, 12])
                         .on_press(Message::Keys(Msg::Replace))
                         .style(move |_, _| button::Style {
                             background: Some(Background::Color(amber)),
-                            text_color: DEEP,
+                            text_color: DEEP.get(),
                             border: border(8.0, 0.0, Color::TRANSPARENT),
                             ..button::Style::default()
                         }),
                 )
                 .id("conflict:replace".to_owned()),
                 container(
-                    button(t(w("Annuler", "Cancel").get(lang), 12.5, TEXT).font(SEMIBOLD))
+                    button(t(w("Annuler", "Cancel").get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
                         .padding([6, 12])
                         .on_press(Message::Keys(Msg::Cancel))
-                        .style(flat(Some(rgba(255, 255, 255, 0.06)), HOVER, 8.0, false)),
+                        .style(flat(
+                            Some(crate::theme::ink(rgba(255, 255, 255, 0.06))),
+                            HOVER.get(),
+                            8.0,
+                            false
+                        )),
                 )
                 .id("conflict:cancel".to_owned()),
             ]
@@ -1272,9 +1291,9 @@ impl App {
         )
         .padding([10, 14])
         .style(boxed(
-            rgba(245, 180, 74, 0.10),
+            crate::theme::ink(rgba(245, 180, 74, 0.10)),
             9.0,
-            Some((1.0, rgba(245, 180, 74, 0.40))),
+            Some((1.0, crate::theme::ink(rgba(245, 180, 74, 0.40)))),
         ))
         .id("conflict".to_owned())
         .into()
@@ -1315,7 +1334,7 @@ impl App {
             .filter(|s| model::family_of(s.id) == Some(family))
             .collect();
         let changed = members.iter().filter(|s| self.changed(s.id)).count();
-        let mut words = column![t(family.name.get(lang), 13.5, TEXT).font(SEMIBOLD)]
+        let mut words = column![t(family.name.get(lang), 13.5, TEXT.get()).font(SEMIBOLD)]
             .spacing(2)
             .width(Length::Fill);
         if changed > 0 {
@@ -1325,7 +1344,7 @@ impl App {
                     Lang::English => format!("{changed} of 9 changed"),
                 },
                 12.0,
-                FAINT,
+                FAINT.get(),
             ));
         }
         let keys_said: El<'_> = match self.family_keys(family) {
@@ -1342,7 +1361,7 @@ impl App {
             None => t(
                 w("Propres à chaque bureau", "One for each desktop").get(lang),
                 12.5,
-                DIM,
+                DIM.get(),
             )
             .into(),
         };
@@ -1357,13 +1376,13 @@ impl App {
                     }
                     .get(lang),
                     12.5,
-                    MINT,
+                    MINT.get(),
                 )
                 .font(SEMIBOLD),
             )
             .padding([4, 8])
             .on_press(Message::Keys(Msg::Fold(family.prefix)))
-            .style(flat(None, HOVER, 6.0, false)),
+            .style(flat(None, HOVER.get(), 6.0, false)),
         )
         .id(format!("fold:{}", family.prefix));
         container(
@@ -1405,7 +1424,7 @@ impl App {
                 i > 0,
                 container(
                     row![
-                        t(name.get(lang), 13.5, DIM)
+                        t(name.get(lang), 13.5, DIM.get())
                             .font(SEMIBOLD)
                             .width(Length::Fill),
                         caps,
@@ -1423,7 +1442,7 @@ impl App {
             t(
                 w("Ne se changent pas", "Cannot be changed").get(lang),
                 12.0,
-                FAINT
+                FAINT.get()
             ),
         ]
         .align_y(Alignment::Center)
@@ -1504,27 +1523,39 @@ fn group<'a>(name: &'static str, body: El<'a>) -> El<'a> {
 fn chip<'a>(said: String) -> El<'a> {
     container(text(said).size(10.5).font(BOLD).color(MINT))
         .padding([1, 6])
-        .style(boxed(rgba(108, 194, 135, 0.16), 5.0, None))
+        .style(boxed(crate::theme::Ink::Accent(0.16).get(), 5.0, None))
         .into()
 }
 
 /// One key: 22 high, a 1 px rim and a 2 px bottom.
 fn keycap<'a>(said: String, alpha: f32) -> El<'a> {
-    container(text(said).size(11).font(MONO).color(fade(TEXT, alpha)))
-        .height(22)
-        .padding([0, 7])
-        .center_y(22)
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(fade(rgba(255, 255, 255, 0.06), alpha))),
-            border: border(5.0, 1.0, fade(rgba(255, 255, 255, 0.14), alpha)),
-            shadow: iced::Shadow {
-                color: fade(rgba(0, 0, 0, 0.45), alpha),
-                offset: iced::Vector::new(0.0, 2.0),
-                blur_radius: 0.0,
-            },
-            ..container::Style::default()
-        })
-        .into()
+    container(
+        text(said)
+            .size(11)
+            .font(MONO)
+            .color(fade(TEXT.get(), alpha)),
+    )
+    .height(22)
+    .padding([0, 7])
+    .center_y(22)
+    .style(move |_: &Theme| container::Style {
+        background: Some(Background::Color(fade(
+            crate::theme::ink(rgba(255, 255, 255, 0.06)),
+            alpha,
+        ))),
+        border: border(
+            5.0,
+            1.0,
+            fade(crate::theme::ink(rgba(255, 255, 255, 0.14)), alpha),
+        ),
+        shadow: iced::Shadow {
+            color: fade(crate::theme::ink(rgba(0, 0, 0, 0.45)), alpha),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 0.0,
+        },
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// Whether `kind` is one this module draws itself.

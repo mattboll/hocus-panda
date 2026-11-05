@@ -30,6 +30,7 @@ use iced::{
 };
 
 use super::{Card, Grid, Open, Row, Words};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
@@ -135,32 +136,32 @@ const EMOJI_CELL_GAP: f32 = z(6.0);
 const EMOJI_CELL_RADIUS: f32 = z(10.0);
 const EMOJI_SIZE: f32 = z(26.0);
 const EMOJI_CARD: f32 = EMOJI_PAD.height * 2.0 + EMOJI_HEAD_LINE + EMOJI_HEAD_GAP + EMOJI_CELL;
-const EMOJI_CARD_FILL: Color = Color::from_rgba8(108, 194, 135, 0.10);
+const EMOJI_CARD_FILL: Ink = Ink::Accent(0.10);
 
-const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const FIELD_RIM: Color = Color::from_rgba8(108, 194, 135, 0.45);
-const PLACEHOLDER: Color = rgb(0x7C8698);
-const HINT_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const LABEL: Color = rgb(0xC9D0DC);
-const SELECTED_FILL: Color = Color::from_rgba8(108, 194, 135, 0.16);
-const SELECTED_RIM: Color = Color::from_rgba8(108, 194, 135, 0.6);
-const MARK: Color = Color::from_rgba8(255, 255, 255, 0.22);
+const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
+const FIELD_RIM: Ink = Ink::Accent(0.45);
+const PLACEHOLDER: Ink = Ink::Dark(rgb(0x7C8698));
+const HINT_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const LABEL: Ink = Ink::Dark(rgb(0xC9D0DC));
+const SELECTED_FILL: Ink = Ink::Accent(0.16);
+const SELECTED_RIM: Ink = Ink::Accent(0.6);
+const MARK: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.22));
 /// The neutral tile of an application without an icon.
 const NEUTRAL: (Color, Color) = (rgb(0x5C6576), rgb(0x9AA3B4));
-const NEUTRAL_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const TOOLTIP_FILL: Color = Color::from_rgba8(22, 27, 42, 0.96);
-const TOOLTIP_RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
+const NEUTRAL_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const TOOLTIP_FILL: Ink = Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96));
+const TOOLTIP_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 /// On the CPU, whose surfaces have no transparency: the bar's dark blue
 /// (bar.md §13), opaque, top to bottom, the compositor's tint without the
 /// desktop under it.
-const OPAQUE: (Color, Color) = (rgb(0x161B2A), rgb(0x0E111C));
-const CARD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.04);
-const CARD_RIM: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const CARD_SUB_INK: Color = rgb(0x8C96A8);
-const CARD_HINT_INK: Color = rgb(0x8FE0A8);
-const BADGE_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const ANSWER_FILL: Color = rgb(0x6CC287);
-const EQUALS_INK: Color = rgb(0x0B1020);
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const CARD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
+const CARD_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const CARD_SUB_INK: Ink = Ink::Dark(rgb(0x8C96A8));
+const CARD_HINT_INK: Ink = Ink::Dark(rgb(0x8FE0A8));
+const BADGE_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const ANSWER_FILL: Ink = Ink::Accent(1.0);
+const EQUALS_INK: Ink = Ink::Dark(rgb(0x0B1020));
 const ADDRESS_FILL: (Color, Color) = (rgb(0x2E7D6B), rgb(0x5CC0A6));
 const WEB_FILL: (Color, Color) = (rgb(0x3B5BA9), rgb(0x6E8FE0));
 
@@ -572,8 +573,8 @@ impl<Message> canvas::Program<Message> for View {
         let mut frame = Frame::new(renderer, bounds.size());
         if self.software {
             let fill = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, bounds.height))
-                .add_stop(0.0, OPAQUE.0)
-                .add_stop(1.0, OPAQUE.1);
+                .add_stop(0.0, OPAQUE.0.get())
+                .add_stop(1.0, OPAQUE.1.get());
             frame.fill(
                 &Path::rectangle(Point::ORIGIN, bounds.size()),
                 canvas::Fill::from(fill),
@@ -848,10 +849,12 @@ impl View {
                 continue;
             };
             if *at == open.selected {
-                f.fill(&kit::rounded(*rect, TILE_RADIUS), SELECTED_FILL);
+                f.fill(&kit::rounded(*rect, TILE_RADIUS), SELECTED_FILL.get());
                 f.stroke(
                     &kit::rounded(inset(*rect, 0.5), TILE_RADIUS - 0.5),
-                    Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
+                    Stroke::default()
+                        .with_color(SELECTED_RIM.get())
+                        .with_width(1.0),
                 );
             }
             // On the screen's pixels, so that the icon's show one for one.
@@ -879,7 +882,7 @@ impl View {
                         rect.y + NAME_TOP + NAME_LINE * (i as f32 + 0.5),
                     ),
                     max_width: f32::INFINITY,
-                    color: LABEL,
+                    color: LABEL.get(),
                     size: Pixels(NAME),
                     line_height: LineHeight::Absolute(Pixels(NAME_LINE)),
                     font: MANROPE,
@@ -896,7 +899,7 @@ impl View {
             self.draw_emoji(f, open, *card, cells);
         }
         if let Some(mark) = layout.mark {
-            f.fill(&kit::rounded(mark, MARK_WIDTH / 2.0), MARK);
+            f.fill(&kit::rounded(mark, MARK_WIDTH / 2.0), MARK.get());
         }
         // The full name of a tile whose name is cut, rested on.
         if let Some((tile, name)) = tooltip_of(open)
@@ -935,10 +938,10 @@ impl View {
         } else {
             (CARD_FILL, CARD_RIM)
         };
-        f.fill(&kit::rounded(rect, CARD_RADIUS), fill);
+        f.fill(&kit::rounded(rect, CARD_RADIUS), fill.get());
         f.stroke(
             &kit::rounded(inset(rect, 0.5), CARD_RADIUS - 0.5),
-            Stroke::default().with_color(rim).with_width(1.0),
+            Stroke::default().with_color(rim.get()).with_width(1.0),
         );
         let size = card.badge();
         let badge = Rectangle::new(
@@ -957,7 +960,7 @@ impl View {
                     hint.to_owned(),
                     Point::new(right, rect.center_y()),
                     CARD_HINT,
-                    CARD_HINT_INK,
+                    CARD_HINT_INK.get(),
                     Alignment::Right,
                 ),
             ));
@@ -980,7 +983,7 @@ impl View {
                 main,
                 Point::new(x, top + main_height / 2.0),
                 main_size,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -988,7 +991,7 @@ impl View {
             sub,
             Point::new(x, top + main_height + CARD_LINES_GAP + sub_height / 2.0),
             CARD_SUB,
-            CARD_SUB_INK,
+            CARD_SUB_INK.get(),
             Alignment::Left,
         ));
     }
@@ -1008,10 +1011,10 @@ impl View {
         } else {
             (CARD_FILL, CARD_RIM)
         };
-        f.fill(&kit::rounded(card, CARD_RADIUS), fill);
+        f.fill(&kit::rounded(card, CARD_RADIUS), fill.get());
         f.stroke(
             &kit::rounded(inset(card, 0.5), CARD_RADIUS - 0.5),
-            Stroke::default().with_color(rim).with_width(1.0),
+            Stroke::default().with_color(rim.get()).with_width(1.0),
         );
         let heading = crate::emoji::Words::new(self.words.lang()).launcher_row();
         let mut x = card.x + EMOJI_PAD.width;
@@ -1025,7 +1028,7 @@ impl View {
                     letter,
                     Point::new(x, middle),
                     EMOJI_HEAD,
-                    CARD_HINT_INK,
+                    CARD_HINT_INK.get(),
                     Alignment::Left,
                 ),
             ));
@@ -1041,13 +1044,15 @@ impl View {
                 continue;
             };
             if *at == open.selected {
-                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), SELECTED_FILL);
+                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), SELECTED_FILL.get());
                 f.stroke(
                     &kit::rounded(inset(*rect, 0.5), EMOJI_CELL_RADIUS - 0.5),
-                    Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
+                    Stroke::default()
+                        .with_color(SELECTED_RIM.get())
+                        .with_width(1.0),
                 );
             } else {
-                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), CARD_FILL);
+                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), CARD_FILL.get());
             }
             crate::emoji::draw::emoji(f, &emoji.with_tone(tone), rect.center(), EMOJI_SIZE, 1.0);
         }
@@ -1055,10 +1060,12 @@ impl View {
 
     fn draw_field(&self, f: &mut Frame, state: &State, layout: &Layout) {
         let field = layout.field;
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL);
+        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
         f.stroke(
             &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default().with_color(FIELD_RIM).with_width(1.0),
+            Stroke::default()
+                .with_color(FIELD_RIM.get())
+                .with_width(1.0),
         );
         magnifier(
             f,
@@ -1075,7 +1082,7 @@ impl View {
             content,
             Point::new(x, field.center_y()),
             QUERY,
-            colour,
+            colour.get(),
             Alignment::Left,
         ));
         // The caret after what is typed: the field has the keyboard.
@@ -1090,7 +1097,7 @@ impl View {
             Point::new(caret_x, field.center_y() - QUERY * 0.6),
             Size::new(1.0, QUERY * 1.2),
         );
-        f.fill_rectangle(caret.position(), caret.size(), TEXT);
+        f.fill_rectangle(caret.position(), caret.size(), TEXT.get());
         // "Échap" in its frame, on the right.
         let width = state.hint + 2.0 * HINT_PAD + 2.0;
         let hint = Rectangle::new(
@@ -1102,7 +1109,7 @@ impl View {
         );
         f.stroke(
             &kit::rounded(inset(hint, 0.5), HINT_RADIUS - 0.5),
-            Stroke::default().with_color(HINT_RIM).with_width(1.0),
+            Stroke::default().with_color(HINT_RIM.get()).with_width(1.0),
         );
         f.fill_text(kit::text_in(
             MANROPE_SEMIBOLD,
@@ -1110,7 +1117,7 @@ impl View {
                 self.words.escape().to_owned(),
                 hint.center(),
                 HINT,
-                PLACEHOLDER,
+                PLACEHOLDER.get(),
                 Alignment::Center,
             ),
         ));
@@ -1173,7 +1180,7 @@ fn magnifier(f: &mut Frame, at: Point) {
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
     let stroke = Stroke {
         line_cap: canvas::LineCap::Round,
-        ..Stroke::default().with_color(DIM).with_width(2.2 * k)
+        ..Stroke::default().with_color(DIM.get()).with_width(2.2 * k)
     };
     f.stroke(&Path::circle(p(10.5, 10.5), 6.5 * k), stroke);
     f.stroke(&Path::line(p(15.5, 15.5), p(20.0, 20.0)), stroke);
@@ -1185,7 +1192,7 @@ fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
     let radius = (rect.width * 0.28).round();
     let shape = kit::rounded(rect, radius);
     match card {
-        Card::Answer => f.fill(&shape, ANSWER_FILL),
+        Card::Answer => f.fill(&shape, ANSWER_FILL.get()),
         Card::Address | Card::Web => {
             let (from, to) = if card == Card::Web {
                 WEB_FILL
@@ -1203,7 +1210,9 @@ fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
     }
     f.stroke(
         &kit::rounded(inset(rect, 0.5), radius - 0.5),
-        Stroke::default().with_color(BADGE_RIM).with_width(1.0),
+        Stroke::default()
+            .with_color(BADGE_RIM.get())
+            .with_width(1.0),
     );
     let at = Point::new(
         rect.center_x() - BADGE_ICON / 2.0,
@@ -1216,7 +1225,7 @@ fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
                 "=".to_owned(),
                 rect.center(),
                 EQUALS,
-                EQUALS_INK,
+                EQUALS_INK.get(),
                 Alignment::Center,
             ),
         )),
@@ -1229,7 +1238,11 @@ fn badge_of(f: &mut Frame, card: Card, rect: Rectangle) {
 fn globe(f: &mut Frame, at: Point) {
     let k = BADGE_ICON / 24.0;
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
-    let stroke = |width: f32| Stroke::default().with_color(TEXT).with_width(width * k);
+    let stroke = |width: f32| {
+        Stroke::default()
+            .with_color(TEXT.get())
+            .with_width(width * k)
+    };
     f.stroke(&Path::circle(p(12.0, 12.0), 8.5 * k), stroke(1.8));
     let lines = Path::new(|b| {
         b.move_to(p(3.5, 12.0));
@@ -1250,7 +1263,7 @@ fn link(f: &mut Frame, at: Point) {
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
     let stroke = Stroke {
         line_cap: canvas::LineCap::Round,
-        ..Stroke::default().with_color(TEXT).with_width(1.8 * k)
+        ..Stroke::default().with_color(TEXT.get()).with_width(1.8 * k)
     };
     let degrees = |d: f32| iced::Radians(d * PI / 180.0);
     let hook =
@@ -1290,7 +1303,7 @@ fn head(f: &mut Frame, label: &str, rect: Rectangle) {
                 letter,
                 Point::new(x, rect.center_y()),
                 HEAD_TEXT,
-                PLACEHOLDER,
+                PLACEHOLDER.get(),
                 Alignment::Left,
             ),
         ));
@@ -1311,7 +1324,9 @@ fn letter_tile(f: &mut Frame, rect: Rectangle, name: &str) {
     f.fill(&shape, canvas::Fill::from(fill));
     f.stroke(
         &kit::rounded(inset(rect, 0.5), ICON_RADIUS - 0.5),
-        Stroke::default().with_color(NEUTRAL_RIM).with_width(1.0),
+        Stroke::default()
+            .with_color(NEUTRAL_RIM.get())
+            .with_width(1.0),
     );
     let first = name
         .chars()
@@ -1340,16 +1355,18 @@ fn tooltip(f: &mut Frame, name: &str, tile: Rectangle, size: Size) {
         Point::new(x, tile.y + tile.height + TOOLTIP_UNDER),
         Size::new(width, height),
     );
-    f.fill(&kit::rounded(rect, TOOLTIP_RADIUS), TOOLTIP_FILL);
+    f.fill(&kit::rounded(rect, TOOLTIP_RADIUS), TOOLTIP_FILL.get());
     f.stroke(
         &kit::rounded(inset(rect, 0.5), TOOLTIP_RADIUS - 0.5),
-        Stroke::default().with_color(TOOLTIP_RIM).with_width(1.0),
+        Stroke::default()
+            .with_color(TOOLTIP_RIM.get())
+            .with_width(1.0),
     );
     f.fill_text(kit::text(
         name.to_owned(),
         rect.center(),
         TOOLTIP,
-        TEXT,
+        TEXT.get(),
         Alignment::Center,
     ));
 }

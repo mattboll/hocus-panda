@@ -69,8 +69,13 @@ const LIGHT_END: Duration = Duration::from_millis(2400);
 const SEARCH: &str = "search";
 
 /// The window's background (the content's) and its text.
-pub const BACKGROUND: iced::Color = style::CONTENT;
-pub const TEXT: iced::Color = style::TEXT;
+pub fn background() -> iced::Color {
+    style::CONTENT.get()
+}
+
+pub fn text() -> iced::Color {
+    style::TEXT.get()
+}
 
 /// The fonts the window draws with, and its default one.
 pub fn fonts() -> Vec<&'static [u8]> {
@@ -687,6 +692,13 @@ impl App {
                 self.last_good = last_good;
                 if snapshot.state == FileState::Reads {
                     self.reduced_motion = snapshot.reduced_motion;
+                    if crate::theme::set(snapshot.theme) {
+                        tracing::info!(
+                            theme = %snapshot.theme.scheme,
+                            accent = %snapshot.theme.accent,
+                            "the window's theme"
+                        );
+                    }
                 }
                 self.snapshot = Some(snapshot);
                 if !self.writable() {

@@ -1,8 +1,8 @@
 # Hocuspanda's configuration: ~/.config/hocuspanda/config.toml (or
 # $XDG_CONFIG_HOME/hocuspanda/config.toml). Every setting is listed here
 # with its default; uncomment what you change. It is read when the session
-# starts; [pointer], [touchpad], [keyboard] and [shortcuts] also as soon
-# as the file changes. A file that does not read is refused as a whole, and the
+# starts; [pointer], [touchpad], [keyboard], [shortcuts] and [appearance]
+# also as soon as the file changes. A file that does not read is refused as a whole, and the
 # journal says why: journalctl --user -t hocuspanda -b
 
 # [keyboard]
@@ -290,10 +290,22 @@
 # count = 4
 
 # [appearance]
+# The theme the bar, its menus, the launcher, the lock screen, the
+# authentication dialog and the Settings draw in: "dark" or "light".
+# Applications are told too, through the desktop portal's
+# org.freedesktop.appearance color-scheme (GTK 4, libadwaita, Qt 6.5 and
+# browsers follow it).
+# theme = "dark"
+# What is chosen, on or focused (switches, the selection, the keyboard's
+# ring): "green" (the pandas'), "blue", "violet", "rose", "teal", or
+# "wallpaper" (its dominant hue). Applications are told it as the portal's
+# accent-color.
+# accent = "green"
 # Windows fade instead of moving, and do not wobble; desktops fade
 # instead of sliding; the bar changes its form at once.
 # reduced-motion = false
-# The focused window's rim is 2 px wide instead of 1.
+# The focused window's rim is 2 px wide instead of 1; applications are
+# told (the portal's contrast).
 # high-contrast = false
 # The bar is opaque instead of glass over what is behind it.
 # reduce-transparency = false

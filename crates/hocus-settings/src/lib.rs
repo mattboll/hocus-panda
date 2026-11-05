@@ -29,5 +29,6 @@ pub mod screens;
 pub mod search;
 pub mod single;
 pub mod store;
+pub mod theme;
 pub mod worker;
 pub mod xkb;

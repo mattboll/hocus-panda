@@ -762,12 +762,12 @@ fn row_aside(words: Words, device: &Device, running: Option<&(String, Action)>) 
                 Action::Connect => words.connecting(),
                 Action::Pair => words.pairing(),
             },
-            colour: DIM,
+            colour: DIM.get(),
             spinner: true,
         }),
         _ if device.code && !device.paired => Some(Aside {
             text: words.in_settings(),
-            colour: FAINT,
+            colour: FAINT.get(),
             spinner: false,
         }),
         _ => None,
@@ -839,7 +839,7 @@ impl Drawn<'_> {
                 Point::new(LEFT, middle - ICON / 2.0),
                 ICON,
                 device.kind,
-                ACCENT,
+                ACCENT.get(),
             );
             if let Some(button) = self.shape(Target::Disconnect(i)) {
                 let hover = self.hover(Target::Disconnect(i));
@@ -855,7 +855,7 @@ impl Drawn<'_> {
                 words.connected().to_owned(),
                 Point::new(x, status),
                 STATUS,
-                ACCENT,
+                ACCENT.get(),
                 Alignment::Left,
             ));
             if let Some(percent) = device.battery {
@@ -873,7 +873,7 @@ impl Drawn<'_> {
                     beside,
                     Point::new(after, status),
                     STATUS,
-                    colour,
+                    colour.get(),
                     Alignment::Left,
                 ));
                 if let Some(under) = under {
@@ -881,7 +881,7 @@ impl Drawn<'_> {
                         under,
                         Point::new(x, status + STATUS * LINE),
                         STATUS,
-                        colour,
+                        colour.get(),
                         Alignment::Left,
                     ));
                 }
@@ -964,7 +964,7 @@ impl Drawn<'_> {
         };
         let middle = rect.center_y();
         let icon = Point::new(rect.x + ROW_PAD, middle - ICON / 2.0);
-        kind(f, icon, ICON, device.kind, colour);
+        kind(f, icon, ICON, device.kind, colour.get());
         if let Some(aside) = row_aside(self.words(), device, running) {
             let right = rect.x + rect.width - ROW_PAD;
             let width = self.width(aside.text, SMALL);
@@ -976,13 +976,13 @@ impl Drawn<'_> {
                 name,
                 Point::new(icon.x + ICON + ICON_GAP, middle),
                 ROW_TEXT,
-                colour,
+                colour.get(),
                 Alignment::Left,
             ),
         );
         if let Some(failure) = self.ui.failure(&device.path) {
             let at = (rect.x + ERROR_INDENT, rect.y + ROW);
-            for said in kit::lines(&error_lines(failure), at, ERROR, ERROR_LINE, PEACH) {
+            for said in kit::lines(&error_lines(failure), at, ERROR, ERROR_LINE, PEACH.get()) {
                 clip.fill(f, said);
             }
         }

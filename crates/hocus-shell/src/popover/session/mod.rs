@@ -47,38 +47,39 @@ use super::{
     kit::{self, Input, Pointer, text, text_in},
 };
 use crate::levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, ring};
+use crate::theme::Ink;
 
 pub const WIDTH: u32 = POPOVER_WIDTH.unsigned_abs();
 
 const ROW_RADIUS: f32 = 8.0;
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 const ROW_TEXT: f32 = 14.0;
 const ROW_PAD: f32 = 6.0;
 const TILE_RADIUS: f32 = 8.0;
-const TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const TILE_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 const TILE_GAP: f32 = 10.0;
 const GLYPH: f32 = 17.0;
 const GLYPH_INK: &str = "#C9D0DC";
 const SHORTCUT: f32 = 11.0;
 const MARTIAN: iced::Font = iced::Font::with_name("Martian Mono");
-const GREYED: Color = Color::from_rgba8(255, 255, 255, 0.28);
-const RULE: Color = Color::from_rgba8(255, 255, 255, 0.08);
+const GREYED: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.28));
+const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const NAME_SIZE: f32 = 16.0;
-const AMBER: Color = crate::levels::draw::rgb(0xF5C46E);
-const AMBER_TILE: Color = Color::from_rgba8(245, 196, 110, 0.14);
-const AMBER_INK: Color = crate::levels::draw::rgb(0x1C1406);
-const ANYWAY_FILL: Color = Color::from_rgba8(245, 196, 110, 0.12);
-const ANYWAY_BORDER: Color = Color::from_rgba8(245, 196, 110, 0.45);
-const TRACK: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const AMBER: Ink = Ink::Dark(crate::levels::draw::rgb(0xF5C46E));
+const AMBER_TILE: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.14));
+const AMBER_INK: Ink = Ink::Dark(crate::levels::draw::rgb(0x1C1406));
+const ANYWAY_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.12));
+const ANYWAY_BORDER: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.45));
+const TRACK: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const BUTTON_RADIUS: f32 = 9.0;
-const BUTTON_FILL: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const BUTTON_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
+const BUTTON_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const BUTTON_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const BUTTON_TEXT: f32 = 13.5;
 const BLOCK_RADIUS: f32 = 10.0;
-const BLOCK_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
+const BLOCK_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const SMALL_RADIUS: f32 = 7.0;
-const SMALL_FILL: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const SMALL_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.12);
+const SMALL_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const SMALL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 const ICON_RADIUS: f32 = 8.0;
 /// The bar drains in frames this far apart, on a GPU with motion.
 const FRAME: Duration = Duration::from_millis(16);
@@ -330,7 +331,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     f.fill_rectangle(
                         Point::new(kit::LEFT, *y),
                         Size::new(kit::RIGHT - kit::LEFT, 1.0),
-                        RULE,
+                        RULE.get(),
                     );
                 }
                 for placed in rows {
@@ -373,11 +374,11 @@ impl<Message> canvas::Program<Message> for Panel {
                     said,
                     Point::new(kit::LEFT, *sentence),
                     layout::SENTENCE,
-                    DIM,
+                    DIM.get(),
                     Alignment::Left,
                 ));
                 if let Some(bar) = bar {
-                    f.fill(&kit::rounded(*bar, 2.0), TRACK);
+                    f.fill(&kit::rounded(*bar, 2.0), TRACK.get());
                     let left = left.unwrap_or(LEAVE_COUNTDOWN);
                     // Smooth on a GPU with motion; else a step a second.
                     let left = if self.motion {
@@ -389,7 +390,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     if part > 0.0 {
                         let mut drained = *bar;
                         drained.width *= part;
-                        f.fill(&kit::rounded(drained, 2.0), AMBER);
+                        f.fill(&kit::rounded(drained, 2.0), AMBER.get());
                     }
                 }
                 if let Some(now) = now {
@@ -430,7 +431,7 @@ impl<Message> canvas::Program<Message> for Panel {
                         line.clone(),
                         Point::new(kit::LEFT, sentence_top + line_height * (i as f32 + 0.5)),
                         layout::HELD_SENTENCE,
-                        DIM,
+                        DIM.get(),
                         Alignment::Left,
                     ));
                 }
@@ -480,7 +481,7 @@ fn title(f: &mut Frame, action: LeaveAction, top: f32, lines: &[String]) {
         Point::new(kit::LEFT, top),
         Size::new(layout::TILE, layout::TILE),
     );
-    f.fill(&kit::rounded(tile, TILE_RADIUS), AMBER_TILE);
+    f.fill(&kit::rounded(tile, TILE_RADIUS), AMBER_TILE.get());
     draw_glyph(f, tile, Row::Leave(action), true);
     let line = layout::TITLE * layout::LINE;
     let block = (lines.len() as f32 * line).max(layout::TILE);
@@ -495,7 +496,7 @@ fn title(f: &mut Frame, action: LeaveAction, top: f32, lines: &[String]) {
                     first + line * (i as f32 + 0.5),
                 ),
                 layout::TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -528,7 +529,11 @@ fn button(f: &mut Frame, rect: Rectangle, word: &str, look: Button, hover: bool,
     let shape = kit::rounded(rect, BUTTON_RADIUS);
     let (ink, font) = match look {
         Button::Amber => {
-            let fill = if hover { AMBER.scale_alpha(0.9) } else { AMBER };
+            let fill = if hover {
+                AMBER.scale_alpha(0.9)
+            } else {
+                AMBER.get()
+            };
             f.fill(&shape, fill);
             (AMBER_INK, MANROPE_BOLD)
         }
@@ -546,7 +551,9 @@ fn button(f: &mut Frame, rect: Rectangle, word: &str, look: Button, hover: bool,
                     ),
                     BUTTON_RADIUS - 0.5,
                 ),
-                Stroke::default().with_color(ANYWAY_BORDER).with_width(1.0),
+                Stroke::default()
+                    .with_color(ANYWAY_BORDER.get())
+                    .with_width(1.0),
             );
             (AMBER, MANROPE_BOLD)
         }
@@ -560,7 +567,7 @@ fn button(f: &mut Frame, rect: Rectangle, word: &str, look: Button, hover: bool,
             word.to_owned(),
             rect.center(),
             BUTTON_TEXT,
-            ink,
+            ink.get(),
             Alignment::Center,
         ),
     ));
@@ -581,7 +588,7 @@ fn small(f: &mut Frame, rect: Rectangle, word: &str, hover: bool, focus: bool) {
             word.to_owned(),
             rect.center(),
             layout::REASON,
-            TEXT,
+            TEXT.get(),
             Alignment::Center,
         ),
     ));
@@ -603,7 +610,7 @@ impl Panel {
                     name.clone(),
                     Point::new(avatar.x + layout::AVATAR + TILE_GAP, middle),
                     NAME_SIZE,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ),
             ));
@@ -615,7 +622,7 @@ impl Panel {
         let rect = placed.rect;
         let target = Some(Target::Row(placed.row));
         if placed.enabled && hover == target {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER);
+            f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
         }
         if focus == target {
             ring(f, rect, ROW_RADIUS);
@@ -650,7 +657,11 @@ impl Panel {
                 self.row_word(placed.row).to_owned(),
                 Point::new(tile.x + layout::TILE + TILE_GAP, rect.center_y()),
                 ROW_TEXT,
-                if placed.enabled { TEXT } else { GREYED },
+                if placed.enabled {
+                    TEXT.get()
+                } else {
+                    GREYED.get()
+                },
                 Alignment::Left,
             ),
         ));
@@ -661,7 +672,7 @@ impl Panel {
                     "Super+L".to_owned(),
                     Point::new(rect.x + rect.width - ROW_PAD, rect.center_y()),
                     SHORTCUT,
-                    FAINT,
+                    FAINT.get(),
                     Alignment::Right,
                 ),
             ));
@@ -687,7 +698,7 @@ impl Panel {
         hover: Option<Target>,
         focus: Option<Target>,
     ) {
-        f.fill(&kit::rounded(block.rect, BLOCK_RADIUS), BLOCK_FILL);
+        f.fill(&kit::rounded(block.rect, BLOCK_RADIUS), BLOCK_FILL.get());
         self.icon(f, block.icon, app, &block.name);
         let words_left = block.back.x;
         f.fill_text(text_in(
@@ -696,7 +707,7 @@ impl Panel {
                 block.name.clone(),
                 Point::new(words_left, block.name_middle),
                 layout::NAME,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -706,7 +717,7 @@ impl Panel {
                 said.clone(),
                 Point::new(words_left, block.reason_top + line * (n as f32 + 0.5)),
                 layout::REASON,
-                DIM,
+                DIM.get(),
                 Alignment::Left,
             ));
         }

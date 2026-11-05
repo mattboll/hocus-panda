@@ -30,6 +30,7 @@ use super::{
     Effect, Event as Seen, Pressed, event,
     kit::{self, Input, MANROPE_SEMIBOLD, Pointer, app_tile, text, text_in},
 };
+use crate::theme::Ink;
 use crate::{
     in_use::{Kind, Media, Uses, Words, draw::colour},
     levels::{
@@ -58,19 +59,19 @@ const BUTTON_TEXT: f32 = 12.5;
 /// The recording's pause, beside its stop (5.10's).
 const PAUSE: f32 = 36.0;
 const PAUSE_GAP: f32 = 6.0;
-const BLUE: Color = rgb(0x5B8DEF);
-const BLUE_HOVER: Color = rgb(0x6E9BF2);
-const MUTE_FILL: Color = Color::from_rgba8(245, 163, 91, 0.14);
-const MUTE_RING: Color = Color::from_rgba8(245, 163, 91, 0.6);
-const UNMUTE_RING: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.08);
-const REC_FILL: Color = Color::from_rgba8(242, 84, 91, 0.16);
-const REC_RED: Color = rgb(0xF2545B);
-const REC_AMBER: Color = rgb(0xF5B44A);
-const REC_PAUSE: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const REC_STOP: Color = Color::from_rgba8(242, 84, 91, 0.85);
-const REC_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const REC_ICON: Color = rgb(0xEEF1F6);
+const BLUE: Ink = Ink::Dark(rgb(0x5B8DEF));
+const BLUE_HOVER: Ink = Ink::Dark(rgb(0x6E9BF2));
+const MUTE_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 163, 91, 0.14));
+const MUTE_RING: Ink = Ink::Dark(Color::from_rgba8(245, 163, 91, 0.6));
+const UNMUTE_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const REC_FILL: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.16));
+const REC_RED: Ink = Ink::Dark(rgb(0xF2545B));
+const REC_AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
+const REC_PAUSE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const REC_STOP: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.85));
+const REC_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const REC_ICON: Ink = Ink::Dark(rgb(0xEEF1F6));
 
 /// A use's line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,7 +253,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.right_now().to_owned(),
                 Point::new(left, layout.title),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -283,7 +284,13 @@ impl<Message> canvas::Program<Message> for Panel {
             let (app, what) = elided(&said, room);
             f.fill_text(text_in(
                 MANROPE_SEMIBOLD,
-                text(app, Point::new(x, app_middle), APP, TEXT, Alignment::Left),
+                text(
+                    app,
+                    Point::new(x, app_middle),
+                    APP,
+                    TEXT.get(),
+                    Alignment::Left,
+                ),
             ));
             f.fill_text(text(
                 what,
@@ -299,7 +306,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 self.words.held(held),
                 Point::new(left, middle),
                 HELD,
-                FAINT,
+                FAINT.get(),
                 Alignment::Left,
             ));
         }
@@ -431,10 +438,10 @@ impl Panel {
             }
             Line::Recording => {
                 // 5.10's item: its tint, its dot (amber while paused).
-                f.fill(&kit::rounded(rect, ICON_RADIUS), REC_FILL);
+                f.fill(&kit::rounded(rect, ICON_RADIUS), REC_FILL.get());
                 let paused = uses.recording.as_ref().is_some_and(|r| r.what.shown.paused);
                 let dot = if paused { REC_AMBER } else { REC_RED };
-                f.fill(&Path::circle(rect.center(), 5.0), dot);
+                f.fill(&Path::circle(rect.center(), 5.0), dot.get());
             }
             Line::Share(id) => {
                 let Some(share) = uses.shares.iter().find(|s| s.what.id == id) else {
@@ -471,10 +478,10 @@ impl Panel {
         match target {
             Target::Mute => {
                 if !uses.muted {
-                    f.fill(&shape, MUTE_FILL);
+                    f.fill(&shape, MUTE_FILL.get());
                 }
                 if hover {
-                    f.fill(&shape, HOVER);
+                    f.fill(&shape, HOVER.get());
                 }
                 let edge = if uses.muted { UNMUTE_RING } else { MUTE_RING };
                 f.stroke(
@@ -485,26 +492,26 @@ impl Panel {
                         ),
                         BUTTON_RADIUS - 0.5,
                     ),
-                    Stroke::default().with_color(edge).with_width(1.0),
+                    Stroke::default().with_color(edge.get()).with_width(1.0),
                 );
-                word(f, self.words.mute(uses.muted).to_owned(), TEXT);
+                word(f, self.words.mute(uses.muted).to_owned(), TEXT.get());
             }
             Target::Stop(id) => {
                 f.fill(&shape, if hover { BLUE_HOVER } else { BLUE });
                 word(f, self.stop_word(uses, id), Color::WHITE);
             }
             Target::Pause => {
-                f.fill(&shape, REC_PAUSE);
+                f.fill(&shape, REC_PAUSE.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER);
+                    f.fill(&shape, REC_HOVER.get());
                 }
                 let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
                 pause_icon(f, rect, paused);
             }
             Target::StopRecording => {
-                f.fill(&shape, REC_STOP);
+                f.fill(&shape, REC_STOP.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER);
+                    f.fill(&shape, REC_HOVER.get());
                 }
                 word(f, self.words.stop_recording().to_owned(), Color::WHITE);
             }
@@ -697,7 +704,7 @@ fn pause_icon(f: &mut Frame, rect: Rectangle, paused: bool) {
             }
         })
     };
-    f.fill(&icon, REC_ICON);
+    f.fill(&icon, REC_ICON.get());
 }
 
 #[cfg(test)]

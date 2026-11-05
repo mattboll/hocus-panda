@@ -24,6 +24,7 @@ use iced::{
 };
 
 use super::{Grid, Heading, Open, Row, Words, data};
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, Wheel},
@@ -89,24 +90,24 @@ const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
 }
 
 /// The mockup's tint, opaque without glass.
-const GLASS_TOP: Color = rgba(22, 27, 42, 0.97);
-const GLASS_BOTTOM: Color = rgba(14, 17, 28, 0.98);
-const OPAQUE_TOP: Color = rgb(0x161B2A);
-const OPAQUE_BOTTOM: Color = rgb(0x0E111C);
-const RIM: Color = rgba(255, 255, 255, 0.10);
-const FIELD_FILL: Color = rgba(255, 255, 255, 0.05);
-const FIELD_RIM: Color = rgba(108, 194, 135, 0.45);
-const QUIET: Color = rgb(0x7C8698);
-const BUTTON_RIM: Color = rgba(255, 255, 255, 0.14);
-const TAB_LIT: Color = rgba(255, 255, 255, 0.10);
-const HOVER: Color = rgba(255, 255, 255, 0.08);
-const SELECTED_FILL: Color = rgba(108, 194, 135, 0.16);
-const SELECTED_RIM: Color = rgba(108, 194, 135, 0.6);
-const GREEN: Color = rgb(0x6CC287);
-const FAINT: Color = rgb(0x8C96A8);
-const NAME: Color = rgb(0xC9D0DC);
-const HINT: Color = rgb(0x6A7384);
-const RULE: Color = rgba(255, 255, 255, 0.08);
+const GLASS_TOP: Ink = Ink::Dark(rgba(22, 27, 42, 0.97));
+const GLASS_BOTTOM: Ink = Ink::Dark(rgba(14, 17, 28, 0.98));
+const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
+const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
+const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const FIELD_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.05));
+const FIELD_RIM: Ink = Ink::Accent(0.45);
+const QUIET: Ink = Ink::Dark(rgb(0x7C8698));
+const BUTTON_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.14));
+const TAB_LIT: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.08));
+const SELECTED_FILL: Ink = Ink::Accent(0.16);
+const SELECTED_RIM: Ink = Ink::Accent(0.6);
+const GREEN: Ink = Ink::Accent(1.0);
+const FAINT: Ink = Ink::Dark(rgb(0x8C96A8));
+const NAME: Ink = Ink::Dark(rgb(0xC9D0DC));
+const HINT: Ink = Ink::Dark(rgb(0x6A7384));
+const RULE: Ink = Ink::Dark(rgba(255, 255, 255, 0.08));
 
 /// The tones' colours, the mockup's: yellow, then light to dark.
 pub const TONE_COLOURS: [Color; 6] = [
@@ -401,8 +402,8 @@ impl View {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
         };
         let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
+            .add_stop(0.0, top.get())
+            .add_stop(1.0, bottom.get());
         f.fill(
             &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
             canvas::Fill::from(tint),
@@ -413,7 +414,7 @@ impl View {
                 Size::new(size.width - BORDER, size.height - BORDER),
                 (RADIUS - BORDER / 2.0).into(),
             ),
-            Stroke::default().with_color(RIM).with_width(BORDER),
+            Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
     }
 
@@ -581,13 +582,15 @@ impl View {
         self.field(f, state, open, &layout);
         // The tone's button: its colour in a round.
         let b = layout.tone_button;
-        f.fill(&Path::circle(b.center(), b.width / 2.0), FIELD_FILL);
+        f.fill(&Path::circle(b.center(), b.width / 2.0), FIELD_FILL.get());
         if open.hover == Some(Target::ToneButton) {
-            f.fill(&Path::circle(b.center(), b.width / 2.0), HOVER);
+            f.fill(&Path::circle(b.center(), b.width / 2.0), HOVER.get());
         }
         f.stroke(
             &Path::circle(b.center(), b.width / 2.0 - 0.5),
-            Stroke::default().with_color(BUTTON_RIM).with_width(1.0),
+            Stroke::default()
+                .with_color(BUTTON_RIM.get())
+                .with_width(1.0),
         );
         f.fill(
             &Path::circle(b.center(), TONE_DOT / 2.0),
@@ -601,7 +604,9 @@ impl View {
             if i == tone {
                 f.stroke(
                     &Path::circle(rect.center(), rect.width / 2.0 - TONE_RING / 2.0),
-                    Stroke::default().with_color(GREEN).with_width(TONE_RING),
+                    Stroke::default()
+                        .with_color(GREEN.get())
+                        .with_width(TONE_RING),
                 );
             }
         }
@@ -612,9 +617,9 @@ impl View {
         };
         for (i, (heading, rect)) in layout.tabs.iter().enumerate() {
             if Some(*heading) == lit {
-                f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_LIT);
+                f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_LIT.get());
             } else if open.hover == Some(Target::Tab(i)) {
-                f.fill(&kit::rounded(*rect, TAB_RADIUS), HOVER);
+                f.fill(&kit::rounded(*rect, TAB_RADIUS), HOVER.get());
             }
             let dim = lit.is_some() && Some(*heading) != lit;
             emoji(
@@ -633,10 +638,12 @@ impl View {
                 continue;
             };
             if *at == open.selected {
-                f.fill(&kit::rounded(*rect, CELL_RADIUS), SELECTED_FILL);
+                f.fill(&kit::rounded(*rect, CELL_RADIUS), SELECTED_FILL.get());
                 f.stroke(
                     &kit::rounded(inset(*rect, 0.5), CELL_RADIUS - 0.5),
-                    Stroke::default().with_color(SELECTED_RIM).with_width(1.0),
+                    Stroke::default()
+                        .with_color(SELECTED_RIM.get())
+                        .with_width(1.0),
                 );
             }
             emoji(f, &text, rect.center(), CELL_EMOJI, 1.0);
@@ -649,7 +656,7 @@ impl View {
                     layout.grid.y + EMPTY_TOP + EMPTY * crate::levels::draw::LINE / 2.0,
                 ),
                 EMPTY,
-                FAINT,
+                FAINT.get(),
                 Alignment::Center,
             ));
         }
@@ -657,7 +664,7 @@ impl View {
         f.fill_rectangle(
             Point::new(LEFT, layout.footer),
             Size::new(RIGHT - LEFT, 1.0),
-            RULE,
+            RULE.get(),
         );
         let middle = layout.footer + 1.0 + FOOT_PAD + FOOT / 2.0;
         let hint = self.words.inserts();
@@ -666,7 +673,7 @@ impl View {
             hint.to_owned(),
             Point::new(RIGHT, middle),
             FOOT_HINT,
-            HINT,
+            HINT.get(),
             Alignment::Right,
         ));
         if let Some((e, text)) = open.emoji(open.selected) {
@@ -686,7 +693,7 @@ impl View {
                 name,
                 Point::new(x, middle),
                 FOOT_NAME,
-                NAME,
+                NAME.get(),
                 Alignment::Left,
             ));
         }
@@ -694,10 +701,12 @@ impl View {
 
     fn field(&self, f: &mut Frame, state: &State, open: &Open, layout: &Layout) {
         let field = layout.field;
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL);
+        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
         f.stroke(
             &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default().with_color(FIELD_RIM).with_width(1.0),
+            Stroke::default()
+                .with_color(FIELD_RIM.get())
+                .with_width(1.0),
         );
         magnifier(
             f,
@@ -714,7 +723,7 @@ impl View {
             content,
             Point::new(x, field.center_y()),
             QUERY,
-            colour,
+            colour.get(),
             Alignment::Left,
         ));
         if open.holding {
@@ -726,7 +735,7 @@ impl View {
             f.fill_rectangle(
                 Point::new(caret_x, field.center_y() - QUERY * 0.6),
                 Size::new(1.0, QUERY * 1.2),
-                TEXT,
+                TEXT.get(),
             );
         }
     }
@@ -738,7 +747,10 @@ pub fn emoji(f: &mut Frame, text: &str, at: Point, size: f32, alpha: f32) {
         content: text.to_owned(),
         position: at,
         max_width: f32::INFINITY,
-        color: Color { a: alpha, ..TEXT },
+        color: Color {
+            a: alpha,
+            ..TEXT.get()
+        },
         size: iced::Pixels(size),
         line_height: LineHeight::Relative(1.0),
         font: EMOJI_FONT,
@@ -760,7 +772,7 @@ fn head(f: &mut Frame, label: &str, rect: Rectangle) {
                 letter,
                 Point::new(x, rect.center_y()),
                 HEAD_TEXT,
-                QUIET,
+                QUIET.get(),
                 Alignment::Left,
             ),
         ));
@@ -798,7 +810,7 @@ fn magnifier(f: &mut Frame, at: Point) {
     let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
     let stroke = Stroke {
         line_cap: canvas::LineCap::Round,
-        ..Stroke::default().with_color(DIM).with_width(2.2 * k)
+        ..Stroke::default().with_color(DIM.get()).with_width(2.2 * k)
     };
     f.stroke(&Path::circle(p(10.5, 10.5), 6.5 * k), stroke);
     f.stroke(&Path::line(p(15.5, 15.5), p(20.0, 20.0)), stroke);

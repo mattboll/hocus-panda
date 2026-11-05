@@ -569,6 +569,41 @@ pub struct Appearance {
     pub cursor_size: Option<u32>,
     /// The bar is opaque instead of glass over what is behind it.
     pub reduce_transparency: bool,
+    /// `"dark"` or `"light"`: the shell, the Settings, the lock and the
+    /// authentication dialog draw in it, and applications are told
+    /// (#402).
+    #[serde(deserialize_with = "scheme")]
+    pub theme: hocus_link::theme::Scheme,
+    /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"` or
+    /// `"wallpaper"`: what is chosen, on or focused.
+    #[serde(deserialize_with = "accent")]
+    pub accent: hocus_link::theme::Accent,
+}
+
+impl Appearance {
+    /// The theme the shell draws in.
+    pub fn theme_choice(&self) -> hocus_link::theme::Choice {
+        hocus_link::theme::Choice {
+            scheme: self.theme,
+            accent: self.accent,
+        }
+    }
+}
+
+fn scheme<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::theme::Scheme, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(|err: hocus_link::BadLine| serde::de::Error::custom(err.0))
+}
+
+fn accent<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::theme::Accent, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(|err: hocus_link::BadLine| serde::de::Error::custom(err.0))
 }
 
 fn cursor_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
@@ -1217,6 +1252,22 @@ mod tests {
             "cursor-size = 300",
             "cursor-size = \"32\"",
         ] {
+            let text = format!("[appearance]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_theme_and_accent_are_read_by_their_words() -> anyhow::Result<()> {
+        use hocus_link::theme::{Accent, Scheme};
+        let config: Config =
+            toml::from_str("[appearance]\ntheme = \"light\"\naccent = \"teal\"\n")?;
+        assert_eq!(config.appearance.theme, Scheme::Light);
+        assert_eq!(config.appearance.accent, Accent::Teal);
+        let config: Config = toml::from_str("")?;
+        assert_eq!(config.appearance.theme_choice(), Default::default());
+        for bad in ["theme = \"neon\"", "accent = \"amber\"", "theme = 1"] {
             let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }

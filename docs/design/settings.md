@@ -384,6 +384,46 @@ key; the window's keyboard reaches combinations by the mouse only (not
 `Tab`); on the CPU at scale 2 the sub-page takes a few seconds to draw
 its 64 rows the first time.
 
+## Apparence et langue (6.2): the themes and the accent
+
+Issue #402, decided 2026-11-05: dark and light themes in v1, the whole
+desktop following; an accent among six (bar.md §13 gives every value).
+
+- **The keys**: `[appearance] theme = "dark" | "light"` and `accent =
+  "green" | "blue" | "violet" | "rose" | "teal" | "wallpaper"`; a word not
+  understood refuses the file, as any key's.
+- **Live**: `[appearance]` is followed as the file changes, through the
+  compositor's one watcher (`reload.rs`, `appearance/mod.rs`): the theme
+  and the accent go to the shell (`theme SCHEME ACCENT` on the line),
+  which draws every surface again in them (the bar, its popovers, the
+  launcher, the notifications, the lock screen, the authentication
+  dialog, the capture's and the sharing's panels); reduced motion and
+  reduced transparency to the bars and to what the compositor moves; high
+  contrast to the focused window's rim; the cursor's theme and size to
+  the cursor (its theme's thread started again) and to the programs
+  started afterwards.
+- **The Settings window** reads the same keys with the rest of the file
+  and draws in them as soon as the file changes: it is its own preview.
+  Its toast stays dark in both themes.
+- **Applications** are told through the desktop's portal backend, which
+  now serves `org.freedesktop.impl.portal.Settings` (version 2) beside
+  the screen cast, on the same name (`hocuspanda.portal`;
+  `hocuspanda-portals.conf` sends Settings to it, then to GTK's for the
+  other namespaces): `org.freedesktop.appearance` `color-scheme` (1 dark,
+  2 light), `accent-color` (the base, red, green, blue from 0 to 1) and
+  `contrast` (1 with high contrast), each signalled with
+  `SettingChanged` when it changes. GTK 4, libadwaita, Qt 6.5 and browsers
+  read it; an application already open follows if it listens.
+- **How the programs draw it**: their colours are `Ink`s (the shell's
+  `theme.rs`, the Settings' `theme.rs`), constants that give their colour
+  in the theme of the moment: a token, the accent, or a colour drawn for
+  the dark theme that light reads by rule (bar.md §13). At rest nothing
+  draws: a theme change is one message, each surface drawn once.
+- **Choices made here**: the wallpaper's accent is the default
+  backdrop's (`#7A96E0`) until the wallpaper's page (6.3) lets one be
+  chosen; the windows' rims and grips, drawn over the wallpaper, keep
+  their colours; the screen around a capture stays dimmed dark.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -555,8 +595,8 @@ file.
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
-  `[shortcuts]` (6.8), through one watcher (`reload.rs`); each other
-  setting's ticket adds its own.
+  `[shortcuts]` (6.8), `[appearance]` (6.2), through one watcher
+  (`reload.rs`); each other setting's ticket adds its own.
 - The other sixteen pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
@@ -582,6 +622,15 @@ that nothing draws at rest.
 - `the_close_button_esc_and_ctrl_w_close_the_window`
 - `a_change_made_just_before_closing_is_on_disk`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/appearance.rs` (6.2, the themes): the
+real shell and Settings, the portal on a D-Bus daemon of the test's own:
+
+- `switching_to_light_redraws_the_bar_and_the_calendar_in_light_live`
+- `the_accent_changes_the_bars_accent_colour`
+- `the_settings_window_draws_in_the_theme_and_follows_the_file`
+- `the_portal_answers_color_scheme_and_signals_its_change`
+- `once_the_switch_is_drawn_nothing_commits_at_rest`
 
 `crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
 of two screens (2560 × 1600 at 1, 3440 × 1440):

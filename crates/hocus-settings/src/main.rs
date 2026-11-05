@@ -68,10 +68,16 @@ fn main() -> ExitCode {
     let ran = iced::application(move || App::new(start.clone()), App::update, App::view)
         .title(App::title)
         .subscription(App::subscription)
-        .theme(|_: &App| iced::Theme::Dark)
+        .theme(|_: &App| {
+            if hocus_settings::theme::now().scheme == hocus_link::theme::Scheme::Light {
+                iced::Theme::Light
+            } else {
+                iced::Theme::Dark
+            }
+        })
         .style(|_: &App, _: &iced::Theme| iced::theme::Style {
-            background_color: app::BACKGROUND,
-            text_color: app::TEXT,
+            background_color: app::background(),
+            text_color: app::text(),
         })
         .settings(settings)
         .window(window::Settings {

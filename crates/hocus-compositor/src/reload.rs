@@ -8,7 +8,7 @@
 //! keeps the last configuration that read.
 //!
 //! Followed live: `[pointer]` and `[touchpad]` (6.12), `[shortcuts]` and
-//! `[keyboard]` (6.8). A keyboard whose layouts or options changed has its
+//! `[keyboard]` (6.8), `[appearance]` (6.2). A keyboard whose layouts or options changed has its
 //! keymap compiled on the thread too (XKB reads its files), the loop only
 //! taking it in; its repeat is given to clients again.
 
@@ -210,6 +210,11 @@ impl State {
             self.config.touchpad = new.touchpad;
             self.input_settings_changed();
             followed.push("[pointer] [touchpad]");
+        }
+        // The theme, the accent, motion, transparency, contrast and the
+        // cursor (#402, appearance.rs).
+        if self.appearance_changed(new.appearance.clone()) {
+            followed.push("[appearance]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

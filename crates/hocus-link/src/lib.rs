@@ -7,7 +7,7 @@
 //! message is one line of text, words separated by spaces (the screens'
 //! names by tabs). The compositor decides where bars are and in which
 //! form, reserves their space and takes the clicks on their edge, passes on
-//! the clock's settings, the level keys (volume, brightness) pressed, the
+//! the theme and the clock's settings, the level keys (volume, brightness) pressed, the
 //! presses outside the shell's surfaces while a popover shows, the
 //! names of the screens besides the built-in one, the keyboard's layouts
 //! and which one is active, the bars' screens' desktops with a sketch of
@@ -53,6 +53,7 @@ mod leave;
 mod lock;
 mod record;
 mod share;
+pub mod theme;
 pub use auth::{
     AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
     AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
@@ -366,6 +367,10 @@ pub enum ToShell {
     /// How bars look: on glass the compositor blurs behind (else opaque),
     /// and whether they move (else reduced motion).
     Look { glass: bool, motion: bool },
+    /// The theme and the accent the shell draws in (`[appearance] theme`
+    /// and `accent`, #402): sent as the shell connects and when the file
+    /// changes them. Written `theme SCHEME ACCENT`.
+    Theme(theme::Choice),
     /// A bar on `output`, in `form`; `since`: when it switched to it, in
     /// microseconds of `CLOCK_MONOTONIC` (0: it shows in that form at once);
     /// `scale`: its screen's, in 120ths as its surfaces' fractional scale
@@ -1474,6 +1479,7 @@ impl fmt::Display for ToShell {
                 if *glass { "glass" } else { "opaque" },
                 if *motion { "motion" } else { "still" }
             ),
+            Self::Theme(choice) => write!(f, "theme {} {}", choice.scheme, choice.accent),
             Self::Bar {
                 output,
                 form,
@@ -1869,6 +1875,10 @@ impl FromStr for ToShell {
                 glass: flag(words.next(), "glass", "opaque")?,
                 motion: flag(words.next(), "motion", "still")?,
             }),
+            Some("theme") => Ok(Self::Theme(theme::Choice {
+                scheme: word(&mut words, "theme")?.parse()?,
+                accent: word(&mut words, "accent")?.parse()?,
+            })),
             Some("bar") => Ok(Self::Bar {
                 output: word(&mut words, "output")?.to_owned(),
                 form: word(&mut words, "form")?.parse()?,
@@ -2488,6 +2498,10 @@ mod tests {
                 glass: true,
                 motion: false,
             },
+            ToShell::Theme(theme::Choice {
+                scheme: theme::Scheme::Light,
+                accent: theme::Accent::Violet,
+            }),
             ToShell::Bar {
                 output: "eDP-1".into(),
                 form: Form::Mini,

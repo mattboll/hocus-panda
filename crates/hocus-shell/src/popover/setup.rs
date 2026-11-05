@@ -41,6 +41,7 @@ use super::{
     Event as Seen, Pressed, event,
     kit::{self, Input, Pointer},
 };
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded, rgb, ring},
     setup::{
@@ -98,19 +99,19 @@ const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 6.0;
 const DONE: f32 = 34.0;
 
-const ROW_FILL: Color = Color::from_rgba8(255, 255, 255, 0.03);
-const ROW_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const FIELD_FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const FIELD_RIM: Color = Color::from_rgba8(255, 255, 255, 0.14);
-const FIELD_FOCUS: Color = Color::from_rgba8(108, 194, 135, 0.65);
-const FIELD_REFUSED: Color = rgb(0xF2945B);
-const PEACH: Color = rgb(0xF7B98A);
-const PLAIN: Color = Color::from_rgba8(255, 255, 255, 0.06);
-const PLAIN_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.10);
-const GREEN_HOVER: Color = rgb(0x7DCF97);
-const BOX_BORDER: Color = Color::from_rgba8(255, 255, 255, 0.38);
+const ROW_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.03));
+const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
+const FIELD_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
+const FIELD_FOCUS: Ink = Ink::Accent(0.65);
+const FIELD_REFUSED: Ink = Ink::Dark(rgb(0xF2945B));
+const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
+const PLAIN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const PLAIN_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const GREEN_HOVER: Ink = Ink::AccentLit;
+const BOX_BORDER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.38));
 /// A featured calendar's star: the eight's yellow.
-const STAR: Color = rgb(0xF5C46E);
+const STAR: Ink = Ink::Dark(rgb(0xF5C46E));
 
 /// What can be acted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,8 +254,8 @@ impl Laid {
 }
 
 /// Where the tiles' letters are: Google's blue, Planka's green.
-const GOOGLE_TINT: Color = BLUE;
-const PLANKA_TINT: Color = GREEN;
+const GOOGLE_TINT: Ink = BLUE;
+const PLANKA_TINT: Ink = GREEN;
 
 /// The popover for `flow` as it is, its text measured with `width`.
 fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Font) -> f32) -> Laid {
@@ -300,7 +301,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                 rect,
                 target,
                 letter: 'G',
-                tint: GOOGLE_TINT,
+                tint: GOOGLE_TINT.get(),
                 name: words.google(),
                 lines,
                 dim,
@@ -329,7 +330,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                 rect,
                 target: Some(Target::Planka),
                 letter: 'P',
-                tint: PLANKA_TINT,
+                tint: PLANKA_TINT.get(),
                 name: words.planka(),
                 lines,
                 dim: false,
@@ -344,7 +345,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                 top: y,
                 size: LINE_TEXT,
                 line: LINE,
-                colour: FAINT,
+                colour: FAINT.get(),
                 bold: false,
             });
             y += n * LINE;
@@ -375,7 +376,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                     top: y,
                     size: LABEL,
                     line: LABEL_HEIGHT,
-                    colour: DIM,
+                    colour: DIM.get(),
                     bold: true,
                 });
                 y += LABEL_HEIGHT + 6.0;
@@ -408,7 +409,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                 top: y,
                 size: LINE_TEXT,
                 line: LINE,
-                colour: FAINT,
+                colour: FAINT.get(),
                 bold: false,
             });
             y += n * LINE;
@@ -421,7 +422,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                     top: y,
                     size: ERROR,
                     line: ERROR_LINE,
-                    colour: PEACH,
+                    colour: PEACH.get(),
                     bold: false,
                 });
                 y += n * ERROR_LINE;
@@ -484,7 +485,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                 top: y,
                 size: 12.5,
                 line: 18.0,
-                colour: DIM,
+                colour: DIM.get(),
                 bold: false,
             });
             y += 18.0 + GAP;
@@ -504,7 +505,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                                 top: y + (CHECK_ROW - 18.0) / 2.0,
                                 size: 13.0,
                                 line: 18.0,
-                                colour: DIM,
+                                colour: DIM.get(),
                                 bold: false,
                             });
                             y += CHECK_ROW;
@@ -518,7 +519,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                                 top: y,
                                 size: ERROR,
                                 line: ERROR_LINE,
-                                colour: PEACH,
+                                colour: PEACH.get(),
                                 bold: false,
                             });
                             y += n * ERROR_LINE;
@@ -632,7 +633,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                             top: y,
                             size: NAME,
                             line: 22.0,
-                            colour: TEXT,
+                            colour: TEXT.get(),
                             bold: true,
                         });
                         said.push(format!("board «{}»", board.board.name));
@@ -644,7 +645,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                             top: y + 7.0,
                             size: 13.0,
                             line: 18.0,
-                            colour: DIM,
+                            colour: DIM.get(),
                             bold: false,
                         });
                         y += CHECK_ROW;
@@ -693,7 +694,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
                             top: y + 4.0,
                             size: LINE_TEXT,
                             line: LINE,
-                            colour: DIM,
+                            colour: DIM.get(),
                             bold: false,
                         });
                         said.push(count);
@@ -885,7 +886,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 laid.title.to_owned(),
                 Point::new(title_x, HEADER_TOP + HEADER / 2.0),
                 TITLE,
-                TEXT,
+                TEXT.get(),
                 Alignment::Left,
             ),
         ));
@@ -1144,7 +1145,7 @@ impl Panel {
             } => {
                 let alpha = if *dim { 0.5 } else { 1.0 };
                 let fill = if lit(*target) { ROW_HOVER } else { ROW_FILL };
-                f.fill(&kit::rounded(*rect, ROW_RADIUS), fill);
+                f.fill(&kit::rounded(*rect, ROW_RADIUS), fill.get());
                 if focused(*target) {
                     ring(f, *rect, ROW_RADIUS);
                 }
@@ -1172,7 +1173,7 @@ impl Panel {
                         (*name).to_owned(),
                         Point::new(rect.x + NAME_X, rect.y + 19.0),
                         NAME,
-                        faded(TEXT, alpha),
+                        faded(TEXT.get(), alpha),
                         Alignment::Left,
                     ),
                 ));
@@ -1181,7 +1182,7 @@ impl Panel {
                         line.clone(),
                         Point::new(rect.x + NAME_X, rect.y + 30.0 + LINE * (i as f32 + 0.5)),
                         LINE_TEXT,
-                        faded(DIM, alpha),
+                        faded(DIM.get(), alpha),
                         Alignment::Left,
                     ));
                 }
@@ -1195,7 +1196,7 @@ impl Panel {
             Part::Account { rect, target, name } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER);
+                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1206,7 +1207,7 @@ impl Panel {
                     shown,
                     Point::new(rect.x + NAME_X - 4.0, rect.center_y()),
                     13.0,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ));
                 chevron_right(f, Point::new(rect.x + rect.width - 12.0, rect.center_y()));
@@ -1265,7 +1266,10 @@ impl Panel {
                     ),
                 };
                 let alpha = if enabled { 1.0 } else { 0.45 };
-                f.fill(&kit::rounded(*rect, BUTTON_RADIUS), faded(fill, alpha));
+                f.fill(
+                    &kit::rounded(*rect, BUTTON_RADIUS),
+                    faded(fill.get(), alpha),
+                );
                 if focused(*target) {
                     ring(f, *rect, BUTTON_RADIUS);
                 }
@@ -1273,7 +1277,7 @@ impl Panel {
                 if *busy {
                     let w = measure(word, BUTTON_TEXT, font);
                     let spin = Point::new(centre.x - (w + 18.0) / 2.0 + 6.0, centre.y);
-                    spinner(f, spin, ink, self.motion);
+                    spinner(f, spin, ink.get(), self.motion);
                     centre.x += 9.0;
                 }
                 f.fill_text(kit::text_in(
@@ -1282,7 +1286,7 @@ impl Panel {
                         (*word).to_owned(),
                         centre,
                         BUTTON_TEXT,
-                        faded(ink, alpha),
+                        faded(ink.get(), alpha),
                         Alignment::Center,
                     ),
                 ));
@@ -1298,7 +1302,7 @@ impl Panel {
             } => {
                 let target = Some(Target::Calendar(*index));
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER);
+                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1315,7 +1319,7 @@ impl Panel {
                 if lit(swatch_target) {
                     f.stroke(
                         &kit::rounded(swatch, 6.0),
-                        Stroke::default().with_color(DIM).with_width(1.0),
+                        Stroke::default().with_color(DIM.get()).with_width(1.0),
                     );
                 }
                 if focused(swatch_target) {
@@ -1328,7 +1332,7 @@ impl Panel {
                 if lit(star_target) {
                     f.stroke(
                         &kit::rounded(star, 6.0),
-                        Stroke::default().with_color(DIM).with_width(1.0),
+                        Stroke::default().with_color(DIM.get()).with_width(1.0),
                     );
                 }
                 if focused(star_target) {
@@ -1343,7 +1347,7 @@ impl Panel {
                     shown_name,
                     Point::new(x, middle),
                     13.0,
-                    if *shown { TEXT } else { DIM },
+                    if *shown { TEXT.get() } else { DIM.get() },
                     Alignment::Left,
                 ));
                 if let Some(aside) = aside {
@@ -1351,7 +1355,7 @@ impl Panel {
                         aside.to_owned(),
                         Point::new(RIGHT, middle),
                         11.5,
-                        FAINT,
+                        FAINT.get(),
                         Alignment::Right,
                     ));
                 }
@@ -1366,7 +1370,7 @@ impl Panel {
                         f.stroke(
                             &Path::circle(centre, SWATCH / 2.0 + 2.5),
                             Stroke::default()
-                                .with_color(if c == *chosen { TEXT } else { DIM })
+                                .with_color(if c == *chosen { TEXT.get() } else { DIM.get() })
                                 .with_width(1.5),
                         );
                     }
@@ -1383,7 +1387,7 @@ impl Panel {
             } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER);
+                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1393,7 +1397,7 @@ impl Panel {
                     (*label).to_owned(),
                     Point::new(LEFT, middle),
                     13.0,
-                    DIM,
+                    DIM.get(),
                     Alignment::Left,
                 ));
                 let label_width = measure(label, 13.0, MANROPE) + 12.0;
@@ -1403,7 +1407,7 @@ impl Panel {
                     shown,
                     Point::new(RIGHT - 16.0, middle),
                     13.0,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Right,
                 ));
                 chevron_down(f, Point::new(RIGHT - 5.0, middle));
@@ -1416,14 +1420,14 @@ impl Panel {
             } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 7.0), ROW_HOVER);
+                    f.fill(&kit::rounded(*rect, 7.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 7.0);
                 }
                 let middle = rect.center_y();
                 if *chosen {
-                    check(f, Point::new(rect.x + 12.0, middle), GREEN, 12.0);
+                    check(f, Point::new(rect.x + 12.0, middle), GREEN.get(), 12.0);
                 }
                 let room = rect.width - 34.0;
                 let shown = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
@@ -1431,7 +1435,7 @@ impl Panel {
                     shown,
                     Point::new(rect.x + 26.0, middle),
                     13.0,
-                    if *chosen { TEXT } else { DIM },
+                    if *chosen { TEXT.get() } else { DIM.get() },
                     Alignment::Left,
                 ));
             }
@@ -1442,7 +1446,7 @@ impl Panel {
     /// while it holds the keyboard.
     fn field(&self, f: &mut Frame, state: &State, field: Field, rect: Rectangle, refused: bool) {
         let focused = state.focus == Some(Target::Field(field));
-        f.fill(&kit::rounded(rect, FIELD_RADIUS), FIELD_FILL);
+        f.fill(&kit::rounded(rect, FIELD_RADIUS), FIELD_FILL.get());
         let rim = Rectangle::new(
             Point::new(rect.x + 0.5, rect.y + 0.5),
             Size::new(rect.width - 1.0, rect.height - 1.0),
@@ -1456,7 +1460,7 @@ impl Panel {
         };
         f.stroke(
             &kit::rounded(rim, FIELD_RADIUS - 0.5),
-            Stroke::default().with_color(colour).with_width(1.0),
+            Stroke::default().with_color(colour.get()).with_width(1.0),
         );
         let left = rect.x + FIELD_PAD;
         let room = rect.width - 2.0 * FIELD_PAD;
@@ -1467,7 +1471,7 @@ impl Panel {
                     "https://…/boards/…".to_owned(),
                     Point::new(left, middle),
                     FIELD_TEXT,
-                    FAINT,
+                    FAINT.get(),
                     Alignment::Left,
                 ));
                 left
@@ -1488,7 +1492,7 @@ impl Panel {
                     shown,
                     Point::new(left, middle),
                     FIELD_TEXT,
-                    TEXT,
+                    TEXT.get(),
                     Alignment::Left,
                 ));
                 left + width
@@ -1498,7 +1502,7 @@ impl Panel {
                     "accessToken=…; httpOnlyToken=…".to_owned(),
                     Point::new(left, middle),
                     FIELD_TEXT,
-                    FAINT,
+                    FAINT.get(),
                     Alignment::Left,
                 ));
                 left
@@ -1508,7 +1512,7 @@ impl Panel {
                 let n = state.token.min(fit);
                 for i in 0..n {
                     let centre = Point::new(left + DOT_ADVANCE * (i as f32 + 0.5), middle);
-                    f.fill(&Path::circle(centre, DOT), TEXT);
+                    f.fill(&Path::circle(centre, DOT), TEXT.get());
                 }
                 left + n as f32 * DOT_ADVANCE
             }
@@ -1517,7 +1521,7 @@ impl Panel {
             f.fill_rectangle(
                 Point::new(end + 1.0, middle - 8.0),
                 Size::new(1.0, 16.0),
-                TEXT,
+                TEXT.get(),
             );
         }
     }
@@ -1538,7 +1542,7 @@ const PALETTE_COLOURS: [Color; 8] = {
 /// keyboard.
 fn square(f: &mut Frame, rect: Rectangle, lit: bool, focused: bool) {
     if lit {
-        f.fill(&kit::rounded(rect, 7.0), ROW_HOVER);
+        f.fill(&kit::rounded(rect, 7.0), ROW_HOVER.get());
     }
     if focused {
         ring(f, rect, 7.0);
@@ -1563,7 +1567,7 @@ fn arrow(f: &mut Frame, c: Point) {
         p.line_to(Point::new(c.x - 6.0, c.y));
         p.line_to(Point::new(c.x - 1.0, c.y + 5.0));
     });
-    f.stroke(&path, line_stroke(1.8, DIM));
+    f.stroke(&path, line_stroke(1.8, DIM.get()));
 }
 
 /// ✕, 12 px, centred on `c`.
@@ -1575,7 +1579,7 @@ fn cross(f: &mut Frame, c: Point) {
         p.move_to(Point::new(c.x + arm, c.y - arm));
         p.line_to(Point::new(c.x - arm, c.y + arm));
     });
-    f.stroke(&path, line_stroke(1.8, DIM));
+    f.stroke(&path, line_stroke(1.8, DIM.get()));
 }
 
 fn chevron_right(f: &mut Frame, c: Point) {
@@ -1585,7 +1589,7 @@ fn chevron_right(f: &mut Frame, c: Point) {
         p.line_to(Point::new(c.x + half / 2.0, c.y));
         p.line_to(Point::new(c.x - half / 2.0, c.y + half));
     });
-    f.stroke(&path, line_stroke(1.8, FAINT));
+    f.stroke(&path, line_stroke(1.8, FAINT.get()));
 }
 
 fn chevron_down(f: &mut Frame, c: Point) {
@@ -1595,7 +1599,7 @@ fn chevron_down(f: &mut Frame, c: Point) {
         p.line_to(Point::new(c.x, c.y + half / 2.0));
         p.line_to(Point::new(c.x + half, c.y - half / 2.0));
     });
-    f.stroke(&path, line_stroke(1.8, FAINT));
+    f.stroke(&path, line_stroke(1.8, FAINT.get()));
 }
 
 /// A check, `size` px, its middle-left at `at`.
@@ -1614,8 +1618,8 @@ fn check(f: &mut Frame, at: Point, colour: Color, size: f32) {
 fn tick(f: &mut Frame, at: Point, ticked: bool) {
     let rect = Rectangle::new(at, Size::new(BOX, BOX));
     if ticked {
-        f.fill(&kit::rounded(rect, 4.0), GREEN);
-        check(f, Point::new(at.x + 2.0, at.y + BOX / 2.0), INK, 12.0);
+        f.fill(&kit::rounded(rect, 4.0), GREEN.get());
+        check(f, Point::new(at.x + 2.0, at.y + BOX / 2.0), INK.get(), 12.0);
     } else {
         let inset = 0.75;
         let border = Rectangle::new(
@@ -1624,7 +1628,9 @@ fn tick(f: &mut Frame, at: Point, ticked: bool) {
         );
         f.stroke(
             &kit::rounded(border, 4.0 - inset),
-            Stroke::default().with_color(BOX_BORDER).with_width(1.5),
+            Stroke::default()
+                .with_color(BOX_BORDER.get())
+                .with_width(1.5),
         );
     }
 }
@@ -1649,12 +1655,12 @@ fn star_mark(f: &mut Frame, c: Point, lit: bool, shown: bool) {
     });
     let strength = if shown { 1.0 } else { 0.5 };
     if lit {
-        f.fill(&path, faded(STAR, strength));
+        f.fill(&path, faded(STAR.get(), strength));
     } else {
         f.stroke(
             &path,
             Stroke::default()
-                .with_color(faded(BOX_BORDER, strength))
+                .with_color(faded(BOX_BORDER.get(), strength))
                 .with_width(1.3)
                 .with_line_join(canvas::LineJoin::Round),
         );

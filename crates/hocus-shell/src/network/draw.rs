@@ -38,6 +38,7 @@ use iced::{
 };
 
 use super::model::{Link, Network};
+use crate::theme::Ink;
 use crate::{
     bluetooth::{self, draw::RowState, model::Row},
     levels::{
@@ -68,8 +69,8 @@ const MINI_BUTTON: Size = Size::new(44.0, 38.0);
 const MINI_ICON: f32 = 20.0;
 /// The sign-in page's dot, and its ring of the bar's colour.
 const DOT: f32 = 7.0;
-const DOT_COLOUR: Color = crate::levels::draw::rgb(0xF2945B);
-const DOT_RING: Color = Color::from_rgba8(14, 17, 28, 0.9);
+const DOT_COLOUR: Ink = Ink::Dark(crate::levels::draw::rgb(0xF2945B));
+const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.9));
 
 /// The connections shown in the full form, from the top: the Wi-Fi's
 /// while NetworkManager is there, Bluetooth's while BlueZ has an adapter,
@@ -441,7 +442,7 @@ impl<Message> canvas::Program<Message> for Connections {
             if let Some(colour) = lit {
                 frame.fill(
                     &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour,
+                    colour.get(),
                 );
             }
             if focused {
@@ -730,7 +731,7 @@ fn full(f: &mut Frame, rect: Rectangle, link: &Link, state: &State, alpha: f32) 
         content: state.label.clone(),
         position: Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
         max_width: f32::INFINITY,
-        color: faded(colour, alpha),
+        color: faded(colour.get(), alpha),
         size: Pixels(LABEL),
         line_height: LineHeight::Relative(LINE),
         font: MANROPE,
@@ -760,11 +761,13 @@ fn mini(f: &mut Frame, rect: Rectangle, link: &Link, warns: bool, alpha: f32) {
 /// The row's icon for `link`, `size` px at `at`.
 fn glyph(f: &mut Frame, at: Point, size: f32, link: &Link, alpha: f32) {
     match link {
-        Link::Wired => ethernet(f, at, size, faded(TEXT, alpha)),
-        Link::Connected { bars, .. } => wifi(f, at, size, *bars, faded(TEXT, alpha), false, alpha),
-        Link::Connecting => wifi(f, at, size, 4, faded(DIM, alpha), false, alpha),
+        Link::Wired => ethernet(f, at, size, faded(TEXT.get(), alpha)),
+        Link::Connected { bars, .. } => {
+            wifi(f, at, size, *bars, faded(TEXT.get(), alpha), false, alpha)
+        }
+        Link::Connecting => wifi(f, at, size, 4, faded(DIM.get(), alpha), false, alpha),
         Link::Off | Link::Offline | Link::Hidden => {
-            wifi(f, at, size, 0, faded(TEXT, alpha), true, alpha);
+            wifi(f, at, size, 0, faded(TEXT.get(), alpha), true, alpha);
         }
     }
 }
@@ -772,9 +775,12 @@ fn glyph(f: &mut Frame, at: Point, size: f32, link: &Link, alpha: f32) {
 pub(crate) fn dot(f: &mut Frame, centre: Point, alpha: f32) {
     f.fill(
         &Path::circle(centre, DOT / 2.0 + 2.0),
-        faded(DOT_RING, alpha),
+        faded(DOT_RING.get(), alpha),
     );
-    f.fill(&Path::circle(centre, DOT / 2.0), faded(DOT_COLOUR, alpha));
+    f.fill(
+        &Path::circle(centre, DOT / 2.0),
+        faded(DOT_COLOUR.get(), alpha),
+    );
 }
 
 // --- Icons, from the mockup's SVGs (a 24-unit box) ------------------------------
@@ -791,7 +797,7 @@ pub(crate) fn wifi(
     alpha: f32,
 ) {
     let s = size / 24.0;
-    let unlit = faded(MUTED_FILL, alpha);
+    let unlit = faded(MUTED_FILL.get(), alpha);
     let lit = |n: u8| if bars >= n { colour } else { unlit };
     // `M2.5 9a13.5 13.5 0 0 1 19 0`, `M5.5 12.3a9.3 9.3 0 0 1 13 0`,
     // `M8.5 15.5a5 5 0 0 1 7 0`: arcs over their chords, bulging up.
@@ -811,7 +817,7 @@ pub(crate) fn wifi(
             Point::new(at.x + 4.0 * s, at.y + 3.0 * s),
             Point::new(at.x + 20.0 * s, at.y + 21.0 * s),
         );
-        f.stroke(&line, stroke(2.2 * s, faded(FAINT, alpha)));
+        f.stroke(&line, stroke(2.2 * s, faded(FAINT.get(), alpha)));
     }
 }
 

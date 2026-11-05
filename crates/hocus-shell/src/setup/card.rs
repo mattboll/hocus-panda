@@ -20,6 +20,7 @@ use iced::{
 };
 
 use super::Words;
+use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, FAINT, HOVER, MANROPE_BOLD, faded, rgb, ring},
     popover::kit,
@@ -41,12 +42,12 @@ const LATER: f32 = 24.0;
 const LATER_RADIUS: f32 = 7.0;
 const LATER_TEXT: f32 = 12.5;
 
-const FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const RIM: Color = Color::from_rgba8(255, 255, 255, 0.08);
-pub const BLUE: Color = rgb(0x8FB3FF);
-pub const GREEN: Color = rgb(0x6CC287);
-const GREEN_HOVER: Color = rgb(0x7DCF97);
-pub const INK: Color = rgb(0x0B1020);
+const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
+const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+pub const BLUE: Ink = Ink::Dark(rgb(0x8FB3FF));
+pub const GREEN: Ink = Ink::Accent(1.0);
+const GREEN_HOVER: Ink = Ink::AccentLit;
+pub const INK: Ink = Ink::Dark(rgb(0x0B1020));
 
 /// The card laid out, from its top left.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,7 +90,7 @@ pub struct Lit {
 pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha: f32) {
     let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
     let whole = Rectangle::new(o, Size::new(WIDTH, card.height));
-    f.fill(&kit::rounded(whole, RADIUS), faded(FILL, alpha));
+    f.fill(&kit::rounded(whole, RADIUS), faded(FILL.get(), alpha));
     let rim = Rectangle::new(
         Point::new(o.x + 0.5, o.y + 0.5),
         Size::new(WIDTH - 1.0, card.height - 1.0),
@@ -97,17 +98,21 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
     f.stroke(
         &kit::rounded(rim, RADIUS - 0.5),
         Stroke::default()
-            .with_color(faded(RIM, alpha))
+            .with_color(faded(RIM.get(), alpha))
             .with_width(1.0),
     );
-    calendar(f, Point::new(o.x + PAD, o.y + PAD), faded(BLUE, alpha));
+    calendar(
+        f,
+        Point::new(o.x + PAD, o.y + PAD),
+        faded(BLUE.get(), alpha),
+    );
     f.fill_text(kit::text_in(
         MANROPE_BOLD,
         kit::text(
             words.card_title().to_owned(),
             Point::new(o.x + PAD + ICON + GAP, o.y + PAD + ICON / 2.0),
             TITLE,
-            faded(crate::levels::draw::TEXT, alpha),
+            faded(crate::levels::draw::TEXT.get(), alpha),
             Alignment::Left,
         ),
     ));
@@ -117,7 +122,7 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
             line.clone(),
             Point::new(o.x + PAD, y + TEXT_LINE / 2.0),
             TEXT,
-            faded(DIM, alpha),
+            faded(DIM.get(), alpha),
             Alignment::Left,
         );
         text.line_height = iced::widget::text::LineHeight::Relative(1.45);
@@ -126,7 +131,10 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
     }
     let choose = at(card.choose);
     let fill = if lit.choose { GREEN_HOVER } else { GREEN };
-    f.fill(&kit::rounded(choose, CHOOSE_RADIUS), faded(fill, alpha));
+    f.fill(
+        &kit::rounded(choose, CHOOSE_RADIUS),
+        faded(fill.get(), alpha),
+    );
     if lit.choose_ring {
         ring(f, choose, CHOOSE_RADIUS);
     }
@@ -136,13 +144,16 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
             words.choose().to_owned(),
             choose.center(),
             CHOOSE_TEXT,
-            faded(INK, alpha),
+            faded(INK.get(), alpha),
             Alignment::Center,
         ),
     ));
     let later = at(card.later);
     if lit.later {
-        f.fill(&kit::rounded(later, LATER_RADIUS), faded(HOVER, alpha));
+        f.fill(
+            &kit::rounded(later, LATER_RADIUS),
+            faded(HOVER.get(), alpha),
+        );
     }
     if lit.later_ring {
         ring(f, later, LATER_RADIUS);
@@ -151,7 +162,7 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
         words.later().to_owned(),
         later.center(),
         LATER_TEXT,
-        faded(FAINT, alpha),
+        faded(FAINT.get(), alpha),
         Alignment::Center,
     ));
 }

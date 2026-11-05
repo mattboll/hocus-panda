@@ -32,6 +32,7 @@ use iced::{
 };
 
 use super::{HEADER, LINE, Row, Words};
+use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
@@ -58,7 +59,7 @@ const DOT: f32 = 7.0;
 const DOT_GAP: f32 = 7.0;
 const TITLE: f32 = 13.0;
 const MORE: f32 = 12.5;
-const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 /// Resting this long on a line shows its tooltip.
 pub const TIP: Duration = Duration::from_millis(600);
 /// A line going fades out over 200 ms, those under it move up over 240.
@@ -308,7 +309,7 @@ impl canvas::Program<Message> for View {
                     ch.clone(),
                     Point::new(x, o.y + HEADER / 2.0),
                     LABEL,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -394,7 +395,7 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
         return;
     }
     if lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER, alpha));
+        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
     }
     let x = rect.x + OUT;
     let middle = rect.center_y();
@@ -407,7 +408,7 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                     line.start.clone(),
                     Point::new(x, middle),
                     TIME,
-                    faded(DIM, alpha),
+                    faded(DIM.get(), alpha),
                     Alignment::Left,
                 ),
             ));
@@ -425,7 +426,7 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                 title,
                 Point::new(tx, middle),
                 TITLE,
-                faded(TEXT, alpha),
+                faded(TEXT.get(), alpha),
                 Alignment::Left,
             ));
         }
@@ -434,7 +435,7 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                 words.more(*n),
                 Point::new(x, middle),
                 MORE,
-                faded(FAINT, alpha),
+                faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
         }

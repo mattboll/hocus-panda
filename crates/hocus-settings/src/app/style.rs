@@ -12,7 +12,7 @@ use iced::{
     widget::{button, container, svg, text_input},
 };
 
-use crate::model::Icon;
+use crate::{model::Icon, theme::Ink};
 
 /// `#RRGGBB`.
 pub const fn rgb(hex: u32) -> Color {
@@ -27,29 +27,34 @@ pub const fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
     Color::from_rgba8(r, g, b, a)
 }
 
-/// `text` / `text.dim` / `text.faint`.
-pub const TEXT: Color = rgb(0xEEF1F6);
-pub const DIM: Color = rgb(0xA9B2C2);
-pub const FAINT: Color = rgb(0x8C96A8);
+/// `text` / `text.dim` / `text.faint` (bar.md §13), in the theme of the
+/// moment ([`crate::theme`]).
+pub const TEXT: Ink = Ink::Token(|t| t.text);
+pub const DIM: Ink = Ink::Token(|t| t.dim);
+pub const FAINT: Ink = Ink::Token(|t| t.faint);
 /// The sidebar's names, and the banner's words.
-pub const SOFT: Color = rgb(0xD5DBE5);
-pub const ACCENT: Color = rgb(0x6CC287);
-pub const ORANGE: Color = rgb(0xF2945B);
-pub const PEACH: Color = rgb(0xF7B98A);
-pub const BLUE: Color = rgb(0x8FB3FF);
-pub const MINT: Color = rgb(0x7EE0A0);
-pub const DEEP: Color = rgb(0x0B1020);
+pub const SOFT: Ink = Ink::Token(|t| t.text2);
+/// What is chosen, on or focused.
+pub const ACCENT: Ink = Ink::Accent(1.0);
+pub const ORANGE: Ink = Ink::Dark(rgb(0xF2945B));
+pub const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
+pub const BLUE: Ink = Ink::Dark(rgb(0x8FB3FF));
+/// Text in the accent (its links, its marks).
+pub const MINT: Ink = Ink::AccentText;
+/// Text and marks on the accent's fill.
+pub const DEEP: Ink = Ink::Token(|t| t.on_accent);
 
-pub const SIDEBAR: Color = rgb(0x0F131C);
-pub const CONTENT: Color = rgb(0x141926);
-pub const LINE: Color = rgba(255, 255, 255, 0.06);
-pub const CARD: Color = rgba(255, 255, 255, 0.035);
-pub const CARD_RIM: Color = rgba(255, 255, 255, 0.07);
-pub const HOVER: Color = rgba(255, 255, 255, 0.05);
-pub const CURRENT: Color = rgba(108, 194, 135, 0.14);
-pub const MENU: Color = rgb(0x1F2534);
-pub const TOAST: Color = rgb(0x262C3C);
-pub const RIM_12: Color = rgba(255, 255, 255, 0.12);
+pub const SIDEBAR: Ink = Ink::Token(|t| t.sidebar);
+pub const CONTENT: Ink = Ink::Token(|t| t.window);
+pub const LINE: Ink = Ink::Token(|t| t.divider);
+pub const CARD: Ink = Ink::Token(|t| t.card);
+pub const CARD_RIM: Ink = Ink::Token(|t| t.card_rim);
+pub const HOVER: Ink = Ink::Dark(rgba(255, 255, 255, 0.05));
+pub const CURRENT: Ink = Ink::Accent(0.14);
+pub const MENU: Ink = Ink::Token(|t| t.menu);
+/// The toast stays dark in both themes, and so does its text.
+pub const TOAST: Ink = Ink::Token(|t| t.toast);
+pub const RIM_12: Ink = Ink::Token(|t| t.control_rim);
 
 /// The fonts the shell carries (SIL Open Font License 1.1).
 pub const FONTS: [&[u8]; 4] = [
@@ -91,7 +96,7 @@ pub fn border(radius: f32, width: f32, color: Color) -> Border {
 /// The popovers' shadow.
 pub fn shadow() -> Shadow {
     Shadow {
-        color: rgba(0, 0, 0, 0.45),
+        color: crate::theme::ink(rgba(0, 0, 0, 0.45)),
         offset: Vector::new(0.0, 12.0),
         blur_radius: 36.0,
     }
@@ -115,7 +120,7 @@ pub fn boxed(
 
 /// The keyboard's ring (as in the bar): 3 px of the accent.
 pub fn ring(radius: f32) -> Border {
-    border(radius, 3.0, ACCENT)
+    border(radius, 3.0, ACCENT.get())
 }
 
 /// A flat button: transparent, `hover` under the pointer, `fill` always
@@ -136,7 +141,7 @@ pub fn flat(
         };
         button::Style {
             background,
-            text_color: TEXT,
+            text_color: TEXT.get(),
             border: if focused {
                 ring(radius)
             } else {
@@ -153,10 +158,10 @@ pub fn search(_: &Theme, status: text_input::Status) -> text_input::Style {
     text_input::Style {
         background: Background::Color(Color::TRANSPARENT),
         border: border(9.0, 0.0, Color::TRANSPARENT),
-        icon: DIM,
-        placeholder: FAINT,
-        value: TEXT,
-        selection: rgba(108, 194, 135, if focused { 0.35 } else { 0.2 }),
+        icon: DIM.get(),
+        placeholder: FAINT.get(),
+        value: TEXT.get(),
+        selection: Ink::Accent(if focused { 0.35 } else { 0.2 }).get(),
     }
 }
 

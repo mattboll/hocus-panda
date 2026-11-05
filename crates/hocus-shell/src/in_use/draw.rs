@@ -37,6 +37,7 @@ use iced::{
 };
 
 use super::Kind;
+use crate::theme::Ink;
 use crate::{
     Message,
     levels::draw::{faded, pointer, rgb, ring},
@@ -54,11 +55,11 @@ const REC_GAP: f32 = 4.0;
 const REC_TIME: f32 = 12.0;
 const REC_LINE: f32 = 16.0;
 const REC_RADIUS: f32 = 8.0;
-const REC_FILL: Color = Color::from_rgba8(242, 84, 91, 0.16);
-const REC_RING: Color = Color::from_rgba8(242, 84, 91, 0.55);
-const REC_INK: Color = rgb(0xFFD9DB);
-pub const REC_RED: Color = rgb(0xF2545B);
-pub const REC_AMBER: Color = rgb(0xF5B44A);
+const REC_FILL: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.16));
+const REC_RING: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.55));
+const REC_INK: Ink = Ink::Dark(rgb(0xFFD9DB));
+pub const REC_RED: Ink = Ink::Dark(rgb(0xF2545B));
+pub const REC_AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 /// Martian Mono's advance, of its size: 700 of its 1000 units.
 const MONO_ADVANCE: f32 = 0.7;
@@ -82,13 +83,13 @@ pub const AFTER: f32 = 14.0;
 pub const POP: Duration = Duration::from_millis(200);
 /// It draws again this often while it pops in.
 const POP_STEP: Duration = Duration::from_millis(16);
-const FILL: Color = Color::from_rgba8(255, 255, 255, 0.05);
-const LIT: Color = Color::from_rgba8(255, 255, 255, 0.10);
-pub const MICROPHONE: Color = rgb(0xF5A35B);
-pub const CAMERA: Color = rgb(0x6CC287);
-pub const SCREEN: Color = rgb(0x8FB3FF);
-pub const MUTED: Color = rgb(0xA9B2C2);
-const MUTED_TILE: Color = Color::from_rgba8(255, 255, 255, 0.06);
+const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
+const LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+pub const MICROPHONE: Ink = Ink::Dark(rgb(0xF5A35B));
+pub const CAMERA: Ink = Ink::Dark(rgb(0x6CC287));
+pub const SCREEN: Ink = Ink::Dark(rgb(0x8FB3FF));
+pub const MUTED: Ink = Ink::Dark(rgb(0xA9B2C2));
+const MUTED_TILE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 /// A tile's tint of its colour: the mockup's `#RRGGBB29`.
 const TINT: f32 = 41.0 / 255.0;
 /// Around the sign on its surface: the keyboard's ring.
@@ -100,11 +101,11 @@ const MINI_WIDTH: u32 = 54;
 /// Kind `kind`'s colour (the microphone's grey while it is `muted`).
 pub fn colour(kind: Kind, muted: bool) -> Color {
     match kind {
-        Kind::Microphone if muted => MUTED,
-        Kind::Microphone => MICROPHONE,
-        Kind::Camera => CAMERA,
-        Kind::Recording => REC_RED,
-        Kind::Screen => SCREEN,
+        Kind::Microphone if muted => MUTED.get(),
+        Kind::Microphone => MICROPHONE.get(),
+        Kind::Camera => CAMERA.get(),
+        Kind::Recording => REC_RED.get(),
+        Kind::Screen => SCREEN.get(),
     }
 }
 
@@ -562,7 +563,7 @@ pub fn draw_sign(
     let Shown { kinds, muted, rec } = *shown;
     f.fill(
         &kit::rounded(rect, RADIUS),
-        faded(if lit { LIT } else { FILL }, alpha),
+        faded(if lit { LIT.get() } else { FILL.get() }, alpha),
     );
     for (kind, tile) in kinds.iter().zip(tiles(rect, form, kinds)) {
         if *kind == Kind::Recording {
@@ -574,7 +575,7 @@ pub fn draw_sign(
         let grey = *kind == Kind::Microphone && muted;
         let ink = colour(*kind, muted);
         let tint = if grey {
-            MUTED_TILE
+            MUTED_TILE.get()
         } else {
             Color { a: TINT, ..ink }
         };
@@ -590,7 +591,10 @@ pub fn draw_sign(
 /// The recording's tile at `rect` (5.10's item): its tint and ring, its dot
 /// over its time.
 pub fn draw_rec(f: &mut Frame, rect: Rectangle, rec: &RecShown, alpha: f32) {
-    f.fill(&kit::rounded(rect, REC_RADIUS), faded(REC_FILL, alpha));
+    f.fill(
+        &kit::rounded(rect, REC_RADIUS),
+        faded(REC_FILL.get(), alpha),
+    );
     f.stroke(
         &kit::rounded(
             Rectangle::new(
@@ -600,14 +604,14 @@ pub fn draw_rec(f: &mut Frame, rect: Rectangle, rec: &RecShown, alpha: f32) {
             REC_RADIUS - 0.5,
         ),
         Stroke::default()
-            .with_color(faded(REC_RING, alpha))
+            .with_color(faded(REC_RING.get(), alpha))
             .with_width(1.0),
     );
     let dot = Point::new(rect.center_x(), rect.y + REC_PAD + REC_DOT / 2.0);
     let colour = if rec.paused { REC_AMBER } else { REC_RED };
     f.fill(
         &Path::circle(dot, REC_DOT / 2.0),
-        faded(colour, alpha * rec.dot),
+        faded(colour.get(), alpha * rec.dot),
     );
     f.fill_text(kit::text_in(
         MONO,
@@ -618,7 +622,7 @@ pub fn draw_rec(f: &mut Frame, rect: Rectangle, rec: &RecShown, alpha: f32) {
                 rect.y + REC_PAD + REC_DOT + REC_GAP + REC_LINE / 2.0,
             ),
             time_size(&rec.said, rect.width),
-            faded(REC_INK, alpha),
+            faded(REC_INK.get(), alpha),
             Alignment::Center,
         ),
     ));

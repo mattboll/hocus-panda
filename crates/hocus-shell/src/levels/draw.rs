@@ -40,6 +40,7 @@ use iced::{
 };
 
 use super::model::{Band, Snapshot, Words};
+use crate::theme::Ink;
 use crate::{
     clock::{self, motion::bezier},
     popover::{self, Item},
@@ -101,9 +102,9 @@ const ITEM_PAD: f32 = 4.0;
 pub(crate) const ITEM_RADIUS: f32 = 8.0;
 const MINI_ITEM: Size = Size::new(44.0, 64.0);
 pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
-pub(crate) const HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
-pub(crate) const OPEN: Color = Color::from_rgba8(255, 255, 255, 0.08);
-pub(crate) const ACCENT: Color = rgb(0x6CC287);
+pub(crate) const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+pub(crate) const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+pub(crate) const ACCENT: Ink = crate::theme::ACCENT;
 pub(crate) const RING: f32 = 3.0;
 pub(crate) const RING_OUT: f32 = 2.0;
 
@@ -112,11 +113,11 @@ pub(crate) const fn rgb(hex: u32) -> Color {
 }
 
 /// `text`, `text.dim`, `text.faint` (bar.md §13).
-pub(crate) const TEXT: Color = rgb(0xEEF1F6);
-pub(crate) const DIM: Color = rgb(0xA9B2C2);
-pub(crate) const FAINT: Color = rgb(0x8C96A8);
-pub(crate) const TRACK: Color = Color::from_rgba8(255, 255, 255, 0.10);
-pub(crate) const MUTED_FILL: Color = Color::from_rgba8(255, 255, 255, 0.22);
+pub(crate) const TEXT: Ink = crate::theme::TEXT;
+pub(crate) const DIM: Ink = crate::theme::DIM;
+pub(crate) const FAINT: Ink = crate::theme::FAINT;
+pub(crate) const TRACK: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+pub(crate) const MUTED_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.22));
 /// `gauge.sound`, `gauge.light`, `gauge.battery`, and the battery's low
 /// and critical ones, from the left (or the bottom) to the right (the top).
 pub(crate) const SOUND: (Color, Color) = (rgb(0x5B8DEF), rgb(0x8FB3FF));
@@ -125,9 +126,9 @@ pub(crate) const LIGHT_GAUGE: (Color, Color) = LIGHT;
 const BATTERY: (Color, Color) = (rgb(0x3FA66B), rgb(0x7EE0A0));
 pub(crate) const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
 pub(crate) const CRITICAL: (Color, Color) = (rgb(0xE5793F), rgb(0xF7B98A));
-pub(crate) const BOLT: Color = rgb(0x7EE0A0);
+pub(crate) const BOLT: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The bolt's outline over a battery's fill.
-const BOLT_EDGE: Color = rgb(0x0B1020);
+const BOLT_EDGE: Ink = Ink::Dark(rgb(0x0B1020));
 
 /// A gauge's motion: 160 ms, `ease-out`.
 const MOVE: Duration = Duration::from_millis(160);
@@ -368,7 +369,7 @@ impl<Message> canvas::Program<Message> for Levels {
             if let Some(colour) = lit {
                 frame.fill(
                     &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour,
+                    colour.get(),
                 );
             }
             if focused {
@@ -723,7 +724,7 @@ pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
     f.stroke(
         &path,
         Stroke {
-            style: Style::Solid(ACCENT),
+            style: Style::Solid(ACCENT.get()),
             width: RING,
             ..Stroke::default()
         },
@@ -755,7 +756,7 @@ impl Drawn<'_> {
         let middles = full_rows(levels, self.status.len(), self.bottom);
         let band = levels.battery.map_or(Band::Ok, |b| b.band());
         let colour = match band {
-            Band::Ok => FAINT,
+            Band::Ok => FAINT.get(),
             Band::Low => LOW.1,
             Band::Critical => CRITICAL.1,
         };
@@ -786,7 +787,7 @@ impl Drawn<'_> {
         };
         if let (Some(battery), Some(middle)) = (levels.battery, middles[0]) {
             let (fill, colour) = match band {
-                Band::Ok => (BATTERY, DIM),
+                Band::Ok => (BATTERY, DIM.get()),
                 Band::Low => (LOW, LOW.1),
                 Band::Critical => (CRITICAL, CRITICAL.1),
             };
@@ -803,7 +804,7 @@ impl Drawn<'_> {
             );
         }
         if let (Some(brightness), Some(middle)) = (levels.brightness, middles[1]) {
-            let value = Value::Number(brightness.round() as u32, DIM);
+            let value = Value::Number(brightness.round() as u32, DIM.get());
             row(
                 f,
                 middle,
@@ -816,13 +817,13 @@ impl Drawn<'_> {
         if let (Some(sound), Some(middle)) = (levels.sound, middles[2]) {
             let (fill, value) = if sound.muted {
                 (
-                    Fill::Flat(MUTED_FILL),
-                    Value::Text(self.words.muted(), FAINT),
+                    Fill::Flat(MUTED_FILL.get()),
+                    Value::Text(self.words.muted(), FAINT.get()),
                 )
             } else {
                 (
                     Fill::Gradient(SOUND),
-                    Value::Number(sound.volume.round() as u32, DIM),
+                    Value::Number(sound.volume.round() as u32, DIM.get()),
                 )
             };
             row(
@@ -877,7 +878,7 @@ impl Drawn<'_> {
         if let Some(sound) = levels.sound {
             let bottom = mini_gauge_bottom(levels, bottom, keys);
             let fill = if sound.muted {
-                Fill::Flat(MUTED_FILL)
+                Fill::Flat(MUTED_FILL.get())
             } else {
                 Fill::Gradient(SOUND)
             };
@@ -908,7 +909,7 @@ fn bar(f: &mut Frame, track: Rectangle, percent: f32, fill: Fill, way: Direction
     let radius = GAUGE / 2.0;
     f.fill(
         &Path::rounded_rectangle(track.position(), track.size(), radius.into()),
-        faded(TRACK, alpha),
+        faded(TRACK.get(), alpha),
     );
     let share = (percent / 100.0).clamp(0.0, 1.0);
     let (rect, start, end) = match way {
@@ -1117,10 +1118,10 @@ impl Icon {
                     (11.0, 5.0),
                     (6.0, 9.0),
                 ];
-                line(f, s, 2.2, colour, &cone);
+                line(f, s, 2.2, colour.get(), &cone);
                 if muted {
-                    line(f, s, 2.2, colour, &[(16.0, 9.0), (21.0, 15.0)]);
-                    line(f, s, 2.2, colour, &[(21.0, 9.0), (16.0, 15.0)]);
+                    line(f, s, 2.2, colour.get(), &[(16.0, 9.0), (21.0, 15.0)]);
+                    line(f, s, 2.2, colour.get(), &[(21.0, 9.0), (16.0, 15.0)]);
                 } else {
                     // `a5 5 0 0 1 0 7` from (15.5, 8.5): the circle's
                     // centre is 3.57 units left of the chord.
@@ -1135,12 +1136,12 @@ impl Icon {
                             end_angle: Radians(angle),
                         });
                     });
-                    f.stroke(&arc, stroke(2.2 * s, faded(colour, alpha)));
+                    f.stroke(&arc, stroke(2.2 * s, faded(colour.get(), alpha)));
                 }
             }
             Self::Sun => {
                 let circle = Path::circle(Point::new(at.x + 12.0 * s, at.y + 12.0 * s), 4.0 * s);
-                f.stroke(&circle, stroke(2.2 * s, faded(TEXT, alpha)));
+                f.stroke(&circle, stroke(2.2 * s, faded(TEXT.get(), alpha)));
                 for ray in [
                     [(12.0, 2.0), (12.0, 4.0)],
                     [(12.0, 20.0), (12.0, 22.0)],
@@ -1151,7 +1152,7 @@ impl Icon {
                     [(4.9, 19.1), (6.3, 17.7)],
                     [(17.7, 6.3), (19.1, 4.9)],
                 ] {
-                    line(f, s, 2.2, TEXT, &ray);
+                    line(f, s, 2.2, TEXT.get(), &ray);
                 }
             }
             Self::Battery { bolt } => {
@@ -1163,13 +1164,13 @@ impl Icon {
                     Size::new(22.0 * s, 12.0 * s),
                     (3.0 * s).into(),
                 );
-                f.stroke(&body, stroke(1.8 * s, faded(TEXT, alpha)));
+                f.stroke(&body, stroke(1.8 * s, faded(TEXT.get(), alpha)));
                 let tip = Path::rounded_rectangle(
                     Point::new(at.x + 24.5 * s, top + 6.0 * s),
                     Size::new(2.0 * s, 4.0 * s),
                     (1.0 * s).into(),
                 );
-                f.fill(&tip, faded(TEXT, alpha));
+                f.fill(&tip, faded(TEXT.get(), alpha));
                 if bolt {
                     // `M13.5 4 9 9h3.5l-1.5 4L15.5 8H12z`.
                     let at = Point::new(at.x, top);
@@ -1182,7 +1183,7 @@ impl Icon {
                         p((15.5, 8.0)),
                         p((12.0, 8.0)),
                     ]);
-                    f.fill(&path, faded(BOLT, alpha));
+                    f.fill(&path, faded(BOLT.get(), alpha));
                 }
             }
         }
@@ -1198,7 +1199,7 @@ pub(crate) fn sun(f: &mut Frame, at: Point) {
 /// critical (§4.2).
 pub(crate) fn band_colour(band: Band) -> Color {
     match band {
-        Band::Ok => BOLT,
+        Band::Ok => BOLT.get(),
         Band::Low => LOW.1,
         Band::Critical => CRITICAL.1,
     }
@@ -1239,9 +1240,9 @@ pub(crate) fn battery_sign(f: &mut Frame, rect: Rectangle, sign: Sign, alpha: f3
     let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
     let body =
         Path::rounded_rectangle(p(1.0, 2.0), Size::new(22.0 * s, 12.0 * s), (3.0 * s).into());
-    f.stroke(&body, stroke(sign.outline * s, faded(TEXT, alpha)));
+    f.stroke(&body, stroke(sign.outline * s, faded(TEXT.get(), alpha)));
     let tip = Path::rounded_rectangle(p(24.5, 6.0), Size::new(2.0 * s, 4.0 * s), s.into());
-    f.fill(&tip, faded(TEXT, alpha));
+    f.fill(&tip, faded(TEXT.get(), alpha));
     let width = 18.0 * (sign.percent / 100.0).clamp(0.0, 1.0) * s;
     if width >= 0.25 {
         let level = Path::rounded_rectangle(
@@ -1261,11 +1262,11 @@ pub(crate) fn battery_sign(f: &mut Frame, rect: Rectangle, sign: Sign, alpha: f3
             p(16.0, 7.5),
             p(12.5, 7.5),
         ]);
-        f.fill(&bolt, faded(TEXT, alpha));
+        f.fill(&bolt, faded(TEXT.get(), alpha));
         f.stroke(
             &bolt,
             Stroke {
-                style: Style::Solid(faded(BOLT_EDGE, alpha)),
+                style: Style::Solid(faded(BOLT_EDGE.get(), alpha)),
                 width: 0.8 * s,
                 line_join: canvas::LineJoin::Miter,
                 ..Stroke::default()

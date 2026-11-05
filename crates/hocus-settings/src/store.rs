@@ -93,6 +93,9 @@ pub struct Snapshot {
     pub readings: BTreeMap<Slot, Reading>,
     /// `[appearance] reduced-motion`: motions only fade.
     pub reduced_motion: bool,
+    /// `[appearance] theme` and `accent`: the window draws in them (a
+    /// word not understood: the default's).
+    pub theme: hocus_link::theme::Choice,
     /// The screens the file places (`[outputs.NAME] position`), by name.
     pub screens_placed: Vec<String>,
     /// `[panel] output`, the primary screen named.
@@ -148,6 +151,7 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(|a| a.get("reduced-motion"))
                 .and_then(Item::as_bool)
                 .unwrap_or(false),
+            theme: theme_of(&doc),
             screens_placed: doc
                 .get("outputs")
                 .and_then(Item::as_table_like)
@@ -172,9 +176,27 @@ pub fn read(text: &str) -> Snapshot {
             },
             readings: BTreeMap::new(),
             reduced_motion: false,
+            theme: hocus_link::theme::Choice::default(),
             screens_placed: Vec::new(),
             primary_output: None,
         },
+    }
+}
+
+/// The theme `doc` chooses.
+fn theme_of(doc: &DocumentMut) -> hocus_link::theme::Choice {
+    let word = |key: &str| {
+        doc.get("appearance")
+            .and_then(|a| a.get(key))
+            .and_then(Item::as_str)
+    };
+    hocus_link::theme::Choice {
+        scheme: word("theme")
+            .and_then(hocus_link::theme::Scheme::of)
+            .unwrap_or_default(),
+        accent: word("accent")
+            .and_then(hocus_link::theme::Accent::of)
+            .unwrap_or_default(),
     }
 }
 
