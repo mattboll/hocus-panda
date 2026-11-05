@@ -18,6 +18,7 @@ mod config;
 mod cursor;
 mod decoration;
 pub mod desktops;
+mod displays;
 mod emoji;
 mod focus;
 mod foreign;
@@ -234,6 +235,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
+    state.start_displays();
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
     if options.xwayland {
@@ -343,6 +345,9 @@ impl App {
         // The session's end (7.4): the windows that closed, the lock drawn
         // before suspending.
         state.leave_after_turn();
+        // The screens' settings (6.9): the layout applied when it was
+        // asked, then the Settings told what changed.
+        state.displays_after_turn(backend);
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

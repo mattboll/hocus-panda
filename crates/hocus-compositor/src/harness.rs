@@ -840,6 +840,8 @@ impl Headless {
         state.lock_wait_tick();
         // So do the session menu's countdown and its windows' 5 s (7.4).
         state.leave_tick();
+        // And a screen's mode tried from the Settings (6.9).
+        state.trial_tick();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.

@@ -16,6 +16,9 @@
 //! - `hocus msg idle`: the session's idle state, its time left and what
 //!   holds it off (docs/design/idle.md), as the compositor says it.
 //!
+//! - `hocus msg outputs`: the screens, their modes, places, scales and
+//!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
+//!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
 //!   on standard input, checked and kept where the bar reads it
 //!   (docs/design/day.md).
@@ -128,6 +131,10 @@ enum MsgCommand {
     Idle,
     /// Locks the session now (docs/design/lock.md).
     Lock,
+    /// The screens: each one's modes, current mode, scale, place, VRR and
+    /// whether it is on, plugged and primary, as one line of JSON
+    /// (docs/design/settings.md, "Écrans").
+    Outputs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -188,6 +195,7 @@ fn main() -> ExitCode {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
                 MsgCommand::Lock => Question::Lock,
+                MsgCommand::Outputs => Question::Outputs,
             };
             match ask(args.socket, question) {
                 Ok(answer) => {

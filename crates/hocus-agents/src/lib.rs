@@ -46,6 +46,9 @@ pub enum Question {
     /// Lock the session now (docs/design/lock.md), as `Super+L` will;
     /// answered once it is locked.
     Lock,
+    /// The screens: their modes, places, scales and settings, as JSON
+    /// (docs/design/settings.md, "Écrans").
+    Outputs,
 }
 
 impl Question {
@@ -54,6 +57,7 @@ impl Question {
         match self {
             Self::Idle => "msg idle",
             Self::Lock => "msg lock",
+            Self::Outputs => "msg outputs",
         }
     }
 
@@ -62,6 +66,7 @@ impl Question {
         match line.trim_end_matches(['\n', '\r']) {
             "msg idle" => Some(Self::Idle),
             "msg lock" => Some(Self::Lock),
+            "msg outputs" => Some(Self::Outputs),
             _ => None,
         }
     }

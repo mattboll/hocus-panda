@@ -231,6 +231,8 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// The screens' settings, their trials and the Settings' lines (6.9).
+    pub(crate) displays: crate::displays::Displays,
     /// When the session is idle, and what holds it off (7.3).
     pub idle: crate::idle::Idleness,
     /// The render node of the GPU the compositor draws with, which the
@@ -418,6 +420,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            displays: crate::displays::Displays::default(),
             idle,
             gpu: None,
             blur: false,

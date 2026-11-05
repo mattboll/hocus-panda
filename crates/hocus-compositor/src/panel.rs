@@ -295,10 +295,23 @@ impl State {
             self.redraw = true;
         }
         self.tell_screens(false);
+        // The primary screen may have changed: the Settings are told.
+        self.displays.dirty = true;
         // Locked (7.1): the form may move to another screen; an external
         // locker's surfaces take their screens' sizes.
         self.tell_lock();
         self.external_screens_changed();
+    }
+
+    /// Screen `name`'s scale changed (6.9): its bar, if it has one, is
+    /// made again at that scale by the next [`State::panel_refresh`].
+    pub(crate) fn bar_rescaled(&mut self, name: &str) {
+        if self.panel.bars.remove(name).is_some() {
+            self.bar_front_gone(name);
+            self.tell_shell(ToShell::NoBar {
+                output: name.to_owned(),
+            });
+        }
     }
 
     /// Tells the shell the other screens' names (bar.md §9, the

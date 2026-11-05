@@ -56,6 +56,17 @@ pub struct Put {
     rect: Option<Rect>,
 }
 
+/// A screen moved or resized (6.9): its work area before, its geometry
+/// and work area now, and the windows that were on it.
+#[derive(Debug, Clone)]
+pub(crate) struct Moved {
+    pub output: Output,
+    pub was_area: Rect,
+    pub geometry: Rect,
+    pub area: Rect,
+    pub windows: Vec<WindowId>,
+}
+
 /// How long an unplugged screen's `wl_output` global stays, disabled,
 /// before it is removed: a client binding it as it goes (its
 /// `global_remove` not read yet) still finds it, rather than being killed
@@ -79,6 +90,7 @@ impl State {
     /// left, and only then do clients learn that its global went
     /// (docs/design/windows.md §12, "What clients are told").
     pub fn unplug_output(&mut self, output: &Output, global: GlobalId) {
+        self.display_removed(output);
         self.output_gone(output);
         // Also when it had no place on the desktop, which `output_gone`
         // then leaves as it is: nothing may be left on it.
@@ -242,6 +254,47 @@ impl State {
         if let Err(err) = inserted {
             tracing::warn!(%err.error, "could not wait to remove a screen's global: removed now");
             self.display_handle.remove_global::<State>(global);
+        }
+    }
+
+    /// `output` turned off by the file (6.9): it leaves the desktop as one
+    /// unplugged does, its `wl_output` kept, and comes back by
+    /// [`State::output_back`].
+    pub(crate) fn screen_turned_off(&mut self, output: &Output) {
+        self.output_gone(output);
+        self.leave_output(output);
+        self.close_layers_on(output);
+    }
+
+    /// Screens moved or resized (6.9: a mode, a scale, a place): the
+    /// windows on each go along, at the same share of its work area,
+    /// snapped ones in their zone, fullscreen ones over it.
+    pub(crate) fn screens_moved(&mut self, moved: Vec<Moved>) {
+        for Moved {
+            output,
+            was_area,
+            geometry,
+            area,
+            windows,
+        } in moved
+        {
+            for id in windows {
+                let Some(rect) = self.home_rect(id) else {
+                    continue;
+                };
+                let placed = match self.model.mode(id) {
+                    Mode::Floating => model::carried(rect, was_area, area),
+                    Mode::Snapped(zone) => zone.rect(area),
+                    Mode::Fullscreen => geometry,
+                };
+                let restore = self
+                    .model
+                    .placement(id)
+                    .restore
+                    .map(|r| model::carried(r, was_area, area));
+                let desktop = self.model.desktop(id);
+                self.relocate(id, &output, desktop, placed, restore);
+            }
         }
     }
 

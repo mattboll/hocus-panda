@@ -88,6 +88,8 @@ pub enum Heard {
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
+    /// A Settings' line (`msg screens`, 6.9).
+    Screens(crate::displays::FromSettings),
 }
 
 /// A go-to waiting for herdr's terminal to be found: the agent, its row,
@@ -274,6 +276,20 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
             let Ok(line) = line else {
                 break;
             };
+            if line.trim_end() == "msg screens" {
+                // The Settings' line stays open, on threads of its own.
+                let sender = sender.clone();
+                let Ok(line_stream) = stream.try_clone() else {
+                    break;
+                };
+                let started = std::thread::Builder::new()
+                    .name("settings' line".to_owned())
+                    .spawn(move || crate::displays::serve(line_stream, sender));
+                if let Err(err) = started {
+                    tracing::warn!(%err, "the Settings' line is not served");
+                }
+                break;
+            }
             if let Some(question) = Question::of(&line) {
                 // The loop answers; the answer is written back here, off
                 // the loop. One question a connection.
@@ -314,12 +330,17 @@ impl Compositor {
             }
             Heard::Herdr(news) => self.herdr_said(news),
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
+            Heard::Screens(heard) => self.displays_heard(heard),
             Heard::Asked(question, reply) => {
                 let answer = match question {
                     Question::Idle => {
                         // What changed this turn, judged first.
                         self.flush_idle();
                         format!("{}{}", self.idle_said(), self.away_said())
+                    }
+                    Question::Outputs => {
+                        // The layout this turn asked for, applied first.
+                        format!("{}\n", self.displays_json())
                     }
                     Question::Lock => {
                         tracing::info!("hocus msg lock: the session locks");
