@@ -103,3 +103,15 @@ when that never comes. It does not sleep a guessed time:
   icon looked up or a paste read from the clipboard lands later: the test
   waits for the line the shell logs, or for the pixels, before it acts on
   them.
+
+## The wallpaper's counts (6.3)
+
+The backgrounds are counted, not timed. Each screen's is drawn once per
+change (of the file's `[wallpaper]`, or of the screen's size or scale),
+on the compositor's wallpaper thread, and none at rest
+(`Backgrounds::draws`, `settings_wallpaper.rs`'s
+`at_rest_the_wallpaper_page_commits_nothing`). A picture of one's own is
+decoded once per change (`Backgrounds::decodes`) and its source dropped
+once scaled. Memory: one RGBA buffer per screen at its size for a picture
+(16.4 MB for 2560 × 1600, 19.8 MB for 3440 × 1440); a built-in or the
+plain colour a sixteenth of that (a quarter of the pixels each way).

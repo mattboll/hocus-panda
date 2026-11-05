@@ -137,8 +137,8 @@ impl SectionId {
                 Personalisation,
                 w("Fond d’écran", "Wallpaper"),
                 w(
-                    "Une image par écran, ou une couleur unie.",
-                    "A picture per screen, or a plain colour.",
+                    "Le fond de chaque écran, et celui de l’écran de verrouillage.",
+                    "Each screen’s background, and the lock screen’s.",
                 ),
                 Icon::Wallpaper,
                 "6.3",
@@ -479,6 +479,8 @@ pub enum Codec {
     Chords,
     /// A list of texts: `["fr", "us"]`.
     Texts,
+    /// A colour, `"#RRGGBB"`, held in lower case (6.3's plain colour).
+    Colour,
     /// A number from `min` to `max` hundredths, written as a decimal
     /// (`1.2`): 6.2's text size, held as a percentage.
     Hundredths { min: i64, max: i64 },
@@ -553,6 +555,10 @@ impl Codec {
                 .and_then(|s| words.iter().find(|w| **w == s))
                 .map(|w| Value::Word(w)),
             Self::Text => item.as_str().map(|s| Value::Text(s.to_owned())),
+            Self::Colour => item
+                .as_str()
+                .and_then(hocus_link::wallpaper::colour_of)
+                .map(|rgb| Value::Text(hocus_link::wallpaper::colour_word(rgb))),
             Self::Chords => match (item.as_str(), item.as_array()) {
                 (Some(one), _) => Some(Value::List(
                     (!one.trim().is_empty())
@@ -621,6 +627,9 @@ impl Codec {
             (Self::Delay, Value::Seconds(s)) => delay_word(*s).into(),
             (Self::Word(words), Value::Word(word)) if words.contains(word) => (*word).into(),
             (Self::Text, Value::Text(t)) => t.as_str().into(),
+            (Self::Colour, Value::Text(t)) if hocus_link::wallpaper::colour_of(t).is_some() => {
+                t.as_str().into()
+            }
             (Self::Tenths { min, max }, Value::Int(n)) if (min..=max).contains(n) => {
                 (*n as f64 / 10.0).into()
             }
@@ -904,6 +913,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Mouse => crate::mouse::settings(),
         SectionId::Keyboard => crate::keyboard::settings(),
         SectionId::Appearance => crate::appearance::settings(),
+        SectionId::Wallpaper => crate::wallpaper::settings(),
         _ => &[],
     }
 }

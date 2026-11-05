@@ -551,7 +551,22 @@ impl Shell {
                 if theme::set(choice) {
                     self.clock = clock_style(&self.clock_look);
                 }
-                tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme");
+                tracing::info!(
+                    theme = %choice.scheme,
+                    accent = %choice.accent,
+                    colours = %choice,
+                    "the theme"
+                );
+                Task::none()
+            }
+            // The lock draws the wallpapers (6.3).
+            ToShell::Wallpaper(wallpapers) => {
+                tracing::info!(%wallpapers, "the wallpapers");
+                if lock::wallpaper::set(wallpapers) {
+                    popover::tell(hocus_link::ToCompositor::Wake(
+                        hocus_link::LOCK_NAMESPACE.to_owned(),
+                    ));
+                }
                 Task::none()
             }
             // The words and the formats: every surface draws again in them.

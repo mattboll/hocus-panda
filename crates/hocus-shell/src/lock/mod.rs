@@ -15,6 +15,7 @@
 
 pub mod avatar;
 pub mod draw;
+pub mod wallpaper;
 
 use std::{
     collections::HashMap,

@@ -105,6 +105,8 @@ pub struct Snapshot {
     pub screens_placed: Vec<String>,
     /// `[panel] output`, the primary screen named.
     pub primary_output: Option<String>,
+    /// `[wallpaper]` and the screens' wallpapers (6.3).
+    pub wallpaper: Box<crate::wallpaper::File>,
 }
 
 impl Snapshot {
@@ -188,6 +190,7 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(|p| p.get("output"))
                 .and_then(Item::as_str)
                 .map(ToOwned::to_owned),
+            wallpaper: Box::new(crate::wallpaper::File::of(&doc)),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -201,6 +204,7 @@ pub fn read(text: &str) -> Snapshot {
             text_scale: 100,
             screens_placed: Vec::new(),
             primary_output: None,
+            wallpaper: Box::default(),
         },
     }
 }
@@ -219,6 +223,8 @@ fn theme_of(doc: &DocumentMut) -> hocus_link::theme::Choice {
         accent: word("accent")
             .and_then(hocus_link::theme::Accent::of)
             .unwrap_or_default(),
+        // The wallpaper's accent is the window's to find (6.3).
+        wallpaper: hocus_link::theme::AccentColours::default(),
     }
 }
 

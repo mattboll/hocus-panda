@@ -572,10 +572,109 @@ desktop following; an accent among six (bar.md §13 gives every value).
   in the theme of the moment: a token, the accent, or a colour drawn for
   the dark theme that light reads by rule (bar.md §13). At rest nothing
   draws: a theme change is one message, each surface drawn once.
-- **Choices made here**: the wallpaper's accent is the default
-  backdrop's (`#7A96E0`) until the wallpaper's page (6.3) lets one be
-  chosen; the windows' rims and grips, drawn over the wallpaper, keep
+- **Choices made here**: the wallpaper's accent is the primary screen's
+  wallpaper's (6.3, below; Nuit's `#7A96E0` by default); the windows' rims and grips, drawn over the wallpaper, keep
   their colours; the screen around a capture stays dimmed dark.
+
+## Fond d'écran (6.3)
+
+Built 2026-11-05 (issue #403), variant A of the mockup, the gallery, from
+the spec in the issue's last comment. The maintainer decided: Nuit (the
+desktop's background so far) plus Brume, Aube and Forêt, the same recipe
+in other colours; a picture chosen in the file chooser is copied into
+`~/.local/share/hocuspanda/wallpapers`; a background per screen or for
+all; the lock screen shows the desktop's wallpaper darkened by default,
+as before; the plain colour is six swatches; pictures are decoded on a
+thread, never on the compositor's loop. Section `wallpaper` (`hocus
+settings wallpaper`), PERSONNALISATION's second row. `src/wallpaper.rs`
+(the keys, the page's settings for the search, its thread),
+`src/portal.rs` (the file chooser), `src/app/wallpaper_page.rs` (the
+page).
+
+| Group | What | Key |
+|---|---|---|
+| APERÇU | segmented "Tous les écrans \| Chaque écran"; the screens side by side, bottoms aligned, each with its background and the bar's strip on the primary, "Écran du portable · Nuit" under it; with "Chaque écran" a click chooses the screen the gallery applies to (green ring) | `[wallpaper] per-screen = false` |
+| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
+| | Remplissage (a picture of one's own): "Couvrir l’écran", "L’image entière", "Centrer, sans agrandir" | `[wallpaper] fit = "cover" \| "contain" \| "center"` |
+| | Couleur unie (the plain background, or around a picture not covering): six 24 px swatches, Nuit, Ardoise (default), Bleu profond, Sapin, Terre, Graphite | `[wallpaper] color = "#1b2233"` |
+| ÉCRAN DE VERROUILLAGE | the lock's drawing (its source, the veil, the clock), a radio list: "Le fond du bureau, assombri" (default), "… flouté", "Une autre image"; then "Image du verrouillage", a list of the same backgrounds and "Choisir une image…" | `[wallpaper] lock = "dimmed" \| "blurred" \| "picture"`, `lock-picture` |
+
+- **Writing**: a tile, the scope and the lock's picture are keys the page
+  writes itself (one toast, "Annuler", `Ctrl+Z`: "Fond d’écran : Brume",
+  "Fond de l’écran externe 34 pouces : Forêt", "Annulé : le fond revient
+  à Nuit."); the fit, the colour and the lock are the window's rows.
+  "Chaque écran" the first time writes each plugged screen's `wallpaper`
+  from `picture`; "Tous les écrans" keeps them in the file for later.
+- **Choisir une image…**: `org.freedesktop.portal.FileChooser.OpenFile`
+  on the session bus (`DBUS_SESSION_BUS_ADDRESS`), from the page's
+  thread: titled "Choisir une image pour le fond" (or "… pour le
+  verrouillage"), modal, a filter "Images (JPEG, PNG, WebP)" on their
+  three types, the pictures' folder (`XDG_PICTURES_DIR`, else
+  `~/Pictures`) as `current_folder`. Chosen, the file is checked (its
+  size read from its header), copied into
+  `$XDG_DATA_HOME/hocuspanda/wallpapers` under its name ("NAME (2).jpg"
+  when another file has it; the same file chosen again is not copied
+  twice), and its copy written with `~/`; the green line says "Copié dans
+  ~/.local/share/hocuspanda/wallpapers/Montagne.jpg". Not a picture:
+  "Montagne.jpg ne s’ouvre pas comme une image.", nothing written.
+  Cancelled: nothing. No portal: a toast says so.
+- **One's own pictures** are the folder's JPEG, PNG and WebP files, in the
+  order added. ✕ (or `Delete` on its tile) is refused while it is in use
+  ("Montagne.jpg sert encore : choisis d’abord un autre fond."); else the
+  copy is deleted, with "Annuler" (its bytes are kept until the window
+  closes).
+- **A hand-edited value**: a path that does not read draws Nuit (the
+  compositor's journal says why) and the page says, in `#F7B98A` above
+  the gallery, "Dans le fichier : « ~/Images/Ancienne photo.jpg »,
+  introuvable ; Nuit s’affiche. Choisis un fond pour remplacer cette
+  ligne."; no tile is chosen. A path outside the folder is used where it
+  is. An unknown word, or a colour not `#RRGGBB`, refuses the file in the
+  compositor and is "non compris" on the page, as 6.1's.
+- **The keyboard**: the scope (`←`/`→`), each screen with "Chaque écran"
+  (`Space`), the gallery as one stop (arrows move the ring, row by row;
+  `Space`/`Enter` choose; `Delete` removes one's own), the fit's menu, the
+  swatches (`←`/`→`), the lock's choices (arrows), the lock's picture
+  (`Space` opens its list).
+- **The search** finds "Fond du bureau", "Fonds fournis", "Choisir une
+  image", "Un fond par écran", "Remplissage", "Couleur unie", "Écran de
+  verrouillage" and "Image du verrouillage" by the spec's nearby words
+  and their keys.
+- **The accent "wallpaper"** is the primary screen's wallpaper's: Nuit's
+  `#7A96E0`, Brume's, Aube's and Forêt's main glow's hue, the plain
+  colour's, a picture's strongest hue, each lifted to the accents'
+  lightness until its text reads at 4.5:1 (`AccentColours::lifted`). The
+  compositor finds it as the primary's background is drawn and tells the
+  shell (`theme SCHEME ACCENT WALLPAPER`, the three colours) and the
+  portal; the window finds it from the file or its own thumbnail.
+
+**How it is drawn.** `hocus_link::backdrop` takes a palette
+(`Backdrop::Night`, `Mist`, `Dawn`, `Forest`: the same stops' places and
+glows, other colours) and `hocus_link::wallpaper::render` draws any
+background for a size: a built-in or the plain colour at a quarter of the
+pixels, drawn stretched; a picture (the `image` crate's JPEG, PNG and
+WebP, EXIF orientation applied) scaled and cropped to the screen's pixels
+for its fit, on the colour for "contain" and "center". The compositor
+(`src/wallpaper.rs`) asks it of a thread of its own for each screen whose
+background, size or scale changed, as the screen is drawn next, and only
+swaps the screen's buffer when it comes back: the previous stays
+meanwhile (a screen's first frame draws a built-in at once, as before).
+The shell draws the lock's on a thread of its own from `wallpaper` on the
+line (each screen's picture, the lock's, the fit and the colour), the
+window its thumbnails on the page's thread. At rest nothing is drawn.
+
+**The compositor follows the file**: `[wallpaper]` and `[outputs.NAME]
+wallpaper` through `reload.rs`; a screen's `wallpaper` is not part of its
+layout (a change redraws its background, never sets its mode). `~/` in a
+path is the session's home.
+
+Choices made here (to confirm on the machine): the file chooser gets no
+parent window (the Settings have no xdg-foreign handle yet), so it is not
+attached to the window; the lock's picture's list opens in the card under
+its row rather than floating; the screens' and tiles' rounded corners are
+their rims' (iced does not clip pictures to them); a tile is not lit under
+the pointer; a picture removed is put back by "Annuler" but not by
+`Ctrl+Shift+Z`; the preview's dashed outline of a screen unplugged is
+solid (as 6.9's).
 
 ## Saving
 
@@ -759,9 +858,10 @@ file.
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
-  `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), through one watcher
+  `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
+  (6.3), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The other eleven pages (6.3 to 6.17, Day.1).
+- The other ten pages (6.4 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -810,6 +910,26 @@ real shell and Settings, the portal on a D-Bus daemon of the test's own:
 - `the_language_switch_turns_the_shell_and_the_window_to_english_at_once`
 - `at_rest_the_appearance_page_and_the_bar_commit_nothing`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_wallpaper.rs` (6.3), on a
+compositor of two screens (1920 × 1080, 1280 × 800), the real shell and
+Settings, the file chooser a fake portal on a D-Bus daemon of the test's
+own:
+
+- `choosing_brume_redraws_the_desktops_background`
+- `a_picture_chosen_in_the_file_chooser_is_copied_and_drawn`
+- `each_screen_takes_its_own_background`
+- `the_lock_shows_the_desktops_wallpaper_dimmed`
+- `the_lock_takes_a_picture_of_its_own`
+- `a_swatch_colours_the_plain_background`
+- `the_wallpaper_accent_takes_the_wallpapers_colour`
+- `at_rest_the_wallpaper_page_commits_nothing`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+Unit tests of 6.3: the palettes, the words, the line, a picture covering,
+contained or centred and its accent, a file that is no picture, the blur
+(`hocus-link`); the file's screens' pictures, the copy's name
+(`hocus-settings`); the accents lifted reading on both themes.
 
 `crates/hocus-compositor/tests/settings_sound.rs` (6.5): the same window
 against a PipeWire of the test's own (null sinks and a null source;

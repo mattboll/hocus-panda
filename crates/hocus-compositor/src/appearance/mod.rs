@@ -15,8 +15,7 @@ use crate::{State, config::Appearance};
 impl State {
     /// What the settings portal says of the appearance now.
     pub fn portal_appearance(&self) -> portal::Values {
-        let appearance = &self.config.appearance;
-        portal::Values::of(appearance.theme_choice(), appearance.high_contrast)
+        portal::Values::of(self.theme_choice(), self.config.appearance.high_contrast)
     }
 
     /// The file's `[appearance]` is now `new`: whether it changed.
@@ -26,8 +25,9 @@ impl State {
         if now == old {
             return false;
         }
-        if now.theme_choice() != old.theme_choice() {
-            let choice = now.theme_choice();
+        let wallpaper = self.backgrounds.borrow().accent;
+        if now.theme_choice(wallpaper) != old.theme_choice(wallpaper) {
+            let choice = now.theme_choice(wallpaper);
             tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme changed");
             self.tell_shell(ToShell::Theme(choice));
         }

@@ -771,6 +771,9 @@ impl App {
         if id == SectionId::Keyboard {
             return self.keyboard_page(page);
         }
+        if id == SectionId::Wallpaper {
+            return self.wallpaper_page(page);
+        }
         let settings = settings_of(id);
         if settings.is_empty() {
             page = page.push(card_box(
@@ -881,6 +884,10 @@ impl App {
         .width(Length::Fill);
         if setting.kind == Kind::Swatches {
             words = words.push(t(self.accent_line(slot), 12.5, fade(DIM.get(), ink)));
+        } else if setting.id == crate::wallpaper::COLOR {
+            words = words.push(t(self.colour_line(), 12.5, fade(DIM.get(), ink)));
+        } else if setting.id == crate::wallpaper::FIT {
+            words = words.push(t(self.fit_line(), 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = setting.line {
             words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
@@ -937,6 +944,9 @@ impl App {
     fn control(&self, setting: &'static Setting, slot: Slot, inert: bool, focused: bool) -> El<'_> {
         let alpha = if inert { INERT } else { 1.0 };
         let value = self.value(slot);
+        if setting.id == crate::wallpaper::COLOR {
+            return self.colour_swatches(slot, inert, focused);
+        }
         match &setting.kind {
             Kind::Switch => {
                 let on = value == Some(crate::model::Value::Bool(true));
@@ -1589,6 +1599,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "screens": if app.page == Page::Section(SectionId::Screens) { app.screens_shown() } else { serde_json::Value::Null },
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
+        "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

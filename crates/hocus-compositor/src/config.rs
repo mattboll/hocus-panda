@@ -24,6 +24,8 @@ pub struct Config {
     pub shortcuts: Shortcuts,
     pub programs: Programs,
     pub appearance: Appearance,
+    /// The desktop's background and the lock's (6.3).
+    pub wallpaper: Wallpaper,
     /// The desktop's language and formats (6.2).
     #[serde(deserialize_with = "locale")]
     pub locale: hocus_link::locale::Locale,
@@ -94,6 +96,11 @@ pub struct Config {
     /// `PATH`. Not part of the file.
     #[serde(skip)]
     pub ffmpeg: PathBuf,
+    /// The home `~/` stands for in the file's paths (a wallpaper's): `HOME`.
+    /// Not part of the file; `None`: a `~/` path is not found (tests,
+    /// unless they give one).
+    #[serde(skip)]
+    pub home: Option<PathBuf>,
     /// The file this was read from, which the shell reads its own sections
     /// of (`[day]`, docs/design/day.md). Not part of the file; `None`: the
     /// shell reads none (tests, unless they give one).
@@ -587,6 +594,78 @@ pub struct Appearance {
     pub text_scale: TextScale,
 }
 
+/// The desktop's background, `[wallpaper]` (6.3, docs/design/settings.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Wallpaper {
+    /// `"night"`, `"mist"`, `"dawn"`, `"forest"`, `"plain"`, or a
+    /// picture's path: every screen's, but those that have their own.
+    #[serde(deserialize_with = "picture")]
+    pub picture: hocus_link::wallpaper::Picture,
+    /// Each screen its own: `[outputs.NAME] wallpaper`, else `picture`.
+    pub per_screen: bool,
+    /// How a picture of one's own fills its screen.
+    #[serde(deserialize_with = "fit")]
+    pub fit: hocus_link::wallpaper::Fit,
+    /// `"plain"`'s colour, and around a picture not covering: `#RRGGBB`.
+    #[serde(deserialize_with = "colour")]
+    pub color: [u8; 3],
+    /// The lock screen: `"dimmed"`, `"blurred"` or `"picture"`.
+    #[serde(deserialize_with = "lock_look")]
+    pub lock: hocus_link::wallpaper::LockLook,
+    /// The lock's own picture, with `lock = "picture"`.
+    #[serde(deserialize_with = "picture")]
+    pub lock_picture: hocus_link::wallpaper::Picture,
+}
+
+impl Default for Wallpaper {
+    fn default() -> Self {
+        Self {
+            picture: hocus_link::wallpaper::Picture::default(),
+            per_screen: false,
+            fit: hocus_link::wallpaper::Fit::default(),
+            color: hocus_link::wallpaper::DEFAULT_COLOR,
+            lock: hocus_link::wallpaper::LockLook::default(),
+            lock_picture: hocus_link::wallpaper::Picture::default(),
+        }
+    }
+}
+
+fn picture<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::wallpaper::Picture, D::Error> {
+    hocus_link::wallpaper::Picture::of(&String::deserialize(deserializer)?)
+        .map_err(serde::de::Error::custom)
+}
+
+fn some_picture<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<hocus_link::wallpaper::Picture>, D::Error> {
+    picture(deserializer).map(Some)
+}
+
+fn fit<'de, D: Deserializer<'de>>(deserializer: D) -> Result<hocus_link::wallpaper::Fit, D::Error> {
+    let word = String::deserialize(deserializer)?;
+    hocus_link::wallpaper::Fit::of(&word).ok_or_else(|| {
+        serde::de::Error::custom(format!("no fit {word:?}: cover, contain or center"))
+    })
+}
+
+fn colour<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 3], D::Error> {
+    let text = String::deserialize(deserializer)?;
+    hocus_link::wallpaper::colour_of(&text)
+        .ok_or_else(|| serde::de::Error::custom(format!("no colour {text:?}: #RRGGBB")))
+}
+
+fn lock_look<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<hocus_link::wallpaper::LockLook, D::Error> {
+    let word = String::deserialize(deserializer)?;
+    hocus_link::wallpaper::LockLook::of(&word).ok_or_else(|| {
+        serde::de::Error::custom(format!("no lock {word:?}: dimmed, blurred or picture"))
+    })
+}
+
 /// `[appearance] text-scale`, in hundredths: 100 by default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextScale(pub u32);
@@ -647,11 +726,21 @@ fn locale<'de, D: Deserializer<'de>>(
 }
 
 impl Appearance {
-    /// The theme the shell draws in.
-    pub fn theme_choice(&self) -> hocus_link::theme::Choice {
+    /// The theme the shell draws in, `wallpaper` the wallpaper's accent
+    /// (only kept while the accent is the wallpaper's: another accent does
+    /// not change with the wallpaper).
+    pub fn theme_choice(
+        &self,
+        wallpaper: hocus_link::theme::AccentColours,
+    ) -> hocus_link::theme::Choice {
         hocus_link::theme::Choice {
             scheme: self.theme,
             accent: self.accent,
+            wallpaper: if self.accent == hocus_link::theme::Accent::Wallpaper {
+                wallpaper
+            } else {
+                hocus_link::theme::AccentColours::default()
+            },
         }
     }
 }
@@ -737,6 +826,20 @@ pub struct OutputSettings {
     pub enabled: bool,
     /// Variable refresh rate (VRR, adaptive sync), when it offers it.
     pub vrr: bool,
+    /// Its own wallpaper, with `[wallpaper] per-screen` (6.3); kept when
+    /// per-screen is off, for when it is on again.
+    #[serde(deserialize_with = "some_picture")]
+    pub wallpaper: Option<hocus_link::wallpaper::Picture>,
+}
+
+impl OutputSettings {
+    /// The same, without its wallpaper: what the screens' layout takes.
+    pub fn screen_part(&self) -> Self {
+        Self {
+            wallpaper: None,
+            ..self.clone()
+        }
+    }
 }
 
 impl Default for OutputSettings {
@@ -748,6 +851,7 @@ impl Default for OutputSettings {
             position: None,
             enabled: true,
             vrr: false,
+            wallpaper: None,
         }
     }
 }
@@ -1332,7 +1436,10 @@ mod tests {
         assert_eq!(config.appearance.theme, Scheme::Light);
         assert_eq!(config.appearance.accent, Accent::Teal);
         let config: Config = toml::from_str("")?;
-        assert_eq!(config.appearance.theme_choice(), Default::default());
+        assert_eq!(
+            config.appearance.theme_choice(Default::default()),
+            Default::default()
+        );
         for bad in ["theme = \"neon\"", "accent = \"amber\"", "theme = 1"] {
             let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");

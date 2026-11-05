@@ -179,9 +179,12 @@ connects; its lock fades in from black.
 
 Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`):
 
-- **The background**: the desktop's gradient (`hocus_link::backdrop`, the
-  compositor's, which moved there so that both draw the same picture),
-  `rgba(5,7,12,0.45)` over it. The blurred desktop waits for blur (#37).
+- **The background**: each screen's wallpaper (6.3, `[wallpaper] lock`:
+  `"dimmed"` by default, `"blurred"`, or `"picture"`, `lock-picture`),
+  drawn with the compositor's function (`hocus_link::wallpaper::render`)
+  on a thread of the shell's (`lock/wallpaper.rs`), `rgba(5,7,12,0.45)`
+  over it. "Blurred" is a box blur made once on a small copy, never a
+  live blur of the screen: the lock never shows windows.
   It is a canvas of its own under the rest: iced draws a canvas' images
   over its shapes.
 - **The clock**: `HH:MM`, Martian Mono 400, 112 px, `text`, in cells as

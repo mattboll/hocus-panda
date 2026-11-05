@@ -1180,20 +1180,20 @@ impl State {
         let mode = output.current_mode()?;
         let size = output.current_transform().transform_size(mode.size);
         let logical = self.space.output_geometry(output)?.size;
-        let buffer = self
-            .backdrops
-            .borrow_mut()
-            .entry((size.w, size.h))
-            .or_insert_with(|| crate::backdrop::picture((size.w, size.h)))
-            .clone();
+        let name = output.name();
+        let key = crate::wallpaper::Key {
+            look: self.wallpaper_look(&name),
+            size: (size.w, size.h),
+        };
+        let (buffer, (w, h)) = {
+            let mut backgrounds = self.backgrounds.borrow_mut();
+            backgrounds.want(&name, &key);
+            // Until the screen's new one is drawn, its previous stays.
+            let shown = backgrounds.shown.get(&name)?;
+            (shown.buffer.clone(), shown.picture)
+        };
         // Its whole picture, stretched over the screen.
-        let picture = Rectangle::<f64, Logical>::from_size(
-            (
-                f64::from((size.w / crate::backdrop::SHRINK).max(1)),
-                f64::from((size.h / crate::backdrop::SHRINK).max(1)),
-            )
-                .into(),
-        );
+        let picture = Rectangle::<f64, Logical>::from_size((f64::from(w), f64::from(h)).into());
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             (0.0, 0.0),

@@ -8,7 +8,8 @@
 //! keeps the last configuration that read.
 //!
 //! Followed live: `[pointer]` and `[touchpad]` (6.12), `[shortcuts]` and
-//! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2). A keyboard whose layouts or options changed has its
+//! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
+//! and the screens' wallpapers (6.3). A keyboard whose layouts or options changed has its
 //! keymap compiled on the thread too (XKB reads its files), the loop only
 //! taking it in; its repeat is given to clients again.
 
@@ -200,6 +201,11 @@ impl State {
         if new.keyboard != self.config.keyboard || keymap.is_some() {
             self.keyboard_changed(new.keyboard.clone(), keymap);
             followed.push("[keyboard]");
+        }
+        // The wallpaper (6.3, wallpaper.rs): before the screens, which
+        // take the rest of `[outputs]`.
+        if self.wallpaper_changed(&new) {
+            followed.push("[wallpaper]");
         }
         // The screens and the primary screen (6.9, displays.rs).
         if self.displays_config_changed(&new) {

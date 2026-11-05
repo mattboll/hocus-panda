@@ -153,6 +153,7 @@ mod tests {
             Choice {
                 scheme: Scheme::Light,
                 accent: Accent::Blue,
+                ..Choice::default()
             },
             true,
         );

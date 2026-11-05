@@ -150,6 +150,7 @@ fn main() -> ExitCode {
     config.agent_places = hocus_agents::tools::Places::from_env(hocus, config.state_dir.clone());
     config.applications = hocus_compositor::application_dirs();
     config.pictures = hocus_compositor::pictures_dir();
+    config.home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     config.videos = hocus_compositor::record::save::videos_dir();
     config.french = ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()

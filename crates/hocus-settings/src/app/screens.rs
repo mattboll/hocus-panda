@@ -176,7 +176,7 @@ impl App {
         self.screens.line = Some(line);
     }
 
-    fn screens_list(&self) -> Option<&Screens> {
+    pub(super) fn screens_list(&self) -> Option<&Screens> {
         self.screens.known.as_ref()
     }
 

@@ -200,7 +200,17 @@ impl State {
     /// The file changed and reads (`reload.rs`): its screens' settings
     /// and the primary screen apply now. Whether they changed.
     pub(crate) fn displays_config_changed(&mut self, config: &Config) -> bool {
-        let outputs_changed = config.outputs != self.config.outputs;
+        // A screen's wallpaper is the wallpaper's (6.3, wallpaper.rs), not
+        // the layout's.
+        let screens =
+            |outputs: &std::collections::BTreeMap<String, crate::config::OutputSettings>| {
+                outputs
+                    .iter()
+                    .map(|(name, o)| (name.clone(), o.screen_part()))
+                    .filter(|(_, o)| *o != crate::config::OutputSettings::default())
+                    .collect::<Vec<_>>()
+            };
+        let outputs_changed = screens(&config.outputs) != screens(&self.config.outputs);
         let primary_changed = config.panel.output != self.config.panel.output;
         if !outputs_changed && !primary_changed {
             return false;
@@ -249,6 +259,7 @@ impl State {
             Some(Rect::new(x, y, size.0, size.1))
         });
         self.displays.outputs.retain(|o| o != output);
+        self.backgrounds.get_mut().forget(&name);
         self.displays.off.remove(&name);
         self.displays.vrr_on.remove(&name);
         if let Some(rect) = rect {
@@ -631,7 +642,7 @@ impl State {
     }
 
     /// The screen with the bar, as the rule says now.
-    fn panel_primary(&self) -> Option<String> {
+    pub(crate) fn panel_primary(&self) -> Option<String> {
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
         crate::panel::primary(
             &names,
