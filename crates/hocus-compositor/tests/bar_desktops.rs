@@ -114,6 +114,10 @@ fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let mut config = Config::default();
     config.desktops.count = setup.count;
+    // No seconds: the clock would draw every second, and a desktop
+    // change's count (`drawn_by`) would catch a tick in most tries on a
+    // loaded runner (#629). Its minute still changes, once a minute.
+    config.panel.clock.seconds = false;
     // Either form, on a screen too narrow to choose the full one too.
     config.panel.form = if setup.mini {
         FormChoice::Mini
