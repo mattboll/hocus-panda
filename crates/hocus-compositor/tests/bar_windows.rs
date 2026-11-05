@@ -281,6 +281,19 @@ impl Bed {
 
     /// What the shell logged of its windows and the popovers, to say why a
     /// test failed.
+    /// Waits until the windows' surface commits nothing for half a second.
+    fn settle(&mut self) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            let before = self.hp.windows_commits();
+            common::wait(&mut self.hp, std::time::Duration::from_millis(500))?;
+            if self.hp.windows_commits() == before {
+                return Ok(());
+            }
+            anyhow::ensure!(start.elapsed() < WAIT, "the windows never came to rest");
+        }
+    }
+
     fn no_group(&self) -> bool {
         no_group(&self.hp)
     }
@@ -849,6 +862,8 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
     bed.open("test.deux", "Deux")?;
     bed.shows("«Deux»*; «Un»")?;
     common::at_rest(&mut bed.hp)?;
+    // The shell done with what it drew (a loaded machine commits late).
+    bed.settle()?;
     // Snapping the focused window to a side moves its sketch in the tiles,
     // not what the windows list: the desktops draw, the windows do not.
     let (windows, desktops) = (bed.hp.windows_commits(), bed.hp.desktops_commits());
@@ -863,12 +878,20 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
     bed.hp.pointer_move(700.0, 400.0);
     bed.hp.dispatch_until(WAIT, |hp| hp.frames() > frames + 1)?;
     common::at_rest(&mut bed.hp)?;
-    assert_eq!(bed.hp.windows_commits(), windows, "the windows drew");
+    assert_eq!(
+        bed.hp.windows_commits(),
+        windows,
+        "the windows drew\n{}",
+        bed.windows_log()
+    );
     // A retitle draws them.
     bed.client("test.un")?
         .commands
         .send(Command::Title("Un, renommé"))?;
     bed.shows("«Deux»*; «Un, renommé»")?;
-    assert!(bed.hp.windows_commits() > windows);
+    let drew = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.windows_commits() > windows)?;
+    anyhow::ensure!(drew, "the retitle drew nothing");
     Ok(())
 }
