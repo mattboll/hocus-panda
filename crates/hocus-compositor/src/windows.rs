@@ -447,7 +447,7 @@ impl State {
                 managed.away = Some(rect);
             }
         } else if !resizing {
-            self.space.map_element(window, (rect.x, rect.y), false);
+            self.place_in_space(window, (rect.x, rect.y));
         }
         self.redraw = true;
     }
@@ -780,6 +780,26 @@ impl State {
             (x - 24.0, y - 18.0).into(),
             (48.0, 36.0).into(),
         ))
+    }
+
+    /// Puts `window` at `at` in the space, where it is in the stack.
+    /// smithay's `map_element` takes a window already there to the top of
+    /// the space, the order the pointer finds windows in, while the screen
+    /// draws the model's: a window moved behind another (one that follows
+    /// the bar, a resize's neighbour) would take the clicks of the one in
+    /// front of it (#647).
+    pub fn place_in_space(&mut self, window: Window, at: (i32, i32)) {
+        let above: Vec<Window> = self
+            .space
+            .elements()
+            .skip_while(|w| **w != window)
+            .skip(1)
+            .cloned()
+            .collect();
+        self.space.map_element(window, at, false);
+        for w in &above {
+            self.space.raise_element(w, false);
+        }
     }
 
     /// Puts smithay's stacking in the model's order.
@@ -1214,7 +1234,7 @@ impl State {
         }
         let window = managed.window.clone();
         if self.space.element_location(&window) != Some((x, y).into()) {
-            self.space.map_element(window, (x, y), false);
+            self.place_in_space(window, (x, y));
         }
     }
 
