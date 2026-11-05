@@ -1762,7 +1762,11 @@ nothing to propose, the group is its header alone.
     workspaces' and tabs' labels (`workspace.list`, `tab.list`), each
     pane's `pane.process_info`, then `events.subscribe` on a blocking
     read, the renames with it (`workspace.renamed`, `workspace.updated`,
-    `tab.renamed`, `tab.created`, `tab.closed`, `tab.moved`).
+    `tab.renamed`, `tab.created`, `tab.closed`, `tab.moved`). Panes
+    coming or going list the agents again once their burst of events is
+    over (quiet for 500 ms, at most 2 s after its first), and `/proc` is
+    read again only when the agents' panes changed; another pane's state
+    asks nothing, and at rest herdr is asked nothing (#624).
 - **One agent for two sources**: a report joins the agent that has its
   key, else one of another source that has its process (a Claude Code in
   a herdr pane is the pane's foreground process); one source's keys stay
