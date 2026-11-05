@@ -58,7 +58,10 @@ jobs:
             libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build
+          # The key the one test job saved its build under on main, before
+          # this layout: same programs and tests, so a pull request starts
+          # warm (cold, this job took 20 min).
+          shared-key: linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
