@@ -180,8 +180,12 @@ async fn run(mut asks: UnboundedReceiver<Ask>, options: Options, mut publish: Pu
         match Connection::system().await {
             Ok(connection) => break connection,
             Err(err) => {
+                // Said once: tries that fail again change nothing shown,
+                // and must not wake whoever shows it.
+                if presence != Presence::Away {
+                    publish(Bluetooth::default());
+                }
                 presence.now(false, "Bluetooth (the system bus)", &err);
-                publish(Bluetooth::default());
                 while let Ok(ask) = asks.try_recv() {
                     if let Ask::Quit(done) = ask {
                         let _ = done.send(());

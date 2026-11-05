@@ -87,7 +87,14 @@ impl State {
     pub fn start(to: UnboundedSender<Message>) -> Self {
         let (asks, incoming) = hocus_bluetooth::channel();
         let _ = ASKS.set(asks.clone());
+        // Only what changed reaches the window: each message is an update
+        // and a frame drawn.
+        let mut last: Option<Bluetooth> = None;
         hocus_bluetooth::start(incoming, hocus_bluetooth::Options::default(), move |bt| {
+            if last.as_ref() == Some(&bt) {
+                return;
+            }
+            last = Some(bt.clone());
             let _ = to.unbounded_send(Message::Bluetooth(Msg::Heard(Box::new(bt))));
         });
         Self {
