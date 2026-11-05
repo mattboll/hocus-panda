@@ -89,6 +89,7 @@ fn key_of(c: char) -> Option<u32> {
         '1'..='9' => Some(2 + (c as u32 - '1' as u32)),
         '0' => Some(11),
         '-' => Some(12),
+        '.' => Some(52),
         _ => None,
     }
 }
@@ -134,13 +135,14 @@ impl Bed {
             &script,
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
-                 export DBUS_SYSTEM_BUS_ADDRESS='{}' HOCUS_RFKILL='{}' \
+                 export DBUS_SYSTEM_BUS_ADDRESS='{}' DBUS_SESSION_BUS_ADDRESS='{}' HOCUS_RFKILL='{}' \
                  HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=UTC HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
                  PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \
                  RUST_LOG=warn,hocus_settings=debug,hocus_network=info\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
+                fakes.address,
                 fakes.address,
                 rfkill.path.display(),
                 at("home"),
@@ -190,12 +192,29 @@ impl Bed {
     /// The Settings launched on Réseau, their window open with the
     /// keyboard and the page drawn once `ready` holds.
     fn open_until(&mut self, ready: impl Fn(&Value) -> bool) -> anyhow::Result<Value> {
+        self.open_with(&["network"], ready)
+    }
+
+    /// The Settings launched as the desktop launches them, with `args`.
+    fn launch(&mut self, args: &[&str]) {
+        let mut argv = vec![self.script.display().to_string()];
+        argv.extend(args.iter().map(|a| (*a).to_owned()));
         self.hp.launch(hocus_link::Launch {
             id: APP_ID.to_owned(),
             terminal: false,
             dir: String::new(),
-            argv: vec![self.script.display().to_string(), "network".to_owned()],
+            argv,
         });
+    }
+
+    /// Launched with `args`, the window open with the keyboard and the
+    /// page drawn once `ready` holds.
+    fn open_with(
+        &mut self,
+        args: &[&str],
+        ready: impl Fn(&Value) -> bool,
+    ) -> anyhow::Result<Value> {
+        self.launch(args);
         let open = self.hp.dispatch_until(Duration::from_secs(20), |hp| {
             hp.windows()
                 .iter()
@@ -714,7 +733,7 @@ fn a_wrong_password_in_the_sheet_says_so_and_keeps_the_field() -> anyhow::Result
     })?;
     // The right one, after the wrong one taken away: joined, the sheet
     // closed.
-    bed.click("sheet:field")?;
+    bed.click("sheet:password")?;
     bed.press(KEY_END);
     for _ in 0.."mauvaispass".len() {
         bed.press(KEY_BACKSPACE);
@@ -811,6 +830,481 @@ fn at_rest_the_page_draws_nothing() -> anyhow::Result<()> {
     let last = bed.settled()?;
     wait(&mut bed.hp, Duration::from_secs(3))?;
     assert_eq!(bed.hp.window_commits(), last, "the window drew at rest");
+    Ok(())
+}
+
+// --- The second part: the sheets, the cable, `--join` -------------------------
+
+/// The desktop portal's file chooser on the fakes' bus: it answers each
+/// `OpenFile` with the next of `chosen`, a moment after, as a portal does
+/// once the user chooses; it says what it was asked.
+struct Chooser {
+    chosen: std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>>,
+    asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[zbus::interface(name = "org.freedesktop.portal.FileChooser")]
+impl Chooser {
+    async fn open_file(
+        &self,
+        _parent_window: String,
+        title: String,
+        options: std::collections::HashMap<String, zbus::OwnedVariant>,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> zbus::fdo::Result<zbus::OwnedObjectPath> {
+        let sender = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        let token = options
+            .get("handle_token")
+            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+            .unwrap_or_default();
+        let path = format!(
+            "/org/freedesktop/portal/desktop/request/{}/{token}",
+            sender.trim_start_matches(':').replace('.', "_")
+        );
+        self.asked
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("poisoned".into()))?
+            .push(title);
+        let chosen = {
+            let mut chosen = self
+                .chosen
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("poisoned".into()))?;
+            (!chosen.is_empty()).then(|| chosen.remove(0))
+        };
+        let uri = chosen.map(|c| format!("file://{}", c.display()));
+        let connection = connection.clone();
+        let answer = path.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let mut results: std::collections::HashMap<&str, zbus::Variant<'_>> =
+                std::collections::HashMap::new();
+            let code: u32 = match uri {
+                Some(uri) => {
+                    results.insert("uris", zbus::Variant::from(vec![uri]));
+                    0
+                }
+                None => 1,
+            };
+            let _ = connection
+                .emit_signal(
+                    Some(sender.as_str()),
+                    answer.as_str(),
+                    "org.freedesktop.portal.Request",
+                    "Response",
+                    &(code, results),
+                )
+                .await;
+        });
+        zbus::OwnedObjectPath::try_from(path).map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+}
+
+impl Bed {
+    /// The portal's file chooser served, answering with `chosen` in turn.
+    fn chooser(
+        &self,
+        chosen: Vec<PathBuf>,
+    ) -> anyhow::Result<(
+        zbus::Connection,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    )> {
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let connection = self.fakes.runtime().block_on(
+            zbus::connection::Builder::address(self.fakes.address.as_str())
+                .name("org.freedesktop.portal.Desktop")
+                .serve_at(
+                    "/org/freedesktop/portal/desktop",
+                    Chooser {
+                        chosen: std::sync::Arc::new(std::sync::Mutex::new(chosen)),
+                        asked: asked.clone(),
+                    },
+                )
+                .build(),
+        )?;
+        Ok((connection, asked))
+    }
+
+    /// The sheet's field `field` clicked, then `text` typed in it.
+    fn fill(&mut self, field: &str, text: &str) -> anyhow::Result<()> {
+        self.click(&format!("sheet:{field}"))?;
+        let want = field.to_owned();
+        self.shows(|s| {
+            s["network"]["sheet"].is_object()
+                && s["focus"]
+                    .as_str()
+                    .is_some_and(|f| f.starts_with("control:"))
+                && !want.is_empty()
+        })?;
+        wait(&mut self.hp, Duration::from_millis(60))?;
+        self.type_text(text)?;
+        let typed = field.to_owned();
+        self.shows(|s| {
+            s["network"]["sheet"]["typed"]
+                .as_array()
+                .is_some_and(|t| t.iter().any(|f| f == typed.as_str()))
+        })?;
+        Ok(())
+    }
+
+    /// A menu of the sheet opened, and its `index`th choice, `label`,
+    /// clicked.
+    fn pick(&mut self, menu: &str, label: &str, index: usize) -> anyhow::Result<()> {
+        self.click(&format!("sheet:{menu}"))?;
+        let want = menu.to_owned();
+        self.shows(|s| s["network"]["sheet"]["menu"] == want.as_str())?;
+        self.click(&format!("option:{index}"))?;
+        self.shows(|s| s["network"]["sheet"]["menu"].is_null())
+            .map_err(|e| e.context(format!("{label} not chosen")))?;
+        Ok(())
+    }
+}
+
+#[test]
+fn a_hidden_network_joins_with_its_name_typed() -> anyhow::Result<()> {
+    let setup = Setup {
+        hidden: vec![FakeAp::new("labocache", 60, Security::Psk("cachecache"))],
+        ..home()
+    };
+    let Some(mut bed) = Bed::start(Some(setup), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("network:hidden")?;
+    let sheet = bed.shows(|s| s["network"]["sheet"]["hidden"] == true)?;
+    assert_eq!(
+        sheet["network"]["sheet"]["fields"],
+        serde_json::json!(["name", "password"])
+    );
+    // The keyboard starts in its name.
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("labocache")?;
+    bed.shows(|s| s["network"]["sheet"]["name"] == "labocache")?;
+    bed.press(KEY_TAB);
+    bed.shows(|s| s["focus"] == "control:1")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("cachecache")?;
+    bed.shows(|s| s["network"]["sheet"]["filled"] == true)?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: "labocache".to_owned(),
+        psk: Some("cachecache".to_owned()),
+    })?;
+    let added = bed.nm().added("labocache").unwrap_or_default();
+    assert_eq!(
+        added.get("802-11-wireless.hidden").map(String::as_str),
+        Some("true"),
+        "{added:?}"
+    );
+    assert_eq!(
+        added
+            .get("802-11-wireless-security.key-mgmt")
+            .map(String::as_str),
+        Some("wpa-psk")
+    );
+    bed.shows(|s| {
+        s["network"]["sheet"].is_null() && s["network"]["current"]["name"] == "labocache"
+    })?;
+    Ok(())
+}
+
+#[test]
+fn an_enterprise_network_sends_its_8021x_settings() -> anyhow::Result<()> {
+    let setup = Setup {
+        aps: {
+            let mut aps = around();
+            aps.push(FakeAp::new("Labo-TLS", 50, Security::Enterprise));
+            aps
+        },
+        ..home()
+    };
+    let Some(mut bed) = Bed::start(Some(setup), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let dir = bed.fakes.dir.path().join("home");
+    let (ca, certificate, key) = (
+        dir.join("ca.pem"),
+        dir.join("alex.crt"),
+        dir.join("alex.key"),
+    );
+    for file in [&ca, &certificate, &key] {
+        std::fs::write(file, "-----BEGIN-----\n")?;
+    }
+    let (_portal, asked) = bed.chooser(vec![certificate.clone(), key.clone(), ca.clone()])?;
+    bed.open()?;
+    // PEAP: MSCHAPv2, the system's authorities.
+    bed.click("connect:eduroam")?;
+    let sheet = bed.shows(|s| s["network"]["sheet"]["name"] == "eduroam")?;
+    assert_eq!(sheet["network"]["sheet"]["security"], "Enterprise");
+    assert_eq!(sheet["network"]["sheet"]["method"], "PEAP");
+    assert_eq!(sheet["network"]["sheet"]["inner"], "MSCHAPv2");
+    assert_eq!(
+        sheet["network"]["sheet"]["fields"],
+        serde_json::json!(["identity", "password", "domain"])
+    );
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("alex")?;
+    bed.fill("password", "motdepasse")?;
+    bed.fill("domain", "radius.univ.fr")?;
+    bed.shows(|s| s["network"]["sheet"]["filled"] == true)?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: "eduroam".to_owned(),
+        psk: None,
+    })?;
+    let added = bed.nm().added("eduroam").unwrap_or_default();
+    let get = |k: &str| added.get(k).cloned().unwrap_or_default();
+    assert_eq!(get("802-11-wireless-security.key-mgmt"), "wpa-eap");
+    assert_eq!(get("802-1x.eap"), "peap");
+    assert_eq!(get("802-1x.phase2-auth"), "mschapv2");
+    assert_eq!(get("802-1x.identity"), "alex");
+    assert_eq!(get("802-1x.password"), "motdepasse");
+    assert_eq!(get("802-1x.password-flags"), "0");
+    assert_eq!(get("802-1x.system-ca-certs"), "true");
+    assert_eq!(get("802-1x.domain-suffix-match"), "radius.univ.fr");
+    bed.shows(|s| s["network"]["sheet"].is_null() && s["network"]["current"]["name"] == "eduroam")?;
+    assert!(
+        !bed.plain().contains("motdepasse"),
+        "the password was logged"
+    );
+    // TLS: the certificate and the key from the file chooser, the
+    // authority's from a file.
+    bed.click("connect:Labo-TLS")?;
+    bed.shows(|s| s["network"]["sheet"]["name"] == "Labo-TLS")?;
+    bed.pick("method", "TLS", 2)?;
+    bed.shows(|s| s["network"]["sheet"]["method"] == "TLS")?;
+    wait(&mut bed.hp, Duration::from_millis(60))?;
+    bed.fill("identity", "alex")?;
+    bed.click("sheet:certificate")?;
+    bed.shows(|s| s["network"]["sheet"]["certificate"] == true)?;
+    bed.click("sheet:key")?;
+    bed.shows(|s| s["network"]["sheet"]["key"] == true)?;
+    bed.fill("key-password", "clesecrete")?;
+    bed.pick("authority", "Choisir un fichier…", 1)?;
+    bed.shows(|s| {
+        s["network"]["sheet"]["authority"] == "File" && s["network"]["sheet"]["filled"] == true
+    })?;
+    bed.click("sheet:connect")?;
+    bed.asked(&Call::AddAndActivate {
+        ssid: "Labo-TLS".to_owned(),
+        psk: None,
+    })?;
+    let added = bed.nm().added("Labo-TLS").unwrap_or_default();
+    let get = |k: &str| added.get(k).cloned().unwrap_or_default();
+    assert_eq!(get("802-1x.eap"), "tls");
+    assert!(!added.contains_key("802-1x.phase2-auth"), "{added:?}");
+    assert_eq!(
+        get("802-1x.client-cert"),
+        format!("file://{}", certificate.display())
+    );
+    assert_eq!(
+        get("802-1x.private-key"),
+        format!("file://{}", key.display())
+    );
+    assert_eq!(get("802-1x.private-key-password"), "clesecrete");
+    assert_eq!(get("802-1x.ca-cert"), format!("file://{}", ca.display()));
+    assert!(!added.contains_key("802-1x.system-ca-certs"), "{added:?}");
+    let titles = asked.lock().map(|a| a.clone()).unwrap_or_default();
+    assert_eq!(
+        titles,
+        [
+            "Certificat personnel",
+            "Clé privée",
+            "Certificat de l’autorité"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_wep_network_sends_its_key() -> anyhow::Result<()> {
+    let setup = Setup {
+        aps: {
+            let mut aps = around();
+            aps.push(FakeAp::new("Imprimante-3A", 45, Security::Wep("12345")));
+            aps
+        },
+        ..home()
+    };
+    let Some(mut bed) = Bed::start(Some(setup), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    let printer = find(&shown["network"]["around"], "Imprimante-3A");
+    assert_eq!(
+        printer["line"],
+        "WEP · une protection ancienne, facile à casser"
+    );
+    assert_eq!(printer["warn"], true);
+    bed.click("connect:Imprimante-3A")?;
+    bed.shows(|s| s["network"]["sheet"]["security"] == "Wep")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("12345")?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: "Imprimante-3A".to_owned(),
+        psk: None,
+    })?;
+    let added = bed.nm().added("Imprimante-3A").unwrap_or_default();
+    let get = |k: &str| added.get(k).cloned().unwrap_or_default();
+    assert_eq!(get("802-11-wireless-security.key-mgmt"), "none");
+    assert_eq!(get("802-11-wireless-security.wep-key0"), "12345");
+    assert_eq!(get("802-11-wireless-security.wep-key-type"), "1");
+    bed.shows(|s| s["network"]["current"]["name"] == "Imprimante-3A")?;
+    Ok(())
+}
+
+#[test]
+fn the_cable_says_unplugged_then_connected() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(home()), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(
+        shown["network"]["wired"]["line"],
+        "Adaptateur Ethernet USB · débranché"
+    );
+    assert_eq!(shown["network"]["wired"]["value"], "Débranché");
+    bed.places_with("row:network.cable")?;
+    bed.nm().set_wired(true)?;
+    let plugged = bed.shows(|s| s["network"]["wired"]["connected"] == true)?;
+    assert_eq!(
+        plugged["network"]["wired"]["value"],
+        "Connecté · 1 Gb/s · 192.168.1.30"
+    );
+    assert_eq!(plugged["network"]["card"], "Câble");
+    Ok(())
+}
+
+#[test]
+fn launched_with_join_opens_that_networks_sheet() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(home()), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    // As the Wi-Fi popover's "dans les Réglages" row launches them.
+    bed.open_with(&["network", "--join", "eduroam"], |s| {
+        s["network"]["sheet"]["name"] == "eduroam"
+    })?;
+    // Launched again for another: the window comes forward on its sheet.
+    bed.launch(&["network", "--join", "Livebox-8F21"]);
+    let again = bed.shows(|s| s["network"]["sheet"]["name"] == "Livebox-8F21")?;
+    assert_eq!(again["network"]["sheet"]["security"], "Psk { sae: false }");
+    let windows = bed
+        .hp
+        .windows()
+        .iter()
+        .filter(|w| w.app_id.as_deref() == Some(APP_ID))
+        .count();
+    assert_eq!(windows, 1);
+    Ok(())
+}
+
+/// The second part's pictures, at ×2: `HOCUS_SHOTS=DIR`.
+#[test]
+#[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_sheets() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start_on(
+        Some(home()),
+        &[(WLAN, false), (BLUETOOTH, false)],
+        "2880x1800@2",
+    )?
+    else {
+        return Ok(());
+    };
+    let dir = bed.fakes.dir.path().join("home");
+    let (certificate, key) = (dir.join("alex.crt"), dir.join("alex.key"));
+    for file in [&certificate, &key] {
+        std::fs::write(file, "-----BEGIN-----\n")?;
+    }
+    let (_portal, _) = bed.chooser(vec![certificate, key])?;
+    bed.nm().set_wired(true)?;
+    bed.open()?;
+    bed.shows(|s| s["network"]["scanning"] == false && s["network"]["wired"]["connected"] == true)?;
+    bed.scroll_to_show("row:network.cable")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-cable.png")?;
+    // eduroam's sheet, filled in.
+    bed.click("connect:eduroam")?;
+    bed.shows(|s| s["network"]["sheet"]["name"] == "eduroam")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("alex.martin")?;
+    for (at, field, text) in [
+        ("control:1", "password", "motdepasse"),
+        ("control:2", "domain", "radius.univ.fr"),
+    ] {
+        bed.press(KEY_TAB);
+        bed.shows(|s| s["focus"] == at)?;
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        bed.type_text(text)?;
+        bed.shows(|s| {
+            s["network"]["sheet"]["typed"]
+                .as_array()
+                .is_some_and(|t| t.iter().any(|f| f == field))
+        })?;
+    }
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-eduroam.png")?;
+    // TLS, its files chosen, the authority not checked.
+    bed.pick("method", "TLS", 2)?;
+    bed.shows(|s| s["network"]["sheet"]["method"] == "TLS")?;
+    bed.click("sheet:certificate")?;
+    bed.shows(|s| s["network"]["sheet"]["certificate"] == true)?;
+    bed.click("sheet:key")?;
+    bed.shows(|s| s["network"]["sheet"]["key"] == true)?;
+    bed.pick("authority", "Ne pas vérifier", 2)?;
+    bed.shows(|s| s["network"]["sheet"]["authority"] == "Unchecked")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-tls.png")?;
+    bed.press(KEY_ESC);
+    bed.shows(|s| s["network"]["sheet"].is_null())?;
+    // A hidden network's sheet.
+    bed.click("network:hidden")?;
+    bed.shows(|s| s["network"]["sheet"]["hidden"] == true)?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("labocache")?;
+    bed.shows(|s| s["network"]["sheet"]["name"] == "labocache")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-hidden.png")?;
+    Ok(())
+}
+
+/// The window at ×2, once settled (or a caret blinking), into `out`.
+fn shot(bed: &mut Bed, out: &std::path::Path, name: &str) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..30 {
+        if still >= 5 {
+            break;
+        }
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+    }
+    let window = bed.window()?;
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+    let pad = 24;
+    let x = (window.x * 2 - pad).max(0) as u32;
+    let y = (window.y * 2 - pad).max(0) as u32;
+    let cw = ((window.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+    let ch = ((window.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+    let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+    let path = out.join(name);
+    image.save(&path)?;
+    eprintln!("{}", path.display());
     Ok(())
 }
 

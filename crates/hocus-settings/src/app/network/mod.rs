@@ -11,6 +11,7 @@
 //! forgotten toast with "Annuler" and join `Ctrl+Z`; connecting and
 //! disconnecting say themselves on their rows.
 
+mod sheet;
 mod view;
 
 use std::{
@@ -20,7 +21,7 @@ use std::{
 
 use hocus_network::{
     Ask, Details, Heard, Kept, Reply,
-    model::{Failure, Progress, Security, Wifi},
+    model::{Progress, Security, Wifi},
     rfkill::{self, Block, Radios},
     secret::{self, Secret},
 };
@@ -35,9 +36,10 @@ use crate::{
     network as model,
 };
 
-/// The text fields' ids: the sheet's password, a saved network's.
-pub(super) const SHEET_FIELD: &str = "network-sheet-password";
+/// A saved network's password field's id.
 pub(super) const PASSWORD_FIELD: &str = "network-password";
+
+use self::sheet::Sheet;
 
 /// The page's own messages.
 #[derive(Debug, Clone)]
@@ -68,10 +70,9 @@ pub enum Msg {
     Forget(String),
     /// The pointer over the networks around, or not: their order held.
     Hover(bool),
-    SheetInput(String),
-    SheetEye,
-    SheetConnect,
-    SheetCancel,
+    /// "Rejoindre…": a hidden network's sheet.
+    Hidden,
+    Sheet(sheet::Msg),
 }
 
 /// An answer of NetworkManager's thread, taken once (it may hold a
@@ -134,7 +135,9 @@ pub enum Stop {
     Eye,
     Change,
     Forget,
-    SheetField,
+    /// "Réseau masqué"'s "Rejoindre…".
+    Hidden,
+    SheetField(sheet::Field),
     SheetCancel,
     SheetConnect,
 }
@@ -148,37 +151,6 @@ pub(super) struct Password {
     pub shown: bool,
     /// Typed anew ("Changer…"): `Enter` saves it, `Esc` cancels.
     pub editing: bool,
-}
-
-/// The sheet over the page: a protected network joined with its
-/// password.
-#[derive(Debug)]
-pub(super) struct Sheet {
-    pub ssid: Vec<u8>,
-    pub name: String,
-    pub security: Security,
-    pub text: String,
-    pub shown: bool,
-    /// Sent: the attempts before it, by their number, are not its.
-    pub sent: Option<u64>,
-    pub failed: Option<Failure>,
-}
-
-impl Sheet {
-    /// Whether what is typed can be tried: 8 characters at least for WPA,
-    /// a WEP key of 5 or 13 characters, 10 or 26 hex digits, or any
-    /// passphrase.
-    pub(super) fn filled(&self) -> bool {
-        let n = self.text.chars().count();
-        match self.security {
-            Security::Wep => n > 0,
-            _ => (secret::SHORTEST..secret::LONGEST).contains(&n) || n == secret::LONGEST,
-        }
-    }
-
-    pub(super) fn waiting(&self) -> bool {
-        self.sent.is_some()
-    }
 }
 
 /// The page's state.
@@ -205,6 +177,10 @@ pub struct State {
     restoring: Vec<(String, Doing)>,
     /// A scan was asked since the page showed.
     scanned: bool,
+    /// What the window hears through, for the file chooser's answers.
+    to: Option<UnboundedSender<Message>>,
+    /// A network whose sheet opens once it is around (`--join`).
+    pub(super) joining: Option<String>,
 }
 
 impl State {
@@ -243,6 +219,7 @@ impl State {
         Self {
             asks: Some(asks),
             radio_asks: Some(radio_asks),
+            to: Some(to.clone()),
             ..Self::default()
         }
     }
@@ -337,7 +314,7 @@ impl App {
         match msg {
             Msg::Heard(details) => {
                 self.network_heard(details);
-                Task::none()
+                self.network_try_join()
             }
             Msg::Radios(radios) => {
                 self.network.radios = radios;
@@ -490,24 +467,13 @@ impl App {
                 self.network.hold(over || keyboard);
                 Task::none()
             }
-            Msg::SheetInput(text) => {
-                if let Some(sheet) = self.network.sheet.as_mut().filter(|s| !s.waiting()) {
-                    sheet.text = text;
-                    sheet.failed = None;
+            Msg::Hidden => {
+                if !self.network.manager() || !self.network.wifi_on() {
+                    return Task::none();
                 }
-                Task::none()
+                self.network_open_sheet(Sheet::hidden())
             }
-            Msg::SheetEye => {
-                if let Some(sheet) = &mut self.network.sheet {
-                    sheet.shown = !sheet.shown;
-                }
-                Task::none()
-            }
-            Msg::SheetConnect => self.network_sheet_connect(),
-            Msg::SheetCancel => {
-                self.network_close_sheet();
-                Task::none()
-            }
+            Msg::Sheet(msg) => self.network_sheet_update(msg),
         }
     }
 
@@ -711,56 +677,32 @@ impl App {
             self.network.ask(Ask::Connect { ssid });
             return Task::none();
         }
-        if !wifi.security.joinable() {
-            // 802.1X and WEP: their sheet's fields come with #406's
-            // second part.
-            return Task::none();
-        }
-        self.network.sheet = Some(Sheet {
-            ssid,
-            name: wifi.name,
-            security: wifi.security,
-            text: String::new(),
-            shown: false,
-            sent: None,
-            failed: None,
-        });
-        self.focus = Focus::Control(0);
-        operation::focus(SHEET_FIELD)
+        self.network_open_sheet(Sheet::known(ssid, wifi.name, wifi.security))
     }
 
-    fn network_sheet_connect(&mut self) -> Task<Message> {
-        let before = self
-            .network
-            .details
-            .as_ref()
-            .and_then(|d| d.network.attempt.as_ref())
-            .map_or(0, |a| a.id);
-        let Some(sheet) = self.network.sheet.as_mut() else {
+    /// The network `--join` named, once it is around: its sheet (or
+    /// joined at once, open or saved).
+    pub(super) fn network_try_join(&mut self) -> Task<Message> {
+        let Some(name) = self.network.joining.clone() else {
             return Task::none();
         };
-        if sheet.waiting() || !sheet.filled() {
+        if !self.network.manager() {
             return Task::none();
         }
-        let mut secret = Secret::longest(sheet.text.chars().count());
-        secret.push(&sheet.text);
-        sheet.sent = Some(before);
-        sheet.failed = None;
-        let ssid = sheet.ssid.clone();
-        self.network.ask(Ask::ConnectWith { ssid, secret });
-        Task::none()
-    }
-
-    /// The sheet closed: what was typed forgotten, an attempt under way
-    /// given up.
-    fn network_close_sheet(&mut self) {
-        if let Some(mut sheet) = self.network.sheet.take() {
-            if sheet.waiting() {
-                self.network.ask(Ask::Abandon);
-            }
-            wipe(&mut sheet.text);
-        }
-        self.focus = Focus::Nothing;
+        let Some(wifi) = self
+            .network
+            .around()
+            .into_iter()
+            .find(|n| n.name == name || n.ssid == name.as_bytes())
+        else {
+            return Task::none();
+        };
+        self.network.joining = None;
+        self.go(Page::Section(SectionId::Network));
+        self.network.sub = false;
+        self.network_close_sheet();
+        tracing::info!("the sheet of the network asked opens");
+        self.network_connect(wifi.ssid)
     }
 
     /// The saved networks' sub-page shown, or the page.
@@ -803,11 +745,24 @@ impl App {
             self.network_close_sheet();
         }
     }
+}
 
-    /// `Esc` on the page: the sheet closes, a password typed is given up.
+/// The message that closes the sheet's open menu.
+pub(super) fn close_sheet_menu() -> Msg {
+    Msg::Sheet(sheet::Msg::CloseMenu)
+}
+
+impl App {
+    /// `Esc` on the page: the sheet's menu closes, then the sheet; a
+    /// password typed is given up.
     pub(super) fn network_escape(&mut self) -> Option<Task<Message>> {
         if self.page != Page::Section(SectionId::Network) {
             return None;
+        }
+        if let Some(sheet) = self.network.sheet.as_mut()
+            && sheet.menu.take().is_some()
+        {
+            return Some(Task::none());
         }
         if self.network.sheet.is_some() {
             self.network_close_sheet();
@@ -827,11 +782,24 @@ impl App {
         if self.page != Page::Section(SectionId::Network) {
             return None;
         }
+        let focused = match self.focus {
+            Focus::Control(i) => self.network_controls().get(i).copied(),
+            _ => None,
+        };
         let field = if let Some(sheet) = self.network.sheet.as_mut().filter(|s| !s.waiting()) {
-            sheet.text.push_str(typed);
+            let field = match focused {
+                Some(Stop::SheetField(field)) => field,
+                _ => sheet.first_empty()?,
+            };
+            sheet.text_mut(field).push_str(typed);
             sheet.failed = None;
-            self.focus = Focus::Control(0);
-            SHEET_FIELD
+            let at = self
+                .network_controls()
+                .iter()
+                .position(|s| *s == Stop::SheetField(field))
+                .unwrap_or(0);
+            self.focus = Focus::Control(at);
+            field.id()
         } else {
             let p = self.network.password.as_mut().filter(|p| p.editing)?;
             p.text.push_str(typed);
@@ -851,8 +819,10 @@ impl App {
     /// The page's controls, in `Tab`'s order: the sheet's alone while it
     /// is open.
     pub(super) fn network_controls(&self) -> Vec<Stop> {
-        if self.network.sheet.is_some() {
-            return vec![Stop::SheetField, Stop::SheetCancel, Stop::SheetConnect];
+        if let Some(sheet) = &self.network.sheet {
+            let mut stops: Vec<Stop> = sheet.fields().into_iter().map(Stop::SheetField).collect();
+            stops.extend([Stop::SheetCancel, Stop::SheetConnect]);
+            return stops;
         }
         if !self.network.manager() {
             return Vec::new();
@@ -888,6 +858,9 @@ impl App {
             stops.extend([Stop::Disconnect, Stop::Details]);
         }
         stops.push(Stop::Saved);
+        if self.network.wifi_on() {
+            stops.push(Stop::Hidden);
+        }
         if self.network.wifi_on() && !self.network.around().is_empty() {
             stops.push(Stop::Around);
         }
@@ -907,10 +880,9 @@ impl App {
             (at + 1) % count
         };
         self.focus = Focus::Control(next);
-        if next == 0 {
-            operation::focus(SHEET_FIELD)
-        } else {
-            operation::focus("nothing")
+        match self.network_controls().get(next) {
+            Some(Stop::SheetField(field)) => operation::focus(field.id()),
+            _ => operation::focus("nothing"),
         }
     }
 
@@ -980,9 +952,10 @@ impl App {
                 };
                 self.network_update(msg)
             }
-            Stop::SheetCancel => self.network_update(Msg::SheetCancel),
-            Stop::SheetConnect => self.network_update(Msg::SheetConnect),
-            Stop::SheetField => Task::none(),
+            Stop::Hidden => self.network_update(Msg::Hidden),
+            Stop::SheetCancel => self.network_update(Msg::Sheet(sheet::Msg::Cancel)),
+            Stop::SheetConnect => self.network_update(Msg::Sheet(sheet::Msg::Connect)),
+            Stop::SheetField(_) => Task::none(),
         }
     }
 

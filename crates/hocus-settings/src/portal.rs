@@ -1,4 +1,5 @@
-//! "Choisir une image…" (6.3): the desktop portal's file chooser
+//! "Choisir une image…" (6.3), an 802.1X network's certificates (6.6):
+//! the desktop portal's file chooser
 //! (`org.freedesktop.portal.FileChooser.OpenFile`) on the session bus
 //! (`DBUS_SESSION_BUS_ADDRESS`, which the compositor gives the programs it
 //! starts; without it, none), asked from the wallpaper page's thread,
@@ -36,6 +37,17 @@ pub enum Chosen {
 /// with the filter `filter` (JPEG, PNG, WebP). Blocks this thread until
 /// they do.
 pub fn open_file(title: &str, filter: &str, folder: &Path) -> Chosen {
+    let types: Vec<(u32, &str)> = ["image/jpeg", "image/png", "image/webp"]
+        .into_iter()
+        .map(|t| (1, t))
+        .collect();
+    open_file_of(title, filter, &types, folder)
+}
+
+/// The user chooses a file from `folder` in a dialog titled `title`, its
+/// filter `filter` taking `types` (`(0, glob)` or `(1, MIME type)`, the
+/// portal's). Blocks this thread until they do.
+pub fn open_file_of(title: &str, filter: &str, types: &[(u32, &str)], folder: &Path) -> Chosen {
     let Some(bus) = std::env::var("DBUS_SESSION_BUS_ADDRESS")
         .ok()
         .filter(|b| !b.is_empty())
@@ -53,13 +65,19 @@ pub fn open_file(title: &str, filter: &str, folder: &Path) -> Chosen {
             return Chosen::NoPortal;
         }
     };
-    runtime.block_on(choose(&bus, title, filter, folder))
+    runtime.block_on(choose(&bus, title, filter, types, folder))
 }
 
-async fn choose(bus: &str, title: &str, filter: &str, folder: &Path) -> Chosen {
+async fn choose(
+    bus: &str,
+    title: &str,
+    filter: &str,
+    types: &[(u32, &str)],
+    folder: &Path,
+) -> Chosen {
     let asked = async {
         let connection = Builder::address(bus).build().await?;
-        let request = ask(&connection, title, filter, folder).await?;
+        let request = ask(&connection, title, filter, types, folder).await?;
         Ok::<_, zbus::Error>((connection, request))
     };
     let (connection, mut responses) = match tokio::time::timeout(ASK, asked).await {
@@ -108,6 +126,7 @@ async fn ask(
     connection: &Connection,
     title: &str,
     filter: &str,
+    types: &[(u32, &str)],
     folder: &Path,
 ) -> zbus::Result<MessageStream> {
     static TOKENS: AtomicU32 = AtomicU32::new(1);
@@ -130,12 +149,8 @@ async fn ask(
             .build()
     };
     let responses = MessageStream::for_match_rule(listen(&path)?, connection, None).await?;
-    // `[(name, [(0, mime type)])]`: the pictures the desktop draws.
-    let types: Vec<(u32, &str)> = ["image/jpeg", "image/png", "image/webp"]
-        .into_iter()
-        .map(|t| (1, t))
-        .collect();
-    let filters = vec![(filter, types)];
+    // `[(name, [(0, glob) or (1, mime type)])]`.
+    let filters = vec![(filter, types.to_vec())];
     let mut options: HashMap<&str, Variant<'_>> = HashMap::new();
     options.insert("handle_token", Variant::from(token.as_str()));
     options.insert("modal", Variant::from(true));
