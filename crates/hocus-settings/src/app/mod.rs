@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod keyboard_page;
 mod mouse;
 mod places;
 mod screens;
@@ -134,6 +135,9 @@ enum Change {
         slot: Slot,
         before: Raw,
         after: Raw,
+        /// Changes made together (a shortcut taken from another action,
+        /// 6.8) are taken back together.
+        batch: Option<u64>,
     },
     /// Keys a page wrote itself (the screens'), and what it says of them.
     Keys {
@@ -141,6 +145,16 @@ enum Change {
         after: Vec<KeyEdit>,
         said: KeysSaid,
     },
+}
+
+impl Change {
+    /// The batch it was made in, taken back with it.
+    fn batch(&self) -> Option<u64> {
+        match self {
+            Self::Slot { batch, .. } => *batch,
+            Self::Keys { .. } => None,
+        }
+    }
 }
 
 /// What the toasts say of keys a page wrote, done, undone or redone; the
@@ -175,6 +189,10 @@ struct Pending {
     /// The change undone or redone, which goes on the other stack once
     /// written.
     change: Option<Change>,
+    batch: Option<u64>,
+    /// What its toast says instead of the setting and its value; empty:
+    /// no toast (another write of its batch says it).
+    say: Option<String>,
 }
 
 /// Whether the window stays: asked to close, it goes once the writes it
@@ -206,6 +224,7 @@ pub enum Message {
     Again(Again),
     Key {
         key: Key,
+        physical: keyboard::key::Physical,
         modifiers: Modifiers,
         text: Option<String>,
         captured: bool,
@@ -243,6 +262,8 @@ pub enum Message {
     Scrolled,
     /// The mice and touchpads page's (6.12).
     Mouse(mouse::Msg),
+    /// The keyboard's page and its shortcuts' (6.8).
+    Keys(keyboard_page::Msg),
     Nothing,
 }
 
@@ -290,6 +311,8 @@ pub struct App {
     scale: f32,
     /// The mice and touchpads, and the test area (6.12).
     mouse: mouse::Mouse,
+    /// The layouts, the shortcuts' sub-page, a shortcut recorded (6.8).
+    keys: keyboard_page::Keys,
     /// What the log said last.
     said: String,
     said_places: String,
@@ -319,6 +342,12 @@ impl App {
                     .is_ok()
             });
         }
+        let layouts = sender.clone();
+        keyboard_page::read_registry(start.lang, move |registry, system| {
+            let _ = layouts.unbounded_send(Message::Keys(keyboard_page::Msg::Registry(
+                registry, system,
+            )));
+        });
         if let Some(listener) = listener {
             let again: UnboundedSender<Message> = sender;
             crate::single::listen(listener, move |ask| {
@@ -360,6 +389,7 @@ impl App {
             screens: screens::Page::default(),
             scale: 1.0,
             mouse: mouse::Mouse::default(),
+            keys: keyboard_page::Keys::default(),
             said: String::new(),
             said_places: String::new(),
         };
@@ -388,16 +418,22 @@ impl App {
             event::listen_with(|event, status, _| match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key,
+                    physical_key,
                     modifiers,
                     text,
                     ..
                 }) => Some(Message::Key {
                     key,
+                    physical: physical_key,
                     modifiers,
                     text: text.map(|t| t.to_string()),
                     captured: status == event::Status::Captured,
                 }),
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
+                // The modifiers held while a shortcut is recorded (6.8).
+                Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
+                    Some(Message::Keys(keyboard_page::Msg::Mods(mods)))
+                }
                 Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
                 // The test area says which device scrolled (6.12).
                 Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
@@ -486,10 +522,24 @@ impl App {
             Message::Again(again) => self.again(again),
             Message::Key {
                 key,
+                physical,
                 modifiers,
                 text,
                 captured,
-            } => self.key(&key, modifiers, text.as_deref(), captured),
+            } => {
+                // A shortcut recorded takes every key (6.8).
+                if self.keys.recording.is_some() {
+                    return self.record_key(&key, &physical, modifiers);
+                }
+                if self.keys.conflict.is_some() && key.as_ref() == Key::Named(Named::Escape) {
+                    return self.keys_update(keyboard_page::Msg::Cancel);
+                }
+                if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
+                    self.keys.adding = None;
+                    return Task::none();
+                }
+                self.key(&key, modifiers, text.as_deref(), captured)
+            }
             Message::Query(query) => {
                 self.focus = Focus::Search;
                 self.search(query);
@@ -506,6 +556,7 @@ impl App {
             }
             Message::Section(id) => {
                 self.go(Page::Section(id));
+                self.keys.sub = false;
                 Task::none()
             }
             Message::Result(i) => self.open_result(i),
@@ -595,6 +646,7 @@ impl App {
             }
             Message::Placed(places) => self.placed(places),
             Message::Mouse(msg) => self.mouse_update(msg),
+            Message::Keys(msg) => self.keys_update(msg),
         }
     }
 
@@ -704,6 +756,7 @@ impl App {
             slot,
             before,
             after: raw,
+            batch: pending.batch,
         });
         let Some(setting) = slot.setting() else {
             return Task::none();
@@ -714,9 +767,11 @@ impl App {
             Doing::New => {
                 self.undo.push(change);
                 self.redo.clear();
-                let text = match self.lang {
-                    Lang::French => format!("{name} : {now}"),
-                    Lang::English => format!("{name}: {now}"),
+                let text = match (pending.say, self.lang) {
+                    (Some(said), _) if said.is_empty() => return Task::none(),
+                    (Some(said), _) => said,
+                    (None, Lang::French) => format!("{name} : {now}"),
+                    (None, Lang::English) => format!("{name}: {now}"),
                 };
                 self.toast(text, ToastAction::Undo, TOAST)
             }
@@ -804,6 +859,7 @@ impl App {
     /// what a device says (the touchpad's own right click).
     fn default_of(&self, slot: Slot) -> Option<Value> {
         self.device_default(slot)
+            .or_else(|| self.keyboard_default(slot))
             .or_else(|| slot.place().map(|p| p.default.clone()))
     }
 
@@ -844,7 +900,36 @@ impl App {
         Task::none()
     }
 
+    /// `value` written at `slot` as one of a batch taken back together,
+    /// its toast saying `say` (empty: none).
+    fn write_batch(&mut self, slot: Slot, value: Value, batch: u64, say: Option<String>) {
+        if self.writable() {
+            self.ask(slot, Raw::Set(value), Doing::New, None, Some(batch), say);
+        }
+    }
+
+    /// `slot`'s line taken out of the file: its default applies, and
+    /// follows a changed default later ("Rétablir", 6.8).
+    fn remove(&mut self, slot: Slot, batch: Option<u64>) {
+        if self.writable() {
+            self.ask(slot, Raw::Remove, Doing::New, None, batch, None);
+        }
+    }
+
     fn ask_write(&mut self, slot: Slot, raw: Raw, doing: Doing, change: Option<Change>) {
+        let batch = change.as_ref().and_then(Change::batch);
+        self.ask(slot, raw, doing, change, batch, None);
+    }
+
+    fn ask(
+        &mut self,
+        slot: Slot,
+        raw: Raw,
+        doing: Doing,
+        change: Option<Change>,
+        batch: Option<u64>,
+        say: Option<String>,
+    ) {
         self.serial += 1;
         let id = self.serial;
         self.pending.insert(
@@ -853,6 +938,8 @@ impl App {
                 write: Write::Slot(slot, raw.clone()),
                 doing,
                 change,
+                batch,
+                say,
             },
         );
         if !self.worker.ask(Ask::Write { slot, raw, id }) {
@@ -879,6 +966,8 @@ impl App {
                 write: Write::Keys(edits.clone(), said),
                 doing,
                 change,
+                batch: None,
+                say: None,
             },
         );
         if !self.worker.ask(Ask::Keys { edits, id }) {
@@ -894,14 +983,22 @@ impl App {
             return Task::none();
         };
         self.toast = None;
-        match &change {
-            Change::Slot { slot, before, .. } => {
-                let (slot, before) = (*slot, before.clone());
-                self.ask_write(slot, before, Doing::Undo, Some(change));
-            }
-            Change::Keys { before, said, .. } => {
-                let (before, said) = (before.clone(), said.clone());
-                self.ask_keys(before, said, Doing::Undo, Some(change));
+        // Its batch's others with it, the last first.
+        let batch = change.batch();
+        let mut changes = vec![change];
+        while batch.is_some() && self.undo.last().is_some_and(|c| c.batch() == batch) {
+            changes.extend(self.undo.pop());
+        }
+        for change in changes {
+            match &change {
+                Change::Slot { slot, before, .. } => {
+                    let (slot, before) = (*slot, before.clone());
+                    self.ask_write(slot, before, Doing::Undo, Some(change));
+                }
+                Change::Keys { before, said, .. } => {
+                    let (before, said) = (before.clone(), said.clone());
+                    self.ask_keys(before, said, Doing::Undo, Some(change));
+                }
             }
         }
         Task::none()
@@ -914,14 +1011,21 @@ impl App {
         let Some(change) = self.redo.pop() else {
             return Task::none();
         };
-        match &change {
-            Change::Slot { slot, after, .. } => {
-                let (slot, after) = (*slot, after.clone());
-                self.ask_write(slot, after, Doing::Redo, Some(change));
-            }
-            Change::Keys { after, said, .. } => {
-                let (after, said) = (after.clone(), said.clone());
-                self.ask_keys(after, said, Doing::Redo, Some(change));
+        let batch = change.batch();
+        let mut changes = vec![change];
+        while batch.is_some() && self.redo.last().is_some_and(|c| c.batch() == batch) {
+            changes.extend(self.redo.pop());
+        }
+        for change in changes {
+            match &change {
+                Change::Slot { slot, after, .. } => {
+                    let (slot, after) = (*slot, after.clone());
+                    self.ask_write(slot, after, Doing::Redo, Some(change));
+                }
+                Change::Keys { after, said, .. } => {
+                    let (after, said) = (after.clone(), said.clone());
+                    self.ask_keys(after, said, Doing::Redo, Some(change));
+                }
             }
         }
         Task::none()
@@ -1015,6 +1119,10 @@ impl App {
             self.page = page;
             self.light = None;
             self.menu = None;
+            self.stop_recording();
+            self.keys.conflict = None;
+            self.keys.adding = None;
+            self.keys.sub = false;
         }
         self.opened = None;
     }
@@ -1048,6 +1156,8 @@ impl App {
     fn show_row(&mut self, setting: &'static str) -> Task<Message> {
         if let Some(s) = crate::model::setting(setting) {
             self.go(Page::Section(s.section));
+            // A shortcut's row is on the shortcuts' sub-page.
+            self.keys.sub = s.kind == Kind::Shortcut;
         }
         self.scroll_to = Some(setting);
         self.light = Some((setting, Instant::now()));
@@ -1105,6 +1215,16 @@ impl App {
         let Page::Section(section) = self.page else {
             return Vec::new();
         };
+        if section == SectionId::Keyboard {
+            if self.keys.sub {
+                return Vec::new();
+            }
+            return settings_of(section)
+                .iter()
+                .filter(|s| !keyboard_page::own_kind(&s.kind))
+                .map(|s| Control::Setting(Slot::of(s, self.source)))
+                .collect();
+        }
         if section == SectionId::Screens {
             return self
                 .screens_controls()
@@ -1220,6 +1340,14 @@ impl App {
             && text.chars().any(char::is_alphanumeric)
             && !text.is_empty()
         {
+            // Into the layouts' popover's search while it is open (6.8).
+            if let Some(query) = &self.keys.adding {
+                let query = format!("{query}{text}");
+                return Task::batch([
+                    self.keys_update(keyboard_page::Msg::AddQuery(query)),
+                    self.keys_update(keyboard_page::Msg::FocusAdd),
+                ]);
+            }
             self.focus = Focus::Search;
             let query = format!("{}{text}", self.query);
             self.search(query);
@@ -1391,7 +1519,7 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.not_here(setting).is_some() {
+        if !self.writable() || self.unavailable(setting).is_some() {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -1399,6 +1527,13 @@ impl App {
                 self.value(Slot::of(switch, self.source)) == Some(Value::Bool(false))
             })
         })
+    }
+
+    /// Why a row does not apply now: no device plugged takes it (6.12), or
+    /// another setting takes its key (6.8).
+    pub(super) fn unavailable(&self, setting: &Setting) -> Option<&'static str> {
+        self.not_here(setting)
+            .or_else(|| self.keyboard_not_here(setting))
     }
 
     /// The row lit, and how much (0 to 1), at the frame's time.

@@ -898,6 +898,8 @@ pub struct Keyboard {
     pub repeat_delay: i32,
     /// Repeats per second.
     pub repeat_rate: i32,
+    /// Num Lock on as the session opens, on every keyboard.
+    pub numlock: bool,
 }
 
 impl Default for Keyboard {
@@ -907,6 +909,7 @@ impl Default for Keyboard {
             options: String::new(),
             repeat_delay: 200,
             repeat_rate: 25,
+            numlock: false,
         }
     }
 }

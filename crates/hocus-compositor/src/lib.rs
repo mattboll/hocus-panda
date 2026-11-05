@@ -238,7 +238,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
     if let Some(file) = state.config.file.clone() {
-        reload::start(&event_loop.handle(), &file);
+        reload::start(&event_loop.handle(), &file, &state.config);
     }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);

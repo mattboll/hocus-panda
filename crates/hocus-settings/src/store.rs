@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use toml_edit::{DocumentMut, Item, Table, TableLike};
 
-use crate::model::{Place, Setting, Source, Value, all_settings};
+use crate::model::{Codec, Place, Setting, Source, Value, all_settings};
 
 /// One value of a setting: the setting's only one, or its value for a
 /// power source.
@@ -249,6 +249,21 @@ pub fn write(doc: &mut DocumentMut, slot: Slot, raw: &Raw) -> Result<(), String>
     let place = slot.place().ok_or("an unknown setting")?;
     let (name, tables) = place.key.split_last().ok_or("an empty key")?;
     let new = match raw {
+        // One option among the line's others (6.8).
+        Raw::Set(Value::Word(choice)) if matches!(place.codec, Codec::XkbOption(_)) => {
+            let Codec::XkbOption(family) = place.codec else {
+                return Err("an XKB option".to_owned());
+            };
+            let mut table: &dyn TableLike = doc.as_table();
+            for part in tables {
+                match table.get(part).and_then(Item::as_table_like) {
+                    Some(inner) => table = inner,
+                    None => break,
+                }
+            }
+            let old = table.get(name).and_then(Item::as_str).unwrap_or_default();
+            Some(crate::model::xkb_options(old, family, choice).into())
+        }
         Raw::Set(value) => Some(
             place
                 .codec
