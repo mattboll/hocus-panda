@@ -847,6 +847,8 @@ impl Headless {
         state.leave_tick();
         // And a screen's mode tried from the Settings (6.9).
         state.trial_tick();
+        // And the halo's reminder of an agent waiting (4.4).
+        state.halo_reminder_due();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.
@@ -1077,12 +1079,18 @@ impl Headless {
     }
 
     /// Whether the last frame drawn shows everything at rest: no motion
-    /// under way as of that frame, and no frame asked for since. A frame is
-    /// only drawn after the loop turns, so on a loaded machine it can come
-    /// well after a motion's end in time: read pixels once this holds.
+    /// under way as of that frame, no frame asked for since, and none due
+    /// by now (a motion that starts after a pause, as Alt+Tab's panel
+    /// does, wakes the loop by a timer, which a loaded machine runs late).
+    /// A frame is only drawn after the loop turns, so on a loaded machine
+    /// it can come well after a motion's end in time: read pixels once
+    /// this holds.
     pub fn at_rest(&self) -> bool {
         let state = &self.app.state;
-        state.still && !state.redraw && state.drawn_at.get().is_some()
+        state.still
+            && !state.redraw
+            && state.drawn_at.get().is_some()
+            && state.wake.is_none_or(|at| at > state.now())
     }
 
     /// The layer surfaces of `namespace` that show what was asked of them:

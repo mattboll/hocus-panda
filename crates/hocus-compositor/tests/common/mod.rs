@@ -1650,6 +1650,43 @@ pub fn at_rest(hp: &mut Headless) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What a program logged to the file at `path`, its whole lines alone
+/// and without its colours' escape sequences. A line is written while the
+/// test reads: its start, read alone, would be a line that never was (a
+/// JSON value cut short), so it counts once it ends.
+pub fn logged(path: &Path) -> String {
+    let mut bytes = std::fs::read(path).unwrap_or_default();
+    let whole = bytes
+        .iter()
+        .rposition(|b| *b == b'\n')
+        .map_or(0, |at| at + 1);
+    bytes.truncate(whole);
+    let text = String::from_utf8_lossy(&bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The JSON value of the last line [`logged`] to `path` that holds
+/// `marker` (` shows {`), the value from the marker's last character.
+pub fn last_json(path: &Path, marker: &str) -> Option<serde_json::Value> {
+    let text = logged(path);
+    let line = text.lines().rev().find(|l| l.contains(marker))?;
+    let at = line.find(marker)? + marker.len() - 1;
+    serde_json::from_str(&line[at..]).ok()
+}
+
 impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
     fn event(
         _: &mut Self,

@@ -659,7 +659,10 @@ impl Fakes {
     /// chosen (`default.configured.audio.sink`, `….source`), and
     /// WirePlumber makes it the default (`default.audio.sink`, `….source`).
     /// Here a `pw-metadata` follows the first, and the second is set when
-    /// it changes.
+    /// it changes. A stream's target set or taken away, WirePlumber moves
+    /// the stream: the graph changes, which PipeWire 1.0's pw-dump needs
+    /// to write the metadata's change out (without it, an undone target
+    /// stayed until something else changed).
     fn start_policy(&mut self) -> anyhow::Result<()> {
         use std::io::BufRead;
         let mut monitor = self
@@ -675,10 +678,27 @@ impl Fakes {
             self.pw_socket(),
         );
         std::thread::spawn(move || {
+            let pw = |program: &str| {
+                let mut command = Command::new(program);
+                command
+                    .env_clear()
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("HOME", &home)
+                    .env("XDG_RUNTIME_DIR", &runtime)
+                    .env("PIPEWIRE_REMOTE", &socket)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                command
+            };
             for line in std::io::BufReader::new(out).lines() {
                 let Ok(line) = line else {
                     return;
                 };
+                if line.contains("key:'target.object'") {
+                    let _ = pw("wpctl").arg("status").status();
+                    continue;
+                }
                 let Some(key) = ["sink", "source"]
                     .into_iter()
                     .find(|k| line.contains(&format!("key:'default.configured.audio.{k}'")))
@@ -691,19 +711,6 @@ impl Fakes {
                     .and_then(|v| v.split('\'').next())
                 else {
                     continue;
-                };
-                let pw = |program: &str| {
-                    let mut command = Command::new(program);
-                    command
-                        .env_clear()
-                        .env("PATH", "/usr/bin:/bin")
-                        .env("HOME", &home)
-                        .env("XDG_RUNTIME_DIR", &runtime)
-                        .env("PIPEWIRE_REMOTE", &socket)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null());
-                    command
                 };
                 let _ = pw("pw-metadata")
                     .args(["-n", "default", "0", &format!("default.audio.{key}"), value])
@@ -822,16 +829,18 @@ impl Fakes {
         )
     }
 
-    /// Stream `node` ends.
-    pub fn stop(&mut self, node: &str) {
+    /// Stream `node` destroyed, once PipeWire no longer lists it.
+    pub fn stop(&mut self, node: &str) -> anyhow::Result<()> {
         self.streams.retain(|n| n != node);
-        if let Ok(id) = self.sink(node) {
-            let _ = self
-                .pw("pw-cli")
-                .args(["destroy", &id.to_string()])
-                .stdout(Stdio::null())
-                .status();
-        }
+        let id = self.sink(node)?;
+        let status = self
+            .pw("pw-cli")
+            .args(["destroy", &id.to_string()])
+            .stdout(Stdio::null())
+            .status()
+            .context("pw-cli")?;
+        anyhow::ensure!(status.success(), "pw-cli destroy: {status}");
+        wait_for(|| self.sink(node).is_err(), "end of the stream")
     }
 
     /// Links stream `node`'s ports to the first sink's (or unlinks them).

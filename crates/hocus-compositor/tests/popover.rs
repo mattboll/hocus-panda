@@ -734,8 +734,8 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     wait(&mut hp, Duration::from_millis(500))?;
     assert_eq!(popovers(&hp), vec![popover(502)]);
     // Its streams gone, its row goes.
-    fakes.stop("hocus-test-tab-1");
-    fakes.stop("hocus-test-tab-2");
+    fakes.stop("hocus-test-tab-1")?;
+    fakes.stop("hocus-test-tab-2")?;
     popover_is(&mut hp, Some(two))?;
     // Opened again: the playing ones only.
     fakes.pause("hocus-test-music", true)?;

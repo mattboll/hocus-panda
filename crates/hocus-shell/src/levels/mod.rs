@@ -111,12 +111,14 @@ pub fn publish(change: impl FnOnce(&mut Snapshot)) {
 }
 
 /// From now on, a change calls `wake` (until it returns `false`); it is
-/// called once now, for what changed before.
+/// called once now, for what changed before. Called and kept under the
+/// waker's lock: a change published meanwhile, on the services' thread,
+/// waits for it and wakes it, instead of falling between the two.
 pub fn on_change(wake: impl FnMut() -> bool + Send + 'static) {
     if let Some(service) = SERVICE.get() {
+        let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
         let mut wake: Waker = Box::new(wake);
-        let alive = wake();
-        *service.waker.lock().unwrap_or_else(PoisonError::into_inner) = alive.then_some(wake);
+        *waker = wake().then_some(wake);
     }
 }
 

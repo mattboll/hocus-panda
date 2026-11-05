@@ -86,14 +86,21 @@ when that never comes. It does not sleep a guessed time:
 - **Pixels are read once the screen is at rest.** A frame is drawn only
   after the loop turns, so on a loaded machine it can come long after a
   motion's end. `common::at_rest` waits until no motion is under way as
-  of the last frame drawn, and no frame is asked for since
-  (`Headless::at_rest`).
+  of the last frame drawn, no frame is asked for since, and none is due
+  by now from a timer that has not run yet, as Alt+Tab's panel's
+  (`Headless::at_rest`). A loop held up past a second after a motion's
+  last frame draws one more frame as of then, so that the screen shows
+  the motion's end and comes to rest.
 - **A motion is measured on the held clock.** `Headless::hold_clock`
   stops the motions' time. `Headless::step` moves it on by one refresh
   and draws a frame at that time. `common::sample` reads each step's
   frame. A streak, a halo or a pulse is then seen at the same moments
-  however late the frames come. Frame callbacks and presentation times
-  stay on the real clock.
+  however late the frames come. What falls due on the motions' clock
+  (the idle countdown, the halo's reminder) comes at the step it falls
+  in, not when the real clock's timer runs. Frame callbacks and
+  presentation times stay on the real clock. An agent's start is on the
+  machine's clock, which counts from boot: a test moves the motions'
+  clock on rather than backdating an agent past the machine's start.
 - **A private daemon is used once it listens.** Its socket's file comes
   as the daemon binds it, a moment before it listens, and a connection
   then is refused. `common::private_bus` waits for `dbus-daemon` to print
@@ -102,7 +109,13 @@ when that never comes. It does not sleep a guessed time:
 - **What the shell does off its loop is waited for by what it says.** An
   icon looked up or a paste read from the clipboard lands later: the test
   waits for the line the shell logs, or for the pixels, before it acts on
-  them.
+  them. A log is read by its whole lines (`common::logged`,
+  `common::last_json`): the line being written is read once it ends, not
+  cut short. What a wait found is what it returns, not a read after it.
+- **A count is not a time window around something else.** The clock
+  draws on a surface of its own, counted apart: a test that counts what a
+  change draws counts the surfaces it means, and does not retry while the
+  clock ticks.
 
 ## The wallpaper's counts (6.3)
 

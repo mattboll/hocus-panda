@@ -733,9 +733,13 @@ fn at_rest_while_locked_nothing_wakes_but_the_minute() -> anyhow::Result<()> {
         })?
     };
     assert!(came, "the minute never drew");
+    // The shell logs a draw before its buffer comes: waited for.
+    let drew = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.lock_commits() > before.1)?;
+    assert!(drew, "the lock drew at the minute");
     common::at_rest(&mut bed.hp)?;
     let at_minute = counts(&bed.hp);
-    assert!(at_minute.1 > before.1, "the lock drew at the minute");
     wait(&mut bed.hp, Duration::from_secs(2))?;
     let after = counts(&bed.hp);
     assert_eq!(
