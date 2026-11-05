@@ -239,12 +239,18 @@ pub fn start(
                 on(None);
                 return;
             }
+            // Said only when it changed: a kernel event that changes
+            // nothing wakes no one.
+            let mut said: Option<Radios> = None;
             loop {
                 *read
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = now.clone();
-                if !on(Some(now.clone())) {
-                    return;
+                if said.as_ref() != Some(&now) {
+                    said = Some(now.clone());
+                    if !on(Some(now.clone())) {
+                        return;
+                    }
                 }
                 match reader.read_event() {
                     Ok(event) => now.apply(event),

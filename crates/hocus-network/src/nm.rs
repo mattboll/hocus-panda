@@ -218,8 +218,12 @@ async fn run(mut asks: UnboundedReceiver<Ask>, mut on: On) {
         match Connection::system().await {
             Ok(connection) => break connection,
             Err(err) => {
+                // Said once: a retry that fails again changes nothing, and
+                // wakes no one.
+                if presence != Presence::Away {
+                    on(Heard::Now(View::absent()));
+                }
                 presence.now(false, "NetworkManager (the system bus)", &err);
-                on(Heard::Now(View::absent()));
                 while asks.try_recv().is_ok() {}
                 tokio::time::sleep(wait).await;
                 wait = (wait * 2).min(RETRY_LAST);
