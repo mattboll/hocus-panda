@@ -227,11 +227,11 @@ fn plain(log: &Path) -> String {
 }
 
 /// Whether the windows show no group: their surface, kept with the bar,
-/// a pixel tall (or not there yet).
+/// shorter than a line, drawing nothing (or not there yet).
 fn no_group(hp: &Headless) -> bool {
     hp.layer_rects(WINDOWS_NAMESPACE)
         .iter()
-        .all(|(_, r)| r.height <= 1)
+        .all(|(_, r)| r.height < LINE)
 }
 
 /// What the windows said they draw at rest, the last time.
@@ -610,8 +610,8 @@ fn no_window_no_group() -> anyhow::Result<()> {
     let Some(mut bed) = start(&Machine::default())? else {
         return Ok(());
     };
-    // The bar drawn, its tiles too: no group (its surface a pixel, kept
-    // with the bar, #617).
+    // The bar drawn, its tiles too: no group (its surface kept with the
+    // bar, drawing nothing, #617).
     bed.last_is("the desktops' tiles show it", &[])?;
     assert!(
         bed.no_group(),

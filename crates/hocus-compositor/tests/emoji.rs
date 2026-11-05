@@ -351,7 +351,7 @@ fn a_window_opening_while_it_is_open_leaves_it_the_keys() -> anyhow::Result<()> 
     let listed = bed.hp.dispatch_until(WAIT, |hp| {
         hp.drawn_layers(hocus_link::WINDOWS_NAMESPACE)
             .iter()
-            .any(|(_, r)| r.height > 1)
+            .any(|(_, r)| r.height > 30)
     })?;
     anyhow::ensure!(listed, "the bar never listed the window");
     // And typed once they show it.

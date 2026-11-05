@@ -26,7 +26,7 @@
 //!   hides it in both forms.
 //!
 //! Each bar has a surface of its own for it, opened with the bar and kept
-//! as long as it, one pixel taking no pointer while nothing shows
+//! as long as it, drawing nothing and taking no pointer while nothing shows
 //! ([`draw`]): a surface made later would take the keyboard's keys from
 //! one holding it (#617). It draws only when what it lists changes
 //! (a window opening, closing, retitled, focused), never at rest.
@@ -302,9 +302,13 @@ pub fn fit_all() -> bool {
         .into_iter()
         .map(|bar| {
             let lines = if hidden { Vec::new() } else { lines(&bar) };
-            let height = popover::with(|c| c.bar_height(&bar));
+            // From the bar's bottom: not before its height is known, else
+            // the surface would go off a short screen, which the shell does
+            // not survive (#617).
+            let height = popover::with(|c| c.known_height(&bar));
             let under = |form| {
-                crate::desktops::draw::top_above_bottom_in(&bar, form).map(|above| height - above)
+                let above = crate::desktops::draw::top_above_bottom_in(&bar, form)?;
+                Some(height? - above)
             };
             let (full_bottom, mini_bottom) = (under(Form::Full), under(Form::Mini));
             let room = column::room(&bar, Part::Windows);
@@ -357,8 +361,14 @@ pub fn fit_all() -> bool {
                 listed.push(r.bar.clone());
             }
             place.lines = r.lines;
-            place.full_top = r.full_bottom.unwrap_or(0.0) - GAP - rows_height(&rows);
-            place.mini_top = r.mini_bottom.unwrap_or(0.0) - GAP - ITEM;
+            // Until the desktops are placed, it stays where it is: a top
+            // from nothing would be off the screen (#617).
+            if let Some(bottom) = r.full_bottom {
+                place.full_top = bottom - GAP - rows_height(&rows);
+            }
+            if let Some(bottom) = r.mini_bottom {
+                place.mini_top = bottom - GAP - ITEM;
+            }
             place.rows = rows;
             place.item = item;
             effects.extend(place.fit(&r.bar, &mut placed, &mut redraw));
@@ -421,8 +431,13 @@ fn placement(
 /// The layer-shell margins of a surface whose top is `top` under the
 /// bar's.
 fn margin(top: f32) -> (i32, i32, i32, i32) {
-    (EDGE + top.round() as i32, EDGE + 1, 0, 0)
+    (EDGE + top.round().max(0.0) as i32, EDGE + 1, 0, 0)
 }
+
+/// The surface's height when it shows nothing: the ring's room, drawing
+/// nothing. Not a pixel: at a fractional scale tiny-skia refuses a buffer
+/// that small (#617).
+const IDLE: u32 = (2.0 * draw::ROOM) as u32;
 
 /// The surface's width when it shows nothing, in `form`.
 fn width_of(form: Option<Form>, switching: bool) -> u32 {
@@ -433,8 +448,8 @@ fn width_of(form: Option<Form>, switching: bool) -> u32 {
 }
 
 impl Place {
-    /// Its surface for what it shows: resized and moved, one pixel taking
-    /// no pointer when nothing shows; drawn again (`redraw`) where it
+    /// Its surface for what it shows: resized and moved, drawing nothing
+    /// and taking no pointer when nothing shows; drawn again (`redraw`) where it
     /// moves, its backdrop the bar's colour there on the CPU. The surface
     /// stays as long as its bar: iced_layershell hands the keys to the
     /// surface made last, and one made while the emoji picker or the
@@ -457,10 +472,16 @@ impl Place {
             )
         });
         let shows = at.is_some();
+        // Showing nothing: in the gap over the desktops (or the dots),
+        // over nothing else.
         let (top, size) = at.unwrap_or_else(|| {
+            let bottom = match (self.form, self.switching) {
+                (Some(Form::Mini), false) => self.mini_top + ITEM,
+                _ => self.full_top + rows_height(&self.rows),
+            };
             (
-                self.full_top - draw::ROOM,
-                (width_of(self.form, self.switching), 1),
+                bottom - draw::ROOM,
+                (width_of(self.form, self.switching), IDLE),
             )
         });
         let asked = (size, margin(top));
@@ -484,8 +505,8 @@ impl Place {
     }
 }
 
-/// Bar `bar` opened in `form`: its surface, one pixel taking no pointer
-/// until the column moves (`crate::column::moved`, as the bar takes its
+/// Bar `bar` opened in `form`: its surface, drawing nothing and taking
+/// no pointer until the column moves (`crate::column::moved`, as the bar takes its
 /// height) and it has windows to show; to open after the bar's own.
 pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
     let id = window::Id::unique();
@@ -493,25 +514,23 @@ pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
     // desktops once the bar knows its height (a place off a short screen
     // keeps the shell from going on).
     let top = column::start(form) - draw::ROOM;
-    let size = (width_of(Some(form), false), 1);
+    let size = (width_of(Some(form), false), IDLE);
     state(|s| {
         let place = s.places.entry(bar.to_owned()).or_default();
         place.form = Some(form);
         place.id = Some(id);
         place.full_top = top + draw::ROOM;
+        place.mini_top = top + draw::ROOM;
         place.asked = Some((size, margin(top)));
-        place.input = Some(false);
+        place.input = None;
     });
-    vec![
-        Effect::Layer {
-            id,
-            bar: bar.to_owned(),
-            namespace: WINDOWS_NAMESPACE,
-            size,
-            margin: margin(top),
-        },
-        Effect::Input { id, takes: false },
-    ]
+    vec![Effect::Layer {
+        id,
+        bar: bar.to_owned(),
+        namespace: WINDOWS_NAMESPACE,
+        size,
+        margin: margin(top),
+    }]
 }
 
 /// Bar `bar` in `form`, switching or not: its rows follow as the column

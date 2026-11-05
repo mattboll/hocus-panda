@@ -4024,8 +4024,11 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   deciding; nothing waits for it. Both name the window by its id, not
   "the focused one". `Tab` reaches the lines and their ✕ from the bar's
   other items; `Enter` acts.
-- **Its surface** (#617): opened with the bar and kept as long as it, one
-  pixel taking no pointer while it lists nothing. iced_layershell hands
+- **Its surface** (#617): opened with the bar and kept as long as it,
+  drawing nothing and taking no pointer while it lists nothing (10 px in
+  the gap over the desktops: tiny-skia refuses a buffer of one pixel at a
+  fractional scale), and placed from the bar's bottom only once the bar
+  knows its height (a place off a short screen ended the shell). iced_layershell hands
   the keys to the surface made last: one made as a window opens, while
   the emoji picker or the launcher holds the keyboard, took their typing.
   Its lines are placed from the surface's bottom, as the compositor has

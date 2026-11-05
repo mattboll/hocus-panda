@@ -651,7 +651,9 @@ impl<Message> canvas::Program<Message> for View {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
         let shown = &state.shown;
-        if let Some(backdrop) = self.backdrop {
+        // Nothing to show: nothing drawn, the bar seen through.
+        let empty = shown.rows.is_empty() && shown.item.is_none();
+        if let Some(backdrop) = self.backdrop.filter(|_| !empty) {
             let bar = popover::with(|c| c.bar_height(&self.bar));
             let middle = shown.surface_top + size.height / 2.0;
             frame.fill_rectangle(Point::ORIGIN, size, backdrop.at(middle, bar));
