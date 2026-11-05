@@ -74,6 +74,17 @@ fn around() -> Vec<FakeDevice> {
     ]
 }
 
+/// The paired devices of an adapter that is off: none connected.
+fn mine_off() -> Vec<FakeDevice> {
+    mine()
+        .into_iter()
+        .map(|d| FakeDevice {
+            connected: false,
+            ..d
+        })
+        .collect()
+}
+
 fn setup() -> Setup {
     Setup {
         devices: mine(),
@@ -584,7 +595,7 @@ fn off_blocked_and_without_adapter_say_so() -> anyhow::Result<()> {
     // off.
     let Some(mut bed) = Bed::start(Some(Setup {
         blocked: true,
-        devices: mine(),
+        devices: mine_off(),
         ..Setup::default()
     }))?
     else {
@@ -809,7 +820,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start_on(
         Some(Setup {
             blocked: true,
-            devices: mine(),
+            devices: mine_off(),
             ..Setup::default()
         }),
         "2880x1800@2",
