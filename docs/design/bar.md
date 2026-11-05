@@ -1177,7 +1177,8 @@ slots are not part of the product.
   rest, popover closed or open, nothing commits but the clock; a network's
   change damages only the connections' rectangle.
 - **NetworkManager, off the loop.** A thread of its own, with zbus on a
-  small runtime, keeps NetworkManager's objects as last said: read whole
+  small runtime (the crate `hocus-network`, which the Settings' Réseau
+  page shares, 6.6), keeps NetworkManager's objects as last said: read whole
   when NetworkManager has an owner on the system bus, then followed by
   every signal under its path (`PropertiesChanged` with the values, and
   the older per-interface one, `AccessPointAdded` and `…Removed`, devices
