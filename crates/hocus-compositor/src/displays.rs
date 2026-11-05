@@ -540,6 +540,21 @@ impl State {
                 };
                 self.desktops_answer(session, done)
             }
+            // The applications with a window open, for the rules' menu
+            // (6.14): they come first there.
+            (Some("windows-apps"), None, None) => {
+                let mut apps: Vec<String> = self
+                    .windows
+                    .values()
+                    .filter_map(|m| crate::windows::app_id(&m.window))
+                    .filter(|a| !a.is_empty())
+                    .collect();
+                apps.sort();
+                apps.dedup();
+                let answer = serde_json::json!({ "apps": apps }).to_string();
+                self.displays_send(Some(session), &answer);
+                None
+            }
             _ => Some(format!("not understood: {line}")),
         };
         if let Some(why) = answer {

@@ -61,8 +61,27 @@ impl Bed {
         };
         let dir = tempfile::tempdir()?;
         let root = dir.path();
-        for sub in ["home", "config/hocuspanda", "cache", "state", "data", "bin"] {
+        for sub in [
+            "home",
+            "config/hocuspanda",
+            "cache",
+            "state",
+            "data/applications",
+            "system",
+            "bin",
+        ] {
             std::fs::create_dir_all(root.join(sub))?;
+        }
+        // The applications installed: the test's own.
+        for (id, name) in [
+            ("org.example.Mail", "Name=Mail\nName[fr]=Courrier"),
+            ("test.music", "Name=Musique"),
+            ("test.editor", "Name=Éditeur"),
+        ] {
+            std::fs::write(
+                root.join(format!("data/applications/{id}.desktop")),
+                format!("[Desktop Entry]\nType=Application\n{name}\n"),
+            )?;
         }
         let file = root.join("config/hocuspanda/config.toml");
         std::fs::write(&file, text)?;
@@ -76,7 +95,7 @@ impl Bed {
                  export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
                  HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=UTC HOME='{}' XDG_CONFIG_HOME='{}' \
-                 XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
+                 XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' XDG_DATA_DIRS='{}' \
                  PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \
                  RUST_LOG=warn,hocus_settings=debug\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
@@ -85,6 +104,7 @@ impl Bed {
                 at("cache"),
                 at("state"),
                 at("data"),
+                at("system"),
                 at("bin"),
                 program.display(),
                 log.display()
@@ -704,6 +724,223 @@ fn in_the_trial_a_side_takes_the_half_unless_snapping_is_off() -> anyhow::Result
     Ok(())
 }
 
+/// The file with a rule of Courrier's.
+const RULED: &str = "# My desktop, by hand.\n[keyboard]\nlayouts = [\"us\"]\n\n\
+                     [desktops]\ncount = 4\nnames = [\"Travail\", \"Courrier\", \"Musique\"]\n\n\
+                     [[windows.rules]]\napp-id = \"org.example.Mail\"\n";
+
+fn rules(shown: &Value) -> Vec<(String, String)> {
+    shown["desktops"]["rules"]["rules"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|r| {
+                    (
+                        r["name"].as_str().unwrap_or_default().to_owned(),
+                        r["said"].as_str().unwrap_or_default().to_owned(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_rule_added_from_the_menu_writes_its_table_and_opens_its_rows() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(RULED)? else {
+        return Ok(());
+    };
+    // Musique has a window open: it comes first.
+    bed.window_on("test.music", None)?;
+    bed.open()?;
+    bed.click("rules:add")?;
+    let shown = bed.shows(|s| {
+        s["desktops"]["rules"]["choices"]
+            .as_array()
+            .is_some_and(|c| c.first().and_then(Value::as_str) == Some("Musique"))
+    })?;
+    assert_eq!(
+        strings(&shown["desktops"]["rules"]["choices"]),
+        ["Musique", "Éditeur"],
+        "Courrier has its rule"
+    );
+    bed.click("option:0")?;
+    let text = bed.written(|t| t.contains("app-id = \"test.music\""))?;
+    assert!(
+        text.contains("[[windows.rules]]\napp-id = \"org.example.Mail\"\n\n[[windows.rules]]\napp-id = \"test.music\"\n"),
+        "{text}"
+    );
+    let shown = bed.shows(|s| {
+        s["toast"] == "Règle ajoutée : Musique" && s["desktops"]["rules"]["open"] == "test.music"
+    })?;
+    assert_eq!(
+        rules(&shown)[1],
+        (
+            "Musique".to_owned(),
+            "Aucune règle encore : elle s’ouvre comme les autres.".to_owned()
+        )
+    );
+    bed.places_with("rule:1:desktop")?;
+    Ok(())
+}
+
+#[test]
+fn an_open_rules_desktop_size_and_above_are_written_and_the_compositor_follows()
+-> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(RULED)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| !rules(s).is_empty())?;
+    assert_eq!(rules(&shown)[0].0, "Courrier");
+    bed.click("rule:0:edit")?;
+    bed.shows(|s| s["desktops"]["rules"]["open"] == "org.example.Mail")?;
+    // "2 · Courrier".
+    bed.click("rule:0:desktop")?;
+    bed.shows(|s| s["desktops"]["rules"]["menu"] == "rule:0:desktop")?;
+    bed.click("option:2")?;
+    bed.written(|t| t.contains("desktop = 2"))?;
+    // "Maximisée".
+    bed.click("rule:0:size")?;
+    bed.shows(|s| s["desktops"]["rules"]["menu"] == "rule:0:size")?;
+    bed.click("option:1")?;
+    bed.written(|t| t.contains("size = \"maximized\""))?;
+    bed.click("rule:0:above")?;
+    let text = bed.written(|t| t.contains("above = true"))?;
+    assert!(
+        text.contains("[[windows.rules]]\napp-id = \"org.example.Mail\"\ndesktop = 2\nsize = \"maximized\"\nabove = true\n"),
+        "{text}"
+    );
+    let shown = bed.shows(|s| {
+        s["toast"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("Règle de Courrier : "))
+            && rules(s)[0].1.contains("au-dessus")
+    })?;
+    assert_eq!(
+        rules(&shown)[0].1,
+        "Toujours sur « Courrier » · s’ouvre maximisée · au-dessus des autres"
+    );
+    let read = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state()
+            .config
+            .windows
+            .rules
+            .first()
+            .is_some_and(|r| r.desktop == Some(2) && r.above)
+    })?;
+    anyhow::ensure!(read, "the compositor did not read the rule");
+    Ok(())
+}
+
+#[test]
+fn a_rule_taken_out_and_annuler_brings_it_back() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(RULED)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| !rules(s).is_empty())?;
+    bed.click("rule:0:remove")?;
+    let text = bed.written(|t| !t.contains("rules"))?;
+    assert!(text.starts_with("# My desktop, by hand."), "{text}");
+    bed.shows(|s| s["toast"] == "Règle de Courrier retirée" && rules(s).is_empty())?;
+    bed.click("toast-action")?;
+    bed.written(|t| t.contains("[[windows.rules]]\napp-id = \"org.example.Mail\""))?;
+    bed.shows(|s| rules(s).len() == 1)?;
+    Ok(())
+}
+
+#[test]
+fn a_desktop_taken_out_moves_the_rules_with_its_windows() -> anyhow::Result<()> {
+    let text =
+        format!("{RULED}desktop = 2\n\n[[windows.rules]]\napp-id = \"test.music\"\ndesktop = 3\n");
+    let Some(mut bed) = Bed::start(&text)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("remove:1")?;
+    let text = bed.written(|t| t.contains("count = 3"))?;
+    assert!(
+        text.contains("app-id = \"org.example.Mail\"\ndesktop = 1\n"),
+        "Courrier's rule to Travail, where its windows went:\n{text}"
+    );
+    assert!(
+        text.contains("app-id = \"test.music\"\ndesktop = 2\n"),
+        "{text}"
+    );
+    // Annuler: back where they were.
+    bed.click("toast-action")?;
+    let text = bed.written(|t| t.contains("count = 4"))?;
+    assert!(text.contains("desktop = 3"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn searching_regle_finds_the_rules() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(RULED)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+    bed.shows(|s| s["focus"] == "search")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("app-id")?;
+    let shown = bed.shows(|s| {
+        s["query"] == "app-id" && s["results"].as_array().is_some_and(|r| !r.is_empty())
+    })?;
+    let names: Vec<&str> = shown["results"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|r| r["name"].as_str()).collect())
+        .unwrap_or_default();
+    let i = names
+        .iter()
+        .position(|n| *n == "Règles par application")
+        .ok_or_else(|| anyhow::anyhow!("{names:?}"))?;
+    bed.click(&format!("result:{i}"))?;
+    bed.shows(|s| s["page"] == "desktops" && s["lit"] == "desktops.rules")?;
+    Ok(())
+}
+
+/// The window as it shows, once still, into `out`/`name`.
+fn save(bed: &mut Bed, out: &Path, name: &str, rest: bool) -> anyhow::Result<()> {
+    if rest {
+        bed.hp.pointer_move(5.0, 5.0);
+    }
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..40 {
+        if still >= 5 {
+            break;
+        }
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+    }
+    let window = bed.window()?;
+    let (w, h, bytes) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    let image = image::imageops::crop_imm(
+        &image,
+        window.x.max(0) as u32,
+        window.y.max(0) as u32,
+        window.width as u32,
+        window.height as u32,
+    )
+    .to_image();
+    let path = out.join(name);
+    image.save(&path)?;
+    eprintln!("{}", path.display());
+    Ok(())
+}
+
 /// The pull request's screenshots, into `HOCUS_SHOTS`.
 #[test]
 #[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
@@ -715,49 +952,11 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
-    let save = |bed: &mut Bed, name: &str, rest: bool| -> anyhow::Result<()> {
-        if rest {
-            bed.hp.pointer_move(5.0, 5.0);
-        }
-        let mut last = bed.hp.window_commits();
-        let mut still = 0;
-        for _ in 0..40 {
-            if still >= 5 {
-                break;
-            }
-            wait(&mut bed.hp, Duration::from_millis(100))?;
-            let now = bed.hp.window_commits();
-            still = if now == last { still + 1 } else { 0 };
-            last = now;
-        }
-        let window = bed.window()?;
-        let (w, h, bytes) = bed.hp.screenshot(0)?;
-        let rgba: Vec<u8> = bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|p| [p[2], p[1], p[0], 255])
-            .collect();
-        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
-            .ok_or_else(|| anyhow::anyhow!("no image"))?;
-        let image = image::imageops::crop_imm(
-            &image,
-            window.x.max(0) as u32,
-            window.y.max(0) as u32,
-            window.width as u32,
-            window.height as u32,
-        )
-        .to_image();
-        let path = out.join(name);
-        image.save(&path)?;
-        eprintln!("{}", path.display());
-        Ok(())
-    };
     bed.window_on("test.mail", Some(KEY_2))?;
     bed.window_on("test.mail2", Some(KEY_2))?;
     bed.open()?;
     bed.shows(|s| s["desktops"]["windows"] == serde_json::json!([1, 2, 0, 0]))?;
-    save(&mut bed, "desktops-page.png", true)?;
+    save(&mut bed, &out, "desktops-page.png", true)?;
     // The pointer on "Courrier": its tooltip.
     let [x, y, w, h] = bed.place_of("chip:1")?;
     let window = bed.window()?;
@@ -765,13 +964,13 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         f64::from(window.x) + x + w / 2.0,
         f64::from(window.y) + y + h / 2.0,
     );
-    save(&mut bed, "desktops-tooltip.png", false)?;
+    save(&mut bed, &out, "desktops-tooltip.png", false)?;
     // The trial: Notes stuck to the Terminal, then over the left half.
     let grab = (NOTES.0 + 40.0, NOTES.1 + 10.0);
     let to = (grab.0 - (NOTES.0 - TERMINAL_RIGHT - 8.0 - 10.0), grab.1);
     bed.trial_drag(grab, to)?;
     bed.shows(|s| s["desktops"]["trial"]["notes"][0] == 242)?;
-    save(&mut bed, "desktops-trial-stuck.png", false)?;
+    save(&mut bed, &out, "desktops-trial-stuck.png", false)?;
     let at = (242.0 + 40.0, NOTES.1 + 10.0);
     let a = bed.trial_point(at)?;
     let b = bed.trial_point((3.0, 120.0))?;
@@ -782,7 +981,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         wait(&mut bed.hp, Duration::from_millis(16))?;
     }
     bed.shows(|s| s["desktops"]["trial"]["preview"].is_array())?;
-    save(&mut bed, "desktops-trial-preview.png", false)?;
+    save(&mut bed, &out, "desktops-trial-preview.png", false)?;
     bed.trial_release()?;
     bed.reveal("row:desktops.names")?;
     bed.click("chip:3")?;
@@ -790,7 +989,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     wait(&mut bed.hp, Duration::from_millis(100))?;
     bed.type_text("Projet")?;
     bed.shows(|s| s["desktops"]["editing"][1] == "Projet")?;
-    save(&mut bed, "desktops-rename.png", true)?;
+    save(&mut bed, &out, "desktops-rename.png", true)?;
     bed.key(KEY_ENTER)?;
     bed.written(|t| t.contains("\"Projet\""))?;
     bed.click("remove:1")?;
@@ -799,10 +998,46 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
             .as_str()
             .is_some_and(|t| t.starts_with("« Courrier » retiré"))
     })?;
-    save(&mut bed, "desktops-removed.png", true)?;
+    save(&mut bed, &out, "desktops-removed.png", true)?;
     bed.choose("windows.move-modifier", 1)?;
     bed.shows(|s| s["desktops"]["ink_off"].is_string())?;
     bed.reveal("row:ink.enabled")?;
-    save(&mut bed, "desktops-super-ink-off.png", true)?;
+    save(&mut bed, &out, "desktops-super-ink-off.png", true)?;
+    Ok(())
+}
+
+/// The rules' screenshots, into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn rules_screenshots_for_the_pull_request() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let text = format!(
+        "{RULED}desktop = 2\nabove = true\n\n[[windows.rules]]\napp-id = \"test.editor\"\nsize = \"right\"\n"
+    );
+    let Some(mut bed) = Bed::start(&text)? else {
+        return Ok(());
+    };
+    bed.window_on("test.music", None)?;
+    bed.open()?;
+    bed.shows(|s| rules(s).len() == 2)?;
+    bed.click("rule:0:edit")?;
+    bed.shows(|s| s["desktops"]["rules"]["open"] == "org.example.Mail")?;
+    bed.reveal("rules:add")?;
+    save(&mut bed, &out, "desktops-rules.png", true)?;
+    bed.click("rule:0:desktop")?;
+    bed.shows(|s| s["desktops"]["rules"]["menu"] == "rule:0:desktop")?;
+    save(&mut bed, &out, "desktops-rule-desktop-menu.png", true)?;
+    chord(&mut bed.hp, &[common::KEY_ESC]);
+    bed.shows(|s| s["desktops"]["rules"]["menu"].is_null())?;
+    bed.click("rules:add")?;
+    bed.shows(|s| {
+        s["desktops"]["rules"]["choices"]
+            .as_array()
+            .is_some_and(|c| c.first().and_then(Value::as_str) == Some("Musique"))
+    })?;
+    save(&mut bed, &out, "desktops-rule-add-menu.png", true)?;
     Ok(())
 }

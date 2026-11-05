@@ -45,6 +45,7 @@ fn main() -> ExitCode {
     // Before the window: it reads folders.
     hocus_settings::bar::find_fonts();
     hocus_settings::appearance::find_cursor_themes();
+    hocus_settings::apps::find(Lang::of_messages() == Lang::French);
     let start = app::Start {
         lang: Lang::of_messages(),
         places: worker::Places {

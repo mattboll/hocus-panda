@@ -404,9 +404,10 @@ impl App {
                 self.screens.asked = None;
                 iced::Task::none()
             }
-            Said::Desktops { .. } | Said::DesktopRemoved { .. } | Said::DesktopRestored { .. } => {
-                iced::Task::none()
-            }
+            Said::Desktops { .. }
+            | Said::DesktopRemoved { .. }
+            | Said::DesktopRestored { .. }
+            | Said::Apps(_) => iced::Task::none(),
         }
     }
 
@@ -2604,7 +2605,13 @@ fn note<'a>(head: String, body: String, id: String) -> El<'a> {
     .into()
 }
 
-fn switch<'a>(on: bool, inert: bool, focused: bool, moved: f32, press: Option<Message>) -> El<'a> {
+pub(super) fn switch<'a>(
+    on: bool,
+    inert: bool,
+    focused: bool,
+    moved: f32,
+    press: Option<Message>,
+) -> El<'a> {
     let alpha = if inert { INERT } else { 1.0 };
     let at = if on { moved } else { 1.0 - moved };
     let track = if on {
@@ -2644,7 +2651,7 @@ fn switch<'a>(on: bool, inert: bool, focused: bool, moved: f32, press: Option<Me
     switch.into()
 }
 
-fn menu_button<'a>(
+pub(super) fn menu_button<'a>(
     said: String,
     inert: bool,
     focused: bool,

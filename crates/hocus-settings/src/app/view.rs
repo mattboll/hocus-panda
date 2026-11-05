@@ -67,6 +67,10 @@ impl App {
         if let Some(menu) = self.screens_menu_list() {
             layers.push(menu);
         }
+        // The rules' menus (6.14).
+        if let Some(menu) = self.rules_menu_list() {
+            layers.push(menu);
+        }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
         }

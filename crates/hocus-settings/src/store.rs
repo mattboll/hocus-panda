@@ -109,6 +109,8 @@ pub struct Snapshot {
     pub wallpaper: Box<crate::wallpaper::File>,
     /// The bar's keys the page writes itself (6.4).
     pub bar: Box<crate::bar::File>,
+    /// The rules per application (6.14).
+    pub rules: Box<crate::desktops::Rules>,
 }
 
 impl Snapshot {
@@ -194,6 +196,7 @@ pub fn read(text: &str) -> Snapshot {
                 .map(ToOwned::to_owned),
             wallpaper: Box::new(crate::wallpaper::File::of(&doc)),
             bar: Box::new(crate::bar::File::of(&doc)),
+            rules: Box::new(crate::desktops::Rules(crate::desktops::rules_of(&doc))),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -209,6 +212,7 @@ pub fn read(text: &str) -> Snapshot {
             primary_output: None,
             wallpaper: Box::default(),
             bar: Box::default(),
+            rules: Box::default(),
         },
     }
 }
@@ -435,18 +439,47 @@ pub fn keys_now(doc: &DocumentMut, keys: &[Vec<String>]) -> Vec<KeyEdit> {
     keys.iter()
         .map(|key| KeyEdit {
             key: key.clone(),
-            value: value_at(doc.as_table(), key).map(|v| v.to_string().trim().to_owned()),
+            value: value_at(doc.as_table(), key).map(|v| canonical(&v)),
         })
         .collect()
 }
 
-fn value_at<'a>(table: &'a dyn TableLike, key: &[String]) -> Option<&'a toml_edit::Value> {
+/// The value at `key`; an array of tables (`[[windows.rules]]`) as an
+/// array of inline tables.
+fn value_at(table: &dyn TableLike, key: &[String]) -> Option<toml_edit::Value> {
     let (name, tables) = key.split_last()?;
     let mut table = table;
     for part in tables {
         table = table.get(part)?.as_table_like()?;
     }
-    table.get(name)?.as_value()
+    match table.get(name)? {
+        Item::ArrayOfTables(tables) => Some(toml_edit::Value::Array(
+            tables
+                .iter()
+                .map(|t| toml_edit::Value::InlineTable(t.clone().into_inline_table()))
+                .collect(),
+        )),
+        item => item.as_value().cloned(),
+    }
+}
+
+/// `value` written plainly, whatever its spacing in the file: what two
+/// values that say the same thing both are.
+fn canonical(value: &toml_edit::Value) -> String {
+    match value {
+        toml_edit::Value::Array(array) => {
+            let items: Vec<String> = array.iter().map(canonical).collect();
+            format!("[{}]", items.join(", "))
+        }
+        toml_edit::Value::InlineTable(table) => {
+            let items: Vec<String> = table
+                .iter()
+                .map(|(k, v)| format!("{} = {}", toml_edit::Key::new(k), canonical(v)))
+                .collect();
+            format!("{{ {} }}", items.join(", "))
+        }
+        other => other.clone().decorated("", "").to_string(),
+    }
 }
 
 /// `doc` with `edits`: each key's line only, its comment kept; the tables
@@ -456,6 +489,7 @@ fn value_at<'a>(table: &'a dyn TableLike, key: &[String]) -> Option<&'a toml_edi
 pub fn write_keys(doc: &mut DocumentMut, edits: &[KeyEdit]) -> Result<(), String> {
     for edit in edits {
         let (name, tables) = edit.key.split_last().ok_or("an empty key")?;
+        let tables_of_key = tables;
         let new = edit
             .value
             .as_ref()
@@ -468,6 +502,23 @@ pub fn write_keys(doc: &mut DocumentMut, edits: &[KeyEdit]) -> Result<(), String
             remove_key(doc.as_table_mut(), &edit.key);
             continue;
         };
+        // An array of inline tables (`[[windows.rules]]`, 6.14) is written
+        // as an array of tables, a table each.
+        if let Some(tables) = array_of_tables(&new) {
+            let mut table: &mut dyn TableLike = doc.as_table_mut();
+            for part in tables_of_key {
+                let item = table.entry(part).or_insert_with(|| {
+                    let mut made = Table::new();
+                    made.set_implicit(true);
+                    Item::Table(made)
+                });
+                table = item
+                    .as_table_like_mut()
+                    .ok_or_else(|| format!("{part} is not a table"))?;
+            }
+            table.insert(name, Item::ArrayOfTables(tables));
+            continue;
+        }
         let mut table: &mut dyn TableLike = doc.as_table_mut();
         for (i, part) in tables.iter().enumerate() {
             let item = table.entry(part).or_insert_with(|| {
@@ -519,16 +570,26 @@ fn remove_key(table: &mut Table, key: &[String]) {
     }
 }
 
+/// `value` as an array of tables, when it is a list of inline tables.
+fn array_of_tables(value: &toml_edit::Value) -> Option<toml_edit::ArrayOfTables> {
+    let array = value.as_array().filter(|a| !a.is_empty())?;
+    let mut tables = toml_edit::ArrayOfTables::new();
+    for v in array {
+        tables.push(v.as_inline_table()?.clone().into_table());
+    }
+    Some(tables)
+}
+
 /// Whether `text` says what `edits` wrote.
 pub fn check_keys(text: &str, edits: &[KeyEdit]) -> Result<(), String> {
     let doc = hocus_config::parse(text).map_err(|err| err.to_string())?;
     for edit in edits {
-        let now = value_at(doc.as_table(), &edit.key).map(|v| v.to_string().trim().to_owned());
+        let now = value_at(doc.as_table(), &edit.key).map(|v| canonical(&v));
         let asked = edit
             .value
             .as_ref()
             .and_then(|t| t.parse::<toml_edit::Value>().ok())
-            .map(|v| v.to_string().trim().to_owned());
+            .map(|v| canonical(&v));
         if now != asked {
             return Err(format!("{} would read {now:?}", edit.key.join(".")));
         }
@@ -686,5 +747,34 @@ mod tests {
             assert_eq!(Slot::from_word(&slot.word()), Some(slot));
         }
         assert_eq!(Slot::from_word("power.lid@battery"), None);
+    }
+
+    #[test]
+    fn rules_are_written_as_an_array_of_tables_and_read_back() -> Result<(), String> {
+        let mut doc: DocumentMut = "# Mine.\n[keyboard]\nlayouts = [\"fr\"]\n"
+            .parse()
+            .map_err(|e| format!("{e}"))?;
+        let key = vec!["windows".to_owned(), "rules".to_owned()];
+        let rules = "[{ app-id = \"foot\", desktop = 2 }, { app-id = \"kitty\", above = true }]";
+        let edit = KeyEdit {
+            key: key.clone(),
+            value: Some(rules.to_owned()),
+        };
+        write_keys(&mut doc, std::slice::from_ref(&edit))?;
+        let text = doc.to_string();
+        assert!(text.starts_with("# Mine.\n[keyboard]"), "{text}");
+        assert!(
+            text.contains("[[windows.rules]]\napp-id = \"foot\"\ndesktop = 2\n"),
+            "{text}"
+        );
+        assert!(!text.contains("[windows]\n"), "{text}");
+        check_keys(&text, &[edit])?;
+        // What it says now, to write it back, says the same.
+        let now = keys_now(&doc, std::slice::from_ref(&key));
+        assert_eq!(now[0].value.as_deref(), Some(rules));
+        // Taken out: no rules left.
+        write_keys(&mut doc, &[KeyEdit { key, value: None }])?;
+        assert!(!doc.to_string().contains("rules"), "{doc}");
+        Ok(())
     }
 }
