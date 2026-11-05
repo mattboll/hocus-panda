@@ -4,8 +4,10 @@
 //! form only; the to-do list and the agents' group under it.
 //!
 //! - **What it lists**: today's events that take time and have not ended
-//!   ([`crate::meeting::ahead`]), the card's own left out, in order of
-//!   start. Nothing after the card: no group.
+//!   ([`crate::meeting::today`]), of every shown calendar, featured or not
+//!   (`[[day.calendars]] featured`), the card's own left out
+//!   ([`crate::meeting::ahead`]'s first), in order of start. Nothing but
+//!   the card's: no group.
 //! - **Room**: what the spacer would otherwise have: the column's down to
 //!   14 px over the desktops' group, less what the to-do list and the
 //!   agents' group under it take ([`crate::column::room`]). When some lines
@@ -83,12 +85,13 @@ fn hhmm(t: jiff::Timestamp, now: &Zoned) -> String {
         .to_string()
 }
 
-/// Today's events after the card's, at `now`.
+/// Today's events but the card's, at `now`.
 pub fn lines_of(day: &Day, now: &Zoned) -> Vec<Line> {
     let zone = now.time_zone();
-    crate::meeting::ahead(day, now)
+    let card = crate::meeting::ahead(day, now).first().map(|s| s.event);
+    crate::meeting::today(day, now)
         .into_iter()
-        .skip(1)
+        .filter(|shown| card.is_none_or(|card| !std::ptr::eq(card, shown.event)))
         .map(|shown| {
             let event = shown.event;
             let Colour(colour) = shown.calendar.colour;

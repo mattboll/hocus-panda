@@ -2,7 +2,9 @@
 //! out of the bar beside the meeting's card, with Join (or Open), Later
 //! and ✕ ([`draw`]).
 //!
-//! - **When**: for each event that takes a slot of the day (timed,
+//! - **When**: for each event of the featured calendars
+//!   ([`hocus_day::Day::featured`]: `[[day.calendars]] featured`, every
+//!   shown calendar without it) that takes a slot of the day (timed,
 //!   neither cancelled, declined nor free), at its own earliest alarm,
 //!   else `[calendar] remind` minutes before its start (default 5;
 //!   [`hocus_day::reminders`]). It stays until 10 min after the start, then
@@ -30,7 +32,7 @@
 //!   dismissing a reminder ends it ([`crate::meeting::acted_on`]); Later
 //!   leaves it on.
 //! - `Super+J` ([`join_key`]) joins the meeting whose tab shows, else the
-//!   one starting next within 10 min.
+//!   one starting next within 10 min: of the featured calendars too.
 
 pub mod draw;
 
@@ -91,7 +93,8 @@ pub struct Meeting {
     pub place: Option<String>,
 }
 
-/// The meetings of `day` a reminder may come for, around `now`, in order.
+/// The meetings of `day` a reminder may come for (and `Super+J` join),
+/// around `now`, in order: the featured calendars'.
 pub fn meetings(day: &Day, now: &Zoned, settings: Settings) -> Vec<Meeting> {
     let zone = now.time_zone();
     let at = now.timestamp();
@@ -99,7 +102,7 @@ pub fn meetings(day: &Day, now: &Zoned, settings: Settings) -> Vec<Meeting> {
         return Vec::new();
     };
     let floor = meeting::clock_minute(now) - BACK.as_mins();
-    day.events(from, to, zone)
+    day.featured(from, to, zone)
         .into_iter()
         .filter_map(|shown| {
             let event = shown.event;

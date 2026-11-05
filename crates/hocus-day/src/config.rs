@@ -8,6 +8,7 @@
 //! account = "alex@example.org"    # google: the Online Accounts' account
 //! file = "day.toml"               # fixture: its file, beside config.toml
 //! shown = ["Travail", "Perso"]    # by name or id; none: as the account says
+//! featured = ["Travail"]          # by name or id; none: every shown calendar
 //! colors = { "Perso" = "#F28FB1" }
 //!
 //! [[day.tasks]]
@@ -28,7 +29,7 @@ use std::{
 use serde::Deserialize;
 
 use crate::{
-    model::{AccountId, Colour},
+    model::{AccountId, Calendar, Colour},
     snapshot::{Account, Holds, Kind},
     source::ColumnNames,
 };
@@ -72,9 +73,56 @@ pub struct CalendarEntry {
     /// them.
     #[serde(default)]
     pub shown: Option<Vec<String>>,
+    /// The calendars that feed what is about to start (the meeting card,
+    /// the reminders, the halo, `Super+J`), by name or id; `None`: every
+    /// shown calendar.
+    #[serde(default)]
+    pub featured: Option<Vec<String>>,
     /// Colours, by calendar name or id, over the account's own.
     #[serde(default, deserialize_with = "colours")]
     pub colors: BTreeMap<String, Colour>,
+}
+
+impl CalendarEntry {
+    /// What it says over its account's calendars.
+    pub fn over(&self) -> Over {
+        Over {
+            shown: self.shown.clone(),
+            featured: self.featured.clone(),
+            colours: self.colors.clone(),
+        }
+    }
+}
+
+/// What a `[[day.calendars]]` says over its account's calendars, each
+/// named by its name (whatever its case) or its id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Over {
+    /// `None`: shown as the account marks them.
+    pub shown: Option<Vec<String>>,
+    /// `None`: every shown calendar is featured.
+    pub featured: Option<Vec<String>>,
+    pub colours: BTreeMap<String, Colour>,
+}
+
+impl Over {
+    /// `calendar` as the configuration has it: shown or not, featured or
+    /// not ([`Calendar::featured`], the configuration's alone), its colour.
+    pub fn apply(&self, calendar: &mut Calendar) {
+        let names = |name: &String| {
+            calendar.id.as_str() == name || calendar.name.to_lowercase() == name.to_lowercase()
+        };
+        if let Some(shown) = &self.shown {
+            calendar.shown = shown.iter().any(names);
+        }
+        calendar.featured = self
+            .featured
+            .as_ref()
+            .is_none_or(|featured| featured.iter().any(names));
+        if let Some((_, colour)) = self.colours.iter().find(|(name, _)| names(name)) {
+            calendar.colour = *colour;
+        }
+    }
 }
 
 fn colours<'de, D: serde::Deserializer<'de>>(
@@ -324,6 +372,45 @@ mod tests {
     }
 
     #[test]
+    fn featured_calendars_are_named_and_without_featured_every_shown_one_is() {
+        let calendar = |id: &str, name: &str| Calendar {
+            id: crate::model::CalendarId::new(id),
+            account: AccountId::new("google-1"),
+            name: name.to_owned(),
+            colour: Colour::DEFAULT,
+            read_only: false,
+            shown: true,
+            featured: false,
+        };
+        let entry = |featured: Option<&[&str]>| CalendarEntry {
+            kind: CalendarKind::Google,
+            account: String::new(),
+            file: None,
+            shown: None,
+            featured: featured.map(|f| f.iter().map(|n| (*n).to_owned()).collect()),
+            colors: BTreeMap::new(),
+        };
+        let featured = |over: &Over| -> Vec<bool> {
+            [calendar("work@x", "Travail"), calendar("lou@x", "Congés")]
+                .into_iter()
+                .map(|mut c| {
+                    over.apply(&mut c);
+                    c.featured
+                })
+                .collect()
+        };
+        // By name, whatever its case, or by id.
+        assert_eq!(featured(&entry(Some(&["travail"])).over()), [true, false]);
+        assert_eq!(featured(&entry(Some(&["lou@x"])).over()), [false, true]);
+        assert_eq!(featured(&entry(Some(&[])).over()), [false, false]);
+        // None: every one, as before.
+        assert_eq!(featured(&entry(None).over()), [true, true]);
+        let config = from_toml("[[day.calendars]]\nkind = \"google\"\nfeatured = [\"Travail\"]\n")
+            .map(|c| c.calendars[0].featured.clone());
+        assert_eq!(config, Ok(Some(vec!["Travail".to_owned()])));
+    }
+
+    #[test]
     fn accounts_have_ids_fit_for_a_files_name() {
         let mut taken = vec![local_account().id];
         let planka = TaskEntry {
@@ -344,6 +431,7 @@ mod tests {
             account: String::new(),
             file: Some(PathBuf::from("my day.toml")),
             shown: None,
+            featured: None,
             colors: BTreeMap::new(),
         };
         let f = fixture.account(Some(Path::new("/home/alex/.config/hocuspanda")), &mut taken);

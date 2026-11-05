@@ -292,7 +292,9 @@
 #   [[day.calendars]]
 #   kind = "google"
 #   account = "alex@example.org"         # none: every Google account there
-#   shown = ["Travail"]
+#   shown = ["Travail", "Congés"]
+#   featured = ["Travail"]               # the meeting card's, the reminders'
+#                                        # and the halo's; none: every shown one
 #   colors = { "Travail" = "#6CC287" }
 
 # [calendar]
