@@ -143,6 +143,10 @@ jobs:
         # they are (none newer). This checkout is newer than the build's.
         run: git ls-files -z | xargs -0 touch -d '2000-01-01T00:00:00Z'
       - name: Tests
+        # Extracted into this checkout's target/, where the build put them:
+        # a test may name a program by the path it was built at
+        # (`CARGO_BIN_EXE_hocus`, fixed at compile time).
         run: >
           cargo nextest run --archive-file nextest.tar.zst --workspace-remap .
+          --extract-to . --extract-overwrite
           --partition count:${{ matrix.shard }}/4
