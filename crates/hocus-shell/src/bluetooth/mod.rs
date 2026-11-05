@@ -106,12 +106,15 @@ fn publish(bluetooth: Bluetooth) {
 /// called once now, for what changed before.
 pub fn on_change(wake: impl FnMut(Change) -> bool + Send + 'static) {
     if let Some(service) = SERVICE.get() {
+        // Under the waker's lock: a change published meanwhile waits for
+        // it and wakes it, instead of falling between the two.
+        let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
         let mut wake: Waker = Box::new(wake);
         let alive = wake(Change {
             row: true,
             shown: true,
         });
-        *service.waker.lock().unwrap_or_else(PoisonError::into_inner) = alive.then_some(wake);
+        *waker = alive.then_some(wake);
     }
 }
 

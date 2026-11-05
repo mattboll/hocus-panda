@@ -557,6 +557,14 @@ impl State {
         }
     }
 
+    /// The reminder due by the motions' time now, held and stepped by the
+    /// tests: its timer runs on the real clock.
+    pub fn halo_reminder_due(&mut self) {
+        if self.halo.next_reminder().is_some_and(|at| at <= self.now()) {
+            self.halo_remind();
+        }
+    }
+
     fn halo_remind(&mut self) {
         let (now, motion) = (self.now(), self.halo_motion());
         if self.halo.remind(now, motion) {

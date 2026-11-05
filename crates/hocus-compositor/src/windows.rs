@@ -1229,10 +1229,7 @@ impl State {
         };
         // Locked (7.1): the lock's own motion alone; nothing else is drawn.
         if let Some(moving) = self.lock_tick(now) {
-            self.still = !moving && as_of_frame;
-            if moving {
-                self.redraw = true;
-            }
+            self.judge_still(moving, as_of_frame);
             return;
         }
         let mut moving = false;
@@ -1332,11 +1329,23 @@ impl State {
         if let Some(at) = self.cursor_next_frame(now) {
             wake(at);
         }
-        self.still = !moving && as_of_frame;
-        if moving {
-            self.redraw = true;
-        } else if let Some(at) = next {
+        self.judge_still(moving, as_of_frame);
+        if !moving && let Some(at) = next {
             self.wake_at(at);
+        }
+    }
+
+    /// Whether the last frame drawn shows every motion at its end, and
+    /// a frame asked for while something moves. Judged as of a frame
+    /// long gone (the loop held up past a second on a loaded machine),
+    /// nothing moving now does not tell what that frame showed: a motion
+    /// may have ended since, its last frame a step short (a panel at
+    /// 97 %). One more frame is drawn then, as of now, unless the last
+    /// judgement already found everything still: nothing moved since.
+    fn judge_still(&mut self, moving: bool, as_of_frame: bool) {
+        self.still = !moving && (as_of_frame || self.still);
+        if moving || !self.still {
+            self.redraw = true;
         }
     }
 

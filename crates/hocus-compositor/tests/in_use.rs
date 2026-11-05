@@ -670,7 +670,7 @@ fn a_use_lingers_3_s_after_it_ends() -> anyhow::Result<()> {
     let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
     bed.speak("hocus-test-short", "Discord", "discord", "")?;
     bed.sign("Microphone")?;
-    bed.fakes.stop("hocus-test-short");
+    bed.fakes.stop("hocus-test-short")?;
     let gone = bed.hp.dispatch_until(Duration::from_secs(15), |hp| {
         hp.layer_rects(hocus_link::IN_USE_NAMESPACE).is_empty()
     })?;
@@ -701,7 +701,7 @@ fn the_camera_shows_through_pipewire_and_through_its_device() -> anyhow::Result<
     bed.film("hocus-test-zoom", "Zoom")?;
     let sign = bed.sign("Camera")?;
     assert_eq!(bed.tiles(sign, FormChoice::Mini, 1)?, [Ink::Green]);
-    bed.fakes.stop("hocus-test-zoom");
+    bed.fakes.stop("hocus-test-zoom")?;
     bed.logged("the in-use sign goes", |_| true)?;
     // A program holding the device open itself.
     let started = Instant::now();
@@ -979,7 +979,7 @@ fn proc_is_read_at_most_once_a_second_while_a_cameras_node_exists() -> anyhow::R
         started.elapsed()
     );
     // The camera's node gone: the device opened, nothing read.
-    bed.fakes.stop("hocus-test-camera");
+    bed.fakes.stop("hocus-test-camera")?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     let after = bed.lines("the cameras' holders read").len();
     for _ in 0..5 {

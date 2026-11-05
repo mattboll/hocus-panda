@@ -136,12 +136,13 @@ fn start(shell: &Path, setup: Setup) -> anyhow::Result<Bed> {
         mini: setup.mini,
     };
     let drawn = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
-        hp.desktops_surfaces().len() == 1 && hp.desktops_commits() > 0 && hp.levels_commits() > 0
+        hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE).len() == 1 && hp.levels_commits() > 0
     })?;
     anyhow::ensure!(drawn, "no desktops: {:?}", bed.hp.desktops_surfaces());
     bed.logged("the desktops' tiles show it")?;
     bed.hp.pointer_move(600.0, 500.0);
     bed.settle()?;
+    bed.placed_drawn()?;
     Ok(bed)
 }
 
@@ -168,6 +169,41 @@ impl Bed {
             self.hp.popover_commits(),
             self.hp.desktops_commits(),
         ]
+    }
+
+    /// Waits until the desktops' surface shows what was asked of it at
+    /// its place: the shell resizes it as it learns how many desktops
+    /// there are, and a loaded machine draws the new size late.
+    fn placed_drawn(&mut self) -> anyhow::Result<()> {
+        let drawn = self.hp.dispatch_until(WAIT, |hp| {
+            let placed = hp.desktops_surfaces();
+            !placed.is_empty() && hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE) == placed
+        })?;
+        anyhow::ensure!(
+            drawn,
+            "the desktops placed at {:?}, drawn at {:?}",
+            self.hp.desktops_surfaces(),
+            self.hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+        );
+        Ok(())
+    }
+
+    /// Waits until the desktops' surface is drawn `size` large: the shell
+    /// resizes it as it learns how many desktops there are. Where it is.
+    fn drawn_sized(&mut self, size: (i32, i32)) -> anyhow::Result<Rect> {
+        let sized = |hp: &Headless| {
+            hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+                .first()
+                .map(|(_, r)| *r)
+                .filter(|r| (r.width, r.height) == size)
+        };
+        let drawn = self.hp.dispatch_until(WAIT, |hp| sized(hp).is_some())?;
+        anyhow::ensure!(
+            drawn,
+            "the desktops drawn at {:?}, not {size:?}",
+            self.hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+        );
+        sized(&self.hp).ok_or_else(|| anyhow::anyhow!("no desktops"))
     }
 
     fn surface(&self) -> Rect {
@@ -256,8 +292,11 @@ impl Bed {
         plain(&self.log).len()
     }
 
-    /// The pixel at (`x`, `y`), global: red, green, blue.
+    /// The pixel at (`x`, `y`), global: red, green, blue. Read once the
+    /// screen is at rest: a buffer the shell committed shows once the
+    /// compositor has drawn a frame since.
     fn pixel(&mut self, x: i32, y: i32) -> anyhow::Result<[u8; 3]> {
+        common::at_rest(&mut self.hp)?;
         let (width, _, bytes) = self.hp.screenshot(0)?;
         let at = usize::try_from(y * width + x)? * 4;
         let p = bytes
@@ -266,8 +305,10 @@ impl Bed {
         Ok([p[2], p[1], p[0]])
     }
 
-    /// How many pixels of `rect` (global) `test` takes.
+    /// How many pixels of `rect` (global) `test` takes, once the screen is
+    /// at rest ([`Bed::pixel`]).
     fn count(&mut self, rect: Rect, test: impl Fn([u8; 3]) -> bool) -> anyhow::Result<usize> {
+        common::at_rest(&mut self.hp)?;
         let (width, _, bytes) = self.hp.screenshot(0)?;
         let mut n = 0;
         for y in rect.y..rect.y + rect.height {
@@ -278,6 +319,29 @@ impl Bed {
             }
         }
         Ok(n)
+    }
+
+    /// Waits until the screen shows what `test` looks for: the shell logs
+    /// a draw before its buffer comes, and on a loaded machine the
+    /// compositor may draw it well after.
+    fn shows(
+        &mut self,
+        what: &str,
+        mut test: impl FnMut(&mut Self) -> anyhow::Result<bool>,
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+        while !test(self)? {
+            anyhow::ensure!(
+                start.elapsed() < WAIT,
+                "the screen never showed {what}; the tiles last drew: {:?}",
+                plain(&self.log)
+                    .lines()
+                    .rev()
+                    .find(|l| l.contains("the desktops' tiles show it"))
+            );
+            wait(&mut self.hp, Duration::from_millis(50))?;
+        }
+        Ok(())
     }
 
     /// The accent's green along the top of desktop `index`'s tile, where
@@ -304,56 +368,64 @@ impl Bed {
     }
 
     /// The commits a change made by `change` brings once the desktops'
-    /// surface has drawn: tried again while the clock ticks through it.
-    fn drawn_by(&mut self, mut change: impl FnMut(&mut Self)) -> anyhow::Result<[u64; 5]> {
-        let mut ticks = Vec::new();
-        for _ in 0..5 {
-            self.settle()?;
-            let clocks = self.hp.clock_commits();
-            wait(&mut self.hp, Duration::from_millis(100))?;
-            let before = self.counts();
-            change(self);
-            let drawn = self
-                .hp
-                .dispatch_until(WAIT, |hp| hp.desktops_commits() > before[4])?;
-            anyhow::ensure!(drawn, "the desktops did not draw");
-            wait(&mut self.hp, Duration::from_millis(500))?;
-            let after = self.counts();
-            if self.hp.clock_commits() == clocks {
-                return Ok(std::array::from_fn(|i| after[i] - before[i]));
-            }
-            ticks.push(self.hp.clock_commits() - clocks);
+    /// surface has drawn. The clock draws on a surface of its own, counted
+    /// apart: its ticks change none of these.
+    fn drawn_by(&mut self, change: impl FnOnce(&mut Self)) -> anyhow::Result<[u64; 5]> {
+        self.settle()?;
+        let before = self.counts();
+        let mark = self.mark();
+        change(self);
+        let drawn = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.desktops_commits() > before[4])?;
+        anyhow::ensure!(drawn, "the desktops did not draw");
+        wait(&mut self.hp, Duration::from_millis(500))?;
+        let after = self.counts();
+        let commits = std::array::from_fn(|i| after[i] - before[i]);
+        if commits[..4] != [0; 4] {
+            // What the shell said meanwhile, to tell what drew.
+            eprintln!("{commits:?}; the shell said:\n{}", self.said_since(mark));
         }
-        // What the shell said meanwhile, to tell why the clock drew.
-        let said = std::fs::read_to_string(&self.log).unwrap_or_default();
-        let tail: Vec<&str> = said
-            .lines()
-            .filter(|l| !l.contains("TRACE"))
-            .rev()
-            .take(40)
-            .collect();
-        anyhow::bail!(
-            "the clock ticked through every try ({ticks:?} commits); the shell said:\n{}",
-            tail.into_iter().rev().collect::<Vec<_>>().join("\n")
-        )
+        Ok(commits)
     }
 
     /// The commits in two seconds at rest.
     fn at_rest(&mut self) -> anyhow::Result<[u64; 5]> {
         self.settle()?;
         let before = self.counts();
+        let mark = self.mark();
         wait(&mut self.hp, Duration::from_secs(2))?;
         let after = self.counts();
-        Ok(std::array::from_fn(|i| after[i] - before[i]))
+        let commits = std::array::from_fn(|i| after[i] - before[i]);
+        if commits != [0; 5] {
+            eprintln!(
+                "{commits:?} at rest; the shell said:\n{}",
+                self.said_since(mark)
+            );
+        }
+        Ok(commits)
     }
 
-    /// Opens a window and keeps its client.
+    /// What the shell logged past `mark`.
+    fn said_since(&self, mark: usize) -> String {
+        plain(&self.log).get(mark..).unwrap_or_default().to_owned()
+    }
+
+    /// Opens a window and keeps its client. The shell looks its icon up
+    /// off its loop and, found, draws the tiles and the list again: one of
+    /// the test's theme is waited for, so that it does not draw in a count
+    /// taken after (on a loaded machine, it came after the commits had
+    /// settled).
     fn open(
         &mut self,
         app_id: &'static str,
         size: (u32, u32),
     ) -> anyhow::Result<(Rect, ClientHandle)> {
-        common::open_with(&mut self.hp, app_id, size, false)
+        let opened = common::open_with(&mut self.hp, app_id, size, false)?;
+        if RED.contains(&app_id) {
+            self.logged(&format!("app={app_id} found=true"))?;
+        }
+        Ok(opened)
     }
 
     /// Opens a window titled `title`.
@@ -373,6 +445,20 @@ impl Bed {
         let (x, y) = self.middle(index);
         self.hp.pointer_move(x - 1.0, y);
         self.hp.pointer_move(x, y);
+    }
+
+    /// The pointer from the tile it rests on to `at`, off the tiles: the
+    /// tile is drawn once without its hover, waited for, so that a count
+    /// taken after does not catch it late (on a loaded machine, after a
+    /// while without commits).
+    fn leave_tile_for(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        let tiles = self.hp.desktops_commits();
+        self.hp.pointer_move(at.0, at.1);
+        let left = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.desktops_commits() > tiles)?;
+        anyhow::ensure!(left, "the tile left kept its hover");
+        Ok(())
     }
 
     /// The list, once it shows.
@@ -436,13 +522,14 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     };
     let mut bed = start(&shell, Setup::default())?;
     // Four tiles in a row, 14 px above the levels (no connection here).
-    let s = bed.surface();
-    assert_eq!((s.width, s.height), (194, 40));
+    bed.drawn_sized((194, 40))?;
     bed.logged("said=Bureau 1, aucune fenêtre · Bureau 2, aucune fenêtre")?;
     // An empty desktop shows its number.
     let t = bed.tile(0);
     let number = Rect::new(t.x + t.width / 2 - 4, t.y + 9, 8, 12);
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no number");
+    bed.shows("the number", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     // A window opens: its sketch where it is on the screen, the focused
     // one's light.
     let mark = bed.mark();
@@ -451,7 +538,7 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let drawn = bed.sketch(0, window);
     let (x, y) = centre(drawn);
-    assert!(light(bed.pixel(x, y)?) > 95, "{:?}", bed.pixel(x, y)?);
+    bed.shows("the sketch", |bed| Ok(light(bed.pixel(x, y)?) > 95))?;
     // Dragged with Alt: nothing told on the way, where it lands at the
     // end.
     let commits = bed.hp.desktops_commits();
@@ -483,7 +570,9 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     bed.settle()?;
     let now = bed.sketch(0, moved);
     let (nx, ny) = centre(now);
-    assert!(light(bed.pixel(nx, ny)?) > 95, "not where it went");
+    bed.shows("the sketch where it went", |bed| {
+        Ok(light(bed.pixel(nx, ny)?) > 95)
+    })?;
     let left = (drawn.x + 1, drawn.y + drawn.height / 2);
     assert!(left.0 + 2 < now.x, "{drawn:?} {now:?}");
     assert!(light(bed.pixel(left.0, left.1)?) < 60, "still where it was");
@@ -491,8 +580,9 @@ fn the_tiles_sketch_their_windows_as_they_open_move_and_close() -> anyhow::Resul
     let mark = bed.mark();
     client.commands.send(Command::Close)?;
     bed.logged_after(mark, "said=Bureau 1, aucune fenêtre")?;
-    bed.settle()?;
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no number");
+    bed.shows("the number back", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     Ok(())
 }
 
@@ -504,11 +594,16 @@ fn the_current_desktop_is_ringed_in_the_accent() -> anyhow::Result<()> {
     let mut bed = start(&shell, Setup::default())?;
     assert!(bed.ringed(0)?, "the first not ringed");
     assert!(!bed.ringed(1)?);
-    // Super+2: the ring goes to the second.
+    // Super+2: the ring goes to the second, once the tiles are drawn so.
+    let mark = bed.mark();
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_2]);
     bed.on(1)?;
+    bed.logged_after(
+        mark,
+        "the desktops' tiles show it bar=\"HEADLESS-1\" current=2",
+    )?;
     bed.settle()?;
-    assert!(bed.ringed(1)?, "the second not ringed");
+    bed.shows("the second ringed", |bed| bed.ringed(1))?;
     assert!(!bed.ringed(0)?, "the first still ringed");
     Ok(())
 }
@@ -538,7 +633,7 @@ fn a_click_on_a_tile_slides_to_its_desktop() -> anyhow::Result<()> {
     );
     bed.on(2)?;
     bed.settle()?;
-    assert!(bed.ringed(2)?);
+    bed.shows("the third ringed", |bed| bed.ringed(2))?;
     Ok(())
 }
 
@@ -592,16 +687,18 @@ fn six_desktops_take_two_rows() -> anyhow::Result<()> {
             ..Setup::default()
         },
     )?;
-    // Two rows of 30 px, 6 px apart.
-    let s = bed.surface();
-    assert_eq!((s.width, s.height), (194, 76));
+    // Two rows of 30 px, 6 px apart, once drawn for six: the surface is
+    // resized as the shell learns their number.
     bed.logged("Bureau 5, aucune fenêtre · Bureau 6, aucune fenêtre")?;
+    bed.drawn_sized((194, 76))?;
     // The fifth under the first, its number drawn; nothing where a
     // seventh would be.
     let fifth = bed.tile(4);
     assert_eq!(fifth.x, bed.tile(0).x);
     let number = Rect::new(fifth.x + fifth.width / 2 - 4, fifth.y + 9, 8, 12);
-    assert!(bed.count(number, |p| light(p) > 70)? > 3, "no fifth");
+    bed.shows("the fifth", |bed| {
+        Ok(bed.count(number, |p| light(p) > 70)? > 3)
+    })?;
     let seventh = bed.tile(6);
     assert_eq!(bed.count(seventh, |p| light(p) > 60)?, 0, "a seventh");
     // The sixth, clicked.
@@ -624,8 +721,7 @@ fn the_mini_forms_dots_in_their_three_looks_and_a_click() -> anyhow::Result<()> 
         },
     )?;
     // Two to a row: 54 × 40.
-    let s = bed.surface();
-    assert_eq!((s.width, s.height), (54, 40));
+    bed.drawn_sized((54, 40))?;
     // A window, sent to the second desktop.
     let (_, _client) = bed.open("test.sent", (400, 300))?;
     let mark = bed.mark();
@@ -687,7 +783,7 @@ fn the_keyboard_reaches_the_tiles_where_enter_and_space_go_there() -> anyhow::Re
     // Its ring, around the tile.
     let t = bed.tile(3);
     let under = Rect::new(t.x + 8, t.y + t.height + 2, t.width - 16, 2);
-    assert!(bed.count(under, green)? > 10, "no ring");
+    bed.shows("the ring", |bed| Ok(bed.count(under, green)? > 10))?;
     // Enter: there; Shift+Tab, then Space: the third.
     bed.press(KEY_ENTER);
     bed.on(3)?;
@@ -713,11 +809,7 @@ fn a_desktop_change_draws_the_desktops_surface_alone() -> anyhow::Result<()> {
         return Ok(());
     };
     let mut bed = start(&shell, Setup::default())?;
-    let mut to = 1;
-    let commits = bed.drawn_by(|bed| {
-        chord(&mut bed.hp, &[KEY_LEFTMETA, common::KEY_1 + to]);
-        to = 1 - to;
-    })?;
+    let commits = bed.drawn_by(|bed| chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_2]))?;
     assert_eq!(commits[..4], [0, 0, 0, 0], "{commits:?}");
     assert!(commits[4] >= 1, "{commits:?}");
     Ok(())
@@ -730,8 +822,15 @@ fn nothing_draws_at_rest() -> anyhow::Result<()> {
     };
     let mut bed = start(&shell, Setup::default())?;
     let (_, _client) = bed.open("test.resting", (600, 400))?;
+    let mark = bed.mark();
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_2]);
     bed.on(1)?;
+    // Counted once the tiles show it: on a loaded machine the shell may
+    // draw it after a while without commits.
+    bed.logged_after(
+        mark,
+        "the desktops' tiles show it bar=\"HEADLESS-1\" current=2",
+    )?;
     bed.hp.pointer_move(600.0, 500.0);
     assert_eq!(bed.at_rest()?, [0; 5], "at rest");
     Ok(())
@@ -754,7 +853,6 @@ fn a_sketch_with_room_for_it_shows_its_windows_icon() -> anyhow::Result<()> {
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_2]);
     // A large one on the first: 16 × 14 px, its icon in its middle.
     let (window, _large) = bed.open("test.red", (1000, 700))?;
-    bed.logged("app=test.red found=true")?;
     bed.hp.pointer_move(600.0, 500.0);
     bed.settle()?;
     let sketch = bed.sketch(0, window);
@@ -880,8 +978,7 @@ fn a_retitle_draws_the_open_list_and_not_the_tiles() -> anyhow::Result<()> {
     let list = bed.list()?;
     bed.logged_after(mark, "rows=[\"Alpha\"]")?;
     // The pointer rests in the list, off its row.
-    bed.hp
-        .pointer_move(f64::from(list.x + 120), f64::from(list.y + 20));
+    bed.leave_tile_for((f64::from(list.x + 120), f64::from(list.y + 20)))?;
     bed.settle()?;
     let before = bed.counts();
     let mark = bed.mark();
@@ -894,7 +991,12 @@ fn a_retitle_draws_the_open_list_and_not_the_tiles() -> anyhow::Result<()> {
     bed.settle()?;
     let after = bed.counts();
     assert!(after[3] > before[3], "the list did not draw");
-    assert_eq!(after[4], before[4], "the tiles drew");
+    assert_eq!(
+        after[4],
+        before[4],
+        "the tiles drew; the shell said:\n{}",
+        bed.said_since(mark)
+    );
     assert_eq!(after[..3], before[..3], "{before:?} {after:?}");
     Ok(())
 }
@@ -1111,7 +1213,7 @@ fn a_minimised_window_is_listed_last_greyed_and_a_click_brings_it_back() -> anyh
         let (_, y) = Bed::row(list, i);
         Rect::new(list.x + 13, y as i32 - 8, 16, 16)
     };
-    assert!(bed.count(icon(1), red)? > 100, "Alpha's icon");
+    bed.shows("Alpha's icon", |bed| Ok(bed.count(icon(1), red)? > 100))?;
     assert_eq!(bed.count(icon(2), red)?, 0, "Beta's icon at full");
     let brightest = |bed: &mut Bed, i: usize| -> anyhow::Result<u32> {
         let (_, y) = Bed::row(list, i);
@@ -1157,8 +1259,13 @@ fn nothing_draws_at_rest_while_the_list_shows() -> anyhow::Result<()> {
     bed.settle()?;
     bed.rest_on(0);
     let list = bed.list()?;
-    let (x, y) = Bed::row(list, 0);
-    bed.hp.pointer_move(x, y);
+    // On its first row, lit: drawn, then at rest.
+    let lists = bed.hp.popover_commits();
+    bed.leave_tile_for(Bed::row(list, 0))?;
+    let lit = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_commits() > lists)?;
+    anyhow::ensure!(lit, "the row under the pointer was not lit");
     assert_eq!(bed.at_rest()?, [0; 5], "at rest");
     assert!(!bed.hp.popover_surfaces().is_empty(), "the list closed");
     Ok(())

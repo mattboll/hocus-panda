@@ -235,14 +235,15 @@ fn wake_all() {
 
 /// From now on, a change of the day calls `wake` (on the day's thread,
 /// until it returns `false`); it is called once now, for what came before.
-/// It may be asked before the day has started.
+/// It may be asked before the day has started. Called and kept under the
+/// wakers' lock: a change published meanwhile, on the day's thread, waits
+/// for it and wakes it, instead of falling between the two (the meeting
+/// card then waited for the clock's next minute to show).
 pub fn on_change(wake: impl FnMut() -> bool + Send + 'static) {
+    let mut wakers = WAKERS.lock().unwrap_or_else(PoisonError::into_inner);
     let mut wake: Waker = Box::new(wake);
     if wake() {
-        WAKERS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(wake);
+        wakers.push(wake);
     }
 }
 

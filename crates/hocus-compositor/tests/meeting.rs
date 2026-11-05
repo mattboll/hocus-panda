@@ -265,6 +265,17 @@ impl Bed {
     /// The bar's colour beside the card, once the card's surface is drawn.
     fn bar_beside(&mut self) -> anyhow::Result<[u8; 3]> {
         self.card_surface()?;
+        // The bar there drawn too: before its buffer, the background shows.
+        common::drawn(&mut self.hp, hocus_link::NAMESPACE)?;
+        let (x, y) = (f64::from(BAR_BESIDE.0), f64::from(BAR_BESIDE.1));
+        let drawn = self
+            .hp
+            .dispatch_until(common::WAIT, |hp| hp.undrawn_at(x, y).is_empty())?;
+        anyhow::ensure!(
+            drawn,
+            "never drawn beside the card: {:?}",
+            self.hp.undrawn_at(x, y)
+        );
         self.pixel(BAR_BESIDE.0, BAR_BESIDE.1)
     }
 
@@ -548,6 +559,9 @@ fn at_its_end_the_next_meeting_takes_the_card_at_the_minutes_change() -> anyhow:
             "join=false page=false",
         ],
     )?;
+    // The shell logs a draw before its buffer comes: counted from once
+    // the card's first is there.
+    bed.card_surface()?;
     common::at_rest(&mut bed.hp)?;
     let commits = bed.hp.meeting_commits();
     let mark = bed.mark();
@@ -675,6 +689,7 @@ fn at_rest_the_card_draws_nothing_and_the_minutes_change_draws_it_once() -> anyh
         FormChoice::Full,
     )?;
     bed.card_since(0, &["«Point produit» 14:30 · dans 30\u{a0}min"])?;
+    bed.card_surface()?;
     common::at_rest(&mut bed.hp)?;
     common::wait(&mut bed.hp, Duration::from_millis(300))?;
     let commits = bed.hp.meeting_commits();

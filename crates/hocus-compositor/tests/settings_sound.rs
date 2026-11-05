@@ -218,41 +218,44 @@ impl Bed {
     }
 
     fn plain(&self) -> String {
-        String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned()
+        common::logged(&self.log)
     }
 
     /// The last JSON line of `log` said after `what`.
     fn last(log: &Path, what: &str) -> Option<Value> {
-        let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
-        let line = text.lines().rev().find(|l| l.contains(what))?;
-        let at = line.find(what)? + what.len() - 1;
-        serde_json::from_str(&line[at..]).ok()
+        common::last_json(log, what)
     }
 
     /// What the window shows, once `done` holds of it.
     fn shows(&mut self, done: impl Fn(&Value) -> bool) -> anyhow::Result<Value> {
         let log = self.log.clone();
-        let seen = self.hp.dispatch_until(WAIT, |_| {
-            Self::last(&log, " shows {").is_some_and(|s| done(&s))
+        // What held, not what is read again after: the window may have
+        // said more meanwhile.
+        let mut seen = None;
+        self.hp.dispatch_until(WAIT, |_| {
+            seen = Self::last(&log, " shows {").filter(|s| done(s));
+            seen.is_some()
         })?;
-        let last = Self::last(&log, " shows {");
-        anyhow::ensure!(
-            seen,
-            "the window never showed it; it shows {}\nit said:\n{}",
-            last.map_or_else(|| "nothing".to_owned(), |s| s.to_string()),
-            self.said()
-        );
-        last.ok_or_else(|| anyhow::anyhow!("nothing shown"))
+        seen.ok_or_else(|| {
+            anyhow::anyhow!(
+                "the window never showed it; it shows {}\nit said:\n{}",
+                Self::last(&log, " shows {")
+                    .map_or_else(|| "nothing".to_owned(), |s| s.to_string()),
+                self.said()
+            )
+        })
     }
 
     /// The window's places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
         let log = self.log.clone();
-        let seen = self.hp.dispatch_until(WAIT, |_| {
-            Self::last(&log, " places {").is_some_and(|p| p.get(id).is_some())
+        // What held, not what is read again after.
+        let mut seen = None;
+        self.hp.dispatch_until(WAIT, |_| {
+            seen = Self::last(&log, " places {").filter(|p| p.get(id).is_some());
+            seen.is_some()
         })?;
-        anyhow::ensure!(seen, "{id} is nowhere: {:?}", Self::last(&log, " places {"));
-        Self::last(&log, " places {").ok_or_else(|| anyhow::anyhow!("no places"))
+        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", Self::last(&log, " places {")))
     }
 
     fn window(&self) -> anyhow::Result<Rect> {
@@ -423,7 +426,7 @@ impl Bed {
 
     /// The shell's log.
     fn shell_said(&self) -> String {
-        String::from_utf8_lossy(&std::fs::read(&self.shell_log).unwrap_or_default()).into_owned()
+        common::logged(&self.shell_log)
     }
 
     /// Waits until the shell logs `what` on a line `pass` takes.
@@ -623,7 +626,7 @@ fn an_application_playing_joins_the_list_and_its_device_can_change() -> anyhow::
     bed.click("toast-action")?;
     bed.shows(|s| s["sound"]["apps"][0]["follows"] == true)?;
     // It stops: it leaves the list.
-    bed.fakes.stop("hocus-test-music");
+    bed.fakes.stop("hocus-test-music")?;
     bed.shows(|s| s["sound"]["apps"].as_array().is_some_and(Vec::is_empty))?;
     Ok(())
 }
