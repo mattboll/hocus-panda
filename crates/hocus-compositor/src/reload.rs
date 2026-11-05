@@ -79,26 +79,32 @@ fn watch(file: &Path, sender: &channel::Sender<Config>) {
         tracing::warn!(file = %file.display(), "the configuration's folder is not there: not followed");
         return;
     }
-    // What was last read, so that the loop hears only of changes.
-    let mut last = std::fs::read_to_string(file).ok();
+    // What was last read, so that the loop hears only of changes. The
+    // file is read once as soon as it is watched, without waiting: a
+    // change made before the watch began is not missed (the loop takes
+    // only what differs from what it has).
+    let mut last: Option<String> = None;
+    let mut first = true;
     let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 4096];
     let mut reader = inotify::Reader::new(&fd, &mut buffer);
     loop {
-        match reader.next() {
-            Ok(event) => {
-                let ours = event.file_name().is_some_and(|n| {
-                    names
-                        .iter()
-                        .any(|name| name.as_encoded_bytes() == n.to_bytes())
-                });
-                if !ours {
-                    continue;
+        if !std::mem::take(&mut first) {
+            match reader.next() {
+                Ok(event) => {
+                    let ours = event.file_name().is_some_and(|n| {
+                        names
+                            .iter()
+                            .any(|name| name.as_encoded_bytes() == n.to_bytes())
+                    });
+                    if !ours {
+                        continue;
+                    }
                 }
-            }
-            Err(rustix::io::Errno::INTR) => continue,
-            Err(err) => {
-                tracing::warn!(%err, "the configuration is no longer followed");
-                return;
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(err) => {
+                    tracing::warn!(%err, "the configuration is no longer followed");
+                    return;
+                }
             }
         }
         let text = match std::fs::read_to_string(file) {
@@ -137,6 +143,8 @@ impl State {
             self.input_settings_changed();
             followed.push("[pointer] [touchpad]");
         }
-        tracing::info!(?followed, "the configuration changed on disk");
+        if !followed.is_empty() {
+            tracing::info!(?followed, "the configuration changed on disk");
+        }
     }
 }
