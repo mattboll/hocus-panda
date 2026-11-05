@@ -15,6 +15,7 @@ mod appearance_page;
 mod bar_page;
 mod keyboard_page;
 mod mouse;
+mod network;
 mod places;
 mod screens;
 mod sound;
@@ -216,6 +217,8 @@ enum Undo {
     Time(time::Choice),
     /// A display name or an avatar set (in AccountsService, 6.11).
     Account(account::Choice),
+    /// A change of the Réseau page's (in NetworkManager, rfkill).
+    Network(network::Choice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -322,6 +325,8 @@ pub enum Message {
     Time(time::Msg),
     /// The Compte page's (6.11).
     Account(account::Msg),
+    /// The network's page (6.6).
+    Network(network::Msg),
     Nothing,
 }
 
@@ -389,6 +394,9 @@ pub struct App {
     /// The Compte page: AccountsService as last heard, the password's
     /// sheet (6.11).
     account: account::State,
+    /// The network's page: NetworkManager and the radios as last said
+    /// (6.6).
+    network: network::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -404,6 +412,7 @@ impl App {
         let sound = sound::Sound::start(sender.clone());
         let time = time::State::new(sender.clone());
         let account = account::State::new(sender.clone());
+        let network = network::State::start(&sender, start.places.state.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -479,6 +488,7 @@ impl App {
             bar: bar_page::State::default(),
             time,
             account,
+            network,
             fresh: None,
             parity: false,
         };
@@ -594,12 +604,15 @@ impl App {
             || self.screens_moving(now)
             || self.mouse.moving(now)
             || self.bar_moving(now)
+            || self.network_moving()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
         let framed = matches!(message, Message::Frame(_));
-        let scrolled = matches!(message, Message::Scrolled);
+        // The network's page changes its shape at once (a sheet, a list):
+        // whole frames, as after a scroll.
+        let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
         let task = Task::batch([
@@ -610,6 +623,8 @@ impl App {
         ]);
         self.sound_listen();
         self.wallpaper_want();
+        self.network_visit();
+        self.network_after_key();
         self.now = Instant::now();
         // Whole frames after a scroll, a toast coming or going, and through
         // any motion and a moment after it: two at least, one in each of
@@ -792,6 +807,7 @@ impl App {
             Message::Time(msg) => self.time_update(msg),
             Message::Account(msg) => self.account_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
+            Message::Network(msg) => self.network_update(msg),
         }
     }
 
@@ -1154,6 +1170,13 @@ impl App {
                 self.toast = None;
                 return self.account_undo(choice, false);
             }
+            Some(Undo::Network(_)) => {
+                let Some(Undo::Network(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.network_undo(choice, false);
+            }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
                     return Task::none();
@@ -1216,6 +1239,12 @@ impl App {
                     return Task::none();
                 };
                 return self.account_undo(choice, true);
+            }
+            Some(Undo::Network(_)) => {
+                let Some(Undo::Network(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.network_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1482,6 +1511,13 @@ impl App {
         if section == SectionId::Bar {
             return self.bar_controls();
         }
+        if section == SectionId::Network {
+            return self
+                .network_controls()
+                .into_iter()
+                .map(Control::Network)
+                .collect();
+        }
         if section == SectionId::Mouse {
             let mut out: Vec<Control> = self
                 .mouse_visible()
@@ -1554,6 +1590,10 @@ impl App {
                 if self.menu.take().is_some() || self.sound.menu.take().is_some() {
                     return Task::none();
                 }
+                // The network's sheet, a password typed (6.6).
+                if let Some(task) = self.network_escape() {
+                    return task;
+                }
                 if !self.query.is_empty() {
                     self.search(String::new());
                     self.focus = Focus::Search;
@@ -1576,6 +1616,10 @@ impl App {
             return self.sound_menu_key(key);
         }
         match key.as_ref() {
+            // The network's sheet keeps the keyboard (6.6).
+            Key::Named(Named::Tab) if self.network.sheet.is_some() => {
+                return self.network_sheet_tab(modifiers.shift());
+            }
             Key::Named(Named::Tab) => return self.tab(modifiers.shift()),
             Key::Named(Named::ArrowDown | Named::ArrowUp) if !self.query.is_empty() => {
                 let down = key.as_ref() == Key::Named(Named::ArrowDown);
@@ -1588,6 +1632,18 @@ impl App {
                 return Task::none();
             }
             _ => {}
+        }
+        // Into the network's sheet or a password typed anew, before their
+        // field holds the keyboard (6.6).
+        if let Some(text) = text
+            && !captured
+            && !ctrl
+            && !modifiers.alt()
+            && !text.is_empty()
+            && text.chars().all(|c| !c.is_control())
+            && let Some(task) = self.network_typed(text)
+        {
+            return task;
         }
         match self.focus {
             Focus::Nav(i) => return self.nav_key(i, key),
@@ -1682,6 +1738,7 @@ impl App {
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
             Control::Account(stop) => self.account_key(stop, named),
+            Control::Network(stop) => self.network_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1929,6 +1986,8 @@ enum Control {
     Time(time::Stop),
     /// The Compte page's own (6.11).
     Account(account::Stop),
+    /// The network's page's own (6.6).
+    Network(network::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -435,7 +435,7 @@ impl State {
             let suffix = if here {
                 String::new()
             } else {
-                format!(" · {}", desktop + 1)
+                crate::desktop_set::suffix(&self.config.desktops, desktop)
             };
             let label = place(p.label);
             let width = (label.size.w * scale).floor() as i32;

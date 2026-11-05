@@ -167,6 +167,10 @@ struct Shown {
     index: u8,
     rows: Vec<Row>,
     titles: Vec<String>,
+    /// Its title: its name (6.14) or "Bureau N", elided to the room the
+    /// count leaves it; and whole.
+    title: String,
+    title_of: String,
 }
 
 /// What the surface keeps between draws.
@@ -263,7 +267,7 @@ impl<Message> canvas::Program<Message> for Panel {
         f.fill_text(text_in(
             MANROPE_BOLD,
             text(
-                self.words.desktop_title(usize::from(shown.index) + 1),
+                shown.title.clone(),
                 Point::new(LEFT, HEADER_MIDDLE),
                 TITLE,
                 TEXT.get(),
@@ -385,29 +389,45 @@ impl Panel {
             _ => u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX),
         };
         let rows = desktops::rows(&bar, usize::from(index));
-        let same = state
-            .shown
-            .as_ref()
-            .is_some_and(|s| s.bar == bar && s.index == index && s.rows == rows);
+        let full_title = self.words.desktop_title(
+            usize::from(index) + 1,
+            desktops::name(usize::from(index)).as_deref(),
+        );
+        let count = self.words.windows(rows.len()).unwrap_or_default();
+        let same = state.shown.as_ref().is_some_and(|s| {
+            s.bar == bar && s.index == index && s.rows == rows && s.title_of == full_title
+        });
         if same {
             return None;
         }
         let room = title_room(list_of(rows.len()).scrolls());
-        let titles = match iced::advanced::graphics::text::font_system().write() {
-            Ok(mut system) => rows
-                .iter()
-                .map(|r| {
-                    kit::elide(&r.title, room, |t| {
-                        kit::measure_in(system.raw(), t, NAME, MANROPE)
+        let (titles, title) = match iced::advanced::graphics::text::font_system().write() {
+            Ok(mut system) => {
+                let titles = rows
+                    .iter()
+                    .map(|r| {
+                        kit::elide(&r.title, room, |t| {
+                            kit::measure_in(system.raw(), t, NAME, MANROPE)
+                        })
                     })
-                })
-                .collect(),
-            Err(_) => rows.iter().map(|r| r.title.clone()).collect(),
+                    .collect();
+                // A long name keeps 8 px before the count.
+                let counted = kit::measure_in(system.raw(), &count, COUNT, MANROPE);
+                let header = RIGHT - LEFT - if count.is_empty() { 0.0 } else { counted + 8.0 };
+                let title = kit::elide(&full_title, header, |t| {
+                    kit::measure_in(system.raw(), t, TITLE, MANROPE_BOLD)
+                });
+                (titles, title)
+            }
+            Err(_) => (
+                rows.iter().map(|r| r.title.clone()).collect(),
+                full_title.clone(),
+            ),
         };
         tracing::debug!(
             bar = %bar,
-            title = %self.words.desktop_title(usize::from(index) + 1),
-            count = %self.words.windows(rows.len()).unwrap_or_default(),
+            title = %full_title,
+            count = %count,
             empty = ?rows.is_empty().then(|| self.words.no_window()),
             rows = ?titles,
             minimized = rows.iter().filter(|r| r.minimized).count(),
@@ -423,6 +443,8 @@ impl Panel {
             index,
             rows,
             titles,
+            title,
+            title_of: full_title,
         });
         state.pointer.hover = None;
         if state.focus.is_some_and(|f| !state.ids().contains(&f)) {

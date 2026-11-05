@@ -26,6 +26,11 @@ pick first and without anything to clean up afterwards.
 - **Moving a window from anywhere in it is now `Alt` + drag**, which takes
   the place of `Super` + drag ([windows.md](windows.md) §6 changes with
   this ticket). Its header and its grip still work.
+- **Turned off** (6.14, the Settings' "Bureaux et fenêtres"): `[ink]
+  enabled = false`, and Super+drag and the laser do nothing, and pass to
+  the window; what shows goes at once. The ink is off as well while
+  `[windows] move-modifier = "super"` takes Super+drag to move windows.
+  Both are followed as the file changes.
 
 **While drawing**
 
