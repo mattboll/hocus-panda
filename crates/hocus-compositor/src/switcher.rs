@@ -304,9 +304,13 @@ impl State {
             return;
         };
         let current = self.strip(&output).current();
-        let order = self.model.switcher_order(|id| {
-            self.model.desktop(id) == current && self.output_of(id).as_ref() == Some(&output)
-        });
+        let here =
+            |id| self.model.desktop(id) == current && self.output_of(id).as_ref() == Some(&output);
+        let mut order = self.model.switcher_order(here);
+        // `[windows] alt-tab = "desktop"` (6.14): this desktop's only.
+        if self.config.windows.alt_tab == crate::config::AltTab::Desktop {
+            order.retain(|id| here(*id));
+        }
         if order.is_empty() {
             return;
         }

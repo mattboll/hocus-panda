@@ -79,9 +79,9 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Appearance, Config, Delay as PowerDelay, Desktops, FormChoice, Idle as IdleSettings,
-    OutputSettings, PanelScreens, Power as PowerSettings, PowerSource, Recording, ScaleFrom,
-    SystemKeyboard,
+    AltTab, Appearance, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
+    Idle as IdleSettings, Ink, OutputSettings, PanelScreens, Power as PowerSettings, PowerSource,
+    Recording, ScaleFrom, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
