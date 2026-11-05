@@ -206,6 +206,14 @@ impl Strip {
         now.saturating_sub(DOTS_FADE.mul_f64(f64::from(shown)))
     }
 
+    /// Its desktops are now `count`, the one it shows `current`: at once,
+    /// nothing sliding (desktops added or taken out, 6.14).
+    pub fn renumber(&mut self, count: usize, current: usize) {
+        self.count = count.clamp(1, MAX_COUNT);
+        self.current = current.min(self.count - 1);
+        self.motion = Motion::Still;
+    }
+
     /// Its screen went: it stops on the desktop it was going to, which it
     /// shows if the screen comes back.
     pub fn still(&mut self) {
@@ -720,7 +728,7 @@ impl crate::State {
     }
 
     /// `id` leaves the screen: its desktop is out of sight.
-    fn hide(&mut self, id: WindowId) {
+    pub(crate) fn hide(&mut self, id: WindowId) {
         let rect = self.rect_of(id);
         self.end_popup_grab_of(id);
         let Some(managed) = self.windows.get_mut(&id) else {
@@ -740,7 +748,7 @@ impl crate::State {
 
     /// `id`'s desktop comes in sight: it shows where it was, unless
     /// minimised.
-    fn unhide(&mut self, id: WindowId) {
+    pub(crate) fn unhide(&mut self, id: WindowId) {
         self.model.set_hidden(id, false);
         if self.model.is_minimized(id) {
             return;

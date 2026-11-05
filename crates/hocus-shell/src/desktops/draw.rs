@@ -392,6 +392,8 @@ pub struct Tiles {
 #[derive(Debug, Default)]
 pub struct State {
     shown: Option<Desktops>,
+    /// Their names as said with them (6.14).
+    names: Vec<Option<String>>,
     /// The ring on its way to the current desktop: from where it was in
     /// each form (full, mini), since then.
     ring: Option<([Rectangle; 2], Instant)>,
@@ -739,7 +741,10 @@ impl Tiles {
             state.ring = None;
         }
         let desktops = super::snapshot(&self.bar);
-        if desktops != state.shown {
+        let names: Vec<Option<String>> = desktops.as_ref().map_or_else(Vec::new, |d| {
+            (0..usize::from(d.count)).map(super::name).collect()
+        });
+        if desktops != state.shown || names != state.names {
             if let (Some(before), Some(after)) = (&state.shown, &desktops)
                 && before.current != after.current
                 && self.motion
@@ -749,7 +754,11 @@ impl Tiles {
             }
             if let Some(desktops) = &desktops {
                 let said: Vec<String> = (0..usize::from(desktops.count))
-                    .map(|i| self.words.desktop(i + 1, on(desktops, i).count()))
+                    .map(|i| {
+                        let name = names.get(i).cloned().flatten();
+                        self.words
+                            .desktop(i + 1, name.as_deref(), on(desktops, i).count())
+                    })
                     .collect();
                 tracing::debug!(
                     bar = self.bar,
@@ -760,6 +769,7 @@ impl Tiles {
                 );
             }
             state.shown = desktops;
+            state.names = names;
         }
         state.now = Some(now);
         if state.hover.is_some_and(|h| usize::from(h) >= state.count()) {

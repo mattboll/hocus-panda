@@ -703,6 +703,10 @@ impl Shell {
                 windows::set_shown(shown);
                 Task::none()
             }
+            ToShell::DesktopNames(names) => {
+                desktops::set_names(names);
+                Task::none()
+            }
             ToShell::BarGroups(groups) => {
                 column::set_groups(groups);
                 Task::none()
@@ -2304,6 +2308,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::BarWindows(shown)) => {
                             windows::set_shown(shown);
+                            continue;
+                        }
+                        // The desktops' names (6.14): the tiles and an
+                        // open list draw.
+                        Ok(ToShell::DesktopNames(names)) => {
+                            desktops::set_names(names);
                             continue;
                         }
                         // What the column shows (6.4): only its parts draw.

@@ -337,7 +337,26 @@ Keyboard:
   wrap), and the dots show, as with `Super+Ctrl+←/→`. A window being
   dragged while desktops switch goes along.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
-  sets how many, from 1 to 9, on every screen.
+  sets how many, from 1 to 9, on every screen, followed as the file
+  changes (6.14): more are added after the last, empty; fewer take out the
+  last ones, their windows going to the last that stays. Nothing slides:
+  a screen showing a desktop taken out shows the one its windows went to.
+- **Names** (`[desktops] names`, by position, the same on every screen;
+  6.14): the bar's tiles say them (a tile's name for screen readers, its
+  list's title) and Alt+Tab's other desktops' suffix (`Firefox ·
+  Courrier`); one missing or empty is "Bureau N" / "Desktop N".
+- **A desktop taken out by the Settings** (settings.md, "Bureaux et
+  fenêtres"), wherever it is: on the Settings' line (`msg screens`),
+  `desktop-remove N` (from 1) gives its windows to the desktop before it
+  (the first's to the next one) on every screen, the desktops after it
+  moving down one with their names; the answer
+  (`{"desktop-removed": {"desktop": N, "to": M, "windows": [ids]}}`)
+  names the windows that moved, and `desktop-restore N ID…` (the toast's
+  "Annuler") puts a desktop back at `N` with them. The Settings ask first
+  and write the file once answered, so that the count the file then says
+  is already the desktops', and nothing moves twice. The line also says
+  how many windows each desktop has, every screen's together, as they
+  change: `{"desktops": {"count": 4, "windows": [3, 2, 0, 0]}}`.
 
 ### A screen unplugged
 
@@ -507,7 +526,8 @@ unless it is kept.
 `[appearance]` holds `reduced-motion` (windows fade instead of moving,
 and do not wobble; desktops cross-fade) and `high-contrast` (the focused
 rim 2 px wide), both off by default. `[desktops] count` is the number of
-desktops on each screen (4).
+desktops on each screen (4), `names` their names (§12); both followed as
+the file changes.
 
 Not configurable yet: `Alt`+drag moves a window, `Super`+right-drag
 resizes it (`Alt+Super` nested); `Super`+drag draws on the screen,

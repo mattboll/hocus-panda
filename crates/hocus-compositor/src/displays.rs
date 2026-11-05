@@ -192,6 +192,8 @@ pub struct Displays {
     /// The screens changed: the Settings are told after this turn.
     pub(crate) dirty: bool,
     told: Option<String>,
+    /// The desktops' windows as the Settings were last told (6.14).
+    desktops_told: Option<crate::desktop_set::Counts>,
 }
 
 static SESSIONS: AtomicU64 = AtomicU64::new(1);
@@ -472,6 +474,9 @@ impl State {
                 tracing::info!(session, "the Settings follow the screens");
                 let line = self.displays_json().to_string();
                 let _ = to.send(line);
+                let counts = self.desktop_counts();
+                let _ = to.send(Self::desktops_line(counts));
+                self.displays.desktops_told = Some(counts);
                 self.displays.sessions.push(Session { id: session, to });
             }
             FromSettings::Closed { session } => {
@@ -517,6 +522,24 @@ impl State {
                 self.bar_auto(name);
                 None
             }
+            // A desktop taken out, or put back with its windows (6.14,
+            // desktop_set.rs): answered on this line.
+            (Some("desktop-remove"), Some(number), None) => {
+                let done = number
+                    .parse()
+                    .map_err(|_| format!("no desktop {number}"))
+                    .and_then(|n| self.desktop_remove(n));
+                self.desktops_answer(session, done)
+            }
+            (Some("desktop-restore"), Some(number), windows) => {
+                let windows: Result<Vec<u64>, _> =
+                    windows.into_iter().chain(words).map(str::parse).collect();
+                let done = match (number.parse(), windows) {
+                    (Ok(n), Ok(windows)) => self.desktop_restore(n, &windows),
+                    _ => Err(format!("cannot read {line}")),
+                };
+                self.desktops_answer(session, done)
+            }
             _ => Some(format!("not understood: {line}")),
         };
         if let Some(why) = answer {
@@ -524,6 +547,33 @@ impl State {
             let refused = serde_json::json!({ "refused": why }).to_string();
             self.displays_send(Some(session), &refused);
         }
+    }
+
+    /// A desktop taken out or put back: its answer to the line `session`,
+    /// and the desktops' windows to every line; or why it could not be.
+    fn desktops_answer(
+        &mut self,
+        session: u64,
+        done: Result<serde_json::Value, String>,
+    ) -> Option<String> {
+        let answer = match done {
+            Ok(answer) => answer,
+            Err(why) => return Some(why),
+        };
+        self.desktops_tell_settings();
+        self.displays_send(Some(session), &answer.to_string());
+        None
+    }
+
+    /// The desktops' windows to the Settings' lines, if they changed since
+    /// they were told.
+    fn desktops_tell_settings(&mut self) {
+        let counts = self.desktop_counts();
+        if self.displays.desktops_told == Some(counts) {
+            return;
+        }
+        self.displays.desktops_told = Some(counts);
+        self.displays_send(None, &Self::desktops_line(counts));
     }
 
     /// `line` to the Settings' line `session`, or to all of them.
@@ -542,6 +592,9 @@ impl State {
         if self.displays.wanted {
             self.displays.wanted = false;
             self.apply_displays(backend);
+        }
+        if !self.displays.sessions.is_empty() {
+            self.desktops_tell_settings();
         }
         if !self.displays.dirty {
             return;
