@@ -33,6 +33,13 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   linux:
+    # The tests run in four shards at once: the run takes about a third of
+    # the time it took in one job, and every test still runs.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: linux (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -58,10 +65,15 @@ jobs:
             dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
       - uses: Swatinem/rust-cache@v2
+        with:
+          # One cache for the four shards, saved by the first on main.
+          shared-key: linux
+          save-if: ${{ matrix.shard == 1 && github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
       - name: Clippy
+        if: matrix.shard == 1
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Shell
         # The compositor's tests start the real shell and Settings, and run `hocus`,
@@ -69,4 +81,4 @@ jobs:
         # tests skip without them.
         run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings
       - name: Tests
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --partition count:${{ matrix.shard }}/4
