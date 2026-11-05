@@ -997,7 +997,7 @@ impl Shell {
             after.extend(in_use::bar_opened(&output, form));
             after.extend(meeting::bar_opened(&output, form));
             after.extend(today::bar_opened(&output, form));
-            windows::bar_opened(&output, form);
+            after.extend(windows::bar_opened(&output, form));
             reminder::bar_opened(&output, form);
         }
         open.chain(open_clock)

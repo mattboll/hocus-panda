@@ -783,6 +783,8 @@ pub struct Controller {
     /// The items each bar's surfaces show, by namespace, from the top, and
     /// where (the bar's frame): the keyboard steps through them.
     items: HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    /// The bars' surfaces whose height is known (their first size came).
+    sized: std::collections::HashSet<window::Id>,
     /// Popovers move in and out (else they show and go at once).
     pub motion: bool,
 }
@@ -795,6 +797,7 @@ impl Default for Controller {
             focused: None,
             bars: HashMap::new(),
             items: HashMap::new(),
+            sized: std::collections::HashSet::new(),
             motion: true,
         }
     }
@@ -923,6 +926,9 @@ impl Controller {
     pub fn height(&mut self, surface: window::Id, height: f32) {
         for place in self.bars.values_mut().filter(|p| p.surface == surface) {
             place.height = height;
+            if height > 0.0 {
+                self.sized.insert(surface);
+            }
         }
     }
 
@@ -931,7 +937,19 @@ impl Controller {
         self.bars.get(bar).map_or(HEIGHT, |p| p.height)
     }
 
+    /// Bar `bar`'s height once its surface has had its size: what is
+    /// placed from the bar's bottom waits for it (#617).
+    pub fn known_height(&self, bar: &str) -> Option<f32> {
+        self.bars
+            .get(bar)
+            .filter(|p| self.sized.contains(&p.surface))
+            .map(|p| p.height)
+    }
+
     pub fn forget(&mut self, bar: &str) {
+        if let Some(place) = self.bars.get(bar) {
+            self.sized.remove(&place.surface);
+        }
         self.bars.remove(bar);
         self.items.retain(|(b, _), _| b != bar);
     }

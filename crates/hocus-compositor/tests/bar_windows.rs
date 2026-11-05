@@ -226,6 +226,14 @@ fn plain(log: &Path) -> String {
     out
 }
 
+/// Whether the windows show no group: their surface, kept with the bar,
+/// shorter than a line, drawing nothing (or not there yet).
+fn no_group(hp: &Headless) -> bool {
+    hp.layer_rects(WINDOWS_NAMESPACE)
+        .iter()
+        .all(|(_, r)| r.height < LINE)
+}
+
 /// What the windows said they draw at rest, the last time.
 const AT_REST: &str = "the windows are drawn at rest";
 
@@ -273,6 +281,23 @@ impl Bed {
 
     /// What the shell logged of its windows and the popovers, to say why a
     /// test failed.
+    /// Waits until the windows' surface commits nothing for half a second.
+    fn settle(&mut self) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            let before = self.hp.windows_commits();
+            common::wait(&mut self.hp, std::time::Duration::from_millis(500))?;
+            if self.hp.windows_commits() == before {
+                return Ok(());
+            }
+            anyhow::ensure!(start.elapsed() < WAIT, "the windows never came to rest");
+        }
+    }
+
+    fn no_group(&self) -> bool {
+        no_group(&self.hp)
+    }
+
     fn windows_log(&self) -> String {
         plain(&self.log)
             .lines()
@@ -506,6 +531,7 @@ fn a_click_on_a_line_focuses_its_window_even_minimised() -> anyhow::Result<()> {
     };
     three(&mut bed)?;
     bed.shows("«Trois»*; «Deux»; «Un»")?;
+    bed.group_of(3 * LINE)?;
     let un = bed.id_of("test.un")?;
     bed.click(&format!("Window({un})"))?;
     let done = bed.hp.dispatch_until(WAIT, |hp| {
@@ -539,6 +565,7 @@ fn the_close_button_asks_its_window_to_close() -> anyhow::Result<()> {
     };
     three(&mut bed)?;
     bed.shows("«Trois»*; «Deux»; «Un»")?;
+    bed.group_of(3 * LINE)?;
     // Deux's ✕, not the focused window's: Deux alone is asked.
     let deux = bed.id_of("test.deux")?;
     bed.click(&format!("WindowClose({deux})"))?;
@@ -596,25 +623,26 @@ fn no_window_no_group() -> anyhow::Result<()> {
     let Some(mut bed) = start(&Machine::default())? else {
         return Ok(());
     };
-    // The bar drawn, its tiles too: no windows' surface.
+    // The bar drawn, its tiles too: no group (its surface kept with the
+    // bar, drawing nothing, #617).
     bed.last_is("the desktops' tiles show it", &[])?;
-    assert!(bed.hp.layer_rects(WINDOWS_NAMESPACE).is_empty());
+    assert!(
+        bed.no_group(),
+        "{:?}",
+        bed.hp.layer_rects(WINDOWS_NAMESPACE)
+    );
     bed.open("test.un", "Un")?;
     bed.shows("«Un»*")?;
     bed.group_of(LINE)?;
     // An empty desktop: none.
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_2]);
-    let gone = bed
-        .hp
-        .dispatch_until(WAIT, |hp| hp.layer_rects(WINDOWS_NAMESPACE).is_empty())?;
+    let gone = bed.hp.dispatch_until(WAIT, no_group)?;
     anyhow::ensure!(gone, "the windows show on an empty desktop");
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_1]);
     bed.group_of(LINE)?;
     // Its window closed: none.
     bed.client("test.un")?.commands.send(Command::Close)?;
-    let gone = bed
-        .hp
-        .dispatch_until(WAIT, |hp| hp.layer_rects(WINDOWS_NAMESPACE).is_empty())?;
+    let gone = bed.hp.dispatch_until(WAIT, no_group)?;
     anyhow::ensure!(gone, "the windows show without a window");
     Ok(())
 }
@@ -633,7 +661,11 @@ fn panel_windows_false_hides_them_and_true_brings_them_back_live() -> anyhow::Re
     // The shell has the windows (its tiles sketch them): none listed.
     let deux = bed.id_of("test.deux")?;
     bed.last_is("the desktops' tiles show it", &[&format!("id: {deux}")])?;
-    assert!(bed.hp.layer_rects(WINDOWS_NAMESPACE).is_empty());
+    assert!(
+        bed.no_group(),
+        "{:?}",
+        bed.hp.layer_rects(WINDOWS_NAMESPACE)
+    );
     // `true` written in the file: they show, as the file is followed.
     let settings = bed.dir.path().join("config/config.toml");
     let on = Machine {
@@ -830,6 +862,8 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
     bed.open("test.deux", "Deux")?;
     bed.shows("«Deux»*; «Un»")?;
     common::at_rest(&mut bed.hp)?;
+    // The shell done with what it drew (a loaded machine commits late).
+    bed.settle()?;
     // Snapping the focused window to a side moves its sketch in the tiles,
     // not what the windows list: the desktops draw, the windows do not.
     let (windows, desktops) = (bed.hp.windows_commits(), bed.hp.desktops_commits());
@@ -844,12 +878,20 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
     bed.hp.pointer_move(700.0, 400.0);
     bed.hp.dispatch_until(WAIT, |hp| hp.frames() > frames + 1)?;
     common::at_rest(&mut bed.hp)?;
-    assert_eq!(bed.hp.windows_commits(), windows, "the windows drew");
+    assert_eq!(
+        bed.hp.windows_commits(),
+        windows,
+        "the windows drew\n{}",
+        bed.windows_log()
+    );
     // A retitle draws them.
     bed.client("test.un")?
         .commands
         .send(Command::Title("Un, renommé"))?;
     bed.shows("«Deux»*; «Un, renommé»")?;
-    assert!(bed.hp.windows_commits() > windows);
+    let drew = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.windows_commits() > windows)?;
+    anyhow::ensure!(drew, "the retitle drew nothing");
     Ok(())
 }

@@ -4047,7 +4047,7 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   list has them (3.9c). Past 3, a 20 px "+ N autres" / "+ N more"
   (12.5 px, `text.faint`) opens the current desktop's list (3.9b, every
   window of the desktop) beside it, until the overview comes (8.5). No
-  window on the desktop: no group, and no surface.
+  window on the desktop: no group.
 - **A line**: 30 px, 6 px past the group's sides, radius 8: the
   application's icon (18 px, from the icon theme as the tiles find
   theirs, else its letter on a colour), 8 px, its title (Manrope 13 px,
@@ -4065,6 +4065,16 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   deciding; nothing waits for it. Both name the window by its id, not
   "the focused one". `Tab` reaches the lines and their ✕ from the bar's
   other items; `Enter` acts.
+- **Its surface** (#617): opened with the bar and kept as long as it,
+  drawing nothing and taking no pointer while it lists nothing (10 px in
+  the gap over the desktops: tiny-skia refuses a buffer of one pixel at a
+  fractional scale), and placed from the bar's bottom only once the bar
+  knows its height (a place off a short screen ended the shell). iced_layershell hands
+  the keys to the surface made last: one made as a window opens, while
+  the emoji picker or the launcher holds the keyboard, took their typing.
+  Its lines are placed from the surface's bottom, as the compositor has
+  it: a press read while it still has the surface where it was finds
+  the line it was on there.
 - **Its place**: a surface of its own (`hocus-bar-windows`) 14 px over
   the desktops' tiles (over the dots in the mini form), placed from
   them, in the room the column leaves free: the windows are not in the
