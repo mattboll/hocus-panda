@@ -121,6 +121,121 @@ The mockup's page, its rows and choices. The keys:
   is the compositor's, 5 min on AC and 3 min on battery (7.2; the menu
   has a "3 min"); the others are the mockup's.
 
+## Écrans (6.9)
+
+Built 2026-11-05 (issue #409), variant A of the
+[mockup](https://claude.ai/artifact/NpviTjpi82usEsSWkM9XFA): the
+arrangement on top. The maintainer decided: variant A; rotation drawn but
+"Plus tard", with no effect; the scale written at once with "Annuler",
+the resolution and the refresh rate through the 15 s "Garder ?"; VRR an
+on/off switch, off by default. `src/screens.rs` (the compositor's line,
+the arrangement's geometry, the page's settings for the search) and
+`src/app/screens.rs` (the page, its drawing, its menus, the dialog): the
+page draws itself, its keys holding a screen's name.
+
+**The compositor is the source.** The window opens a line of the
+compositor's control socket (`HOCUS_SOCKET`, `msg screens`) on threads of
+its own; the compositor writes the screens on it as one JSON line each
+time they change (a screen plugged or unplugged, the file read again, a
+trial, the lid, the primary screen), then a trial's seconds left.
+`hocus msg outputs` prints the same JSON once. Each screen: its connector,
+whether it is built in, its size in mm, its modes (width, height, mHz,
+native), its mode, its scale and whether the file sets it, the scale it
+takes by itself, its logical place and size, VRR offered and on, on, plugged,
+lid closed, primary, the file's mode and whether the screen offers it; a
+screen unplugged this session is listed with its place and when. Nothing
+comes from the session bus.
+
+**The page**: "Écrans", its line; DISPOSITION with "Identifier", the
+drawing (196 high, a dot every 14 px; each screen at its logical size,
+0.1 px per logical px at most, centred; its number's disc, its name, its
+mode, its scale when the file sets one; the bar's strip on the primary
+screen, 196 or 56 logical wide; dashed for a screen off, unplugged or
+behind its closed lid) and its line; the notes of a screen missing (blue);
+the chosen screen's group (its number, its name in capitals, "Principal",
+its connector, size and density), its rows "Utiliser cet écran",
+"Résolution" (native first), "Fréquence" (inert with one rate), "Échelle"
+("Automatique (100 %)", 100 to 200 %; "Comme 2048 × 1280", its density,
+the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
+(inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
+ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
+ÉCLAIRAGE NOCTURNE, "Plus tard", inert. Screens are numbered 1 for the
+built-in panel, then by connector, and named "Écran du portable", "Écran
+externe 34 pouces" (its EDID's size), or "Écran 2" when its size is not
+known.
+
+**Dragging** a screen (4 px before it counts) shows where it lands, a
+dashed green outline: on the side of the other nearest its centre (the
+centres' offset over half their summed sizes, the larger axis wins),
+flush, at least 200 logical px shared, caught by aligned edges or
+middles within 120 logical px. Let go, it slides there in 200 ms (none
+with reduced motion) and both screens' places are written, normalised
+so that the smallest x and y are 0; dropped where it was, nothing is
+("Lâché à sa place : rien ne change."). A click chooses a screen; `Tab`
+reaches each, `Enter` or `Space` chooses it, the arrows put it on that
+side of the other, tops or lefts aligned. A size changed (mode, scale)
+while the file places the screens writes the places too, keeping the
+side and the alignment.
+
+**Tried first**: a resolution or a refresh rate (a new size keeps the
+rate when it has it, else takes its highest) is asked of the compositor
+(`try NAME mode=WxH@HZ`), which applies it without the file and counts 15 s
+on its own clock: the dialog over the window shows the seconds it is told
+(a ring, "Garder cette résolution ?", what the screen shows now and what
+it goes back to, "Revenir", "Garder" with the focus; `Tab` between them,
+`Esc` reverts), and the header says "À confirmer" with an amber dot.
+Nothing pressed, `Esc`, "Revenir", or the window gone (its line closes):
+the compositor takes it back and nothing is written. "Garder" keeps it
+(`keep ID`) and writes `mode`, with the toast "Gardé : 2560 × 1080 à 60 Hz
+sur l’écran externe 34 pouces" and its "Annuler", which goes straight
+back.
+
+**Written at once**, with the toast's "Annuler" and `Ctrl+Z`: a place,
+the scale, the primary screen, VRR, a screen turned off or on. "Annuler"
+takes each key back as the file had it: a key the file did not hold is
+taken out, with its table when that one is left empty and has no comment
+(the file then is byte for byte what it was). These keys go through the
+file's worker together (`Ask::Keys`), as 6.1's do one by one.
+
+| Row | Key |
+|---|---|
+| Disposition | `[outputs.NAME] position = [x, y]`, every screen plugged |
+| Utiliser cet écran | `[outputs.NAME] enabled = false` (on: taken out) |
+| Résolution, Fréquence | `[outputs.NAME] mode = "2560x1600@60"` |
+| Échelle | `[outputs.NAME] scale` (Automatique: taken out) |
+| Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
+| Écran principal | `[panel] output` (Automatique: taken out) |
+
+**The compositor follows the file** (`crates/hocus-compositor/src/
+displays.rs`): the one watcher of the file (`reload.rs`, 6.12's) hands
+the loop what it says, and the loop takes `[outputs]` and `[panel]
+output` from it at once (windows.md §13). A file that does not read changes nothing.
+
+**A screen missing**: unplugged, its dashed ghost stays at its place,
+"Débranché · sa place est gardée", not chosen, with a note ("Écran
+externe 34 pouces débranché à 14:02 — Sa place (…) et ses réglages sont
+gardés…"); off by the file, dashed "Éteint", still chosen and dragged,
+with its note; the lid closed over the built-in panel with another
+screen on, dashed "Couvercle fermé", its rows inert, with its note. The
+last screen on cannot be turned off (its switch is inert), and the
+compositor keeps one on whatever the file says. A file whose places
+overlap or leave a screen apart: the compositor puts them left to right
+and the page says so.
+
+**The search** finds the page's rows by their words and keys
+("Disposition des écrans", "Identifier les écrans", "Utiliser cet écran",
+"Résolution", "Fréquence", "Échelle" by « hidpi », "Fréquence variable
+(VRR)", "Rotation", "Écran principal", "Recopie" by « miroir »,
+"Éclairage nocturne"); they are model settings whose `Places::Page` say
+their keys (`outputs.NAME.scale`) but are not slots of the file.
+
+Not built here (to confirm): **mirroring** (no `mirror` key yet: the
+compositor does not draw one screen's picture on another; the row is
+"Plus tard", inert); **Identifier**'s overlay on the screens themselves
+(the drawing shows the numbers large for 3 s, the compositor draws
+nothing yet); a drop that would split three screens or more (only two are
+drawn against each other); the night light.
+
 ## Souris et pavé tactile (6.12)
 
 Built 2026-11-05 (issue #446), variant A of
@@ -365,7 +480,8 @@ file.
 
 - What the desktop does with the rest of `[power]` (6.10). The
   compositor follows the file live for `[pointer]` and `[touchpad]`
-  (6.12); each other setting's ticket adds its own.
+  (6.12), `[outputs]` and `[panel] output` (6.9), through one watcher
+  (`reload.rs`); each other setting's ticket adds its own.
 - The other sixteen pages (6.2 to 6.17, Day.1).
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them).
@@ -390,6 +506,21 @@ that nothing draws at rest.
 - `the_grip_shows_on_hover_at_the_top_edge_and_a_drag_on_it_moves_the_window`
 - `the_close_button_esc_and_ctrl_w_close_the_window`
 - `a_change_made_just_before_closing_is_on_disk`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_screens.rs` (6.9), on a compositor
+of two screens (2560 × 1600 at 1, 3440 × 1440):
+
+- `the_arrangement_is_drawn_from_the_compositors_screens`
+- `dragging_the_external_above_the_laptop_writes_both_places`
+- `the_scale_is_written_at_once_and_annuler_puts_the_file_back`
+- `a_resolution_kept_with_garder_is_written`
+- `a_resolution_not_kept_goes_back_after_15_s_on_the_held_clock`
+- `the_compositor_follows_the_files_screens`
+- `windows_go_along_with_their_screen`
+- `a_window_goes_back_to_its_screen_turned_on_again`
+- `searching_hidpi_and_miroir_finds_the_scale_and_mirroring`
+- `at_rest_the_screens_page_commits_nothing`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_mouse.rs` (6.12), the same bed

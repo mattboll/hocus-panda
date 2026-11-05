@@ -29,7 +29,7 @@ pub(super) type El<'a> = Element<'a, Message>;
 
 const SIDEBAR_WIDTH: f32 = 240.0;
 const HEADER: f32 = 48.0;
-const PAGE_WIDTH: f32 = 720.0;
+pub(super) const PAGE_WIDTH: f32 = 720.0;
 
 /// A text in Manrope.
 pub(super) fn t<'a>(
@@ -59,8 +59,15 @@ impl App {
             );
             layers.push(menu);
         }
+        // The Écrans page's menu, and its "Garder ?" over everything.
+        if let Some(menu) = self.screens_menu_list() {
+            layers.push(menu);
+        }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
+        }
+        if let Some(dialog) = self.screens_dialog() {
+            layers.push(dialog);
         }
         stack(layers)
             .width(Length::Fill)
@@ -349,6 +356,7 @@ impl App {
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
+            _ if self.screens_to_confirm() => (rgb(0xF5B44A), w("À confirmer", "To confirm")),
             Some(FileState::Reads) | None => (ACCENT, w("Enregistré", "Saved")),
             Some(FileState::Broken { .. }) => (ORANGE, w("Lecture seule", "Read-only")),
             Some(FileState::NoFile) => (ORANGE, w("Aucun fichier", "No file")),
@@ -697,6 +705,9 @@ impl App {
 
     fn section(&self, id: SectionId) -> El<'_> {
         let lang = self.lang;
+        if id == SectionId::Screens {
+            return self.screens_page();
+        }
         let section = id.section();
         let mut page = column![
             column![
@@ -1272,7 +1283,7 @@ pub(super) fn ease(t: Duration, over: Duration) -> f32 {
     ease_out(t, over)
 }
 
-fn ease_out(t: Duration, over: Duration) -> f32 {
+pub(super) fn ease_out(t: Duration, over: Duration) -> f32 {
     let x = (t.as_secs_f32() / over.as_secs_f32()).clamp(0.0, 1.0);
     1.0 - (1.0 - x).powi(3)
 }
@@ -1363,6 +1374,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         })
         .collect();
     let rows: Vec<serde_json::Value> = match app.page {
+        Page::Section(SectionId::Screens) => Vec::new(),
         Page::Section(SectionId::Mouse) => app
             .mouse_visible()
             .into_iter()
@@ -1434,6 +1446,8 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "menu": app.menu.map(|(slot, _)| slot.word()),
         "cards": if app.page == Page::Home { serde_json::json!(cards) } else { serde_json::Value::Null },
         "undo": app.undo.len(),
+        "scale": app.scale,
+        "screens": if app.page == Page::Section(SectionId::Screens) { app.screens_shown() } else { serde_json::Value::Null },
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),

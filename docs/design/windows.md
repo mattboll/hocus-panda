@@ -471,6 +471,23 @@ would blur the applications that cannot draw at one (X11 ones). A screen
 without a believable size (none, a projector's, an impossible density)
 takes 1.
 
+The same section takes, since 6.9 (the Settings' Écrans page,
+settings.md): `mode = "2560x1600@60"` (width, height and refresh rate,
+whole or not; without one, its preferred size at its highest rate; one it
+does not offer is the same), `position = [x, y]` (its top-left corner,
+logical; used when every screen on has one and they neither overlap nor
+leave one apart, else they go left to right in the connectors' order,
+tops aligned), `enabled = false` (off, plugged: its windows go to another
+as for a screen unplugged; the last screen on stays on) and `vrr = true`.
+The compositor follows the file as it changes (a thread waits in inotify
+on its folder, then the loop applies `[outputs]` and `[panel] output`):
+windows go along with their screen, at the same share of its work area
+(a window the desktop moved so is still the one a screen turned on again,
+or plugged back, takes back).
+A mode can also be tried by the Settings without the file: the
+compositor takes it back by itself after 15 s, or when the Settings go,
+unless it is kept.
+
 `[appearance]` holds `reduced-motion` (windows fade instead of moving,
 and do not wobble; desktops cross-fade) and `high-contrast` (the focused
 rim 2 px wide), both off by default. `[desktops] count` is the number of

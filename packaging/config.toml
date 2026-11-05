@@ -99,6 +99,18 @@
 #   [outputs.DP-2]
 #   scale = 1.25
 #   panel-form = "mini"
+#
+# The Settings' Écrans page writes the rest; the desktop follows the file
+# as it changes. A mode, WIDTHxHEIGHT@HZ (without one: the screen's
+# preferred size at its highest rate; one it does not offer: the same):
+#   mode = "2560x1600@60"
+# Its top-left corner, logical pixels; used when every screen on has one
+# and they neither overlap nor leave one apart, else left to right:
+#   position = [0, 0]
+# Turned off, plugged (its windows go to another; the last one stays on):
+#   enabled = false
+# Variable refresh rate, when the screen offers it:
+#   vrr = true
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and

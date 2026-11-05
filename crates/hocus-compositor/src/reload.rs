@@ -137,6 +137,10 @@ impl State {
     /// The file says `new` now: the parts that follow it live take it.
     pub fn config_changed(&mut self, new: Config) {
         let mut followed = Vec::new();
+        // The screens and the primary screen (6.9, displays.rs).
+        if self.displays_config_changed(&new) {
+            followed.push("[outputs] [panel] output");
+        }
         if new.pointer != self.config.pointer || new.touchpad != self.config.touchpad {
             self.config.pointer = new.pointer;
             self.config.touchpad = new.touchpad;

@@ -231,6 +231,8 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// The screens' settings, their trials and the Settings' lines (6.9).
+    pub(crate) displays: crate::displays::Displays,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
@@ -420,6 +422,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            displays: crate::displays::Displays::default(),
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
             gpu: None,

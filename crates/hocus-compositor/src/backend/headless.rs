@@ -317,6 +317,19 @@ where
             Some(position.into()),
         );
         output.set_preferred(mode);
+        // What the Settings offer of it (6.9): its size, and the usual
+        // ones under it, at 60 Hz.
+        output
+            .user_data()
+            .insert_if_missing(|| crate::displays::Facts {
+                modes: crate::displays::headless_modes(spec.width, spec.height, REFRESH_MHZ),
+                preferred: (spec.width, spec.height, REFRESH_MHZ),
+                vrr_capable: false,
+                millimetres: spec.physical_size.unwrap_or((0, 0)),
+                fixed_scale: Some(spec.scale),
+                placed: position,
+                placed_size: crate::displays::logical_size(&output).unwrap_or((1, 1)),
+            });
         add_output(state, &output, position);
         tracing::info!(
             output = name,
@@ -336,6 +349,23 @@ where
             damaged: None,
         });
         self.outputs.sort_by_key(|o| o.output.name());
+        Ok(())
+    }
+
+    /// Output `output` drawn in `mode` from now on: a buffer of its size.
+    fn set_mode(&mut self, output: &Output, mode: crate::displays::Mode3) -> anyhow::Result<()> {
+        let out = self
+            .outputs
+            .iter_mut()
+            .find(|o| o.output == *output)
+            .with_context(|| format!("no output {}", output.name()))?;
+        let target = self
+            .renderer
+            .create_buffer(self.format, (mode.0, mode.1).into())
+            .with_context(|| format!("could not create a {}x{} buffer", mode.0, mode.1))?;
+        out.target = target;
+        output.change_current_state(Some(crate::displays::mode_of(mode)), None, None, None);
+        out.damage_tracker = OutputDamageTracker::from_output(output);
         Ok(())
     }
 
@@ -385,6 +415,10 @@ where
             renderer, outputs, ..
         } = self;
         for out in outputs {
+            // Turned off by the file (6.9): nothing drawn.
+            if state.display_off(&out.output) {
+                continue;
+            }
             let elements = state.output_elements(renderer, &out.output, true);
             let mut framebuffer = match renderer.bind(&mut out.target) {
                 Ok(framebuffer) => framebuffer,
@@ -495,6 +529,21 @@ impl HeadlessBackend {
             Canvas::Gles(c) => c.render(state),
             Canvas::Pixman(c) => c.render(state),
         }
+    }
+
+    /// Output `output` drawn in `mode` (6.9).
+    pub fn set_mode(
+        &mut self,
+        state: &mut State,
+        output: &Output,
+        mode: crate::displays::Mode3,
+    ) -> anyhow::Result<()> {
+        let done = match &mut self.canvas {
+            Canvas::Gles(c) => c.set_mode(output, mode),
+            Canvas::Pixman(c) => c.set_mode(output, mode),
+        };
+        state.redraw = true;
+        done
     }
 
     /// Output `name` goes, as a screen unplugged; its windows go to a

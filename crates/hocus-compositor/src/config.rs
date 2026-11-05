@@ -599,7 +599,7 @@ fn desktop_count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D:
 }
 
 /// One screen's settings, `[outputs.eDP-1]`.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct OutputSettings {
     /// From 0.5 to 4. None: 1 or 2 by its density
@@ -608,6 +608,106 @@ pub struct OutputSettings {
     pub scale: Option<f64>,
     /// The bar's form on this screen, over `[panel] form`.
     pub panel_form: FormChoice,
+    /// `mode = "2560x1600@60"`: its size in pixels and its refresh rate
+    /// (Hz, whole or not). None: the mode it prefers.
+    #[serde(deserialize_with = "mode")]
+    pub mode: Option<ModeWanted>,
+    /// `position = [x, y]`: its top-left corner, logical pixels. Used when
+    /// every screen on has one and they neither overlap nor leave one
+    /// apart; otherwise the screens go left to right.
+    #[serde(deserialize_with = "position")]
+    pub position: Option<(i32, i32)>,
+    /// `enabled = false` turns it off, plugged; its windows go to another.
+    pub enabled: bool,
+    /// Variable refresh rate (VRR, adaptive sync), when it offers it.
+    pub vrr: bool,
+}
+
+impl Default for OutputSettings {
+    fn default() -> Self {
+        Self {
+            scale: None,
+            panel_form: FormChoice::default(),
+            mode: None,
+            position: None,
+            enabled: true,
+            vrr: false,
+        }
+    }
+}
+
+/// A mode asked for in the file: `2560x1600@60`, `1920x1080@59.94`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModeWanted {
+    pub width: i32,
+    pub height: i32,
+    /// In Hz.
+    pub refresh: f64,
+}
+
+impl ModeWanted {
+    /// `2560x1600@60`; the refresh rate may be left out (`2560x1600`: its
+    /// highest).
+    pub fn parse(text: &str) -> Option<Self> {
+        let (size, refresh) = match text.trim().split_once('@') {
+            Some((size, refresh)) => (size, Some(refresh)),
+            None => (text.trim(), None),
+        };
+        let (w, h) = size.split_once('x')?;
+        let width: i32 = w.parse().ok()?;
+        let height: i32 = h.parse().ok()?;
+        let refresh = match refresh {
+            Some(r) => r
+                .parse::<f64>()
+                .ok()
+                .filter(|r| r.is_finite() && *r > 0.0)?,
+            None => 0.0,
+        };
+        (width > 0 && height > 0).then_some(Self {
+            width,
+            height,
+            refresh,
+        })
+    }
+
+    /// Of `modes` (width, height, refresh in mHz), the one asked: that
+    /// size, the refresh rate nearest the one asked within half a hertz,
+    /// or its highest when none was asked.
+    pub fn pick(&self, modes: &[(i32, i32, i32)]) -> Option<(i32, i32, i32)> {
+        let sized = modes
+            .iter()
+            .copied()
+            .filter(|(w, h, _)| (*w, *h) == (self.width, self.height));
+        if self.refresh == 0.0 {
+            return sized.max_by_key(|m| m.2);
+        }
+        let asked = self.refresh * 1000.0;
+        sized
+            .map(|m| (m, (f64::from(m.2) - asked).abs()))
+            .filter(|(_, off)| *off <= 500.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(m, _)| m)
+    }
+}
+
+impl std::fmt::Display for ModeWanted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}@{}", self.width, self.height, self.refresh)
+    }
+}
+
+fn mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<ModeWanted>, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    ModeWanted::parse(&text).map(Some).ok_or_else(|| {
+        serde::de::Error::custom(format!(
+            "mode {text:?}: WIDTHxHEIGHT@HZ, as \"2560x1600@60\""
+        ))
+    })
+}
+
+fn position<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<(i32, i32)>, D::Error> {
+    let [x, y] = <[i32; 2]>::deserialize(deserializer)?;
+    Ok(Some((x, y)))
 }
 
 fn scale<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
@@ -828,6 +928,27 @@ impl Config {
             Err(err) => {
                 tracing::warn!(file = %path.display(), "configuration refused, defaults kept: {err}");
                 Self::default()
+            }
+        }
+    }
+
+    /// The file read again after it changed, off the loop: `None` when it
+    /// does not read, the desktop keeping what it had (said in the log);
+    /// no file is the defaults.
+    pub fn read_again(path: &Path) -> Option<Self> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Some(Self::default()),
+            Err(err) => {
+                tracing::warn!(file = %path.display(), %err, "configuration not read again; kept");
+                return None;
+            }
+        };
+        match toml::from_str(&text) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                tracing::warn!(file = %path.display(), "configuration refused, the last one kept: {err}");
+                None
             }
         }
     }

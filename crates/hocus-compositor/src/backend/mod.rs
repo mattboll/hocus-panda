@@ -58,6 +58,28 @@ impl Backend {
         }
     }
 
+    /// `output` driven in `mode` (6.9): the nested window keeps its own.
+    pub fn set_mode(
+        &mut self,
+        state: &mut State,
+        output: &Output,
+        mode: crate::displays::Mode3,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Winit(_) => anyhow::bail!("the nested window's size is its mode"),
+            Self::Tty(tty) => tty.set_mode(state, output, mode),
+            Self::Headless(headless) => headless.set_mode(state, output, mode),
+        }
+    }
+
+    /// Variable refresh rate on `output`, or off.
+    pub fn set_vrr(&mut self, output: &Output, on: bool) -> anyhow::Result<()> {
+        match self {
+            Self::Tty(tty) => tty.set_vrr(output, on),
+            _ => anyhow::bail!("no VRR here"),
+        }
+    }
+
     pub fn headless(&self) -> Option<&headless::HeadlessBackend> {
         match self {
             Self::Headless(headless) => Some(headless),
@@ -119,6 +141,7 @@ pub type DevId = smithay::reexports::rustix::fs::Dev;
 /// Maps `output` in the space at `position`; its global is the caller's.
 pub fn add_output(state: &mut State, output: &Output, position: (i32, i32)) {
     state.space.map_output(output, position);
+    state.display_added(output);
     state.panel_refresh();
     state.redraw = true;
 }
