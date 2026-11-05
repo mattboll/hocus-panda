@@ -250,6 +250,11 @@ impl State {
             self.tell_shell(hocus_link::ToShell::BarWindows(new.panel.windows));
             followed.push("[panel] windows");
         }
+        // Idleness, locking, sleeping, the lid, the power button and the
+        // power saver (6.10, away/power.rs).
+        if self.power_config_changed(&new) {
+            followed.push("[idle] [power]");
+        }
         if !followed.is_empty() {
             tracing::info!(?followed, "the configuration changed on disk");
         }

@@ -138,7 +138,7 @@ fn record_format<'de, D: Deserializer<'de>>(
 pub struct Idle {
     /// How long without input before the session is idle, on AC (the
     /// curtain then comes before the lock, 7.2); `None`, `"off"` in the
-    /// file: never. On battery, `[power.battery] screen-off` says it.
+    /// file: never. On battery, `[power.battery] idle` says it.
     #[serde(deserialize_with = "idle_delay")]
     pub delay: Option<std::time::Duration>,
 }
@@ -156,51 +156,227 @@ impl Default for Idle {
     }
 }
 
-/// `[power]` (the Settings' Énergie page, docs/design/settings.md): what
-/// the compositor reads of it, the battery's idle delay and when each
-/// source locks (7.2). The rest (the lid, the power button, suspending,
-/// the power saver) is the system's or 6.10's, let through.
+/// `[power]` (the Settings' Énergie page, 6.10, docs/design/settings.md):
+/// the delays of each power source, locking, the lid, the power button and
+/// the automatic power saver. Every value is read leniently: one that does
+/// not read is logged and its default applies, the rest of the file kept;
+/// a key not known refuses the file, as elsewhere. 6.1's keys still read
+/// ([`Power::old`]): `[power.battery] screen-off` is the battery's `idle`
+/// when that is absent, and `[power.*] lock-after` says `lock-on-idle` when
+/// that is absent; neither is written again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[serde(from = "RawPower")]
 pub struct Power {
-    pub ac: PowerSource,
-    pub battery: PowerSource,
+    pub ac: PowerAc,
+    pub battery: PowerBattery,
+    /// The session locks as the dim ends; off, the screens go off after
+    /// it, unlocked.
+    pub lock_on_idle: bool,
+    /// The session locks before the machine sleeps.
+    pub lock_before_sleep: bool,
+    pub lid: Lid,
+    /// Docked (on AC, another screen on), the lid only turns the laptop's
+    /// panel off.
+    pub lid_ignored_when_docked: bool,
+    pub power_button: PowerButton,
+    pub auto_saver: bool,
+    /// The battery level, in percent, at or under which the automatic
+    /// power saver comes on: from 5 to 50.
+    pub auto_saver_below: u8,
+    /// 6.1's keys the file has.
+    pub old: OldKeys,
 }
 
-/// `[power.ac]` or `[power.battery]`: `"0s"`, `"5m"`, `"1h"` or
-/// `"never"`, as the Settings write them; a value that does not read is
-/// taken as not given (and logged), the rest of the file kept.
+/// `[power.ac]`. On AC the dim's delay is `[idle] delay`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PowerAc {
+    /// The screens off this long after the lock (or after the dim, with
+    /// locking off).
+    pub screen_off_after: Delay,
+    /// The machine asleep after this long without activity.
+    pub suspend_after: Delay,
+}
+
+/// `[power.battery]`: the same on battery, and the dim's delay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PowerBattery {
+    /// How long without input before the session is idle (the dim).
+    pub idle: Delay,
+    pub screen_off_after: Delay,
+    pub suspend_after: Delay,
+}
+
+/// 6.1's keys found in the file, and what they were read as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OldKeys {
+    /// `[power.battery] screen-off`, read as `idle` unless that is given.
+    pub screen_off: bool,
+    /// `[power.*] lock-after`, read as `lock-on-idle` unless that is given.
+    pub lock_after: bool,
+    /// The new keys were there too: the old ones were ignored.
+    pub ignored: bool,
+}
+
+/// What closing the lid does (`[power] lid`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
-pub struct PowerSource {
-    /// On battery, how long without input before the session is idle (on
-    /// AC, `[idle] delay`).
-    #[serde(deserialize_with = "power_delay")]
-    pub screen_off: Option<Delay>,
-    /// When the session locks once idle: `"0s"` as the curtain ends, a
-    /// delay after the screens went off, or never.
-    #[serde(deserialize_with = "power_delay")]
-    pub lock_after: Option<Delay>,
+#[serde(rename_all = "kebab-case")]
+pub enum Lid {
+    Suspend,
+    Lock,
+    ScreenOff,
+    Nothing,
 }
 
+/// What a short press of the power button does (`[power] power-button`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PowerButton {
+    /// The session menu opens (7.4).
+    Ask,
+    Suspend,
+    PowerOff,
+    Nothing,
+}
+
+const fn after(seconds: u64) -> Delay {
+    Delay::After(std::time::Duration::from_secs(seconds))
+}
+
+/// 7.2's and 6.1's defaults: the dim at 5 min on AC (`[idle] delay`), 3 on
+/// battery; the screens off 30 s after the lock on AC, 10 s on battery;
+/// asleep never on AC, after 15 min on battery.
 impl Default for Power {
     fn default() -> Self {
         Self {
-            ac: PowerSource::default(),
-            battery: PowerSource {
-                screen_off: Some(Delay::After(IDLE_ON_BATTERY)),
-                ..PowerSource::default()
+            ac: PowerAc {
+                screen_off_after: after(30),
+                suspend_after: Delay::Never,
             },
+            battery: PowerBattery {
+                idle: Delay::After(IDLE_ON_BATTERY),
+                screen_off_after: after(10),
+                suspend_after: after(15 * 60),
+            },
+            lock_on_idle: true,
+            lock_before_sleep: true,
+            lid: Lid::Suspend,
+            lid_ignored_when_docked: true,
+            power_button: PowerButton::Ask,
+            auto_saver: true,
+            auto_saver_below: 20,
+            old: OldKeys::default(),
         }
     }
 }
 
-/// Locked as the curtain ends; on AC, the idle delay is `[idle]`'s.
-impl Default for PowerSource {
-    fn default() -> Self {
+/// `[power]` as the file has it, each value `None` when absent or when it
+/// does not read.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct RawPower {
+    ac: RawSource,
+    battery: RawBattery,
+    #[serde(deserialize_with = "lenient")]
+    lock_on_idle: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    lock_before_sleep: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    lid: Option<Lid>,
+    #[serde(deserialize_with = "lenient")]
+    lid_ignored_when_docked: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    power_button: Option<PowerButton>,
+    #[serde(deserialize_with = "lenient")]
+    auto_saver: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    auto_saver_below: Option<u8>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct RawSource {
+    #[serde(deserialize_with = "power_delay")]
+    screen_off_after: Option<Delay>,
+    #[serde(deserialize_with = "power_delay")]
+    suspend_after: Option<Delay>,
+    /// 6.1's.
+    #[serde(deserialize_with = "power_delay")]
+    lock_after: Option<Delay>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct RawBattery {
+    #[serde(deserialize_with = "power_delay")]
+    idle: Option<Delay>,
+    #[serde(deserialize_with = "power_delay")]
+    screen_off_after: Option<Delay>,
+    #[serde(deserialize_with = "power_delay")]
+    suspend_after: Option<Delay>,
+    /// 6.1's name for `idle`.
+    #[serde(deserialize_with = "power_delay")]
+    screen_off: Option<Delay>,
+    /// 6.1's.
+    #[serde(deserialize_with = "power_delay")]
+    lock_after: Option<Delay>,
+}
+
+impl From<RawPower> for Power {
+    fn from(raw: RawPower) -> Self {
+        let default = Self::default();
+        // 6.1's `lock-after`: `"never"` on every source it names turns
+        // locking off; anything else keeps it on (its delays after the
+        // screens went off are gone: the session locks as the dim ends).
+        let lock_after = [raw.ac.lock_after, raw.battery.lock_after];
+        let old_lock = lock_after
+            .iter()
+            .any(Option::is_some)
+            .then(|| !lock_after.iter().flatten().all(|d| *d == Delay::Never));
+        let old = OldKeys {
+            screen_off: raw.battery.screen_off.is_some(),
+            lock_after: old_lock.is_some(),
+            ignored: (raw.battery.screen_off.is_some() && raw.battery.idle.is_some())
+                || (old_lock.is_some() && raw.lock_on_idle.is_some()),
+        };
         Self {
-            screen_off: None,
-            lock_after: Some(Delay::After(std::time::Duration::ZERO)),
+            ac: PowerAc {
+                screen_off_after: raw
+                    .ac
+                    .screen_off_after
+                    .unwrap_or(default.ac.screen_off_after),
+                suspend_after: raw.ac.suspend_after.unwrap_or(default.ac.suspend_after),
+            },
+            battery: PowerBattery {
+                idle: raw
+                    .battery
+                    .idle
+                    .or(raw.battery.screen_off)
+                    .unwrap_or(default.battery.idle),
+                screen_off_after: raw
+                    .battery
+                    .screen_off_after
+                    .unwrap_or(default.battery.screen_off_after),
+                suspend_after: raw
+                    .battery
+                    .suspend_after
+                    .unwrap_or(default.battery.suspend_after),
+            },
+            lock_on_idle: raw
+                .lock_on_idle
+                .or(old_lock)
+                .unwrap_or(default.lock_on_idle),
+            lock_before_sleep: raw.lock_before_sleep.unwrap_or(default.lock_before_sleep),
+            lid: raw.lid.unwrap_or(default.lid),
+            lid_ignored_when_docked: raw
+                .lid_ignored_when_docked
+                .unwrap_or(default.lid_ignored_when_docked),
+            power_button: raw.power_button.unwrap_or(default.power_button),
+            auto_saver: raw.auto_saver.unwrap_or(default.auto_saver),
+            auto_saver_below: raw
+                .auto_saver_below
+                .filter(|p| (5..=50).contains(p))
+                .unwrap_or(default.auto_saver_below),
+            old,
         }
     }
 }
@@ -230,6 +406,14 @@ impl Delay {
             .filter(|s| *s <= IDLE_MOST)
             .map(|s| Self::After(std::time::Duration::from_secs(s)))
     }
+
+    /// The delay; `None`: never.
+    pub fn time(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Never => None,
+            Self::After(d) => Some(d),
+        }
+    }
 }
 
 fn power_delay<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Delay>, D::Error> {
@@ -241,34 +425,66 @@ fn power_delay<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Dela
     Ok(read)
 }
 
+/// A `[power]` value, or `None` (its default) when it does not read.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = toml::Value::deserialize(deserializer)?;
+    match T::deserialize(value.clone()) {
+        Ok(read) => Ok(Some(read)),
+        Err(err) => {
+            tracing::warn!(%value, %err, "a [power] value that does not read: its default applies");
+            Ok(None)
+        }
+    }
+}
+
+impl Power {
+    /// 6.1's keys the file still has, and what they are read as: for the
+    /// log, as the file is read.
+    pub fn old_keys(&self) -> Vec<&'static str> {
+        let mut old = Vec::new();
+        if self.old.screen_off {
+            old.push("[power.battery] screen-off, read as idle unless idle is set");
+        }
+        if self.old.lock_after {
+            old.push("[power.*] lock-after, read as lock-on-idle unless lock-on-idle is set");
+        }
+        old
+    }
+}
+
 impl Config {
-    /// How long without input before the session is idle, on battery or
-    /// on AC; `None`: never.
+    /// How long without input before the session is idle (the dim), on
+    /// battery or on AC; `None`: never.
     pub fn idle_delay(&self, battery: bool) -> Option<std::time::Duration> {
         if !battery {
             return self.idle.delay;
         }
-        match self.power.battery.screen_off {
-            None => Some(IDLE_ON_BATTERY),
-            Some(Delay::Never) => None,
-            Some(Delay::After(d)) => (!d.is_zero()).then_some(d),
+        self.power.battery.idle.time().filter(|d| !d.is_zero())
+    }
+
+    /// How long after the lock (or after the dim, with locking off) the
+    /// screens go off; `None`: never.
+    pub fn screen_off_after(&self, battery: bool) -> Option<std::time::Duration> {
+        if battery {
+            self.power.battery.screen_off_after.time()
+        } else {
+            self.power.ac.screen_off_after.time()
         }
     }
 
-    /// When the session locks once idle, on battery or on AC: at once as
-    /// the curtain ends (zero, the default), this long after the screens
-    /// went off, or never (`None`).
-    pub fn lock_after(&self, battery: bool) -> Option<std::time::Duration> {
-        let source = if battery {
-            &self.power.battery
+    /// How long without activity before the machine sleeps; `None`:
+    /// never.
+    pub fn suspend_after(&self, battery: bool) -> Option<std::time::Duration> {
+        let delay = if battery {
+            self.power.battery.suspend_after
         } else {
-            &self.power.ac
+            self.power.ac.suspend_after
         };
-        match source.lock_after {
-            None => Some(std::time::Duration::ZERO),
-            Some(Delay::Never) => None,
-            Some(Delay::After(d)) => Some(d),
-        }
+        delay.time().filter(|d| !d.is_zero())
     }
 }
 
@@ -1469,24 +1685,82 @@ mod tests {
         let none = Config::default();
         assert_eq!(none.idle_delay(false), Some(Duration::from_secs(300)));
         assert_eq!(none.idle_delay(true), Some(Duration::from_secs(180)));
-        assert_eq!(none.lock_after(false), Some(Duration::ZERO));
-        assert_eq!(none.lock_after(true), Some(Duration::ZERO));
+        assert_eq!(none.screen_off_after(false), Some(Duration::from_secs(30)));
+        assert_eq!(none.screen_off_after(true), Some(Duration::from_secs(10)));
+        assert_eq!(none.suspend_after(false), None);
+        assert_eq!(none.suspend_after(true), Some(Duration::from_secs(900)));
+        assert!(none.power.lock_on_idle && none.power.lock_before_sleep);
+        assert_eq!(none.power.lid, Lid::Suspend);
+        assert_eq!(none.power.power_button, PowerButton::Ask);
+        assert!(none.power.lid_ignored_when_docked && none.power.auto_saver);
+        assert_eq!(none.power.auto_saver_below, 20);
         let set: Config = toml::from_str(
-            "[idle]\ndelay = 600\n[power]\nlid = \"suspend\"\n\
-             [power.battery]\nscreen-off = \"2m\"\nlock-after = \"5m\"\n\
-             suspend-after = \"15m\"\n[power.ac]\nlock-after = \"never\"\n",
+            "[idle]\ndelay = 600\n[power]\nlid = \"screen-off\"\n\
+             power-button = \"power-off\"\nlock-on-idle = false\n\
+             lock-before-sleep = false\nauto-saver = false\nauto-saver-below = 35\n\
+             lid-ignored-when-docked = false\n\
+             [power.battery]\nidle = \"2m\"\nscreen-off-after = \"0s\"\n\
+             suspend-after = \"5m\"\n[power.ac]\nscreen-off-after = \"5m\"\n\
+             suspend-after = \"1h\"\n",
         )?;
         assert_eq!(set.idle_delay(false), Some(Duration::from_secs(600)));
         assert_eq!(set.idle_delay(true), Some(Duration::from_secs(120)));
-        assert_eq!(set.lock_after(true), Some(Duration::from_secs(300)));
-        assert_eq!(set.lock_after(false), None);
-        let never: Config = toml::from_str("[power.battery]\nscreen-off = \"never\"\n")?;
+        assert_eq!(set.screen_off_after(true), Some(Duration::ZERO));
+        assert_eq!(set.screen_off_after(false), Some(Duration::from_secs(300)));
+        assert_eq!(set.suspend_after(true), Some(Duration::from_secs(300)));
+        assert_eq!(set.suspend_after(false), Some(Duration::from_secs(3600)));
+        assert!(!set.power.lock_on_idle && !set.power.lock_before_sleep);
+        assert_eq!(set.power.lid, Lid::ScreenOff);
+        assert_eq!(set.power.power_button, PowerButton::PowerOff);
+        assert!(!set.power.auto_saver && !set.power.lid_ignored_when_docked);
+        assert_eq!(set.power.auto_saver_below, 35);
+        let never: Config = toml::from_str("[power.battery]\nidle = \"never\"\n")?;
         assert_eq!(never.idle_delay(true), None);
         // A value that does not read: its default, the rest of the file kept.
-        let odd: Config =
-            toml::from_str("[power.battery]\nscreen-off = \"3 heures\"\n[desktops]\ncount = 6\n")?;
+        let odd: Config = toml::from_str(
+            "[power]\nlid = \"explode\"\nauto-saver-below = 90\nlock-on-idle = \"yes\"\n\
+             [power.battery]\nidle = \"3 heures\"\n[desktops]\ncount = 6\n",
+        )?;
         assert_eq!(odd.idle_delay(true), Some(Duration::from_secs(180)));
+        assert_eq!(odd.power.lid, Lid::Suspend);
+        assert_eq!(odd.power.auto_saver_below, 20);
+        assert!(odd.power.lock_on_idle);
         assert_eq!(odd.desktops.count, 6);
+        // A key not known refuses the file, as elsewhere.
+        assert!(toml::from_str::<Config>("[power]\nlid-closed = \"lock\"\n").is_err());
+        assert!(toml::from_str::<Config>("[power.ac]\nidle = \"5m\"\n").is_err());
+        Ok(())
+    }
+
+    /// A file 6.1's Settings wrote: its battery's `screen-off` is the dim's
+    /// delay, its `lock-after` says whether the session locks.
+    #[test]
+    fn a_file_written_by_6_1_keeps_its_battery_screen_off_as_the_dim_delay() -> anyhow::Result<()> {
+        use std::time::Duration;
+        let old: Config = toml::from_str(
+            "[power]\nlid = \"suspend\"\n[power.battery]\nscreen-off = \"2m\"\n\
+             lock-after = \"5m\"\nsuspend-after = \"15m\"\n[power.ac]\nlock-after = \"0s\"\n",
+        )?;
+        assert_eq!(old.idle_delay(true), Some(Duration::from_secs(120)));
+        assert!(old.power.lock_on_idle);
+        assert_eq!(old.power.old_keys().len(), 2);
+        let never: Config = toml::from_str(
+            "[power.battery]\nlock-after = \"never\"\n[power.ac]\nlock-after = \"never\"\n",
+        )?;
+        assert!(!never.power.lock_on_idle);
+        // Locking stays on unless every source said never.
+        let one: Config = toml::from_str(
+            "[power.ac]\nlock-after = \"never\"\n[power.battery]\nlock-after = \"0s\"\n",
+        )?;
+        assert!(one.power.lock_on_idle);
+        // 6.10's keys win over 6.1's.
+        let both: Config = toml::from_str(
+            "[power]\nlock-on-idle = true\n[power.battery]\nidle = \"1m\"\nscreen-off = \"30m\"\n\
+             lock-after = \"never\"\n[power.ac]\nlock-after = \"never\"\n",
+        )?;
+        assert_eq!(both.idle_delay(true), Some(Duration::from_secs(60)));
+        assert!(both.power.lock_on_idle);
+        assert!(both.power.old.ignored);
         Ok(())
     }
 

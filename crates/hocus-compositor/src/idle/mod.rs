@@ -2,10 +2,13 @@
 //! the user's last input, what holds it off, and the clients told.
 //!
 //! - **The countdown** (`[idle] delay` on AC, five minutes by default;
-//!   `[power.battery] screen-off` on battery, three) runs from the user's
+//!   `[power.battery] idle` on battery, three) runs from the user's
 //!   last input. Reaching its end is [`Idle::Reached`], which brings the
 //!   curtain and the lock (7.2, [`crate::away`]); the next input is
 //!   [`Idle::Resumed`].
+//! - **Sleeping** (`[power.*] suspend-after`, 6.10) counts from the same
+//!   activity, held off by the same holds: reaching it asks logind to
+//!   suspend ([`crate::away::power`]), once until the next activity.
 //! - **What holds it off**, each at once: a shown surface's
 //!   `zwp_idle_inhibitor_v1`; an application's `org.freedesktop.ScreenSaver`
 //!   `Inhibit`, until its `UnInhibit` or until it leaves the bus
@@ -173,6 +176,14 @@ pub struct Idleness {
     held: bool,
     /// The timer, and the deadline it is set for.
     timer: Option<(Duration, RegistrationToken)>,
+    /// How long without activity before the machine sleeps; `None`:
+    /// never.
+    suspend: Option<Duration>,
+    /// Where that countdown runs from: the activity's, or later when
+    /// logind's own holds put it off.
+    suspend_from: Duration,
+    /// The machine was asked to sleep since the last activity.
+    suspended: bool,
     /// The surfaces with an idle inhibitor, shown or not.
     inhibitors: Vec<WlSurface>,
     /// The applications' `Inhibit`s, as the bus's thread last said.
@@ -195,6 +206,9 @@ impl Idleness {
             counting_from: Duration::ZERO,
             held: false,
             timer: None,
+            suspend: None,
+            suspend_from: Duration::ZERO,
+            suspended: false,
             inhibitors: Vec::new(),
             screensaver: Vec::new(),
             notifications: Vec::new(),
@@ -213,12 +227,21 @@ impl Idleness {
         {
             take(self.counting_from + delay);
         }
+        if let Some(at) = self.suspend_at() {
+            take(at);
+        }
         for n in &self.notifications {
             if !n.idled && (n.input || !self.held) {
                 take(n.deadline(self.input_at, self.counting_from));
             }
         }
         next
+    }
+
+    /// When the machine is to sleep, unless held off or asked already.
+    fn suspend_at(&self) -> Option<Duration> {
+        let delay = self.suspend?;
+        (!self.held && !self.suspended).then_some(self.suspend_from + delay)
     }
 }
 
@@ -229,6 +252,8 @@ impl State {
         let now = self.now();
         self.idle.input_at = now;
         self.idle.counting_from = now;
+        self.idle.suspend_from = now;
+        self.idle.suspend = self.config.suspend_after(self.on_battery());
         self.idle.phase = match self.idle.delay {
             Some(_) => Phase::Counting,
             None => Phase::Off,
@@ -292,6 +317,26 @@ impl State {
         self.idle_check();
     }
 
+    /// How long without activity before the machine sleeps is now
+    /// `delay` (the power source, or the file, changed): counted from the
+    /// same activity.
+    pub(crate) fn idle_set_suspend(&mut self, delay: Option<Duration>) {
+        if self.idle.suspend == delay {
+            return;
+        }
+        tracing::info!(?delay, "the delay before sleeping changes");
+        self.idle.suspend = delay;
+        self.idle_check();
+    }
+
+    /// logind's own holds kept the machine awake: the countdown to sleep
+    /// starts again from now.
+    pub(crate) fn idle_suspend_put_off(&mut self) {
+        self.idle.suspend_from = self.now();
+        self.idle.suspended = false;
+        self.idle_arm();
+    }
+
     /// Activity: the user's input, or an application saying the user is
     /// there (`SimulateUserActivity`), which only the inhibitors' honouring
     /// notifications take. Every deadline moves on; the timer set for an
@@ -303,6 +348,8 @@ impl State {
             idle.input_at = now;
         }
         idle.counting_from = now;
+        idle.suspend_from = now;
+        idle.suspended = false;
         let resumed = idle.phase == Phase::Reached;
         if resumed {
             idle.phase = if idle.held {
@@ -344,7 +391,9 @@ impl State {
         if held {
             tracing::info!(holders = ?self.idle_holders(), "idle held off");
         } else {
-            self.idle.counting_from = self.now();
+            let now = self.now();
+            self.idle.counting_from = now;
+            self.idle.suspend_from = now;
             tracing::info!("idle no longer held off: the countdown starts again");
         }
         self.idle_arm();
@@ -492,6 +541,10 @@ impl State {
             idle.phase = Phase::Reached;
             idle.counts.reached += 1;
         }
+        let sleeps = idle.suspend_at().is_some_and(|at| now >= at);
+        if sleeps {
+            idle.suspended = true;
+        }
         let (input_at, counting_from, held) = (idle.input_at, idle.counting_from, idle.held);
         for n in &mut idle.notifications {
             if !n.idled && (n.input || !held) && now >= n.deadline(input_at, counting_from) {
@@ -500,6 +553,9 @@ impl State {
         }
         if reached {
             self.idle_event(Idle::Reached);
+        }
+        if sleeps {
+            self.power_idle_suspend();
         }
         self.idle.next()
     }

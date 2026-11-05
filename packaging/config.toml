@@ -267,21 +267,26 @@
 # How long without input (keyboard, pointer, touchpad) on AC before the
 # session is idle, in seconds, from 1 to 86400, or "off". Idle, every
 # screen dims for 10 s (any input lifts it), then the session locks, and
-# the screens go off 30 s later (docs/design/idle.md). A video playing or
-# a call (an application holding the screen on), and a window in full
-# screen with the focus, hold it off; the countdown starts again from
-# zero when they let go. Applications' own idle notifications work either
-# way. The Settings' "Éteindre l'écran après", on AC, writes it.
+# the screens go off [power.ac] screen-off-after later
+# (docs/design/idle.md). A video playing or a call (an application holding
+# the screen on), and a window in full screen with the focus, hold it off;
+# the countdown starts again from zero when they let go. Applications' own
+# idle notifications work either way. The Settings' "Assombrir l'écran
+# après", on AC, writes it.
 # delay = 300
 
 # [power]
-# Written by the Settings' Énergie page (docs/design/settings.md). The
-# lid closed: "suspend", "lock", "screen-off" or "nothing"; kept on with
-# a screen plugged in, on AC; the power button's short press: "ask",
-# "suspend", "power-off" or "nothing"; the automatic power saver, under
-# this battery level (5 to 50 %). The desktop acts on these from 6.10 on;
-# the session always locks before the machine sleeps, and a closed lid
-# turns the laptop's screen off.
+# Written by the Settings' Énergie page (docs/design/settings.md), every
+# key followed live. Whether the session locks as the dim ends (off: the
+# screens go off after it, unlocked) and before the machine sleeps. The
+# lid closed: "suspend", "lock", "screen-off" or "nothing"; only the
+# laptop's screen off when docked (on AC, another screen on); the power
+# button's short press: "ask" (the session menu), "suspend", "power-off"
+# or "nothing" (both only when logind leaves them to the desktop). The
+# automatic power saver, at or under this battery level (5 to 50 %), on
+# battery, through power-profiles-daemon.
+# lock-on-idle = true
+# lock-before-sleep = true
 # lid = "suspend"
 # lid-ignored-when-docked = true
 # power-button = "ask"
@@ -289,17 +294,16 @@
 # auto-saver-below = 20
 
 # [power.battery]
-# On battery: idle after this long without input (the dim, then the lock);
-# when the session locks once idle ("0s": as the dim ends; a delay: that
-# long after the screens went off; "never": the screens only go off); the
-# computer asleep after this long (6.10). "0s", "5m", "1h", or "never".
-# On AC, the idle delay is [idle] delay.
-# screen-off = "3m"
-# lock-after = "0s"
+# On battery: the dim after this long without input; the screens off this
+# long after the lock (or after the dim, locking off); the computer asleep
+# after this long without activity. "0s", "10s", "5m", "1h", or "never".
+# idle = "3m"
+# screen-off-after = "10s"
 # suspend-after = "15m"
 
 # [power.ac]
-# lock-after = "0s"
+# On AC (the dim's delay is [idle] delay).
+# screen-off-after = "30s"
 # suspend-after = "never"
 
 # [programs]
