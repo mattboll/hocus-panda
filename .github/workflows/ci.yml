@@ -140,8 +140,15 @@ jobs:
           done
       - name: Sources older than the programs
         # The tests check that the programs were built from the sources as
-        # they are (none newer). This checkout is newer than the build's.
-        run: git ls-files -z | xargs -0 touch -d '2000-01-01T00:00:00Z'
+        # they are (none newer than each, by its NAME.d list), and this
+        # checkout is newer than the build's. Only those sources are made
+        # older: a test may read its other files' times.
+        run: |
+          zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' \
+            | sed 's/^[^:]*: //; s/\\ /\x00/g' | tr ' ' '\n' | tr '\000' ' ' \
+            | grep -F "$PWD/" | sort -u > sources.txt
+          wc -l sources.txt
+          tr '\n' '\000' < sources.txt | xargs -0 touch -c -d '2000-01-01T00:00:00Z'
       - name: Tests
         # Extracted into this checkout's target/, where the build put them:
         # a test may name a program by the path it was built at
