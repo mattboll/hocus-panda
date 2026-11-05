@@ -1,0 +1,14 @@
+# CI builds once and runs the tests from an archive on other machines
+# (.github/workflows/ci.yml, #633). The compositor's tests start the shell,
+# the Settings and `hocus` from beside their own binary, and check against
+# each one's list of sources (NAME.d) that it is fresh: the archive takes
+# them along.
+[profile.default]
+archive.include = [
+    { path = "debug/hocuspanda-shell", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocuspanda-shell.d", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus.d", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus-settings", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus-settings.d", relative-to = "target", on-missing = "error" },
+]
