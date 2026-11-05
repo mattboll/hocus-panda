@@ -48,6 +48,7 @@ mod auth;
 pub mod backdrop;
 mod capture;
 mod curtain;
+pub mod input;
 mod leave;
 mod lock;
 mod record;

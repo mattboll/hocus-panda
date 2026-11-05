@@ -231,6 +231,8 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// The mice and touchpads, and what they were given (6.12).
+    pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
     pub idle: crate::idle::Idleness,
     /// The render node of the GPU the compositor draws with, which the
@@ -418,6 +420,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            input_devices: crate::input_devices::InputDevices::default(),
             idle,
             gpu: None,
             blur: false,

@@ -88,6 +88,9 @@ pub enum Heard {
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
+    /// A connection that follows the mice and touchpads (`hocus msg
+    /// input-devices follow`): the loop writes to it as they change.
+    Follow(std::os::unix::net::UnixStream),
 }
 
 /// A go-to waiting for herdr's terminal to be found: the agent, its row,
@@ -274,6 +277,15 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
             let Ok(line) = line else {
                 break;
             };
+            if Question::of(&line) == Some(Question::InputDevices { follow: true }) {
+                // The loop keeps it, and writes without waiting.
+                if let Ok(kept) = stream.try_clone()
+                    && sender.send(Heard::Follow(kept)).is_err()
+                {
+                    return;
+                }
+                break;
+            }
             if let Some(question) = Question::of(&line) {
                 // The loop answers; the answer is written back here, off
                 // the loop. One question a connection.
@@ -313,6 +325,10 @@ impl Compositor {
                 self.agents.tools = Some(seen);
             }
             Heard::Herdr(news) => self.herdr_said(news),
+            Heard::Follow(stream) => {
+                self.follow_input_devices(stream);
+                return;
+            }
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
             Heard::Asked(question, reply) => {
                 let answer = match question {
@@ -325,6 +341,14 @@ impl Compositor {
                         tracing::info!("hocus msg lock: the session locks");
                         self.lock_now();
                         "locked\n".to_owned()
+                    }
+                    Question::InputDevices { .. } => {
+                        let said = self.input_devices.said();
+                        if said.is_empty() {
+                            "no mouse or touchpad\n".to_owned()
+                        } else {
+                            said
+                        }
                     }
                 };
                 let _ = reply.send(answer);

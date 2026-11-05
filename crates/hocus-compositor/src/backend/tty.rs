@@ -157,9 +157,15 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
 
     handle
         .insert_source(LibinputInputBackend::new(libinput), |event, _, app| {
-            if let InputEvent::DeviceAdded { device } = &event {
-                let pointer = device.has_capability(DeviceCapability::Pointer);
-                tracing::info!(device = device.name(), pointer, "input device");
+            match &event {
+                InputEvent::DeviceAdded { device } => {
+                    let pointer = device.has_capability(DeviceCapability::Pointer);
+                    tracing::info!(device = device.name(), pointer, "input device");
+                    // [pointer] and [touchpad] given as it comes (6.12).
+                    app.state.input_device_added(device.clone());
+                }
+                InputEvent::DeviceRemoved { device } => app.state.input_device_removed(device),
+                _ => {}
             }
             app.state.process_input_event(event);
         })
