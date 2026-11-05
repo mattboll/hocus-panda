@@ -690,10 +690,29 @@ impl State {
                 self.screen_turned_off(output);
             }
         }
+        // Screens turned on again: laid out with the others, their
+        // windows back once all are in place.
+        let back: Vec<Output> = outputs
+            .iter()
+            .filter(|o| {
+                let name = o.name();
+                self.displays.off.contains(&name) && wanted_on(&self.config, &name)
+            })
+            .cloned()
+            .collect();
+        for output in &back {
+            let name = output.name();
+            tracing::info!(output = name, "a screen turned on by the file");
+            self.displays.off.remove(&name);
+            self.displays.off_places.remove(&name);
+        }
         let on: Vec<(Output, Wanted)> = wanted
             .into_iter()
             .filter(|(o, _)| !self.display_off(o) || !any_on)
             .collect();
+        // The windows still where a screen gone put them: still so once
+        // the screens moved.
+        let put = self.still_put();
         // Where each was, and its windows, before anything moves.
         let before: Vec<Before> = on
             .iter()
@@ -787,28 +806,17 @@ impl State {
                 self.space.map_output(output, *place);
             }
         }
-        // Screens turned on again: their windows come back.
-        let back: Vec<Output> = outputs
-            .iter()
-            .filter(|o| {
-                let name = o.name();
-                self.displays.off.contains(&name) && wanted_on(&self.config, &name)
-            })
-            .cloned()
-            .collect();
-        for output in &back {
-            let name = output.name();
-            tracing::info!(output = name, "a screen turned on by the file");
-            self.displays.off.remove(&name);
-            let place = self.displays.off_places.remove(&name).unwrap_or((0, 0));
-            output.change_current_state(None, None, None, Some(place.into()));
-            self.space.map_output(output, place);
+        // Windows follow their screen, into its work area as its layers
+        // leave it at its new size.
+        for (output, _, _) in &before {
+            layer_map_for_output(output).arrange();
         }
-        if !back.is_empty() {
-            // Its place among the others now that it is on.
-            self.displays.wanted = true;
+        // The bars at their screens' new scale and form first: the work
+        // areas are theirs.
+        for output in &scaled {
+            self.bar_rescaled(&output.name());
         }
-        // Windows follow their screen.
+        self.panel_refresh();
         let mut moved = Vec::new();
         for (output, was, windows) in before {
             let now = self
@@ -828,13 +836,7 @@ impl State {
                 });
             }
         }
-        for crate::screens::Moved { output, .. } in &moved {
-            layer_map_for_output(output).arrange();
-        }
-        self.screens_moved(moved);
-        for output in &scaled {
-            self.bar_rescaled(&output.name());
-        }
+        self.screens_moved(moved, &put);
         for output in &back {
             self.output_back(output);
         }
@@ -1078,7 +1080,10 @@ fn follow(file: PathBuf, sender: channel::Sender<Reread>) {
         .spawn(move || {
             let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 4096];
             let mut reader = inotify::Reader::new(&fd, &mut buffer);
-            let mut last: Option<String> = std::fs::read_to_string(&file).ok();
+            // Nothing read yet: the first change is always handed on (a
+            // text read now could already be that change's), the loop
+            // telling what it changes.
+            let mut last: Option<String> = None;
             loop {
                 match reader.next() {
                     Ok(event) => {

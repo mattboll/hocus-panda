@@ -742,3 +742,114 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, "unplugged.png")?;
     Ok(())
 }
+
+#[test]
+fn windows_go_along_with_their_screen() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, FILE)?;
+    let config = Config {
+        file: Some(file.clone()),
+        ..Config::default()
+    };
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec!["1920x1080@1".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )?;
+    let before = common::open(&mut hp, "carried", (700, 500))?;
+    let area = hp
+        .work_area_of("HEADLESS-1")
+        .ok_or_else(|| anyhow::anyhow!("no area"))?;
+    // The screen at 1.5: 1280 × 720 logical; the window keeps its share of
+    // the work area, inside it.
+    std::fs::write(
+        &file,
+        format!("{FILE}\n[outputs.HEADLESS-1]\nscale = 1.5\n"),
+    )?;
+    let seen = hp.dispatch_until(WAIT, |hp| {
+        hp.outputs().first().is_some_and(|(_, r)| r.width == 1280)
+    })?;
+    anyhow::ensure!(seen, "never scaled: {:?}", hp.outputs());
+    wait(&mut hp, Duration::from_millis(200))?;
+    let now_area = hp
+        .work_area_of("HEADLESS-1")
+        .ok_or_else(|| anyhow::anyhow!("no area"))?;
+    let after = common::rect_of(&hp, "carried").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let share = |r: Rect, a: Rect| {
+        (
+            (f64::from(r.x) + f64::from(r.width) / 2.0 - f64::from(a.x)) / f64::from(a.width),
+            (f64::from(r.y) + f64::from(r.height) / 2.0 - f64::from(a.y)) / f64::from(a.height),
+        )
+    };
+    eprintln!("before {before:?} in {area:?}, after {after:?} in {now_area:?}");
+    assert!(
+        after.x >= now_area.x
+            && after.y >= now_area.y
+            && after.x + after.width <= now_area.x + now_area.width
+            && after.y + after.height <= now_area.y + now_area.height,
+        "{after:?} out of {now_area:?}"
+    );
+    let (b, a) = (share(before, area), share(after, now_area));
+    assert!(
+        (b.0 - a.0).abs() < 0.05 && (b.1 - a.1).abs() < 0.05,
+        "{b:?} {a:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_window_goes_back_to_its_screen_turned_on_again() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, FILE)?;
+    let config = Config {
+        file: Some(file.clone()),
+        ..Config::default()
+    };
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec!["1920x1080@1".parse()?, "1920x1080@1".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )?;
+    // On the second screen.
+    hp.pointer_move(2880.0, 540.0);
+    let first = common::open(&mut hp, "away", (600, 400))?;
+    anyhow::ensure!(first.x >= 1920, "{first:?}");
+    // Turned off: the window goes to the first screen.
+    std::fs::write(
+        &file,
+        format!("{FILE}\n[outputs.HEADLESS-2]\nenabled = false\n"),
+    )?;
+    let gone = hp.dispatch_until(WAIT, |hp| {
+        hp.outputs().len() == 1 && common::rect_of(hp, "away").is_some_and(|r| r.x < 1920)
+    })?;
+    anyhow::ensure!(
+        gone,
+        "{:?} {:?}",
+        hp.outputs(),
+        common::rect_of(&hp, "away")
+    );
+    // On again while the first one's scale changes: it goes back all the
+    // same, the desktop having moved it, not the user.
+    std::fs::write(
+        &file,
+        format!("{FILE}\n[outputs.HEADLESS-1]\nscale = 1.5\n"),
+    )?;
+    let back = hp.dispatch_until(WAIT, |hp| {
+        hp.outputs().len() == 2 && common::rect_of(hp, "away").is_some_and(|r| r.x >= 1280)
+    })?;
+    anyhow::ensure!(
+        back,
+        "{:?} {:?}",
+        hp.outputs(),
+        common::rect_of(&hp, "away")
+    );
+    Ok(())
+}

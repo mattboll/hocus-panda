@@ -8,7 +8,8 @@
 #   scripts/vm/debian.sh copy          copy target/debug's hocuspanda and its shell into it
 #   scripts/vm/debian.sh install DEB   install a .deb (packaging/deb/build.sh)
 #   scripts/vm/debian.sh ssh [cmd…]    a shell, or a command, as the test user
-#   scripts/vm/debian.sh screen FILE   save what the VM's screen shows (PNG)
+#   scripts/vm/debian.sh screen FILE [HEAD]  save what the VM's screen shows
+#                                      (PNG; HEAD: its second screen, 1)
 #   scripts/vm/debian.sh keys K…       press keys on its keyboard (QEMU names:
 #                                      ctrl-alt-f2, a, ret…)
 #   scripts/vm/debian.sh mouse DX DY   move its mouse by so many pixels
@@ -21,6 +22,8 @@
 # HOCUS_VM_NAME names an instance (its directory there; `debian` by
 # default): another name, with other HOCUS_VM_SSH_PORT and
 # HOCUS_VM_HTTP_PORT, runs a second VM beside the first.
+# HOCUS_VM_HEADS=2 gives its GPU two screens (connectors Virtual-1 and
+# Virtual-2), for the screens' settings (6.9).
 # HOCUS_VM_DISPLAY=gtk shows its screen in a window of the current
 # session, its keyboard and mouse for a person to try it by hand (any QEMU
 # display backend; `none` by default). Ctrl+Alt+G lets the keyboard go,
@@ -35,6 +38,11 @@ SSH_PORT="${HOCUS_VM_SSH_PORT:-2522}"
 HTTP_PORT="${HOCUS_VM_HTTP_PORT:-2580}"
 MEMORY="${HOCUS_VM_MEMORY:-4G}"
 CPUS="${HOCUS_VM_CPUS:-4}"
+HEADS="${HOCUS_VM_HEADS:-1}"
+# A second screen is lit once a display asks for it: a VNC server on a
+# socket, which `head-on` asks (SetDesktopSize).
+SECOND_HEAD=""
+[ "$HEADS" -gt 1 ] && SECOND_HEAD="-vnc unix:$WORK/vnc1,display=gpu0,head=1"
 DISPLAY_BACKEND="${HOCUS_VM_DISPLAY:-none}"
 # A window's keyboard is the VM's while the pointer is over it, so that the
 # host session's shortcuts reach the session tried there.
@@ -135,7 +143,8 @@ up() {
         -drive file="$WORK/disk.qcow2",if=virtio \
         -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
         -smbios type=1,serial="ds=nocloud;s=http://10.0.2.2:$HTTP_PORT/" \
-        -device virtio-vga,id=gpu0 -display "$DISPLAY_BACKEND" \
+        -device virtio-vga,id=gpu0,max_outputs="$HEADS" -display "$DISPLAY_BACKEND" \
+        $SECOND_HEAD \
         -global PIIX4_PM.disable_s3=0 \
         -monitor unix:"$WORK/monitor",server,nowait \
         -qmp unix:"$WORK/qmp",server,nowait \
@@ -204,7 +213,7 @@ case "${1:-}" in
     screen)
         # QEMU writes the file itself: an absolute path.
         file=$(realpath -m "$2")
-        qmp_command "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"$file\",\"device\":\"gpu0\",\"format\":\"png\"}}" >/dev/null
+        qmp_command "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"$file\",\"device\":\"gpu0\",\"head\":${3:-0},\"format\":\"png\"}}" >/dev/null
         sleep 0.5
         echo "$file" ;;
     mouse) qmp "{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$2}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$3}}" ;;

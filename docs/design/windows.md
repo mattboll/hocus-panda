@@ -479,7 +479,9 @@ tops aligned), `enabled = false` (off, plugged: its windows go to another
 as for a screen unplugged; the last screen on stays on) and `vrr = true`.
 The compositor follows the file as it changes (a thread waits in inotify
 on its folder, then the loop applies `[outputs]` and `[panel] output`):
-windows go along with their screen, at the same share of its work area.
+windows go along with their screen, at the same share of its work area
+(a window the desktop moved so is still the one a screen turned on again,
+or plugged back, takes back).
 A mode can also be tried by the Settings without the file: the
 compositor takes it back by itself after 15 s, or when the Settings go,
 unless it is kept.

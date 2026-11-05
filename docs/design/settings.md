@@ -441,6 +441,8 @@ of two screens (2560 × 1600 at 1, 3440 × 1440):
 - `a_resolution_kept_with_garder_is_written`
 - `a_resolution_not_kept_goes_back_after_15_s_on_the_held_clock`
 - `the_compositor_follows_the_files_screens`
+- `windows_go_along_with_their_screen`
+- `a_window_goes_back_to_its_screen_turned_on_again`
 - `searching_hidpi_and_miroir_finds_the_scale_and_mirroring`
 - `at_rest_the_screens_page_commits_nothing`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)

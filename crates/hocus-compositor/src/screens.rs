@@ -269,7 +269,7 @@ impl State {
     /// Screens moved or resized (6.9: a mode, a scale, a place): the
     /// windows on each go along, at the same share of its work area,
     /// snapped ones in their zone, fullscreen ones over it.
-    pub(crate) fn screens_moved(&mut self, moved: Vec<Moved>) {
+    pub(crate) fn screens_moved(&mut self, moved: Vec<Moved>, put: &[WindowId]) {
         for Moved {
             output,
             was_area,
@@ -294,8 +294,30 @@ impl State {
                     .map(|r| model::carried(r, was_area, area));
                 let desktop = self.model.desktop(id);
                 self.relocate(id, &output, desktop, placed, restore);
+                // Moved by the desktop, not by the user: a window that came
+                // from a screen gone still goes back when it returns.
+                if put.contains(&id)
+                    && let Some(now) = self.put_now(id)
+                    && let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.as_mut())
+                {
+                    came.put = now;
+                }
             }
         }
+    }
+
+    /// The windows that came from a screen gone and are still where they
+    /// were put, before the screens move (6.9).
+    pub(crate) fn still_put(&self) -> Vec<WindowId> {
+        self.windows
+            .iter()
+            .filter(|(id, m)| {
+                m.came_from
+                    .as_ref()
+                    .is_some_and(|c| self.put_now(**id).as_ref() == Some(&c.put))
+            })
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// Whether `output` is one of the desktop's screens: an unplugged one
