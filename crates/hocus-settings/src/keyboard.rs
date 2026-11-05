@@ -489,6 +489,22 @@ fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
 }
 
 /// The section's settings: the keyboard's, then every shortcut.
+/// The page's rows the model does not hold, for the search and the
+/// other pages' links: the desktop's shortcuts' row (6.14's link).
+pub fn outside() -> &'static [crate::model::Outside] {
+    const ALL: [crate::model::Outside; 1] = [crate::model::Outside {
+        id: crate::desktops::SHORTCUTS,
+        section: SectionId::Keyboard,
+        group: w("RACCOURCIS", "SHORTCUTS"),
+        name: w("Raccourcis du bureau", "Desktop shortcuts"),
+        keywords: (
+            &["raccourcis", "touches", "combinaisons"],
+            &["shortcuts", "keys", "bindings"],
+        ),
+    }];
+    &ALL
+}
+
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {

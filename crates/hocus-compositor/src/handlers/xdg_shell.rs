@@ -27,6 +27,7 @@ use smithay::{
     },
 };
 
+use crate::grabs::EdgesExt as _;
 use crate::{
     State,
     model::{Edges, Mode, Zone},
@@ -285,6 +286,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
         let window = state.unmapped[index].clone();
         if let Some(toplevel) = window.toplevel() {
             if !toplevel.is_initial_configure_sent() {
+                state.rule_size_first(&window, toplevel);
                 toplevel.send_configure();
                 return;
             }
@@ -360,6 +362,21 @@ impl State {
         // A request after the first configure is answered with another.
         if surface.is_initial_configure_sent() {
             surface.send_configure();
+        }
+    }
+
+    /// A window's first configure: its application's rule's size (6.14,
+    /// rules.rs), unless it asked to open as something already.
+    fn rule_size_first(&mut self, window: &Window, toplevel: &ToplevelSurface) {
+        let asked = self
+            .opens_as
+            .iter()
+            .any(|(s, _)| s == toplevel.wl_surface());
+        if asked {
+            return;
+        }
+        if let Some(mode) = self.opening_rule(window).and_then(|r| r.size.mode()) {
+            self.open_as(toplevel, Some(mode));
         }
     }
 

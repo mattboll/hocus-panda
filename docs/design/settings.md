@@ -943,6 +943,90 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   the shell's own surfaces; the sample agents are drawn as the mockup's
   heads, not the pandas' pictures.
 
+## Bureaux et fenêtres (6.14)
+
+Issue #448, variant A (one page by subject), as the issue's spec and its
+"Decided (2026-11-05)" specify it: focus on click only (the draft's focus
+rows are dropped, the group is "ALT+TAB"); a desktop removed while it has
+windows gives them to the one before it; Super chosen to move turns the
+ink off; every key is followed live (windows.md §5, §6, §9, §11, §12,
+ink.md). Section `desktops` (`hocus settings desktops`), TRAVAIL's first
+row. The rules per application ("RÈGLES PAR APPLICATION") come with their
+own pull request.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| BUREAUX ("4 bureaux par écran") | Nombre de bureaux | − the number + (32 × 32; − at 1 and + at 9 at 45 %, inert) | `[desktops] count` |
+| | Leurs noms | a chip per desktop (its number, its name or "Bureau N" faint, a ✕ but with one left; its tooltip "Travail · 3 fenêtres" when the compositor says them), then "+ Ajouter un bureau" (gone at 9) | `[desktops] names` |
+| DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
+| | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
+| | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
+| ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
+| DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
+
+- **Under the title**: "Les raccourcis des fenêtres et des bureaux se
+  règlent dans Clavier et raccourcis ›", which opens 6.8 with its
+  "Raccourcis du bureau" row lit.
+- **A name**: a click (or `Enter`/`Space`) on it makes it a 128 px field,
+  its text selected, 24 characters at most; `Enter`, `Tab` or a click
+  elsewhere writes `names` ("Nom du bureau 4 : Projet", "Annuler"), `Esc`
+  keeps the old one (and does not empty the search); an empty name
+  writes `""`, the placeholder comes back. Names past the count and the
+  empty ones last are left out of the file.
+- **Adding** (+, "+ Ajouter un bureau") writes the count ("Bureau 5
+  ajouté, sur chaque écran"): the compositor appends an empty desktop on
+  every screen. **Taking out** (✕, or − for the last) asks the compositor
+  first on the screens' line (`desktop-remove N`): it gives the desktop's
+  windows to the one before it (the first's to the next one) and answers
+  which moved; the page then writes the count and the names moved up
+  ("« Courrier » retiré : ses 2 fenêtres passent sur « Travail »",
+  "Annuler"). "Annuler" asks `desktop-restore N ID…` (its windows go back
+  with it), then writes the file back; its redo takes it out again the
+  same way. Without a compositor's answer within 2 s (or none listening),
+  the file is written anyway. The compositor's line says each desktop's
+  windows, every screen's together, as they change (windows.md §12).
+- **Not now**: with `[appearance] reduced-motion`, the wobble's row is at
+  45 %, inert, its line in amber "Coupées tant que Mouvements réduits est
+  activé." with "Apparence et langue ›" (6.2's row lit); its key keeps its
+  value. With `move-modifier = "super"` the ink's row is at 45 %, "Super +
+  glisser déplace les fenêtres : l'encre ne se lance plus. Choisis Alt
+  pour la retrouver.", and choosing Super says so in its toast
+  ("Déplacer : Super + glisser · l'encre ne se lance plus").
+- **ESSAYER ICI** ("Ce que tu fais ici n'est pas écrit"), under
+  DÉPLACER ET ANCRER: a 30 px "Tenir Alt" button (it follows the move key:
+  "Tenir Super"; "Aucune touche" at 45 %, inert; held, the accent and
+  "Alt tenue"; `Space` toggles it) with "Comme si tu tenais Alt : glisse
+  « Notes » par son contenu."; a 640 × 230 screen at the desktop's real
+  sizes, a fixed "Terminal" (210 × 140 at 24, 28) and "Notes" (184 × 124,
+  the focused rim, a 22 px title bar); then what happened ("Collée au
+  Terminal, à 8 px : glisse encore pour la décoller.", "Lâche-la ici : la
+  moitié gauche.", "Ancrée : la moitié gauche. Glisse-la pour lui rendre
+  sa taille.", "Sans Alt, le clic irait à l'application. Tiens Alt (le
+  bouton au-dessus) pour la saisir ici.") and the motion's state ("Elle
+  ondule pendant le geste et se pose en 400 ms.", "Mouvements réduits :
+  elle se déplace d'un bloc…"). Notes moves by its title bar, or by its
+  content while the key is held (the button, or the real key when the
+  host lets it through). It follows the page's switches live, with the
+  compositor's own code: the crate `hocus-geometry` holds the rectangles,
+  the snap zones (the compositor's 24 px edges and 48 px corners, the
+  zone taken in a 200 ms spring, its size given back when dragged 12 px
+  away) and the magnet (12 px, the 8 px gap), which both use. The wobble
+  is a shear of its top following the window's speed (not the magnet's
+  jumps), settling with an overshoot in about 400 ms; none without it or
+  with reduced motion, where the zone is taken at once. Nothing in it is
+  written.
+- **The search** finds the rows by their names, the spec's words in both
+  languages (espaces de travail, aimant, moitié, quart, ondule, encre,
+  laser; workspaces, magnet, snap, tiling, wobbly, ink) and their keys
+  (`count`, `names`, `move-modifier`, `snap-by-drag`, `wobble`,
+  `alt-tab`); "Raccourcis du bureau" is Clavier et raccourcis' own row.
+- **Choices made here (to confirm on the machine)**: the toast of a name
+  says "Nom du bureau N : …"; the ink's line in amber like the wobble's;
+  the stepper's − and + are text glyphs; a chip with its field open grows
+  and the chips after it wrap; the trial's zones use the compositor's
+  thresholds (24 px edges, 48 px corners) rather than the mockup's smaller
+  ones, and its preview shows at once, without the desktop's 80 ms wait.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
