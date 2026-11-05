@@ -13,7 +13,7 @@ use unicode_normalization::UnicodeNormalization as _;
 
 use crate::{
     lang::Lang,
-    model::{SectionId, Setting, all_settings},
+    model::{Outside, SectionId, Setting, all_settings, outside_of},
 };
 
 /// At most this many results.
@@ -24,6 +24,8 @@ pub const MOST: usize = 8;
 pub enum Target {
     Section(SectionId),
     Setting(&'static Setting),
+    /// A setting outside the file (the Son page's).
+    Outside(&'static Outside),
 }
 
 impl Target {
@@ -31,6 +33,7 @@ impl Target {
         match self {
             Self::Section(id) => id,
             Self::Setting(setting) => setting.section,
+            Self::Outside(outside) => outside.section,
         }
     }
 
@@ -39,6 +42,7 @@ impl Target {
         match self {
             Self::Section(id) => id.section().slug.to_owned(),
             Self::Setting(setting) => setting.id.to_owned(),
+            Self::Outside(outside) => outside.id.to_owned(),
         }
     }
 }
@@ -167,6 +171,24 @@ fn entries(lang: Lang) -> Vec<Entry> {
             section: section_names(setting.section),
         });
     }
+    for outside in SectionId::ALL.into_iter().flat_map(outside_of) {
+        let name = outside.name.get(lang);
+        let (fr, en) = outside.keywords;
+        let mut near: Vec<(String, Vec<char>)> = fr
+            .iter()
+            .chain(en.iter())
+            .map(|word| ((*word).to_owned(), chars(word)))
+            .collect();
+        let other_name = outside.name.get(other);
+        near.push((other_name.to_owned(), chars(other_name)));
+        list.push(Entry {
+            target: Target::Outside(outside),
+            name,
+            folded: folded(name),
+            near,
+            section: section_names(outside.section),
+        });
+    }
     list
 }
 
@@ -209,7 +231,9 @@ pub fn find(query: &str, lang: Lang) -> Vec<Found> {
             name: entry.name,
             hit: at.map(|i| entry.folded.bytes(i, first.len())),
             via: match (at, entry.target) {
-                (None, Target::Setting(_)) => via.map(|(word, _)| word.clone()),
+                (None, Target::Setting(_) | Target::Outside(_)) => {
+                    via.map(|(word, _)| word.clone())
+                }
                 _ => None,
             },
             rank,

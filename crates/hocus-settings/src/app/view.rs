@@ -51,7 +51,7 @@ impl App {
     pub fn view(&self) -> El<'_> {
         let base = row![self.sidebar(), self.content()];
         let mut layers: Vec<El<'_>> = vec![base.into()];
-        if let Some(menu) = self.menu_list() {
+        if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .on_press(Message::CloseMenu)
@@ -306,6 +306,11 @@ impl App {
             };
             let mut path = match found.target {
                 Target::Section(_) => w("Toute la page", "The whole page").get(lang).to_owned(),
+                Target::Outside(outside) => format!(
+                    "{} › {}",
+                    section.name.get(lang),
+                    capitalised(outside.group.get(lang))
+                ),
                 Target::Setting(setting) if setting.kind == Kind::Shortcut => format!(
                     "{} › {} › {}",
                     section.name.get(lang),
@@ -706,6 +711,7 @@ impl App {
                     (None, Lang::English) => format!("On AC · {suspend}"),
                 }
             }
+            SectionId::Sound => self.sound_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
                 .to_owned(),
@@ -730,6 +736,10 @@ impl App {
         ]
         .spacing(18)
         .padding(Padding::default().top(14));
+        if id == SectionId::Sound {
+            page = page.push(self.sound_groups());
+            return container(page).id(format!("page:{}", section.slug)).into();
+        }
         if id == SectionId::Mouse {
             return self.mouse_page(page);
         }
@@ -1146,22 +1156,18 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
-            ToastAction::Undo => Some(w("Annuler", "Undo")),
-            ToastAction::Show(_) => Some(w("Voir", "Show")),
+            ToastAction::Undo => Some(w("Annuler", "Undo").get(lang).to_owned()),
+            ToastAction::Show(_) => Some(w("Voir", "Show").get(lang).to_owned()),
+            ToastAction::Sound(act) => Some(self.sound_act_label(act)),
             ToastAction::None => None,
         };
         if let Some(action) = action {
             line = line.push(
                 container(
-                    button(
-                        text(action.get(lang))
-                            .size(13)
-                            .font(BOLD)
-                            .color(fade(MINT, came)),
-                    )
-                    .padding([4, 6])
-                    .on_press(Message::ToastAct)
-                    .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
+                    button(text(action).size(13).font(BOLD).color(fade(MINT, came)))
+                        .padding([4, 6])
+                        .on_press(Message::ToastAct)
+                        .style(flat(None, rgba(255, 255, 255, 0.06), 6.0, false)),
                 )
                 .id("toast-action".to_owned()),
             );
@@ -1455,6 +1461,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
     let action = app.toast.as_ref().and_then(|t| match t.action {
         ToastAction::Undo => Some("undo"),
         ToastAction::Show(_) => Some("show"),
+        ToastAction::Sound(_) => Some("sound"),
         ToastAction::None => None,
     });
     let cards: Vec<serde_json::Value> = [
@@ -1485,6 +1492,11 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "menu": app.menu.map(|(slot, _)| slot.word()),
         "cards": if app.page == Page::Home { serde_json::json!(cards) } else { serde_json::Value::Null },
         "undo": app.undo.len(),
+        "sound": if app.page == Page::Section(SectionId::Sound) {
+            app.sound_shown()
+        } else {
+            serde_json::json!({ "listening": app.sound.listening() })
+        },
         "scale": app.scale,
         "screens": if app.page == Page::Section(SectionId::Screens) { app.screens_shown() } else { serde_json::Value::Null },
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },

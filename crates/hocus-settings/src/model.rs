@@ -181,8 +181,8 @@ impl SectionId {
                 Devices,
                 w("Son", "Sound"),
                 w(
-                    "Les sorties, les entrées et leurs profils.",
-                    "The outputs, the inputs and their profiles.",
+                    "Les sorties, les entrées et leurs profils ; le volume de chaque application.",
+                    "Outputs, inputs and their profiles; each application's volume.",
                 ),
                 Icon::Sound,
                 "6.5",
@@ -876,6 +876,37 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Keyboard => crate::keyboard::settings(),
         _ => &[],
     }
+}
+
+/// A setting that lives outside the file (in PipeWire, for one): its
+/// section's page draws its row, with the id `row:{id}`, and the search
+/// finds it as it finds the file's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Outside {
+    /// `sound.output`.
+    pub id: &'static str,
+    pub section: SectionId,
+    /// Its group's label.
+    pub group: Words,
+    pub name: Words,
+    /// Nearby words, French then English.
+    pub keywords: (&'static [&'static str], &'static [&'static str]),
+}
+
+/// The settings of `section` that live outside the file.
+pub fn outside_of(section: SectionId) -> &'static [Outside] {
+    match section {
+        SectionId::Sound => crate::sound::outside(),
+        _ => &[],
+    }
+}
+
+/// The setting outside the file `id`.
+pub fn outside(id: &str) -> Option<&'static Outside> {
+    SectionId::ALL
+        .into_iter()
+        .flat_map(|section| outside_of(section).iter())
+        .find(|o| o.id == id)
 }
 
 /// Every setting, section after section.

@@ -49,8 +49,9 @@ const OUTPUTS: [FakeSink; 3] = [
 const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
 const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
 /// The popover with three outputs, no microphone and no application
-/// playing: 280 × 332, 8 px left of the bar, its bottom on the bar's.
-const POPOVER: Rect = popover(332);
+/// playing: 280 × 377 (the Settings' link at its bottom), 8 px left of
+/// the bar, its bottom on the bar's.
+const POPOVER: Rect = popover(377);
 /// Its mute button, its slider's ends (the knob's centre at 0 and 100 %),
 /// and its outputs' rows, in it.
 const MUTE: (i32, i32) = (31, 69);
@@ -58,7 +59,7 @@ const SLIDER: (i32, i32, i32) = (63, 213, 69);
 const OUTPUT_Y: [i32; 3] = [152, 190, 228];
 /// The mini bar's gauge, and its popover.
 const MINI_GAUGE: (f64, f64) = (1920.0 - 8.0 - 1.0 - 27.0, (1080 - 8 - 41 - 176 + 40) as f64);
-const MINI_POPOVER: Rect = Rect::new(1920 - 8 - 56 - 8 - 280, 1080 - 8 - 332, 280, 332);
+const MINI_POPOVER: Rect = Rect::new(1920 - 8 - 56 - 8 - 280, 1080 - 8 - 377, 280, 377);
 
 /// The full bar's popover, `height` tall.
 const fn popover(height: i32) -> Rect {
@@ -570,7 +571,7 @@ fn with_one_output_it_is_shorter_and_on_a_taller_screen_still_at_the_bottom() ->
     // The bar's height is the screen's less 16 px: its row, 120 px lower.
     let mut hp = start_on(&fakes, &shell, 1200)?;
     click(&mut hp, (ROW.0, ROW.1 + 120.0))?;
-    let rect = Rect::new(POPOVER.x, 1200 - 8 - 256, 280, 256);
+    let rect = Rect::new(POPOVER.x, 1200 - 8 - 301, 280, 301);
     popover_is(&mut hp, Some(rect))?;
     Ok(())
 }
@@ -621,7 +622,7 @@ fn the_microphone_its_mute_its_volume_and_which_one() -> anyhow::Result<()> {
     fakes.wpctl(&["set-volume", &fakes.sink(MIC)?.to_string(), "0.70"])?;
     let mut hp = start(&fakes, &shell)?;
     // Its section: its row, and the two to choose from.
-    let rect = popover(495);
+    let rect = popover(540);
     click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(rect))?;
     // Muted, then unmuted by its slider, as the master's.
@@ -659,7 +660,7 @@ fn one_microphone_has_no_list_and_none_hides_its_section() -> anyhow::Result<()>
     let fakes = Fakes::start_with_sources(&OUTPUTS, &MICROPHONES[..1])?;
     let mut hp = start(&fakes, &shell)?;
     click(&mut hp, ROW)?;
-    popover_is(&mut hp, Some(popover(415)))?;
+    popover_is(&mut hp, Some(popover(460)))?;
     Ok(())
 }
 
@@ -678,7 +679,7 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     fakes.pause("hocus-test-paused", true)?;
     let mut hp = start(&fakes, &shell)?;
     // Two rows: Firefox's (its two tabs), the music's; not the paused one.
-    let two = popover(405);
+    let two = popover(450);
     click(&mut hp, ROW)?;
     popover_is(&mut hp, Some(two))?;
 
@@ -726,12 +727,12 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
 
     // The paused player plays again: its row comes, the popover grows.
     fakes.pause("hocus-test-paused", false)?;
-    popover_is(&mut hp, Some(popover(457)))?;
+    popover_is(&mut hp, Some(popover(502)))?;
     // A tab paused: Firefox keeps its row while the popover is open.
     fakes.pause("hocus-test-tab-1", true)?;
     fakes.pause("hocus-test-tab-2", true)?;
     wait(&mut hp, Duration::from_millis(500))?;
-    assert_eq!(popovers(&hp), vec![popover(457)]);
+    assert_eq!(popovers(&hp), vec![popover(502)]);
     // Its streams gone, its row goes.
     fakes.stop("hocus-test-tab-1");
     fakes.stop("hocus-test-tab-2");
@@ -741,6 +742,6 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     click(&mut hp, ROW)?;
     popover_is(&mut hp, None)?;
     click(&mut hp, ROW)?;
-    popover_is(&mut hp, Some(popover(353)))?;
+    popover_is(&mut hp, Some(popover(398)))?;
     Ok(())
 }
