@@ -551,10 +551,11 @@ impl Shell {
                 if theme::set(choice) {
                     self.clock = clock_style(&self.clock_look);
                 }
+                // The accent last: tests read the line's end.
                 tracing::info!(
                     theme = %choice.scheme,
-                    accent = %choice.accent,
                     colours = %choice,
+                    accent = %choice.accent,
                     "the theme"
                 );
                 Task::none()
