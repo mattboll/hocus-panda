@@ -127,11 +127,13 @@ impl Bed {
             hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
         })?;
         anyhow::ensure!(up, "no footer");
-        // Drawn: until then it takes no click.
-        let button = bed.button();
-        common::over(&mut bed.hp, button, hocus_link::BELL_NAMESPACE)?;
+        // Drawn: until then it takes no click. Over its menu, which opens
+        // on a click only: its clipboard, hovered 150 ms, opens the
+        // history, which `Super+V` then only holds, saying nothing new
+        // (#614).
+        let menu = bed.menu();
+        common::over(&mut bed.hp, menu, hocus_link::BELL_NAMESPACE)?;
         bed.hp.pointer_move(400.0, 300.0);
-        wait(&mut bed.hp, Duration::from_millis(300))?;
         Ok(Some(bed))
     }
 
@@ -307,6 +309,12 @@ impl Bed {
     fn button(&self) -> (f64, f64) {
         let f = self.hp.bell_surfaces()[0].1;
         (f64::from(f.x + 11 + 20), f64::from(f.y + 6 + 17))
+    }
+
+    /// The footer's menu, its centre: its third button, 99 px in.
+    fn menu(&self) -> (f64, f64) {
+        let f = self.hp.bell_surfaces()[0].1;
+        (f64::from(f.x + 99 + 20), f64::from(f.y + 6 + 17))
     }
 
     /// The pixel at (`x`, `y`): red, green, blue.
@@ -743,11 +751,10 @@ fn the_history_comes_back_after_a_restart_and_is_not_plain_text_on_disk() -> any
         return Ok(());
     };
     bed.logged_after(mark, "the clipboard's history is read back items=1")?;
-    let (_, line) = bed.super_v()?;
-    assert!(
-        history(&line).contains(&format!("«{marker}» Éditeur")),
-        "{line}"
-    );
+    // Said read before it is in the history: it shows it once it is.
+    let mark = bed.mark();
+    bed.super_v()?;
+    bed.history_after(mark, &format!("«{marker}» Éditeur"))?;
     Ok(())
 }
 
