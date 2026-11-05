@@ -963,7 +963,10 @@ impl Panel {
 /// forward.
 pub(in crate::popover) fn open_settings(section: Option<&str>) {
     let program = settings_program();
-    tracing::info!(program, section, "the Settings open from the bar");
+    match section {
+        None => tracing::info!(program, "the Settings open from the footer"),
+        Some(section) => tracing::info!(program, section, "the Settings open from a popover"),
+    }
     let mut argv = vec![program];
     argv.extend(section.map(str::to_owned));
     let launch = Launch {

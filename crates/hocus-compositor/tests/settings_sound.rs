@@ -697,7 +697,7 @@ fn the_popovers_link_opens_settings_on_son() -> anyhow::Result<()> {
         Ok(())
     };
     link(&mut bed)?;
-    bed.shell_logged("the Settings open from the bar", |l| l.contains("sound"))?;
+    bed.shell_logged("the Settings open from a popover", |l| l.contains("sound"))?;
     let open = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.windows()
             .iter()
