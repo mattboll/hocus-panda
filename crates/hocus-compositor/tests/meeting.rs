@@ -548,6 +548,9 @@ fn at_its_end_the_next_meeting_takes_the_card_at_the_minutes_change() -> anyhow:
             "join=false page=false",
         ],
     )?;
+    // The shell logs a draw before its buffer comes: counted from once
+    // the card's first is there.
+    bed.card_surface()?;
     common::at_rest(&mut bed.hp)?;
     let commits = bed.hp.meeting_commits();
     let mark = bed.mark();
@@ -675,6 +678,7 @@ fn at_rest_the_card_draws_nothing_and_the_minutes_change_draws_it_once() -> anyh
         FormChoice::Full,
     )?;
     bed.card_since(0, &["«Point produit» 14:30 · dans 30\u{a0}min"])?;
+    bed.card_surface()?;
     common::at_rest(&mut bed.hp)?;
     common::wait(&mut bed.hp, Duration::from_millis(300))?;
     let commits = bed.hp.meeting_commits();

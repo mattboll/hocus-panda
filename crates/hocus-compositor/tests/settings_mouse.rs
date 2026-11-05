@@ -194,44 +194,39 @@ impl Bed {
     }
 
     fn plain(&self) -> String {
-        String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned()
+        common::logged(&self.log)
     }
 
     /// What the window shows, once `done` holds of it.
     fn shows(&mut self, done: impl Fn(&Value) -> bool) -> anyhow::Result<Value> {
         let log = self.log.clone();
-        let read = |log: &Path| -> Option<Value> {
-            let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
-            let line = text.lines().rev().find(|l| l.contains(" shows {"))?;
-            let at = line.find(" shows {")? + " shows ".len();
-            serde_json::from_str(&line[at..]).ok()
-        };
-        let seen = self
-            .hp
-            .dispatch_until(WAIT, |_| read(&log).is_some_and(|s| done(&s)))?;
-        let last = read(&log);
-        anyhow::ensure!(
-            seen,
-            "the window never showed it; it shows {}",
-            last.map_or_else(|| "nothing".to_owned(), |s| s.to_string())
-        );
-        last.ok_or_else(|| anyhow::anyhow!("nothing shown"))
+        let read = |log: &Path| -> Option<Value> { common::last_json(log, " shows {") };
+        // What held, not what is read again after: the window may have
+        // said more meanwhile.
+        let mut seen = None;
+        self.hp.dispatch_until(WAIT, |_| {
+            seen = read(&log).filter(|s| done(s));
+            seen.is_some()
+        })?;
+        seen.ok_or_else(|| {
+            anyhow::anyhow!(
+                "the window never showed it; it shows {}",
+                read(&log).map_or_else(|| "nothing".to_owned(), |s| s.to_string())
+            )
+        })
     }
 
     /// The window's places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
         let log = self.log.clone();
-        let read = |log: &Path| -> Option<Value> {
-            let text = String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned();
-            let line = text.lines().rev().find(|l| l.contains(" places {"))?;
-            let at = line.find(" places {")? + " places ".len();
-            serde_json::from_str(&line[at..]).ok()
-        };
-        let seen = self
-            .hp
-            .dispatch_until(WAIT, |_| read(&log).is_some_and(|p| p.get(id).is_some()))?;
-        anyhow::ensure!(seen, "{id} is nowhere: {:?}", read(&log));
-        read(&log).ok_or_else(|| anyhow::anyhow!("no places"))
+        let read = |log: &Path| -> Option<Value> { common::last_json(log, " places {") };
+        // What held, not what is read again after.
+        let mut seen = None;
+        self.hp.dispatch_until(WAIT, |_| {
+            seen = read(&log).filter(|p| p.get(id).is_some());
+            seen.is_some()
+        })?;
+        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", read(&log)))
     }
 
     fn window(&self) -> anyhow::Result<Rect> {
