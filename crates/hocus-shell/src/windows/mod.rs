@@ -25,8 +25,10 @@
 //! - `[panel] windows = false` (the compositor's `bar-windows hidden`)
 //!   hides it in both forms.
 //!
-//! Each bar has a surface of its own for it, opened while it shows and
-//! removed after ([`draw`]). It draws only when what it lists changes
+//! Each bar has a surface of its own for it, opened with the bar and kept
+//! as long as it, one pixel taking no pointer while nothing shows
+//! ([`draw`]): a surface made later would take the keyboard's keys from
+//! one holding it (#617). It draws only when what it lists changes
 //! (a window opening, closing, retitled, focused), never at rest.
 
 pub mod draw;
@@ -177,6 +179,8 @@ struct Place {
     full_top: f32,
     mini_top: f32,
     asked: Option<Asked>,
+    /// Whether it takes the pointer, as last asked: only while it shows.
+    input: Option<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -205,6 +209,8 @@ pub struct Shown {
     pub full_top: f32,
     pub mini_top: f32,
     pub surface_top: f32,
+    /// The surface's bottom under the bar's top, as last asked for.
+    pub surface_bottom: f32,
 }
 
 /// What bar `bar` shows now, and where.
@@ -221,6 +227,9 @@ pub fn shown(bar: &str) -> Shown {
                 surface_top: p
                     .asked
                     .map_or(p.full_top, |(_, margin)| (margin.0 - EDGE) as f32),
+                surface_bottom: p.asked.map_or(p.full_top, |((_, height), margin)| {
+                    (margin.0 - EDGE) as f32 + height as f32
+                }),
             })
             .unwrap_or_default()
     })
@@ -409,16 +418,36 @@ fn placement(
     }
 }
 
+/// The layer-shell margins of a surface whose top is `top` under the
+/// bar's.
+fn margin(top: f32) -> (i32, i32, i32, i32) {
+    (EDGE + top.round() as i32, EDGE + 1, 0, 0)
+}
+
+/// The surface's width when it shows nothing, in `form`.
+fn width_of(form: Option<Form>, switching: bool) -> u32 {
+    match (form, switching) {
+        (Some(Form::Mini), false) => draw::MINI_WIDTH,
+        _ => draw::FULL_WIDTH,
+    }
+}
+
 impl Place {
-    /// Its surface for what it shows: opened, resized, moved or removed;
-    /// drawn again (`redraw`) where it moves, its backdrop the bar's
-    /// colour there on the CPU.
+    /// Its surface for what it shows: resized and moved, one pixel taking
+    /// no pointer when nothing shows; drawn again (`redraw`) where it
+    /// moves, its backdrop the bar's colour there on the CPU. The surface
+    /// stays as long as its bar: iced_layershell hands the keys to the
+    /// surface made last, and one made while the emoji picker or the
+    /// launcher holds the keyboard would lose their typing (#617).
     fn fit(
         &mut self,
         bar: &str,
         placed: &mut Vec<(String, Option<window::Id>)>,
         redraw: &mut bool,
     ) -> Vec<Effect> {
+        let Some(id) = self.id else {
+            return Vec::new();
+        };
         let at = self.form.and_then(|form| {
             placement(
                 form,
@@ -427,48 +456,62 @@ impl Place {
                 (self.mini_top, if self.item.is_some() { ITEM } else { 0.0 }),
             )
         });
-        let asked = at.map(|(top, size)| (size, (EDGE + top.round() as i32, EDGE + 1, 0, 0)));
-        match (self.id, asked) {
-            (None, Some(asked)) => {
-                let id = window::Id::unique();
-                self.id = Some(id);
-                self.asked = Some(asked);
-                placed.push((bar.to_owned(), Some(id)));
-                vec![Effect::Layer {
-                    id,
-                    bar: bar.to_owned(),
-                    namespace: WINDOWS_NAMESPACE,
-                    size: asked.0,
-                    margin: asked.1,
-                }]
-            }
-            (Some(id), None) => {
-                self.id = None;
-                self.asked = None;
-                placed.push((bar.to_owned(), None));
-                vec![Effect::Remove(id)]
-            }
-            (Some(id), Some(asked)) if self.asked != Some(asked) => {
-                self.asked = Some(asked);
-                *redraw = true;
-                vec![Effect::Resize {
-                    id,
-                    size: asked.0,
-                    margin: Some(asked.1),
-                }]
-            }
-            _ => Vec::new(),
+        let shows = at.is_some();
+        let (top, size) = at.unwrap_or_else(|| {
+            (
+                self.full_top - draw::ROOM,
+                (width_of(self.form, self.switching), 1),
+            )
+        });
+        let asked = (size, margin(top));
+        let mut effects = Vec::new();
+        if self.asked != Some(asked) {
+            self.asked = Some(asked);
+            *redraw = true;
+            effects.push(Effect::Resize {
+                id,
+                size: asked.0,
+                margin: Some(asked.1),
+            });
         }
+        if self.input != Some(shows) {
+            self.input = Some(shows);
+            // The bar's items for the keyboard: its own while it shows.
+            placed.push((bar.to_owned(), shows.then_some(id)));
+            effects.push(Effect::Input { id, takes: shows });
+        }
+        effects
     }
 }
 
-/// Bar `bar` opened in `form`: its place, its group once the column
-/// moves (`crate::column::moved`, as the bar takes its height).
-pub fn bar_opened(bar: &str, form: Form) {
+/// Bar `bar` opened in `form`: its surface, one pixel taking no pointer
+/// until the column moves (`crate::column::moved`, as the bar takes its
+/// height) and it has windows to show; to open after the bar's own.
+pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
+    let id = window::Id::unique();
+    // Under the clock, inside the smallest screen: placed over the
+    // desktops once the bar knows its height (a place off a short screen
+    // keeps the shell from going on).
+    let top = column::start(form) - draw::ROOM;
+    let size = (width_of(Some(form), false), 1);
     state(|s| {
         let place = s.places.entry(bar.to_owned()).or_default();
         place.form = Some(form);
+        place.id = Some(id);
+        place.full_top = top + draw::ROOM;
+        place.asked = Some((size, margin(top)));
+        place.input = Some(false);
     });
+    vec![
+        Effect::Layer {
+            id,
+            bar: bar.to_owned(),
+            namespace: WINDOWS_NAMESPACE,
+            size,
+            margin: margin(top),
+        },
+        Effect::Input { id, takes: false },
+    ]
 }
 
 /// Bar `bar` in `form`, switching or not: its rows follow as the column

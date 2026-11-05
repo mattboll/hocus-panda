@@ -299,22 +299,30 @@ impl View {
     }
 
     /// The group's top left on the surface.
+    ///
+    /// In a form alone, from the surface's bottom as it is: the group sits
+    /// on the desktops, and a line keeps its place on the screen as lines
+    /// come over it. A press read while the compositor still has the
+    /// surface where it was finds the line it was on there, never the one
+    /// the next place will put there (#617).
     fn origin(&self, size: Size, shown: &super::Shown) -> Point {
         let left = size.width + 2.0 - self.bar_width;
-        Point::new(left + SIDE, shown.full_top - shown.surface_top)
+        let top = match self.alone() {
+            Some(_) => size.height - ROOM - super::rows_height(&shown.rows),
+            None => shown.full_top - shown.surface_top,
+        };
+        Point::new(left + SIDE, top)
     }
 
     /// The mini item on the surface, centred in the bar as wide as it is
     /// drawn.
     fn mini_rect(&self, size: Size, shown: &super::Shown) -> Rectangle {
         let centre = size.width + 1.0 - self.bar_width / 2.0;
-        Rectangle::new(
-            Point::new(
-                (centre - MINI.width / 2.0).round(),
-                shown.mini_top - shown.surface_top,
-            ),
-            MINI,
-        )
+        let top = match self.alone() {
+            Some(_) => size.height - ROOM - MINI.height,
+            None => shown.mini_top - shown.surface_top,
+        };
+        Rectangle::new(Point::new((centre - MINI.width / 2.0).round(), top), MINI)
     }
 
     /// The full form's rows' lines on the surface.
@@ -334,9 +342,13 @@ impl View {
         }
     }
 
-    /// A point of the surface in the bar's frame.
+    /// A point of the surface in the bar's frame, from its bottom as its
+    /// lines are.
     fn in_bar(&self, at: Point, size: Size, shown: &super::Shown) -> Point {
-        Point::new(at.x - size.width - 1.0, shown.surface_top + at.y)
+        Point::new(
+            at.x - size.width - 1.0,
+            shown.surface_bottom - (size.height - at.y),
+        )
     }
 
     fn in_bar_rect(&self, r: Rectangle, size: Size, shown: &super::Shown) -> Rectangle {
