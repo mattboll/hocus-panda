@@ -21,6 +21,8 @@ hocus-agents = { path = "../hocus-agents", version = "0.2.0" }
 hocus-link = { path = "../hocus-link", version = "0.2.0" }
 # The Son page's PipeWire: followed, set, metered, as the bar does.
 hocus-sound = { path = "../hocus-sound", version = "0.2.0" }
+# The Bluetooth page's BlueZ: followed and asked, as the bar does.
+hocus-bluetooth = { path = "../hocus-bluetooth", version = "0.2.0" }
 toml_edit = "0.25.17"
 # The shell's toolkit and its settings (tech-choices, decision 2), as an
 # application window this time: winit's Wayland backend, no X11, no theme

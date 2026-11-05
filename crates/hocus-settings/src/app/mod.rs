@@ -12,6 +12,7 @@
 
 mod appearance_page;
 mod bar_page;
+mod bluetooth;
 mod keyboard_page;
 mod mouse;
 mod places;
@@ -36,6 +37,7 @@ use iced::{
     window,
 };
 
+pub use bluetooth::stop as stop_bluetooth;
 pub use places::Places;
 
 use crate::{
@@ -210,6 +212,8 @@ enum Write {
 enum Undo {
     File(Change),
     Sound(sound::Choice),
+    /// Bluetooth turned off on its page (in BlueZ).
+    Bluetooth(bluetooth::Choice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -312,6 +316,8 @@ pub enum Message {
     Wallpaper(wallpaper_page::Msg),
     /// The bar's page (6.4).
     Bar(bar_page::Msg),
+    /// The Bluetooth page's (6.7).
+    Bluetooth(bluetooth::Msg),
     Nothing,
 }
 
@@ -374,6 +380,8 @@ pub struct App {
     wallpaper: wallpaper_page::State,
     /// The bar's page: its preview's motions and clock (6.4).
     bar: bar_page::State,
+    /// The Bluetooth page: BlueZ as last heard (6.7).
+    bluetooth: bluetooth::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -387,6 +395,7 @@ impl App {
         *HEARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
+        let bluetooth = bluetooth::State::start(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -460,6 +469,7 @@ impl App {
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
+            bluetooth,
             fresh: None,
             parity: false,
         };
@@ -571,6 +581,7 @@ impl App {
             || self.screens_moving(now)
             || self.mouse.moving(now)
             || self.bar_moving(now)
+            || self.bluetooth_moving()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -581,6 +592,7 @@ impl App {
         let task = self.handle(message);
         let task = Task::batch([task, self.bar_after()]);
         self.sound_listen();
+        self.bluetooth_want();
         self.wallpaper_want();
         self.now = Instant::now();
         // Whole frames after a scroll, a toast coming or going, and through
@@ -753,6 +765,7 @@ impl App {
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
+            Message::Bluetooth(msg) => self.bluetooth_update(msg),
             Message::Keys(msg) => self.keys_update(msg),
         }
     }
@@ -1102,6 +1115,13 @@ impl App {
                 self.toast = None;
                 return self.sound_undo(choice, false);
             }
+            Some(Undo::Bluetooth(_)) => {
+                let Some(Undo::Bluetooth(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.bluetooth_undo(choice, false);
+            }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
                     return Task::none();
@@ -1152,6 +1172,12 @@ impl App {
                     return Task::none();
                 };
                 return self.sound_undo(choice, true);
+            }
+            Some(Undo::Bluetooth(_)) => {
+                let Some(Undo::Bluetooth(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.bluetooth_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1242,6 +1268,7 @@ impl App {
     fn close_now(&mut self) -> Task<Message> {
         self.life = Life::Closed;
         self.sound.stop();
+        self.bluetooth_close();
         self.window.map_or_else(iced::exit, window::close)
     }
 
@@ -1384,6 +1411,13 @@ impl App {
         };
         if section == SectionId::Sound {
             return self.sound_stops().into_iter().map(Control::Sound).collect();
+        }
+        if section == SectionId::Bluetooth {
+            return self
+                .bluetooth_stops()
+                .into_iter()
+                .map(Control::Bluetooth)
+                .collect();
         }
         if section == SectionId::Keyboard {
             if self.keys.sub {
@@ -1606,6 +1640,7 @@ impl App {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
+            Control::Bluetooth(stop) => self.bluetooth_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1849,6 +1884,8 @@ enum Control {
     Wallpaper(wallpaper_page::Stop),
     /// The bar's page's own (6.4).
     Bar(bar_page::Stop),
+    /// The Bluetooth page's own (6.7).
+    Bluetooth(bluetooth::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1617,6 +1617,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-bluetooth"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "hocus-cli"
 version = "0.2.0"
 dependencies = [
@@ -1704,6 +1715,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "hocus-agents",
+ "hocus-bluetooth",
  "hocus-config",
  "hocus-link",
  "hocus-sound",
@@ -1731,6 +1743,7 @@ version = "0.2.0"
 dependencies = [
  "chacha20poly1305",
  "fontdue",
+ "hocus-bluetooth",
  "hocus-day",
  "hocus-link",
  "hocus-sound",

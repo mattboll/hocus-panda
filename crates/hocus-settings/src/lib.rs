@@ -15,12 +15,15 @@
 //!   and its keys.
 //! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
+//! - [`bluetooth`]: the Bluetooth page's words and search; BlueZ itself is
+//!   `hocus-bluetooth`'s, as the bar's.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
 pub mod app;
 pub mod appearance;
 pub mod bar;
+pub mod bluetooth;
 pub mod devices;
 pub mod keyboard;
 pub mod keys;

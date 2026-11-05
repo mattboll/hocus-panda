@@ -746,6 +746,7 @@ impl App {
                 }
             }
             SectionId::Sound => self.sound_card(),
+            SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
                 .to_owned(),
@@ -785,6 +786,9 @@ impl App {
         }
         if id == SectionId::Bar {
             return self.bar_page(page);
+        }
+        if id == SectionId::Bluetooth {
+            return self.bluetooth_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -1662,6 +1666,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
+        "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

@@ -2597,7 +2597,13 @@ fn note<'a>(head: String, body: String, id: String) -> El<'a> {
     .into()
 }
 
-fn switch<'a>(on: bool, inert: bool, focused: bool, moved: f32, press: Option<Message>) -> El<'a> {
+pub(super) fn switch<'a>(
+    on: bool,
+    inert: bool,
+    focused: bool,
+    moved: f32,
+    press: Option<Message>,
+) -> El<'a> {
     let alpha = if inert { INERT } else { 1.0 };
     let at = if on { moved } else { 1.0 - moved };
     let track = if on {

@@ -15,8 +15,9 @@ use iced::window;
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hocus_settings=info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("hocus_settings=info,hocus_bluetooth=info")
+            }),
         )
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
@@ -102,6 +103,9 @@ fn main() -> ExitCode {
         })
         .run();
     single::stop();
+    // The computer hidden again and the search stopped before the program
+    // goes (BlueZ keeps it visible otherwise until its timeout).
+    app::stop_bluetooth();
     tracing::info!("the Settings closed");
     match ran {
         Ok(()) => ExitCode::SUCCESS,
