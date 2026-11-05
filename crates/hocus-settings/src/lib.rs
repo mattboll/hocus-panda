@@ -14,6 +14,8 @@
 //!   at once, its changes on disk followed, off the window's thread.
 //! - [`search`]: every setting found by its words, in French and English,
 //!   and its keys.
+//! - [`desktops`]: the desktops' count and names, how windows move and
+//!   snap, Alt+Tab and the ink (6.14).
 //! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
 //! - [`app`]: the window, drawn with iced as the shell is.
@@ -22,6 +24,7 @@ pub mod activate;
 pub mod app;
 pub mod appearance;
 pub mod bar;
+pub mod desktops;
 pub mod devices;
 pub mod keyboard;
 pub mod keys;
