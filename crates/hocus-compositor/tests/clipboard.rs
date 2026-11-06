@@ -12,17 +12,28 @@
 //! an image shows its thumbnail. And a screen capture (5.8b, issue #528):
 //! the history's first row, pasted from there.
 //!
+//! Then its rules, followed live (6.17, issue #451): the history off
+//! shows the pinned items under its line, the others erased once the
+//! grace is over, all back when it is on again in time; kept for the
+//! session, nothing is on disk; an ignored application's copy is never
+//! kept; with `skip-secrets` off, a marked secret is; the Settings' line
+//! hears how many items there are, and clears all but the pinned. The file
+//! is written by hand, as the Settings' worker would.
+//!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
 mod common;
 
 use std::{
     collections::HashMap,
-    os::unix::fs::PermissionsExt,
+    io::{BufRead, BufReader, Write},
+    os::unix::{fs::PermissionsExt, net::UnixStream},
     path::{Path, PathBuf},
+    sync::mpsc,
     time::Duration,
 };
 
+use anyhow::Context;
 use common::{
     BTN_LEFT, ClientHandle, Clip, Command, Event, KEY_DOWN, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTMETA,
     KEY_LEFTSHIFT, Shows, WAIT, chord, wait,
@@ -51,6 +62,8 @@ struct Bed {
     hp: Headless,
     log: PathBuf,
     state: PathBuf,
+    /// The configuration's file, empty at first.
+    file: PathBuf,
 }
 
 /// A window of the test's, and where it is.
@@ -109,6 +122,10 @@ impl Bed {
         config.applications = vec![applications];
         // Captures land in the test's own folder (5.8b).
         config.pictures = Some(root.join("Images"));
+        let file = root.join("config/hocuspanda/config.toml");
+        std::fs::create_dir_all(root.join("config/hocuspanda"))?;
+        std::fs::write(&file, "")?;
+        config.file = Some(file.clone());
         let hp = Headless::start_with_shell(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -122,6 +139,7 @@ impl Bed {
             hp,
             log,
             state: root.join("state/hocuspanda"),
+            file,
         };
         let up = bed.hp.dispatch_until(WAIT, |hp| {
             hp.drawn_layers(hocus_link::BELL_NAMESPACE).len() == 1
@@ -325,6 +343,54 @@ impl Bed {
             .get(at..at + 4)
             .ok_or_else(|| anyhow::anyhow!("({x}, {y}) off the screen"))?;
         Ok([p[2], p[1], p[0]])
+    }
+
+    /// `[clipboard]` now says `lines`, as the Settings write it; once the
+    /// shell has its rules (or the compositor read it, as `read` says).
+    fn rules(
+        &mut self,
+        lines: &str,
+        read: impl Fn(&hocus_compositor::ClipboardSettings) -> bool,
+    ) -> anyhow::Result<()> {
+        let new = self.file.with_extension("new");
+        std::fs::write(&new, format!("[clipboard]\n{lines}\n"))?;
+        std::fs::rename(&new, &self.file)?;
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |hp| read(&hp.state().config.clipboard))?;
+        anyhow::ensure!(done, "the file is not read: {lines}");
+        Ok(())
+    }
+
+    /// `Super+V`, the history once it says `text` and not `not`, and
+    /// `Escape`.
+    fn shows(&mut self, text: &str, not: &str) -> anyhow::Result<String> {
+        let mark = self.mark();
+        chord(&mut self.hp, &[KEY_LEFTMETA, KEY_V]);
+        self.popover()?;
+        let line = self.history_with(mark, text, not)?;
+        self.press(KEY_ESC);
+        self.closed()?;
+        Ok(history(&line))
+    }
+
+    /// Pins the history's row holding `text`.
+    fn pin(&mut self, text: &str) -> anyhow::Result<()> {
+        let (popover, line) = self.super_v()?;
+        let said = history(&line);
+        // The rows' keys from the top; the history's rows in that order.
+        let keys = rows(&line);
+        let words: Vec<&str> = said.split(" [").skip(1).collect();
+        let index = words
+            .iter()
+            .position(|w| w.contains(text))
+            .with_context(|| format!("no {text:?} in {said}"))?;
+        let pin = on_screen(popover, targets(&line)[&format!("Pin({})", keys[index])]);
+        let mark = self.mark();
+        self.click(pin)?;
+        self.history_after(mark, "(pinned)")?;
+        self.press(KEY_ESC);
+        self.closed()
     }
 
     /// The history's files on disk.
@@ -858,5 +924,207 @@ fn a_capture_is_the_first_row_and_pastes_from_there() -> anyhow::Result<()> {
         ],
     )?;
     assert_eq!(bed.hp.clipboard_bytes(), Some(png));
+    Ok(())
+}
+
+/// The Settings' line (`msg screens`): what the compositor says on it, as
+/// JSON, and what is asked on it.
+struct Line {
+    stream: UnixStream,
+    heard: mpsc::Receiver<serde_json::Value>,
+}
+
+impl Line {
+    fn open(hp: &Headless) -> anyhow::Result<Self> {
+        let path = hp.control_socket().context("no control socket")?;
+        let mut stream = UnixStream::connect(path)?;
+        stream.write_all(b"msg screens\n")?;
+        let reader = stream.try_clone()?;
+        let (said, heard) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(reader).lines() {
+                let Ok(line) = line else {
+                    return;
+                };
+                if let Ok(value) = serde_json::from_str(&line)
+                    && said.send(value).is_err()
+                {
+                    return;
+                }
+            }
+        });
+        Ok(Self { stream, heard })
+    }
+
+    fn ask(&mut self, line: &str) -> anyhow::Result<()> {
+        self.stream.write_all(format!("{line}\n").as_bytes())?;
+        Ok(())
+    }
+
+    /// Runs the compositor until the line says the history holds
+    /// `items`, `pinned` of them pinned.
+    fn counts(&self, hp: &mut Headless, items: u64, pinned: u64) -> anyhow::Result<()> {
+        let mut last = None;
+        let done = hp.dispatch_until(WAIT, |_| {
+            while let Ok(value) = self.heard.try_recv() {
+                if let Some(count) = value.get("clipboard") {
+                    last = Some(count.clone());
+                }
+            }
+            last.as_ref().is_some_and(|c| {
+                c["items"].as_u64() == Some(items) && c["pinned"].as_u64() == Some(pinned)
+            })
+        })?;
+        anyhow::ensure!(done, "the line said {last:?}, not {items} and {pinned}");
+        Ok(())
+    }
+}
+
+#[test]
+fn the_history_off_shows_the_pinned_then_erases_the_rest_and_on_again_in_time_restores()
+-> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy(&editor, "une copie gardee")?;
+    bed.copy(&editor, "une copie de passage")?;
+    bed.pin("gardee")?;
+    // Off, then on again before the grace is over (the Settings'
+    // "Annuler"): nothing was erased.
+    let mark = bed.mark();
+    bed.rules("history = false", |c| !c.history)?;
+    bed.logged_after(mark, "the clipboard's history's rules history=false")?;
+    bed.rules("history = true", |c| c.history)?;
+    bed.logged_after(mark, "the history's rules applied gone=0 history=true")?;
+    bed.shows("passage", "Historique coupé")?;
+    // Off: its line, the pinned item under it, nothing else.
+    let mark = bed.mark();
+    bed.rules("history = false", |c| !c.history)?;
+    let shown = bed.shows("Historique coupé", "passage")?;
+    assert!(
+        shown.starts_with("Historique coupé · Réglages: ÉPINGLÉS: [text] «une copie gardee»"),
+        "{shown}"
+    );
+    // Nothing new is read meanwhile.
+    bed.focus(&editor)?;
+    editor.client.commands.send(Command::Copy(Clip {
+        types: &["text/plain;charset=utf-8"],
+        text: "pendant la coupure",
+        hang: false,
+    }))?;
+    // Once the grace is over, what is not pinned goes for good.
+    bed.logged_after(mark, "the history's rules applied gone=1 history=false")?;
+    let state = bed.state.clone();
+    let one = bed.hp.dispatch_until(WAIT, |_| clips(&state) == 1)?;
+    anyhow::ensure!(one, "{} items on disk", clips(&state));
+    bed.rules("history = true", |c| c.history)?;
+    let shown = bed.shows("gardee", "Historique coupé")?;
+    assert!(
+        !shown.contains("passage") && !shown.contains("pendant"),
+        "{shown}"
+    );
+    Ok(())
+}
+
+#[test]
+fn kept_for_the_session_nothing_is_on_disk() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy(&editor, "avant la session")?;
+    let state = bed.state.clone();
+    let one = bed.hp.dispatch_until(WAIT, |_| clips(&state) == 1)?;
+    anyhow::ensure!(one, "{} items on disk", clips(&state));
+    let mark = bed.mark();
+    bed.rules("keep = \"session\"", |c| {
+        c.keep == hocus_link::ClipKeep::Session
+    })?;
+    // Once applied, what was on disk leaves it; what is copied next never
+    // goes there. Both still show.
+    bed.logged_after(
+        mark,
+        "the history's rules applied gone=0 history=true keep=session",
+    )?;
+    bed.copy(&editor, "pendant la session")?;
+    let shown = bed.shows("pendant la session", "Rien")?;
+    assert!(shown.contains("avant la session"), "{shown}");
+    let none = bed.hp.dispatch_until(WAIT, |_| clips(&state) == 0)?;
+    anyhow::ensure!(none, "{} items on disk", clips(&state));
+    Ok(())
+}
+
+#[test]
+fn an_ignored_applications_copy_is_never_kept() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    bed.rules("ignore = [\"test.vault\"]", |c| !c.ignore.is_empty())?;
+    let vault = bed.window("test.vault", (320, 200))?;
+    bed.focus(&vault)?;
+    vault.client.commands.send(Command::Copy(Clip {
+        types: &["text/plain;charset=utf-8"],
+        text: "le-mot-du-coffre",
+        hang: false,
+    }))?;
+    let copied = bed.hp.dispatch_until(WAIT, |_| {
+        vault.client.events.try_iter().any(|e| e == Event::Copied)
+    })?;
+    anyhow::ensure!(copied, "the clipboard was never taken");
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy(&editor, "une copie ordinaire")?;
+    let shown = bed.shows("ordinaire", "coffre")?;
+    assert_eq!(
+        shown,
+        "RÉCENTS: [text] «une copie ordinaire» Éditeur · maintenant (selected)"
+    );
+    Ok(())
+}
+
+#[test]
+fn skip_secrets_off_keeps_a_marked_secret_and_a_password_managers_copy() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    bed.rules("skip-secrets = false", |c| !c.skip_secrets)?;
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy_with(
+        &editor,
+        Command::Copy(Clip {
+            types: &["text/plain;charset=utf-8", "x-kde-passwordManagerHint"],
+            text: "hunter2-mot-de-passe",
+            hang: false,
+        }),
+    )?;
+    let keepass = bed.window("org.keepassxc.KeePassXC", (320, 200))?;
+    bed.copy(&keepass, "un-autre-mot-de-passe")?;
+    let shown = bed.shows("un-autre-mot-de-passe", "Rien")?;
+    assert!(shown.contains("hunter2-mot-de-passe"), "{shown}");
+    Ok(())
+}
+
+#[test]
+fn the_settings_line_hears_the_count_and_clears_all_but_the_pinned() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let mut line = Line::open(&bed.hp)?;
+    line.counts(&mut bed.hp, 0, 0)?;
+    let editor = bed.window("test.editor", (640, 420))?;
+    bed.copy(&editor, "une copie gardee")?;
+    bed.copy(&editor, "une copie de passage")?;
+    bed.pin("gardee")?;
+    line.counts(&mut bed.hp, 2, 1)?;
+    // "Effacer l'historique".
+    line.ask("clipboard-clear")?;
+    line.counts(&mut bed.hp, 1, 1)?;
+    let shown = bed.shows("gardee", "passage")?;
+    assert!(!shown.contains("RÉCENTS"), "{shown}");
     Ok(())
 }

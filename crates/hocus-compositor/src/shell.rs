@@ -393,6 +393,7 @@ impl State {
         self.tell_shell(ToShell::Locale(self.config.locale));
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));
         self.tell_shell(ToShell::BarWindows(self.config.panel.windows));
+        self.tell_shell(ToShell::ClipboardRules(self.config.clipboard.rules()));
         self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
         self.tell_shell(ToShell::BarGroups(self.config.panel.groups()));
         self.tell_shell(ToShell::BarSide(self.bar_side()));
@@ -505,6 +506,9 @@ impl State {
             }
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
+            ToCompositor::ClipboardCount { items, pinned } => {
+                self.clipboard_counted(items, pinned);
+            }
             ToCompositor::Emoji { keep, text } => self.emoji_asked(keep, text),
             ToCompositor::Capture(ask) => self.capture_asked(ask),
             ToCompositor::Share(ask) => self.share_asked(ask),

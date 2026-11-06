@@ -5,13 +5,21 @@
 //! image, and the application of the window focused as it was copied),
 //! never a secret. The history keeps text and images; the same copy again
 //! is the same item, moved to the top, as is an item used again. Pinned
-//! items stay for good; the others, the last [`KEPT`], [`DAYS`] days at
+//! items stay for good; the others, the last [`KEPT`], 30 days at
 //! most. "Clear all" keeps the pinned ones.
 //!
 //! It lives here, in memory, for the popover ([`crate::popover::clipboard`])
 //! to draw, and on disk for the next session ([`store`]): sealed with a key
 //! kept in the session's keyring, else in a file of the user's alone; read
 //! and written on a thread of its own, never on the one that draws.
+//!
+//! Its rules are the compositor's (`[clipboard] history` and `keep`,
+//! 6.17): they show at once (off, only the pinned items; a shorter keep,
+//! only what is younger), and what they leave out is erased [`GRACE`]
+//! later, if they still say so: the Settings' "Annuler" within that time
+//! brings it all back. Kept until the session ends, what is not pinned is
+//! not on disk. How many items it holds goes to the compositor, for the
+//! Settings.
 
 pub mod keyring;
 pub mod kind;
@@ -19,16 +27,19 @@ mod store;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use hocus_link::{Clip, ClipKind, ToCompositor};
+use hocus_link::{Clip, ClipKind, ClipRules, ToCompositor};
 
 pub use kind::{Kind, Picture};
 
 use crate::popover;
 
-/// The items kept besides the pinned ones, and for how long at most.
+/// The items kept besides the pinned ones (how long: `[clipboard] keep`,
+/// 30 days by default).
 pub const KEPT: usize = 200;
-pub const DAYS: i64 = 30;
 const DAY_MS: i64 = 24 * 3600 * 1000;
+/// How long what the rules leave out waits before it is erased: the
+/// Settings' toast's, during which its "Annuler" brings it back.
+pub const GRACE: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// An item of the history.
 #[derive(Debug, Clone)]
@@ -84,6 +95,10 @@ pub struct History {
     items: Vec<Item>,
     /// Every change counts: what is drawn from it is made again.
     version: u64,
+    /// The rules shown (the compositor's last), and those its items were
+    /// pruned by (the same, [`GRACE`] after a change).
+    rules: ClipRules,
+    applied: ClipRules,
 }
 
 impl History {
@@ -93,6 +108,56 @@ impl History {
 
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    pub fn rules(&self) -> ClipRules {
+        self.rules
+    }
+
+    /// What it shows at `now`, by its rules: off, the pinned items only;
+    /// else those its keep has not let go.
+    pub fn shown(&self, now: i64) -> Vec<Item> {
+        let oldest = self.rules.keep.days().map(|d| now - d * DAY_MS);
+        self.items
+            .iter()
+            .filter(|i| {
+                i.pinned || (self.rules.history && oldest.is_none_or(|oldest| i.at >= oldest))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// How many items it shows, and how many of them are pinned.
+    pub fn count(&self, now: i64) -> (u32, u32) {
+        let shown = self.shown(now);
+        let pinned = shown.iter().filter(|i| i.pinned).count();
+        (
+            u32::try_from(shown.len()).unwrap_or(u32::MAX),
+            u32::try_from(pinned).unwrap_or(u32::MAX),
+        )
+    }
+
+    /// The rules now: shown at once.
+    pub fn set_rules(&mut self, rules: ClipRules) -> bool {
+        if rules == self.rules {
+            return false;
+        }
+        self.rules = rules;
+        self.version += 1;
+        true
+    }
+
+    /// The rules applied at `now`, [`GRACE`] after they changed: what they
+    /// leave out goes.
+    pub fn apply_rules(&mut self, now: i64) -> Vec<u64> {
+        self.applied = self.rules;
+        let mut gone = if self.rules.history {
+            Vec::new()
+        } else {
+            self.clear()
+        };
+        gone.extend(self.prune(now));
+        gone
     }
 
     pub fn get(&self, key: u64) -> Option<&Item> {
@@ -196,9 +261,14 @@ impl History {
     }
 
     /// What is past the limits at `now` goes: the unpinned items older
-    /// than [`DAYS`], and those past the [`KEPT`] newest.
+    /// than the rules applied keep them (30 days by default), and those
+    /// past the [`KEPT`] newest.
     pub fn prune(&mut self, now: i64) -> Vec<u64> {
-        let oldest = now - DAYS * DAY_MS;
+        let oldest = self
+            .applied
+            .keep
+            .days()
+            .map_or(i64::MIN, |d| now - d * DAY_MS);
         let mut unpinned = 0;
         let mut gone = Vec::new();
         self.items.retain(|item| {
@@ -222,16 +292,70 @@ impl History {
 static HISTORY: Mutex<History> = Mutex::new(History {
     items: Vec::new(),
     version: 0,
+    rules: ClipRules {
+        history: true,
+        keep: hocus_link::ClipKeep::Month,
+    },
+    applied: ClipRules {
+        history: true,
+        keep: hocus_link::ClipKeep::Month,
+    },
 });
+
+/// The count last told the compositor.
+static TOLD: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 
 /// `with` on the history.
 pub fn with<T>(with: impl FnOnce(&mut History) -> T) -> T {
     with(&mut HISTORY.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
-/// The history changed: its popover draws it again, if it is open.
+/// The history changed: its popover draws it again, if it is open, and
+/// the compositor hears how many items it holds.
 fn changed() {
     popover::changed(popover::Item::Clipboard);
+    report();
+}
+
+/// How many items it holds, to the compositor (for the Settings, 6.17),
+/// when that changed since it was told; again with `again`.
+fn report_count(again: bool) {
+    let count = with(|h| h.count(crate::notifications::wall_ms()));
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    if !again && *told == Some(count) {
+        return;
+    }
+    let (items, pinned) = count;
+    if popover::tell(ToCompositor::ClipboardCount { items, pinned }) {
+        *told = Some(count);
+    }
+}
+
+fn report() {
+    report_count(false);
+}
+
+/// Linked to the compositor: it hears how many items there are.
+pub fn linked() {
+    report_count(true);
+}
+
+/// The compositor's rules (`[clipboard] history` and `keep`, 6.17): shown
+/// at once, applied [`GRACE`] later on the history's thread.
+pub fn rules(rules: ClipRules) {
+    let changed_now = with(|h| h.set_rules(rules));
+    tracing::info!(
+        history = rules.history,
+        keep = %rules.keep.word(),
+        changed = changed_now,
+        "the clipboard's history's rules"
+    );
+    store::ask(store::Ask::Rules(rules));
+    if changed_now {
+        changed();
+    } else {
+        report();
+    }
 }
 
 /// Reads the history back and keeps it from now on, on its own thread:
@@ -428,6 +552,47 @@ mod tests {
         let change = h.replace(9, text_item(4, "again", "", 0), NOW + 1);
         assert!(change.gone.is_empty());
         assert!(h.get(4).is_some_and(|i| !i.pinned));
+    }
+
+    #[test]
+    fn the_rules_show_at_once_and_erase_once_applied() {
+        use hocus_link::ClipKeep;
+        let mut h = History::default();
+        h.add(text_item(1, "pinned", "", 0), NOW - 3 * DAY_MS);
+        h.pin(1);
+        h.add(text_item(2, "three days", "", 0), NOW - 3 * DAY_MS);
+        h.add(text_item(3, "now", "", 0), NOW);
+        // A day: what is older hides at once, and goes once applied.
+        h.set_rules(ClipRules {
+            history: true,
+            keep: ClipKeep::Day,
+        });
+        let shown: Vec<u64> = h.shown(NOW).iter().map(|i| i.key).collect();
+        assert_eq!(shown, [3, 1]);
+        assert_eq!(h.count(NOW), (2, 1));
+        assert_eq!(h.items().len(), 3, "nothing erased yet");
+        // Back to 30 days before it applied: all of it shows again.
+        h.set_rules(ClipRules::default());
+        assert_eq!(h.count(NOW), (3, 1));
+        // Off: the pinned items only; applied, the others go.
+        h.set_rules(ClipRules {
+            history: false,
+            keep: ClipKeep::Month,
+        });
+        assert_eq!(h.count(NOW), (1, 1));
+        let mut gone = h.apply_rules(NOW);
+        gone.sort_unstable();
+        assert_eq!(gone, [2, 3]);
+        assert_eq!(keys(&h), [1]);
+        // The session: nothing is too old.
+        let mut h = History::default();
+        h.set_rules(ClipRules {
+            history: true,
+            keep: ClipKeep::Session,
+        });
+        assert!(h.apply_rules(NOW).is_empty());
+        h.add(text_item(4, "old", "", 0), NOW - 90 * DAY_MS);
+        assert_eq!(h.count(NOW), (1, 0));
     }
 
     #[test]

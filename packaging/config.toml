@@ -258,10 +258,41 @@
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
 
+# [capture]
+# Written by the Settings' Captures et presse-papiers page, every key
+# followed live (taken by the next capture). Where screenshots are saved:
+# empty, the pictures' folder's "Screenshots" ("Captures d'écran" in
+# French); else an absolute folder, or one from the home ("~/Bureau"). A
+# folder that cannot be written (gone, read-only) is passed over for the
+# default one until it can again. Their format, "png" or "jpeg" (quality
+# 90; the clipboard always gets PNG). A discreet click as the picture is
+# taken, never when the sound is muted.
+# folder = ""
+# format = "png"
+# sound = true
+
 # [recording]
 # Screen recordings' format: "mp4" (H.264 and AAC) or "webm" (VP9 and
-# Opus). Encoded by ffmpeg, on the GPU through VA-API when it can.
+# Opus). Encoded by ffmpeg, on the GPU through VA-API when it can. Where
+# they are saved: empty, the videos' folder's "Screen recordings"
+# ("Enregistrements d'écran"); else as [capture] folder. Both followed
+# live, taken by the next recording.
 # format = "mp4"
+# folder = ""
+
+# [clipboard]
+# The clipboard's history (Super+V), followed live. Off, nothing new is
+# read or kept, the history shows its pinned items only and erases the
+# others 6 s later (turned on again within that time, they come back).
+# How long what is not pinned is kept, 200 items at most: "session"
+# (never on disk), "1d", "7d" or "30d". What a password manager marks
+# secret, and what is copied from KeePassXC, Bitwarden, 1Password or the
+# applications listed (by their ids), is never kept, unless skip-secrets
+# is off.
+# history = true
+# keep = "30d"
+# skip-secrets = true
+# ignore = []
 
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the
