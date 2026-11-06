@@ -376,7 +376,7 @@ the field.
 ### 6.13, four fingers on the touchpad (2026-11-06)
 
 - Issue #447, the spec in its last comment (the Settings' rows:
-  settings.md, "Souris et pavé tactile"). `[touchpad] swipe-launcher`
+  settings.md, the Mouse and touchpad page). `[touchpad] swipe-launcher`
   (on by default, followed live) gives the compositor four-finger
   swipes up and down; `crates/hocus-compositor/src/gestures.rs` decides.
 - **Which swipes.** The fingers' first 12 units of travel (libinput's,

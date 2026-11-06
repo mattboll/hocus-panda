@@ -248,16 +248,9 @@ impl Bed {
         })
     }
 
-    /// The window's places, once they hold `id`.
+    /// The window's current places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
-        let log = self.log.clone();
-        // What held, not what is read again after.
-        let mut seen = None;
-        self.hp.dispatch_until(WAIT, |_| {
-            seen = Self::last(&log, " places {").filter(|p| p.get(id).is_some());
-            seen.is_some()
-        })?;
-        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", Self::last(&log, " places {")))
+        settings_page::places_with(&mut self.hp, &self.log, id)
     }
 
     fn window(&self) -> anyhow::Result<Rect> {

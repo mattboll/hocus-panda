@@ -151,6 +151,11 @@ impl Peeks {
         self.out.map(|o| (o.id, o.kind))
     }
 
+    /// Since when it is out: its surface's first frame.
+    pub fn since(&self) -> Option<Duration> {
+        self.out.and_then(|o| o.since)
+    }
+
     /// Whether it is going back.
     pub fn going_back(&self) -> bool {
         self.out.is_some_and(|o| o.back.is_some())
@@ -365,8 +370,10 @@ impl State {
         }
     }
 
-    /// The peek's moment came: it goes back, or it is back.
-    fn peek_due(&mut self) {
+    /// The peek's moment came: it goes back, or it is back. Its timers run
+    /// on the real clock; a test holding the motions' clock calls this as
+    /// it steps it.
+    pub(crate) fn peek_due(&mut self) {
         // A timer may fire a hair early.
         let by = self.now() + Duration::from_millis(1);
         match self.peek.out {

@@ -23,6 +23,11 @@ install -D -m 755 "$release/hocuspanda-shell" "$destdir$prefix/bin/hocuspanda-sh
 install -D -m 755 "$release/hocus-settings" "$destdir$prefix/bin/hocus-settings"
 install -D -m 644 "$here/hocus-settings.desktop" \
     "$destdir$prefix/share/applications/hocus-settings.desktop"
+# The pandas the Compte page offers as avatars (6.11).
+for panda in "$here"/../crates/hocus-settings/data/avatars/panda-[1-8].png; do
+    install -D -m 644 "$panda" \
+        "$destdir$prefix/share/hocuspanda/avatars/$(basename "$panda")"
+done
 # What agents' hooks and scripts run to tell the bar their state.
 install -D -m 755 "$release/hocus" "$destdir$prefix/bin/hocus"
 install -D -m 755 "$here/hocuspanda-session" "$destdir$prefix/bin/hocuspanda-session"

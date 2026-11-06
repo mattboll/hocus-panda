@@ -109,13 +109,24 @@ impl App {
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
         }
+        // The Agents page's consent sheet (6.16).
+        if let Some(sheet) = self.agents_sheet() {
+            layers.push(sheet);
+        }
         // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
         if let Some(sheet) = self.bluetooth_sheet() {
             layers.push(sheet);
         }
-        // The time zone picker (6.11).
+        // The time zone picker, the avatar's popover, the password's sheet
+        // (6.11).
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
+        }
+        if let Some(popover) = self.account_popover() {
+            layers.push(popover);
+        }
+        if let Some(sheet) = self.account_sheet() {
+            layers.push(sheet);
         }
         // The Applications page's menu and sheet (6.15).
         if let Some(menu) = self.apps_menu() {
@@ -869,6 +880,9 @@ impl App {
         if id == SectionId::DateTime {
             return self.time_page(page);
         }
+        if id == SectionId::Account {
+            return self.account_page(page);
+        }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
         }
@@ -883,6 +897,9 @@ impl App {
         }
         if id == SectionId::Power {
             return self.power_page(page);
+        }
+        if id == SectionId::Agents {
+            return self.agents_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -983,12 +1000,15 @@ impl App {
         let slot = Slot::of(setting, self.source);
         // A row no device plugged can take is drawn at 45 % (6.12).
         let not_here = self.unavailable(setting);
-        let ink =
-            if not_here.is_some() || self.desktops_inert(setting) || self.captures_inert(setting) {
-                INERT
-            } else {
-                1.0
-            };
+        let ink = if not_here.is_some()
+            || self.desktops_inert(setting)
+            || self.agents_inert(setting)
+            || self.captures_inert(setting)
+        {
+            INERT
+        } else {
+            1.0
+        };
         let name = text(setting.name.get(lang))
             .size(14)
             .font(SEMIBOLD)
@@ -996,7 +1016,8 @@ impl App {
         // A key new with its page (6.4's side): "Nouveau" beside its name.
         let chip = self
             .bar_chip(setting)
-            .or_else(|| self.captures_new(setting).then(|| self.new_chip()));
+            .or_else(|| self.captures_new(setting).then(|| self.new_chip()))
+            .or_else(|| self.mouse_chip(setting));
         let name: El<'_> = match chip {
             Some(chip) => row![name, chip]
                 .spacing(8)
@@ -1051,15 +1072,21 @@ impl App {
         }
         let inert = self.inert(setting);
         let focused = matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&super::Control::Setting(slot)));
-        // The row 54 px at least: 36 inside its padding.
+        // The row 54 px at least: 36 inside its padding; with a gesture's
+        // diagram, 68 (6.13).
+        let diagram = self.gesture_diagram(setting.id, ink);
         let control = row![
-            Space::new().height(36),
+            Space::new().height(if diagram.is_some() { 50 } else { 36 }),
             container(self.control(setting, slot, inert, focused))
                 .id(format!("control:{}", setting.id)),
         ]
         .align_y(Alignment::Center);
         let lit = self.lit(setting.id);
-        container(row![words, control].spacing(16).align_y(Alignment::Center))
+        let line = match diagram {
+            Some(diagram) => row![diagram, words, control],
+            None => row![words, control],
+        };
+        container(line.spacing(16).align_y(Alignment::Center))
             .padding(Padding {
                 top: 9.0,
                 right: 14.0,
@@ -1300,6 +1327,10 @@ impl App {
             }
             Kind::Swatches => self.swatches(slot, inert, focused),
             Kind::Link(to) => self.link_control(*to),
+            Kind::Note(note) => text(note.get(self.lang))
+                .size(13.5)
+                .color(fade(DIM.get(), alpha))
+                .into(),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,
@@ -1807,10 +1838,12 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
+        "account": if app.page == Page::Section(SectionId::Account) { app.account_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
+        "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
