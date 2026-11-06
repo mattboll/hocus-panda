@@ -37,6 +37,9 @@ pub type Mode3 = (i32, i32, i32);
 #[derive(Debug, Clone, PartialEq)]
 pub struct Screen {
     pub name: String,
+    /// Who it is: its EDID's make, model and serial, else its connector
+    /// (windows.md §12); the key of its set's table.
+    pub key: String,
     pub built_in: bool,
     /// Millimetres; 0 when unknown.
     pub mm: (i32, i32),
@@ -165,11 +168,184 @@ pub struct Screens {
     /// The file's places were refused: the compositor put them left to
     /// right.
     pub places_refused: bool,
+    /// The set in use: its screens' keys, sorted.
+    pub set: Vec<String>,
+    /// The sets known, the one in use first.
+    pub sets: Vec<KnownSet>,
+}
+
+/// A set of screens the compositor knows (windows.md §12, 6.9).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnownSet {
+    /// Its screens, one per line, sorted: the file's key for it.
+    pub name: String,
+    pub screens: Vec<SetScreen>,
+    pub current: bool,
+    /// When it was last in use (seconds since 1970).
+    pub seen: Option<i64>,
+    /// The file arranges it.
+    pub in_file: bool,
+    /// Windows waiting for one of its screens.
+    pub waiting: usize,
+}
+
+/// A screen of a set, as its row draws and names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetScreen {
+    pub key: String,
+    pub built_in: bool,
+    pub mm: (i32, i32),
+    pub size: (i32, i32),
+}
+
+impl SetScreen {
+    fn inches(&self) -> Option<u32> {
+        let (w, h) = self.mm;
+        (w > 0 && h > 0)
+            .then(|| ((f64::from(w).powi(2) + f64::from(h).powi(2)).sqrt() / 25.4).round() as u32)
+    }
+
+    /// "portable", "écran 27 pouces", "écran externe".
+    fn named(&self, lang: Lang) -> String {
+        match (self.built_in, self.inches(), lang) {
+            (true, _, Lang::French) => "portable".to_owned(),
+            (true, _, Lang::English) => "laptop".to_owned(),
+            (false, Some(i), Lang::French) => format!("écran {i} pouces"),
+            (false, Some(i), Lang::English) => format!("{i}-inch screen"),
+            (false, None, Lang::French) => "écran externe".to_owned(),
+            (false, None, Lang::English) => "external screen".to_owned(),
+        }
+    }
+}
+
+impl KnownSet {
+    /// Its screens as its row shows them: the laptop first, then the
+    /// largest.
+    pub fn in_order(&self) -> Vec<&SetScreen> {
+        let mut screens: Vec<&SetScreen> = self.screens.iter().collect();
+        screens.sort_by_key(|s| (!s.built_in, std::cmp::Reverse(s.inches()), s.key.clone()));
+        screens
+    }
+
+    /// Its name in its row: "Portable + écran 27 pouces", "Portable
+    /// seul"; the laptop first, then the largest.
+    pub fn title(&self, lang: Lang) -> String {
+        let names: Vec<String> = self.in_order().iter().map(|s| s.named(lang)).collect();
+        let text = match (names.as_slice(), lang) {
+            ([one], Lang::French) => format!("{one} seul"),
+            ([one], Lang::English) => format!("{one} alone"),
+            (many, _) => many.join(" + "),
+        };
+        upper_first(&text)
+    }
+
+    /// Its row's line: "Maintenant · nouveau, sa disposition sera
+    /// gardée", "Hier, 18:04 · 2 fenêtres l’attendent", "Lundi"; `now`
+    /// and the user's time zone `zone` for the day.
+    pub fn line(&self, lang: Lang, now: i64, zone: &jiff::tz::TimeZone) -> String {
+        let fr = lang == Lang::French;
+        let mut parts: Vec<String> = Vec::new();
+        if self.current {
+            parts.push(if fr { "Maintenant" } else { "Now" }.to_owned());
+            if !self.in_file {
+                parts.push(
+                    if fr {
+                        "nouveau, sa disposition sera gardée"
+                    } else {
+                        "new, its arrangement will be kept"
+                    }
+                    .to_owned(),
+                );
+            }
+        } else if let Some(seen) = self.seen {
+            parts.push(when(seen, now, lang, zone));
+        }
+        match (self.waiting, fr) {
+            (0, _) => {}
+            (1, true) => parts.push("1 fenêtre l’attend".to_owned()),
+            (1, false) => parts.push("1 window waits for it".to_owned()),
+            (n, true) => parts.push(format!("{n} fenêtres l’attendent")),
+            (n, false) => parts.push(format!("{n} windows wait for it")),
+        }
+        parts.join(" · ")
+    }
+}
+
+/// When a set was last in use, as its row says it: "Aujourd’hui, 09:12",
+/// "Hier, 18:04", the weekday within a week, else the date.
+pub fn when(at: i64, now: i64, lang: Lang, zone: &jiff::tz::TimeZone) -> String {
+    let fr = lang == Lang::French;
+    let (Ok(at), Ok(now)) = (
+        jiff::Timestamp::from_second(at),
+        jiff::Timestamp::from_second(now),
+    ) else {
+        return String::new();
+    };
+    let at = at.to_zoned(zone.clone());
+    let now = now.to_zoned(zone.clone());
+    let days = (now.date() - at.date()).get_days();
+    let time = at.strftime("%H:%M").to_string();
+    const JOURS: [&str; 7] = [
+        "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
+    ];
+    const DAYS: [&str; 7] = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    let weekday = usize::try_from(at.weekday().to_monday_zero_offset()).unwrap_or(0);
+    match (days, fr) {
+        (..=0, true) => format!("Aujourd’hui, {time}"),
+        (..=0, false) => format!("Today, {time}"),
+        (1, true) => format!("Hier, {time}"),
+        (1, false) => format!("Yesterday, {time}"),
+        (2..=6, true) => JOURS[weekday].to_owned(),
+        (2..=6, false) => DAYS[weekday].to_owned(),
+        (_, true) => at.strftime("%d/%m/%Y").to_string(),
+        (_, false) => at.strftime("%Y-%m-%d").to_string(),
+    }
+}
+
+/// `text` with its first letter up.
+fn upper_first(text: &str) -> String {
+    let mut letters = text.chars();
+    letters
+        .next()
+        .map(|c| c.to_uppercase().chain(letters).collect())
+        .unwrap_or_default()
 }
 
 impl Screens {
     pub fn get(&self, name: &str) -> Option<&Screen> {
         self.list.iter().find(|s| s.name == name)
+    }
+
+    /// The set in use's name in the file, when it has several screens:
+    /// their arrangement is that set's (windows.md §12); one screen alone
+    /// takes `[outputs.NAME]`, the defaults.
+    pub fn set_in_use(&self) -> Option<String> {
+        (self.set.len() >= 2).then(|| crate::store::set_name(&self.set))
+    }
+
+    /// The key screen `name`'s `what` is written at: in the set in use's
+    /// table when it has several screens and `name` is one of them (its
+    /// place, mode, scale and VRR), else `[outputs.NAME]`.
+    pub fn key_of(&self, name: &str, what: &str) -> Vec<String> {
+        let in_set = matches!(what, "position" | "mode" | "scale" | "vrr");
+        match (in_set, self.set_in_use(), self.get(name)) {
+            (true, Some(set), Some(screen)) if self.set.contains(&screen.key) => vec![
+                crate::store::SCREEN_SETS.to_owned(),
+                set,
+                "outputs".to_owned(),
+                screen.key.clone(),
+                what.to_owned(),
+            ],
+            _ => vec!["outputs".to_owned(), name.to_owned(), what.to_owned()],
+        }
     }
 
     /// The screens plugged.
@@ -280,8 +456,13 @@ pub fn read_line(line: &str) -> Option<Said> {
                         .and_then(serde_json::Value::as_bool)
                         .unwrap_or(default)
                 };
+                let name = o.get("name")?.as_str()?.to_owned();
                 Some(Screen {
-                    name: o.get("name")?.as_str()?.to_owned(),
+                    key: o
+                        .get("key")
+                        .and_then(|k| k.as_str())
+                        .map_or_else(|| name.clone(), ToOwned::to_owned),
+                    name,
                     built_in: flag("built_in", false),
                     mm: pair(o.get("mm")),
                     modes,
@@ -310,12 +491,66 @@ pub fn read_line(line: &str) -> Option<Said> {
             })
             .collect();
         number(&mut screens);
+        let strings = |v: Option<&serde_json::Value>| -> Vec<String> {
+            v.and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| s.as_str().map(ToOwned::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let sets = value
+            .get("sets")
+            .and_then(|s| s.as_array())
+            .map(|sets| {
+                sets.iter()
+                    .filter_map(|set| {
+                        Some(KnownSet {
+                            name: set.get("name")?.as_str()?.to_owned(),
+                            screens: set
+                                .get("screens")?
+                                .as_array()?
+                                .iter()
+                                .filter_map(|s| {
+                                    Some(SetScreen {
+                                        key: s.get("key")?.as_str()?.to_owned(),
+                                        built_in: s
+                                            .get("built_in")
+                                            .and_then(serde_json::Value::as_bool)
+                                            .unwrap_or(false),
+                                        mm: pair(s.get("mm")),
+                                        size: pair(s.get("size")),
+                                    })
+                                })
+                                .collect(),
+                            current: set
+                                .get("current")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false),
+                            seen: set.get("seen").and_then(serde_json::Value::as_i64),
+                            in_file: set
+                                .get("in_file")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false),
+                            waiting: set
+                                .get("waiting")
+                                .and_then(serde_json::Value::as_u64)
+                                .and_then(|n| usize::try_from(n).ok())
+                                .unwrap_or(0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         return Some(Said::Screens(Screens {
             list: screens,
             places_refused: value
                 .get("places_refused")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
+            set: strings(value.get("set")),
+            sets,
         }));
     }
     if let Some(trial) = value.get("trial") {
@@ -750,6 +985,10 @@ const ALL: RowGroup = RowGroup {
     label: w("TOUS LES ÉCRANS", "ALL SCREENS"),
     per_source: false,
 };
+const SETS_GROUP: RowGroup = RowGroup {
+    label: w("ENSEMBLES D’ÉCRANS", "SCREEN SETS"),
+    per_source: false,
+};
 const NIGHT: RowGroup = RowGroup {
     label: w("ÉCLAIRAGE NOCTURNE", "NIGHT LIGHT"),
     per_source: false,
@@ -775,6 +1014,8 @@ pub const ROTATION: &str = "screens.rotation";
 pub const PRIMARY: &str = "screens.primary";
 pub const MIRROR: &str = "screens.mirror";
 pub const NIGHT_LIGHT: &str = "screens.night-light";
+/// The sets of screens known (windows.md §12).
+pub const SETS: &str = "screens.sets";
 
 /// The page's settings: what the search finds; the page draws them itself.
 pub fn settings() -> &'static [Setting] {
@@ -888,6 +1129,16 @@ pub fn settings() -> &'static [Setting] {
                 &["outputs", "NAME", "mirror"],
             ),
             s(
+                SETS,
+                SETS_GROUP,
+                w("Ensembles d’écrans", "Screen sets"),
+                (
+                    &["oublier", "brancher", "bureau", "maison", "disposition"],
+                    &["forget", "dock", "office", "home", "arrangement", "profile"],
+                ),
+                &["screen-sets"],
+            ),
+            s(
                 NIGHT_LIGHT,
                 NIGHT,
                 w("Éclairage nocturne", "Night light"),
@@ -989,5 +1240,81 @@ mod tests {
                 left: 12
             })
         );
+    }
+
+    /// The sets the compositor says, how their rows name them, and where
+    /// the page writes a screen's keys: in the set in use's table when it
+    /// has several screens.
+    #[test]
+    fn the_sets_are_read_named_and_written_to() {
+        let said = read_line(
+            r#"{"outputs":[{"name":"eDP-1","key":"BOE 0x0BCA (eDP-1)","built_in":true,"position":[0,0],"size":[1280,800]},{"name":"DP-2","key":"DEL U2723QE 7XY","position":[1280,0],"size":[2560,1440]}],"places_refused":false,"trial":null,"set":["BOE 0x0BCA (eDP-1)","DEL U2723QE 7XY"],"sets":[{"name":"BOE 0x0BCA (eDP-1)\nDEL U2723QE 7XY","screens":[{"key":"DEL U2723QE 7XY","built_in":false,"mm":[597,336],"size":[2560,1440]},{"key":"BOE 0x0BCA (eDP-1)","built_in":true,"mm":[302,188],"size":[1280,800]}],"current":true,"seen":1762400000,"in_file":false,"waiting":0},{"name":"BOE 0x0BCA (eDP-1)\nDEL U3423WE 9AB","screens":[{"key":"BOE 0x0BCA (eDP-1)","built_in":true,"mm":[302,188],"size":[1280,800]},{"key":"DEL U3423WE 9AB","built_in":false,"mm":[800,335],"size":[3440,1440]}],"current":false,"seen":1762367040,"in_file":true,"waiting":2},{"name":"BOE 0x0BCA (eDP-1)","screens":[{"key":"BOE 0x0BCA (eDP-1)","built_in":true,"mm":[302,188],"size":[1280,800]}],"current":false,"seen":1762150000,"in_file":false,"waiting":0}]}"#,
+        );
+        let Some(Said::Screens(screens)) = said else {
+            panic!("{said:?}");
+        };
+        assert_eq!(
+            screens.get("DP-2").map(|s| s.key.as_str()),
+            Some("DEL U2723QE 7XY")
+        );
+        assert_eq!(screens.sets.len(), 3);
+        let fr = Lang::French;
+        let en = Lang::English;
+        let utc = jiff::tz::TimeZone::UTC;
+        // 2025-11-06 03:33:20 UTC: "now".
+        let now = 1_762_400_000;
+        let [here, office, alone] = &screens.sets[..] else {
+            panic!("{:?}", screens.sets);
+        };
+        assert_eq!(here.title(fr), "Portable + écran 27 pouces");
+        assert_eq!(here.title(en), "Laptop + 27-inch screen");
+        assert_eq!(
+            here.line(fr, now, &utc),
+            "Maintenant · nouveau, sa disposition sera gardée"
+        );
+        assert_eq!(
+            here.line(en, now, &utc),
+            "Now · new, its arrangement will be kept"
+        );
+        assert_eq!(office.title(fr), "Portable + écran 34 pouces");
+        // The day before, 18:24 UTC.
+        assert_eq!(
+            office.line(fr, now, &utc),
+            "Hier, 18:24 · 2 fenêtres l’attendent"
+        );
+        assert_eq!(
+            office.line(en, now, &utc),
+            "Yesterday, 18:24 · 2 windows wait for it"
+        );
+        assert_eq!(alone.title(fr), "Portable seul");
+        assert_eq!(alone.title(en), "Laptop alone");
+        assert_eq!(alone.line(fr, now, &utc), "Lundi");
+        assert_eq!(when(now - 30 * 86_400, now, en, &utc), "2025-10-07");
+        assert_eq!(when(now - 60, now, fr, &utc), "Aujourd’hui, 03:32");
+        // Two screens: their place, mode, scale and VRR go in the set's
+        // table, by identity; the rest stays theirs.
+        let set = "BOE 0x0BCA (eDP-1)\nDEL U2723QE 7XY".to_owned();
+        assert_eq!(screens.set_in_use(), Some(set.clone()));
+        assert_eq!(
+            screens.key_of("DP-2", "position"),
+            [
+                "screen-sets",
+                &set,
+                "outputs",
+                "DEL U2723QE 7XY",
+                "position"
+            ]
+        );
+        assert_eq!(
+            screens.key_of("DP-2", "enabled"),
+            ["outputs", "DP-2", "enabled"]
+        );
+        // One screen alone: its defaults, [outputs.NAME].
+        let one = Screens {
+            set: vec!["BOE 0x0BCA (eDP-1)".to_owned()],
+            ..screens.clone()
+        };
+        assert_eq!(one.set_in_use(), None);
+        assert_eq!(one.key_of("eDP-1", "scale"), ["outputs", "eDP-1", "scale"]);
     }
 }

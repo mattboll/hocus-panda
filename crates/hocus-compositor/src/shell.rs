@@ -509,6 +509,7 @@ impl State {
                 tracing::warn!(tool, "the shell follows a tool that is not herdr");
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
+            ToCompositor::PeekClose => self.peek_closed(),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {

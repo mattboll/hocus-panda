@@ -1790,7 +1790,60 @@ impl Headless {
         backend
             .headless_mut()
             .context("not headless")?
-            .plug(name, None, state)
+            .plug(name, None, None, state)
+    }
+
+    /// A screen of `spec`, who `identity` says (its EDID's make, model and
+    /// serial; none: known by its connector), plugged on connector `name`:
+    /// one unplugged before, in its place, or a new one, right of the
+    /// others.
+    pub fn plug_screen(
+        &mut self,
+        name: &str,
+        spec: crate::OutputSpec,
+        identity: Option<crate::screen_sets::Identity>,
+    ) -> anyhow::Result<()> {
+        let App { state, backend } = &mut self.app;
+        backend.headless_mut().context("not headless")?.plug(
+            name,
+            None,
+            Some((spec, identity)),
+            state,
+        )
+    }
+
+    /// The key screen `name` is known by (its identity's, windows.md §12).
+    pub fn screen_key(&self, name: &str) -> String {
+        self.app.state.screen_key(name)
+    }
+
+    /// The set of screens in use: their keys, sorted.
+    pub fn screen_set(&self) -> Vec<String> {
+        self.app.state.current_set()
+    }
+
+    /// The sets as the Settings are told them (6.9).
+    pub fn screen_sets_said(&self) -> serde_json::Value {
+        self.app.state.sets_json()
+    }
+
+    /// Whether the winking panda saying screens moved is out.
+    pub fn screens_peek_out(&self) -> bool {
+        self.app.state.peek.screens_out()
+    }
+
+    /// Whether the panda out goes back.
+    pub fn peek_going_back(&self) -> bool {
+        self.app.state.peek.going_back()
+    }
+
+    /// The Settings forget the set of `screens` (by their keys), as
+    /// "Oublier cet ensemble" does (6.9).
+    pub fn forget_screen_set(&mut self, screens: &[&str]) -> Result<(), String> {
+        let keys: Vec<String> = screens.iter().map(|s| (*s).to_owned()).collect();
+        self.app
+            .state
+            .forget_screen_set(&crate::screen_sets::set_name(&keys))
     }
 
     /// Output `name`, unplugged before, comes back with its top-left
@@ -1800,7 +1853,7 @@ impl Headless {
         backend
             .headless_mut()
             .context("not headless")?
-            .plug(name, Some((x, y)), state)
+            .plug(name, Some((x, y)), None, state)
     }
 
     /// Why the compositor was asked to end, if it was.

@@ -2847,15 +2847,15 @@ impl Bed {
         };
         let (x, y) = (f64::from(surface.x), f64::from(surface.y));
         let panda = (
-            x + f64::from(surface.width) - right - 96.0,
+            x + f64::from(surface.width) - right - 170.0,
             y + top,
-            96.0,
-            96.0,
+            170.0,
+            170.0,
         );
         let bubble_height = 13.0 * 1.366 + 18.0;
         let bubble = (
             x + left,
-            y + top + (96.0 - bubble_height) / 2.0,
+            y + top + (170.0 - bubble_height) / 2.0,
             panda.0 - 8.0 - x - left,
             bubble_height,
         );
@@ -2900,7 +2900,7 @@ fn peek_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
 /// The full bar's left edge on the test's 1920 px screen.
 const BAR_LEFT: f64 = 1920.0 - 8.0 - 196.0;
 
-/// An agent starting to wait: its panda (96 px) comes out of the bar's
+/// An agent starting to wait: its panda (170 px) comes out of the bar's
 /// edge at its row, 18 px from the bar, with its bubble; on a GPU sliding
 /// out from under the bar in some 320 ms with a slight overshoot, fading
 /// in; then still, and back after 8 s on the clock; then its surfaces go

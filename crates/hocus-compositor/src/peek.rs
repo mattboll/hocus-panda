@@ -19,6 +19,13 @@
 //! timer of the loop each, never a poll; then the shell is told that it is
 //! back (`no-peek`) and removes its surfaces: nothing is drawn at rest.
 //!
+//! When a screen goes or comes back and windows move with it
+//! (docs/design/windows.md §12), the winking panda peeks out the same
+//! way with a blue bubble that says so ([`State::screens_peek`]), for
+//! 4 s: an agent's peek arriving meanwhile replaces it, it never
+//! replaces an agent's, a click on it sends it back, and nothing is said
+//! while the session is locked.
+//!
 //! `[agents] peek` (6.16) says for what a panda peeks out: an agent
 //! waiting or finished, waiting only, or never; followed live from the
 //! next one, a panda out staying its 8 s.
@@ -53,22 +60,42 @@ pub const OUT_CURVE: Bezier = Bezier(0.2, 0.9, 0.25, 1.15);
 pub const FADE_IN: Duration = Duration::from_millis(260);
 /// It stays out this long, still.
 pub const STAYS: Duration = Duration::from_secs(8);
+/// The winking panda saying screens moved stays out this long.
+pub const SCREENS_STAY: Duration = Duration::from_secs(4);
 /// It goes back in this time along this curve, fading out over
 /// [`FADE_OUT`], CSS's `ease-in`.
 pub const BACK: Duration = Duration::from_millis(260);
 pub const BACK_CURVE: Bezier = Bezier(0.5, 0.0, 0.75, 0.3);
 pub const FADE_OUT: Duration = Duration::from_millis(220);
-/// Where it is when in: this far toward the bar, logical pixels.
-pub const SLIDE: f64 = 150.0;
+/// Where it is when in: this far toward the bar, logical pixels: the
+/// panda (170 px) and its 18 px from the bar, under the bar.
+pub const SLIDE: f64 = 190.0;
 /// On the CPU, its surface is a card (no alpha): its corners' radius, the
 /// bubble's.
 pub const CARD_RADIUS: f64 = 12.0;
 
+/// Why the panda is out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum What {
+    /// Agent `id`'s.
+    Agent(u64, PeekKind),
+    /// The winking panda: screens moved.
+    Screens,
+}
+
+impl What {
+    fn stays(self) -> Duration {
+        match self {
+            Self::Agent(..) => STAYS,
+            Self::Screens => SCREENS_STAY,
+        }
+    }
+}
+
 /// The panda out, or on its way.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Out {
-    id: u64,
-    kind: PeekKind,
+    what: What,
     /// From its surface's first frame, on the compositor's clock.
     since: Option<Duration>,
     /// When it goes back.
@@ -148,7 +175,15 @@ impl Out {
 impl Peeks {
     /// Which agent's panda is out, and why.
     pub fn out(&self) -> Option<(u64, PeekKind)> {
-        self.out.map(|o| (o.id, o.kind))
+        match self.out?.what {
+            What::Agent(id, kind) => Some((id, kind)),
+            What::Screens => None,
+        }
+    }
+
+    /// Whether the winking panda saying screens moved is out.
+    pub fn screens_out(&self) -> bool {
+        self.out.is_some_and(|o| o.what == What::Screens)
     }
 
     /// Since when it is out: its surface's first frame.
@@ -224,8 +259,7 @@ impl State {
             .and_then(|o| o.since.filter(|_| o.back.is_none()));
         tracing::debug!(id, kind = kind.name(), "the panda peeks out");
         self.peek.out = Some(Out {
-            id,
-            kind,
+            what: What::Agent(id, kind),
             since: showing,
             stays: showing.map(|_| now + STAYS),
             back: None,
@@ -239,6 +273,57 @@ impl State {
         }));
         self.arm_peek();
         self.redraw = true;
+    }
+
+    /// Windows moved with a screen gone or back (windows.md §12): the
+    /// winking panda says so for 4 s, unless an agent's panda is out (it
+    /// is never replaced), the briefing is open or the session locked.
+    pub(crate) fn screens_peek(&mut self, moved: hocus_link::ScreensMoved) {
+        if !self.shell_linked() {
+            return;
+        }
+        if self.locked() {
+            tracing::debug!("locked: the windows moved, nothing is said");
+            return;
+        }
+        if self.peek.briefing {
+            tracing::debug!("the briefing is open: no peek for the screens");
+            return;
+        }
+        if let Some(out) = self.peek.out
+            && matches!(out.what, What::Agent(..))
+            && out.back.is_none()
+        {
+            tracing::debug!("an agent's panda is out: the screens' peek is not shown");
+            return;
+        }
+        let now = self.now();
+        let showing = self
+            .peek
+            .out
+            .and_then(|o| o.since.filter(|_| o.back.is_none()));
+        tracing::debug!(
+            gone = moved.gone,
+            windows = moved.apps.len(),
+            "the winking panda peeks out"
+        );
+        self.peek.out = Some(Out {
+            what: What::Screens,
+            since: showing,
+            stays: showing.map(|_| now + SCREENS_STAY),
+            back: None,
+        });
+        self.peek.told += 1;
+        self.tell_shell(ToShell::ScreensMoved(moved));
+        self.arm_peek();
+        self.redraw = true;
+    }
+
+    /// The user clicked the winking panda: it goes back.
+    pub(crate) fn peek_closed(&mut self) {
+        if self.peek.screens_out() {
+            self.peek_back();
+        }
     }
 
     /// A commit of the shell's peek surface `layer`: its first frame
@@ -258,7 +343,7 @@ impl State {
             && out.back.is_none()
         {
             out.since = Some(now);
-            out.stays = Some(now + STAYS);
+            out.stays = Some(now + out.what.stays());
             self.arm_peek();
         }
         self.redraw = true;
@@ -272,7 +357,11 @@ impl State {
     /// The user went to agent `id` (its row, the peek itself): its panda
     /// goes back at once (§8 step 5).
     pub(crate) fn peek_gone_to(&mut self, id: u64) {
-        if self.peek.out.is_some_and(|o| o.id == id) {
+        if self
+            .peek
+            .out
+            .is_some_and(|o| matches!(o.what, What::Agent(out, _) if out == id))
+        {
             self.peek_back();
         }
     }
@@ -292,10 +381,11 @@ impl State {
     /// was seen, or that the user acted on, goes back.
     pub(crate) fn peek_follows(&mut self) {
         if let Some(out) = self.peek.out
+            && let What::Agent(id, kind) = out.what
             && out.back.is_none()
-            && !self.halo.counts(out.id, concern(out.kind))
+            && !self.halo.counts(id, concern(kind))
         {
-            tracing::debug!(id = out.id, "the agent was dealt with: the panda goes back");
+            tracing::debug!(id, "the agent was dealt with: the panda goes back");
             self.peek_back();
         }
     }
@@ -484,8 +574,7 @@ mod tests {
     #[test]
     fn it_moves_only_on_its_way_out_and_back() {
         let out = Out {
-            id: 1,
-            kind: PeekKind::Waiting,
+            what: What::Agent(1, PeekKind::Waiting),
             since: Some(ms(0)),
             stays: Some(STAYS),
             back: None,

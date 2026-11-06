@@ -689,6 +689,38 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
 | Écran principal | `[panel] output` (Automatique: taken out) |
 
+**With two screens or more** (#417, windows.md §12 "Sets of screens"),
+the place, the mode, the scale, VRR and the primary screen are the set
+in use's: written into its `[[screen-sets]]` table (`[screen-sets.outputs.
+"IDENTITY"] position`, `mode`, `scale`, `vrr`; the set's `primary`, an
+identity), made with its `screens` when its first key is written and
+taken out when "Annuler" leaves nothing but them. "Utiliser cet écran"
+stays `[outputs.NAME] enabled`. With one screen, `[outputs.NAME]` as
+above: those stay the defaults every set starts from.
+
+**ENSEMBLES D'ÉCRANS / SCREEN SETS** (#417, the s8a mockup's state 4),
+under the arrangement's notes, once more than one set is known: a card, a row per set the compositor
+knows (those seen, kept in the state directory, and those in the file;
+its line's `sets`), the one in use first and lit (the accent at 12 %, a
+1 px ring at 40 %, radius 9). Each row: an icon of its screens' shapes
+(each a 1.5 px outline, radius 3; the laptop 20 × 13, the others by
+their proportions, 22 to 34 wide, bottoms aligned, 58 × 30 in all), its
+name in 13.5 px semibold ("Portable + écran 27 pouces", the laptop
+first then the largest; "Portable seul"; "écran externe" when a size is
+not known) and its line in 12 px: "Maintenant" for the set in use, with
+"· nouveau, sa disposition sera gardée" while the file has no table for
+it; else when it was last in use ("Aujourd'hui, 09:12", "Hier, 18:04",
+the weekday within a week, else the date); then "· 2 fenêtres
+l'attendent" when windows wait for one of its screens. The others end
+with a "⋯" button whose menu says "Oublier cet ensemble" / "Forget this
+set": the compositor forgets it (`forget-set`, a tab before each of its
+screens' identities) and its table leaves the file, with the toast
+"Ensemble oublié : …" and its "Annuler" (the table back). Under the
+rows, 12 px faint: "Chaque ensemble garde la place des écrans, leurs
+résolutions, leurs échelles et l'écran principal." The search finds it
+("oublier", "disposition", "screen sets"). Each screen of the line also
+says its identity (`key`).
+
 **The compositor follows the file** (`crates/hocus-compositor/src/
 displays.rs`): the one watcher of the file (`reload.rs`, 6.12's) hands
 the loop what it says, and the loop takes `[outputs]` and `[panel]

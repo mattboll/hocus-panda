@@ -39,6 +39,10 @@ const FILE: &str = "# My desktop, by hand.\n\
     [panel]\n\
     form = \"full\"\n";
 
+/// The table of the set the test's two screens make, which the page
+/// writes their arrangement into (no EDID: known by their connectors).
+const SET: &str = "\n[[screen-sets]]\nscreens = [\"HEADLESS-1\", \"HEADLESS-2\"]\n";
+
 /// The test's two screens.
 const LAPTOP: &str = "HEADLESS-1";
 const EXTERNAL: &str = "HEADLESS-2";
@@ -58,6 +62,16 @@ impl Bed {
     }
 
     fn start_on(file: &str, outputs: &[&str]) -> anyhow::Result<Option<Self>> {
+        Self::start_tuned(file, outputs, |_, _| {})
+    }
+
+    /// The same, `tune` changing the compositor's configuration, given
+    /// the test's directory.
+    fn start_tuned(
+        file: &str,
+        outputs: &[&str],
+        tune: impl FnOnce(&mut Config, &Path),
+    ) -> anyhow::Result<Option<Self>> {
         let Some(program) = common::settings_program() else {
             eprintln!("hocus-settings is not built: build the workspace to run this test");
             return Ok(None);
@@ -97,6 +111,7 @@ impl Bed {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(config_file);
+        tune(&mut config, root);
         let hp = Headless::start_with(
             HeadlessConfig {
                 outputs: outputs
@@ -378,15 +393,17 @@ fn dragging_the_external_above_the_laptop_writes_both_places() -> anyhow::Result
             && (f(&held, 1) + f(&held, 3) / 2.0 - target.1).abs() <= 1.5
     })?;
     bed.hp.button(BTN_LEFT, false);
-    // Above, flush and centred: both places written, the smallest 0.
+    // Above, flush and centred: both places written, the smallest 0, in
+    // the set of these two screens' table (windows.md §12).
     let text = bed.written(|t| t.contains("position"))?;
     assert!(text.starts_with(FILE), "{text}");
+    assert!(text.contains(SET), "{text}");
     assert!(
-        text.contains("[outputs.HEADLESS-1]\nposition = [440, 1440]\n"),
+        text.contains("[screen-sets.outputs.HEADLESS-1]\nposition = [440, 1440]\n"),
         "{text}"
     );
     assert!(
-        text.contains("[outputs.HEADLESS-2]\nposition = [0, 0]\n"),
+        text.contains("[screen-sets.outputs.HEADLESS-2]\nposition = [0, 0]\n"),
         "{text}"
     );
     let shown = bed.shows(|s| s["toast"].as_str().is_some_and(|t| t.contains("au-dessus")))?;
@@ -411,7 +428,7 @@ fn the_scale_is_written_at_once_and_annuler_puts_the_file_back() -> anyhow::Resu
     let text = bed.written(|t| t.contains("scale"))?;
     assert_eq!(
         text,
-        format!("{FILE}\n[outputs.HEADLESS-1]\nscale = 1.25\n")
+        format!("{FILE}{SET}\n[screen-sets.outputs.HEADLESS-1]\nscale = 1.25\n")
     );
     let shown = bed.shows(|s| {
         s["toast"]
@@ -465,7 +482,7 @@ fn a_resolution_kept_with_garder_is_written() -> anyhow::Result<()> {
     let text = bed.written(|t| t.contains("mode"))?;
     assert_eq!(
         text,
-        format!("{FILE}\n[outputs.HEADLESS-2]\nmode = \"2560x1080@60\"\n")
+        format!("{FILE}{SET}\n[screen-sets.outputs.HEADLESS-2]\nmode = \"2560x1080@60\"\n")
     );
     let shown = bed.shows(|s| s["screens"]["dialog"].is_null() && !s["toast"].is_null())?;
     assert_eq!(
@@ -839,5 +856,146 @@ fn a_window_goes_back_to_its_screen_turned_on_again() -> anyhow::Result<()> {
         hp.outputs(),
         common::rect_of(&hp, "away")
     );
+    Ok(())
+}
+
+/// A file arranging a set of screens not plugged now.
+const AWAY_SET: &str = "\n[[screen-sets]]\n\
+    screens = [\"DEL U3423WE 7XY1234\", \"HEADLESS-1\"]\n\
+    \n[screen-sets.outputs.HEADLESS-1]\nposition = [0, 1440]\n\
+    \n[screen-sets.outputs.\"DEL U3423WE 7XY1234\"]\nposition = [0, 0]\n";
+
+/// Écrans lists the sets of screens, the one in use first; "Oublier cet
+/// ensemble" on another takes its table out of the file, and the
+/// compositor no longer lists it (windows.md §12, #417).
+#[test]
+fn a_set_forgotten_leaves_the_file() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(&format!("{FILE}{AWAY_SET}"))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let listed = |hp: &Headless| -> Vec<String> {
+        hp.screen_sets_said()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s["name"].as_str().map(ToOwned::to_owned))
+            .collect()
+    };
+    let away = "DEL U3423WE 7XY1234\nHEADLESS-1".to_owned();
+    assert_eq!(
+        listed(&bed.hp),
+        ["HEADLESS-1\nHEADLESS-2".to_owned(), away.clone()]
+    );
+    // The second row's menu: its one choice.
+    bed.click("control:set:1")?;
+    let shown = bed.shows(|s| s["screens"]["menu"] == "screens.sets")?;
+    assert_eq!(
+        shown["screens"]["choices"][0], "Oublier cet ensemble",
+        "{shown}"
+    );
+    bed.click("option:0")?;
+    bed.written(|t| t == FILE)?;
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !listed(hp).contains(&away))?;
+    anyhow::ensure!(gone, "{:?}", listed(&bed.hp));
+    bed.shows(|s| {
+        s["toast"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("Ensemble oublié"))
+    })?;
+    // "Annuler": its table back.
+    bed.click("toast-action")?;
+    bed.written(|t| t.contains("U3423WE"))?;
+    Ok(())
+}
+
+/// The pull request's screenshot of the sets' list, into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshot_of_the_screen_sets() -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
+        return Ok(());
+    };
+    // Sets seen before: the laptop alone on Monday, the office's 32-inch
+    // three days ago.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let state = format!(
+        "[[set]]\nseen = {}\n[[set.screens]]\nkey = \"HEADLESS-1\"\nbuilt-in = true\n\
+         mm = [302, 188]\nsize = [1920, 1200]\n\n\
+         [[set]]\nseen = {}\n[[set.screens]]\nkey = \"HEADLESS-1\"\nbuilt-in = true\n\
+         mm = [302, 188]\nsize = [1920, 1200]\n[[set.screens]]\nkey = \"GSM 32UN880 205NTAB1C123\"\n\
+         mm = [697, 392]\nsize = [2560, 1440]\n",
+        now - 5 * 86_400,
+        now - 3 * 86_400 - 3600,
+    );
+    let Some(mut bed) = Bed::start_tuned(
+        &format!("{FILE}{AWAY_SET}"),
+        &["1920x1200@1:302x188mm", "2560x1440@1:597x336mm"],
+        |config, root| {
+            let dir = root.join("state/hocuspanda");
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("screen-sets"), &state);
+            config.state_dir = Some(dir);
+        },
+    )?
+    else {
+        return Ok(());
+    };
+    bed.hp.set_internal(LAPTOP);
+    // The 34-inch screen came and went today, a window waiting for it.
+    bed.hp.unplug(EXTERNAL)?;
+    bed.hp.plug_screen(
+        EXTERNAL,
+        "3440x1440@1:800x335mm".parse()?,
+        Some(hocus_compositor::ScreenIdentity::new(
+            "DEL", "U3423WE", "7XY1234",
+        )),
+    )?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    // Where the file's arrangement of that set put it: above the laptop.
+    let (x, y) = bed
+        .hp
+        .outputs()
+        .into_iter()
+        .find(|(n, _)| n == EXTERNAL)
+        .map(|(_, g)| g.centre())
+        .ok_or_else(|| anyhow::anyhow!("no external screen"))?;
+    bed.hp.pointer_move(x, y);
+    common::open(&mut bed.hp, "waits", (900, 600))?;
+    bed.hp.unplug(EXTERNAL)?;
+    bed.hp
+        .plug_screen(EXTERNAL, "2560x1440@1:597x336mm".parse()?, None)?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.hp.pointer_move(960.0, 600.0);
+    bed.open()?;
+    bed.places_with("set:2")?;
+    let shot = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        common::at_rest(&mut bed.hp)?;
+        let window = bed.window()?;
+        let (width, height, bytes) = bed.hp.screenshot(0)?;
+        let mut image = image::RgbaImage::new(window.width as u32, window.height as u32);
+        for y in 0..window.height {
+            for x in 0..window.width {
+                let (sx, sy) = (window.x + x, window.y + y);
+                if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                    continue;
+                }
+                let at = usize::try_from(sy * width + sx)? * 4;
+                let p = &bytes[at..at + 4];
+                image.put_pixel(x as u32, y as u32, image::Rgba([p[2], p[1], p[0], 255]));
+            }
+        }
+        image.save(Path::new(&folder).join(name))?;
+        Ok(())
+    };
+    shot(&mut bed, "ecrans-ensembles.png")?;
+    bed.click("control:set:1")?;
+    bed.shows(|s| s["screens"]["menu"] == "screens.sets")?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    shot(&mut bed, "ecrans-oublier.png")?;
     Ok(())
 }
