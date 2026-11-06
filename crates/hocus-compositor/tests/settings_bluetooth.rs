@@ -386,6 +386,10 @@ impl Bed {
     }
 }
 
+/// The seconds the window gives a connection or a pairing while the test
+/// holds BlueZ's answer: as long as the test waits for what it shows.
+const HELD: u32 = WAIT.as_secs() as u32;
+
 /// A row of the page's list `list` (`mine`, `nearby`), by its name.
 fn device<'a>(shown: &'a Value, list: &str, name: &str) -> &'a Value {
     shown["bluetooth"][list]
@@ -463,20 +467,24 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
 {
     let mut devices = mine();
     devices[2] = FakeDevice::paired(PIXEL, "phone", None).answering(Answer::Refuses);
-    let Some(mut bed) = Bed::start(Some(Setup {
+    // The window gives a connection as long as the test may hold it.
+    let setup = Setup {
         devices,
         ..Setup::default()
-    }))?
-    else {
+    };
+    let Some(mut bed) = Bed::start_on(Some(setup), "1920x1080", HELD, false)? else {
         return Ok(());
     };
     bed.open()?;
     bed.shows(|s| names(s, "mine").len() == 4)?;
     // The keyboard connects from its row: "Connexion…", then connected,
-    // the last connected first.
+    // the last connected first. Its answer held until the window said
+    // "Connexion…": a window slow to draw went straight to connected.
+    bed.bluez().hold();
     bed.click(&format!("bt:act:{K380}"))?;
     bed.asked(&Call::Connect(K380.to_owned()))?;
     bed.shows(|s| device(s, "mine", K380)["line"] == "Connexion…")?;
+    bed.bluez().release();
     let shown = bed.shows(|s| device(s, "mine", K380)["connected"] == true)?;
     assert_eq!(names(&shown, "mine")[0], K380);
     assert_eq!(
@@ -504,16 +512,20 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
 
 #[test]
 fn pairing_without_a_code_moves_the_device_to_my_devices_connected() -> anyhow::Result<()> {
-    let Some(mut bed) = Bed::start(Some(setup()))? else {
+    // The window gives a pairing as long as the test may hold it.
+    let Some(mut bed) = Bed::start_on(Some(setup()), "1920x1080", HELD, false)? else {
         return Ok(());
     };
     bed.open()?;
     bed.shows(|s| names(s, "nearby").len() == 4)?;
+    // Its answer held until the window says it pairs.
+    bed.bluez().hold();
     bed.click(&format!("bt:pair:{BUDS}"))?;
     bed.asked(&Call::Pair(BUDS.to_owned()))?;
     // Pairing: its row says so, the others are inert.
     let shown = bed.shows(|s| device(s, "nearby", BUDS)["line"] == "Association…")?;
     assert_eq!(device(&shown, "nearby", FLIP)["inert"], true);
+    bed.bluez().release();
     // Then trusted, connected, and among the paired devices, first.
     bed.asked(&Call::Trust(BUDS.to_owned()))?;
     bed.asked(&Call::Connect(BUDS.to_owned()))?;
@@ -702,12 +714,18 @@ fn the_home_card_and_the_search_lead_to_the_page() -> anyhow::Result<()> {
         };
         bed.key(code)?;
     }
+    // The whole word: a window slow to read the keys says the results of
+    // « ju » first, where the pairing comes third.
     let shown = bed.shows(|s| {
-        s["results"]
-            .as_array()
-            .is_some_and(|r| r.iter().any(|r| r["target"] == "bluetooth.pair"))
+        s["query"] == "jumeler"
+            && s["results"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|r| r["target"] == "bluetooth.pair"))
     })?;
-    assert_eq!(shown["results"][0]["name"], "Associer un appareil");
+    assert_eq!(
+        shown["results"][0]["name"], "Associer un appareil",
+        "{shown}"
+    );
     bed.key(KEY_ENTER)?;
     let shown = bed.shows(|s| s["page"] == "bluetooth" && s["lit"] == "bluetooth.pair")?;
     assert_eq!(shown["bluetooth"]["heard"], true);
