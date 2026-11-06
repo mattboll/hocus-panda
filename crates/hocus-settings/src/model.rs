@@ -280,8 +280,8 @@ impl SectionId {
                 System,
                 w("Énergie", "Power"),
                 w(
-                    "Quand l’écran s’éteint, quand la session se verrouille et quand l’ordinateur se met en veille ; le couvercle et le bouton d’alimentation.",
-                    "When the screen turns off, when the session locks and when the computer sleeps; the lid and the power button.",
+                    "Quand l’écran s’assombrit, se verrouille et s’éteint, quand l’ordinateur se met en veille ; le couvercle, le bouton d’alimentation et l’économie d’énergie.",
+                    "When the screen dims, locks and turns off, when the computer sleeps; the lid, the power button and power saving.",
                 ),
                 Icon::Power,
                 "6.10",
@@ -947,6 +947,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Account => crate::account::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
+        SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
         _ => &[],
     }

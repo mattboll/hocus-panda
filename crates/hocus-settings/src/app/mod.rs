@@ -20,6 +20,7 @@ mod keyboard_page;
 mod mouse;
 mod network;
 mod places;
+mod power_page;
 mod screens;
 mod sound;
 mod style;
@@ -224,6 +225,8 @@ enum Undo {
     Account(account::Choice),
     /// A change of the Réseau page's (in NetworkManager, rfkill).
     Network(network::Choice),
+    /// The power mode (power-profiles-daemon's, 6.10).
+    Power(power_page::ModeChoice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -334,6 +337,8 @@ pub enum Message {
     Desktops(desktops_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
+    /// The Énergie page's (6.10).
+    Power(power_page::Msg),
     Nothing,
 }
 
@@ -407,6 +412,9 @@ pub struct App {
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
+    /// The Énergie page: the battery, the modes and logind as last said
+    /// (6.10).
+    power: power_page::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -424,6 +432,7 @@ impl App {
         let account = account::State::new(sender.clone());
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
+        let power = power_page::State::start(&sender);
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -501,6 +510,7 @@ impl App {
             account,
             desktops: desktops_page::State::default(),
             network,
+            power,
             fresh: None,
             parity: false,
         };
@@ -861,6 +871,7 @@ impl App {
                 self.keys_update(msg)
             }
             Message::Network(msg) => self.network_update(msg),
+            Message::Power(msg) => self.power_update(msg),
         }
     }
 
@@ -869,7 +880,11 @@ impl App {
     fn heard(&mut self, heard: Heard) -> Task<Message> {
         match heard {
             Heard::Power { source, battery } => {
-                self.source = source;
+                self.power.kernel_on_battery = source == Source::Battery;
+                // UPower, once heard, says it better (`power_page`).
+                if self.power.now.as_ref().is_none_or(|n| !n.upower) {
+                    self.source = source;
+                }
                 self.battery = battery;
                 Task::none()
             }
@@ -1237,6 +1252,13 @@ impl App {
                 self.toast = None;
                 return self.network_undo(choice, false);
             }
+            Some(Undo::Power(_)) => {
+                let Some(Undo::Power(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.power_undo(choice, false);
+            }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
                     return Task::none();
@@ -1309,6 +1331,12 @@ impl App {
                     return Task::none();
                 };
                 return self.network_undo(choice, true);
+            }
+            Some(Undo::Power(_)) => {
+                let Some(Undo::Power(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.power_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1590,6 +1618,9 @@ impl App {
         if section == SectionId::Desktops {
             return self.desktops_controls();
         }
+        if section == SectionId::Power {
+            return self.power_controls();
+        }
         if section == SectionId::Network {
             return self
                 .network_controls()
@@ -1819,6 +1850,7 @@ impl App {
             Control::Time(stop) => self.time_key(stop, named),
             Control::Account(stop) => self.account_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
+            Control::Power(stop) => self.power_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1970,7 +2002,11 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.unavailable(setting).is_some() || self.desktops_inert(setting) {
+        if !self.writable()
+            || self.unavailable(setting).is_some()
+            || self.desktops_inert(setting)
+            || self.power_inert(setting)
+        {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -2070,6 +2106,8 @@ enum Control {
     Desktops(desktops_page::Stop),
     /// The network's page's own (6.6).
     Network(network::Stop),
+    /// The Énergie page's own (6.10).
+    Power(power_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
