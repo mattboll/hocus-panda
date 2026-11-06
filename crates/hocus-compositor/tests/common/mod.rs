@@ -83,6 +83,8 @@ use wayland_protocols_misc::server_decoration::client::{
 pub const WAIT: Duration = Duration::from_secs(30);
 /// What test windows are filled with, ARGB.
 pub const WINDOW_COLOUR: u32 = 0xff3a_7bd5;
+/// How high a test window's header is ([`Shows::KdeDecorated`]).
+pub const HEADER_HEIGHT: u32 = 40;
 /// A client-side shadow: black at 25 %, premultiplied.
 pub const SHADOW_COLOUR: u32 = 0x4000_0000;
 pub const BTN_LEFT: u32 = 0x110;
@@ -413,11 +415,14 @@ pub enum Shows {
     /// An xdg toplevel of this size without xdg-decoration that asks for
     /// the server's decorations (`server`) or draws its own through KDE's
     /// server decoration protocol, as GTK 3 clients do; it says
-    /// the modes the compositor gives it ([`Event::KdeMode`]).
+    /// the modes the compositor gives it ([`Event::KdeMode`]). With a
+    /// `header` (ARGB), its first [`HEADER_HEIGHT`] pixels are that
+    /// colour, as an application's own header under the grip.
     KdeDecorated {
         app_id: &'static str,
         size: (u32, u32),
         server: bool,
+        header: Option<u32>,
     },
     /// An xdg toplevel of this size that asks for nothing through either
     /// decoration protocol, as GTK 4 applications, which draw their own
@@ -612,6 +617,7 @@ fn run_client(
         clear: false,
         checkered: false,
         fill: None,
+        header: None,
         undrawn: false,
         caret: None,
         text_inputs: None,
@@ -722,6 +728,7 @@ fn run_client(
             app_id,
             size,
             server,
+            header,
         }) => {
             use org_kde_kwin_server_decoration::Mode;
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -737,6 +744,7 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.kde_decoration = Some(decoration);
+            client.header = header;
         }
         Some(Shows::Undecorated { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -1002,6 +1010,8 @@ struct Client {
     checkered: bool,
     /// Its surface's colour, when not a window's.
     fill: Option<u32>,
+    /// Its header's colour ([`Shows::KdeDecorated`]).
+    header: Option<u32>,
     /// Its layer surface never draws ([`Shows::Undrawn`]).
     undrawn: bool,
     /// A writing client's caret, its text input, and what is committed
@@ -1085,7 +1095,10 @@ impl Client {
                         0xff00_0000
                     }
                 }
-                (false, true) => self.fill.unwrap_or(WINDOW_COLOUR),
+                (false, true) => match self.header {
+                    Some(header) if y - m < HEADER_HEIGHT as i32 => header,
+                    _ => self.fill.unwrap_or(WINDOW_COLOUR),
+                },
                 (false, false) => SHADOW_COLOUR,
             };
             pixel.copy_from_slice(&colour.to_le_bytes());

@@ -28,6 +28,7 @@ mod gestures;
 mod glass;
 pub mod going;
 mod grabs;
+mod grip_tone;
 pub mod halo;
 mod handlers;
 mod harness;

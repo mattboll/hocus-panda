@@ -258,12 +258,14 @@ where
     R: Renderer
         + ImportAll
         + ImportMem
+        + ExportMem
         + Offscreen<T>
         + Bind<T>
         + crate::wobble::Bend
         + crate::going::Shaders
         + crate::glass::Glass,
     R::TextureId: Send + Clone + Texture + 'static,
+    R::TextureMapping: 'static,
     R::Error: Send + Sync + 'static,
 {
     fn new(
@@ -455,6 +457,7 @@ where
             }
             state.send_frames(&out.output, Some(&states));
             state.desktops_drawn(&out.output);
+            state.read_under_grips(renderer);
         }
     }
 }

@@ -178,6 +178,7 @@ pub(crate) struct Look {
     /// without the keyboard.
     pulse: crate::going::Pulse,
     grip: f32,
+    grip_tone: crate::grip_tone::Tone,
     decorated: bool,
     shadow: ShadowStyle,
     own_shadow: bool,
@@ -195,6 +196,7 @@ impl Look {
             focus: 0.0,
             pulse: crate::going::Pulse::default(),
             grip: 0.0,
+            grip_tone: crate::grip_tone::Tone::Light,
             decorated: true,
             shadow: ShadowStyle::UNFOCUSED,
             own_shadow: true,
@@ -245,6 +247,7 @@ impl State {
             focus,
             pulse: managed.pulse_look(now),
             grip,
+            grip_tone: self.grip_tone(id),
             decorated,
             shadow,
             own_shadow,
@@ -372,9 +375,15 @@ impl State {
         let rect = Rectangle::new(look.visual.loc - origin, look.visual.size);
         let textures = &self.textures;
         if look.decorated {
-            if let Some(grip) =
-                grip_element(renderer, textures, ids, rect, scale, look.grip * look.alpha)
-            {
+            if let Some(grip) = grip_element(
+                renderer,
+                textures,
+                ids,
+                rect,
+                look.grip_tone,
+                scale,
+                look.grip * look.alpha,
+            ) {
                 out.push(OutputElements::Frame(grip));
             }
             let focused_width = if self.config.appearance.high_contrast {
