@@ -702,12 +702,18 @@ fn the_home_card_and_the_search_lead_to_the_page() -> anyhow::Result<()> {
         };
         bed.key(code)?;
     }
+    // The whole word: a window slow to read the keys says the results of
+    // « ju » first, where the pairing comes third.
     let shown = bed.shows(|s| {
-        s["results"]
-            .as_array()
-            .is_some_and(|r| r.iter().any(|r| r["target"] == "bluetooth.pair"))
+        s["query"] == "jumeler"
+            && s["results"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|r| r["target"] == "bluetooth.pair"))
     })?;
-    assert_eq!(shown["results"][0]["name"], "Associer un appareil");
+    assert_eq!(
+        shown["results"][0]["name"], "Associer un appareil",
+        "{shown}"
+    );
     bed.key(KEY_ENTER)?;
     let shown = bed.shows(|s| s["page"] == "bluetooth" && s["lit"] == "bluetooth.pair")?;
     assert_eq!(shown["bluetooth"]["heard"], true);
