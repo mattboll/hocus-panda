@@ -15,21 +15,27 @@
 //! leaves the history as it is: what is copied meanwhile is kept in
 //! memory only, for this session.
 //!
+//! Kept until the session ends (`[clipboard] keep = "session"`, 6.17),
+//! the items that are not pinned are kept in memory only: those on disk
+//! leave it once the rules are applied ([`super::GRACE`] after they
+//! change), and come back to it if the rules change again.
+//!
 //! [`keyring`]: super::keyring
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError, mpsc},
+    time::Instant,
 };
 
 use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Generate, Key, Payload},
 };
-use hocus_link::{CAPTURE_APP, Clip, ClipKind, ToCompositor};
+use hocus_link::{CAPTURE_APP, Clip, ClipKeep, ClipKind, ClipRules, ToCompositor};
 
 use super::{Item, Kind, Picture, digest, keyring};
 
@@ -57,6 +63,8 @@ pub enum Ask {
         key: u64,
         paste: bool,
     },
+    /// The compositor's rules (6.17): applied [`super::GRACE`] later.
+    Rules(ClipRules),
 }
 
 static ASK: Mutex<Option<mpsc::Sender<Ask>>> = Mutex::new(None);
@@ -91,27 +99,53 @@ fn run(dir: Option<PathBuf>, bus: Option<&str>, asked: &mpsc::Receiver<Ask>) {
         files: dir.and_then(|dir| Files::open(dir, bus)),
         images: HashMap::new(),
         captures: HashMap::new(),
+        on_disk: HashSet::new(),
+        keep: ClipKeep::Month,
+        apply_at: None,
     };
     if let Some(files) = &store.files {
         let items = files.load();
         tracing::info!(items = items.len(), "the clipboard's history is read back");
+        store.on_disk.extend(items.iter().map(|i| i.key));
         let now = crate::notifications::wall_ms();
         let gone = super::with(|h| h.loaded(items, now));
         store.forget(&gone);
-        super::changed();
     }
-    while let Ok(ask) = asked.recv() {
-        store.ask(ask);
+    super::changed();
+    loop {
+        let ask = match store.apply_at {
+            Some(at) => match asked.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                Ok(ask) => Some(ask),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            },
+            None => match asked.recv() {
+                Ok(ask) => Some(ask),
+                Err(_) => return,
+            },
+        };
+        match ask {
+            Some(ask) => store.ask(ask),
+            None => store.apply_rules(),
+        }
     }
 }
 
 struct Store {
     files: Option<Files>,
-    /// Images' PNGs when there are no files to keep them in.
+    /// Images' PNGs when there are no files to keep them in, or while
+    /// their items are kept for the session only.
     images: HashMap<u64, Arc<[u8]>>,
     /// The item each capture of this session made, by the capture's number
     /// (5.8b): the one its annotated image replaces (5.9).
     captures: HashMap<u64, u64>,
+    /// The items whose files are on disk.
+    on_disk: HashSet<u64>,
+    /// How long the rules last applied keep the items (6.17): with
+    /// "session", only the pinned ones are on disk.
+    keep: ClipKeep,
+    /// When the rules that changed last are applied.
+    apply_at: Option<Instant>,
 }
 
 impl Store {
@@ -120,9 +154,19 @@ impl Store {
             Ask::Copied { app, clip, at } => self.copied(app, clip, at),
             Ask::Captured { capture, clip, at } => self.captured(capture, clip, at),
             Ask::Changed(item) => {
-                if let Some(files) = &self.files {
-                    files.write_item(&item);
+                if self.wants_disk(&item) {
+                    self.write(&item, None);
+                } else {
+                    self.evict(&item);
                 }
+            }
+            Ask::Rules(rules) => {
+                tracing::debug!(
+                    history = rules.history,
+                    keep = %rules.keep.word(),
+                    "the history's rules, applied after the grace"
+                );
+                self.apply_at = Some(Instant::now() + super::GRACE);
             }
             Ask::Remove(keys) => self.forget(&keys),
             Ask::Choose { key, paste } => {
@@ -189,31 +233,96 @@ impl Store {
     /// item now holding the copy, if one does.
     fn keep(&mut self, change: super::Change, clip: Clip) -> Option<u64> {
         if let Some(new) = &change.new {
-            match &self.files {
-                Some(files) => {
-                    if new.kind == Kind::Image {
-                        files.write_png(new.key, &clip.data);
-                    }
-                    files.write_item(new);
-                }
-                None if new.kind == Kind::Image => {
-                    self.images.insert(new.key, clip.data.into());
-                }
-                None => {}
+            if self.wants_disk(new) {
+                self.write(new, Some(&clip.data));
+            } else if new.kind == Kind::Image {
+                self.images.insert(new.key, clip.data.into());
             }
         }
-        if let (Some(changed), Some(files)) = (&change.changed, &self.files) {
-            files.write_item(changed);
+        if let Some(changed) = &change.changed
+            && self.wants_disk(changed)
+        {
+            self.write(changed, None);
         }
         self.forget(&change.gone);
         super::changed();
         change.new.or(change.changed).map(|item| item.key)
     }
 
+    /// Whether `item` is kept on disk: when there is one, unless only the
+    /// session keeps it and it is not pinned (6.17).
+    fn wants_disk(&self, item: &Item) -> bool {
+        self.files.is_some() && (self.keep != ClipKeep::Session || item.pinned)
+    }
+
+    /// `item`'s files written, its image's from `png`, else from memory.
+    fn write(&mut self, item: &Item, png: Option<&[u8]>) {
+        let Some(files) = &self.files else {
+            return;
+        };
+        if item.kind == Kind::Image && !self.on_disk.contains(&item.key) {
+            let png = png
+                .map(<[u8]>::to_vec)
+                .or_else(|| self.images.get(&item.key).map(|p| p.to_vec()));
+            let Some(png) = png else {
+                tracing::warn!(key = item.key, "an image of the history is gone");
+                return;
+            };
+            files.write_png(item.key, &png);
+            self.images.remove(&item.key);
+        }
+        files.write_item(item);
+        self.on_disk.insert(item.key);
+    }
+
+    /// The rules changed [`super::GRACE`] ago: what they leave out goes,
+    /// and the disk holds what they keep there.
+    fn apply_rules(&mut self) {
+        self.apply_at = None;
+        let now = crate::notifications::wall_ms();
+        let (gone, rules) = super::with(|h| (h.apply_rules(now), h.rules()));
+        tracing::info!(
+            gone = gone.len(),
+            history = rules.history,
+            keep = %rules.keep.word(),
+            "the history's rules applied"
+        );
+        self.forget(&gone);
+        self.keep = rules.keep;
+        let items = super::with(|h| h.items().to_vec());
+        for item in &items {
+            let wanted = self.wants_disk(item);
+            let there = self.on_disk.contains(&item.key);
+            if wanted && !there {
+                self.write(item, None);
+            } else if !wanted {
+                self.evict(item);
+            }
+        }
+        super::changed();
+    }
+
+    /// `item`, kept for the session only: off the disk, its image in
+    /// memory.
+    fn evict(&mut self, item: &Item) {
+        if !self.on_disk.remove(&item.key) {
+            return;
+        }
+        if item.kind == Kind::Image
+            && let Some(png) = self.files.as_ref().and_then(|f| f.read_png(item.key))
+        {
+            self.images.insert(item.key, png.into());
+        }
+        if let Some(files) = &self.files {
+            files.remove(item.key);
+        }
+    }
+
     /// What went: its files.
     fn forget(&mut self, keys: &[u64]) {
         for key in keys {
             self.images.remove(key);
+            self.on_disk.remove(key);
             if let Some(files) = &self.files {
                 files.remove(*key);
             }

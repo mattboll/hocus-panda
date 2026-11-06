@@ -115,8 +115,9 @@ const RIM: theme::Ink = theme::Ink::Token(|t| t.bar_border);
 fn main() -> ExitCode {
     // Before anything could take it for its own (docs/design/lock.md).
     let handed = wayland::take_socket();
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "warn,hocuspanda_shell=info,hocus_day=info".into());
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "warn,hocuspanda_shell=info,hocus_day=info,hocus_bluetooth=info".into()
+    });
     // cosmic-text traces the text it shapes, a password shown with the eye
     // too: never, whatever RUST_LOG asks.
     let filter = match "cosmic_text::shape=off".parse() {
@@ -481,6 +482,7 @@ impl Shell {
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
                 meeting::linked();
+                clipboard::linked();
                 Task::none()
             }
             Message::FromCompositor(line) => match line.parse::<ToShell>() {
@@ -746,6 +748,14 @@ impl Shell {
             }
             ToShell::Clipboard { output } => {
                 popover::toggle_clipboard(&output);
+                Task::none()
+            }
+            ToShell::ClipboardRules(rules) => {
+                clipboard::rules(rules);
+                Task::none()
+            }
+            ToShell::ClipboardClear => {
+                clipboard::clear();
                 Task::none()
             }
             ToShell::Emoji {
@@ -2362,6 +2372,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Clipboard { output }) => {
                             popover::toggle_clipboard(&output);
+                            continue;
+                        }
+                        // What the history keeps (6.17), and the
+                        // Settings' clear: on its own thread.
+                        Ok(ToShell::ClipboardRules(rules)) => {
+                            clipboard::rules(rules);
+                            continue;
+                        }
+                        Ok(ToShell::ClipboardClear) => {
+                            clipboard::clear();
                             continue;
                         }
                         // The emoji picker: its own surface.
