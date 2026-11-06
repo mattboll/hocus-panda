@@ -826,7 +826,10 @@ built".
   two or fewer, both rows so. The value stays written for another pad.
   A compositor that does not say the count leaves both rows as they are.
 - The search finds the three rows by « geste », « swipe », « doigts »,
-  « lanceur », « bureau », « pincer » and their keys.
+  « lanceur », « bureau », « pincer » and their keys. « geste » then
+  lists Keyboard and shortcuts' "Bureau de gauche" and "Bureau de droite"
+  (what three fingers sideways do), which have the word too: a shortcut
+  found by a nearby word comes after the settings so found (#681).
 
 ## Clavier et raccourcis (6.8)
 
@@ -1715,8 +1718,8 @@ language), the other language's names, and each setting's keys
 (`suspend-after`, `idle.delay`). Accents and case are ignored, `’` is `'`;
 several words must all be found. The order: a section's name, then
 settings whose name starts a word with the first word typed, then names
-holding it, then settings found by a nearby word, then the settings of a
-section found by its name; 8 at most. The list replaces the sections:
+holding it, then settings found by a nearby word, then shortcuts so
+found, then the settings of a section found by its name; 8 at most. The list replaces the sections:
 "3 résultats · ↑ ↓ puis Entrée", each row its section's icon, its name
 with the typed part lit, and "Énergie › Écran et veille", " · par
 « veille »" when found by a nearby word. Opening one (a click, `Enter`)
@@ -2087,7 +2090,7 @@ with the harness's touchpad and mouse:
 - `a_three_finger_touchpad_greys_the_four_finger_row`
 - `the_diagrams_move_only_while_shown_and_focused`
 - `with_reduced_motion_the_diagrams_stand_still`
-- `searching_geste_lists_the_three_gestures_rows_first`
+- `searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys`
 - `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
 - `screenshots_of_the_gestures` (ignored; `HOCUS_SHOTS=DIR`)
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
