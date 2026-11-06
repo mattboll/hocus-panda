@@ -87,9 +87,14 @@ fi
 [ ${#tests[@]} -gt 0 ] && programs
 
 if [ ${#units[@]} -gt 0 ]; then
-    args=()
-    for crate in "${!units[@]}"; do args+=(-p "$crate"); done
-    run "${args[@]}" --lib --bins
+    # A crate without a library (the shell) has only its binaries' tests:
+    # `--lib` on it is an error.
+    with_lib=() bins_only=()
+    for crate in "${!units[@]}"; do
+        if [ -e "crates/$crate/src/lib.rs" ]; then with_lib+=(-p "$crate"); else bins_only+=(-p "$crate"); fi
+    done
+    [ ${#with_lib[@]} -gt 0 ] && run "${with_lib[@]}" --lib --bins
+    [ ${#bins_only[@]} -gt 0 ] && run "${bins_only[@]}" --bins
 fi
 
 for crate in "${!tests[@]}"; do
