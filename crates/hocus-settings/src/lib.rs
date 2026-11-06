@@ -25,12 +25,15 @@
 //!   the shutter, and what the clipboard's history keeps (6.17).
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
 //!   and systemd's timedated followed and asked off the window's thread.
+//! - [`agents`]: the agents' tools as the compositor says them, the halo
+//!   and the pandas' keys (6.16).
 //! - [`applications`]: the Applications page's default applications
 //!   (`mimeapps.list`, the terminal) and start-up applications (XDG
 //!   autostart), read and written on its thread (6.15).
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
+pub mod agents;
 pub mod app;
 pub mod appearance;
 pub mod applications;

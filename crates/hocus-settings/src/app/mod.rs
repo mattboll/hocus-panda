@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod agents_page;
 mod appearance_page;
 mod applications;
 mod bar_page;
@@ -237,6 +238,8 @@ enum Undo {
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
     Power(power_page::ModeChoice),
+    /// A tool plugged in or out, herdr followed or not (6.16).
+    Agents(agents_page::Choice),
     /// A default application or a start-up one (mimeapps.list, autostart,
     /// 6.15).
     Apps(applications::Choice),
@@ -356,6 +359,8 @@ pub enum Message {
     Network(network::Msg),
     /// The Énergie page's (6.10).
     Power(power_page::Msg),
+    /// The Agents page's (6.16).
+    Agents(agents_page::Msg),
     /// The Applications page's (6.15).
     Apps(applications::Msg),
     Nothing,
@@ -444,6 +449,9 @@ pub struct App {
     /// The Énergie page: the battery, the modes and logind as last said
     /// (6.10).
     power: power_page::State,
+    /// The Agents page: the tools as the compositor says them, the
+    /// consent sheet, the preview and the pandas' motions (6.16).
+    agents: agents_page::State,
     /// The Applications page: what its thread read, its menus and sheet
     /// (6.15).
     apps: applications::State,
@@ -465,6 +473,7 @@ impl App {
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
+        let agents = agents_page::State::with(&sender);
         let apps = applications::State::new(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
@@ -548,6 +557,7 @@ impl App {
             captures: captures_page::State::default(),
             network,
             power,
+            agents,
             apps,
             fresh: None,
             parity: false,
@@ -661,6 +671,7 @@ impl App {
             || self.network_moving()
             || self.trial_moving(now)
             || self.rules_moving(now)
+            || self.agents_moving(now)
             || self.apps_moving(now)
             || self.captures_moving(now)
     }
@@ -678,6 +689,7 @@ impl App {
         self.bluetooth_want();
         self.wallpaper_want();
         self.network_visit();
+        self.agents_visit();
         self.network_after_key();
         self.now = Instant::now();
         // Whole frames after a scroll, a toast coming or going, and through
@@ -752,6 +764,10 @@ impl App {
                     self.keys.adding = None;
                     return Task::none();
                 }
+                // The Agents page's consent sheet takes every key (6.16).
+                if let Some(task) = self.agents_key_first(&key) {
+                    return task;
+                }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
                     return task;
@@ -812,6 +828,7 @@ impl App {
             Message::Toggle(slot) => {
                 let on = self.value(slot) == Some(Value::Bool(true));
                 self.knobs.insert(slot.setting, Instant::now());
+                self.agents_chose(slot, &Value::Bool(!on));
                 let say = self.captures_toggle_toast(slot, !on);
                 self.change_saying(slot, Value::Bool(!on), say)
             }
@@ -835,6 +852,7 @@ impl App {
             Message::Choose(slot, value) => {
                 self.menu = None;
                 self.bar_chose(slot, &value);
+                self.agents_chose(slot, &value);
                 let say = self.desktops_toast(slot, &value);
                 self.change_saying(slot, value, say)
             }
@@ -916,6 +934,7 @@ impl App {
             }
             Message::Network(msg) => self.network_update(msg),
             Message::Power(msg) => self.power_update(msg),
+            Message::Agents(msg) => self.agents_update(msg),
             Message::Apps(msg) => self.apps_update(msg),
         }
     }
@@ -1304,6 +1323,13 @@ impl App {
                 self.toast = None;
                 return self.power_undo(choice, false);
             }
+            Some(Undo::Agents(_)) => {
+                let Some(Undo::Agents(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.agents_undo(choice, false);
+            }
             Some(Undo::Apps(_)) => {
                 let Some(Undo::Apps(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1389,6 +1415,12 @@ impl App {
                     return Task::none();
                 };
                 return self.power_undo(choice, true);
+            }
+            Some(Undo::Agents(_)) => {
+                let Some(Undo::Agents(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.agents_undo(choice, true);
             }
             Some(Undo::Apps(_)) => {
                 let Some(Undo::Apps(choice)) = self.redo.pop() else {
@@ -1705,6 +1737,9 @@ impl App {
         if section == SectionId::Power {
             return self.power_controls();
         }
+        if section == SectionId::Agents {
+            return self.agents_controls();
+        }
         if section == SectionId::Captures {
             return self.captures_controls();
         }
@@ -1948,6 +1983,7 @@ impl App {
             Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
+            Control::Agents(stop) => self.agents_key(stop, named),
             Control::Apps(stop) => self.apps_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -2104,6 +2140,7 @@ impl App {
             || self.unavailable(setting).is_some()
             || self.desktops_inert(setting)
             || self.power_inert(setting)
+            || self.agents_inert(setting)
         {
             return true;
         }
@@ -2221,6 +2258,8 @@ enum Control {
     Network(network::Stop),
     /// The Énergie page's own (6.10).
     Power(power_page::Stop),
+    /// The Agents page's own (6.16).
+    Agents(agents_page::Stop),
     /// The Applications page's own (6.15).
     Apps(applications::Stop),
 }
