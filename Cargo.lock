@@ -1640,6 +1640,7 @@ dependencies = [
  "hocus-compositor",
  "hocus-geometry",
  "hocus-link",
+ "hocus-xdg",
  "image",
  "jiff",
  "libc",
@@ -1754,6 +1755,7 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-sound",
+ "hocus-xdg",
  "iced",
  "iced_layershell",
  "image",
@@ -1779,6 +1781,14 @@ name = "hocus-sound"
 version = "0.2.0"
 dependencies = [
  "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "hocus-xdg"
+version = "0.2.0"
+dependencies = [
+ "tempfile",
  "tracing",
 ]
 

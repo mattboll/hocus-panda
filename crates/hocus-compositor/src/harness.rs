@@ -655,6 +655,13 @@ impl Headless {
         self.app.state.record.copied_on_loop()
     }
 
+    /// Starts the start-up applications of these autostart directories
+    /// (the user's first) once the bar shows, as `--session` does those of
+    /// the XDG directories; asked before the loop runs.
+    pub fn autostart(&mut self, dirs: Vec<std::path::PathBuf>) {
+        self.app.state.autostart = crate::session::autostart::Autostart::Waiting(dirs);
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);

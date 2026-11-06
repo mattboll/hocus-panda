@@ -166,7 +166,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
         };
         drop(map);
         match layer.namespace() {
-            hocus_link::NAMESPACE => state.panel.commits += 1,
+            hocus_link::NAMESPACE => {
+                state.panel.commits += 1;
+                state.bar_committed(&layer);
+            }
             hocus_link::CLOCK_NAMESPACE => state.panel.clock_commits += 1,
             hocus_link::LEVELS_NAMESPACE => state.panel.levels_commits += 1,
             hocus_link::IN_USE_NAMESPACE => state.panel.in_use_commits += 1,
