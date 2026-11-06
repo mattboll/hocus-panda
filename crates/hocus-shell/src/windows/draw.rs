@@ -108,13 +108,52 @@ pub fn title_room(width: f32) -> f32 {
     width - OUT - ICON - ICON_GAP - TITLE_END - CLOSE - CLOSE_IN
 }
 
-/// `title` cut to the room of a line `width` wide, and whether it was.
-pub fn cut(title: &str, width: f32) -> (String, bool) {
-    let shown = kit::elide(title, title_room(width), |t| {
+/// A state's mark after a title (#723): 12 px, 4 px apart.
+const MARK: f32 = 12.0;
+const MARK_GAP: f32 = 4.0;
+
+/// The room `line`'s marks take after its title.
+fn marks_room(line: &Line) -> f32 {
+    let n = u8::from(line.above) + u8::from(line.everywhere);
+    f32::from(n) * (MARK + MARK_GAP)
+}
+
+/// `line`'s title cut to the room of a line `width` wide, its marks
+/// after it, and whether it was.
+pub fn cut(line: &Line, width: f32) -> (String, bool) {
+    let title = line.title.as_str();
+    let shown = kit::elide(title, title_room(width) - marks_room(line), |t| {
         kit::measure(t, TITLE, MANROPE)
     });
     let cut = shown != title;
     (shown, cut)
+}
+
+/// `line`'s marks from `x`, on its middle `y`: kept above (two windows,
+/// the front one up), on all desktops (three panes).
+fn draw_marks(f: &mut Frame, line: &Line, mut x: f32, y: f32, alpha: f32) {
+    let ink = faded(DIM.get(), alpha);
+    let stroke = Stroke::default().with_color(ink).with_width(1.3);
+    if line.above {
+        let back = Rectangle::new(Point::new(x, y - 2.0), Size::new(7.5, 6.0));
+        let front = Rectangle::new(Point::new(x + 4.0, y - 5.0), Size::new(7.5, 6.0));
+        f.stroke(
+            &kit::rounded(back, 1.5),
+            stroke.with_color(faded(DIM.get(), alpha * 0.55)),
+        );
+        f.fill(&kit::rounded(front, 1.5), faded(DIM.get(), alpha * 0.25));
+        f.stroke(&kit::rounded(front, 1.5), stroke);
+        x += MARK + MARK_GAP;
+    }
+    if line.everywhere {
+        for i in 0..3 {
+            let pane = Rectangle::new(
+                Point::new(x + 0.5 + 4.0 * i as f32, y - 4.0),
+                Size::new(3.0, 8.0),
+            );
+            f.stroke(&kit::rounded(pane, 1.0), stroke);
+        }
+    }
 }
 
 /// How a line's parts are lit.
@@ -148,13 +187,18 @@ pub fn draw_line(f: &mut Frame, rect: Rectangle, line: &Line, title: &str, lit: 
         opacity * alpha,
     );
     let colour = if line.minimized { FAINT } else { TEXT };
+    let x = icon.x + ICON + ICON_GAP;
     f.fill_text(kit::text(
         title.to_owned(),
-        Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
+        Point::new(x, rect.center_y()),
         TITLE,
         faded(colour.get(), alpha),
         Alignment::Left,
     ));
+    if line.above || line.everywhere {
+        let end = x + kit::measure(title, TITLE, MANROPE) + MARK_GAP + 2.0;
+        draw_marks(f, line, end, rect.center_y(), alpha);
+    }
     let close = close_rect(rect);
     if lit.close {
         f.fill(
@@ -366,7 +410,7 @@ impl View {
             .rows
             .iter()
             .map(|row| match row {
-                Row::Window(line) => cut(&line.title, WIDTH + 2.0 * OUT),
+                Row::Window(line) => cut(line, WIDTH + 2.0 * OUT),
                 Row::More(n) => (self.words.more(*n), false),
             })
             .collect();
@@ -496,6 +540,27 @@ impl View {
                     None => popover::Event::PressElsewhere,
                 };
                 popover::event(event);
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            // A right click on a line (or the mini item): its window's
+            // menu beside the bar, its top on the line's (#723).
+            mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                if state.tip.take().is_some() {
+                    crate::tray::tip::leave();
+                }
+                let (item, r) = found?;
+                let line = match item {
+                    Item::Window(id) | Item::WindowClose(id) => {
+                        shown.rows.iter().find_map(|row| match row {
+                            Row::Window(line) if line.id == id => Some(line.clone()),
+                            _ => None,
+                        })
+                    }
+                    Item::Windows => shown.item.clone(),
+                    _ => None,
+                }?;
+                let rect = self.in_bar_rect(r, size, &shown);
+                popover::window_menu::ask(&self.bar, line.id, Some(rect), &line.title, &line.app);
                 Some(canvas::Action::request_redraw().and_capture())
             }
             _ => None,
@@ -707,8 +772,7 @@ mod tests {
             id,
             app: String::new(),
             title: format!("w{id}"),
-            focused: false,
-            minimized: false,
+            ..Line::default()
         }
     }
 

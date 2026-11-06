@@ -56,6 +56,7 @@ mod record;
 mod share;
 pub mod theme;
 pub mod wallpaper;
+mod window_menu;
 pub use auth::{
     AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
     AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
@@ -85,6 +86,7 @@ pub use share::{
     SHARE_CHOOSER_RADIUS, SHARE_MONITOR, SHARE_THUMB_RADIUS, SHARE_THUMBS_EVERY, SHARE_WINDOW,
     ShareAsk, ShareChoose, ShareScreen, ShareShown, ShareSource, ShareWindow, SharedThing,
 };
+pub use window_menu::{MenuScreen, WindowAction, WindowMenu, WindowStates};
 
 /// The environment variable naming the compositor's socket for its shell.
 pub const SOCKET_ENV: &str = "HOCUS_SHELL_SOCKET";
@@ -678,6 +680,12 @@ pub enum ToShell {
     /// the session menu (7.4) opens on `output`'s bar, as a click on the
     /// footer's user opens it. Written `session-menu OUTPUT`.
     SessionMenu { output: String },
+    /// What the bar's menu of a window shows (#723), the answer to
+    /// [`ToCompositor::WindowMenu`] ([`WindowMenu`]).
+    WindowMenu(WindowMenu),
+    /// The windows kept above the others and those on all desktops, for
+    /// the marks after their titles in the bar ([`WindowStates`]).
+    WindowStates(WindowStates),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1734,6 +1742,20 @@ pub enum ToCompositor {
     /// The session menu (7.4, [`LeaveAsk`]): it opened, a row chosen, the
     /// confirmation acted on or cancelled.
     Leave(LeaveAsk),
+    /// The bar's menu of window `id` (#723) runs `action` on it, as its
+    /// radial menu does. Written `window-action ID ACTION`.
+    WindowAction { id: u64, action: WindowAction },
+    /// The bar's menu sends window `id` to desktop `desktop` (from 0) of
+    /// screen `output`. Written `send-to ID OUTPUT N`.
+    SendTo {
+        id: u64,
+        output: String,
+        desktop: u8,
+    },
+    /// The bar's menu of window `id` is about to open: the compositor
+    /// answers at once with what it shows ([`ToShell::WindowMenu`]).
+    /// Written `window-menu ID`.
+    WindowMenu(u64),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -2018,6 +2040,8 @@ impl fmt::Display for ToShell {
             Self::Leave(shown) => shown.write(f),
             Self::LeaveEnd => f.write_str("leave-end"),
             Self::SessionMenu { output } => write!(f, "session-menu {output}"),
+            Self::WindowMenu(menu) => menu.write(f),
+            Self::WindowStates(states) => states.write(f),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -2059,6 +2083,12 @@ impl FromStr for ToShell {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(rest) = line.strip_prefix("share-choose ") {
             return ShareChoose::read(rest).map(Self::ShareChoose);
+        }
+        if let Some(rest) = line.strip_prefix("window-menu ") {
+            return WindowMenu::read(rest).map(Self::WindowMenu);
+        }
+        if let Some(rest) = line.strip_prefix("window-states ") {
+            return WindowStates::read(rest).map(Self::WindowStates);
         }
         if let Some(rest) = line.strip_prefix("auth-at ") {
             return AuthAt::read(rest).map(Self::AuthAt);
@@ -2534,6 +2564,13 @@ impl fmt::Display for ToCompositor {
                 Ok(())
             }
             Self::Close(id) => write!(f, "close {id}"),
+            Self::WindowAction { id, action } => write!(f, "window-action {id} {}", action.name()),
+            Self::SendTo {
+                id,
+                output,
+                desktop,
+            } => write!(f, "send-to {id} {output} {desktop}"),
+            Self::WindowMenu(id) => write!(f, "window-menu {id}"),
             Self::GoToAgent { id, row: None } => write!(f, "go-to-agent {id}"),
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
@@ -2738,6 +2775,26 @@ impl FromStr for ToCompositor {
                     .collect::<Result<_, _>>()?,
             }),
             Some("bring") => Ok(Self::Bring(
+                word(&mut words, "window")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("window: {e}")))?,
+            )),
+            Some("window-action") => Ok(Self::WindowAction {
+                id: word(&mut words, "window")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("window: {e}")))?,
+                action: WindowAction::read(word(&mut words, "action")?)?,
+            }),
+            Some("send-to") => Ok(Self::SendTo {
+                id: word(&mut words, "window")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("window: {e}")))?,
+                output: word(&mut words, "output")?.to_owned(),
+                desktop: word(&mut words, "desktop")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("desktop: {e}")))?,
+            }),
+            Some("window-menu") => Ok(Self::WindowMenu(
                 word(&mut words, "window")?
                     .parse()
                     .map_err(|e| BadLine(format!("window: {e}")))?,

@@ -27,6 +27,9 @@ calloop = { version = "0.14.5", features = ["signals"] }
 clap = { version = "4.6.7", features = ["derive"] }
 # The titles of Alt+Tab's panel (MIT, Apache-2.0 or Zlib).
 fontdue = "0.9.3"
+# The radial menu drawn on the CPU (#723), as the shell's toolkit draws
+# there (BSD-3-Clause).
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 # The screen capture (5.8): its PNG, cut and put together off the loop;
 # PNG alone of the codecs, as the shell's (MIT or Apache-2.0).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

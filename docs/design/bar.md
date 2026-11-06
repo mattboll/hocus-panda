@@ -4230,6 +4230,53 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   (`hocus-shell`); the room shared (`column`). With `HOCUS_SHOTS=dir`,
   the screenshots of the pull request.
 
+### A window's menu beside the bar (2026-11-06)
+
+Issue #723, with the radial menu of a window (windows.md §10b): the same
+actions from the bar's window lines, variant A of the maintainer's
+choice (a right click on the line).
+
+- **Opening**: a right click on a window's line (the full form's group,
+  the mini form's popover, a desktop's list's rows) opens a 240 px
+  popover beside the bar, the popovers' glass, its top on the line's,
+  pushed up to stay on the screen (§9); from a popover's line it takes
+  that popover's place. The shell asks the compositor what it shows
+  (`window-menu ID`), and opens it when the compositor answers, at once
+  (`window-menu ID FLAGS\tSCREEN…`).
+- **What it shows**, top to bottom: the application's icon and the
+  window's title (13.5 px bold, cut with "…"); 30 px rows (radius 8, lit
+  `0.06` under the pointer), each with the radial menu's icon (14 px):
+  "Agrandir" / "Maximise" (or "Restaurer" / "Restore", maximised) with
+  `Super+↑` (`Super+↓`), "Réduire" / "Minimise" with `Super+H` (keys in
+  Martian Mono 10.5, `text.faint`); a rule; "Au premier plan" / "Always
+  on top" and "Sur tous les bureaux" / "On all desktops" with 30 × 17
+  switches (the accent when on); a rule; "ENVOYER SUR" / "SEND TO" in
+  spaced capitals, then for each screen, left to right by position, its
+  name (the built-in one is "ce portable" / "this laptop") and a row of
+  tiles, one per desktop, shaped like the screen (24 px high at most),
+  numbered, the desktop it shows lighter, the window's own ringed in the
+  accent and inert; a rule; "Fermer" / "Close" in orange with `Super+Q`.
+- **Acting**: a switch flips at once and the menu stays; Maximise,
+  Minimise, a tile (the window goes to that desktop of that screen, the
+  screen staying as it is) and Close close it (`window-action ID ACTION`,
+  `send-to ID OUTPUT N`). `Tab` and the arrows go through it, `Enter` or
+  `Space` acts, `Esc` closes it.
+- **The marks**: a window kept above the others has a 12 px mark after
+  its title in its line (two windows, the front one up), one on all
+  desktops another (three panes), in `text.dim`; the title gives them
+  room. The compositor says which windows are so (`window-states ABOVE
+  ALL`) as the shell connects and when it changes.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_windows.rs`,
+  the real shell): a right click on a line opens the menu, 240 px beside
+  the bar, whole on the screen, its words and the window's desktop
+  ringed, `Esc` closes it and its Close asks the window
+  (`a_right_click_on_a_line_opens_its_windows_menu_beside_the_bar`); its
+  switches flip and the line shows both marks, a tile sends the window to
+  desktop 3, the screen staying
+  (`the_window_menus_switches_and_tiles_act_on_its_window`). Unit tests:
+  the menu's layout, its inert tile and its words (`hocus-shell`); its
+  lines read back (`hocus-link`). With `HOCUS_SHOTS=dir`, the screenshots.
+
 ### 6.2, the themes, the accent and the formats (2026-11-05)
 
 Issue #402 (settings.md's "Apparence et langue"). The bar, its popovers

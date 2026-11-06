@@ -443,6 +443,10 @@ impl State {
         if self.swiping.as_ref() == Some(output) {
             self.swiping = None;
         }
+        if self.radial.as_ref().is_some_and(|r| r.output == *output) {
+            self.close_radial(None);
+        }
+        self.radial_out = None;
         self.seam_handle = None;
     }
 

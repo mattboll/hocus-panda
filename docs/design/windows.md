@@ -236,7 +236,10 @@ Which windows have no header of their own (#716):
   programs the desktop starts are given the same theme and size. Without
   a theme, or for a shape the theme lacks, the compositor draws its own
   plain ones.
-- `Super`+right-drag resizes from the nearest corner.
+- `Super`+right-drag resizes from the nearest corner: once the pointer
+  has moved 6 px with the button down, from where it was pressed. A
+  `Super`+right click that does not move opens the window's radial menu
+  (§10b).
 - Live resize, respecting the application's minimum and maximum sizes,
   and the size it takes: a floating terminal sized by whole cells may
   take a little less than asked, and keeps it once the resize is over,
@@ -342,6 +345,88 @@ Keyboard:
   desktop's list.
 - **Close**: `Super+Q` or `Alt+F4`, or the application's own button.
   Closing never kills the application: it asks it to close.
+- **Always on top** (a window's radial menu, the bar's menu of a window,
+  or `[[windows.rules]] above`): the window stays above the others, its
+  dialogs with it, until toggled; a fullscreen window brought in front
+  covers it while it stays there.
+- **On all desktops** (the same menus): the window shows on every
+  desktop of its screen, staying where it is while the strip slides (it
+  is on the desktop shown, whichever that is); the bar's tiles sketch it
+  in each. Sent to a desktop (`Super+Shift+N`, a menu), it is on that
+  one only again.
+
+## 10b. A window's radial menu (#723)
+
+Its actions around the pointer, each direction meaning something: up and
+down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
+
+| Direction | Action | Same as |
+|---|---|---|
+| up | Maximise / Restore (the label follows the state) | `Super+↑` / `Super+↓` |
+| up-right | Always on top (a switch) | `[[windows.rules]] above` |
+| right | Next desktop (sends the window; the screen stays) | `Super+Shift+<N+1>` |
+| down-right | Other screen (the next by position, onto the desktop it shows) | — |
+| down | Minimise | `Super+H` |
+| down-left | Close (never by a gesture) | `Super+Q` |
+| left | Previous desktop (sends the window; the screen stays) | `Super+Shift+<N−1>` |
+| up-left | On all desktops (a switch) | — |
+
+- **Opening**: `Super` and a right click over a window, released within
+  6 px of the press: the menu opens centred on the pointer and stays
+  open. A right drag of 6 px or more resizes, as before (§8). The key is
+  `[windows] resize-modifier`'s (`"none"`: the grip only). A right click
+  on the grip (§7) opens it too, without a key. Over the bar or another
+  surface of the shell's, nothing opens.
+- **Its look** (the mockup's, real size): a hub of radius 44, the ring to
+  116 with a 6 px rim (`rgba(14,17,28,0.92)`, a 1 px white rim at 10 %,
+  a drop shadow), eight sectors 41.8° wide, their icons 22 px at mid-ring
+  and their labels outside it (12.5 px Manrope 600, `text.dim`, a dark
+  outline; two lines at most), a soft dark halo behind it all so that
+  the labels read over any window. Near a screen's edge it is pushed in
+  to stay whole, labels included (196 px from its centre each way): its
+  centre then is not the pointer.
+- **Picking**: moving into a sector lights it (the accent at 24 %, a
+  1.4 px accent rim, its label bold), and the hub says its shortcut, the
+  desktop it sends to, or the other screen's name. **Crossing a sector's
+  outer rim on the way out picks it**, without a click (a quick flick
+  picks the sector it crossed); a click in a sector picks it too. The
+  picked sector flashes 80 ms and the menu fades in 100 ms; its action
+  runs at once.
+- **Close** lights in orange (`rgba(242,148,91,0.22)`); crossing its rim
+  does nothing. Resting on it 300 ms fills an arc along its rim, the hub
+  then says "clic"; a click then asks the window to close. A click
+  before is ignored.
+- Inert sectors (no desktop on that side, one screen only) at 25 %:
+  they neither light nor pick. A switch that is on shows its icon in
+  `#7EE0A0` with a 3 px dot.
+- A window hosting an agent that waits: the hub shows its panda (64 px,
+  bobbing); otherwise its application's letter tile.
+- **Closing it**: `Esc`, a click in the hub or outside the menu, the
+  window going, its screen going, the session locking.
+- **Keyboard** while open: the arrows step the lit sector that way (from
+  up, → lights up-right), `Tab` and `Shift+Tab` go round, `Enter` or
+  `Space` picks the lit one, Close too, without the rest.
+- While it is open no client sees the pointer or the keys.
+- **Motion**: it opens in 140 ms (scale 0.85 → 1 from its centre, and a
+  fade), closes in 100 ms; with reduced motion it only fades. Nothing
+  draws at rest: only the arc filling and the panda bobbing draw at
+  every frame, each on a small picture of its own.
+- The same actions from the bar: a right click on a window's line
+  (bar.md, "The windows in the bar").
+- **As built** (`crates/hocus-compositor/src/radial.rs`, its drawing in
+  `radial_draw.rs`): the compositor draws it on the CPU with tiny-skia,
+  its words in the shell's own fonts, once for each look it takes.
+  Measured headless (`crates/hocus-compositor/tests/radial.rs`): it opens
+  on the pointer and a drag still resizes; up past the rim maximises,
+  right past it sends to desktop 2 (the screen staying); Close's rim does
+  nothing, a click after the rest asks the window; on desktop 1 previous
+  is inert, with one screen other screen too, with two it sends the
+  window to the second; opened 20 px from the corner it stays whole; the
+  keys; the grip's right click; nothing over a layer surface; always on
+  top stays above a window focused after; on all desktops shows on
+  desktop 2 and, again, only there; `Super+Shift+2` takes it off all
+  desktops. With the real shell (`tests/bar_windows.rs`): nothing over
+  the bar, the ring over a window (`HOCUS_SHOTS`: its screenshots).
 
 ## 11. Alt+Tab
 
@@ -739,3 +824,9 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 12. A window placed over the bar goes in front of it; the desktop's
     placements still keep off the bar, and the pointer pushed against the
     screen's edge brings the bar back in front (#519).
+13. A window's radial menu has eight actions, each direction meaning
+    something; Close sits in the ring, down-left, never picked by a
+    gesture; it opens with `Super` and a right click that does not move,
+    and from the grip; the bar's window lines have the same actions on a
+    right click; "always on top" and "on all desktops" are new window
+    states, marked after the title in the bar (#723).

@@ -514,11 +514,19 @@ impl crate::State {
         let strip = self.strip(output);
         let current = strip.current();
         let focused = self.model.focused();
+        // A window on all desktops is sketched in each (#723).
         let windows = self
             .windows_on(output)
             .into_iter()
-            .filter_map(|id| {
-                let desktop = self.model.desktop(id);
+            .flat_map(|id| {
+                let desktops = if self.model.is_everywhere(id) {
+                    (0..strip.count()).collect()
+                } else {
+                    vec![self.model.desktop(id)]
+                };
+                desktops.into_iter().map(move |d| (id, d))
+            })
+            .filter_map(|(id, desktop)| {
                 let minimized = self.model.is_minimized(id);
                 let rect = self.home_rect(id).and_then(|r| share(r, screen));
                 // A minimised window is not sketched: where it was does
@@ -818,6 +826,10 @@ impl crate::State {
     /// how much of it shows (reduced motion fades instead). `None` when it
     /// is out of sight.
     pub fn strip_offset(&self, id: WindowId, now: Duration) -> Option<(f64, f32)> {
+        // On all desktops (#723): it stays where it is as the strip slides.
+        if self.model.is_everywhere(id) {
+            return (!self.model.placement(id).hidden).then_some((0.0, 1.0));
+        }
         let output = self.output_of(id)?;
         let strip = self.strip(&output);
         let desktop = self.model.desktop(id);
@@ -917,6 +929,14 @@ impl crate::State {
         // A window being dragged goes along.
         let carried = carried.or(self.moving);
         for id in self.windows_on(output) {
+            // On all desktops (#723): on the one shown now, where it is.
+            if self.model.is_everywhere(id) {
+                self.model.set_desktop(id, to);
+                if self.model.placement(id).hidden {
+                    self.unhide(id);
+                }
+                continue;
+            }
             if Some(id) == carried {
                 self.model.set_desktop(id, to);
                 let now = self.now();
@@ -985,15 +1005,24 @@ impl crate::State {
     /// Sends the focused window to desktop `to` (from 0) of its screen;
     /// `follow`: the screen goes there too, the window with it (§12).
     pub fn send_to_desktop(&mut self, to: usize, follow: bool) {
-        let Some(id) = self.model.focused() else {
-            return;
-        };
+        if let Some(id) = self.model.focused() {
+            self.send_window_to_desktop(id, to, follow);
+        }
+    }
+
+    /// Sends window `id` to desktop `to` (from 0) of its screen; `follow`:
+    /// the screen goes there too, the window with it (§12). A window on
+    /// all desktops is then on that one only (#723).
+    pub fn send_window_to_desktop(&mut self, id: WindowId, to: usize, follow: bool) {
         let Some(output) = self.output_of(id) else {
             return;
         };
         let strip = self.strip(&output);
         if to >= strip.count() {
             return;
+        }
+        if self.model.is_everywhere(id) {
+            self.set_everywhere(id, false);
         }
         let from = self.model.desktop(id);
         if follow {
@@ -1020,6 +1049,7 @@ impl crate::State {
             return;
         }
         tracing::debug!(window = id.0, desktop = to + 1, "sent");
+        let had_focus = self.model.focused() == Some(id);
         let now = self.now();
         self.model.set_desktop(id, to);
         self.hide(id);
@@ -1044,6 +1074,11 @@ impl crate::State {
         let mut strip = strip;
         strip.switch(strip.current(), now, reduced);
         self.set_strip(&output, strip);
+        // Sent from the bar, another window may have the focus: it keeps
+        // it.
+        if !had_focus {
+            return;
+        }
         let next = self
             .model
             .stack()
@@ -1163,6 +1198,10 @@ impl crate::State {
             Mode::Fullscreen => to_geometry,
         };
         let restore = start.restore.map(|r| model::carried(r, area, to_area));
+        // On all desktops (#723), it stays so only on the desktop shown.
+        if self.model.is_everywhere(id) && desktop != self.strip(to).current() {
+            self.set_everywhere(id, false);
+        }
         // Torn off its zone on the way (a drag): in it again.
         if self.model.mode(id) != start.mode {
             self.model.set_mode(id, start.mode, start.rect);

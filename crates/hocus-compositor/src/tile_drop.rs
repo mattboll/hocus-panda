@@ -227,7 +227,7 @@ impl State {
         if target == start.output {
             self.put_back(id, start);
             if desktop != self.model.desktop(id) {
-                self.send_window_to(id, desktop);
+                self.send_window_to_desktop(id, desktop, false);
             }
         } else {
             self.carry_to_screen(id, start, &target, desktop);

@@ -415,6 +415,7 @@ impl State {
         self.tell_screens(true);
         self.tell_layouts();
         self.tell_desktops();
+        self.tell_window_states(true);
         self.tell_agents();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
@@ -482,6 +483,16 @@ impl State {
                 tracing::debug!(window = id, "the shell asks a window to close");
                 self.close_window(crate::model::WindowId(id));
             }
+            ToCompositor::WindowAction { id, action } => {
+                tracing::debug!(window = id, action = action.name(), "the bar's menu acts");
+                self.run_window_action(crate::model::WindowId(id), action);
+            }
+            ToCompositor::SendTo {
+                id,
+                output,
+                desktop,
+            } => self.send_to_asked(id, &output, desktop),
+            ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
