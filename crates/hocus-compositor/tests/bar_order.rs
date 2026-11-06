@@ -752,12 +752,16 @@ fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() ->
     // The agents' rows as many as their room has, the others in "+ N".
     let line = bed.logged(&["shows=AGENTS 3 ·", "autres"])?;
     // The agents' group laid out again for its room: fewer rows over its
-    // "+ N" line (20 px), in place under To do's header and "+ N".
+    // "+ N" line (20 px), in place under To do's header and "+ N". Each
+    // group is a surface of its own, laid out in turn: the agents' room
+    // counts To do without its lines, so the agents may fold while To do
+    // still shows a line, the agents under it for a frame or two. The
+    // column is read once both are laid out.
     let shown = &[MEETING_NAMESPACE, TASKS_NAMESPACE, AGENTS_NAMESPACE];
     let folded = |hp: &Headless| {
         column_is(hp, FULL_TOP, FULL_X, shown, &[TODAY_NAMESPACE]).is_ok_and(|g| {
             let h = g[2].bottom - g[2].top;
-            h < 44 + 6 + 3 * 34 && (h - 44 - 6 - 20) % 34 == 0
+            g[1].bottom - g[1].top == 18 + 20 && h < 44 + 6 + 3 * 34 && (h - 44 - 6 - 20) % 34 == 0
         })
     };
     let done = bed.hp.dispatch_until(WAIT, |hp| folded(hp))?;
