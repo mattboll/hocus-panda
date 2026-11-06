@@ -73,6 +73,9 @@ pub struct Managed {
     /// Its screen went: where it was there, to go back when it comes
     /// back (§12).
     pub came_from: Option<crate::screens::CameFrom>,
+    /// Shrunk to fit the screen it was moved to: its size before, taken
+    /// back on a screen where it fits (§12, #419).
+    pub fitted: Option<crate::scales::Fitted>,
 }
 
 /// A resize under way, or ending.
@@ -170,6 +173,7 @@ impl Managed {
             travel: None,
             snapped_on: None,
             came_from: None,
+            fitted: None,
         }
     }
 

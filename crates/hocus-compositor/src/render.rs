@@ -35,7 +35,9 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Monotonic, Physical, Point, Rectangle, Scale},
     wayland::{
-        compositor::{SurfaceData, send_surface_state},
+        compositor::{
+            SurfaceData, TraversalAction, send_surface_state, with_surface_tree_downward,
+        },
         fractional_scale::with_fractional_scale,
         presentation::Refresh,
         shell::wlr_layer::Layer,
@@ -134,9 +136,9 @@ pub type OutputElement<R> = OutputElements<R>;
 /// A window drawn alone for a capture, and where it is (global).
 pub(crate) type Alone<R> = (Vec<OutputElement<R>>, Rectangle<f64, Logical>);
 
-/// Tells a surface the scale and transform of the output it shows most on:
-/// fractional-scale's, and wl_surface's preferred buffer scale for clients
-/// that only draw at whole scales.
+/// Tells a surface the scale and transform of `output`: fractional-scale's,
+/// and wl_surface's preferred buffer scale, rounded up, for clients that
+/// only draw at whole scales.
 fn tell_scale(surface: &WlSurface, data: &SurfaceData, output: Option<&Output>) {
     let Some(output) = output else {
         return;
@@ -1474,11 +1476,15 @@ impl State {
         // Locked (7.1), only the lock's surfaces draw: the others wait.
         let locked = self.locked();
         for window in self.space.elements().filter(|_| !locked) {
+            // The largest scale of the screens it overlaps (§12, #419);
+            // on none, the screen it shows most on.
+            let drawing = self.drawing_output(window);
             window.with_surfaces(|surface, data| {
                 if let Some(states) = states {
                     update_surface_primary_scanout_output(surface, output, data, states, compare);
                 }
-                tell_scale(surface, data, primary(surface, data).as_ref());
+                let at = drawing.clone().or_else(|| primary(surface, data));
+                tell_scale(surface, data, at.as_ref());
             });
             window.send_frame(output, now, throttle, primary);
         }
@@ -1490,9 +1496,27 @@ impl State {
             layer.send_frame(output, now, throttle, |_, _| Some(output.clone()));
         }
         if let Some(surface) = self.external_surface_on(output) {
+            with_surface_tree_downward(
+                &surface,
+                (),
+                |_, _, ()| TraversalAction::DoChildren(()),
+                |surface, data, ()| tell_scale(surface, data, Some(output)),
+                |_, _, ()| true,
+            );
             send_frames_surface_tree(&surface, output, now, throttle, |_, _| Some(output.clone()));
         }
         if let CursorImageStatus::Surface(cursor) = &self.cursor {
+            // A client's cursor draws at the scale of the screen under the
+            // pointer.
+            if self.output_under_pointer().as_ref() == Some(output) {
+                with_surface_tree_downward(
+                    cursor,
+                    (),
+                    |_, _, ()| TraversalAction::DoChildren(()),
+                    |surface, data, ()| tell_scale(surface, data, Some(output)),
+                    |_, _, ()| true,
+                );
+            }
             send_frames_surface_tree(cursor, output, now, throttle, |_, _| Some(output.clone()));
         }
     }

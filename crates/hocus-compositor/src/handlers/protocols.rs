@@ -111,11 +111,12 @@ impl State {
 delegate_xdg_activation!(State);
 
 impl FractionalScaleHandler for State {
-    /// The scale of the output the window is on, or under the pointer.
+    /// The largest scale of the outputs the window is on (§12, #419), or
+    /// the one under the pointer.
     fn new_fractional_scale(&mut self, surface: WlSurface) {
         let scale = self
             .window_for(&surface)
-            .and_then(|w| self.space.outputs_for_element(&w).into_iter().next())
+            .and_then(|w| self.drawing_output(&w))
             .or_else(|| self.output_under_pointer())
             .map_or(1.0, |o| o.current_scale().fractional_scale());
         with_states(&surface, |states| {
