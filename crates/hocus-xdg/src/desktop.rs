@@ -42,6 +42,9 @@ pub struct Entry {
     pub exec: String,
     /// Its desktop file.
     pub file: PathBuf,
+    /// Its `StartupWMClass`: the id its windows go by, when not its own
+    /// (an X11 class, an Electron application's app id).
+    pub wm_class: Option<String>,
 }
 
 /// What a desktop file is to the launcher.
@@ -408,6 +411,11 @@ pub fn read(
         categories: group.raw("Categories").map(list).unwrap_or_default(),
         exec: group.raw("Exec").map(unescape).unwrap_or_default(),
         file: file.to_owned(),
+        wm_class: group
+            .raw("StartupWMClass")
+            .map(unescape)
+            .map(|c| c.trim().to_owned())
+            .filter(|c| !c.is_empty()),
     })))
 }
 
@@ -466,11 +474,22 @@ pub fn files(applications: &Path) -> Vec<(String, PathBuf)> {
 /// The applications of `dirs` (data directories, the first winning), as
 /// the launcher shows them, in `locale`, on `desktops`.
 pub fn scan(dirs: &[PathBuf], locale: &Locale, desktops: &[String]) -> Vec<Entry> {
+    let applications: Vec<PathBuf> = dirs.iter().map(|d| d.join("applications")).collect();
+    scan_applications(&applications, locale, desktops)
+}
+
+/// The applications of `applications` (data directories' `applications`,
+/// the first winning), as [`scan`] reads them.
+pub fn scan_applications(
+    applications: &[PathBuf],
+    locale: &Locale,
+    desktops: &[String],
+) -> Vec<Entry> {
     let path = std::env::var_os("PATH");
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
-    for dir in dirs {
-        for (id, file) in files(&dir.join("applications")) {
+    for dir in applications {
+        for (id, file) in files(dir) {
             if seen.contains(&id) {
                 continue;
             }
@@ -492,9 +511,56 @@ pub fn scan(dirs: &[PathBuf], locale: &Locale, desktops: &[String]) -> Vec<Entry
     entries
 }
 
+/// The entry of the application whose windows go by `app_id`, as the
+/// session saves them (docs/design/windows.md §14): the entry of that id,
+/// else the one whose `StartupWMClass` it is, else the one whose id's last
+/// part it is (`org.mozilla.firefox`, `firefox`), case aside.
+pub fn entry_for_app<'a>(entries: &'a [Entry], app_id: &str) -> Option<&'a Entry> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() {
+        return None;
+    }
+    let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_lowercase();
+    let wanted = last(app_id);
+    entries
+        .iter()
+        .find(|e| e.id.eq_ignore_ascii_case(app_id))
+        .or_else(|| {
+            entries.iter().find(|e| {
+                e.wm_class
+                    .as_deref()
+                    .is_some_and(|c| c.eq_ignore_ascii_case(app_id))
+            })
+        })
+        .or_else(|| entries.iter().find(|e| last(&e.id) == wanted))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_app_id_finds_its_entry_by_id_class_then_last_part() {
+        let entry = |id: &str, class: Option<&str>| Entry {
+            id: id.to_owned(),
+            wm_class: class.map(str::to_owned),
+            ..Entry::default()
+        };
+        let entries = [
+            entry("org.mozilla.firefox", None),
+            entry("slack", Some("Slack")),
+            entry("firefox-esr", Some("firefox-esr")),
+            entry("org.gnome.Nautilus", None),
+        ];
+        let found = |app: &str| entry_for_app(&entries, app).map(|e| e.id.as_str());
+        assert_eq!(found("org.gnome.Nautilus"), Some("org.gnome.Nautilus"));
+        assert_eq!(found("Slack"), Some("slack"));
+        assert_eq!(found("firefox-esr"), Some("firefox-esr"));
+        assert_eq!(found("firefox"), Some("org.mozilla.firefox"));
+        assert_eq!(found("nautilus"), Some("org.gnome.Nautilus"));
+        assert_eq!(found("foot"), None);
+        assert_eq!(found(""), None);
+    }
 
     fn shown(text: &str) -> Option<Entry> {
         let locale = Locale::of("fr_FR.UTF-8");
