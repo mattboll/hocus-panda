@@ -734,6 +734,10 @@ impl Shell {
                 agents::peek::back();
                 Task::none()
             }
+            ToShell::ScreensMoved(moved) => {
+                agents::peek::screens(moved);
+                Task::none()
+            }
             ToShell::AgentPandas(pandas) => {
                 agents::set_pandas(pandas);
                 Task::none()
@@ -2357,6 +2361,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            continue;
+                        }
+                        Ok(ToShell::ScreensMoved(moved)) => {
+                            agents::peek::screens(moved);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group

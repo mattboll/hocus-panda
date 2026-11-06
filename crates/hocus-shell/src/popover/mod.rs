@@ -612,6 +612,8 @@ pub enum Effect {
         bar: String,
         row: Rectangle,
     },
+    /// The winking panda clicked: the compositor sends it back.
+    PeekClose,
     /// The compositor plugs a tool in, or unplugs it (4.0).
     Plug(crate::agents::Tool),
     Unplug(crate::agents::Tool),
@@ -2233,6 +2235,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 height: row.height.round() as i32,
             });
             tell(ToCompositor::GoToAgent { id, row });
+            Vec::new()
+        }
+        Effect::PeekClose => {
+            tell(ToCompositor::PeekClose);
             Vec::new()
         }
         Effect::Plug(tool) => {
