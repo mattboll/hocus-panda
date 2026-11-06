@@ -70,6 +70,10 @@ use wayland_protocols::{
         zxdg_importer_v2::ZxdgImporterV2,
     },
 };
+use wayland_protocols_misc::server_decoration::client::{
+    org_kde_kwin_server_decoration::{self, OrgKdeKwinServerDecoration},
+    org_kde_kwin_server_decoration_manager::OrgKdeKwinServerDecorationManager,
+};
 
 /// How long a test waits for what it checks before it fails. Only a failing
 /// test waits it out, so it costs nothing when things go right. 10 s was
@@ -406,6 +410,22 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size without xdg-decoration that asks for
+    /// the server's decorations (`server`) or draws its own through KDE's
+    /// server decoration protocol, as GTK 3 clients do; it says
+    /// the modes the compositor gives it ([`Event::KdeMode`]).
+    KdeDecorated {
+        app_id: &'static str,
+        size: (u32, u32),
+        server: bool,
+    },
+    /// An xdg toplevel of this size that asks for nothing through either
+    /// decoration protocol, as GTK 4 applications, which draw their own
+    /// header.
+    Undecorated {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
 }
 
 /// What the test asks of a client.
@@ -500,6 +520,10 @@ pub enum Event {
     Exported(String),
     /// The handle it imported names nothing (any more).
     ImportGone,
+    /// Its KDE server decoration's mode came: the server's, or not.
+    KdeMode {
+        server: bool,
+    },
 }
 
 /// What a pointing client's pointer got ([`Shows::Pointing`]).
@@ -600,6 +624,7 @@ fn run_client(
         notifications: Vec::new(),
         exported: None,
         imported: None,
+        kde_decoration: None,
     };
     match shows {
         Some(Shows::Window {
@@ -692,6 +717,35 @@ fn run_client(
                         .context("no text input")?,
                 );
             }
+        }
+        Some(Shows::KdeDecorated {
+            app_id,
+            size,
+            server,
+        }) => {
+            use org_kde_kwin_server_decoration::Mode;
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let manager = globals
+                .bind::<OrgKdeKwinServerDecorationManager, _, _>(&qh, 1..=1, ())
+                .context("no KDE server decoration")?;
+            let surface = client.compositor.create_surface(&qh);
+            let decoration = manager.create(&surface, &qh, ());
+            decoration.request_mode(if server { Mode::Server } else { Mode::Client });
+            let window = xdg.create_window(surface, WindowDecorations::None, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.kde_decoration = Some(decoration);
+        }
+        Some(Shows::Undecorated { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::None, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
         }
         Some(Shows::Cells { app_id, size, cell }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -963,6 +1017,7 @@ struct Client {
     notifications: Vec<ExtIdleNotificationV1>,
     exported: Option<ZxdgExportedV2>,
     imported: Option<ZxdgImportedV2>,
+    kde_decoration: Option<OrgKdeKwinServerDecoration>,
 }
 
 impl Client {
@@ -1784,6 +1839,35 @@ impl Dispatch<ZwpIdleInhibitorV1, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+    }
+}
+
+impl Dispatch<OrgKdeKwinServerDecorationManager, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &OrgKdeKwinServerDecorationManager,
+        _: <OrgKdeKwinServerDecorationManager as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<OrgKdeKwinServerDecoration, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &OrgKdeKwinServerDecoration,
+        event: org_kde_kwin_server_decoration::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let org_kde_kwin_server_decoration::Event::Mode { mode } = event {
+            let server =
+                mode == wayland_client::WEnum::Value(org_kde_kwin_server_decoration::Mode::Server);
+            let _ = client.events.send(Event::KdeMode { server });
+        }
     }
 }
 

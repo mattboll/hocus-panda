@@ -43,6 +43,7 @@ use smithay::{
         seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         shell::{
+            kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
             xdg::{XdgShellState, decoration::XdgDecorationState},
         },
@@ -97,6 +98,9 @@ pub struct State {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_decoration_state: XdgDecorationState,
+    /// KDE's server decoration protocol, which GTK 3 clients use, having
+    /// no xdg-decoration (#716).
+    pub kde_decoration_state: KdeDecorationState,
     pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub dmabuf_state: DmabufState,
@@ -364,6 +368,10 @@ impl State {
             compositor_state: CompositorState::new::<Self>(dh),
             xdg_shell_state: XdgShellState::new::<Self>(dh),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
+            kde_decoration_state: KdeDecorationState::new::<Self>(
+                dh,
+                smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode::Server,
+            ),
             layer_shell_state: WlrLayerShellState::new::<Self>(dh),
             shm_state: ShmState::new::<Self>(dh, vec![]),
             dmabuf_state: DmabufState::new(),

@@ -412,18 +412,25 @@ impl State {
     }
 
     /// Whether the client draws its own header: no grip then.
+    ///
+    /// A Wayland client leaves it to the desktop through xdg-decoration
+    /// (Qt) or KDE's server decoration (GTK 3); one asking through neither
+    /// draws its own, as GTK 4 does (#716). An X11 client draws its own
+    /// when its Motif hints ask for no decorations (smithay's
+    /// `is_decorated`: decorated by the client).
     pub fn has_own_header(&self, id: WindowId) -> bool {
         use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
         let Some(managed) = self.windows.get(&id) else {
             return true;
         };
         if let Some(x11) = managed.window.x11_surface() {
-            return !x11.is_decorated();
+            return x11.is_decorated();
         }
-        managed
-            .window
-            .toplevel()
-            .is_none_or(|t| t.current_state().decoration_mode != Some(DecorationMode::ServerSide))
+        let Some(toplevel) = managed.window.toplevel() else {
+            return true;
+        };
+        toplevel.current_state().decoration_mode != Some(DecorationMode::ServerSide)
+            && !crate::handlers::kde_server_side(toplevel.wl_surface())
     }
 
     /// Tells a window its size and states, and moves it to `rect`'s place

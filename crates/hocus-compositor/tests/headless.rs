@@ -121,6 +121,7 @@ fn the_protocols_of_the_base_are_offered() -> anyhow::Result<()> {
         "zxdg_output_manager_v1",
         "xdg_wm_base",
         "zxdg_decoration_manager_v1",
+        "org_kde_kwin_server_decoration_manager",
         "zwlr_layer_shell_v1",
         "zwp_linux_dmabuf_v1",
         "wp_viewporter",

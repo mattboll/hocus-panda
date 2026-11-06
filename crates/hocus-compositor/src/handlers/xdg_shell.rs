@@ -1,28 +1,36 @@
-//! xdg-shell and xdg-decoration: application windows and their popups.
-//! A toplevel is mapped on its first buffer, at the centre of the work
-//! area; decorations are the server's by default (none drawn yet: the grip
-//! is task 2.4's).
+//! xdg-shell, xdg-decoration and KDE's server decoration: application
+//! windows and their popups. A toplevel is mapped on its first buffer, at
+//! the centre of the work area; decorations are the server's by default:
+//! the grip (windows.md §7).
+
+use std::sync::Mutex;
 
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
-    delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_kde_decoration, delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{PopupKind, Window, find_popup_root_surface, get_popup_toplevel_coords},
     input::{Seat, pointer::GrabStartData},
     reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
         wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::{
+            Mode as KdeMode, OrgKdeKwinServerDecoration,
+        },
         wayland_server::{
-            Resource,
+            Resource, WEnum,
             protocol::{wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
     utils::Serial,
     wayland::{
-        compositor::add_destruction_hook,
+        compositor::{add_destruction_hook, with_states},
         seat::WaylandFocus,
-        shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            decoration::XdgDecorationHandler,
+        shell::{
+            kde::decoration::{KdeDecorationHandler, KdeDecorationState},
+            xdg::{
+                PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+                decoration::XdgDecorationHandler,
+            },
         },
     },
 };
@@ -251,10 +259,82 @@ impl XdgDecorationHandler for State {
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        self.new_decoration(toplevel);
+        XdgDecorationHandler::new_decoration(self, toplevel);
     }
 }
 delegate_xdg_decoration!(State);
+
+/// The mode a surface's KDE server decoration is in; none once the client
+/// released it.
+struct KdeDecoration(Mutex<Option<KdeMode>>);
+
+/// Whether the surface's client uses KDE's server decoration protocol
+/// (`org_kde_kwin_server_decoration`) and leaves its header to the
+/// desktop: then it draws none, and gets the grip.
+pub fn kde_server_side(surface: &WlSurface) -> bool {
+    // smithay's surface data is not there once a surface is gone.
+    if !surface.is_alive() {
+        return false;
+    }
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<KdeDecoration>()
+            .and_then(|d| d.0.lock().ok().and_then(|mode| *mode))
+            == Some(KdeMode::Server)
+    })
+}
+
+fn set_kde_mode(surface: &WlSurface, mode: Option<KdeMode>) {
+    if !surface.is_alive() {
+        return;
+    }
+    with_states(surface, |states| {
+        let data = states
+            .data_map
+            .get_or_insert_threadsafe(|| KdeDecoration(Mutex::new(None)));
+        if let Ok(mut current) = data.0.lock() {
+            *current = mode;
+        }
+    });
+}
+
+/// Server side by default, as xdg-decoration: GTK 3 windows without a
+/// header bar, which use this protocol and not xdg-decoration, draw no
+/// title bar then. A client asking to draw its own (GTK 3 with a header
+/// bar) gets that and keeps its header. The mode is said as the decoration
+/// is made, as the protocol asks.
+impl KdeDecorationHandler for State {
+    fn kde_decoration_state(&self) -> &KdeDecorationState {
+        &self.kde_decoration_state
+    }
+
+    fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        set_kde_mode(surface, Some(KdeMode::Server));
+        decoration.mode(KdeMode::Server);
+    }
+
+    fn request_mode(
+        &mut self,
+        surface: &WlSurface,
+        decoration: &OrgKdeKwinServerDecoration,
+        mode: WEnum<KdeMode>,
+    ) {
+        // What the client asks, said back: it then knows it is the mode,
+        // and asks no more (the protocol leaves the loop to the
+        // compositor).
+        let WEnum::Value(mode) = mode else {
+            return;
+        };
+        set_kde_mode(surface, Some(mode));
+        decoration.mode(mode);
+    }
+
+    fn release(&mut self, _decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
+        set_kde_mode(surface, None);
+    }
+}
+delegate_kde_decoration!(State);
 
 /// The pointer grab a client's move request takes over, if the request
 /// comes from the press that holds it.

@@ -35,7 +35,8 @@ open on), agents' badges on windows (slice 3).
 
 - Corner radius 8 px. Client-side decorated windows (GTK, libadwaita,
   Firefox, Slack) keep their own header; server-side decorated ones (foot,
-  kitty when it asks) get no title bar (section 7 for moving them).
+  kitty when it asks, Qt applications) get no title bar (section 7 for
+  moving them).
 - A 1 px rim: `rgba(255,255,255,0.18)` unfocused, the accent (`#6CC287`)
   focused. The rim is drawn outside the window's content, so a terminal
   with no padding keeps its first column.
@@ -168,6 +169,19 @@ in 120 ms when the pointer is in the window's top 12 px, and disappears
 maximises or restores. Chosen over a thin title bar after trying both in
 the prototype. The top resize band is the window's first 4 px; the grip
 sits just below it.
+
+Which windows have no header of their own (#716):
+
+- A Wayland window that leaves its decorations to the desktop, through
+  xdg-decoration (foot, Qt applications) or KDE's server decoration
+  protocol (GTK 3 windows without a header bar). Both default to the
+  desktop's decorations; a client asking for its own keeps its header (GTK
+  3 with a header bar asks so).
+- Not a Wayland window that asks through neither protocol: GTK 4 and
+  libadwaita applications ask through neither and draw their own header,
+  as KDE's protocol says to assume of a window that does not ask.
+- An X11 window, unless its Motif hints ask for no decorations (GTK 3's
+  client-side decorated windows on X11 do).
 
 ## 8. Resizing
 
