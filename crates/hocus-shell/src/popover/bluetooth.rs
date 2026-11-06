@@ -1037,7 +1037,8 @@ struct Row<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bluetooth::model::{Attempt, Kind};
+    use crate::bluetooth::model::Kind;
+    use hocus_bluetooth::Attempt;
 
     fn device(name: &str, paired: bool, connected: bool) -> Device {
         Device {
@@ -1046,8 +1047,7 @@ mod tests {
             kind: Kind::Headphones,
             paired,
             connected,
-            battery: None,
-            code: false,
+            ..Device::default()
         }
     }
 
