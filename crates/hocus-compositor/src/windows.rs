@@ -1373,6 +1373,7 @@ impl State {
         for strip in self.strips.values_mut() {
             moving |= strip.tick(now);
         }
+        moving |= self.tile_drop.tick(now);
         moving |= self.tick_going(now);
         moving |= self.tick_halo(now);
         moving |= self.tick_peek(now);

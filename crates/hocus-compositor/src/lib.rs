@@ -70,6 +70,7 @@ mod state;
 mod switcher;
 pub mod test_gpu;
 mod text_input;
+pub mod tile_drop;
 mod tray;
 mod wallpaper;
 mod windows;

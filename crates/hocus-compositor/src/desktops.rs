@@ -18,6 +18,14 @@
 //! Minimised windows are told too, for that list only (3.9c): the tiles
 //! leave them out.
 //!
+//! With several screens (8.4), each keeps its own desktops; a bar on the
+//! primary screen alone shows a row of tiles for every screen, its own
+//! first, then the others left to right: every screen's desktops are told
+//! then, and each bar which screens it shows (`desk-screens`), with their
+//! sizes, which shape their rows. `Super+Alt+←/→` sends the focused window
+//! to the screen on that side, onto the desktop it shows, at the same
+//! share of its work area.
+//!
 //! The windows' titles, for the list a tile opens on hover (3.9b), are told
 //! on a line of their own, compared on their own: a terminal retitles at
 //! every command, which must draw an open list but never the tiles. A
@@ -28,14 +36,17 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use hocus_link::{DeskWindow, DesktopTo, Desktops, Look, Recent, SHARE, Titles, ToShell};
+use hocus_link::{
+    DeskScreen, DeskWindow, DesktopTo, Desktops, Look, Recent, SHARE, Titles, ToShell,
+};
 use smithay::{
     output::Output,
     reexports::calloop::timer::{TimeoutAction, Timer},
 };
 
 use crate::{
-    model::{Rect, WindowId},
+    config::PanelScreens,
+    model::{self, Mode, Rect, WindowId},
     motion::{self, Bezier, Tween},
     windows::rect_of,
 };
@@ -420,6 +431,16 @@ pub fn share(rect: Rect, screen: Rect) -> Option<[u16; 4]> {
     ])
 }
 
+/// Where a window was: its screen, its state, its place (where it comes
+/// back to, shown or not) and where it floats again.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placed {
+    pub output: Output,
+    pub mode: Mode,
+    pub rect: Rect,
+    pub restore: Option<Rect>,
+}
+
 /// A look at the desktops after a change of title or application id: one
 /// frame later.
 const SOON: Duration = Duration::from_millis(16);
@@ -430,6 +451,8 @@ pub struct Told {
     desktops: HashMap<String, Desktops>,
     titles: HashMap<String, Titles>,
     recent: HashMap<String, Recent>,
+    /// The screens each bar shows the desktops of, by the bar's screen.
+    screens: HashMap<String, Vec<DeskScreen>>,
     /// The look asked after a change of title, until it runs.
     soon: Option<smithay::reexports::calloop::RegistrationToken>,
 }
@@ -471,6 +494,7 @@ impl Told {
         self.desktops.clear();
         self.titles.clear();
         self.recent.clear();
+        self.screens.clear();
     }
 
     /// The screen has no bar any more.
@@ -569,14 +593,14 @@ impl crate::State {
         }
     }
 
-    /// A frame of `output` was drawn: its bar's tiles are told its desktops
-    /// if they changed, its list its titles, and its windows their order
-    /// (see the module's documentation).
+    /// A frame of `output` was drawn: the tiles that show it are told its
+    /// desktops if they changed, its list its titles, and its windows their
+    /// order (see the module's documentation).
     pub fn desktops_drawn(&mut self, output: &Output) {
         if !self.shell_linked() {
             return;
         }
-        if !self.panel.bars.contains_key(&output.name()) {
+        if !self.desktops_shown(output) {
             self.shell.desktops.forget(&output.name());
             return;
         }
@@ -601,22 +625,119 @@ impl crate::State {
         }
     }
 
-    /// The bars' screens, as the shell knows them.
+    /// The screens whose desktops bar `bar` shows, a row each (8.4): its
+    /// own; with the bar on the primary screen alone, every other one
+    /// after it, left to right, then top to bottom.
+    pub fn desk_rows(&self, bar: &str) -> Vec<Output> {
+        let Some(own) = self.space.outputs().find(|o| o.name() == bar).cloned() else {
+            return Vec::new();
+        };
+        let mut rows = vec![own];
+        if self.config.panel.screens == PanelScreens::Primary {
+            let mut others: Vec<(i32, i32, Output)> = self
+                .space
+                .outputs()
+                .filter(|o| o.name() != bar)
+                .filter_map(|o| {
+                    let g = self.space.output_geometry(o)?;
+                    Some((g.loc.x, g.loc.y, o.clone()))
+                })
+                .collect();
+            others.sort_by_key(|(x, y, o)| (*x, *y, o.name()));
+            rows.extend(others.into_iter().map(|(_, _, o)| o));
+        }
+        rows
+    }
+
+    /// Whether a bar shows `output`'s desktops.
+    fn desktops_shown(&self, output: &Output) -> bool {
+        self.panel
+            .bars
+            .keys()
+            .any(|bar| self.desk_rows(bar).contains(output))
+    }
+
+    /// The screens some bar shows the desktops of.
     fn bars_outputs(&self) -> Vec<Output> {
         self.space
             .outputs()
-            .filter(|o| self.panel.bars.contains_key(&o.name()))
+            .filter(|o| self.desktops_shown(o))
             .cloned()
             .collect()
     }
 
-    /// The shell connected: every bar's tiles are told their desktops, and
-    /// their list the titles.
-    pub fn tell_desktops(&mut self) {
-        self.shell.desktops.clear();
+    /// `output` as a bar's row shows it: its size, and what names it as
+    /// the Settings' Écrans page does (6.9): the built-in panel, its
+    /// diagonal, its number (1 the built-in panel, then by connector).
+    fn desk_screen(&self, output: &Output) -> Option<DeskScreen> {
+        let g = self.space.output_geometry(output)?;
+        let (w, h) = {
+            let size = output.physical_properties().size;
+            (f64::from(size.w), f64::from(size.h))
+        };
+        let inches = if w > 0.0 && h > 0.0 {
+            (w.hypot(h) / 25.4).round() as u32
+        } else {
+            0
+        };
+        let mut names: Vec<(bool, String)> = self
+            .space
+            .outputs()
+            .map(|o| (!crate::panel::built_in(&o.name()), o.name()))
+            .collect();
+        names.sort();
+        let number = names
+            .iter()
+            .position(|(_, n)| *n == output.name())
+            .map_or(0, |i| i + 1);
+        Some(DeskScreen {
+            output: output.name(),
+            width: u32::try_from(g.size.w).unwrap_or(0),
+            height: u32::try_from(g.size.h).unwrap_or(0),
+            built_in: crate::panel::built_in(&output.name()),
+            inches,
+            number: u32::try_from(number).unwrap_or(0),
+        })
+    }
+
+    /// Each bar is told which screens' desktops it shows, when that
+    /// changed: as the shell connects, as screens come, go, move or resize,
+    /// and as the bars do.
+    pub fn tell_desk_screens(&mut self) {
+        if !self.shell_linked() {
+            return;
+        }
+        let bars: Vec<String> = self.panel.bars.keys().cloned().collect();
+        self.shell
+            .desktops
+            .screens
+            .retain(|bar, _| bars.contains(bar));
+        for bar in bars {
+            let screens: Vec<DeskScreen> = self
+                .desk_rows(&bar)
+                .iter()
+                .filter_map(|o| self.desk_screen(o))
+                .collect();
+            if self.shell.desktops.screens.get(&bar) == Some(&screens) {
+                continue;
+            }
+            self.shell
+                .desktops
+                .screens
+                .insert(bar.clone(), screens.clone());
+            self.tell_shell(ToShell::DeskScreens { bar, screens });
+        }
+        // A screen now shown is told its desktops.
         for output in self.bars_outputs() {
             self.desktops_drawn(&output);
         }
+    }
+
+    /// The shell connected: every bar is told the screens it shows, their
+    /// tiles their desktops, and their list the titles.
+    pub fn tell_desktops(&mut self) {
+        self.shell.desktops.clear();
+        self.tell_desk_screens();
     }
 
     /// A window's title or application changed: the bars are told one
@@ -912,6 +1033,21 @@ impl crate::State {
         if from == to {
             return;
         }
+        self.send_window_to(id, to);
+    }
+
+    /// Sends window `id` to desktop `to` (from 0) of its screen, staying
+    /// here: it leaves toward its desktop's side, the dots show, and the
+    /// focus goes to the window on top there.
+    pub(crate) fn send_window_to(&mut self, id: WindowId, to: usize) {
+        let Some(output) = self.output_of(id) else {
+            return;
+        };
+        let strip = self.strip(&output);
+        let from = self.model.desktop(id);
+        if from == to || to >= strip.count() {
+            return;
+        }
         tracing::debug!(window = id.0, desktop = to + 1, "sent");
         let had_focus = self.model.focused() == Some(id);
         let now = self.now();
@@ -971,6 +1107,121 @@ impl crate::State {
         } else {
             self.switch_desktop_on(&output, delta);
         }
+    }
+
+    /// The screen beside `output` on side `toward` (-1 left, 1 right), by
+    /// their positions: of those whose middle is on that side, the one
+    /// level with it, else the nearest.
+    pub fn screen_beside(&self, output: &Output, toward: i32) -> Option<Output> {
+        let from = rect_of(self.space.output_geometry(output)?);
+        let (cx, _) = from.centre();
+        self.space
+            .outputs()
+            .filter(|o| *o != output)
+            .filter_map(|o| Some((rect_of(self.space.output_geometry(o)?), o)))
+            .filter(|(g, _)| (g.centre().0 - cx) * f64::from(toward) > 0.0)
+            .min_by(|(a, _), (b, _)| {
+                let level = |g: &Rect| g.y < from.y + from.height && g.y + g.height > from.y;
+                let away = |g: &Rect| (g.centre().0 - cx).abs();
+                (!level(a), away(a))
+                    .partial_cmp(&(!level(b), away(b)))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, o)| o.clone())
+    }
+
+    /// Sends the focused window to the screen on side `toward` of its own
+    /// (8.4), onto the desktop that screen shows, at the same share of its
+    /// work area: snapped or maximised, in the same zone; fullscreen,
+    /// covering it. It keeps the focus, travelling there in the strip's
+    /// 320 ms (at once with reduced motion); the pointer stays. No screen
+    /// there: nothing happens.
+    pub fn move_to_screen(&mut self, toward: i32) {
+        let Some(id) = self.model.focused() else {
+            return;
+        };
+        let Some(from) = self.output_of(id) else {
+            return;
+        };
+        let Some(to) = self.screen_beside(&from, toward) else {
+            tracing::debug!(window = id.0, toward, "no screen on that side");
+            return;
+        };
+        let Some(start) = self.placed_now(id) else {
+            return;
+        };
+        let now = self.now();
+        let drawn = self.visual_rect(id, now);
+        let desktop = self.strip(&to).current();
+        tracing::debug!(window = id.0, to = to.name(), "sent to the screen beside");
+        self.carry_to_screen(id, &start, &to, desktop);
+        if !self.reduced_motion()
+            && self.model.is_shown(id)
+            && let (Some(drawn), Some(managed)) = (drawn, self.windows.get_mut(&id))
+        {
+            managed.settle = Some((drawn, Tween::new(now, motion::DESKTOP_SLIDE, Bezier::STRIP)));
+        }
+        self.focus(Some(id));
+    }
+
+    /// Where `id` is now, to carry it or put it back: its screen, its state,
+    /// its place and where it floats again.
+    pub(crate) fn placed_now(&self, id: WindowId) -> Option<Placed> {
+        Some(Placed {
+            output: self.output_of(id)?,
+            mode: self.model.mode(id),
+            rect: self.home_rect(id)?,
+            restore: self.model.placement(id).restore,
+        })
+    }
+
+    /// Puts `id`, which was as `start` says, on screen `to`'s desktop
+    /// `desktop`, in the same state, at the same share of its work area
+    /// (as a screen unplugged carries its windows, windows.md §12).
+    pub(crate) fn carry_to_screen(
+        &mut self,
+        id: WindowId,
+        start: &Placed,
+        to: &Output,
+        desktop: usize,
+    ) {
+        let (Some(area), Some(to_area), Some(to_geometry)) = (
+            self.work_area(&start.output),
+            self.work_area(to),
+            self.space.output_geometry(to).map(rect_of),
+        ) else {
+            return;
+        };
+        let placed = match start.mode {
+            Mode::Floating => model::carried(start.rect, area, to_area),
+            Mode::Snapped(zone) => zone.rect(to_area),
+            Mode::Fullscreen => to_geometry,
+        };
+        let restore = start.restore.map(|r| model::carried(r, area, to_area));
+        // On all desktops (#723), it stays so only on the desktop shown.
+        if self.model.is_everywhere(id) && desktop != self.strip(to).current() {
+            self.set_everywhere(id, false);
+        }
+        // Torn off its zone on the way (a drag): in it again.
+        if self.model.mode(id) != start.mode {
+            self.model.set_mode(id, start.mode, start.rect);
+        }
+        self.relocate(id, to, desktop, placed, restore);
+        // A window moved by the user is not taken back by the screen it
+        // came from, should that one come back.
+        if let Some(managed) = self.windows.get_mut(&id) {
+            managed.came_from = None;
+        }
+        if !self.model.is_shown(id) {
+            let next = self.model.stack().iter().rev().copied().find(|w| {
+                self.model.is_shown(*w) && self.output_of(*w).as_ref() == Some(&start.output)
+            });
+            if self.model.focused() == Some(id) {
+                self.focus(next);
+            }
+        }
+        self.rearrange();
+        self.redraw = true;
     }
 
     /// Brings `id` forward: to its desktop, back from minimised, focused.

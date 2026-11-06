@@ -91,10 +91,14 @@ pub enum Item {
     /// The keyboard's layout: a click, or `Enter` while it holds the
     /// keyboard, asks for the next one (3.8).
     Keyboard,
-    /// A desktop's tile (or dot), from 0: a click, or `Enter` while it
-    /// holds the keyboard, goes to that desktop (3.9); hovered, it shows
-    /// the list of its windows (3.9b).
-    Desktop(u8),
+    /// A desktop's tile (or dot) of the bar's row `row` (its screen's, 8.4:
+    /// 0 the bar's own), desktop `index` from 0: a click, or `Enter` while
+    /// it holds the keyboard, goes to that desktop of that screen (3.9);
+    /// hovered, it shows the list of its windows (3.9b).
+    Desktop {
+        row: u8,
+        index: u8,
+    },
     /// The Sources popover (4.0): from the secretary's briefing, which it
     /// replaces (4.6), and the card's "Un autre outil ?".
     Sources,
@@ -180,7 +184,7 @@ impl Item {
         !matches!(
             self,
             Self::Keyboard
-                | Self::Desktop(_)
+                | Self::Desktop { .. }
                 | Self::Decline
                 | Self::Agent(_)
                 | Self::Menu
@@ -212,9 +216,11 @@ impl Item {
     /// screen-wide launcher must not open on the way past.
     fn hovers(self, form: Form) -> bool {
         match self {
-            Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User | Self::InUse => {
-                true
-            }
+            Self::Desktop { .. }
+            | Self::Clipboard
+            | Self::Notifications
+            | Self::User
+            | Self::InUse => true,
             Self::Keyboard
             | Self::Agent(_)
             | Self::Menu
@@ -237,7 +243,7 @@ impl Item {
     /// Its popover's width, logical pixels.
     fn width(self) -> u32 {
         match self {
-            Self::Desktop(_) => desktop::WIDTH,
+            Self::Desktop { .. } => desktop::WIDTH,
             Self::Secretary => briefing::WIDTH,
             Self::Notifications => history::WIDTH,
             Self::Clipboard => clipboard::WIDTH,
@@ -265,7 +271,7 @@ impl Item {
             Self::Bluetooth => bluetooth::height(),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
-            Self::Desktop(index) => desktop::height(bar, index),
+            Self::Desktop { row, index } => desktop::height(bar, row, index),
             Self::Sources | Self::AnotherTool => agents::sources_height(form),
             Self::Plug(tool) => agents::consent_height(tool),
             Self::Secretary => briefing::height(form),
@@ -282,6 +288,7 @@ impl Item {
             Self::WindowMenu(id) => window_menu::height(id),
             Self::WindowsMore => desktop::height(
                 bar,
+                0,
                 u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
             ),
             Self::Keyboard
@@ -304,7 +311,7 @@ impl Item {
     /// look does not change (it is lit by the pointer already); Sources
     /// lights the mini form's agents' item, which opens it on the card.
     fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop(_)) && (!self.agents() || self == Self::Sources)
+        !matches!(self, Self::Desktop { .. }) && (!self.agents() || self == Self::Sources)
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -315,7 +322,7 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop(_) | Self::Agent(_) | Self::Secretary => {}
+            Self::Keyboard | Self::Desktop { .. } | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
@@ -343,7 +350,7 @@ impl Item {
             | Self::Brightness
             | Self::Battery
             | Self::Keyboard
-            | Self::Desktop(_)
+            | Self::Desktop { .. }
             | Self::Sources
             | Self::AnotherTool
             | Self::Plug(_)
@@ -388,7 +395,7 @@ impl Item {
             (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
                 CONNECTIONS_NAMESPACE
             }
-            (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
+            (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE
             }
@@ -438,7 +445,7 @@ impl Item {
         !matches!(
             self,
             Self::Sound
-                | Self::Desktop(_)
+                | Self::Desktop { .. }
                 | Self::Secretary
                 | Self::InUse
                 | Self::Tray(_)
@@ -1082,7 +1089,10 @@ impl Controller {
                 Phase::Open(open)
                     if open.bar == bar
                         && open.how == Opened::Hover
-                        && matches!((open.item, item), (Item::Desktop(_), Item::Desktop(_))) =>
+                        && matches!(
+                            (open.item, item),
+                            (Item::Desktop { .. }, Item::Desktop { .. })
+                        ) =>
                 {
                     tracing::debug!(?item, "the list shows another desktop");
                     open.item = item;
@@ -1639,7 +1649,7 @@ fn anchor(
             return Rectangle { y: card, ..from };
         }
     }
-    if !matches!(item, Item::Desktop(_)) {
+    if !matches!(item, Item::Desktop { .. }) {
         return from;
     }
     let top = items
@@ -1654,8 +1664,8 @@ fn anchor(
 fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
     match item {
         Item::Keyboard => Some(Effect::NextLayout),
-        Item::Desktop(index) => Some(Effect::Desktop {
-            bar,
+        Item::Desktop { row, index } => Some(Effect::Desktop {
+            bar: crate::desktops::output_of(&bar, row),
             to: DesktopTo::At(index),
         }),
         Item::Decline => Some(Effect::Decline),
@@ -3112,11 +3122,13 @@ mod tests {
         c.set_items(
             BAR,
             DESKTOPS_NAMESPACE,
-            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+            (0..6)
+                .map(|i| (Item::Desktop { row: 0, index: i }, tile(i)))
+                .collect(),
         );
         let enter = |i: u8| Event::ItemEnter {
             bar: BAR.to_owned(),
-            item: Item::Desktop(i),
+            item: Item::Desktop { row: 0, index: i },
             rect: tile(i),
         };
         // In the full form too, 150 ms after; its top on the tiles' first
@@ -3141,7 +3153,7 @@ mod tests {
         );
         let effects = c.handle(enter(4), t + MS(220));
         assert!(effects.contains(&Effect::Wake(POPOVER_NAMESPACE)));
-        assert!(c.shows(BAR, Item::Desktop(4)));
+        assert!(c.shows(BAR, Item::Desktop { row: 0, index: 4 }));
         assert!(c.is_open(id));
         assert_eq!(c.deadline(), None);
         // A row chosen: it closes.
@@ -3155,7 +3167,7 @@ mod tests {
         let effects = c.handle(
             Event::ItemPress {
                 bar: BAR.to_owned(),
-                item: Item::Desktop(1),
+                item: Item::Desktop { row: 0, index: 1 },
                 rect: tile(1),
             },
             t + MS(600),
@@ -3431,7 +3443,9 @@ mod tests {
         c.set_items(
             BAR,
             DESKTOPS_NAMESPACE,
-            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+            (0..6)
+                .map(|i| (Item::Desktop { row: 0, index: i }, tile(i)))
+                .collect(),
         );
         c.set_items(BAR, CONNECTIONS_NAMESPACE, vec![(Item::Wifi, wifi)]);
         c.set_items(BAR, LEVELS_NAMESPACE, vec![(Item::Sound, gauge())]);
@@ -3439,7 +3453,7 @@ mod tests {
         let effects = c.handle(
             Event::ItemPress {
                 bar: BAR.to_owned(),
-                item: Item::Desktop(4),
+                item: Item::Desktop { row: 0, index: 4 },
                 rect: tile(4),
             },
             t,
@@ -3472,21 +3486,21 @@ mod tests {
                 Effect::Wake(DESKTOPS_NAMESPACE),
             ]
         );
-        assert!(c.focused(BAR, Item::Desktop(5)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 5 }));
         // Up again, along the row: the same surface.
         assert_eq!(
             c.handle(Event::ItemStep { back: true }, t),
             vec![Effect::Wake(DESKTOPS_NAMESPACE)]
         );
-        assert!(c.focused(BAR, Item::Desktop(4)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
         // Enter: that desktop, the keyboard kept.
         assert_eq!(c.handle(Event::ItemActivate, t), vec![go(4)]);
-        assert!(c.focused(BAR, Item::Desktop(4)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
         // From the first tile back round to the levels' last item.
         for _ in 0..4 {
             c.handle(Event::ItemStep { back: true }, t);
         }
-        assert!(c.focused(BAR, Item::Desktop(0)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
         let effects = c.handle(Event::ItemStep { back: true }, t);
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
         assert!(c.focused(BAR, Item::Sound));

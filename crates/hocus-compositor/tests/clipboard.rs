@@ -70,6 +70,7 @@ struct Bed {
 struct Window {
     client: ClientHandle,
     rect: Rect,
+    app_id: &'static str,
 }
 
 impl Bed {
@@ -227,7 +228,11 @@ impl Bed {
     fn window(&mut self, app_id: &'static str, size: (u32, u32)) -> anyhow::Result<Window> {
         let (rect, client) =
             common::open_showing(&mut self.hp, app_id, Shows::Typing { app_id, size })?;
-        Ok(Window { client, rect })
+        Ok(Window {
+            client,
+            rect,
+            app_id,
+        })
     }
 
     fn click(&mut self, (x, y): (f64, f64)) -> anyhow::Result<()> {
@@ -242,10 +247,23 @@ impl Bed {
 
     /// A click into `window`, near its top left corner: windows open at
     /// the screen's centre, the later ones smaller here, so that the
-    /// earlier ones show there still.
+    /// earlier ones show there still. Once its surface holds the keyboard:
+    /// a client without it may not take the clipboard (smithay denies its
+    /// selection), and the keyboard may come later than the click. After
+    /// `Esc` in a popover, the bar's item holds it exclusively; the click
+    /// focuses the window, but the keyboard goes to it only once the shell,
+    /// told of the press outside, lets it go, which a loaded machine takes
+    /// longer than any fixed wait to do (#724).
     fn focus(&mut self, window: &Window) -> anyhow::Result<()> {
         let r = window.rect;
         self.click((f64::from(r.x + 20), f64::from(r.y + 20)))?;
+        let app_id = window.app_id;
+        let holds = self.hp.dispatch_until(WAIT, |hp| {
+            hp.windows()
+                .iter()
+                .any(|w| w.app_id.as_deref() == Some(app_id) && w.focused && w.keyboard)
+        })?;
+        anyhow::ensure!(holds, "{app_id} never held the keyboard");
         wait(&mut self.hp, Duration::from_millis(100))
     }
 
