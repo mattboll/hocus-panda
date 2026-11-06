@@ -525,7 +525,7 @@ impl State {
     /// unlocked. Locked, it goes to the lock (its field).
     fn away_swallows(&self) -> bool {
         !self.locked()
-            && (matches!(self.away.phase, Phase::Curtain { .. } | Phase::Dark { .. })
+            && (matches!(self.away.phase, Phase::Curtain { .. } | Phase::Dark)
                 || self.away.screens_off)
     }
 
