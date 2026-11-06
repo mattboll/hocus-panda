@@ -182,6 +182,9 @@ pub struct Network {
     pub scanning: bool,
     /// The last connection the popover asked for.
     pub attempt: Option<Attempt>,
+    /// Airplane mode is on (rfkill's, not NetworkManager's: its reader
+    /// sets it).
+    pub airplane: bool,
 }
 
 /// What the bar's row says (bar.md §4 group 9).
@@ -190,6 +193,8 @@ pub enum Link {
     /// No NetworkManager: no row.
     Hidden,
     Wired,
+    /// Airplane mode is on.
+    Airplane,
     Off,
     Offline,
     Connecting,
@@ -207,6 +212,8 @@ impl Network {
             Link::Hidden
         } else if self.wired {
             Link::Wired
+        } else if self.airplane {
+            Link::Airplane
         } else if !self.hardware {
             Link::Offline
         } else if !self.enabled {
@@ -262,6 +269,40 @@ pub struct Details {
     pub saved: Vec<Saved>,
     /// The Ethernet device, if there is one.
     pub wired: Option<Wired>,
+    /// The VPN connections (`vpn`, `wireguard`), in no order.
+    pub vpns: Vec<Vpn>,
+}
+
+/// A VPN connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Vpn {
+    pub uuid: String,
+    pub name: String,
+    pub kind: VpnKind,
+    pub autoconnect: bool,
+    pub state: VpnState,
+    /// Why it last failed (`NMActiveConnectionStateReason`), until it is
+    /// tried again.
+    pub failed: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VpnKind {
+    WireGuard,
+    OpenVpn,
+    /// Another plugin's, by its service's last word.
+    Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VpnState {
+    Off,
+    Connecting,
+    /// On: since when (seconds since the epoch), its IPv4 address.
+    On {
+        since: Option<u64>,
+        address: Option<String>,
+    },
 }
 
 /// An Ethernet device.

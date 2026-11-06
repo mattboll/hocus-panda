@@ -1029,7 +1029,7 @@ impl Fakes {
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='{}' PIPEWIRE_REMOTE='{}' \
-                 HOCUS_BACKLIGHT_DIR='{}' LC_ALL='{lang}' LANG='{lang}' \
+                 HOCUS_BACKLIGHT_DIR='{}' HOCUS_RFKILL=/nonexistent LC_ALL='{lang}' LANG='{lang}' \
                  RUST_LOG=${{HOCUS_SHELL_LOG:-{level}}}\n{extra}\
                  exec '{}' \"$@\"{redirect}\n",
                 self.address,

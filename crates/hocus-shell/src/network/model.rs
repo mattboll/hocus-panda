@@ -45,6 +45,30 @@ impl Words {
         }
     }
 
+    pub fn airplane_mode(self) -> &'static str {
+        if self.fr() {
+            "Mode avion"
+        } else {
+            "Airplane mode"
+        }
+    }
+
+    pub fn airplane_is_on(self) -> &'static str {
+        if self.fr() {
+            "Le mode avion est activé."
+        } else {
+            "Airplane mode is on."
+        }
+    }
+
+    pub fn wifi_settings(self) -> &'static str {
+        if self.fr() {
+            "Réglages du Wi-Fi…"
+        } else {
+            "Wi-Fi settings…"
+        }
+    }
+
     pub fn wifi_is_off(self) -> &'static str {
         if self.fr() {
             "Le Wi-Fi est coupé."
