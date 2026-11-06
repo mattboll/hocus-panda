@@ -190,6 +190,8 @@ pub struct State {
     pub still: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
+    /// The bar's tiles, and a window moved over them (8.5 B).
+    pub tile_drop: crate::tile_drop::TileDrop,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
     pub going: Option<crate::going::Going>,
     /// The halo around and over the bars (bar.md §6, 4.4).
@@ -441,6 +443,7 @@ impl State {
             cursor_images,
             redraw: true,
             strips: HashMap::new(),
+            tile_drop: crate::tile_drop::TileDrop::default(),
             going: None,
             halo,
             peek: crate::peek::Peeks::default(),

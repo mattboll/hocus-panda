@@ -5,6 +5,8 @@
 //! application's icon (else its letter on a colour) and its title cut
 //! with an ellipsis; then the minimised ones, greyed (3.9c); "Aucune
 //! fenêtre." on an empty desktop. 240 px wide, its top on the tiles'.
+//! Another screen's desktop (8.4) says which under its title: "sur
+//! l'écran externe 34 pouces" (12 px, `text.faint`).
 //! Past 8 rows it scrolls, as the Wi-Fi's list: the wheel, a touchpad,
 //! the row holding the keyboard kept in view.
 //!
@@ -57,6 +59,14 @@ const TITLE: f32 = 14.0;
 const COUNT: f32 = 12.0;
 const GAP: f32 = 4.0;
 const CONTENT_TOP: f32 = HEADER_TOP + HEADER + GAP;
+/// Another screen's line under the title: 12 px, `text.faint`, 18 px high.
+const SCREEN: f32 = 12.0;
+const SCREEN_LINE: f32 = 18.0;
+
+/// Where the content starts: under the screen's line when there is one.
+fn content_top(screen: bool) -> f32 {
+    CONTENT_TOP + if screen { SCREEN_LINE } else { 0.0 }
+}
 /// "Aucune fenêtre.": 13 px, 2 px above and under; then the rows' (empty)
 /// place, 4 px under it, as the mockup's column has it.
 const EMPTY: f32 = 13.0;
@@ -91,18 +101,18 @@ fn rows_height(rows: usize) -> f32 {
 }
 
 /// Where its content ends, `rows` windows long: 8 rows at most show.
-fn end(rows: usize) -> f32 {
+fn end(rows: usize, top: f32) -> f32 {
     match rows {
-        0 => CONTENT_TOP + EMPTY_PAD + EMPTY * LINE + EMPTY_PAD + GAP,
-        n => CONTENT_TOP + rows_height(n.min(MOST)),
+        0 => top + EMPTY_PAD + EMPTY * LINE + EMPTY_PAD + GAP,
+        n => top + rows_height(n.min(MOST)),
     }
 }
 
 /// The list of `rows` windows: its viewport and its rows' height.
-fn list_of(rows: usize) -> List {
+fn list_of(rows: usize, top: f32) -> List {
     List {
         view: Rectangle::new(
-            Point::new(LEFT - ROW_OUT, CONTENT_TOP),
+            Point::new(LEFT - ROW_OUT, top),
             Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, rows_height(rows.min(MOST))),
         ),
         content: rows_height(rows),
@@ -119,13 +129,18 @@ fn title_room(scrolls: bool) -> f32 {
 }
 
 /// Its height for `rows` windows.
-fn height_of(rows: usize) -> u32 {
-    (end(rows) + PAD_BOTTOM + BORDER).round() as u32
+fn height_of(rows: usize, top: f32) -> u32 {
+    (end(rows, top) + PAD_BOTTOM + BORDER).round() as u32
 }
 
-/// Its height for desktop `index` of bar `bar` as it is now.
-pub fn height(bar: &str, index: u8) -> u32 {
-    height_of(desktops::rows(bar, usize::from(index)).len())
+/// Its height for desktop `index` of bar `bar`'s row `row` (its screen's,
+/// 8.4) as it is now.
+pub fn height(bar: &str, row: u8, index: u8) -> u32 {
+    let output = desktops::output_of(bar, row);
+    height_of(
+        desktops::rows(&output, usize::from(index)).len(),
+        content_top(row > 0),
+    )
 }
 
 /// Row `i`'s top in the list's content.
@@ -164,7 +179,11 @@ pub struct Panel {
 #[derive(Debug, Clone, PartialEq)]
 struct Shown {
     bar: String,
+    /// The bar's row (its screen, 8.4) and the desktop.
+    row: u8,
     index: u8,
+    /// Another screen's: the line saying which.
+    screen: Option<String>,
     rows: Vec<Row>,
     titles: Vec<String>,
     /// Its title: its name (6.14) or "Bureau N", elided to the room the
@@ -193,7 +212,8 @@ impl State {
     }
 
     fn list(&self) -> List {
-        list_of(self.ids().len())
+        let screen = self.shown.as_ref().is_some_and(|s| s.screen.is_some());
+        list_of(self.ids().len(), content_top(screen))
     }
 
     fn rect_of(&self, id: u64) -> Option<Rectangle> {
@@ -283,10 +303,20 @@ impl<Message> canvas::Program<Message> for Panel {
                 Alignment::Right,
             ));
         }
+        if let Some(screen) = &shown.screen {
+            f.fill_text(text(
+                screen.clone(),
+                Point::new(LEFT, CONTENT_TOP - GAP + SCREEN_LINE / 2.0),
+                SCREEN,
+                FAINT.get(),
+                Alignment::Left,
+            ));
+        }
         if shown.rows.is_empty() {
+            let top = content_top(shown.screen.is_some());
             f.fill_text(text(
                 self.words.no_window().to_owned(),
-                Point::new(LEFT, CONTENT_TOP + EMPTY_PAD + EMPTY * LINE / 2.0),
+                Point::new(LEFT, top + EMPTY_PAD + EMPTY * LINE / 2.0),
                 EMPTY,
                 FAINT.get(),
                 Alignment::Left,
@@ -378,29 +408,43 @@ impl Panel {
         }
         // Closing, it shows what it showed.
         let (bar, item) = super::with(|c| match c.open_on() {
-            Some((bar, item @ (Item::Desktop(_) | Item::WindowsMore))) if c.is_open(self.id) => {
+            Some((bar, item @ (Item::Desktop { .. } | Item::WindowsMore)))
+                if c.is_open(self.id) =>
+            {
                 Some((bar.to_owned(), item))
             }
             _ => None,
         })?;
         // The windows' "+ N" (#604): the current desktop's.
-        let index = match item {
-            Item::Desktop(index) => index,
-            _ => u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX),
+        let (row, index) = match item {
+            Item::Desktop { row, index } => (row, index),
+            _ => (0, u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX)),
         };
-        let rows = desktops::rows(&bar, usize::from(index));
+        let shown_screen = desktops::screen_of(&bar, row);
+        let output = shown_screen
+            .as_ref()
+            .map_or_else(|| bar.clone(), |s| s.output.clone());
+        let screen = shown_screen
+            .filter(|_| row > 0)
+            .map(|s| self.words.on_screen(s.built_in, s.inches, s.number));
+        let rows = desktops::rows(&output, usize::from(index));
         let full_title = self.words.desktop_title(
             usize::from(index) + 1,
             desktops::name(usize::from(index)).as_deref(),
         );
         let count = self.words.windows(rows.len()).unwrap_or_default();
         let same = state.shown.as_ref().is_some_and(|s| {
-            s.bar == bar && s.index == index && s.rows == rows && s.title_of == full_title
+            s.bar == bar
+                && s.row == row
+                && s.index == index
+                && s.rows == rows
+                && s.title_of == full_title
+                && s.screen == screen
         });
         if same {
             return None;
         }
-        let room = title_room(list_of(rows.len()).scrolls());
+        let room = title_room(list_of(rows.len(), content_top(screen.is_some())).scrolls());
         let (titles, title) = match iced::advanced::graphics::text::font_system().write() {
             Ok(mut system) => {
                 let titles = rows
@@ -431,16 +475,19 @@ impl Panel {
             empty = ?rows.is_empty().then(|| self.words.no_window()),
             rows = ?titles,
             minimized = rows.iter().filter(|r| r.minimized).count(),
+            screen = ?screen,
             "the desktop's list shows it"
         );
         // Another desktop's list starts at its top.
         let another = state
             .shown
             .as_ref()
-            .is_none_or(|s| s.bar != bar || s.index != index);
+            .is_none_or(|s| s.bar != bar || s.row != row || s.index != index);
         state.shown = Some(Shown {
             bar,
+            row,
             index,
+            screen,
             rows,
             titles,
             title,
@@ -560,14 +607,25 @@ mod tests {
     fn its_height_follows_its_rows() {
         // The mockup's: 10 + 26 + 4 inside the rim, 12 under; 32 px rows
         // 2 px apart.
-        assert_eq!(height_of(1), 1 + 10 + 26 + 4 + 32 + 12 + 1);
-        assert_eq!(height_of(3), 1 + 10 + 26 + 4 + 3 * 32 + 2 * 2 + 12 + 1);
+        assert_eq!(height_of(1, CONTENT_TOP), 1 + 10 + 26 + 4 + 32 + 12 + 1);
+        assert_eq!(
+            height_of(3, CONTENT_TOP),
+            1 + 10 + 26 + 4 + 3 * 32 + 2 * 2 + 12 + 1
+        );
+        // Another screen's: its line under the title, 18 px.
+        assert_eq!(
+            height_of(1, content_top(true)),
+            height_of(1, CONTENT_TOP) + 18
+        );
         // Empty: its line, and the rows' empty place under it.
-        assert_eq!(height_of(0), 80);
+        assert_eq!(height_of(0, CONTENT_TOP), 80);
         assert_eq!(TITLE_ROOM, 189.0);
         // Past 8 rows, 8 show and the rest scrolls.
-        assert_eq!(height_of(12), height_of(8));
-        assert!(!list_of(8).scrolls());
-        assert_eq!(list_of(12).most_scroll(), 4.0 * (ROW + ROW_GAP));
+        assert_eq!(height_of(12, CONTENT_TOP), height_of(8, CONTENT_TOP));
+        assert!(!list_of(8, CONTENT_TOP).scrolls());
+        assert_eq!(
+            list_of(12, CONTENT_TOP).most_scroll(),
+            4.0 * (ROW + ROW_GAP)
+        );
     }
 }

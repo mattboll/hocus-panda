@@ -424,6 +424,53 @@ impl Words {
         }
     }
 
+    /// A screen as the Settings' Écrans page names it (6.9): "Écran du
+    /// portable", "Écran externe 34 pouces", "Écran 2".
+    pub fn screen(self, built_in: bool, inches: u32, number: u32) -> String {
+        match (built_in, inches, self.fr()) {
+            (true, _, true) => "Écran du portable".to_owned(),
+            (true, _, false) => "Laptop screen".to_owned(),
+            (false, 0, true) => format!("Écran {number}"),
+            (false, 0, false) => format!("Screen {number}"),
+            (false, i, true) => format!("Écran externe {i} pouces"),
+            (false, i, false) => format!("{i}-inch external screen"),
+        }
+    }
+
+    /// Where another screen's desktop is, under its list's title (8.4):
+    /// "sur l'écran externe 34 pouces" / "on the 34-inch external screen".
+    pub fn on_screen(self, built_in: bool, inches: u32, number: u32) -> String {
+        let name = self.screen(built_in, inches, number);
+        let lower = |s: &str| {
+            let mut chars = s.chars();
+            chars.next().map_or_else(String::new, |c| {
+                c.to_lowercase().chain(chars).collect::<String>()
+            })
+        };
+        match (built_in, inches, self.fr()) {
+            (_, _, true) => format!("sur l’{}", lower(&name)),
+            (false, 0, false) => format!("on {}", lower(&name)),
+            (_, _, false) => format!("on the {}", lower(&name)),
+        }
+    }
+
+    /// Another screen's desktop's tile for screen readers (8.4): "Écran
+    /// externe 34 pouces, Bureau 2, 1 fenêtre".
+    pub fn screen_desktop(
+        self,
+        screen: (bool, u32, u32),
+        number: usize,
+        name: Option<&str>,
+        windows: usize,
+    ) -> String {
+        let (built_in, inches, n) = screen;
+        format!(
+            "{}, {}",
+            self.screen(built_in, inches, n),
+            self.desktop(number, name, windows)
+        )
+    }
+
     /// A desktop's list's title (3.9b): its name (6.14), else "Bureau N".
     pub fn desktop_title(self, number: usize, name: Option<&str>) -> String {
         match name {
@@ -623,6 +670,26 @@ mod tests {
             profile,
             ..Snapshot::default()
         }
+    }
+
+    #[test]
+    fn another_screens_desktop_says_its_screen_as_the_settings_name_it() {
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        assert_eq!(fr.on_screen(true, 14, 1), "sur l’écran du portable");
+        assert_eq!(fr.on_screen(false, 34, 2), "sur l’écran externe 34 pouces");
+        assert_eq!(fr.on_screen(false, 0, 2), "sur l’écran 2");
+        assert_eq!(en.on_screen(true, 14, 1), "on the laptop screen");
+        assert_eq!(en.on_screen(false, 34, 2), "on the 34-inch external screen");
+        assert_eq!(en.on_screen(false, 0, 3), "on screen 3");
+        assert_eq!(
+            fr.screen_desktop((false, 34, 2), 2, None, 1),
+            "Écran externe 34 pouces, Bureau 2, 1 fenêtre"
+        );
+        assert_eq!(
+            en.screen_desktop((false, 34, 2), 2, None, 1),
+            "34-inch external screen, Desktop 2, 1 window"
+        );
     }
 
     #[test]

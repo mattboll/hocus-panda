@@ -134,6 +134,31 @@ open on), agents' badges on windows (slice 3).
   `Alt+Super`), `"alt"` or `"none"` (the frame only). Both followed as the
   file changes.
 
+### Onto a desktop's tile in the bar
+
+Approved 2026-11-06 (8.5 B, issue #490): the mouse's way to another
+desktop or screen, besides the keys (§12).
+
+- While a window is moved by the pointer (its header, `Alt`+drag, the
+  grip) and the pointer comes over a desktop's tile in a bar (bar.md
+  §4.4, any screen's row), the bar comes in front at once (no 300 ms;
+  #519 otherwise unchanged) and stays in front until the move ends.
+- Over a tile: the tile lights (`rgba(108,194,135,0.28)`, a 2 px
+  `#7EE0A0` ring); the window shrinks around the grab point to 30 % of
+  its size in 120 ms, following the pointer, without wobbling; the snap
+  zones and the magnet do nothing there (the tiles win over the right
+  edge's zone). Leaving the tiles gives its size back in 120 ms.
+- Let go on a tile: the window goes to that desktop of that tile's
+  screen, at the place and size (and in the state, snapped or floating)
+  it had before the drag, not where it was let go, leaving toward that
+  desktop's side as `Super+Shift+N` sends it; on another screen, at the
+  same share of its work area, as `Super+Alt+←/→` carries it. The
+  screens keep the desktops they show. Let go on the tile of the desktop
+  it is on, it goes back where the drag began.
+- `Esc` during a drag cancels it: the window goes back where the drag
+  began.
+- Minimised and fullscreen windows are not moved, as before.
+
 ### Magnetic edges
 
 While a window moves, each of its edges **sticks** to a nearby edge when
@@ -445,13 +470,18 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 ## 12. Virtual desktops
 
 - **Per screen**: each output has its own desktops and switches alone
-  (first build's decision, kept). 4 desktops by default (1 to 9).
+  (first build's decision, kept; confirmed for 8.4, issue #420: a window
+  kept on one screen all day stays put while another switches). 4
+  desktops by default (1 to 9), `[desktops] count` and `names` the same on
+  every screen.
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers; `[touchpad] swipe-desktops
   = false`, the Settings' "Trois doigts de côté", leaves it to
   applications, settings.md), and the bar's tiles (a
   click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
-  the pointer, the tiles on their bar's screen.
+  the pointer, the tiles on their row's screen (the bar on the primary
+  screen shows a row per screen, bar.md §4.4). The dots show on the
+  screen that switches only.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -487,6 +517,21 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
   on that side of its screen; past the first or the last, it stays (no
   wrap), and the dots show, as with `Super+Ctrl+←/→`. A window being
   dragged while desktops switch goes along.
+- **Another screen** (8.4, issue #420): `Super+Alt+←/→`
+  (`move-to-screen-left`, `move-to-screen-right`, §13) sends the focused
+  window to the screen on that side, by the screens' positions (of those
+  whose middle is on that side, the one level with it, else the nearest;
+  none: nothing happens), onto the desktop that screen shows, at the same
+  share of its work area as a screen unplugged carries a floating window
+  (below), a snapped or maximised one taking the same zone there, a
+  fullscreen one covering it. It keeps the focus; the pointer does not
+  move. It travels there in 320 ms along the strip's curve (at once with
+  reduced motion). Nested, `Super` already is `Alt+Super`, which would
+  make these `Super+←/→`: they have no default there, and one set in the
+  file is taken. `Super+Alt` held shows the laser (ink.md); an arrow
+  pressed with them is the shortcut's. Dragging a window onto another
+  screen (its header, `Alt`+drag, the grip) puts it on the desktop that
+  screen shows.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
   sets how many, from 1 to 9, on every screen, followed as the file
   changes (6.14): more are added after the last, empty; fewer take out the
@@ -752,8 +797,9 @@ s8a mockup, questions 12 to 15):
   area) when dragged onto a screen where it fits, unless the user resized
   it meanwhile. It is never made smaller than its client's least size.
   Dragged within one screen, nothing changes; a window dropped in a snap
-  zone takes the zone. A screen unplugged carries its windows as above
-  (no larger than the new work area).
+  zone takes the zone. A screen unplugged, or the keys' move to the
+  screen beside (8.4), carries a window at the same share of the new work
+  area, no larger than it, as above.
 - **The pointer** (question 14, B): moving past an edge of its screen
   where no screen touches, toward a screen that lies beyond that edge's
   line (screens of different heights side by side), it goes to the
@@ -830,6 +876,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
+| `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
 | `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |

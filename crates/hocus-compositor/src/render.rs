@@ -223,6 +223,18 @@ impl State {
                 alpha = p.clamp(0.0, 1.0) as f32;
             }
         }
+        // Over a desktop's tile in the bar (8.5 B): small around the grab
+        // point, under the pointer.
+        if self.moving == Some(id) {
+            let k = self.tile_drop.scale(now);
+            if k < 1.0
+                && let Some(pointer) = self.seat.get_pointer()
+            {
+                let at = pointer.current_location();
+                visual.loc = at + (visual.loc - at).upscale(k);
+                visual.size = visual.size.upscale(k);
+            }
+        }
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
         // A client drawing its own shadow (a floating GTK window) keeps it:

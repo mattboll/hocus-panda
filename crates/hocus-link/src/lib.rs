@@ -480,6 +480,23 @@ pub enum ToShell {
     /// changes, at most once a frame. Written `recent`, the screen's name,
     /// then the ids: `recent eDP-1 12 3 13`.
     Recent(Recent),
+    /// The screens whose desktops bar `bar` shows, one row of tiles each
+    /// (8.4): its own first, then the others left to right, then top to
+    /// bottom. Sent as the shell connects and when they change; each one's
+    /// desktops come on its own `desktops` line. Written `desk-screens`,
+    /// the bar's screen, then each screen as [`DeskScreen`] says.
+    DeskScreens {
+        bar: String,
+        screens: Vec<DeskScreen>,
+    },
+    /// A window being moved is over desktop `desktop` (from 0) of screen
+    /// `output` in bar `bar`'s tiles, or over none of them any more (8.5
+    /// B): that tile lights, as where the window would go. Written
+    /// `drop-over BAR OUTPUT N`, or `drop-over BAR -`.
+    DropOver {
+        bar: String,
+        over: Option<(String, u8)>,
+    },
     /// Whether the bar shows its screen's windows (`[panel] windows`,
     /// #604): sent as the shell connects and when the configuration
     /// changes it. Written `bar-windows shown` or `bar-windows hidden`.
@@ -1242,6 +1259,65 @@ impl Look {
     }
 }
 
+/// A screen whose desktops a bar shows (8.4): its name, its logical
+/// size (its tiles take its shape), and what names it as the Settings'
+/// Écrans page does: whether it is the built-in panel, its diagonal in
+/// inches (0: not known) and its number there. Written with commas:
+/// `DP-1,3440,1440,0,34,2`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeskScreen {
+    pub output: String,
+    pub width: u32,
+    pub height: u32,
+    pub built_in: bool,
+    pub inches: u32,
+    pub number: u32,
+}
+
+impl DeskScreen {
+    fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{},{},{},{},{},{}",
+            self.output,
+            self.width,
+            self.height,
+            u8::from(self.built_in),
+            self.inches,
+            self.number
+        )
+    }
+
+    fn read(word: &str) -> Result<Self, BadLine> {
+        let fields: Vec<&str> = word.split(',').collect();
+        let [output, width, height, built_in, inches, number] = fields[..] else {
+            return Err(BadLine(format!("a screen {word:?}")));
+        };
+        let n = |v: &str| {
+            v.parse::<u32>()
+                .map_err(|e| BadLine(format!("a screen's {v:?}: {e}")))
+        };
+        Ok(Self {
+            output: output.to_owned(),
+            width: n(width)?,
+            height: n(height)?,
+            built_in: flag(Some(built_in), "1", "0")?,
+            inches: n(inches)?,
+            number: n(number)?,
+        })
+    }
+}
+
+/// A desktop's tile in a bar (8.5 B): its screen, its desktop (from 0),
+/// and where it is on the bar's desktops' surface, logical pixels from its
+/// top-left corner. Written with commas: `DP-1,2,11,51,39,20`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeskTile {
+    pub output: String,
+    pub desktop: u8,
+    pub rect: [i32; 4],
+}
+
 /// A screen's windows' titles, by their ids, in [`Desktops::windows`]'
 /// order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1586,6 +1662,11 @@ pub enum ToCompositor {
     /// the compositor goes to its desktop, sliding, and focuses it.
     /// Written `bring ID`.
     Bring(u64),
+    /// Where bar `bar`'s desktops' tiles are on its desktops' surface
+    /// (8.5 B): a window moved over one goes to that desktop when it is
+    /// let go there. Sent when they move or change. Written `desk-tiles
+    /// BAR`, then each [`DeskTile`].
+    DeskTiles { bar: String, tiles: Vec<DeskTile> },
     /// The user asks window `id` to close (its ✕ in the bar, #604): the
     /// compositor asks its application, as `Super+Q` does; the
     /// application decides. Written `close ID`.
@@ -1798,6 +1879,19 @@ impl fmt::Display for ToShell {
                 }
                 Ok(())
             }
+            Self::DeskScreens { bar, screens } => {
+                write!(f, "desk-screens {bar}")?;
+                for screen in screens {
+                    f.write_str(" ")?;
+                    screen.write(f)?;
+                }
+                Ok(())
+            }
+            Self::DropOver { bar, over: None } => write!(f, "drop-over {bar} -"),
+            Self::DropOver {
+                bar,
+                over: Some((output, desktop)),
+            } => write!(f, "drop-over {bar} {output} {desktop}"),
             Self::BarSide(side) => write!(f, "bar-side {}", side.name()),
             Self::DesktopNames(names) => {
                 write!(f, "desktop-names")?;
@@ -2412,6 +2506,23 @@ impl FromStr for ToShell {
             })),
             Some("bar-windows") => Ok(Self::BarWindows(flag(words.next(), "shown", "hidden")?)),
             Some("bar-side") => Ok(Self::BarSide(word(&mut words, "side")?.parse()?)),
+            Some("drop-over") => {
+                let bar = word(&mut words, "bar")?.to_owned();
+                let over = match word(&mut words, "screen")? {
+                    "-" => None,
+                    output => Some((
+                        output.to_owned(),
+                        word(&mut words, "desktop")?
+                            .parse()
+                            .map_err(|e| BadLine(format!("desktop: {e}")))?,
+                    )),
+                };
+                Ok(Self::DropOver { bar, over })
+            }
+            Some("desk-screens") => Ok(Self::DeskScreens {
+                bar: word(&mut words, "bar")?.to_owned(),
+                screens: words.map(DeskScreen::read).collect::<Result<_, _>>()?,
+            }),
             Some("bar-groups") => {
                 let order: Vec<BarGroup> = word(&mut words, "order")?
                     .split(',')
@@ -2517,6 +2628,14 @@ impl fmt::Display for ToCompositor {
                 DesktopTo::Previous => write!(f, "desktop {output} previous"),
             },
             Self::Bring(id) => write!(f, "bring {id}"),
+            Self::DeskTiles { bar, tiles } => {
+                write!(f, "desk-tiles {bar}")?;
+                for t in tiles {
+                    let [x, y, width, height] = t.rect;
+                    write!(f, " {},{},{x},{y},{width},{height}", t.output, t.desktop)?;
+                }
+                Ok(())
+            }
             Self::Close(id) => write!(f, "close {id}"),
             Self::WindowAction { id, action } => write!(f, "window-action {id} {}", action.name()),
             Self::SendTo {
@@ -2708,6 +2827,28 @@ impl FromStr for ToCompositor {
                     app => app.to_owned(),
                 },
             }),
+            Some("desk-tiles") => Ok(Self::DeskTiles {
+                bar: word(&mut words, "bar")?.to_owned(),
+                tiles: words
+                    .map(|w| {
+                        let fields: Vec<&str> = w.split(',').collect();
+                        let [output, desktop, x, y, width, height] = fields[..] else {
+                            return Err(BadLine(format!("a tile {w:?}")));
+                        };
+                        let n = |v: &str| {
+                            v.parse::<i32>()
+                                .map_err(|e| BadLine(format!("a tile's {v:?}: {e}")))
+                        };
+                        Ok(DeskTile {
+                            output: output.to_owned(),
+                            desktop: desktop
+                                .parse()
+                                .map_err(|e| BadLine(format!("a tile's desktop: {e}")))?,
+                            rect: [n(x)?, n(y)?, n(width)?, n(height)?],
+                        })
+                    })
+                    .collect::<Result<_, _>>()?,
+            }),
             Some("bring") => Ok(Self::Bring(
                 word(&mut words, "window")?
                     .parse()
@@ -2851,6 +2992,63 @@ mod tests {
                 output: "eDP-1".into(),
             },
         ]
+    }
+
+    #[test]
+    fn the_screens_whose_desktops_a_bar_shows_read_back_as_written() {
+        let screens = ToShell::DeskScreens {
+            bar: "eDP-1".into(),
+            screens: vec![
+                DeskScreen {
+                    output: "eDP-1".into(),
+                    width: 1707,
+                    height: 1067,
+                    built_in: true,
+                    inches: 14,
+                    number: 1,
+                },
+                DeskScreen {
+                    output: "DP-1".into(),
+                    width: 3440,
+                    height: 1440,
+                    built_in: false,
+                    inches: 0,
+                    number: 2,
+                },
+            ],
+        };
+        assert_eq!(
+            screens.to_string(),
+            "desk-screens eDP-1 eDP-1,1707,1067,1,14,1 DP-1,3440,1440,0,0,2"
+        );
+        assert_eq!(screens.to_string().parse::<ToShell>(), Ok(screens));
+        assert!("desk-screens eDP-1 eDP-1,1,2".parse::<ToShell>().is_err());
+    }
+
+    #[test]
+    fn the_tiles_and_a_drop_over_them_read_back_as_written() {
+        let tiles = ToCompositor::DeskTiles {
+            bar: "eDP-1".into(),
+            tiles: vec![DeskTile {
+                output: "DP-1".into(),
+                desktop: 2,
+                rect: [11, 51, 39, 20],
+            }],
+        };
+        assert_eq!(tiles.to_string(), "desk-tiles eDP-1 DP-1,2,11,51,39,20");
+        assert_eq!(tiles.to_string().parse::<ToCompositor>(), Ok(tiles));
+        for line in [
+            ToShell::DropOver {
+                bar: "eDP-1".into(),
+                over: Some(("DP-1".into(), 3)),
+            },
+            ToShell::DropOver {
+                bar: "eDP-1".into(),
+                over: None,
+            },
+        ] {
+            assert_eq!(line.to_string().parse::<ToShell>(), Ok(line));
+        }
     }
 
     #[test]

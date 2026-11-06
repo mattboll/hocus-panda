@@ -235,6 +235,12 @@
 # screen, going there with it; it stays past the first or the last.
 # take-to-desktop-left = "Super+Ctrl+Shift+Left"
 # take-to-desktop-right = "Super+Ctrl+Shift+Right"
+# Sends the focused window to the screen on the left or the right, onto
+# the desktop it shows, at the same share of its work area. Nested (in a
+# window of another session), these have no default: Super is Alt+Super
+# there already.
+# move-to-screen-left = "Super+Alt+Left"
+# move-to-screen-right = "Super+Alt+Right"
 # The bar's other form, on the screen under the pointer.
 # toggle-bar = "Super+B"
 # The launcher, full screen on the screen under the pointer; again, it

@@ -167,6 +167,8 @@ pub struct MoveGrab {
     /// The screen it was on when the drag began: dropped on another, it
     /// fits that one (§12, #419).
     from_output: Option<smithay::output::Output>,
+    /// Where it was when the drag began: its screen, its state, its place.
+    start: Option<crate::desktops::Placed>,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -218,10 +220,28 @@ impl PointerGrab<State> for MoveGrab {
         let location = (self.initial.to_f64() + delta).to_i32_round();
         let size = window.geometry().size;
         let at = Rect::new(location.x, location.y, size.w, size.h);
-        let pull = state.move_pull(self.id, at, pointer);
+        // Over a desktop's tile in the bar (8.5 B): the tiles win over the
+        // snap zones and the magnet.
+        let over_tile = {
+            let over = state.tile_under(pointer);
+            state.drag_over_tile(over)
+        };
+        let pull = if over_tile {
+            Pull::default()
+        } else {
+            state.move_pull(self.id, at, pointer)
+        };
         let location = location + Point::from(pull.offset());
         let before = state.space.element_location(&window);
         state.place_in_space(window.clone(), (location.x, location.y));
+        // Onto another screen: on the desktop it shows (windows.md §12), so
+        // that it stays in sight on the way.
+        if let Some(on) = state.output_of(self.id) {
+            let shown = state.strip(&on).current();
+            if state.model.desktop(self.id) != shown {
+                state.model.set_desktop(self.id, shown);
+            }
+        }
         if let Some(x11) = window.x11_surface() {
             let mut geometry = x11.geometry();
             geometry.loc = location;
@@ -234,7 +254,7 @@ impl PointerGrab<State> for MoveGrab {
             let moved = location - before;
             let moved = magnet::unpulled((moved.x, moved.y), self.pull, pull);
             let now = state.now();
-            let wobbles = !self.rigid && state.wobbles();
+            let wobbles = !self.rigid && !over_tile && state.wobbles();
             if wobbles && state.wobble.as_ref().is_none_or(|(w, _)| *w != self.id) {
                 let held = self.from - self.initial.to_f64();
                 state.wobble = Some((
@@ -259,6 +279,7 @@ impl PointerGrab<State> for MoveGrab {
             .output_under(pointer)
             .next()
             .cloned()
+            .filter(|_| !over_tile)
             .and_then(|o| Some((state.work_area(&o)?, o)))
             .and_then(|(area, o)| Some((state.snap_zone(area, pointer)?, area, o)))
             .map(|(zone, area, o)| (zone, zone.rect(area), o));
@@ -287,6 +308,7 @@ impl PointerGrab<State> for MoveGrab {
     fn unset(&mut self, state: &mut State) {
         state.moving = None;
         state.frame_cursor = None;
+        state.bar_front_dropped();
         let now = state.now();
         let zone = state
             .preview
@@ -298,6 +320,22 @@ impl PointerGrab<State> for MoveGrab {
             && *w == self.id
         {
             jelly.release();
+        }
+        // `Esc`: back where the drag began.
+        if std::mem::take(&mut state.tile_drop.cancelled) {
+            state.drag_over_tile(None);
+            state.drop_on_tile(self.id, None);
+            if let Some(start) = &self.start {
+                tracing::debug!(window = self.id.0, "a move cancelled");
+                state.put_back(self.id, start);
+            }
+            state.redraw = true;
+            return;
+        }
+        // Let go on a desktop's tile (8.5 B).
+        if state.drop_on_tile(self.id, self.start.as_ref()) {
+            state.redraw = true;
+            return;
         }
         if let Some((zone, output)) = zone {
             // On the screen of the preview, under the pointer, wherever
@@ -644,6 +682,7 @@ impl State {
             floating: (hold == Hold::Free).then_some(rect),
             pull: Pull::default(),
             from_output: self.output_of(id),
+            start: self.placed_now(id),
         };
         self.moving = Some(id);
         self.frame_cursor = Some(CursorIcon::Grabbing);

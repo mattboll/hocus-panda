@@ -135,7 +135,7 @@ pub fn set_states(states: hocus_link::WindowStates) {
     let open = popover::with(|c| {
         matches!(
             c.open_on(),
-            Some((_, Item::Windows | Item::WindowsMore | Item::Desktop(_)))
+            Some((_, Item::Windows | Item::WindowsMore | Item::Desktop { .. }))
         )
     });
     if open {
