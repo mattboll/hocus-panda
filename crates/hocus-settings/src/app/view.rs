@@ -98,6 +98,10 @@ impl App {
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
         }
+        // The time zone picker (6.11).
+        if let Some(picker) = self.time_picker() {
+            layers.push(picker);
+        }
         stack(layers)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -817,6 +821,9 @@ impl App {
         }
         if id == SectionId::Bar {
             return self.bar_page(page);
+        }
+        if id == SectionId::DateTime {
+            return self.time_page(page);
         }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
@@ -1733,6 +1740,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
+        "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
