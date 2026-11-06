@@ -258,6 +258,7 @@ impl State {
             system::FromSystem::Handles(fd) => self.power_handles(fd),
             system::FromSystem::Level(level) => self.power_level(level),
             system::FromSystem::Profile(profile) => self.power_profile(profile),
+            system::FromSystem::Lid(closed) => self.lid_read(closed),
         }
     }
 
@@ -633,6 +634,8 @@ impl State {
                 self.ask_inhibitor();
             }
             self.lock_woke();
+            // The lid may have opened while asleep, unseen.
+            self.lid_again("the machine woke up");
             self.away.woke = true;
             self.redraw = true;
             // The user woke it: the screens on, the countdowns from now.

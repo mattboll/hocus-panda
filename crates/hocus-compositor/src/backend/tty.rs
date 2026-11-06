@@ -328,6 +328,8 @@ fn on_session(app: &mut App, event: SessionEvent) {
             if let Err(err) = tty.gpu.outputs.activate(false) {
                 tracing::warn!(%err, "could not take the screens back");
             }
+            // The lid may have moved meanwhile, unseen.
+            state.session_back();
             // What the screens show was another terminal's: draw it all.
             tty.relight();
             // Screens may have come or gone meanwhile.

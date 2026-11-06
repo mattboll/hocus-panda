@@ -995,6 +995,12 @@ impl Headless {
         self.app.state.lid(closed);
     }
 
+    /// The session back from another terminal, as the tty backend says
+    /// it (what it does beyond the screens).
+    pub fn session_back(&mut self) {
+        self.app.state.session_back();
+    }
+
     /// Output `name` is a laptop's own screen: the lid closes over it.
     pub fn set_internal(&mut self, name: &str) {
         if let Some(output) = self.app.state.space.outputs().find(|o| o.name() == name) {
