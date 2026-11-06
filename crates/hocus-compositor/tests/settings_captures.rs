@@ -696,24 +696,18 @@ fn searching_obturateur_and_effacer_finds_their_rows() -> anyhow::Result<()> {
         return Ok(());
     };
     bed.open()?;
+    // The keys reach the field one by one: what it finds once it holds
+    // the whole word.
     bed.search_for("obturateur")?;
-    let shown = bed.shows(|s| s["results"].as_array().is_some_and(|r| !r.is_empty()))?;
-    assert!(
-        shown["results"].to_string().contains("Son de l’obturateur"),
-        "{}",
-        shown["results"]
-    );
+    bed.shows(|s| {
+        s["query"] == "obturateur" && s["results"].to_string().contains("Son de l’obturateur")
+    })?;
     chord(&mut bed.hp, &[KEY_ESC]);
     bed.shows(|s| s["query"] == "")?;
     bed.search_for("effacer")?;
-    let shown = bed.shows(|s| s["results"].as_array().is_some_and(|r| !r.is_empty()))?;
-    assert!(
-        shown["results"]
-            .to_string()
-            .contains("Effacer l’historique"),
-        "{}",
-        shown["results"]
-    );
+    bed.shows(|s| {
+        s["query"] == "effacer" && s["results"].to_string().contains("Effacer l’historique")
+    })?;
     Ok(())
 }
 
