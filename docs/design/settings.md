@@ -89,41 +89,97 @@ Martian Mono; written 450 ms after it stops moving), the segmented
 control. A control that does not apply now (the slider while its switch is
 off; everything while the file does not read) is drawn at 45 % and inert.
 
-## Énergie
+## Énergie (6.10)
 
-The mockup's page, its rows and choices. The keys:
+Built 2026-11-06 (issue #410), from the approved spec (the issue's last
+comment) and its mockup's variant A: 7.2's order on the page, with a
+timeline; the power mode here too; one "lid closed" choice for both
+sources. `src/power.rs` (the rows, the timeline's steps, the battery's
+words), `src/power_bus.rs` (the system bus), `src/app/power_page.rs` (the
+page). The compositor acts on every key, live (docs/design/idle.md).
+
+**The page**, under its title and its line ("Quand l'écran s'assombrit,
+se verrouille et s'éteint, quand l'ordinateur se met en veille ; le
+couvercle, le bouton d'alimentation et l'économie d'énergie."):
+
+1. **The battery's card**, read only: the battery drawn to its level
+   (green, amber at 20 % or less, peach at 10 % or less; a bolt on AC),
+   "82 %", 3.7's line ("Sur batterie · 3 h 40 restantes", "Branché · en
+   charge, plein dans 25 min", "Branché, plein", "Branché, ne charge pas"),
+   and on the right "État de la batterie : 91 % de sa capacité d'origine"
+   when UPower knows it. Without a battery: "Sur secteur", "Cet ordinateur
+   n'a pas de batterie : un seul jeu de délais, pas de couvercle.", a bolt.
+2. **ÉCRAN ET VEILLE**, the segmented control on its line (with a battery
+   only; it starts on the source UPower says, else the kernel's supplies):
+   "Assombrir l'écran après", "Éteindre l'écran" (its line "Après
+   l'assombrissement, …" with locking off; inert while the dim is
+   "Jamais"), "Mettre en veille après", then **the timeline** in the same
+   card: a dot a step with its time above (Martian Mono) and its name
+   under ("dernière activité", "assombri", "verrouillé", "écran éteint",
+   "en veille" or "pas de veille"), in order, not to scale (12 % at least
+   apart; labels kept clear of each other), a step that is off not drawn,
+   a sleep sooner than the dim first. It follows the source and every
+   change, without motion; it is not in the `Tab` order.
+3. **VERROUILLAGE**, "Super+L verrouille à tout moment" on its line (the
+   `lock` shortcut as bound): "Verrouiller après l'assombrissement",
+   "Verrouiller avant la mise en veille".
+4. **COUVERCLE ET BOUTON** (6.1's rows), "BOUTON" and the button's row
+   alone without a lid (UPower's `LidIsPresent`; without UPower, a battery
+   means a lid). Without logind on the bus, the lid's and the button's
+   lines say "Le système décide (logind indisponible)." in amber.
+5. **ÉCONOMIE D'ÉNERGIE**: "Mode d'énergie" ("Nouveau"), its line "Le même
+   que dans le panneau de la batterie.", a segmented control "Économie |
+   Équilibré | Performance" (`←`/`→`); a mode the machine lacks drawn faint
+   and inert with 3.7's line; performance held back: its reason. Without
+   power-profiles-daemon: "Les modes demandent le service
+   power-profiles-daemon, absent de cet ordinateur." in amber, the control
+   inert, and the automatic saver and its slider inert, its line "Elle
+   passe par les modes : sans eux, rien à allumer.". Without a battery,
+   the mode alone.
+6. **PLUS TARD**: "Limiter la charge à 80 %", inert, its amber chip.
+
+The keys:
 
 | Row | On AC | On battery |
 |---|---|---|
-| Éteindre l'écran après | `[idle] delay` (seconds, or `"off"`; 7.3) | `[power.battery] screen-off` |
-| Verrouiller la session | `[power.ac] lock-after` | `[power.battery] lock-after` |
-| Mettre en veille après | `[power.ac] suspend-after` | `[power.battery] suspend-after` |
+| Assombrir l'écran après | `[idle] delay` (seconds, or `"off"`) | `[power.battery] idle` |
+| Éteindre l'écran | `[power.ac] screen-off-after` (`"30s"`) | `[power.battery] screen-off-after` (`"10s"`) |
+| Mettre en veille après | `[power.ac] suspend-after` (`"never"`) | `[power.battery] suspend-after` (`"15m"`) |
+| Verrouiller après l'assombrissement | `[power] lock-on-idle` | |
+| Verrouiller avant la mise en veille | `[power] lock-before-sleep` | |
 | Couvercle fermé | `[power] lid` (`suspend`, `lock`, `screen-off`, `nothing`) | |
 | Rester allumé avec un écran branché | `[power] lid-ignored-when-docked` | |
 | Bouton d'alimentation | `[power] power-button` (`ask`, `suspend`, `power-off`, `nothing`) | |
 | Économie d'énergie automatique | `[power] auto-saver` | |
 | Sous ce niveau de batterie | `[power] auto-saver-below` (5 to 50) | |
+| Mode d'énergie | power-profiles-daemon's `ActiveProfile`, not the file | |
 
-- **Coordination with 7.3 and 7.2** (docs/design/idle.md): the screen's
-  delay is the first countdown without input, which is what `[idle] delay`
-  is, after which the curtain dims the screens, then the session locks.
-  `[idle]` takes no other key (the compositor refuses unknown keys there),
-  so the AC side writes `[idle] delay` and the battery side
-  `[power.battery] screen-off`; the compositor takes the one of the power
-  source UPower says (7.2). "Verrouiller la session" is `[power.*]
-  lock-after`. 6.10 (#410) replaces these rows: the compositor now reads
-  `[power.battery] idle`, `[power.*] screen-off-after`, `suspend-after`,
-  `[power] lock-on-idle`, `lock-before-sleep` and the rest of `[power]`,
-  live, and still reads this page's `screen-off` (as `idle`) and
-  `lock-after` (as `lock-on-idle`) for the files it wrote
-  (docs/design/idle.md, "The Settings' keys").
-- The delays of `[power.*]` are written `"0s"`, `"5m"`, `"1h"`, `"never"`.
-- The segmented control starts on the power source in use (the kernel's
-  supplies, `/sys/class/power_supply`; `HOCUS_POWER_SUPPLY_DIR` in tests),
-  on AC without a battery.
-- What applies without a key is shown as the value: the screen's delay
-  is the compositor's, 5 min on AC and 3 min on battery (7.2; the menu
-  has a "3 min"); the others are the mockup's.
+- **6.1's files**: where `[power.battery] idle` is absent the page shows
+  `[power.battery] screen-off`; where `[power] lock-on-idle` is absent,
+  `[power.*] lock-after` (off only when every source it names says
+  `"never"`), as the compositor reads them. The page writes only the new
+  keys; the old ones stay as they are.
+- **The system bus** (`power_bus`), on a thread of its own: UPower's root
+  (`OnBattery`, `LidIsPresent`), its display device (`IsPresent`,
+  `Percentage`, `State`, `TimeToEmpty`, `TimeToFull`), the battery
+  device's `Capacity`; power-profiles-daemon's `ActiveProfile`, `Profiles`,
+  `PerformanceDegraded`; whether `org.freedesktop.login1` has an owner.
+  Read as it starts and on a `PropertiesChanged` under
+  `/org/freedesktop/UPower` or an owner's change; only what changed goes
+  to the window. Without a system bus nothing is known: no amber lines.
+- **The power mode** chosen: asked of power-profiles-daemon, toasted "Mode
+  d'énergie : Économie" with "Annuler", `Ctrl+Z` and `Ctrl+Shift+Z` as a
+  file's change.
+- Search: the rows' words and the spec's ("rideau", "dpms", "auto-lock",
+  "profil", "santé", "seuil"…), and the battery's health, the power mode
+  and the charge limit as rows outside the file.
+
+Tests: `crates/hocus-compositor/tests/settings_power.rs` (a fake UPower,
+power-profiles-daemon and logind on a private system bus): the page in
+7.2's order and its timeline following the delays and the source; locking
+off and the dim never; the power mode, its toast and `Ctrl+Z`; without
+power-profiles-daemon; without a battery; without logind; a file 6.1
+wrote; at rest, nothing drawn.
 
 ## Son (6.5)
 
@@ -1165,7 +1221,7 @@ file.
 
 ## Choices made here (to confirm on the machine)
 
-- The battery's screen delay in `[power.battery] screen-off` (above).
+- The battery's dim in `[power.battery] idle` (6.10, above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet (AccountsService, 6.11).
 - The home's cards say "À venir" for Écrans, Réseau and Bluetooth until
@@ -1194,13 +1250,12 @@ file.
 
 ## Not built here
 
-- The Énergie page as 6.10 draws it (the compositor acts on `[power]`
-  already, docs/design/idle.md). The compositor follows the file live for `[pointer]` and `[touchpad]`
+- The compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[idle]` and `[power]` (6.10), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.7, 6.10, 6.11, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.7, 6.11, 6.13 to 6.17, Day.1).
 - Réseau's third part (#406): the VPNs, the popover's links, the bar's
   airplane mode. The 802.1X sheet's anonymous identity and advanced
   options (the spec's "later").

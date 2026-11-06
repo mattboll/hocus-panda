@@ -12,13 +12,13 @@
 
 mod appearance_page;
 mod bar_page;
-mod power_page;
 mod desktops_page;
 mod desktops_trial;
 mod keyboard_page;
 mod mouse;
 mod network;
 mod places;
+mod power_page;
 mod screens;
 mod sound;
 mod style;

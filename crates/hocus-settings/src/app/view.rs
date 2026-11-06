@@ -940,7 +940,11 @@ impl App {
         } else if let Some(line) = self.bar_line(setting.id) {
             words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
         } else if let Some((line, warns)) = self.power_line(setting.id) {
-            let colour = if warns { PEACH.get() } else { fade(DIM.get(), ink) };
+            let colour = if warns {
+                PEACH.get()
+            } else {
+                fade(DIM.get(), ink)
+            };
             words = words.push(t(line, 12.5, colour));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).

@@ -394,7 +394,13 @@ pub fn outside() -> &'static [Outside] {
             name: w("Mode d’énergie", "Power mode"),
             keywords: (
                 &["profil", "performance", "économie", "équilibré"],
-                &["power mode", "profile", "balanced", "power saver", "performance"],
+                &[
+                    "power mode",
+                    "profile",
+                    "balanced",
+                    "power saver",
+                    "performance",
+                ],
             ),
         },
         Outside {
@@ -426,22 +432,24 @@ pub fn mode_name(mode: &str, lang: Lang) -> &'static str {
 /// Why performance is held back (power-profiles-daemon's
 /// `PerformanceDegraded`), as the battery's popover says it (3.7).
 pub fn degraded(reason: &str, lang: Lang) -> Option<&'static str> {
-    Some(match reason {
-        "" => return None,
-        "lap-detected" => w(
-            "Performance réduite\u{a0}: l’ordinateur est sur tes genoux.",
-            "Performance reduced: the computer is on a lap.",
-        ),
-        "high-operating-temperature" => w(
-            "Performance réduite\u{a0}: l’ordinateur est trop chaud.",
-            "Performance reduced: the computer is too hot.",
-        ),
-        _ => w(
-            "Performance réduite par le système.",
-            "Performance reduced by the system.",
-        ),
-    }
-    .get(lang))
+    Some(
+        match reason {
+            "" => return None,
+            "lap-detected" => w(
+                "Performance réduite\u{a0}: l’ordinateur est sur tes genoux.",
+                "Performance reduced: the computer is on a lap.",
+            ),
+            "high-operating-temperature" => w(
+                "Performance réduite\u{a0}: l’ordinateur est trop chaud.",
+                "Performance reduced: the computer is too hot.",
+            ),
+            _ => w(
+                "Performance réduite par le système.",
+                "Performance reduced by the system.",
+            ),
+        }
+        .get(lang),
+    )
 }
 
 /// A time left, to the minute: `35 min`, `3 h 40`, `2 h`.
@@ -659,7 +667,12 @@ mod tests {
         let kinds: Vec<StepKind> = steps.iter().map(|s| s.kind).collect();
         assert_eq!(
             kinds,
-            [StepKind::Start, StepKind::Dim, StepKind::Off, StepKind::NoSleep]
+            [
+                StepKind::Start,
+                StepKind::Dim,
+                StepKind::Off,
+                StepKind::NoSleep
+            ]
         );
         assert_eq!(steps[2].time, "+40 s");
         // A sleep sooner than the dim first; the dim never: not drawn.
@@ -685,7 +698,10 @@ mod tests {
             "Branché · en charge, plein dans 25 min"
         );
         assert_eq!(battery_line(Charge::Full, None, fr), "Branché, plein");
-        assert_eq!(battery_line(Charge::Held, None, fr), "Branché, ne charge pas");
+        assert_eq!(
+            battery_line(Charge::Held, None, fr),
+            "Branché, ne charge pas"
+        );
     }
 
     #[test]

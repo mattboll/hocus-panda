@@ -68,9 +68,8 @@ impl State {
     /// to the window through `to`, as changes only.
     pub fn start(to: &iced::futures::channel::mpsc::UnboundedSender<Message>) -> Self {
         let to = to.clone();
-        let bus = power_bus::start(move |now| {
-            to.unbounded_send(Message::Power(Msg::Heard(now))).is_ok()
-        });
+        let bus =
+            power_bus::start(move |now| to.unbounded_send(Message::Power(Msg::Heard(now))).is_ok());
         Self {
             now: None,
             bus: Some(bus),
@@ -129,6 +128,14 @@ impl App {
     /// power-profiles-daemon's modes; `None` without it.
     fn power_modes(&self) -> Option<&power_bus::Modes> {
         self.power.now.as_ref().and_then(|n| n.modes.as_ref())
+    }
+
+    /// The system bus answered and power-profiles-daemon is not on it.
+    fn power_no_modes(&self) -> bool {
+        self.power
+            .now
+            .as_ref()
+            .is_some_and(|n| n.bus && n.modes.is_none())
     }
 
     fn power_seconds(&self, id: &str) -> Option<u64> {
@@ -310,7 +317,7 @@ impl App {
                 .to_owned(),
                 true,
             )),
-            model::AUTO_SAVER if self.power_modes().is_none() => Some((
+            model::AUTO_SAVER if self.power_no_modes() => Some((
                 w(
                     "Elle passe par les modes : sans eux, rien à allumer.",
                     "It works through the modes: without them, nothing to turn on.",
@@ -328,9 +335,7 @@ impl App {
     pub(super) fn power_inert(&self, setting: &Setting) -> bool {
         match setting.id {
             model::SCREEN_OFF => self.power_seconds(model::IDLE).is_none(),
-            model::AUTO_SAVER | model::SAVER_BELOW => {
-                self.power.now.is_some() && self.power_modes().is_none()
-            }
+            model::AUTO_SAVER | model::SAVER_BELOW => self.power_no_modes(),
             _ => false,
         }
     }
@@ -557,12 +562,20 @@ impl App {
         let controls = self.controls();
         let focused = matches!(self.focus, super::Focus::Control(i) if controls.get(i) == Some(&Control::Power(Stop::Mode)));
         let modes = self.power_modes();
-        let known = self.power.now.is_some();
-        let ink = if modes.is_none() && known { INERT } else { 1.0 };
+        let known = self.power_no_modes();
+        let ink = if known { INERT } else { 1.0 };
         let name = row![
-            t(w("Mode d’énergie", "Power mode").get(lang), 14.0, fade(TEXT.get(), ink))
-                .font(SEMIBOLD),
-            chip(w("Nouveau", "New").get(lang), BLUE.get(), rgba(143, 179, 255, 0.16)),
+            t(
+                w("Mode d’énergie", "Power mode").get(lang),
+                14.0,
+                fade(TEXT.get(), ink)
+            )
+            .font(SEMIBOLD),
+            chip(
+                w("Nouveau", "New").get(lang),
+                BLUE.get(),
+                rgba(143, 179, 255, 0.16)
+            ),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -618,17 +631,18 @@ impl App {
             } else {
                 DIM.get()
             };
-            let mut b = button(t(model::mode_name(mode, lang), 12.5, fade(colour, ink)).font(SEMIBOLD))
-                .height(24)
-                .padding([3, 10])
-                .style(move |_, _| button::Style {
-                    background: active.then_some(Background::Color(crate::theme::ink(rgba(
-                        255, 255, 255, 0.13,
-                    )))),
-                    text_color: TEXT.get(),
-                    border: border(7.0, 0.0, Color::TRANSPARENT),
-                    ..button::Style::default()
-                });
+            let mut b =
+                button(t(model::mode_name(mode, lang), 12.5, fade(colour, ink)).font(SEMIBOLD))
+                    .height(24)
+                    .padding([3, 10])
+                    .style(move |_, _| button::Style {
+                        background: active.then_some(Background::Color(crate::theme::ink(rgba(
+                            255, 255, 255, 0.13,
+                        )))),
+                        text_color: TEXT.get(),
+                        border: border(7.0, 0.0, Color::TRANSPARENT),
+                        ..button::Style::default()
+                    });
             if there && !active && self.writable_mode() {
                 b = b.on_press(Message::Power(Msg::Mode(mode)));
             }
@@ -650,9 +664,12 @@ impl App {
             .id("control:power.mode".to_owned());
         let lit = self.power_lit(model::MODE);
         container(
-            row![words, row![Space::new().height(36), control].align_y(Alignment::Center)]
-                .spacing(16)
-                .align_y(Alignment::Center),
+            row![
+                words,
+                row![Space::new().height(36), control].align_y(Alignment::Center)
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center),
         )
         .padding(Padding {
             top: 9.0,
@@ -690,7 +707,11 @@ impl App {
                 fade(TEXT.get(), INERT)
             )
             .font(SEMIBOLD),
-            chip(w("Plus tard", "Later").get(lang), AMBER, rgba(245, 196, 110, 0.16)),
+            chip(
+                w("Plus tard", "Later").get(lang),
+                AMBER,
+                rgba(245, 196, 110, 0.16)
+            ),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -727,9 +748,12 @@ impl App {
             ..container::Style::default()
         });
         container(
-            row![words, row![Space::new().height(36), off].align_y(Alignment::Center)]
-                .spacing(16)
-                .align_y(Alignment::Center),
+            row![
+                words,
+                row![Space::new().height(36), off].align_y(Alignment::Center)
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center),
         )
         .padding(Padding {
             top: 9.0,
@@ -852,11 +876,19 @@ impl canvas::Program<Message> for BatteryIcon {
         let mut f = canvas::Frame::new(renderer, bounds.size());
         let rim = fade(TEXT.get(), 0.45);
         f.stroke(
-            &canvas::Path::rounded_rectangle(Point::new(1.0, 1.0), Size::new(40.0, 24.0), 5.0.into()),
+            &canvas::Path::rounded_rectangle(
+                Point::new(1.0, 1.0),
+                Size::new(40.0, 24.0),
+                5.0.into(),
+            ),
             canvas::Stroke::default().with_color(rim).with_width(1.6),
         );
         f.fill(
-            &canvas::Path::rounded_rectangle(Point::new(43.0, 9.0), Size::new(2.4, 8.0), 1.2.into()),
+            &canvas::Path::rounded_rectangle(
+                Point::new(43.0, 9.0),
+                Size::new(2.4, 8.0),
+                1.2.into(),
+            ),
             rim,
         );
         let band = match self.percent {
@@ -867,7 +899,11 @@ impl canvas::Program<Message> for BatteryIcon {
         let width = 36.0 * f32::from(self.percent.min(100)) / 100.0;
         if width > 0.5 {
             f.fill(
-                &canvas::Path::rounded_rectangle(Point::new(3.0, 3.0), Size::new(width, 20.0), 3.0.into()),
+                &canvas::Path::rounded_rectangle(
+                    Point::new(3.0, 3.0),
+                    Size::new(width, 20.0),
+                    3.0.into(),
+                ),
                 band,
             );
         }
@@ -910,6 +946,40 @@ fn step_colour(kind: StepKind) -> Color {
     }
 }
 
+impl Timeline {
+    /// Each label's left: the first at the start, the last ending at the
+    /// end, the others centred on their dots; then each kept clear of the
+    /// next (from the end back), and of the one before.
+    fn label_places(&self, texts: &[String], size: f32, font: iced::Font, width: f32) -> Vec<f32> {
+        const ROOM: f32 = 8.0;
+        let widths: Vec<f32> = texts.iter().map(|t| measure(t, size, font)).collect();
+        let last = texts.len().saturating_sub(1);
+        let mut left: Vec<f32> = self
+            .steps
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(i, (step, w))| {
+                let x = step.at * width;
+                if i == 0 {
+                    0.0
+                } else if i == last {
+                    width - w
+                } else {
+                    (x - w / 2.0).clamp(0.0, (width - w).max(0.0))
+                }
+            })
+            .collect();
+        for i in (0..last).rev() {
+            left[i] = left[i].min(left[i + 1] - ROOM - widths[i]);
+        }
+        for i in 1..=last {
+            left[i] = left[i].max(left[i - 1] + widths[i - 1] + ROOM);
+        }
+        left
+    }
+}
+
 impl canvas::Program<Message> for Timeline {
     type State = ();
 
@@ -937,42 +1007,39 @@ impl canvas::Program<Message> for Timeline {
                 step_colour(pair[1].kind),
             );
         }
-        let last = self.steps.len().saturating_sub(1);
-        for (i, step) in self.steps.iter().enumerate() {
-            let x = step.at * width;
+        let card = CARD.get();
+        for step in &self.steps {
+            let x = (step.at * width).clamp(4.5, width - 4.5);
             let colour = step_colour(step.kind);
-            let card = CARD.get();
-            f.fill(&canvas::Path::circle(Point::new(x.clamp(4.5, width - 4.5), track + 1.0), 7.5), card);
-            f.fill(&canvas::Path::circle(Point::new(x.clamp(4.5, width - 4.5), track + 1.0), 4.5), colour);
-            let name = step.kind.name(self.lang);
-            let place = |text: &str, size: f32, font: iced::Font| -> f32 {
-                let w = measure(text, size, font);
-                if i == 0 {
-                    0.0
-                } else if i == last {
-                    width - w
-                } else {
-                    (x - w / 2.0).clamp(0.0, (width - w).max(0.0))
-                }
-            };
-            let tx = place(&step.time, 10.5, MONO);
-            f.fill_text(canvas::Text {
-                content: step.time.clone(),
-                position: Point::new(tx, 2.0),
-                color: FAINT.get(),
-                size: 10.5.into(),
-                font: MONO,
-                ..canvas::Text::default()
-            });
-            let nx = place(name, 11.5, MANROPE);
-            f.fill_text(canvas::Text {
-                content: name.to_owned(),
-                position: Point::new(nx, 32.0),
-                color: NAME,
-                size: 11.5.into(),
-                font: MANROPE,
-                ..canvas::Text::default()
-            });
+            f.fill(&canvas::Path::circle(Point::new(x, track + 1.0), 7.5), card);
+            f.fill(
+                &canvas::Path::circle(Point::new(x, track + 1.0), 4.5),
+                colour,
+            );
+        }
+        let times: Vec<String> = self.steps.iter().map(|s| s.time.clone()).collect();
+        let names: Vec<String> = self
+            .steps
+            .iter()
+            .map(|s| s.kind.name(self.lang).to_owned())
+            .collect();
+        for (texts, size, font, y, colour) in [
+            (&times, 10.5, MONO, 2.0, FAINT.get()),
+            (&names, 11.5, MANROPE, 32.0, NAME),
+        ] {
+            for (text, x) in texts
+                .iter()
+                .zip(self.label_places(texts, size, font, width))
+            {
+                f.fill_text(canvas::Text {
+                    content: text.clone(),
+                    position: Point::new(x, y),
+                    color: colour,
+                    size: size.into(),
+                    font,
+                    ..canvas::Text::default()
+                });
+            }
         }
         vec![f.into_geometry()]
     }

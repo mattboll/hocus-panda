@@ -687,12 +687,13 @@ mod tests {
         assert_eq!(old.value(dim), Some(Value::Seconds(Some(120))));
         let lock = slot("power.lock-on-idle", Source::Ac);
         assert_eq!(old.value(lock), Some(Value::Bool(true)));
-        let never = read(
-            "[power.battery]\nlock-after = \"never\"\n[power.ac]\nlock-after = \"never\"\n",
-        );
+        let never =
+            read("[power.battery]\nlock-after = \"never\"\n[power.ac]\nlock-after = \"never\"\n");
         assert_eq!(never.value(lock), Some(Value::Bool(false)));
         // 6.10's keys win.
-        let both = read("[power]\nlock-on-idle = true\n[power.battery]\nidle = \"1m\"\nscreen-off = \"2m\"\nlock-after = \"never\"\n");
+        let both = read(
+            "[power]\nlock-on-idle = true\n[power.battery]\nidle = \"1m\"\nscreen-off = \"2m\"\nlock-after = \"never\"\n",
+        );
         assert_eq!(both.value(dim), Some(Value::Seconds(Some(60))));
         assert_eq!(both.value(lock), Some(Value::Bool(true)));
         assert_eq!(read("").value(dim), Some(Value::Seconds(Some(180))));

@@ -199,7 +199,11 @@ async fn listen(connection: &Connection, wake: UnboundedSender<Wake>) -> zbus::R
     let proxy = DBusProxy::new(connection).await?;
     let mut owners = Vec::new();
     for name in [UPOWER, PROFILES, LOGIN] {
-        owners.push(proxy.receive_name_owner_changed_with_args(&[(0, name)]).await?);
+        owners.push(
+            proxy
+                .receive_name_owner_changed_with_args(&[(0, name)])
+                .await?,
+        );
     }
     let on_change = wake.clone();
     tokio::spawn(async move {
