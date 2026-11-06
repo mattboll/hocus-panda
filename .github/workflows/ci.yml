@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, v2]
   push:
-    branches: [main, v2]
+    branches: [main, v2, 'sprint/**']
   workflow_dispatch:
 
 concurrency:

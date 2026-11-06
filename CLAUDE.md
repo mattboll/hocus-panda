@@ -29,6 +29,9 @@ sharing).
   up, and say so in the pull request.
 - Test what you can headless, to keep what works from breaking; never use
   references you recorded yourself as proof that something looks right.
+  The Settings and other application windows test their logic (what they
+  write, the services they ask); what a page shows and where is validated
+  by the maintainer on screenshots, not by new headless tests.
 
 ## Hard rules
 
@@ -51,9 +54,15 @@ sharing).
 
 ## Workflow
 
-- One issue per branch, `<type>/<issue>-<short-name>`, based on `main`. A
-  pull request says `Closes #N`, how it was tested, and shows screenshots
-  for anything visible.
+- Each sprint has a branch, `sprint/<N>`, based on `main`. An agent takes
+  a lot of related issues on one branch, `<type>/<short-name>`, based on
+  the sprint branch; it runs the tests of what it changes, and the lot is
+  merged into the sprint branch without a pull request. Every push to a
+  sprint branch runs the whole suite in CI, and the package the maintainer
+  tries is built from it. At the sprint's end, one pull request merges it
+  into `main`: it says `Closes #N` for each issue, how they were tested,
+  and shows screenshots for anything visible.
+- A fix outside a sprint: one branch based on `main`, one pull request.
 - Commit messages in English, `area: what changes`. **No attribution
   trailers** (`Co-Authored-By`, `Claude-Session`, "Generated with…") in
   commits or pull requests.
@@ -88,7 +97,8 @@ the crates whose sources it touches, and those its description names on a
 line `Tests: settings_sound, appearance` (test files' names). Name there
 the tests of a behaviour the change can affect but whose files it does not
 touch. A change to a test harness, `Cargo.lock` or the label `full-tests`
-runs everything, as main does: built once, then four jobs. After each merge, main runs the whole suite; a failure
+runs everything, as main does: built once, then four jobs. So does
+every push to a sprint branch. After each merge, main runs the whole suite; a failure
 there is fixed at once; a test that fails by chance is quarantined from
 CI (`[profile.ci]` in `.config/nextest.toml`) until its issue's fix
 takes it out. Update this section as commands land.
