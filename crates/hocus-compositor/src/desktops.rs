@@ -1193,7 +1193,9 @@ impl crate::State {
             return;
         };
         let placed = match start.mode {
-            Mode::Floating => model::carried(start.rect, area, to_area),
+            // Too big there, it fits; back where it fits, its size again
+            // (windows.md §12, #419).
+            Mode::Floating => self.carried_fitting(id, start.rect, area, to_area),
             Mode::Snapped(zone) => zone.rect(to_area),
             Mode::Fullscreen => to_geometry,
         };

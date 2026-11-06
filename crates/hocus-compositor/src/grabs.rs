@@ -164,6 +164,9 @@ pub struct MoveGrab {
     floating: Option<Rect>,
     /// How far the magnet pulled it at the last motion (§6).
     pull: Pull,
+    /// The screen it was on when the drag began: dropped on another, it
+    /// fits that one (§12, #419).
+    from_output: Option<smithay::output::Output>,
     /// Where it was when the drag began: its screen, its state, its place.
     start: Option<crate::desktops::Placed>,
 }
@@ -339,6 +342,8 @@ impl PointerGrab<State> for MoveGrab {
             // most of the window is; restored, it goes back where the drag
             // began.
             state.snap_from(self.id, zone, self.floating, Some(output));
+        } else if state.output_of(self.id) != self.from_output {
+            state.fit_to_screen(self.id);
         }
         state.redraw = true;
     }
@@ -676,6 +681,7 @@ impl State {
             rigid: false,
             floating: (hold == Hold::Free).then_some(rect),
             pull: Pull::default(),
+            from_output: self.output_of(id),
             start: self.placed_now(id),
         };
         self.moving = Some(id);

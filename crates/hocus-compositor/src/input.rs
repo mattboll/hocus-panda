@@ -461,7 +461,7 @@ impl State {
             return;
         };
         let from = pointer.current_location();
-        let to = self.onto_outputs(from + event.delta());
+        let to = self.onto_outputs(from, from + event.delta());
         // Games and 3D tools read the motion itself (relative-pointer).
         let focus = self.surface_under(from);
         pointer.relative_motion(
@@ -501,30 +501,21 @@ impl State {
         Some(event.position_transformed(area.size) + area.loc.to_f64())
     }
 
-    /// The nearest point of the outputs to `to`.
-    fn onto_outputs(&self, to: Point<f64, Logical>) -> Point<f64, Logical> {
+    /// Where the pointer moved from `from` to `to` goes: on the outputs,
+    /// sliding onto the screen beyond an edge no screen touches (§12,
+    /// #419).
+    pub(crate) fn onto_outputs(
+        &self,
+        from: Point<f64, Logical>,
+        to: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
         let areas: Vec<_> = self
             .space
             .outputs()
             .filter_map(|o| self.space.output_geometry(o))
+            .map(crate::windows::rect_of)
             .collect();
-        if areas.iter().any(|a| a.to_f64().contains(to)) {
-            return to;
-        }
-        areas
-            .iter()
-            .map(|a| {
-                let x =
-                    to.x.clamp(f64::from(a.loc.x), f64::from(a.loc.x + a.size.w - 1));
-                let y =
-                    to.y.clamp(f64::from(a.loc.y), f64::from(a.loc.y + a.size.h - 1));
-                Point::from((x, y))
-            })
-            .min_by(|a: &Point<f64, Logical>, b| {
-                let d = |p: &Point<f64, Logical>| (p.x - to.x).powi(2) + (p.y - to.y).powi(2);
-                d(a).total_cmp(&d(b))
-            })
-            .unwrap_or(to)
+        crate::scales::onto_screens(&areas, (from.x, from.y), (to.x, to.y)).into()
     }
 
     /// Moves the pointer to `location` in the global logical space. Over
