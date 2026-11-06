@@ -109,16 +109,18 @@ struct LookKey {
     app: String,
 }
 
-/// A picture drawn for a key, and its side in pixels.
-type Picture<K> = RefCell<Option<(K, MemoryRenderBuffer, i32)>>;
+/// A picture drawn for a key, its side in pixels, and the id it is drawn
+/// by: a new one with each picture, so that what draws it is drawn again
+/// (a picture of the same size at the same place, under the same id,
+/// would show nothing changed).
+type Picture<K> = RefCell<Option<(K, MemoryRenderBuffer, i32, Id)>>;
 
-/// The menu's pictures and the ids of what draws them.
+/// The menu's pictures.
 pub struct RadialPaint {
     fonts: OnceCell<Option<Fonts>>,
     main: Picture<LookKey>,
     arc: Picture<(u32, u32)>,
     panda: Picture<u32>,
-    ids: [Id; 3],
     shadow: FrameIds,
 }
 
@@ -135,7 +137,6 @@ impl Default for RadialPaint {
             main: RefCell::default(),
             arc: RefCell::default(),
             panda: RefCell::default(),
-            ids: std::array::from_fn(|_| Id::new()),
             shadow: FrameIds::default(),
         }
     }
@@ -820,12 +821,12 @@ impl State {
         // The panda, bobbing.
         if radial.waiting && key.hub.is_empty() {
             let mut cache = paint.panda.borrow_mut();
-            if cache.as_ref().is_none_or(|(s, _, _)| *s != key.scale)
+            if cache.as_ref().is_none_or(|(s, _, _, _)| *s != key.scale)
                 && let Some((pixels, px)) = draw_panda(scale)
             {
-                *cache = Some((key.scale, buffer(&pixels, px, px), px));
+                *cache = Some((key.scale, buffer(&pixels, px, px), px, Id::new()));
             }
-            if let Some((_, texture, px)) = cache.as_ref() {
+            if let Some((_, texture, px, id)) = cache.as_ref() {
                 let bob = if self.reduced_motion() {
                     0.0
                 } else {
@@ -833,7 +834,7 @@ impl State {
                     BOB * (t * std::f64::consts::TAU / BOB_PERIOD).sin()
                 };
                 let dst = placed((-PANDA / 2.0, -PANDA / 2.0 + bob), PANDA);
-                draw(texture, *px, dst, &paint.ids[0], out);
+                draw(texture, *px, dst, id, out);
             }
         }
         // The arc along Close's rim, resting.
@@ -845,37 +846,25 @@ impl State {
             let mut cache = paint.arc.borrow_mut();
             if cache
                 .as_ref()
-                .is_none_or(|(k, _, _)| *k != (key.scale, step))
+                .is_none_or(|(k, _, _, _)| *k != (key.scale, step))
                 && let Some((pixels, px)) = draw_arc(f64::from(step) / 40.0, scale)
             {
-                *cache = Some(((key.scale, step), buffer(&pixels, px, px), px));
+                *cache = Some(((key.scale, step), buffer(&pixels, px, px), px, Id::new()));
             }
-            if let Some((_, texture, px)) = cache.as_ref() {
-                draw(
-                    texture,
-                    *px,
-                    placed(arc_corner(), ARC_SIDE),
-                    &paint.ids[1],
-                    out,
-                );
+            if let Some((_, texture, px, id)) = cache.as_ref() {
+                draw(texture, *px, placed(arc_corner(), ARC_SIDE), id, out);
             }
         }
         // The menu.
         {
             let mut cache = paint.main.borrow_mut();
-            if cache.as_ref().is_none_or(|(k, _, _)| *k != key)
+            if cache.as_ref().is_none_or(|(k, _, _, _)| *k != key)
                 && let Some((pixels, px)) = draw_main(fonts, &key, scale)
             {
-                *cache = Some((key.clone(), buffer(&pixels, px, px), px));
+                *cache = Some((key.clone(), buffer(&pixels, px, px), px, Id::new()));
             }
-            if let Some((_, texture, px)) = cache.as_ref() {
-                draw(
-                    texture,
-                    *px,
-                    placed((-REACH, -REACH), 2.0 * REACH),
-                    &paint.ids[2],
-                    out,
-                );
+            if let Some((_, texture, px, id)) = cache.as_ref() {
+                draw(texture, *px, placed((-REACH, -REACH), 2.0 * REACH), id, out);
             }
         }
         // The disc's shadow.
