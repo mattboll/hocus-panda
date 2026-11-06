@@ -1321,6 +1321,19 @@ impl Headless {
         self.app.state.pointer_motion(Point::from((x, y)), time);
     }
 
+    /// Moves the pointer by (`dx`, `dy`), as a mouse does: it stays on the
+    /// outputs, sliding onto a screen beyond an edge no screen touches.
+    pub fn pointer_by(&mut self, dx: f64, dy: f64) {
+        let state = &self.app.state;
+        let from = state
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let to = state.onto_outputs(from, from + Point::from((dx, dy)));
+        self.pointer_move(to.x, to.y);
+    }
+
     pub fn button(&mut self, button: u32, pressed: bool) {
         use crate::away::{Felt, Pressed};
         let felt = if pressed {

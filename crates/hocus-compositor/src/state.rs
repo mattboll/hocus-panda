@@ -376,7 +376,10 @@ impl State {
             runtime_dir,
             config,
             nested,
-            compositor_state: CompositorState::new::<Self>(dh),
+            // Version 6: a surface is told the scale to draw at
+            // (`preferred_buffer_scale`), the largest of the screens it is
+            // on (docs/design/windows.md §12, #419).
+            compositor_state: CompositorState::new_v6::<Self>(dh),
             xdg_shell_state: XdgShellState::new::<Self>(dh),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             kde_decoration_state: KdeDecorationState::new::<Self>(

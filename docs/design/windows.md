@@ -724,6 +724,72 @@ screen that came back, the shell having asked for none of its surfaces
 on no screen; and checks the compositor's choice with a client that asks
 for them so.
 
+### Screens of different scales
+
+A screen at 1 beside one at 2 (or 1.25 … 1.75), side by side (#419; the
+s8a mockup, questions 12 to 15):
+
+- **The same size**: a window keeps its logical size on every screen;
+  each screen draws it at its own scale. A 1000×640 window is 1000×640
+  pixels on a screen at 1 and 2000×1280 on one at 2.
+- **Sharp** (question 12, A): the scale a window is asked to draw at,
+  `wp_fractional_scale_v1.preferred_scale`, and `wl_surface`'s
+  `preferred_buffer_scale` (rounded up) for clients without it, is the
+  **largest** scale of the screens its geometry overlaps (its own
+  shadow does not count); once wholly on one screen, that screen's. It
+  changes when the screens it overlaps change, during a drag too, and is
+  sent at most once a frame, only when it changes. The screen at the
+  smaller scale draws the larger buffer reduced (linear filtering). The
+  compositor offers `wl_compositor` version 6 for that. A window on no
+  screen keeps the scale of the screen it last showed most on.
+- **No gap, no jump**: until the client commits a buffer at the new
+  scale, the screens show the last one at the same logical size; nothing
+  goes blank or changes size.
+- **Too big for its screen** (question 13, C): a floating window dragged
+  onto another screen (its centre there when dropped) whose work area is
+  smaller than it shrinks to fit that work area, wholly inside it; it
+  remembers its size from before and takes it back (kept inside the work
+  area) when dragged onto a screen where it fits, unless the user resized
+  it meanwhile. It is never made smaller than its client's least size.
+  Dragged within one screen, nothing changes; a window dropped in a snap
+  zone takes the zone. A screen unplugged carries its windows as above
+  (no larger than the new work area).
+- **The pointer** (question 14, B): moving past an edge of its screen
+  where no screen touches, toward a screen that lies beyond that edge's
+  line (screens of different heights side by side), it goes to the
+  nearest point of that screen instead of stopping. Elsewhere the
+  layout's outer edges still stop it. This is a mouse's or a touchpad's
+  motion; an absolute one (a tablet, a virtual machine's pointer) goes
+  where it points.
+- **X11 applications** (question 15, A): XWayland's windows draw at 1;
+  on a screen at 2 they are shown at their logical size, enlarged, a
+  little soft. Their geometry is the same logical size on every screen.
+- **Cursors** keep their logical size; a client's own cursor surface is
+  told the scale of the screen under the pointer.
+- **Layer surfaces** (the bar, wallpapers, the shell's overlays) are each
+  on one screen, and told its scale.
+- **The bar** stays on the primary screen (8.2, several bars, comes
+  later).
+- **Moving the focused window to another screen with the keyboard** is
+  question 16, its own lot.
+
+Measured headless (`tests/scales.rs`): a screen at 2 (2560×1600, 1280×800
+logical) left of one at 1 (1920×1080); a test client drawing at the
+buffer scale it is told, with a band of one-pixel stripes. A 1000×640
+window on the screen at 1 is told 1 (120ths: 120); held across the seam,
+2 (240) at once, its size unchanged; on the screen at 2 its stripes are
+one pixel each, on the one at 1 two buffer pixels make one grey pixel;
+wholly on the screen at 2: 2; back wholly on the one at 1: 1, each change
+said once. A 1500×1000 window dropped on the screen at 2 takes its work
+area's size, inside it; dragged back, 1500×1000; shrunk again, resized by
+its right edge, dragged back: the size it was given. The pointer at
+(1290, 1000) moved 30 px left lands at (1260, 799); at (1290, 400), at
+(1260, 400); the outer edges stop it. An X11 window of 400×300 opened on
+the screen at 2 is 400×300 logical, its blue over 800×600 pixels. Its
+screenshots (by hand, `HOCUS_SHOTS=DIR`, the ignored tests
+`straddling_shots` with foot and `x11_shots` with xterm): each screen, the
+two as arranged, and the seam's two sides at the same size.
+
 ## 13. Shortcuts
 
 Most use `Super`, as in the user's current desktop; `Alt+Tab` and
@@ -922,3 +988,10 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
     defaults; Écrans lists the sets known and forgets one. The peek's
     panda is 170 px (was 96).
+15. Screens of different scales (#419, the s8a mockup, questions 12 to
+    15): a window straddling two scales is asked to draw at the larger,
+    reduced on the other screen; a window too big for the screen it is
+    dragged onto shrinks to fit and takes its size back where it fits;
+    the pointer at a step between screens slides onto the screen beyond;
+    X11 applications are shown at their size on a screen at 2, enlarged
+    and a little soft.

@@ -58,6 +58,7 @@ mod reload;
 mod reminders;
 mod render;
 mod rules;
+mod scales;
 mod screen_sets;
 mod screens;
 mod session;
