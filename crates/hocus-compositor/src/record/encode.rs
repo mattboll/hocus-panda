@@ -87,6 +87,9 @@ pub struct Job {
     pub gpu: Option<PathBuf>,
     pub pipewire: Option<PathBuf>,
     pub videos: Option<PathBuf>,
+    /// The folder `[recording] folder` names, if it does (6.17): used when
+    /// it can be written, else the videos' folder's own is.
+    pub chosen: Option<PathBuf>,
     pub french: bool,
     pub when: SystemTime,
     /// Where its first frame's picture and its sound's pipe go.
@@ -290,11 +293,27 @@ fn record(
     back: &Sender<FromRecorder>,
 ) -> anyhow::Result<Saved> {
     let video = encoder(job)?;
-    let videos = job
-        .videos
-        .clone()
-        .context("no videos' folder to save the recording in")?;
-    let dir = videos.join(save::folder_name(job.french));
+    let (dir, folder) = match &job.chosen {
+        Some(chosen) if crate::capture::save::writable(chosen) => {
+            (chosen.clone(), crate::capture::save::shown_chosen(chosen))
+        }
+        chosen => {
+            if let Some(chosen) = chosen {
+                tracing::info!(
+                    folder = %chosen.display(),
+                    "the recordings' folder cannot be written: the default one is used"
+                );
+            }
+            let videos = job
+                .videos
+                .clone()
+                .context("no videos' folder to save the recording in")?;
+            (
+                videos.join(save::folder_name(job.french)),
+                save::shown_folder(&videos, job.french),
+            )
+        }
+    };
     std::fs::create_dir_all(&dir).with_context(|| format!("could not make {}", dir.display()))?;
     let file = save::unused(&dir, &save::file_name(job.when, job.french, job.format));
     // The sound's pipe, in a directory of its own in the runtime one.
@@ -436,7 +455,7 @@ fn record(
     );
     Ok(Saved {
         file,
-        folder: save::shown_folder(&videos, job.french),
+        folder,
         size: job.size,
         duration,
         format: job.format,

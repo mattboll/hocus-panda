@@ -89,41 +89,97 @@ Martian Mono; written 450 ms after it stops moving), the segmented
 control. A control that does not apply now (the slider while its switch is
 off; everything while the file does not read) is drawn at 45 % and inert.
 
-## Énergie
+## Énergie (6.10)
 
-The mockup's page, its rows and choices. The keys:
+Built 2026-11-06 (issue #410), from the approved spec (the issue's last
+comment) and its mockup's variant A: 7.2's order on the page, with a
+timeline; the power mode here too; one "lid closed" choice for both
+sources. `src/power.rs` (the rows, the timeline's steps, the battery's
+words), `src/power_bus.rs` (the system bus), `src/app/power_page.rs` (the
+page). The compositor acts on every key, live (docs/design/idle.md).
+
+**The page**, under its title and its line ("Quand l'écran s'assombrit,
+se verrouille et s'éteint, quand l'ordinateur se met en veille ; le
+couvercle, le bouton d'alimentation et l'économie d'énergie."):
+
+1. **The battery's card**, read only: the battery drawn to its level
+   (green, amber at 20 % or less, peach at 10 % or less; a bolt on AC),
+   "82 %", 3.7's line ("Sur batterie · 3 h 40 restantes", "Branché · en
+   charge, plein dans 25 min", "Branché, plein", "Branché, ne charge pas"),
+   and on the right "État de la batterie : 91 % de sa capacité d'origine"
+   when UPower knows it. Without a battery: "Sur secteur", "Cet ordinateur
+   n'a pas de batterie : un seul jeu de délais, pas de couvercle.", a bolt.
+2. **ÉCRAN ET VEILLE**, the segmented control on its line (with a battery
+   only; it starts on the source UPower says, else the kernel's supplies):
+   "Assombrir l'écran après", "Éteindre l'écran" (its line "Après
+   l'assombrissement, …" with locking off; inert while the dim is
+   "Jamais"), "Mettre en veille après", then **the timeline** in the same
+   card: a dot a step with its time above (Martian Mono) and its name
+   under ("dernière activité", "assombri", "verrouillé", "écran éteint",
+   "en veille" or "pas de veille"), in order, not to scale (12 % at least
+   apart; labels kept clear of each other), a step that is off not drawn,
+   a sleep sooner than the dim first. It follows the source and every
+   change, without motion; it is not in the `Tab` order.
+3. **VERROUILLAGE**, "Super+L verrouille à tout moment" on its line (the
+   `lock` shortcut as bound): "Verrouiller après l'assombrissement",
+   "Verrouiller avant la mise en veille".
+4. **COUVERCLE ET BOUTON** (6.1's rows), "BOUTON" and the button's row
+   alone without a lid (UPower's `LidIsPresent`; without UPower, a battery
+   means a lid). Without logind on the bus, the lid's and the button's
+   lines say "Le système décide (logind indisponible)." in amber.
+5. **ÉCONOMIE D'ÉNERGIE**: "Mode d'énergie" ("Nouveau"), its line "Le même
+   que dans le panneau de la batterie.", a segmented control "Économie |
+   Équilibré | Performance" (`←`/`→`); a mode the machine lacks drawn faint
+   and inert with 3.7's line; performance held back: its reason. Without
+   power-profiles-daemon: "Les modes demandent le service
+   power-profiles-daemon, absent de cet ordinateur." in amber, the control
+   inert, and the automatic saver and its slider inert, its line "Elle
+   passe par les modes : sans eux, rien à allumer.". Without a battery,
+   the mode alone.
+6. **PLUS TARD**: "Limiter la charge à 80 %", inert, its amber chip.
+
+The keys:
 
 | Row | On AC | On battery |
 |---|---|---|
-| Éteindre l'écran après | `[idle] delay` (seconds, or `"off"`; 7.3) | `[power.battery] screen-off` |
-| Verrouiller la session | `[power.ac] lock-after` | `[power.battery] lock-after` |
-| Mettre en veille après | `[power.ac] suspend-after` | `[power.battery] suspend-after` |
+| Assombrir l'écran après | `[idle] delay` (seconds, or `"off"`) | `[power.battery] idle` |
+| Éteindre l'écran | `[power.ac] screen-off-after` (`"30s"`) | `[power.battery] screen-off-after` (`"10s"`) |
+| Mettre en veille après | `[power.ac] suspend-after` (`"never"`) | `[power.battery] suspend-after` (`"15m"`) |
+| Verrouiller après l'assombrissement | `[power] lock-on-idle` | |
+| Verrouiller avant la mise en veille | `[power] lock-before-sleep` | |
 | Couvercle fermé | `[power] lid` (`suspend`, `lock`, `screen-off`, `nothing`) | |
 | Rester allumé avec un écran branché | `[power] lid-ignored-when-docked` | |
 | Bouton d'alimentation | `[power] power-button` (`ask`, `suspend`, `power-off`, `nothing`) | |
 | Économie d'énergie automatique | `[power] auto-saver` | |
 | Sous ce niveau de batterie | `[power] auto-saver-below` (5 to 50) | |
+| Mode d'énergie | power-profiles-daemon's `ActiveProfile`, not the file | |
 
-- **Coordination with 7.3 and 7.2** (docs/design/idle.md): the screen's
-  delay is the first countdown without input, which is what `[idle] delay`
-  is, after which the curtain dims the screens, then the session locks.
-  `[idle]` takes no other key (the compositor refuses unknown keys there),
-  so the AC side writes `[idle] delay` and the battery side
-  `[power.battery] screen-off`; the compositor takes the one of the power
-  source UPower says (7.2). "Verrouiller la session" is `[power.*]
-  lock-after`. 6.10 (#410) replaces these rows: the compositor now reads
-  `[power.battery] idle`, `[power.*] screen-off-after`, `suspend-after`,
-  `[power] lock-on-idle`, `lock-before-sleep` and the rest of `[power]`,
-  live, and still reads this page's `screen-off` (as `idle`) and
-  `lock-after` (as `lock-on-idle`) for the files it wrote
-  (docs/design/idle.md, "The Settings' keys").
-- The delays of `[power.*]` are written `"0s"`, `"5m"`, `"1h"`, `"never"`.
-- The segmented control starts on the power source in use (the kernel's
-  supplies, `/sys/class/power_supply`; `HOCUS_POWER_SUPPLY_DIR` in tests),
-  on AC without a battery.
-- What applies without a key is shown as the value: the screen's delay
-  is the compositor's, 5 min on AC and 3 min on battery (7.2; the menu
-  has a "3 min"); the others are the mockup's.
+- **6.1's files**: where `[power.battery] idle` is absent the page shows
+  `[power.battery] screen-off`; where `[power] lock-on-idle` is absent,
+  `[power.*] lock-after` (off only when every source it names says
+  `"never"`), as the compositor reads them. The page writes only the new
+  keys; the old ones stay as they are.
+- **The system bus** (`power_bus`), on a thread of its own: UPower's root
+  (`OnBattery`, `LidIsPresent`), its display device (`IsPresent`,
+  `Percentage`, `State`, `TimeToEmpty`, `TimeToFull`), the battery
+  device's `Capacity`; power-profiles-daemon's `ActiveProfile`, `Profiles`,
+  `PerformanceDegraded`; whether `org.freedesktop.login1` has an owner.
+  Read as it starts and on a `PropertiesChanged` under
+  `/org/freedesktop/UPower` or an owner's change; only what changed goes
+  to the window. Without a system bus nothing is known: no amber lines.
+- **The power mode** chosen: asked of power-profiles-daemon, toasted "Mode
+  d'énergie : Économie" with "Annuler", `Ctrl+Z` and `Ctrl+Shift+Z` as a
+  file's change.
+- Search: the rows' words and the spec's ("rideau", "dpms", "auto-lock",
+  "profil", "santé", "seuil"…), and the battery's health, the power mode
+  and the charge limit as rows outside the file.
+
+Tests: `crates/hocus-compositor/tests/settings_power.rs` (a fake UPower,
+power-profiles-daemon and logind on a private system bus): the page in
+7.2's order and its timeline following the delays and the source; locking
+off and the dim never; the power mode, its toast and `Ctrl+Z`; without
+power-profiles-daemon; without a battery; without logind; a file 6.1
+wrote; at rest, nothing drawn.
 
 ## Son (6.5)
 
@@ -649,8 +705,7 @@ kept, off by default; tap to click on by default.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
   côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
   to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
-  (written and read, but the four-finger launcher is 6.13's, #447: not
-  built yet).
+  (the four-finger launcher, 6.13: launcher.md).
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -1031,6 +1086,73 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   the shell's own surfaces; the sample agents are drawn as the mockup's
   heads, not the pandas' pictures.
 
+## Date et heure (6.11)
+
+Issue #411, variant A of the mockup (`s611`), as the issue's last
+comment, approved 2026-11-05, specifies it; the Compte page is the
+ticket's second part. Section `date-and-time` (`hocus settings
+date-and-time`), SYSTÈME's last row. Nothing is written in
+`config.toml`: the time, the zone and the automatic time are systemd's
+timedated's; their format is 6.2's `[locale] time` and `[locale] date`,
+only read here. The header keeps "Enregistré".
+
+| Group | Row | Control | Where |
+|---|---|---|---|
+| (none) | the clock's card (88 px): the time in Martian Mono 36 in the desktop's format, the date in words (15/700, "jeudi 5 novembre 2026"), "Europe/Paris · UTC+01:00, heure d'hiver jusqu'au 28 mars" (the next offset change from the zone's rules; "pas de changement d'heure" without one) | read only | timedated's `Timezone`, tzdata |
+| HEURE | Mettre à l'heure automatiquement: green "Par Internet (NTP) · à l'heure", amber "… pas encore à l'heure", "Coupé : l'heure ne se corrige plus seule.", or "Aucun service de mise à l'heure sur cet ordinateur." (the switch inert, off) | switch | `NTP`, `NTPSynchronized`, `CanNTP`; `SetNTP` |
+| | Date et heure: the date (118 px, "05/11/2026", or year first when `[locale] date = "iso"`) and the time (72 px, 24 or 12 h) in Martian Mono 12.5, at 45 % and inert while automatic; off, editable, "Tape la date et l'heure, puis « Régler »." and "Régler" (green, 28 px) | two fields and a button | `SetTime` |
+| FUSEAU HORAIRE | Fuseau horaire: "Paris, France · UTC+01:00" | a 200 px button with the zone's id and "›", opening the picker | `SetTimezone` |
+| FORMAT | Format de l'heure et de la date: "24 h · « jeudi 5 novembre ». Une fois pour tout le bureau : la barre, l'agenda, l'écran verrouillé." | link "Apparence et langue ›", opening 6.2 with "Heure" lit | `[locale] time`, `date` (read) |
+| PLUS TARD | Fuseau horaire automatique (a switch, off), Formats régionaux | inert, amber chip | |
+
+- **timedated** is followed on a thread of its own (`timedate.rs`, zbus on
+  the system bus), started the first time the page shows: its properties
+  read again on each `PropertiesChanged`, and `NTPSynchronized` (which it
+  never says) every 5 s only while the automatic time is on and not right
+  yet. Only a change reaches the window. Without timedated the rows are
+  inert and the switch's line says "Le service de l'heure du système
+  (timedated) ne répond pas."; the thread tries again, slower and slower,
+  silently. The calls are interactive (polkit may ask, 7.5) and answered
+  aside; a refusal toasts "Le système a refusé." and the page shows what
+  timedated still holds.
+- **The time set by hand**: "Régler" (or `Enter` in a field) sets the
+  date and time typed, read in the zone shown; toast "Heure réglée :
+  14:45." without "Annuler". `↑` / `↓` in a field step its day or its
+  minute. The fields follow the clock until something is typed in them.
+- **The picker** (a sheet, 440 px): "Fuseau horaire" with a globe, a
+  search field holding the keyboard, up to 8 rows (44 px): the city and
+  its country (the typed part marked as the search's results), "America/Toronto
+  · UTC−05:00", the time there in Martian Mono. Nothing typed: the
+  current zone, its country's, then the best known cities. Typed: the
+  cities whose name (French or English) starts with it first, then a word
+  of it, its country, the zone's id, an abbreviation now or in six months
+  ("CET", "PST"), an offset ("UTC+1", "+05:30"); accents and case
+  ignored; among equals the best known first. `↑` / `↓` move, `Enter`
+  chooses, `Esc` or a click outside closes. "Choisir Montréal" sets the
+  zone; toast "Fuseau horaire : Montréal (UTC−05:00)." with "Annuler",
+  which joins `Ctrl+Z` and `Ctrl+Shift+Z`.
+- **The zones**: tzdata's `zone.tab` (one line per country and zone, so
+  Monaco is found by its name), the cities' and countries' names in
+  French and English from CLDR (Unicode License v3), and a few large
+  cities living in another's zone (Montréal, Mumbai, Genève…), in
+  `crates/hocus-settings/data/zones/zones.tsv`, made by
+  `scripts/zones/generate.py`; their offsets and changes computed with
+  jiff from the system's tzdata.
+- **At rest** the page draws once a minute: its clock, from a one-shot
+  timer to the next minute while it shows.
+- **The search** finds "Mettre à l'heure automatiquement" (ntp,
+  synchroniser, internet), "Date et heure" (régler, changer l'heure),
+  "Fuseau horaire" (pays, ville, utc, gmt, décalage) and "Format de
+  l'heure" (12 h, 24 h, am, pm), and lights their rows.
+- **Choices made here (to confirm on the machine)**: the clock is in
+  Martian Mono Regular (the Light weight is not carried); `↑` / `↓` in a
+  field step its day or its minute, not the part under the caret (iced
+  does not say where the caret is); the date and time fields are reached
+  with the pointer, `Tab` stops on the switch, "Régler", the zone's
+  button and the link; a row of the picker shows its city's own name
+  ("Montréal"), the zone's row the zone's ("Toronto"); the switch shows
+  the value asked until timedated answers.
+
 ## Bureaux et fenêtres (6.14)
 
 Issue #448, variant A (one page by subject), as the issue's spec and its
@@ -1296,7 +1418,7 @@ file.
 
 ## Choices made here (to confirm on the machine)
 
-- The battery's screen delay in `[power.battery] screen-off` (above).
+- The battery's dim in `[power.battery] idle` (6.10, above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet (AccountsService, 6.11).
 - The home's cards say "À venir" for Écrans and Réseau until their
@@ -1326,13 +1448,12 @@ file.
 
 ## Not built here
 
-- The Énergie page as 6.10 draws it (the compositor acts on `[power]`
-  already, docs/design/idle.md). The compositor follows the file live for `[pointer]` and `[touchpad]`
+- The compositor follows the file live for `[pointer]` and `[touchpad]`
   (6.12), `[idle]` and `[power]` (6.10), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.10, 6.11, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.11's Compte, 6.13 to 6.17, Day.1).
 - Bluetooth (6.7), this part: the "⋯" menu (rename, connect by itself,
   forget), the code and PIN sheets with the Settings' own agent, the
   bar's "dans les Réglages" rows and its "Réglages du Bluetooth…" link,
@@ -1557,10 +1678,27 @@ with an XKB registry of the test's own:
 - `the_keyboards_layouts_and_repeat_follow_the_file`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
+`crates/hocus-compositor/tests/settings_time.rs` (6.11, Date et heure),
+the same bed with timedated faked on a D-Bus daemon of the test's own
+(`levels/timedate.rs`):
+
+- `the_page_shows_the_clock_the_zone_and_the_automatic_time`
+- `not_on_time_yet_and_no_time_service_are_said`
+- `automatic_time_off_lets_the_time_be_set`
+- `the_time_zone_picker_finds_montreal_by_mon_and_sets_it`
+- `the_picker_moves_with_the_arrows_and_closes_with_esc`
+- `a_refusal_by_polkit_leaves_the_values_unchanged`
+- `a_zone_changed_elsewhere_shows_at_once`
+- `without_timedated_the_page_says_so`
+- `the_format_link_and_the_search_light_their_rows`
+- `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
 Unit tests: the sections and groups, the delays' and the idle delay's
 codecs, the search's order, accents and keys, the store's edits (only the
 line, its comment kept, tables made, a value written back as it was), the
 power source from the kernel's supplies, the recent changes kept, the
-second launch's line, the ids' names; `hocus-config`'s edit through a link
-with its mode; the user popover's rows; the launcher reading the
-package's entry as "Réglages".
+second launch's line, the ids' names; the zones' offsets, next changes
+and the picker's search, the dates and times typed; `hocus-config`'s edit
+through a link with its mode; the user popover's rows; the launcher
+reading the package's entry as "Réglages".

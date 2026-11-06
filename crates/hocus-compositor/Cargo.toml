@@ -26,7 +26,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 fontdue = "0.9.3"
 # The screen capture (5.8): its PNG, cut and put together off the loop;
 # PNG alone of the codecs, as the shell's (MIT or Apache-2.0).
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # The capture's file names say when, in local time (MIT or Unlicense), as
 # the shell's clock reads it.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }

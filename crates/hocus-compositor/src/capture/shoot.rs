@@ -52,6 +52,8 @@ where
                 cut,
                 when: state.capture_when(),
                 pictures: state.config.pictures.clone(),
+                chosen: state.config.chosen_folder(&state.config.capture.folder),
+                format: state.config.capture.format,
                 french: state.config.french,
             };
             state.capture_taken(shot, job, flash);

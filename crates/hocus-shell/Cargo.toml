@@ -39,8 +39,9 @@ iced = { version = "0.14", default-features = false, features = [
     "image-without-codecs",
     "svg",
 ] }
-# PNG alone of the image crate's codecs, for the applications' icons.
-image = { version = "0.25", default-features = false, features = ["png"] }
+# PNG and JPEG alone of the image crate's codecs: the applications' icons,
+# and the captures (a JPEG's, `[capture] format`, 6.17).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
 iced_layershell = { version = "=0.19.1", default-features = false }

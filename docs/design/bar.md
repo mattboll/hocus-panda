@@ -2728,6 +2728,38 @@ maintainer's spec (issue #396).
   (the launcher's results, the Sources popover's command) in the history;
   the primary selection.
 
+### 6.17, the clipboard's rules (2026-11-06)
+
+What the Settings' "Captures et presse-papiers" page writes
+(`[clipboard]`, docs/design/settings.md), followed live:
+
+- **`history`**: off, the compositor reads no copy and makes no
+  capture's line; the shell shows the pinned items only, under
+  "Historique coupé · Réglages" / "History off · Settings" (first in the
+  list, Manrope 10.5 px `#A9B2C2`), and erases the others 6 s later (the
+  Settings' toast's time), if the rules still say so: turned on within
+  that time, everything shows again.
+- **`keep`**: `"session"`, `"1d"`, `"7d"` or `"30d"` (the default). A
+  shorter one hides what is older at once and erases it 6 s later, as
+  above. `"session"`: the items that are not pinned leave the disk once
+  applied (their images kept in memory), and what is copied next never
+  goes there; pinned items stay on disk, as they stay for good. 200 items
+  at most, as before.
+- **`skip-secrets`** and **`ignore`**: the compositor's checks. On, as
+  before, plus the applications whose ids `ignore` lists (case aside);
+  off, neither the marks nor the applications are looked at.
+- **The Settings' line** (`msg screens`): `{"clipboard": {"items": N,
+  "pinned": P}}`, what the shell's history shows, said as the line opens
+  and as it changes (the shell's `clipboard-count`); `clipboard-clear`
+  asks the shell to clear all but the pinned (`clipboard-clear` to it).
+- **Measured headless** (`crates/hocus-compositor/tests/clipboard.rs`):
+  off then on before the grace erases nothing; off shows its line over
+  the pinned item, reads no copy, erases the rest once the grace is over
+  (on disk too); `"session"` takes the items off the disk and writes none;
+  an ignored application's copy never kept; `skip-secrets` off keeps a
+  marked secret and KeePassXC's copy; the line's counts, and its clear
+  keeping the pinned one. Unit tests for the rules shown and applied.
+
 ### 5.11, the sign of what is shared (2026-11-03)
 
 While the screen is shared, a sign shows under the clock (48 wide, in

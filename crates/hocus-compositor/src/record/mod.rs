@@ -141,6 +141,9 @@ pub struct Recording {
     copied: u64,
     last: Option<Saved>,
     failed: Vec<String>,
+    /// Whether the Settings' lines were last told a recording is under
+    /// way (6.17: its folder and format apply to the next one).
+    settings_told: bool,
 }
 
 impl Recording {
@@ -313,6 +316,7 @@ impl State {
             }),
             pipewire: self.config.pipewire_remote.clone(),
             videos: self.config.videos.clone(),
+            chosen: self.config.chosen_folder(&self.config.recording.folder),
             french: self.config.french,
             when: SystemTime::now(),
             runtime: self.runtime_dir.clone(),
@@ -564,6 +568,17 @@ impl State {
             None => ToShell::RecordingEnd,
         };
         self.tell_shell(line);
+        if self.record.live.is_some() != self.record.settings_told {
+            self.record.settings_told = self.record.live.is_some();
+            let line = self.recording_line();
+            self.displays_send(None, &line);
+        }
+    }
+
+    /// What the Settings' lines are told: whether a recording is under
+    /// way.
+    pub(crate) fn recording_line(&self) -> String {
+        serde_json::json!({ "recording": self.record.live.is_some() }).to_string()
     }
 
     /// Screen `name` went: a recording on it stops.

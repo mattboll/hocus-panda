@@ -152,6 +152,11 @@ fn main() -> ExitCode {
     config.pictures = hocus_compositor::pictures_dir();
     config.home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     config.videos = hocus_compositor::record::save::videos_dir();
+    // The shutter is heard in a session, not from a headless compositor
+    // next to one (6.17).
+    if !matches!(backend, BackendArg::Headless) {
+        config.sound_programs = hocus_compositor::SoundPrograms::Path;
+    }
     config.french = ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
         .filter_map(|name| std::env::var(name).ok())
