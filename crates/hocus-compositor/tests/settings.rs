@@ -95,6 +95,18 @@ impl Bed {
         }
         let config_file = root.join("config/hocuspanda/config.toml");
         std::fs::write(&config_file, file)?;
+        // A laptop on AC, its battery at 82 % (the kernel's supplies, no
+        // UPower): the Énergie page has its battery's rows and its lid.
+        for (supply, files) in [
+            ("BAT0", [("type", "Battery"), ("capacity", "82")]),
+            ("AC", [("type", "Mains"), ("online", "1")]),
+        ] {
+            let dir = root.join("supplies").join(supply);
+            std::fs::create_dir_all(&dir)?;
+            for (name, text) in files {
+                std::fs::write(dir.join(name), format!("{text}\n"))?;
+            }
+        }
         // What "Ouvrir le fichier" runs: nothing.
         let opener = root.join("bin/xdg-open");
         std::fs::write(&opener, "#!/bin/sh\nexit 0\n")?;
@@ -107,12 +119,13 @@ impl Bed {
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
-                 HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
+                 HOCUS_POWER_SUPPLY_DIR='{}' PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
                  PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \
                  RUST_LOG=warn,hocus_settings=debug\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
+                at("supplies"),
                 at("home"),
                 at("config"),
                 at("cache"),
@@ -224,8 +237,43 @@ impl Bed {
             .ok_or_else(|| anyhow::anyhow!("no settings window"))
     }
 
+    /// `id` scrolled into view, clear of the toast, by the wheel (the
+    /// Énergie page is taller than the window, 6.10).
+    fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
+        let window = self.window()?;
+        for _ in 0..20 {
+            let place = self.places_with(id)?[id].clone();
+            let n = |i: usize| place[i].as_f64().unwrap_or_default();
+            let (top, bottom) = (n(1), n(1) + n(3));
+            let notches = if bottom > f64::from(window.height) - 90.0 {
+                2
+            } else if top < 56.0 {
+                -2
+            } else {
+                return Ok(());
+            };
+            self.hp.pointer_move(
+                f64::from(window.x) + 600.0,
+                f64::from(window.y) + f64::from(window.height) / 2.0,
+            );
+            self.hp.wheel(notches);
+            let log = self.log.clone();
+            let key = id.to_owned();
+            let moved = self.hp.dispatch_until(Duration::from_secs(2), |_| {
+                common::last_json(&log, " places {").is_some_and(|p| p[&key] != place)
+            })?;
+            if !moved {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("{id} never came into view")
+    }
+
     /// The middle of `id` on the screen.
     fn at(&mut self, id: &str) -> anyhow::Result<(f64, f64)> {
+        if id.starts_with("control:") || id.starts_with("row:") || id == "restore" {
+            self.reveal(id)?;
+        }
         let places = self.places_with(id)?;
         let place = &places[id];
         let n = |i: usize| place[i].as_f64().unwrap_or_default();
@@ -275,7 +323,7 @@ impl Bed {
     fn power(&mut self) -> anyhow::Result<Value> {
         self.click("nav:power")?;
         let shown = self.shows(|s| {
-            s["page"] == "power" && s["rows"].as_array().is_some_and(|r| r.len() == 8)
+            s["page"] == "power" && s["rows"].as_array().is_some_and(|r| r.len() == 10)
         })?;
         self.places_with("control:power.suspend-after")?;
         Ok(shown)
@@ -387,19 +435,21 @@ fn searching_veille_finds_the_suspend_delay_the_lid_and_the_button() -> anyhow::
         names,
         [
             "Mettre en veille après",
+            "Verrouiller avant la mise en veille",
+            "Éteindre l’écran",
             "Couvercle fermé",
             "Bouton d’alimentation"
         ]
     );
     assert_eq!(shown["results"][0]["via"], Value::Null);
-    assert_eq!(shown["results"][1]["via"], "veille");
-    assert_eq!(shown["results"][2]["via"], "veille");
+    assert_eq!(shown["results"][3]["via"], "veille");
+    assert_eq!(shown["results"][4]["via"], "veille");
     // Enter opens the first: its page, its row lit.
     bed.hp.key(KEY_ENTER, true);
     bed.hp.key(KEY_ENTER, false);
     bed.shows(|s| s["page"] == "power" && s["lit"] == "power.suspend-after")?;
     // The list stays: the lid's is one click away.
-    bed.click("result:1")?;
+    bed.click("result:3")?;
     bed.shows(|s| s["page"] == "power" && s["lit"] == "power.lid" && s["query"] == "veille")?;
     // Esc empties the field and brings the sections back.
     bed.hp.key(KEY_ESC, true);
@@ -415,21 +465,21 @@ fn changing_the_delay_writes_idle_delay_at_once_keeping_the_rest() -> anyhow::Re
     };
     bed.open()?;
     let shown = bed.power()?;
-    // No battery here: the page shows the values on AC, the idle delay's.
+    // On AC here: the page shows the values on AC, the idle delay's.
     assert_eq!(shown["source"], "ac");
-    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "5 min");
+    assert_eq!(Bed::row(&shown, "power.idle")["value"], "5 min");
     // 15 min, the menu's fifth choice.
-    bed.choose("power.screen-off", 5)?;
+    bed.choose("power.idle", 5)?;
     let text = bed.written(|t| t.contains("delay = 900"))?;
     assert_eq!(text, FILE.replace("delay = 300 #", "delay = 900 #"));
     assert!(kept(FILE, &text, &["delay ="]));
     let shown = bed.shows(|s| s["toast"].as_str().is_some())?;
     assert_eq!(
         shown["toast"],
-        "Éteindre l’écran après, sur secteur : 15 min"
+        "Assombrir l’écran après, sur secteur : 15 min"
     );
     assert_eq!(shown["toast_action"], "undo");
-    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "15 min");
+    assert_eq!(Bed::row(&shown, "power.idle")["value"], "15 min");
     // A setting the file did not hold: its table made, the rest kept.
     bed.choose("power.lid", 1)?;
     let text = bed.written(|t| t.contains("lid = \"lock\""))?;
@@ -448,7 +498,7 @@ fn annuler_and_ctrl_z_take_the_value_back() -> anyhow::Result<()> {
     };
     bed.open()?;
     bed.power()?;
-    bed.choose("power.screen-off", 5)?;
+    bed.choose("power.idle", 5)?;
     bed.written(|t| t.contains("delay = 900"))?;
     bed.shows(|s| s["toast_action"] == "undo")?;
     // The toast's "Annuler": the file as it was.
@@ -457,16 +507,16 @@ fn annuler_and_ctrl_z_take_the_value_back() -> anyhow::Result<()> {
     let shown = bed.shows(|s| s["toast"].as_str().is_some_and(|t| t.starts_with("Annulé")))?;
     assert_eq!(
         shown["toast"],
-        "Annulé : Éteindre l’écran après, sur secteur revient à 5 min."
+        "Annulé : Assombrir l’écran après, sur secteur revient à 5 min."
     );
-    assert_eq!(shown["lit"], "power.screen-off");
+    assert_eq!(shown["lit"], "power.idle");
     // Ctrl+Z, the same.
-    bed.choose("power.screen-off", 4)?;
+    bed.choose("power.idle", 4)?;
     bed.written(|t| t.contains("delay = 600"))?;
     bed.shows(|s| s["undo"] == 1)?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
     bed.written(|t| t == FILE)?;
-    bed.shows(|s| Bed::row(s, "power.screen-off")["value"] == "5 min")?;
+    bed.shows(|s| Bed::row(s, "power.idle")["value"] == "5 min")?;
     // Ctrl+Shift+Z does it again.
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z]);
     bed.written(|t| t.contains("delay = 600"))?;
@@ -485,10 +535,10 @@ fn a_hand_edit_of_the_file_shows_in_the_window() -> anyhow::Result<()> {
     let beside = bed.dir.path().join("config/hocuspanda/.config.toml.swp");
     std::fs::write(&beside, &edited)?;
     std::fs::rename(&beside, bed.file())?;
-    let shown = bed.shows(|s| Bed::row(s, "power.screen-off")["value"] == "10 min")?;
+    let shown = bed.shows(|s| Bed::row(s, "power.idle")["value"] == "10 min")?;
     assert_eq!(shown["toast"], "config.toml a changé : relu.");
     assert_eq!(shown["toast_action"], "show");
-    assert_eq!(shown["lit"], "power.screen-off");
+    assert_eq!(shown["lit"], "power.idle");
     // Nothing written over it.
     assert_eq!(bed.text(), edited);
     Ok(())
@@ -524,7 +574,7 @@ fn an_unreadable_file_turns_it_read_only_and_the_last_readable_one_comes_back() 
     let rows = shown["rows"].as_array().cloned().unwrap_or_default();
     assert!(rows.iter().all(|r| r["inert"] == true), "{rows:?}");
     // It shows the last version that read, as the desktop keeps it.
-    assert_eq!(Bed::row(&shown, "power.screen-off")["value"], "5 min");
+    assert_eq!(Bed::row(&shown, "power.idle")["value"], "5 min");
     // Its controls do nothing.
     bed.click("control:power.lid")?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -865,7 +915,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     // Past the toast's rise.
     wait(&mut bed.hp, Duration::from_millis(300))?;
     shoot(&mut bed, "toast.png")?;
-    bed.choose("power.screen-off", 5)?;
+    bed.choose("power.idle", 5)?;
     bed.shows(|s| s["menu"].is_null())?;
     bed.click("control:power.lid")?;
     bed.shows(|s| s["menu"] == "power.lid")?;
