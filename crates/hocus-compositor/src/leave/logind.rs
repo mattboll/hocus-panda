@@ -42,6 +42,10 @@ pub enum Ask {
     Authorize(LeaveAction),
     /// The machine sleeps, restarts or powers off.
     Act(Act),
+    /// The machine sleeps without a dialog (6.10: the lid, the power
+    /// button, a while without activity); `unless_idle_held`, not while
+    /// logind lists a `block` inhibitor of `idle` (a video player's).
+    Sleep { unless_idle_held: bool },
 }
 
 /// What the machine does.
@@ -79,6 +83,8 @@ pub enum Said {
     Authorized(LeaveAction, bool),
     /// The call made, or why it was not.
     Acted(Act, Result<(), String>),
+    /// [`Ask::Sleep`] not made: logind's `idle` inhibitors hold it off.
+    SleepHeld(Vec<Inhibitor>),
 }
 
 /// The thread's end the loop keeps.
@@ -152,6 +158,12 @@ async fn run(bus: String, mut asked: UnboundedReceiver<Ask>, loop_: Sender<Said>
                 Some(Ask::Can) => send(&loop_, Said::Can(LeaveCan::default())),
                 Some(Ask::Authorize(action)) => send(&loop_, Said::Authorized(action, false)),
                 Some(Ask::Act(act)) => send(&loop_, Said::Acted(act, Err("no system bus".into()))),
+                Some(Ask::Sleep { .. }) => {
+                    send(
+                        &loop_,
+                        Said::Acted(Act::Suspend, Err("no system bus".into())),
+                    );
+                }
                 Some(Ask::Watch(_)) | None => {}
             }
             continue;
@@ -183,6 +195,22 @@ async fn run(bus: String, mut asked: UnboundedReceiver<Ask>, loop_: Sender<Said>
                     .map(|_| ())
                     .map_err(|e| e.to_string());
                 send(&loop_, Said::Acted(act, called));
+            }
+            Some(Ask::Sleep { unless_idle_held }) => {
+                if unless_idle_held {
+                    let held = holding_idle(listed(connection).await);
+                    if !held.is_empty() {
+                        send(&loop_, Said::SleepHeld(held));
+                        continue;
+                    }
+                }
+                tracing::info!("logind is asked to suspend");
+                let called = connection
+                    .call_method(Some(LOGIN), LOGIN_PATH, Some(MANAGER), "Suspend", &(false,))
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string());
+                send(&loop_, Said::Acted(Act::Suspend, called));
             }
         }
     }
@@ -219,6 +247,12 @@ async fn can(connection: &Connection) -> LeaveCan {
 /// logind's inhibitors in `block` mode holding `shutdown`: their `Who`,
 /// `Why` and process.
 async fn inhibitors(connection: &Connection) -> Vec<Inhibitor> {
+    holding(listed(connection).await)
+}
+
+/// Every inhibitor logind lists: (`what`, `who`, `why`, `mode`, `uid`,
+/// `pid`).
+async fn listed(connection: &Connection) -> Vec<(String, String, String, String, u32, u32)> {
     let reply = connection
         .call_method(
             Some(LOGIN),
@@ -233,7 +267,7 @@ async fn inhibitors(connection: &Connection) -> Vec<Inhibitor> {
             .deserialize::<Vec<(String, String, String, String, u32, u32)>>()
     });
     match listed {
-        Ok(listed) => holding(listed),
+        Ok(listed) => listed,
         Err(err) => {
             tracing::debug!(%err, "logind's inhibitors not read");
             Vec::new()
@@ -250,6 +284,16 @@ fn holding(listed: Vec<(String, String, String, String, u32, u32)>) -> Vec<Inhib
         .filter(|(what, _, _, mode, _, _)| {
             mode == "block" && what.split(':').any(|w| w == "shutdown")
         })
+        .map(|(_, who, why, _, _, pid)| Inhibitor { who, why, pid })
+        .collect()
+}
+
+/// Of `listed`, those that hold the session's idleness off: `block`,
+/// `idle` among what they hold.
+fn holding_idle(listed: Vec<(String, String, String, String, u32, u32)>) -> Vec<Inhibitor> {
+    listed
+        .into_iter()
+        .filter(|(what, _, _, mode, _, _)| mode == "block" && what.split(':').any(|w| w == "idle"))
         .map(|(_, who, why, _, _, pid)| Inhibitor { who, why, pid })
         .collect()
 }

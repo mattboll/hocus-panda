@@ -111,10 +111,12 @@ The mockup's page, its rows and choices. The keys:
   so the AC side writes `[idle] delay` and the battery side
   `[power.battery] screen-off`; the compositor takes the one of the power
   source UPower says (7.2). "Verrouiller la session" is `[power.*]
-  lock-after`, which the compositor reads too: "Aussitôt" (`"0s"`) locks
-  as the curtain ends, a delay that long after the screens went off,
-  "Jamais" never. The other keys are the mockup's proposal for 6.10:
-  nothing reads them yet. The compositor reads them as it starts.
+  lock-after`. 6.10 (#410) replaces these rows: the compositor now reads
+  `[power.battery] idle`, `[power.*] screen-off-after`, `suspend-after`,
+  `[power] lock-on-idle`, `lock-before-sleep` and the rest of `[power]`,
+  live, and still reads this page's `screen-off` (as `idle`) and
+  `lock-after` (as `lock-on-idle`) for the files it wrote
+  (docs/design/idle.md, "The Settings' keys").
 - The delays of `[power.*]` are written `"0s"`, `"5m"`, `"1h"`, `"never"`.
 - The segmented control starts on the power source in use (the kernel's
   supplies, `/sys/class/power_supply`; `HOCUS_POWER_SUPPLY_DIR` in tests),
@@ -995,8 +997,7 @@ rows are dropped, the group is "ALT+TAB"); a desktop removed while it has
 windows gives them to the one before it; Super chosen to move turns the
 ink off; every key is followed live (windows.md §5, §6, §9, §11, §12,
 ink.md). Section `desktops` (`hocus settings desktops`), TRAVAIL's first
-row. The rules per application ("RÈGLES PAR APPLICATION") come with their
-own pull request.
+row.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
@@ -1059,17 +1060,40 @@ own pull request.
   jumps), settling with an overshoot in about 400 ms; none without it or
   with reduced motion, where the zone is taken at once. Nothing in it is
   written.
+- **RÈGLES PAR APPLICATION**: a row per rule (`[[windows.rules]]`, in
+  the file's order): a 28 px tile (the application's initial on a colour
+  of its id), its name (its desktop entry's, else its id), what it does
+  ("Toujours sur « Courrier » · s'ouvre maximisée · au-dessus des
+  autres"; nothing set: "Aucune règle encore : elle s'ouvre comme les
+  autres."), "Modifier" ("Replier" open) and a ✕. Open, three rows 58 px
+  in: "Bureau" (menu: "Celui où tu l'ouvres", "1 · Travail", "2 ·
+  Courrier"…), "En s'ouvrant" (menu: Sa dernière taille, Maximisée,
+  Moitié gauche, Moitié droite, Plein écran) and "Au-dessus des autres"
+  (switch). Last, "Une autre application" with "+ Ajouter une règle": the
+  applications installed without a rule (the XDG data directories'
+  desktop entries, read on a thread as the program starts; their
+  windows' id is `StartupWMClass`, else the entry's id), those with a
+  window open first (asked of the compositor on the screens' line,
+  `windows-apps`; one open without an entry by its id). Picking one adds
+  its rule with only `app-id`, open. Each change writes the rules whole,
+  as an array of tables ("Règle ajoutée : Musique", "Règle de Courrier :
+  …", "Règle de Courrier retirée", each with "Annuler"). A desktop taken
+  out moves the rules naming it to the one that took its windows, the
+  later ones down one, in the same write.
 - **The search** finds the rows by their names, the spec's words in both
   languages (espaces de travail, aimant, moitié, quart, ondule, encre,
   laser; workspaces, magnet, snap, tiling, wobbly, ink) and their keys
   (`count`, `names`, `move-modifier`, `snap-by-drag`, `wobble`,
-  `alt-tab`); "Raccourcis du bureau" is Clavier et raccourcis' own row.
+  `alt-tab`, `app-id`); "Règles par application" lights the rules' last
+  row; "Raccourcis du bureau" is Clavier et raccourcis' own row.
 - **Choices made here (to confirm on the machine)**: the toast of a name
   says "Nom du bureau N : …"; the ink's line in amber like the wobble's;
   the stepper's − and + are text glyphs; a chip with its field open grows
   and the chips after it wrap; the trial's zones use the compositor's
   thresholds (24 px edges, 48 px corners) rather than the mockup's smaller
-  ones, and its preview shows at once, without the desktop's 80 ms wait.
+  ones, and its preview shows at once, without the desktop's 80 ms wait;
+  a rule's tile is the application's initial, not its icon; the rules'
+  menus take the pointer, `Esc` closes them (no arrow keys in them).
 
 ## Saving
 
@@ -1259,9 +1283,9 @@ file.
 
 ## Not built here
 
-- What the desktop does with the rest of `[power]` (6.10). The
-  compositor follows the file live for `[pointer]` and `[touchpad]`
-  (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
+- The Énergie page as 6.10 draws it (the compositor acts on `[power]`
+  already, docs/design/idle.md). The compositor follows the file live for `[pointer]` and `[touchpad]`
+  (6.12), `[idle]` and `[power]` (6.10), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.

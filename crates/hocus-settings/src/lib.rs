@@ -26,6 +26,7 @@
 pub mod activate;
 pub mod app;
 pub mod appearance;
+pub mod apps;
 pub mod bar;
 pub mod desktops;
 pub mod devices;

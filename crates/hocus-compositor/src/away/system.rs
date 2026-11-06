@@ -1,15 +1,22 @@
 //! The system bus, on a thread of its own with its runtime, never on the
-//! loop: logind's sleep inhibitor and its `PrepareForSleep`, and UPower's
-//! `OnBattery` (7.2).
+//! loop: logind's sleep inhibitor and its `PrepareForSleep`, its lid and
+//! power button, UPower's `OnBattery` (7.2) and battery level, and
+//! power-profiles-daemon's profile (6.10).
 //!
 //! - **logind**: a `delay` inhibitor for `sleep` (`Inhibit`), taken as the
 //!   thread starts and again each time the loop asks (after a sleep): its
 //!   file descriptor goes to the loop, which closes it once the lock shows.
 //!   `PrepareForSleep(true)` and `(false)` go to the loop as they come;
 //!   the signal is listened to before the inhibitor is asked for, so that
-//!   none is missed.
-//! - **UPower**: `OnBattery`, read as the thread starts and again when its
-//!   properties change or UPower comes back.
+//!   none is missed. A `block` inhibitor of `handle-lid-switch` and
+//!   `handle-power-key`, taken once and held for the session: logind
+//!   leaves the lid and the button to the compositor (`[power] lid`,
+//!   `power-button`); refused, logind keeps its own handling.
+//! - **UPower**: `OnBattery`, and its display device's level when a
+//!   battery is there; **power-profiles-daemon**: `ActiveProfile`, set as
+//!   the loop asks (the automatic power saver). Read as the thread starts
+//!   and again when their properties change or either comes back; only
+//!   what changed goes to the loop.
 //!
 //! The bus is the system's on a virtual terminal, or the one given
 //! (`--system-bus`): nested or headless without one, none is read, so that
@@ -26,6 +33,10 @@ const LOGIN_PATH: &str = "/org/freedesktop/login1";
 const MANAGER: &str = "org.freedesktop.login1.Manager";
 const UPOWER: &str = "org.freedesktop.UPower";
 const UPOWER_PATH: &str = "/org/freedesktop/UPower";
+const DISPLAY_DEVICE: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
+const DEVICE: &str = "org.freedesktop.UPower.Device";
+const PROFILES: &str = "org.freedesktop.UPower.PowerProfiles";
+const PROFILES_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 
 /// Which system bus.
@@ -46,13 +57,22 @@ pub enum FromSystem {
     PrepareForSleep(bool),
     /// UPower: on battery, or on AC.
     OnBattery(bool),
+    /// logind's `block` inhibitor of the lid and the power button, held
+    /// for the session: the compositor handles them.
+    Handles(OwnedFd),
+    /// UPower's battery level, in percent; `None`: no battery.
+    Level(Option<f64>),
+    /// power-profiles-daemon's profile; `None`: no power-profiles-daemon.
+    Profile(Option<String>),
 }
 
 /// What the loop asks of the thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToSystem {
     /// A new inhibitor, the last one closed for a sleep.
     Inhibit,
+    /// power-profiles-daemon's profile set so.
+    Profile(String),
 }
 
 pub fn start(bus: Bus, to_loop: Sender<FromSystem>, asks: UnboundedReceiver<ToSystem>) {
@@ -93,10 +113,58 @@ async fn run(bus: Bus, to_loop: Sender<FromSystem>, mut asks: UnboundedReceiver<
     };
     tokio::spawn(sleeps(connection.clone(), to_loop.clone()));
     tokio::spawn(power(connection.clone(), to_loop.clone()));
+    handles(&connection, &to_loop).await;
     // The first inhibitor once the signal is listened to: `sleeps` takes
     // it as it starts; each one after, as the loop asks.
-    while let Some(ToSystem::Inhibit) = asks.recv().await {
-        inhibit(&connection, &to_loop).await;
+    while let Some(ask) = asks.recv().await {
+        match ask {
+            ToSystem::Inhibit => inhibit(&connection, &to_loop).await,
+            ToSystem::Profile(profile) => set_profile(&connection, &profile).await,
+        }
+    }
+}
+
+/// logind's `block` inhibitor of the lid and the power button, to the
+/// loop; refused, logind handles them itself.
+async fn handles(connection: &Connection, to_loop: &Sender<FromSystem>) {
+    let reply = connection
+        .call_method(
+            Some(LOGIN),
+            LOGIN_PATH,
+            Some(MANAGER),
+            "Inhibit",
+            &(
+                "handle-lid-switch:handle-power-key",
+                "Hocuspanda",
+                "The desktop does what its settings say of the lid and the power button",
+                "block",
+            ),
+        )
+        .await;
+    match reply.and_then(|r| r.body().deserialize::<zbus::OwnedFd>()) {
+        Ok(fd) => {
+            let _ = to_loop.send(FromSystem::Handles(OwnedFd::from(fd)));
+        }
+        Err(err) => {
+            tracing::warn!(%err, "logind keeps the lid and the power button: the system decides");
+        }
+    }
+}
+
+/// power-profiles-daemon's profile set to `profile`.
+async fn set_profile(connection: &Connection, profile: &str) {
+    let set = connection
+        .call_method(
+            Some(PROFILES),
+            PROFILES_PATH,
+            Some(PROPERTIES),
+            "Set",
+            &(PROFILES, "ActiveProfile", zbus::Variant::from(profile)),
+        )
+        .await;
+    match set {
+        Ok(_) => tracing::info!(profile, "the power profile set"),
+        Err(err) => tracing::warn!(%err, profile, "power-profiles-daemon did not take the profile"),
     }
 }
 
@@ -160,11 +228,14 @@ async fn inhibit(connection: &Connection, to_loop: &Sender<FromSystem>) {
     }
 }
 
-/// UPower's `OnBattery`, to the loop as it changes.
+/// UPower's `OnBattery` and level, power-profiles-daemon's profile, to
+/// the loop as they change.
 async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
+    // UPower's root, its display device and power-profiles-daemon's
+    // object are all under UPower's path.
     let rule = MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
-        .path(UPOWER_PATH)
+        .path_namespace(UPOWER_PATH)
         .interface(PROPERTIES)
         .member("PropertiesChanged")
         .build();
@@ -172,23 +243,26 @@ async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
         Ok(rule) => MessageStream::for_match_rule(rule, &connection, None).await,
         Err(err) => Err(err),
     };
-    // UPower coming back (it is started on demand, or restarted).
-    let owners = match zbus::fdo::DBusProxy::new(&connection).await {
-        Ok(proxy) => {
+    // UPower or power-profiles-daemon coming back (started on demand, or
+    // restarted).
+    let owners = |name: &'static str| {
+        let connection = connection.clone();
+        async move {
+            let proxy = zbus::fdo::DBusProxy::new(&connection).await?;
             proxy
-                .receive_name_owner_changed_with_args(&[(0, UPOWER)])
+                .receive_name_owner_changed_with_args(&[(0, name)])
                 .await
         }
-        Err(err) => Err(err),
     };
-    let (changes, owners) = match (changes, owners) {
-        (Ok(changes), Ok(owners)) => (changes, owners),
-        (Err(err), _) | (_, Err(err)) => {
+    let (changes, owners, profiles) = match (changes, owners(UPOWER).await, owners(PROFILES).await)
+    {
+        (Ok(changes), Ok(owners), Ok(profiles)) => (changes, owners, profiles),
+        (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
             tracing::warn!(%err, "cannot follow UPower: on AC as far as idle goes");
             return;
         }
     };
-    let mut said = None;
+    let mut said = Said::default();
     read_power(&connection, &to_loop, &mut said).await;
     // Both streams into one: whichever says something, read again.
     let (wake, mut woken) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -201,9 +275,18 @@ async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
             }
         }
     });
+    let on_owner = wake.clone();
     tokio::spawn(async move {
         let mut owners = std::pin::pin!(owners);
         while next(&mut owners).await.is_some() {
+            if on_owner.send(()).is_err() {
+                return;
+            }
+        }
+    });
+    tokio::spawn(async move {
+        let mut profiles = std::pin::pin!(profiles);
+        while next(&mut profiles).await.is_some() {
             if wake.send(()).is_err() {
                 return;
             }
@@ -215,28 +298,69 @@ async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
     }
 }
 
-async fn read_power(
+/// What the loop was told last: only changes go.
+#[derive(Debug, Default)]
+struct Said {
+    battery: Option<bool>,
+    level: Option<Option<f64>>,
+    profile: Option<Option<String>>,
+}
+
+/// One property, if its service answers.
+async fn property(
     connection: &Connection,
-    to_loop: &Sender<FromSystem>,
-    said: &mut Option<bool>,
-) {
+    (name, path, interface): (&str, &str, &str),
+    property: &str,
+) -> Option<OwnedVariant> {
     let reply = connection
         .call_method(
-            Some(UPOWER),
-            UPOWER_PATH,
+            Some(name),
+            path,
             Some(PROPERTIES),
             "Get",
-            &(UPOWER, "OnBattery"),
+            &(interface, property),
         )
-        .await;
-    let battery = reply
-        .ok()
-        .and_then(|r| r.body().deserialize::<OwnedVariant>().ok())
+        .await
+        .ok()?;
+    reply.body().deserialize::<OwnedVariant>().ok()
+}
+
+async fn read_power(connection: &Connection, to_loop: &Sender<FromSystem>, said: &mut Said) {
+    let root = (UPOWER, UPOWER_PATH, UPOWER);
+    let battery = property(connection, root, "OnBattery")
+        .await
         .and_then(|v| v.downcast_ref::<bool>().ok());
     // UPower away: on AC, as far as idle goes.
     let battery = battery.unwrap_or(false);
-    if *said != Some(battery) {
-        *said = Some(battery);
+    if said.battery != Some(battery) {
+        said.battery = Some(battery);
         let _ = to_loop.send(FromSystem::OnBattery(battery));
+    }
+    let device = (UPOWER, DISPLAY_DEVICE, DEVICE);
+    let present = property(connection, device, "IsPresent")
+        .await
+        .and_then(|v| v.downcast_ref::<bool>().ok())
+        .unwrap_or(false);
+    let level = if present {
+        property(connection, device, "Percentage")
+            .await
+            .and_then(|v| v.downcast_ref::<f64>().ok())
+    } else {
+        None
+    };
+    if said.level != Some(level) {
+        said.level = Some(level);
+        let _ = to_loop.send(FromSystem::Level(level));
+    }
+    let profile = property(
+        connection,
+        (PROFILES, PROFILES_PATH, PROFILES),
+        "ActiveProfile",
+    )
+    .await
+    .and_then(|v| String::try_from(v).ok());
+    if said.profile.as_ref() != Some(&profile) {
+        said.profile = Some(profile.clone());
+        let _ = to_loop.send(FromSystem::Profile(profile));
     }
 }

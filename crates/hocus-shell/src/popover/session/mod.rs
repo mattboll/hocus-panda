@@ -132,6 +132,14 @@ pub fn set_shown(shown: Option<LeaveShown>) {
     super::changed(Item::User);
 }
 
+/// The power button asks what to do (6.10): the menu opens on `output`'s
+/// bar, as a click on the footer's user opens it.
+pub fn open(output: &str) {
+    let effects = super::with(|c| c.open_session(output, Instant::now()));
+    super::send(effects);
+    super::changed(Item::User);
+}
+
 /// The popover opens: what logind allows is read again.
 pub(super) fn opening() {
     super::tell(ToCompositor::Leave(LeaveAsk::Open));
