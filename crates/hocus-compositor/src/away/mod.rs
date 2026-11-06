@@ -1,26 +1,30 @@
 //! Locking on idle and before sleep (7.2, docs/design/idle.md and
-//! docs/design/lock.md): the curtain, then the lock, then the screens off.
+//! docs/design/lock.md): the curtain, then the lock, then the screens off,
+//! with the Énergie page's delays (6.10, `[power]`).
 //!
 //! - **The curtain.** When the session is idle ([`crate::idle`]'s
 //!   `Idle::Reached`, its delay the power source's: `[idle] delay` on AC,
-//!   `[power.battery] screen-off` on battery), every screen dims over
+//!   `[power.battery] idle` on battery), every screen dims over
 //!   [`hocus_link::CURTAIN`]; on the screen under the pointer the shell's
 //!   pill says the session is about to lock. Any input lifts it, and is
 //!   swallowed: a move, a click or a key that lifts it does nothing else.
 //! - **The lock** comes as the curtain ends, fading in over its last look
-//!   (`[power.*] lock-after = "0s"`, the default). With a delay there, the
-//!   screens go off as the curtain ends, and the session locks that long
-//!   after; with `"never"`, the screens only go off.
-//! - **The screens off**, [`SCREEN_OFF_LOCKED`] after the lock (or the
-//!   last input while locked): DPMS through the DRM backend; black and
-//!   drawing nothing headless. Input turns them on again, still locked.
-//!   The lid closed turns the laptop's own screens off; it never locks:
-//!   logind sleeps, or not (docked, `HandleLidSwitchDocked`), and the lock
-//!   before sleep is what locks then.
+//!   (`[power] lock-on-idle`, on by default). Off, the curtain has no pill
+//!   and stays dimmed once it ended, until the screens go off, unlocked.
+//! - **The screens off**, the source's `screen-off-after` after the lock
+//!   (30 s on AC, 10 s on battery; or after the curtain ended, locking
+//!   off); after an input while locked, that long again but
+//!   [`SCREEN_OFF_AFTER_INPUT`] at least: DPMS through the DRM backend;
+//!   black and drawing nothing headless. Input turns them on again, still
+//!   locked.
 //! - **Before sleep** ([`system`]): logind's delay inhibitor held for the
 //!   whole session; at `PrepareForSleep(true)` the lock is up at once,
 //!   without its fade, and the inhibitor goes once every screen that is on
-//!   presented a frame of it, or after [`SLEEP_WAIT`] at most.
+//!   presented a frame of it, or after [`SLEEP_WAIT`] at most. With
+//!   `[power] lock-before-sleep = false` the inhibitor goes at once,
+//!   unlocked.
+//! - **The lid, the power button, sleeping after a while, the power
+//!   saver** ([`power`], 6.10).
 //!
 //! One timer, on the motions' clock (`State::now`), armed for the nearest
 //! deadline: the curtain's end, the lock after the screens went off, the
@@ -29,6 +33,7 @@
 //! idle countdown's). At rest nothing is armed but that.
 
 pub mod draw;
+pub mod power;
 pub mod system;
 
 use std::{collections::HashSet, os::fd::OwnedFd, time::Duration};
@@ -48,9 +53,10 @@ use smithay::{
 
 use crate::{State, decoration::FrameIds};
 
-/// The screens go off this long after the lock, or after the last input
-/// while locked.
-pub const SCREEN_OFF_LOCKED: Duration = Duration::from_secs(30);
+/// After an input while locked, the screens go off the source's
+/// `screen-off-after` later, but never sooner than this: a password is
+/// typed with the screen on.
+pub const SCREEN_OFF_AFTER_INPUT: Duration = Duration::from_secs(10);
 /// The machine sleeps once the lock shows, or after this at most.
 pub const SLEEP_WAIT: Duration = Duration::from_secs(2);
 /// The pointer moving less than this, all told since the last input that
@@ -63,17 +69,16 @@ enum Phase {
     /// The user is here, or idle has not come, or the session is locked.
     Here,
     /// The curtain dims since `since`; as it ends, the session locks
-    /// (`locks`) or the screens go off. The pill on screen `output`, from
-    /// its first frame (`pill_at`).
+    /// (`locks`); else it stays dimmed until the screens go off. The pill
+    /// on screen `output`, from its first frame (`pill_at`).
     Curtain {
         since: Duration,
         locks: bool,
         output: String,
         pill_at: Option<Duration>,
     },
-    /// The screens off, unlocked (a lock delay, or none); the session
-    /// locks at `lock_at`.
-    Dark { lock_at: Option<Duration> },
+    /// The screens off, unlocked (locking off).
+    Dark,
 }
 
 /// The curtain lifted, fading out.
@@ -166,8 +171,12 @@ pub struct Away {
     pub(crate) under_lock: Option<Ended>,
     /// Every screen off (idle).
     screens_off: bool,
-    /// The lid closed: the laptop's own screens off.
+    /// The lid closed.
     lid_closed: bool,
+    /// The laptop's own screens off for the lid.
+    lid_dark: bool,
+    /// The lid's and the power button's, the power saver's.
+    pub(crate) power: power::Power,
     /// On battery, as UPower says (on AC until it says).
     battery: bool,
     /// The pointer's motion since the last input that counted.
@@ -191,6 +200,8 @@ impl Default for Away {
             under_lock: None,
             screens_off: false,
             lid_closed: false,
+            lid_dark: false,
+            power: power::Power::default(),
             battery: false,
             drift: Point::default(),
             swallowed: HashSet::new(),
@@ -219,6 +230,7 @@ impl State {
     /// As the loop starts: the system bus read on its thread, if there is
     /// one (logind's sleeps, UPower's power source).
     pub fn start_away(&mut self, bus: Option<system::Bus>) {
+        self.power_log_old_keys();
         let Some(bus) = bus else {
             tracing::info!("no system bus: no lock before sleep, on AC as far as idle goes");
             return;
@@ -243,6 +255,9 @@ impl State {
             system::FromSystem::Inhibitor(fd) => self.away_inhibitor(fd),
             system::FromSystem::PrepareForSleep(sleeping) => self.prepare_for_sleep(sleeping),
             system::FromSystem::OnBattery(battery) => self.away_on_battery(battery),
+            system::FromSystem::Handles(fd) => self.power_handles(fd),
+            system::FromSystem::Level(level) => self.power_level(level),
+            system::FromSystem::Profile(profile) => self.power_profile(profile),
         }
     }
 
@@ -253,7 +268,7 @@ impl State {
         match self.away.phase {
             Phase::Here => Shown::Here,
             Phase::Curtain { locks, .. } => Shown::Curtain { locks },
-            Phase::Dark { .. } => Shown::Dark,
+            Phase::Dark => Shown::Dark,
         }
     }
 
@@ -261,7 +276,7 @@ impl State {
     /// the lid closed over it.
     pub fn output_powered(&self, output: &Output) -> bool {
         !(self.away.screens_off
-            || (self.away.lid_closed && is_internal(output))
+            || (self.away.lid_dark && is_internal(output))
             || self.display_off(output))
     }
 
@@ -333,13 +348,14 @@ impl State {
             format!("off {}", off.join(" "))
         };
         format!(
-            "away {away}\nscreens {screens}\npower {}\nsleep-inhibitor {}\n",
+            "away {away}\nscreens {screens}\npower {}\nsleep-inhibitor {}\n{}",
             if self.away.battery { "battery" } else { "ac" },
             if self.sleep_inhibited() {
                 "held"
             } else {
                 "none"
             },
+            self.power_said(),
         )
     }
 
@@ -352,7 +368,7 @@ impl State {
             return;
         }
         let now = self.now();
-        let locks = self.config.lock_after(self.away.battery) == Some(Duration::ZERO);
+        let locks = self.config.power.lock_on_idle;
         let output = self
             .output_under_pointer()
             .map(|o| o.name())
@@ -509,7 +525,7 @@ impl State {
     /// unlocked. Locked, it goes to the lock (its field).
     fn away_swallows(&self) -> bool {
         !self.locked()
-            && (matches!(self.away.phase, Phase::Curtain { .. } | Phase::Dark { .. })
+            && (matches!(self.away.phase, Phase::Curtain { .. } | Phase::Dark)
                 || self.away.screens_off)
     }
 
@@ -521,7 +537,7 @@ impl State {
                 self.lifted_gone();
                 self.curtain_down(true);
             }
-            Phase::Dark { .. } => self.away.phase = Phase::Here,
+            Phase::Dark => self.away.phase = Phase::Here,
             Phase::Here => {}
         }
         if self.away.screens_off {
@@ -533,38 +549,32 @@ impl State {
         self.away_arm();
     }
 
-    /// The lid closed or opened: the laptop's own screens off or on;
-    /// opened, the user is there.
-    pub fn lid(&mut self, closed: bool) {
-        if self.away.lid_closed == closed {
-            return;
-        }
-        tracing::info!(closed, "the lid");
-        self.away.lid_closed = closed;
-        self.displays.dirty = true;
-        self.redraw = true;
-        if !closed {
-            self.felt(Felt::Other);
+    /// The laptop's own screens off for the lid, or on again.
+    pub(crate) fn set_lid_dark(&mut self, dark: bool) {
+        if self.away.lid_dark != dark {
+            self.away.lid_dark = dark;
+            self.displays.dirty = true;
+            self.redraw = true;
         }
     }
 
-    /// UPower says the machine is on battery, or on AC: the idle delay is
-    /// that source's.
+    /// UPower says the machine is on battery, or on AC: the delays are
+    /// that source's, each countdown keeping the time already spent.
     pub(crate) fn away_on_battery(&mut self, battery: bool) {
         if self.away.battery == battery {
             return;
         }
         tracing::info!(battery, "the power source");
         self.away.battery = battery;
-        let delay = self.config.idle_delay(battery);
-        self.idle_set_delay(delay);
+        self.power_delays_changed();
+        self.power_saver_check();
     }
 
     // --- The lock -----------------------------------------------------------------
 
     /// The session locked (by anything): its screens go off in a while.
     pub(crate) fn away_locked(&mut self) {
-        if let Phase::Curtain { .. } | Phase::Dark { .. } = self.away.phase
+        if let Phase::Curtain { .. } | Phase::Dark = self.away.phase
             && self.away.under_lock.is_none()
         {
             self.curtain_down(false);
@@ -584,7 +594,15 @@ impl State {
 
     /// logind says the machine is about to sleep (`true`), or woke up.
     pub(crate) fn prepare_for_sleep(&mut self, sleeping: bool) {
-        if sleeping {
+        if sleeping && !self.config.power.lock_before_sleep {
+            tracing::info!("the machine is about to sleep, unlocked (lock-before-sleep off)");
+            self.away.sleep.until = None;
+            if self.away.sleep.inhibitor.is_some() {
+                self.away.counts.slept += 1;
+                // Closing it is what lets logind go on.
+                drop(self.away.sleep.inhibitor.take());
+            }
+        } else if sleeping {
             tracing::info!("the machine is about to sleep: the session locks");
             self.curtain_down(false);
             self.away.phase = Phase::Here;
@@ -645,19 +663,44 @@ impl State {
 
     // --- The timer -----------------------------------------------------------------
 
+    /// When the curtain ends: as it has dimmed when it locks, else once
+    /// the screens' delay after that is over too (`None`: never).
+    fn curtain_end(&self, since: Duration, locks: bool) -> Option<Duration> {
+        if locks {
+            return Some(since + CURTAIN);
+        }
+        let after = self.config.screen_off_after(self.away.battery)?;
+        Some(since + CURTAIN + after)
+    }
+
+    /// When the screens go off while locked: the source's delay after the
+    /// lock, or after the last input since (never sooner than
+    /// [`SCREEN_OFF_AFTER_INPUT`] then).
+    fn screens_off_at(&self) -> Option<Duration> {
+        if self.away.screens_off {
+            return None;
+        }
+        let since = self.lock_since()?;
+        let after = self.config.screen_off_after(self.away.battery)?;
+        let input = self.idle_input_at();
+        Some(if input > since {
+            input + after.max(SCREEN_OFF_AFTER_INPUT)
+        } else {
+            since + after
+        })
+    }
+
     /// The nearest deadline.
     fn away_next(&self) -> Option<Duration> {
         let mut next: Option<Duration> = None;
         let mut take = |at: Duration| next = Some(next.map_or(at, |n| n.min(at)));
-        match self.away.phase {
-            Phase::Curtain { since, .. } => take(since + CURTAIN),
-            Phase::Dark { lock_at: Some(at) } => take(at),
-            _ => {}
-        }
-        if !self.away.screens_off
-            && let Some(since) = self.lock_since()
+        if let Phase::Curtain { since, locks, .. } = self.away.phase
+            && let Some(end) = self.curtain_end(since, locks)
         {
-            take(since.max(self.idle_input_at()) + SCREEN_OFF_LOCKED);
+            take(end);
+        }
+        if let Some(at) = self.screens_off_at() {
+            take(at);
         }
         if let Some(until) = self.away.sleep.until {
             take(until);
@@ -674,7 +717,7 @@ impl State {
             ref output,
             ..
         } = self.away.phase
-            && now >= since + CURTAIN
+            && self.curtain_end(since, locks).is_some_and(|end| now >= end)
         {
             if locks {
                 tracing::info!("the curtain ends: the session locks");
@@ -684,27 +727,14 @@ impl State {
                 self.curtain_down(false);
                 self.lock_now();
             } else {
-                let after = self.config.lock_after(self.away.battery);
-                tracing::info!(lock_after = ?after, "the curtain ends: the screens go off");
+                tracing::info!("the dim is over: the screens go off, unlocked (lock-on-idle off)");
                 self.curtain_down(false);
-                self.away.phase = Phase::Dark {
-                    lock_at: after.map(|d| now + d),
-                };
+                self.away.phase = Phase::Dark;
                 self.away.screens_off = true;
             }
             self.redraw = true;
         }
-        if let Phase::Dark { lock_at: Some(at) } = self.away.phase
-            && now >= at
-        {
-            tracing::info!("the screens have been off for the lock's delay: the session locks");
-            self.away.phase = Phase::Here;
-            self.lock_at_once();
-        }
-        if !self.away.screens_off
-            && let Some(since) = self.lock_since()
-            && now >= since.max(self.idle_input_at()) + SCREEN_OFF_LOCKED
-        {
+        if self.screens_off_at().is_some_and(|at| now >= at) {
             tracing::info!("locked without input: the screens go off");
             self.away.screens_off = true;
             self.redraw = true;
@@ -725,7 +755,7 @@ impl State {
     /// The timer for the nearest deadline: kept when it fires first (it
     /// sets itself again then), replaced when the deadline is earlier,
     /// removed when there is none.
-    fn away_arm(&mut self) {
+    pub(crate) fn away_arm(&mut self) {
         let next = self.away_next();
         match (self.away.timer.as_ref().map(|(at, _)| *at), next) {
             (Some(at), Some(next)) if at <= next => return,

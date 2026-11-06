@@ -111,10 +111,12 @@ The mockup's page, its rows and choices. The keys:
   so the AC side writes `[idle] delay` and the battery side
   `[power.battery] screen-off`; the compositor takes the one of the power
   source UPower says (7.2). "Verrouiller la session" is `[power.*]
-  lock-after`, which the compositor reads too: "Aussitôt" (`"0s"`) locks
-  as the curtain ends, a delay that long after the screens went off,
-  "Jamais" never. The other keys are the mockup's proposal for 6.10:
-  nothing reads them yet. The compositor reads them as it starts.
+  lock-after`. 6.10 (#410) replaces these rows: the compositor now reads
+  `[power.battery] idle`, `[power.*] screen-off-after`, `suspend-after`,
+  `[power] lock-on-idle`, `lock-before-sleep` and the rest of `[power]`,
+  live, and still reads this page's `screen-off` (as `idle`) and
+  `lock-after` (as `lock-on-idle`) for the files it wrote
+  (docs/design/idle.md, "The Settings' keys").
 - The delays of `[power.*]` are written `"0s"`, `"5m"`, `"1h"`, `"never"`.
 - The segmented control starts on the power source in use (the kernel's
   supplies, `/sys/class/power_supply`; `HOCUS_POWER_SUPPLY_DIR` in tests),
@@ -1192,9 +1194,9 @@ file.
 
 ## Not built here
 
-- What the desktop does with the rest of `[power]` (6.10). The
-  compositor follows the file live for `[pointer]` and `[touchpad]`
-  (6.12), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
+- The Énergie page as 6.10 draws it (the compositor acts on `[power]`
+  already, docs/design/idle.md). The compositor follows the file live for `[pointer]` and `[touchpad]`
+  (6.12), `[idle]` and `[power]` (6.10), `[outputs]` and `[panel] output` (6.9), `[keyboard]` and
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.

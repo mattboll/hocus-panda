@@ -22,8 +22,8 @@ use std::{
 use anyhow::Context;
 use common::{BTN_LEFT, Command, Event, Pointed, Shows, WAIT, chord, open_showing, open_with};
 use hocus_compositor::{
-    Authenticator, Config, Headless, HeadlessConfig, LockState, OutputSpec, PowerDelay,
-    RendererChoice, away::Shown, idle::Phase,
+    Authenticator, Config, Headless, HeadlessConfig, LockState, OutputSpec, RendererChoice,
+    away::Shown, idle::Phase,
 };
 
 /// Five minutes on AC, three on battery; the curtain's 10 s; the screens
@@ -228,39 +228,6 @@ fn what_lifts_the_curtain_is_swallowed() -> anyhow::Result<()> {
 }
 
 // --- The delays ----------------------------------------------------------------------
-
-/// `[power.ac] lock-after`: with a delay, the screens go off as the curtain
-/// ends and the session locks that long after; with `"never"`, the screens
-/// only go off. Input while they are off turns them on, unlocked, and
-/// goes no further.
-#[test]
-fn a_lock_delay_turns_the_screens_off_first() -> anyhow::Result<()> {
-    let mut later = config();
-    later.power.ac.lock_after = Some(PowerDelay::After(Duration::from_secs(60)));
-    let mut hp = start(later)?;
-    pass(&mut hp, AC)?;
-    assert_eq!(hp.away(), Shown::Curtain { locks: false });
-    pass(&mut hp, CURTAIN)?;
-    assert_eq!(hp.away(), Shown::Dark);
-    assert!(hp.screens_on().is_empty());
-    assert_eq!(hp.lock_state(), LockState::Unlocked);
-    pass(&mut hp, Duration::from_secs(60))?;
-    assert_eq!(hp.lock_state(), LockState::Locked);
-    assert!(hp.screens_on().is_empty());
-    drop(hp);
-
-    let mut never = config();
-    never.power.ac.lock_after = Some(PowerDelay::Never);
-    let mut hp = start(never)?;
-    pass(&mut hp, AC + CURTAIN)?;
-    assert_eq!(hp.away(), Shown::Dark);
-    pass(&mut hp, Duration::from_secs(3600))?;
-    assert_eq!(hp.lock_state(), LockState::Unlocked);
-    hp.pointer_move(600.0, 600.0);
-    assert_eq!(hp.away(), Shown::Here);
-    assert_eq!(hp.screens_on(), ["HEADLESS-1"]);
-    Ok(())
-}
 
 /// On battery (UPower's `OnBattery`), the battery's delay; back on AC,
 /// AC's.
