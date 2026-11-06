@@ -16,7 +16,9 @@ results.
 
 - `Super+Space` (`[shortcuts] launcher`) opens it on the screen under the
   pointer, and closes it again. `Escape` closes it, and so does a click
-  outside the field and the tiles.
+  outside the field and the tiles. Four fingers up on a touchpad open it
+  too, following the fingers, and four fingers down close it (6.13,
+  `[touchpad] swipe-launcher`; see [as built, 6.13](#613-four-fingers-on-the-touchpad-2026-11-06)).
 - The desktop blurs behind it, under the bar's tint (5.1b: the bar's dark
   blue, `rgba(22,27,42,…)` to `rgba(14,17,28,…)`, about 85 % opaque; it
   was 62 % of `#06080E`), so that the grid reads over a white page. The
@@ -370,3 +372,35 @@ the field.
   shows the row, a cat selected, the web row last, and `Enter` commits it
   to the test window's text input. A unit test for the row, the arrows,
   `:` alone and nothing found.
+
+### 6.13, four fingers on the touchpad (2026-11-06)
+
+- Issue #447, the spec in its last comment (the Settings' rows:
+  settings.md, "Souris et pavé tactile"). `[touchpad] swipe-launcher`
+  (on by default, followed live) gives the compositor four-finger
+  swipes up and down; `crates/hocus-compositor/src/gestures.rs` decides.
+- **Which swipes.** The fingers' first 12 units of travel (libinput's,
+  as the desktops' swipe) decide the axis; until then the compositor
+  keeps the swipe's events. Up with no launcher open, or down with one
+  open, is the launcher's; anything else (sideways, down with none
+  open, up with one open) reaches the application under the pointer
+  whole, from its start (`zwp_pointer_gestures_v1`). Locked, or with a
+  grab holding the pointer, the desktop takes no swipe.
+- **Following the fingers.** Up, the compositor asks the shell for the
+  launcher at once (`launcher OUTPUT SCALE`, as `Super+Space`), and from
+  then on its presence is the fingers': its opacity and the tint's, and
+  its panel from 0.97 to whole about its middle, go with their travel,
+  whole at 300 units. Let go past a third of that, or on a flick up
+  (1.2 travels a second), it goes on to whole from where it is in the
+  160 ms of its opening, its search holding the keyboard; otherwise the
+  compositor tells the shell to close it and it fades out from where it
+  is in 120 ms. A swipe libinput cancels goes back. Down, it goes the
+  same way: it follows the fingers out and, let go past a third, closes;
+  short of it, it comes back whole.
+- **Direction**: the fingers', whatever `natural-scroll` says (libinput
+  does not reverse its gestures).
+- **Reduced motion**: nothing follows the fingers; let go past the
+  threshold, it fades in, or out.
+- A launcher closed before the shell's first frame of it (a short swipe,
+  or `Super+Space` twice quickly) shows nothing.
+- Tests: `crates/hocus-compositor/tests/gestures.rs`.

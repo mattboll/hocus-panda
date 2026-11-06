@@ -24,6 +24,7 @@ mod power_page;
 mod screens;
 mod sound;
 mod style;
+mod time;
 mod view;
 mod wallpaper_page;
 
@@ -218,6 +219,8 @@ enum Write {
 enum Undo {
     File(Change),
     Sound(sound::Choice),
+    /// A time zone chosen (in timedated, 6.11).
+    Time(time::Choice),
     /// A change of the Réseau page's (in NetworkManager, rfkill).
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
@@ -324,6 +327,8 @@ pub enum Message {
     Wallpaper(wallpaper_page::Msg),
     /// The bar's page (6.4).
     Bar(bar_page::Msg),
+    /// The Date et heure page's (6.11).
+    Time(time::Msg),
     /// The desktops and windows' page (6.14).
     Desktops(desktops_page::Msg),
     /// The screenshots and clipboard's page (6.17).
@@ -394,6 +399,8 @@ pub struct App {
     wallpaper: wallpaper_page::State,
     /// The bar's page: its preview's motions and clock (6.4).
     bar: bar_page::State,
+    /// The Date et heure page: timedated as last heard (6.11).
+    time: time::State,
     /// The desktops and windows' page: the compositor's windows, a name
     /// changed, a desktop taken out waiting for it (6.14).
     desktops: desktops_page::State,
@@ -419,6 +426,7 @@ impl App {
         *HEARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
+        let time = time::State::new(sender.clone());
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
@@ -495,6 +503,7 @@ impl App {
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
+            time,
             desktops: desktops_page::State::default(),
             captures: captures_page::State::default(),
             network,
@@ -624,7 +633,7 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after()]);
+        let task = Task::batch([task, self.bar_after(), self.time_after()]);
         self.sound_listen();
         self.wallpaper_want();
         self.network_visit();
@@ -701,6 +710,10 @@ impl App {
                 if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     self.keys.adding = None;
                     return Task::none();
+                }
+                // The time zone picker's, the time's fields' (6.11).
+                if let Some(task) = self.time_key_first(&key, captured) {
+                    return task;
                 }
                 // A menu of the rules: `Esc` closes it.
                 if key.as_ref() == Key::Named(Named::Escape) && self.rules_escape() {
@@ -840,6 +853,7 @@ impl App {
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
+            Message::Time(msg) => self.time_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Captures(msg) => self.captures_update(msg),
             Message::Keys(msg) => {
@@ -1210,6 +1224,13 @@ impl App {
                 self.toast = None;
                 return self.sound_undo(choice, false);
             }
+            Some(Undo::Time(_)) => {
+                let Some(Undo::Time(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.time_undo(choice, false);
+            }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1278,6 +1299,12 @@ impl App {
                     return Task::none();
                 };
                 return self.sound_undo(choice, true);
+            }
+            Some(Undo::Time(_)) => {
+                let Some(Undo::Time(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.time_undo(choice, true);
             }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.redo.pop() else {
@@ -1534,6 +1561,9 @@ impl App {
         };
         if section == SectionId::Sound {
             return self.sound_stops().into_iter().map(Control::Sound).collect();
+        }
+        if section == SectionId::DateTime {
+            return self.time_stops().into_iter().map(Control::Time).collect();
         }
         if section == SectionId::Keyboard {
             if self.keys.sub {
@@ -1794,6 +1824,7 @@ impl App {
             Control::Desktops(stop) => self.desktops_key(&stop, named),
             Control::Captures(stop) => self.captures_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
+            Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
@@ -2043,6 +2074,8 @@ enum Control {
     Wallpaper(wallpaper_page::Stop),
     /// The bar's page's own (6.4).
     Bar(bar_page::Stop),
+    /// The Date et heure page's own (6.11).
+    Time(time::Stop),
     /// The desktops and windows' page's own (6.14).
     Desktops(desktops_page::Stop),
     /// The screenshots and clipboard's page's own (6.17).
