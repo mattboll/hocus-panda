@@ -19,6 +19,11 @@ use iced::{
 pub struct Places {
     pub at: BTreeMap<String, Rectangle>,
     pub page: Option<Scroll>,
+    /// The wheels the window had taken when they were read: these places
+    /// are after them (`wheels`).
+    pub wheels: u64,
+    /// The serial of the last "shows" line when they were read.
+    pub shown: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -49,6 +54,19 @@ pub struct Collect {
 }
 
 impl Collect {
+    /// Collecting the places after `wheels` wheels and the "shows" line
+    /// `shown`.
+    pub fn after(wheels: u64, shown: u64) -> Self {
+        Self {
+            found: Places {
+                wheels,
+                shown,
+                ..Places::default()
+            },
+            ..Self::default()
+        }
+    }
+
     fn shift(&self) -> Vector {
         self.shift.last().copied().unwrap_or(Vector::ZERO)
     }

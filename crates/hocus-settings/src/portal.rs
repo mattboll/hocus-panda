@@ -1,4 +1,5 @@
-//! "Choisir une image…" (6.3), an 802.1X network's certificates (6.6):
+//! "Choisir une image…" (6.3), an 802.1X network's certificates (6.6),
+//! the captures' and recordings' folders (6.17, a folder chosen):
 //! the desktop portal's file chooser
 //! (`org.freedesktop.portal.FileChooser.OpenFile`) on the session bus
 //! (`DBUS_SESSION_BUS_ADDRESS`, which the compositor gives the programs it
@@ -48,6 +49,16 @@ pub fn open_file(title: &str, filter: &str, folder: &Path) -> Chosen {
 /// filter `filter` taking `types` (`(0, glob)` or `(1, MIME type)`, the
 /// portal's). Blocks this thread until they do.
 pub fn open_file_of(title: &str, filter: &str, types: &[(u32, &str)], folder: &Path) -> Chosen {
+    open(title, Some((filter, types)), folder)
+}
+
+/// The user chooses a folder, starting in `folder` (`directory`, the
+/// portal's 4th version). Blocks this thread until they do.
+pub fn open_folder(title: &str, folder: &Path) -> Chosen {
+    open(title, None, folder)
+}
+
+fn open(title: &str, filter: Option<(&str, &[(u32, &str)])>, folder: &Path) -> Chosen {
     let Some(bus) = std::env::var("DBUS_SESSION_BUS_ADDRESS")
         .ok()
         .filter(|b| !b.is_empty())
@@ -65,19 +76,18 @@ pub fn open_file_of(title: &str, filter: &str, types: &[(u32, &str)], folder: &P
             return Chosen::NoPortal;
         }
     };
-    runtime.block_on(choose(&bus, title, filter, types, folder))
+    runtime.block_on(choose(&bus, title, filter, folder))
 }
 
 async fn choose(
     bus: &str,
     title: &str,
-    filter: &str,
-    types: &[(u32, &str)],
+    filter: Option<(&str, &[(u32, &str)])>,
     folder: &Path,
 ) -> Chosen {
     let asked = async {
         let connection = Builder::address(bus).build().await?;
-        let request = ask(&connection, title, filter, types, folder).await?;
+        let request = ask(&connection, title, filter, folder).await?;
         Ok::<_, zbus::Error>((connection, request))
     };
     let (connection, mut responses) = match tokio::time::timeout(ASK, asked).await {
@@ -125,8 +135,7 @@ async fn choose(
 async fn ask(
     connection: &Connection,
     title: &str,
-    filter: &str,
-    types: &[(u32, &str)],
+    filter: Option<(&str, &[(u32, &str)])>,
     folder: &Path,
 ) -> zbus::Result<MessageStream> {
     static TOKENS: AtomicU32 = AtomicU32::new(1);
@@ -149,14 +158,21 @@ async fn ask(
             .build()
     };
     let responses = MessageStream::for_match_rule(listen(&path)?, connection, None).await?;
-    // `[(name, [(0, glob) or (1, mime type)])]`.
-    let filters = vec![(filter, types.to_vec())];
     let mut options: HashMap<&str, Variant<'_>> = HashMap::new();
     options.insert("handle_token", Variant::from(token.as_str()));
     options.insert("modal", Variant::from(true));
     options.insert("multiple", Variant::from(false));
-    options.insert("filters", Variant::from(filters.clone()));
-    options.insert("current_filter", Variant::from(filters[0].clone()));
+    match filter {
+        Some((filter, types)) => {
+            // `[(name, [(0, glob) or (1, mime type)])]`.
+            let filters = vec![(filter, types.to_vec())];
+            options.insert("filters", Variant::from(filters.clone()));
+            options.insert("current_filter", Variant::from(filters[0].clone()));
+        }
+        None => {
+            options.insert("directory", Variant::from(true));
+        }
+    }
     let mut bytes = folder.as_os_str().as_encoded_bytes().to_vec();
     bytes.push(0);
     if !folder.as_os_str().is_empty() {
