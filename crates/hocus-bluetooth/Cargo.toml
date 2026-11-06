@@ -1,0 +1,21 @@
+[package]
+name = "hocus-bluetooth"
+description = "The Hocuspanda Bluetooth: BlueZ followed and asked on the system bus, for the bar and the Settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# BlueZ on the system bus; `service`: the pairing agent, which BlueZ calls.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service"] }
+# What zbus calls take, for a call helper.
+serde = "1.0.229"
+# The thread's own runtime, its channels and its timeouts.
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }
+# The signals' streams.
+futures-util = { version = "0.3.34", default-features = false }
+tracing = "0.1.44"

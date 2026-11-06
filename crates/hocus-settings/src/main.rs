@@ -1,5 +1,6 @@
-//! `hocus-settings [SECTION]`: the Settings' window, on its section
-//! (`power`), or brought forward on it when it is open already.
+//! `hocus-settings [SECTION] [--pair ADDRESS]`: the Settings' window, on
+//! its section (`power`), or brought forward on it when it is open
+//! already; `--pair` pairs a Bluetooth device on its page.
 
 use std::{borrow::Cow, path::PathBuf, process::ExitCode};
 
@@ -15,8 +16,9 @@ use iced::window;
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hocus_settings=info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("hocus_settings=info,hocus_bluetooth=info")
+            }),
         )
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
@@ -26,7 +28,7 @@ fn main() -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         let slugs: Vec<&str> = SectionId::ALL.iter().map(|s| s.section().slug).collect();
         println!(
-            "hocus-settings [SECTION] [--join SSID]\n\nSections: {}\n--join: the Réseau page opens that network's sheet.",
+            "hocus-settings [SECTION] [--join SSID] [--pair ADDRESS]\n\nSections: {}\n--join: the Réseau page opens that network's sheet.\n--pair: the Bluetooth page pairs that device.",
             slugs.join(", ")
         );
         return ExitCode::SUCCESS;
@@ -40,11 +42,22 @@ fn main() -> ExitCode {
     let section = arg
         .as_deref()
         .and_then(SectionId::from_slug)
-        .or_else(|| join.is_some().then_some(SectionId::Network));
+        .or_else(|| join.is_some().then_some(SectionId::Network))
+        .or_else(|| {
+            args.iter()
+                .any(|a| a == "--pair")
+                .then_some(SectionId::Bluetooth)
+        });
     if arg.is_some() && section.is_none() {
         tracing::warn!(section = arg, "no such section: the home opens");
     }
+    // `--pair ADDRESS`: a Bluetooth device to pair (the bar's popover).
+    let pair = std::env::args()
+        .skip_while(|a| a != "--pair")
+        .nth(1)
+        .filter(|a| !a.is_empty() && !a.contains(char::is_whitespace));
     let again = Again {
+        pair: pair.clone(),
         section: section.map(|s| s.section().slug.to_owned()),
         token: std::env::var("XDG_ACTIVATION_TOKEN")
             .ok()
@@ -70,6 +83,7 @@ fn main() -> ExitCode {
         },
         section,
         join,
+        pair,
         user: user_name(),
         listener: std::sync::Arc::new(std::sync::Mutex::new(listener)),
     };
@@ -118,6 +132,9 @@ fn main() -> ExitCode {
         })
         .run();
     single::stop();
+    // The computer hidden again and the search stopped before the program
+    // goes (BlueZ keeps it visible otherwise until its timeout).
+    app::stop_bluetooth();
     tracing::info!("the Settings closed");
     match ran {
         Ok(()) => ExitCode::SUCCESS,

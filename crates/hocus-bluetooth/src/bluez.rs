@@ -1,50 +1,55 @@
 //! BlueZ on the system bus, on a thread of its own: what it says, followed
-//! by its signals, and what the popover asks of it.
+//! by its signals, and what the bar or the Settings ask of it.
 //!
-//! The thread keeps BlueZ's objects as last said: the adapters (`Powered`),
-//! the devices (their name, what they are, `Paired`, `Connected`, `RSSI`)
-//! and their batteries (`Battery1`'s `Percentage`). It reads them all with
-//! `GetManagedObjects` when BlueZ has an owner on the bus, then follows
-//! them: `InterfacesAdded` and `…Removed`, `PropertiesChanged` under
+//! The thread keeps BlueZ's objects as last said: the adapters (`Powered`,
+//! `PowerState`, `Alias`, `Discoverable`), the devices (their name, what
+//! they are, `Paired`, `Trusted`, `Connected`, `RSSI`) and their batteries
+//! (`Battery1`'s `Percentage`). It reads them all with `GetManagedObjects`
+//! when BlueZ has an owner on the bus, then follows them:
+//! `InterfacesAdded` and `…Removed`, `PropertiesChanged` under
 //! `/org/bluez`, and BlueZ's owner, for when it stops or starts. Nothing is
-//! polled. After each burst of signals, what the bar shows is made again
+//! polled. After each burst of signals, what is shown is made again
 //! ([`snapshot`]) and published: a signal strength that changes nothing
 //! in the order shown publishes nothing.
 //!
 //! What it asks: the adapter on or off (`Powered`); a search
-//! (`StartDiscovery`) while the popover is open, stopped as it closes
-//! (`StopDiscovery`) and as the shell ends; a paired device connected
-//! (`Connect`, 20 s at most, then given up with `Disconnect`) or
-//! disconnected; a new one paired (`Pair`, 30 s at most, then
-//! `CancelPairing`), trusted (`Trusted`), then connected. Calls that take
-//! long run aside, and say how they ended to the thread.
+//! (`StartDiscovery`) while it is wanted, stopped when it is not
+//! (`StopDiscovery`) and as the program ends; the computer visible to
+//! others (`Discoverable` and `Pairable`) while it is wanted, made visible
+//! again when BlueZ's timeout hides it, hidden when it is not wanted; a
+//! paired device connected (`Connect`, 20 s at most, then given up with
+//! `Disconnect`) or disconnected; a new one paired (`Pair`, 30 s at most,
+//! then `CancelPairing`), trusted (`Trusted`), then connected. Calls that
+//! take long run aside, and say how they ended to the thread.
 //!
-//! Pairing goes through the shell's agent, registered with BlueZ as
-//! `NoInputNoOutput` (BlueZ uses the agent of whoever asked for the
-//! pairing), so that a device that pairs without a code ("Just Works")
-//! does. One that asks for a code (a PIN, a passkey to type or to compare)
-//! is refused by the agent: such a device is left to the Settings. A phone
-//! or a computer is taken to ask for one before it is tried.
+//! Pairing goes through the program's agent, registered with BlueZ with
+//! the capability [`Options`] gives (BlueZ uses the agent of whoever asked
+//! for the pairing), so that a device that pairs without a code ("Just
+//! Works") does. One that asks for a code (a PIN, a passkey to type or to
+//! compare) is refused by the agent, and its pairing said to have asked
+//! one. A phone, a tablet or a computer is taken to ask for one before it
+//! is tried.
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, Mutex, PoisonError},
-    time::Duration,
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
-use iced::futures::StreamExt;
+use futures_util::StreamExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use zbus::{
     Connection, MatchRule, Message, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant,
     Variant, fdo::DBusProxy,
 };
 
-use super::{
-    Ask,
-    model::{Action, Attempt, Bluetooth, Device, Failure, Kind, Step},
-    publish,
+use crate::{
+    Ask, Options,
+    model::{Action, Answer, Asked, Attempt, Bluetooth, Device, Failure, Kind, Request, Step},
 };
-use crate::levels::{Presence, RETRY_FIRST, next_retry};
 
 const BLUEZ: &str = "org.bluez";
 const ROOT: &str = "/org/bluez";
@@ -71,7 +76,43 @@ const SEARCH: Duration = Duration::from_secs(10);
 type Props = HashMap<String, OwnedVariant>;
 type Objects = HashMap<OwnedObjectPath, HashMap<String, Props>>;
 
-pub fn start(asks: UnboundedReceiver<Ask>) {
+/// What the thread says each time what it shows changes.
+type Publish = Box<dyn FnMut(Bluetooth) + Send>;
+
+/// A service that is away is tried again after this, doubled each time it
+/// is still away, up to [`RETRY_LAST`].
+const RETRY_FIRST: Duration = Duration::from_secs(2);
+const RETRY_LAST: Duration = Duration::from_secs(60);
+
+/// The next wait before trying a missing service again.
+fn next_retry(wait: Duration) -> Duration {
+    (wait * 2).min(RETRY_LAST)
+}
+
+/// Whether BlueZ is there, to say once when it goes and comes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Presence {
+    Unknown,
+    There,
+    Away,
+}
+
+impl Presence {
+    /// Logs what changed: `what` is there, or away (`why`).
+    fn now(&mut self, there: bool, what: &str, why: impl std::fmt::Display) {
+        let next = if there { Self::There } else { Self::Away };
+        match (*self, next) {
+            (Self::Away, Self::There) => tracing::info!("{what}: back"),
+            (Self::Unknown | Self::There, Self::Away) => {
+                tracing::info!("{what}: not there ({why}); hidden until it comes");
+            }
+            _ => {}
+        }
+        *self = next;
+    }
+}
+
+pub(crate) fn start(asks: UnboundedReceiver<Ask>, options: Options, publish: Publish) {
     let started = std::thread::Builder::new()
         .name("bluetooth".to_owned())
         .spawn(move || {
@@ -79,7 +120,7 @@ pub fn start(asks: UnboundedReceiver<Ask>) {
                 .enable_all()
                 .build();
             match runtime {
-                Ok(runtime) => runtime.block_on(run(asks)),
+                Ok(runtime) => runtime.block_on(run(asks, options, publish)),
                 Err(err) => tracing::warn!(%err, "no runtime for BlueZ"),
             }
         });
@@ -88,36 +129,48 @@ pub fn start(asks: UnboundedReceiver<Ask>) {
     }
 }
 
+/// How long a pairing takes at most once a code shows (from when it
+/// started): the time to read it and type it.
+const CODE_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// How long a connection, a pairing and a search's first pass take at
-/// most: `HOCUS_BLUETOOTH_TIMEOUT` (seconds) for all three, for tests.
+/// most: `HOCUS_BLUETOOTH_TIMEOUT` (seconds) for all three, for tests;
+/// a pairing showing a code, `HOCUS_BLUETOOTH_CODE_TIMEOUT`.
 #[derive(Debug, Clone, Copy)]
 struct Timeouts {
     connect: Duration,
     pair: Duration,
     search: Duration,
+    code: Duration,
 }
 
 fn timeouts() -> Timeouts {
-    match std::env::var("HOCUS_BLUETOOTH_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|s| *s > 0.0)
-    {
-        Some(seconds) => {
-            let t = Duration::from_secs_f64(seconds);
-            Timeouts {
-                connect: t,
-                pair: t,
-                search: t,
-            }
-        }
+    let seconds = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|s| *s > 0.0)
+            .map(Duration::from_secs_f64)
+    };
+    let code = seconds("HOCUS_BLUETOOTH_CODE_TIMEOUT").unwrap_or(CODE_TIMEOUT);
+    match seconds("HOCUS_BLUETOOTH_TIMEOUT") {
+        Some(t) => Timeouts {
+            connect: t,
+            pair: t,
+            search: t,
+            code,
+        },
         None => Timeouts {
             connect: CONNECT_TIMEOUT,
             pair: PAIR_TIMEOUT,
             search: SEARCH,
+            code,
         },
     }
 }
+
+/// The agent's questions waiting for the user's answer, by id.
+type Waiting = Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Answer>>>>;
 
 /// What the thread acts on, from wherever it comes.
 enum Input {
@@ -133,17 +186,38 @@ enum Input {
     SearchOver(u64),
     /// The agent was asked a code for this device, and refused.
     CodeAsked(String),
+    /// The agent asks the user `asked` for device `path`, and waits.
+    Request {
+        id: u64,
+        path: String,
+        asked: Asked,
+    },
+    /// The agent shows the user `asked` for device `path`.
+    Shown {
+        path: String,
+        asked: Asked,
+    },
+    /// Question `id` was answered, or given up.
+    Answered(u64),
+    /// BlueZ cancelled what it asked (the device gave up, a time out).
+    Cancelled,
+    /// Question `id`'s time is over: refused.
+    RequestOver(u64),
 }
 
-async fn run(mut asks: UnboundedReceiver<Ask>) {
+async fn run(mut asks: UnboundedReceiver<Ask>, options: Options, mut publish: Publish) {
     let mut wait = RETRY_FIRST;
     let mut presence = Presence::Unknown;
     let connection = loop {
         match Connection::system().await {
             Ok(connection) => break connection,
             Err(err) => {
+                // Said once: tries that fail again change nothing shown,
+                // and must not wake whoever shows it.
+                if presence != Presence::Away {
+                    publish(Bluetooth::default());
+                }
                 presence.now(false, "Bluetooth (the system bus)", &err);
-                publish(Bluetooth::default());
                 while let Ok(ask) = asks.try_recv() {
                     if let Ask::Quit(done) = ask {
                         let _ = done.send(());
@@ -162,9 +236,15 @@ async fn run(mut asks: UnboundedReceiver<Ask>) {
         return;
     }
     let pairing = Arc::new(Mutex::new(None));
+    let waiting = Waiting::default();
+    let ids = Arc::new(AtomicU64::new(0));
     let agent = Agent {
         inputs: inputs.clone(),
         pairing: pairing.clone(),
+        asks_codes: options.asks_codes,
+        waiting: waiting.clone(),
+        accepted: Arc::default(),
+        ids: ids.clone(),
     };
     if let Err(err) = connection.object_server().at(AGENT, agent).await {
         tracing::warn!(%err, "no pairing agent: pairing will fail");
@@ -187,7 +267,11 @@ async fn run(mut asks: UnboundedReceiver<Ask>) {
         stamps: HashMap::new(),
         stamp: 0,
         codes: HashSet::new(),
+        options,
+        publish,
         wanted: false,
+        visible: false,
+        shown: false,
         discovering: None,
         search: None,
         searches: 0,
@@ -195,6 +279,14 @@ async fn run(mut asks: UnboundedReceiver<Ask>) {
         attempts: 0,
         pairing,
         timeouts: timeouts(),
+        request: None,
+        waiting,
+        ids,
+        deadline: Arc::new(Mutex::new(Instant::now())),
+        started: None,
+        stopped: false,
+        cancelled: false,
+        registered: false,
     };
     let owned = match DBusProxy::new(&client.connection).await {
         Ok(bus) => bus
@@ -281,8 +373,15 @@ struct Client {
     stamp: u64,
     /// Devices whose pairing asked for a code.
     codes: HashSet<String>,
-    /// The popover is open: a search is wanted while the adapter is on.
+    options: Options,
+    publish: Publish,
+    /// A search is wanted while the adapter is on (the bar's popover is
+    /// open, the Settings' page shows).
     wanted: bool,
+    /// The computer is wanted visible to others.
+    visible: bool,
+    /// It was made visible here: hidden here too.
+    shown: bool,
     /// The adapter the search was started on.
     discovering: Option<String>,
     /// The search whose first pass runs.
@@ -293,6 +392,19 @@ struct Client {
     /// The device being paired, which the agent lets through.
     pairing: Arc<Mutex<Option<String>>>,
     timeouts: Timeouts,
+    /// What the agent asks or shows the user now.
+    request: Option<Request>,
+    waiting: Waiting,
+    /// The questions' ids, the agent's and the shown codes'.
+    ids: Arc<AtomicU64>,
+    /// When the pairing under way is given up, and when it started.
+    deadline: Arc<Mutex<Instant>>,
+    started: Option<Instant>,
+    /// The pairing under way was cancelled by the user, or by the device.
+    stopped: bool,
+    cancelled: bool,
+    /// The agent is registered with BlueZ.
+    registered: bool,
 }
 
 impl Client {
@@ -304,6 +416,9 @@ impl Client {
             Input::Ask(Ask::Quit(done)) => {
                 self.wanted = false;
                 self.discover().await;
+                self.visible = false;
+                self.show().await;
+                self.agent().await;
                 let _ = done.send(());
                 return false;
             }
@@ -319,11 +434,106 @@ impl Client {
                 tracing::info!(device, "the device asks for a code: left to the Settings");
                 self.codes.insert(device);
             }
+            Input::Request { id, path, asked } => self.asked(id, path, asked),
+            Input::Shown { path, asked } => {
+                let id = match &self.request {
+                    Some(r) if r.path == path && matches!(r.asked, Asked::Display { .. }) => r.id,
+                    _ => self.ids.fetch_add(1, Ordering::Relaxed) + 1,
+                };
+                self.asked(id, path, asked);
+            }
+            Input::Answered(id) => {
+                if self.request.as_ref().is_some_and(|r| r.id == id) {
+                    self.request = None;
+                }
+            }
+            Input::Cancelled => {
+                tracing::info!("BlueZ cancelled what the agent asked");
+                self.request = None;
+                if self.running_pair().is_some() && !self.stopped {
+                    self.cancelled = true;
+                }
+            }
+            Input::RequestOver(id) => self.answer(id, Answer::No),
         }
         true
     }
 
-    fn publish(&self) {
+    /// The device paired here now, if one is.
+    fn running_pair(&self) -> Option<&str> {
+        self.attempt
+            .as_ref()
+            .filter(|a| a.step == Step::Running(Action::Pair))
+            .map(|a| a.path.as_str())
+    }
+
+    /// The agent asks the user `asked` for `path`: shown until answered.
+    /// A pairing asked here then has more time; one the device asked
+    /// for is refused once its time is over.
+    fn asked(&mut self, id: u64, path: String, asked: Asked) {
+        let ours = self.running_pair() == Some(path.as_str());
+        let until = if ours {
+            let until = self.started.unwrap_or_else(Instant::now) + self.timeouts.code;
+            let mut deadline = self.deadline.lock().unwrap_or_else(PoisonError::into_inner);
+            *deadline = (*deadline).max(until);
+            *deadline
+        } else {
+            let until = Instant::now() + self.timeouts.code;
+            let inputs = self.inputs.clone();
+            let wait = self.timeouts.code;
+            tokio::spawn(async move {
+                tokio::time::sleep(wait).await;
+                let _ = inputs.send(Input::RequestOver(id));
+            });
+            until
+        };
+        let (name, kind) = self
+            .cache
+            .devices
+            .get(&path)
+            .map(|p| {
+                let name = get::<String>(p, "Alias")
+                    .or_else(|| get::<String>(p, "Name"))
+                    .unwrap_or_default();
+                (name, kind(p))
+            })
+            .unwrap_or_default();
+        tracing::info!(?asked, ours, "the agent asks the user");
+        self.request = Some(Request {
+            id,
+            path,
+            name,
+            kind,
+            asked,
+            until: Some(until),
+            ours,
+        });
+    }
+
+    /// The user answers question `id` (a code shown has none waiting).
+    fn answer(&mut self, id: u64, answer: Answer) {
+        let shown = self.request.as_ref().filter(|r| r.id == id).cloned();
+        if answer == Answer::No
+            && shown
+                .as_ref()
+                .is_some_and(|r| self.running_pair() == Some(r.path.as_str()))
+        {
+            self.stopped = true;
+        }
+        if shown.is_some() {
+            self.request = None;
+        }
+        let waiting = self
+            .waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id);
+        if let Some(waiting) = waiting {
+            let _ = waiting.send(answer);
+        }
+    }
+
+    fn publish(&mut self) {
         let bluetooth = snapshot(
             &self.cache,
             &self.stamps,
@@ -331,7 +541,11 @@ impl Client {
             self.search.is_some(),
             self.attempt.clone(),
         );
-        publish(bluetooth);
+        let bluetooth = Bluetooth {
+            request: self.request.clone(),
+            ..bluetooth
+        };
+        (self.publish)(bluetooth);
     }
 
     /// BlueZ came (read it all) or went (forget it).
@@ -339,6 +553,7 @@ impl Client {
         self.cache = Cache::default();
         self.discovering = None;
         self.search = None;
+        self.registered = false;
         if !owned {
             self.presence
                 .now(false, "Bluetooth", "BlueZ is not running");
@@ -366,21 +581,47 @@ impl Client {
         } else {
             self.presence.now(false, "Bluetooth", "no adapter");
         }
-        let registered = self
-            .call(
-                ROOT,
-                AGENT_MANAGER,
-                "RegisterAgent",
-                &(
-                    ObjectPath::from_static_str_unchecked(AGENT),
-                    "NoInputNoOutput",
-                ),
-            )
-            .await;
-        if let Err(err) = registered {
-            tracing::warn!(%err, "BlueZ did not take the pairing agent");
-        }
+        self.agent().await;
         self.discover().await;
+        self.show().await;
+    }
+
+    /// The agent registered as wanted: always for the bar's; while the
+    /// computer is visible for one that asks the user codes, then the
+    /// default one, so that a device pairing by itself reaches it.
+    async fn agent(&mut self) {
+        let want = !self.options.asks_codes || self.visible;
+        let agent = ObjectPath::from_static_str_unchecked(AGENT);
+        if want && !self.registered {
+            let registered = self
+                .call(
+                    ROOT,
+                    AGENT_MANAGER,
+                    "RegisterAgent",
+                    &(&agent, self.options.capability),
+                )
+                .await;
+            match registered {
+                Ok(_) => self.registered = true,
+                Err(err) => tracing::warn!(%err, "BlueZ did not take the pairing agent"),
+            }
+            if self.registered && self.options.asks_codes {
+                let default = self
+                    .call(ROOT, AGENT_MANAGER, "RequestDefaultAgent", &(&agent,))
+                    .await;
+                if let Err(err) = default {
+                    tracing::warn!(%err, "BlueZ did not make the agent its default");
+                }
+            }
+        } else if !want && self.registered {
+            self.registered = false;
+            let gone = self
+                .call(ROOT, AGENT_MANAGER, "UnregisterAgent", &(&agent,))
+                .await;
+            if let Err(err) = gone {
+                tracing::debug!(%err, "the agent was not registered");
+            }
+        }
     }
 
     async fn load(&mut self) -> zbus::Result<()> {
@@ -514,6 +755,8 @@ impl Client {
             }
             self.discover().await;
         }
+        // Visible again once on, or when BlueZ's timeout hid it.
+        self.show().await;
     }
 
     fn removed(&mut self, path: &str, interfaces: &[String]) {
@@ -606,6 +849,65 @@ impl Client {
         }
     }
 
+    /// The computer visible to others as wanted: while it is wanted and
+    /// the adapter is on, `Pairable` and `Discoverable` set whenever BlueZ
+    /// says they are not (its timeout ends `Discoverable`); once it is no
+    /// longer wanted, hidden if it was made visible here.
+    async fn show(&mut self) {
+        let Some((adapter, discoverable, pairable)) = self.adapter().map(|(p, a)| {
+            (
+                p.to_owned(),
+                get::<bool>(a, "Discoverable") == Some(true),
+                get::<bool>(a, "Pairable") == Some(true),
+            )
+        }) else {
+            self.shown = false;
+            return;
+        };
+        let powered = self.powered();
+        if self.visible && powered {
+            if !pairable && self.set_adapter(&adapter, "Pairable", true).await {
+                tracing::debug!("the computer can be paired with");
+            }
+            if !discoverable && self.set_adapter(&adapter, "Discoverable", true).await {
+                tracing::info!("the computer is visible");
+                self.shown = true;
+            }
+        } else if !self.visible && self.shown {
+            self.shown = false;
+            if discoverable && powered && self.set_adapter(&adapter, "Discoverable", false).await {
+                tracing::info!("the computer is hidden");
+            }
+        }
+    }
+
+    /// The adapter's `name` set to `on`, kept as set until BlueZ says it:
+    /// whether BlueZ took it.
+    async fn set_adapter(&mut self, adapter: &str, name: &str, on: bool) -> bool {
+        let set = self
+            .call(
+                adapter,
+                PROPERTIES,
+                "Set",
+                &(ADAPTER, name, Variant::from(on)),
+            )
+            .await;
+        match set {
+            Ok(_) => {
+                if let Some(props) = self.cache.adapters.get_mut(adapter)
+                    && let Ok(value) = OwnedVariant::try_from(Variant::from(on))
+                {
+                    props.insert(name.to_owned(), value);
+                }
+                true
+            }
+            Err(err) => {
+                tracing::warn!(%err, name, on, "BlueZ did not set the adapter");
+                false
+            }
+        }
+    }
+
     async fn ask(&mut self, ask: Ask) {
         match ask {
             Ask::Power(on) => {
@@ -628,6 +930,62 @@ impl Client {
             Ask::Discover(on) => {
                 self.wanted = on;
                 self.discover().await;
+            }
+            Ask::Visible(on) => {
+                self.visible = on;
+                self.show().await;
+                self.agent().await;
+            }
+            Ask::Answer(id, answer) => self.answer(id, answer),
+            Ask::CancelPairing => {
+                if let Some(id) = self.request.as_ref().map(|r| r.id) {
+                    self.answer(id, Answer::No);
+                }
+                if let Some(path) = self.running_pair().map(str::to_owned) {
+                    self.stopped = true;
+                    self.request = None;
+                    let connection = self.connection.clone();
+                    tokio::spawn(async move {
+                        let done = connection
+                            .call_method(
+                                Some(BLUEZ),
+                                path.as_str(),
+                                Some(DEVICE),
+                                "CancelPairing",
+                                &(),
+                            )
+                            .await;
+                        if let Err(err) = done {
+                            tracing::debug!(%err, "no pairing to cancel");
+                        }
+                    });
+                }
+            }
+            Ask::Rename(path, alias) => self.set_device(path, "Alias", Variant::from(alias)),
+            Ask::Trust(path, on) => self.set_device(path, "Trusted", Variant::from(on)),
+            Ask::Forget(path) => {
+                let Some(adapter) = self.adapter().map(|(p, _)| p.to_owned()) else {
+                    return;
+                };
+                let connection = self.connection.clone();
+                tokio::spawn(async move {
+                    let Ok(device) = ObjectPath::try_from(path.as_str()) else {
+                        return;
+                    };
+                    let done = connection
+                        .call_method(
+                            Some(BLUEZ),
+                            adapter.as_str(),
+                            Some(ADAPTER),
+                            "RemoveDevice",
+                            &(device,),
+                        )
+                        .await;
+                    match done {
+                        Ok(_) => tracing::info!("a device is forgotten"),
+                        Err(err) => tracing::warn!(%err, "BlueZ did not forget the device"),
+                    }
+                });
             }
             Ask::Connect(path) => {
                 if self.start(&path, Action::Connect) {
@@ -654,6 +1012,27 @@ impl Client {
         }
     }
 
+    /// Device `path`'s property `name` set to `value`, aside: an empty
+    /// `Alias` gives it back its own name (BlueZ's).
+    fn set_device(&self, path: String, name: &'static str, value: Variant<'static>) {
+        let connection = self.connection.clone();
+        tokio::spawn(async move {
+            let done = connection
+                .call_method(
+                    Some(BLUEZ),
+                    path.as_str(),
+                    Some(PROPERTIES),
+                    "Set",
+                    &(DEVICE, name, value),
+                )
+                .await;
+            match done {
+                Ok(_) => tracing::info!(name, "a device's property is set"),
+                Err(err) => tracing::warn!(%err, name, "BlueZ did not set the device's property"),
+            }
+        });
+    }
+
     /// A new attempt for `path`, unless one runs: whether it starts.
     fn start(&mut self, path: &str, action: Action) -> bool {
         let running = self
@@ -664,6 +1043,8 @@ impl Client {
             return false;
         }
         self.attempts += 1;
+        self.stopped = false;
+        self.cancelled = false;
         self.attempt = Some(Attempt {
             id: self.attempts,
             path: path.to_owned(),
@@ -706,26 +1087,42 @@ impl Client {
     }
 
     /// Pairs the attempt's device, aside, through the agent.
-    fn pair(&self, path: String) {
+    /// Its time is `timeouts.pair`, longer once a code shows ([`Self::asked`]
+    /// moves the deadline).
+    fn pair(&mut self, path: String) {
         let Some(id) = self.attempt.as_ref().map(|a| a.id) else {
             return;
         };
         *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) = Some(path.clone());
-        let (connection, inputs, timeout) = (
+        let now = Instant::now();
+        self.started = Some(now);
+        *self.deadline.lock().unwrap_or_else(PoisonError::into_inner) = now + self.timeouts.pair;
+        let (connection, inputs, deadline) = (
             self.connection.clone(),
             self.inputs.clone(),
-            self.timeouts.pair,
+            self.deadline.clone(),
         );
         tokio::spawn(async move {
             let call =
                 connection.call_method(Some(BLUEZ), path.as_str(), Some(DEVICE), "Pair", &());
-            let input = match tokio::time::timeout(timeout, call).await {
-                Ok(Ok(_)) => Input::Paired(id),
-                Ok(Err(err)) => {
+            let mut call = std::pin::pin!(call);
+            let done = loop {
+                let until = *deadline.lock().unwrap_or_else(PoisonError::into_inner);
+                let at = tokio::time::Instant::from_std(until);
+                match tokio::time::timeout_at(at, &mut call).await {
+                    Ok(done) => break Some(done),
+                    // Moved while it waited: a code shows.
+                    Err(_) if *deadline.lock().unwrap_or_else(PoisonError::into_inner) > until => {}
+                    Err(_) => break None,
+                }
+            };
+            let input = match done {
+                Some(Ok(_)) => Input::Paired(id),
+                Some(Err(err)) => {
                     tracing::info!(%err, "the device did not pair");
                     Input::Ended(id, Some(Failure::Pairing))
                 }
-                Err(_) => {
+                None => {
                     tracing::info!("the device did not pair in time: cancelled");
                     let _ = connection
                         .call_method(
@@ -773,9 +1170,14 @@ impl Client {
         let pairing = attempt.step == Step::Running(Action::Pair);
         if pairing {
             *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            if self.request.as_ref().is_some_and(|r| r.ours) {
+                self.request = None;
+            }
         }
         attempt.step = match failure {
             None => Step::Done,
+            Some(_) if pairing && self.stopped => Step::Failed(Failure::Stopped),
+            Some(_) if pairing && self.cancelled => Step::Failed(Failure::Cancelled),
             // Refused by the agent: a code was asked.
             Some(Failure::Pairing) if self.codes.contains(&attempt.path) => {
                 Step::Failed(Failure::Code)
@@ -786,14 +1188,22 @@ impl Client {
     }
 }
 
-/// The shell's pairing agent (`org.bluez.Agent1`), for the pairings the
-/// popover asks: without a code (`NoInputNoOutput`), BlueZ pairs "Just
-/// Works" devices; one that asks for a code is refused, and said to the
-/// thread.
+/// The program's pairing agent (`org.bluez.Agent1`). The bar's
+/// (`NoInputNoOutput`) lets BlueZ pair "Just Works" devices and refuses a
+/// code, said to the thread. The Settings' (`KeyboardDisplay`) asks the
+/// user: a code to compare, to type on the device, a PIN to give, a
+/// device pairing by itself to let in; it waits for the answer without
+/// holding the thread. Either lets through only the device paired here,
+/// or one the user accepted.
 struct Agent {
     inputs: UnboundedSender<Input>,
-    /// The device the popover pairs, if one.
+    /// The device paired here, if one.
     pairing: Arc<Mutex<Option<String>>>,
+    asks_codes: bool,
+    waiting: Waiting,
+    /// Devices the user let pair.
+    accepted: Arc<Mutex<HashSet<String>>>,
+    ids: Arc<AtomicU64>,
 }
 
 #[derive(Debug, zbus::DBusError)]
@@ -802,10 +1212,11 @@ enum Refusal {
     #[zbus(error)]
     ZBus(zbus::Error),
     Rejected(String),
+    Canceled(String),
 }
 
 impl Agent {
-    /// A code is asked for `device`: refused.
+    /// A code is asked for `device` of an agent that gives none: refused.
     fn code(&self, device: &OwnedObjectPath) -> Refusal {
         let _ = self
             .inputs
@@ -813,14 +1224,63 @@ impl Agent {
         Refusal::Rejected("a code is entered in the Settings".to_owned())
     }
 
-    /// Lets through only the device the popover pairs.
-    fn ours(&self, device: &OwnedObjectPath) -> Result<(), Refusal> {
+    /// Whether `device` is the one paired here, or one the user let in.
+    fn ours(&self, device: &OwnedObjectPath) -> bool {
         let pairing = self.pairing.lock().unwrap_or_else(PoisonError::into_inner);
-        if pairing.as_deref() == Some(device.as_str()) {
-            Ok(())
-        } else {
-            Err(Refusal::Rejected("not asked for here".to_owned()))
+        pairing.as_deref() == Some(device.as_str())
+            || self
+                .accepted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(device.as_str())
+    }
+
+    /// Asks the user `asked` for `device`, and waits for the answer.
+    async fn ask(&self, device: &OwnedObjectPath, asked: Asked) -> Result<Answer, Refusal> {
+        if !self.asks_codes {
+            return Err(self.code(device));
         }
+        let id = self.ids.fetch_add(1, Ordering::Relaxed) + 1;
+        let (answer, answered) = tokio::sync::oneshot::channel();
+        self.waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id, answer);
+        let path = device.as_str().to_owned();
+        let _ = self.inputs.send(Input::Request {
+            id,
+            path: path.clone(),
+            asked,
+        });
+        let answer = answered.await;
+        self.waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id);
+        let _ = self.inputs.send(Input::Answered(id));
+        match answer {
+            Ok(Answer::No) => Err(Refusal::Rejected("refused".to_owned())),
+            Err(_) => Err(Refusal::Canceled("not answered".to_owned())),
+            Ok(answer) => {
+                self.accepted
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(path);
+                Ok(answer)
+            }
+        }
+    }
+
+    /// Shows the user `asked` for `device`, which waits for nothing.
+    fn show(&self, device: &OwnedObjectPath, asked: Asked) -> Result<(), Refusal> {
+        if !self.asks_codes {
+            return Err(self.code(device));
+        }
+        let _ = self.inputs.send(Input::Shown {
+            path: device.as_str().to_owned(),
+            asked,
+        });
+        Ok(())
     }
 }
 
@@ -828,40 +1288,73 @@ impl Agent {
 impl Agent {
     fn release(&self) {}
 
-    fn request_pin_code(&self, device: OwnedObjectPath) -> Result<String, Refusal> {
-        Err(self.code(&device))
+    async fn request_pin_code(&self, device: OwnedObjectPath) -> Result<String, Refusal> {
+        match self.ask(&device, Asked::Pin).await? {
+            Answer::Pin(pin) => Ok(pin),
+            _ => Err(Refusal::Rejected("no PIN".to_owned())),
+        }
     }
 
-    fn display_pin_code(&self, device: OwnedObjectPath, _code: String) -> Result<(), Refusal> {
-        Err(self.code(&device))
+    fn display_pin_code(&self, device: OwnedObjectPath, code: String) -> Result<(), Refusal> {
+        self.show(&device, Asked::Display { code, typed: None })
     }
 
-    fn request_passkey(&self, device: OwnedObjectPath) -> Result<u32, Refusal> {
-        Err(self.code(&device))
+    async fn request_passkey(&self, device: OwnedObjectPath) -> Result<u32, Refusal> {
+        match self.ask(&device, Asked::Passkey).await? {
+            Answer::Passkey(key) => Ok(key),
+            _ => Err(Refusal::Rejected("no passkey".to_owned())),
+        }
     }
 
     fn display_passkey(
         &self,
         device: OwnedObjectPath,
-        _passkey: u32,
-        _entered: u16,
+        passkey: u32,
+        entered: u16,
     ) -> Result<(), Refusal> {
-        Err(self.code(&device))
+        self.show(
+            &device,
+            Asked::Display {
+                code: format!("{passkey:06}"),
+                typed: Some(entered),
+            },
+        )
     }
 
-    fn request_confirmation(&self, device: OwnedObjectPath, _passkey: u32) -> Result<(), Refusal> {
-        Err(self.code(&device))
+    async fn request_confirmation(
+        &self,
+        device: OwnedObjectPath,
+        passkey: u32,
+    ) -> Result<(), Refusal> {
+        self.ask(&device, Asked::Confirm(passkey)).await.map(|_| ())
     }
 
-    fn request_authorization(&self, device: OwnedObjectPath) -> Result<(), Refusal> {
-        self.ours(&device)
+    async fn request_authorization(&self, device: OwnedObjectPath) -> Result<(), Refusal> {
+        if self.ours(&device) {
+            return Ok(());
+        }
+        if !self.asks_codes {
+            return Err(Refusal::Rejected("not asked for here".to_owned()));
+        }
+        self.ask(&device, Asked::Authorize).await.map(|_| ())
     }
 
     fn authorize_service(&self, device: OwnedObjectPath, _uuid: String) -> Result<(), Refusal> {
-        self.ours(&device)
+        if self.ours(&device) {
+            Ok(())
+        } else {
+            Err(Refusal::Rejected("not asked for here".to_owned()))
+        }
     }
 
-    fn cancel(&self) {}
+    /// BlueZ gives up what it asked: the questions waiting are dropped.
+    fn cancel(&self) {
+        self.waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        let _ = self.inputs.send(Input::Cancelled);
+    }
 }
 
 fn get<T>(props: &Props, name: &str) -> Option<T>
@@ -872,18 +1365,19 @@ where
     props.get(name)?.downcast_ref::<T>().ok()
 }
 
-/// A device's kind: its `Icon`, else its `Class`, else its `Appearance`.
+/// A device's kind: its `Icon`, made finer by its `Class`, else its
+/// `Appearance`.
 fn kind(props: &Props) -> Kind {
-    get::<String>(props, "Icon")
-        .and_then(|i| Kind::from_icon(&i))
-        .or_else(|| get::<u32>(props, "Class").and_then(Kind::from_class))
-        .or_else(|| get::<u16>(props, "Appearance").and_then(Kind::from_appearance))
-        .unwrap_or_default()
+    let icon = get::<String>(props, "Icon").and_then(|i| Kind::from_icon(&i));
+    let fine = get::<u32>(props, "Class")
+        .and_then(Kind::from_class)
+        .or_else(|| get::<u16>(props, "Appearance").and_then(Kind::from_appearance));
+    Kind::of(icon, fine)
 }
 
-/// What the bar shows of `cache`: the first adapter's devices, connected
-/// (the last connected first, as `stamps` say), paired, and around (named
-/// only, the strongest first).
+/// What is shown of `cache`: the first adapter's devices, connected (the
+/// last connected first, as `stamps` say), paired (those too while it is
+/// off), and around (named only, the strongest first).
 fn snapshot(
     cache: &Cache,
     stamps: &HashMap<String, u64>,
@@ -898,13 +1392,13 @@ fn snapshot(
     let mut bluetooth = Bluetooth {
         adapter: true,
         powered,
+        blocked: !powered && get::<String>(props, "PowerState").as_deref() == Some("off-blocked"),
+        alias: get::<String>(props, "Alias").unwrap_or_default(),
+        discoverable: powered && get::<bool>(props, "Discoverable") == Some(true),
         searching: searching && powered,
         attempt,
         ..Bluetooth::default()
     };
-    if !powered {
-        return bluetooth;
-    }
     let prefix = format!("{adapter}/");
     let mut nearby = Vec::new();
     for (path, props) in cache.devices.iter().filter(|(p, _)| p.starts_with(&prefix)) {
@@ -912,6 +1406,10 @@ fn snapshot(
         let alias = get::<String>(props, "Alias").filter(|n| !n.trim().is_empty());
         let paired = get::<bool>(props, "Paired") == Some(true);
         let connected = get::<bool>(props, "Connected") == Some(true);
+        // Off, only the paired ones.
+        if !powered && !paired {
+            continue;
+        }
         // A device that never said its name (an address) is not offered.
         let name = match (named.is_some() || paired || connected, alias.or(named)) {
             (true, Some(name)) => name,
@@ -920,10 +1418,12 @@ fn snapshot(
         let kind = kind(props);
         let device = Device {
             path: path.clone(),
+            address: get::<String>(props, "Address").unwrap_or_default(),
             name,
             kind,
             paired,
             connected,
+            trusted: get::<bool>(props, "Trusted") == Some(true),
             battery: cache.batteries.get(path).copied().filter(|_| connected),
             code: !paired && (kind.asks_a_code() || codes.contains(path)),
         };
@@ -977,9 +1477,13 @@ mod tests {
 
     fn cache() -> Cache {
         let mut cache = Cache::default();
-        cache
-            .adapters
-            .insert(HCI0.to_owned(), props(vec![("Powered", owned(true))]));
+        cache.adapters.insert(
+            HCI0.to_owned(),
+            props(vec![
+                ("Powered", owned(true)),
+                ("Alias", owned("portable-alex")),
+            ]),
+        );
         cache
     }
 
@@ -1064,6 +1568,8 @@ mod tests {
         let stamps = HashMap::from([(sony.clone(), 1), (mx.clone(), 2)]);
         let shown = snapshot(&cache, &stamps, &HashSet::new(), true, None);
         assert!(shown.adapter && shown.powered && shown.searching);
+        assert!(!shown.blocked && !shown.discoverable);
+        assert_eq!(shown.alias, "portable-alex");
         let names = |list: &[Device]| list.iter().map(|d| d.name.clone()).collect::<Vec<_>>();
         // The last connected first.
         assert_eq!(names(&shown.connected), ["MX Master 3S", "WH-1000XM4"]);
@@ -1077,12 +1583,18 @@ mod tests {
         let codes = HashSet::from([format!("{HCI0}/dev_4")]);
         assert!(snapshot(&cache, &stamps, &codes, false, None).nearby[1].code);
         let _ = pixel;
-        // Off: nothing listed.
-        cache
-            .adapters
-            .insert(HCI0.to_owned(), props(vec![("Powered", owned(false))]));
+        // Off, blocked by rfkill: the paired devices only.
+        cache.adapters.insert(
+            HCI0.to_owned(),
+            props(vec![
+                ("Powered", owned(false)),
+                ("PowerState", owned("off-blocked")),
+                ("Discoverable", owned(true)),
+            ]),
+        );
         let off = snapshot(&cache, &stamps, &HashSet::new(), true, None);
-        assert!(off.adapter && !off.powered && !off.searching);
-        assert!(off.connected.is_empty() && off.nearby.is_empty());
+        assert!(off.adapter && !off.powered && off.blocked && !off.searching);
+        assert!(!off.discoverable && off.nearby.is_empty());
+        assert_eq!(names(&off.paired), ["Keychron K3"]);
     }
 }
