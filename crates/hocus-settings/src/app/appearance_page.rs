@@ -188,7 +188,7 @@ impl App {
                 Some(today_as(format, jiff::Zoned::now().date(), self.lang))
             }
             ("locale.language", Value::Word("system")) => Some(system_language(self.lang)),
-            _ => None,
+            (id, value) => crate::agents::aside(id, value, self.lang).map(ToOwned::to_owned),
         }
     }
 
@@ -197,6 +197,9 @@ impl App {
     pub(super) fn menu_said(&self, setting: &Setting, value: &Value) -> String {
         if let Some(said) = self.bar_menu_said(setting, value) {
             return said;
+        }
+        if let Some(said) = crate::agents::button_said(setting.id, value, self.lang) {
+            return said.to_owned();
         }
         let said = setting.say(value, self.lang);
         match (setting.id, value) {

@@ -439,6 +439,13 @@ impl Headless {
         peek.out().map(|(id, kind)| (id, kind, peek.going_back()))
     }
 
+    /// When the panda peeking out had its surface's first frame, which
+    /// starts its motion and its 8 s, on the compositor's clock
+    /// ([`Headless::now`]): `None` before, and when none is out.
+    pub fn peek_since(&self) -> Option<Duration> {
+        self.app.state.peek.since()
+    }
+
     /// The peeks told the shell so far.
     pub fn peeks_told(&self) -> u64 {
         self.app.state.peek.told
@@ -875,8 +882,10 @@ impl Headless {
         state.leave_tick();
         // And a screen's mode tried from the Settings (6.9).
         state.trial_tick();
-        // And the halo's reminder of an agent waiting (4.4).
+        // And the halo's reminder of an agent waiting (4.4), and the 8 s
+        // of a panda peeking out (4.5).
         state.halo_reminder_due();
+        state.peek_due();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
         // on the screen, but each frame drawn notes its time.

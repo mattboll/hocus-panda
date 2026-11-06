@@ -109,13 +109,24 @@ impl App {
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
         }
+        // The Agents page's consent sheet (6.16).
+        if let Some(sheet) = self.agents_sheet() {
+            layers.push(sheet);
+        }
         // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
         if let Some(sheet) = self.bluetooth_sheet() {
             layers.push(sheet);
         }
-        // The time zone picker (6.11).
+        // The time zone picker, the avatar's popover, the password's sheet
+        // (6.11).
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
+        }
+        if let Some(popover) = self.account_popover() {
+            layers.push(popover);
+        }
+        if let Some(sheet) = self.account_sheet() {
+            layers.push(sheet);
         }
         // The Applications page's menu and sheet (6.15).
         if let Some(menu) = self.apps_menu() {
@@ -869,6 +880,9 @@ impl App {
         if id == SectionId::DateTime {
             return self.time_page(page);
         }
+        if id == SectionId::Account {
+            return self.account_page(page);
+        }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
         }
@@ -883,6 +897,9 @@ impl App {
         }
         if id == SectionId::Power {
             return self.power_page(page);
+        }
+        if id == SectionId::Agents {
+            return self.agents_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -983,12 +1000,15 @@ impl App {
         let slot = Slot::of(setting, self.source);
         // A row no device plugged can take is drawn at 45 % (6.12).
         let not_here = self.unavailable(setting);
-        let ink =
-            if not_here.is_some() || self.desktops_inert(setting) || self.captures_inert(setting) {
-                INERT
-            } else {
-                1.0
-            };
+        let ink = if not_here.is_some()
+            || self.desktops_inert(setting)
+            || self.agents_inert(setting)
+            || self.captures_inert(setting)
+        {
+            INERT
+        } else {
+            1.0
+        };
         let name = text(setting.name.get(lang))
             .size(14)
             .font(SEMIBOLD)
@@ -1807,10 +1827,12 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
+        "account": if app.page == Page::Section(SectionId::Account) { app.account_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
+        "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
