@@ -1635,23 +1635,6 @@ fn write(
     });
 }
 
-/// `s` cut with "…" to fit `room`.
-fn elided(s: &str, size: f32, font: Font, room: f32) -> String {
-    let measure = crate::app::style::measure;
-    if measure(s, size, font) <= room {
-        return s.to_owned();
-    }
-    let mut chars: Vec<char> = s.chars().collect();
-    while !chars.is_empty() {
-        chars.pop();
-        let cut = format!("{}…", chars.iter().collect::<String>().trim_end());
-        if measure(&cut, size, font) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
-}
-
 /// `s` with its right at `right`.
 fn write_right(
     f: &mut canvas::Frame,

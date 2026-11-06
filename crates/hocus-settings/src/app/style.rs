@@ -208,6 +208,57 @@ pub fn load_fonts() {
     }
 }
 
+/// `s` in `font` at `size`, cut with "…" to fit `room` px when it does not.
+pub fn elided(s: &str, size: f32, font: Font, room: f32) -> String {
+    fitted(s, room, |cut| measure(cut, size, font))
+}
+
+/// `head` then `kept`, in `font` at `size`, `head` alone cut with "…" when
+/// both do not fit `room` px.
+pub fn elided_keeping(head: &str, kept: &str, size: f32, font: Font, room: f32) -> String {
+    fitted_keeping(head, kept, room, |s| measure(s, size, font))
+}
+
+/// `head` then `kept` as they are when `width` says they fit `room`, else
+/// `head` cut to leave `kept` whole after it ("Haut-parl… · 62 %").
+pub fn fitted_keeping(head: &str, kept: &str, room: f32, width: impl Fn(&str) -> f32) -> String {
+    let whole = format!("{head}{kept}");
+    if kept.is_empty() || width(&whole) <= room {
+        return fitted(&whole, room, width);
+    }
+    let left = room - width(kept);
+    format!("{}{kept}", fitted(head, left, width))
+}
+
+/// `s` as it is when `width` says it fits `room`, else its longest start
+/// that fits with "…" after it, never a space or a separator just before
+/// the ellipsis ("Sur secteur ·…").
+pub fn fitted(s: &str, room: f32, width: impl Fn(&str) -> f32) -> String {
+    if width(s) <= room {
+        return s.to_owned();
+    }
+    let ends: Vec<usize> = s.char_indices().map(|(i, _)| i).skip(1).collect();
+    // The longest start that fits: cuts only get narrower as they shorten.
+    let cut = |end: usize| {
+        let kept = s[..end].trim_end_matches(|c: char| c.is_whitespace() || "·/-,:(".contains(c));
+        format!("{kept}…")
+    };
+    let (mut fits, mut over) = (0, ends.len());
+    while fits < over {
+        let mid = (fits + over).div_ceil(2);
+        if width(&cut(ends[mid - 1])) <= room {
+            fits = mid;
+        } else {
+            over = mid - 1;
+        }
+    }
+    if fits == 0 {
+        "…".to_owned()
+    } else {
+        cut(ends[fits - 1])
+    }
+}
+
 /// `text`'s width in `font` at `size`, measured once.
 pub fn measure(text: &str, size: f32, font: Font) -> f32 {
     use iced::advanced::graphics::text::cosmic_text;
@@ -238,4 +289,76 @@ pub fn measure(text: &str, size: f32, font: Font) -> f32 {
     };
     measured.insert(key, width);
     width
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every character 10 px wide, the ellipsis too.
+    fn tens(s: &str) -> f32 {
+        s.chars().count() as f32 * 10.0
+    }
+
+    #[test]
+    fn a_line_too_wide_ends_with_an_ellipsis_at_the_room_it_has() {
+        let line = "Sur secteur · jamais de veille";
+        // It fits: as it is.
+        assert_eq!(fitted(line, 300.0, tens), line);
+        assert_eq!(fitted(line, 1000.0, tens), line);
+        // One character short: cut, the ellipsis inside the room.
+        assert_eq!(fitted(line, 290.0, tens), "Sur secteur · jamais de veil…");
+        assert_eq!(fitted(line, 210.0, tens), "Sur secteur · jamais…");
+        assert_eq!(fitted(line, 200.0, tens), "Sur secteur · jamai…");
+        // Never a separator just before the ellipsis.
+        assert_eq!(fitted(line, 140.0, tens), "Sur secteur…");
+        assert_eq!(fitted(line, 150.0, tens), "Sur secteur…");
+        // Narrower than anything: the ellipsis alone.
+        assert_eq!(fitted(line, 15.0, tens), "…");
+        assert_eq!(fitted(line, 0.0, tens), "…");
+        // Characters of several bytes are cut whole.
+        assert_eq!(fitted("Énergie · 80 %", 60.0, tens), "Énerg…");
+        // Whatever the room, what comes back fits it (or is the ellipsis).
+        for room in 0..400 {
+            let room = room as f32;
+            let cut = fitted(line, room, tens);
+            assert!(tens(&cut) <= room || cut == "…", "{cut:?} in {room}");
+        }
+    }
+
+    #[test]
+    fn a_value_after_the_name_is_kept_whole_and_the_name_cut() {
+        let (name, volume) = ("Haut-parleurs", " · 62 %");
+        // Both fit: as they are.
+        assert_eq!(
+            fitted_keeping(name, volume, 200.0, tens),
+            "Haut-parleurs · 62 %"
+        );
+        // Not both: the name cut, the volume whole.
+        assert_eq!(
+            fitted_keeping(name, volume, 190.0, tens),
+            "Haut-parleu… · 62 %"
+        );
+        assert_eq!(fitted_keeping(name, volume, 140.0, tens), "Haut-p… · 62 %");
+        // Never a separator before the ellipsis.
+        assert_eq!(fitted_keeping(name, volume, 130.0, tens), "Haut… · 62 %");
+        // Hardly room for the volume: the ellipsis alone before it.
+        assert_eq!(fitted_keeping(name, volume, 80.0, tens), "… · 62 %");
+        // Nothing kept: the line cut as any other.
+        assert_eq!(fitted_keeping(name, "", 60.0, tens), "Haut…");
+    }
+
+    #[test]
+    fn measured_lines_fit_their_room_in_the_window_font() {
+        load_fonts();
+        let line = "Sur secteur · jamais de veille";
+        let full = measure(line, 12.5, MANROPE);
+        assert!(full > 100.0, "{full}");
+        assert_eq!(elided(line, 12.5, MANROPE, full + 1.0), line);
+        for room in [40.0, 80.0, 120.0, full - 1.0] {
+            let cut = elided(line, 12.5, MANROPE, room);
+            assert!(cut.ends_with('…'), "{cut:?}");
+            assert!(measure(&cut, 12.5, MANROPE) <= room, "{cut:?} in {room}");
+        }
+    }
 }
