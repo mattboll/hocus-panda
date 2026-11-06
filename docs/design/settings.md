@@ -1525,9 +1525,13 @@ file.
   JSON: the page, the sections, the query and its results, the lit row,
   the toast, the file's state, the banner, each row's value and warning)
   and **where its pieces are** (`hocus_settings::places`, at debug: each
-  id'd piece's place in the window, scrolling counted), as the shell says
-  what it draws. Tests read both; names for screen readers come with the
-  accessibility slice.
+  id'd piece's place in the window, scrolling counted; `wheels`: how
+  many wheels the window had taken when they were read, so that a test
+  scrolling the page knows its wheel was taken, moved or not, before it
+  clicks; and `shown`: the `serial` of the "shows" line they follow, said
+  once two collections agree, so that a test clicks where the window is
+  as it last showed), as the shell says what it draws. Tests read both; names for
+  screen readers come with the accessibility slice.
 
 ## Choices made here (to confirm on the machine)
 
