@@ -1178,13 +1178,13 @@ impl App {
 
     /// The home's card: the output in use and its volume.
     pub(super) fn sound_card(&self) -> String {
-        match self.sound.output() {
-            Some(sink) => format!(
+        match (self.sound.output(), self.sound.graph.as_deref()) {
+            (Some(sink), Some(graph)) => format!(
                 "{} · {}",
-                sink.description,
+                model::card_name(sink, graph),
                 model::say_volume(sink, false, self.lang)
             ),
-            None => w("Aucune sortie", "No output").get(self.lang).to_owned(),
+            _ => w("Aucune sortie", "No output").get(self.lang).to_owned(),
         }
     }
 }

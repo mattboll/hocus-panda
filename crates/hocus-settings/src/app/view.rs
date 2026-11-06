@@ -779,9 +779,14 @@ impl App {
                             .size(13.5)
                             .font(BOLD)
                             .color(TEXT),
-                        t(state, 12.5, DIM.get()).wrapping(text::Wrapping::None),
+                        // Whatever the window's width, the state ends
+                        // at the card's edge (#722).
+                        container(t(state, 12.5, DIM.get()).wrapping(text::Wrapping::None))
+                            .width(Length::Fill)
+                            .clip(true),
                     ]
-                    .spacing(2),
+                    .spacing(2)
+                    .width(Length::Fill),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
