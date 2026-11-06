@@ -11,10 +11,18 @@
 //! switched off takes the device down. Every change is signalled with its
 //! values (`PropertiesChanged`), and what the shell asked is recorded,
 //! passwords included, for the tests to compare.
+//!
+//! For the Settings' Réseau page (6.6) too: saved connections with their
+//! UUID, when they were last used and whether they join by themselves;
+//! their secrets read (`GetSecrets`), changed (`Update2`, keeping those an
+//! update leaves out, as NetworkManager does) and given back
+//! (`AddConnection`); a connection deleted while in use is left first;
+//! the Wi-Fi device's IPv4 configuration. Changes can be refused as polkit
+//! would ([`Nm::refuse`]).
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex, OnceLock, PoisonError},
     time::Duration,
 };
@@ -32,6 +40,8 @@ const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 const SETTINGS_IFACE: &str = "org.freedesktop.NetworkManager.Settings";
+const IP4: &str = "/org/freedesktop/NetworkManager/IP4Config/1";
+const IP4_WIRED: &str = "/org/freedesktop/NetworkManager/IP4Config/2";
 
 /// How long a connection takes, and a scan.
 const TAKES: Duration = Duration::from_millis(400);
@@ -43,7 +53,10 @@ pub enum Security {
     Open,
     /// WPA2 with this password.
     Psk(&'static str),
+    /// 802.1X: joined with any identity.
     Enterprise,
+    /// WEP with this key.
+    Wep(&'static str),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +64,8 @@ pub struct FakeAp {
     pub ssid: &'static str,
     pub strength: u8,
     pub security: Security,
+    /// In MHz: 5 GHz unless said.
+    pub frequency: u32,
 }
 
 impl FakeAp {
@@ -59,6 +74,7 @@ impl FakeAp {
             ssid,
             strength,
             security,
+            frequency: 5180,
         }
     }
 }
@@ -79,6 +95,11 @@ pub struct Setup {
     pub wired: bool,
     pub enabled: bool,
     pub check_uri: &'static str,
+    /// When saved networks were last used, in seconds before now; the
+    /// others never were.
+    pub used: Vec<(&'static str, u64)>,
+    /// Networks that do not say their name: joined by it, they appear.
+    pub hidden: Vec<FakeAp>,
 }
 
 impl Default for Setup {
@@ -93,6 +114,8 @@ impl Default for Setup {
             wired: false,
             enabled: true,
             check_uri: "http://check.hocus.test/portal",
+            used: Vec::new(),
+            hidden: Vec::new(),
         }
     }
 }
@@ -102,10 +125,36 @@ impl Default for Setup {
 pub enum Call {
     Scan,
     Enable(bool),
-    Activate { ssid: String },
-    AddAndActivate { ssid: String, psk: Option<String> },
-    Update { ssid: String, psk: Option<String> },
-    Delete { ssid: String },
+    Activate {
+        ssid: String,
+    },
+    AddAndActivate {
+        ssid: String,
+        psk: Option<String>,
+    },
+    Update {
+        ssid: String,
+        psk: Option<String>,
+    },
+    /// The Settings' change of a saved connection: the password and
+    /// `autoconnect` it sends, if it does.
+    Update2 {
+        ssid: String,
+        psk: Option<String>,
+        autoconnect: Option<bool>,
+    },
+    GetSecrets {
+        ssid: String,
+    },
+    /// A connection given back: its UUID, its password.
+    AddConnection {
+        ssid: String,
+        uuid: String,
+        psk: Option<String>,
+    },
+    Delete {
+        ssid: String,
+    },
     Disconnect,
     Deactivate,
 }
@@ -121,6 +170,13 @@ struct Saved {
     path: String,
     ssid: String,
     psk: Option<String>,
+    /// What a connection is right with: the password, the WEP key, or
+    /// `8021x:IDENTITY`.
+    secret: Option<String>,
+    uuid: String,
+    /// Seconds since the epoch; 0: never used.
+    timestamp: u64,
+    autoconnect: bool,
 }
 
 #[derive(Debug, Default)]
@@ -145,6 +201,12 @@ struct State {
     calls: Vec<Call>,
     /// How long a connection takes.
     takes: Duration,
+    /// Changes to saved connections refused, as polkit would.
+    refuse: bool,
+    hidden: Vec<FakeAp>,
+    /// The settings each `AddAndActivateConnection` sent, flattened
+    /// (`802-1x.identity` → its value).
+    added: Vec<(String, BTreeMap<String, String>)>,
 }
 
 impl State {
@@ -207,6 +269,7 @@ impl Nm {
                 check_uri: setup.check_uri.to_owned(),
                 portals: setup.portals.clone(),
                 later: setup.later.clone(),
+                hidden: setup.hidden.clone(),
                 device: if setup.enabled { 30 } else { 20 },
                 active_ap: "/".to_owned(),
                 takes: TAKES,
@@ -217,8 +280,9 @@ impl Nm {
         let address = address.to_owned();
         let served = shared.clone();
         runtime.block_on(async move {
+            // Its name taken once every object is served, as
+            // NetworkManager's: a client that reads it at once finds them.
             let connection = Builder::address(address.as_str())
-                .name(NM)
                 .serve_at(ROOT, Manager(served.clone()))
                 .serve_at(SETTINGS, Settings(served.clone()))
                 .build()
@@ -230,11 +294,24 @@ impl Nm {
                 server.at(WIFI, Wireless(served.clone())).await?;
             }
             server.at(WIRED, Device(served.clone(), WIRED, 1)).await?;
+            server.at(WIRED, Wired(served.clone())).await?;
+            server.at(IP4_WIRED, Ip4Wired).await?;
             for ap in setup.aps {
                 add_ap(&served, ap, false).await?;
             }
+            server.at(IP4, Ip4Config).await?;
             for (ssid, psk) in setup.saved {
-                add_saved(&served, ssid, psk.map(str::to_owned), false).await?;
+                let p = add_saved(&served, ssid, psk.map(str::to_owned), None, false).await?;
+                let ago = setup.used.iter().find(|(s, _)| *s == ssid).map(|(_, a)| *a);
+                state(&served, |s| {
+                    if let Some(saved) = s.saved.iter_mut().find(|c| c.path == p) {
+                        saved.timestamp = match (ago, setup.current) {
+                            (_, Some(current)) if current == ssid => now(),
+                            (Some(ago), _) => now().saturating_sub(ago),
+                            (None, _) => 0,
+                        };
+                    }
+                });
             }
             if let Some(current) = setup.current {
                 let ap = state(&served, |s| {
@@ -262,6 +339,7 @@ impl Nm {
                     });
                 }
             }
+            connection.request_name(NM).await?;
             Ok::<_, anyhow::Error>(())
         })?;
         Ok(Self {
@@ -286,6 +364,34 @@ impl Nm {
 
     pub fn enabled(&self) -> bool {
         state(&self.shared, |s| s.enabled)
+    }
+
+    /// Changes to saved connections refused from now on, as polkit would
+    /// (or no longer).
+    pub fn refuse(&self, refuse: bool) {
+        state(&self.shared, |s| s.refuse = refuse);
+    }
+
+    /// The saved connections' UUIDs, SSIDs and `autoconnect`.
+    pub fn saved_uuids(&self) -> Vec<(String, String, bool)> {
+        state(&self.shared, |s| {
+            s.saved
+                .iter()
+                .map(|c| (c.uuid.clone(), c.ssid.clone(), c.autoconnect))
+                .collect()
+        })
+    }
+
+    /// The settings the last `AddAndActivateConnection` for `ssid` sent,
+    /// flattened: `802-1x.eap` → `peap`.
+    pub fn added(&self, ssid: &str) -> Option<BTreeMap<String, String>> {
+        state(&self.shared, |s| {
+            s.added
+                .iter()
+                .rev()
+                .find(|(n, _)| n == ssid)
+                .map(|(_, v)| v.clone())
+        })
     }
 
     /// The saved connections' SSIDs and passwords.
@@ -349,7 +455,7 @@ impl Nm {
         let found = state(&shared, |s| {
             let saved = s.saved.iter().find(|c| c.ssid == ssid)?;
             let ap = s.aps.iter().find(|a| a.fake.ssid == ssid)?;
-            Some((saved.path.clone(), ap.path.clone(), saved.psk.clone()))
+            Some((saved.path.clone(), ap.path.clone(), saved.secret.clone()))
         });
         let (saved, ap, psk) = found.ok_or_else(|| anyhow::anyhow!("no saved {ssid}"))?;
         self.handle
@@ -397,7 +503,24 @@ impl Nm {
         self.handle.block_on(async move {
             let new = if wired { 100u32 } else { 20 };
             state(&shared, |s| s.wired = wired);
-            changed(&shared, WIRED, DEVICE, vec![("State", Variant::from(new))]).await?;
+            let ip4 = if wired { path(IP4_WIRED) } else { none() };
+            changed(
+                &shared,
+                WIRED,
+                DEVICE,
+                vec![
+                    ("State", Variant::from(new)),
+                    ("Ip4Config", Variant::from(ip4)),
+                ],
+            )
+            .await?;
+            changed(
+                &shared,
+                WIRED,
+                "org.freedesktop.NetworkManager.Device.Wired",
+                vec![("Carrier", Variant::from(wired))],
+            )
+            .await?;
             emit(&shared, WIRED, DEVICE, "StateChanged", &(new, 30u32, 0u32)).await
         })
     }
@@ -469,18 +592,31 @@ async fn add_ap(shared: &Shared, fake: FakeAp, announce: bool) -> anyhow::Result
     Ok(p)
 }
 
+/// Now, in seconds since the epoch.
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 async fn add_saved(
     shared: &Shared,
     ssid: &str,
     psk: Option<String>,
+    uuid: Option<String>,
     announce: bool,
 ) -> anyhow::Result<String> {
     let p = state(shared, |s| {
-        let p = format!("/org/freedesktop/NetworkManager/Settings/{}", s.next());
+        let n = s.next();
+        let p = format!("/org/freedesktop/NetworkManager/Settings/{n}");
         s.saved.push(Saved {
             path: p.clone(),
             ssid: ssid.to_owned(),
+            secret: psk.clone(),
             psk,
+            uuid: uuid.unwrap_or_else(|| format!("{n:08x}-7e57-4000-8000-000000000000")),
+            timestamp: 0,
+            autoconnect: true,
         });
         p
     });
@@ -600,13 +736,21 @@ async fn activate(
             let fake = s.ap(&ap).map(|a| a.fake);
             let right = match fake.map(|f| f.security) {
                 Some(Security::Open) => true,
-                Some(Security::Psk(want)) => psk.as_deref() == Some(want),
+                Some(Security::Psk(want) | Security::Wep(want)) => psk.as_deref() == Some(want),
+                Some(Security::Enterprise) => psk
+                    .as_deref()
+                    .and_then(|p| p.strip_prefix("8021x:"))
+                    .is_some_and(|identity| !identity.is_empty()),
                 _ => false,
             };
             (right, fake.map(|f| f.ssid).unwrap_or_default())
         });
         if right {
             let connectivity = state(&task, |s| {
+                let saved = s.active.as_ref().map(|a| a.1.clone());
+                if let Some(c) = s.saved.iter_mut().find(|c| Some(&c.path) == saved.as_ref()) {
+                    c.timestamp = now();
+                }
                 s.active_ap.clone_from(&ap);
                 s.connectivity = if s.portals.contains(&ssid) { 2 } else { 4 };
                 if let Some(a) = &mut s.active {
@@ -748,7 +892,7 @@ impl Manager {
             } else {
                 specific.as_str().to_owned()
             };
-            Some((saved.path.clone(), ap, saved.psk.clone()))
+            Some((saved.path.clone(), ap, saved.secret.clone()))
         });
         let (saved, ap, psk) = saved.ok_or_else(|| failed("no such connection"))?;
         let active = activate(self.0.clone(), saved, ap, psk)
@@ -765,23 +909,51 @@ impl Manager {
     ) -> zbus::fdo::Result<(OwnedObjectPath, OwnedObjectPath)> {
         let ssid = ssid_of(&settings).ok_or_else(|| failed("no SSID"))?;
         let psk = psk_of(&settings);
+        let flat = flatten(&settings);
+        let secret = psk
+            .clone()
+            .or_else(|| flat.get("802-11-wireless-security.wep-key0").cloned())
+            .or_else(|| flat.get("802-1x.identity").map(|i| format!("8021x:{i}")));
         state(&self.0, |s| {
             s.calls.push(Call::AddAndActivate {
                 ssid: ssid.clone(),
                 psk: psk.clone(),
             });
+            s.added.push((ssid.clone(), flat));
         });
-        let saved = add_saved(&self.0, &ssid, psk.clone(), true)
+        // A hidden network, joined by its name: its access point appears.
+        let mut ap = specific.as_str().to_owned();
+        if ap == "/" {
+            let (known, hidden) = state(&self.0, |s| {
+                let known = s
+                    .aps
+                    .iter()
+                    .find(|a| a.fake.ssid == ssid)
+                    .map(|a| a.path.clone());
+                let hidden = s
+                    .hidden
+                    .iter()
+                    .position(|h| h.ssid == ssid)
+                    .map(|at| s.hidden.remove(at));
+                (known, hidden)
+            });
+            if let Some(known) = known {
+                ap = known;
+            } else if let Some(hidden) = hidden {
+                ap = add_ap(&self.0, hidden, true).await.map_err(failed)?;
+            }
+        }
+        let saved = add_saved(&self.0, &ssid, psk.clone(), None, true)
             .await
             .map_err(failed)?;
-        let active = activate(
-            self.0.clone(),
-            saved.clone(),
-            specific.as_str().to_owned(),
-            psk,
-        )
-        .await
-        .map_err(failed)?;
+        state(&self.0, |s| {
+            if let Some(c) = s.saved.iter_mut().find(|c| c.path == saved) {
+                c.secret.clone_from(&secret);
+            }
+        });
+        let active = activate(self.0.clone(), saved.clone(), ap, secret)
+            .await
+            .map_err(failed)?;
         Ok((path(&saved), path(&active)))
     }
 
@@ -815,6 +987,28 @@ impl Device {
         if self.2 == 2 { "wlan0" } else { "eth0" }.to_owned()
     }
 
+    /// The Wi-Fi device's IPv4 configuration, the same whatever its
+    /// network; the cable's while it is plugged.
+    #[zbus(property)]
+    fn ip4_config(&self) -> OwnedObjectPath {
+        match self.2 {
+            2 => path(IP4),
+            _ if state(&self.0, |s| s.wired) => path(IP4_WIRED),
+            _ => none(),
+        }
+    }
+
+    /// Where it sits: the cable on a USB adapter.
+    #[zbus(property)]
+    fn path(&self) -> String {
+        if self.2 == 2 {
+            "pci-0000:00:14.3"
+        } else {
+            "pci-0000:00:14.0-usb-0:2:1.0"
+        }
+        .to_owned()
+    }
+
     async fn disconnect(&self) -> zbus::fdo::Result<()> {
         state(&self.0, |s| s.calls.push(Call::Disconnect));
         drop_active(&self.0, 2).await.map_err(failed)?;
@@ -839,6 +1033,17 @@ impl Wireless {
     #[zbus(property)]
     fn last_scan(&self) -> i64 {
         state(&self.0, |s| s.last_scan)
+    }
+
+    #[zbus(property)]
+    fn hw_address(&self) -> String {
+        "3C:A9:F4:12:5B:7E".to_owned()
+    }
+
+    /// Kb/s.
+    #[zbus(property)]
+    fn bitrate(&self) -> u32 {
+        866_000
     }
 
     async fn request_scan(&self, _options: HashMap<String, OwnedVariant>) -> zbus::fdo::Result<()> {
@@ -906,8 +1111,117 @@ impl AccessPoint {
         match self.fake().map(|f| f.security) {
             Some(Security::Psk(_)) => 0x188,
             Some(Security::Enterprise) => 0x288,
+            Some(Security::Wep(_)) => 0,
             _ => 0,
         }
+    }
+
+    #[zbus(property)]
+    fn frequency(&self) -> u32 {
+        self.fake().map_or(2412, |f| f.frequency)
+    }
+}
+
+/// The cable's side of a wired device.
+struct Wired(Shared);
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager.Device.Wired")]
+impl Wired {
+    /// Mb/s.
+    #[zbus(property)]
+    fn speed(&self) -> u32 {
+        1000
+    }
+
+    #[zbus(property)]
+    fn carrier(&self) -> bool {
+        state(&self.0, |s| s.wired)
+    }
+}
+
+/// The cable's IPv4 configuration.
+struct Ip4Wired;
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager.IP4Config")]
+impl Ip4Wired {
+    #[zbus(property)]
+    fn address_data(&self) -> Dicts {
+        vec![dict(&[("address", "192.168.1.30")])]
+    }
+
+    #[zbus(property)]
+    fn gateway(&self) -> String {
+        "192.168.1.1".to_owned()
+    }
+}
+
+/// Settings flattened for the tests: `group.key` → its value as text
+/// (bytes as text, without their trailing NUL; lists joined by commas).
+fn flatten(settings: &HashMap<String, HashMap<String, OwnedVariant>>) -> BTreeMap<String, String> {
+    let mut flat = BTreeMap::new();
+    for (group, values) in settings {
+        for (key, value) in values {
+            let said = if let Ok(s) = value.downcast_ref::<String>() {
+                s
+            } else if let Ok(b) = value.downcast_ref::<bool>() {
+                b.to_string()
+            } else if let Ok(n) = value.downcast_ref::<u32>() {
+                n.to_string()
+            } else if let Some(bytes) = value
+                .try_clone()
+                .ok()
+                .and_then(|v| Vec::<u8>::try_from(v).ok())
+            {
+                String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_owned()
+            } else if let Some(list) = value
+                .try_clone()
+                .ok()
+                .and_then(|v| Vec::<String>::try_from(v).ok())
+            {
+                list.join(",")
+            } else {
+                format!("{value:?}")
+            };
+            flat.insert(format!("{group}.{key}"), said);
+        }
+    }
+    flat
+}
+
+/// The Wi-Fi device's IPv4 configuration.
+struct Ip4Config;
+
+type Dicts = Vec<HashMap<String, OwnedVariant>>;
+
+fn dict(values: &[(&str, &str)]) -> HashMap<String, OwnedVariant> {
+    values
+        .iter()
+        .filter_map(|(k, v)| {
+            Some((
+                (*k).to_owned(),
+                OwnedVariant::try_from(Variant::from(*v)).ok()?,
+            ))
+        })
+        .collect()
+}
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager.IP4Config")]
+impl Ip4Config {
+    #[zbus(property)]
+    fn address_data(&self) -> Dicts {
+        vec![dict(&[("address", "192.168.1.24")])]
+    }
+
+    #[zbus(property)]
+    fn gateway(&self) -> String {
+        "192.168.1.1".to_owned()
+    }
+
+    #[zbus(property)]
+    fn nameserver_data(&self) -> Dicts {
+        vec![dict(&[("address", "192.168.1.1")])]
     }
 }
 
@@ -918,6 +1232,54 @@ impl Settings {
     fn list_connections(&self) -> Vec<OwnedObjectPath> {
         state(&self.0, |s| s.saved.iter().map(|c| path(&c.path)).collect())
     }
+
+    async fn add_connection(
+        &self,
+        settings: HashMap<String, HashMap<String, OwnedVariant>>,
+    ) -> zbus::fdo::Result<OwnedObjectPath> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        let ssid = ssid_of(&settings).ok_or_else(|| failed("no SSID"))?;
+        let psk = psk_of(&settings);
+        let uuid = settings
+            .get("connection")
+            .and_then(|c| c.get("uuid"))
+            .and_then(|v| v.downcast_ref::<String>().ok())
+            .ok_or_else(|| failed("no UUID"))?;
+        let autoconnect = settings
+            .get("connection")
+            .and_then(|c| c.get("autoconnect"))
+            .and_then(|v| v.downcast_ref::<bool>().ok())
+            .unwrap_or(true);
+        let timestamp = settings
+            .get("connection")
+            .and_then(|c| c.get("timestamp"))
+            .and_then(|v| v.downcast_ref::<u64>().ok())
+            .unwrap_or(0);
+        state(&self.0, |s| {
+            s.calls.push(Call::AddConnection {
+                ssid: ssid.clone(),
+                uuid: uuid.clone(),
+                psk: psk.clone(),
+            });
+        });
+        let p = add_saved(&self.0, &ssid, psk, Some(uuid), true)
+            .await
+            .map_err(failed)?;
+        state(&self.0, |s| {
+            if let Some(saved) = s.saved.iter_mut().find(|c| c.path == p) {
+                saved.autoconnect = autoconnect;
+                saved.timestamp = timestamp;
+            }
+        });
+        Ok(path(&p))
+    }
+}
+
+/// What polkit says to a change it does not allow.
+fn refused() -> zbus::fdo::Error {
+    zbus::fdo::Error::AccessDenied("Not authorized to modify system connections".to_owned())
 }
 
 struct SavedConnection(Shared, String);
@@ -925,23 +1287,95 @@ struct SavedConnection(Shared, String);
 #[zbus::interface(name = "org.freedesktop.NetworkManager.Settings.Connection")]
 impl SavedConnection {
     fn get_settings(&self) -> HashMap<String, HashMap<String, OwnedVariant>> {
-        let ssid = state(&self.0, |s| {
-            s.saved
-                .iter()
-                .find(|c| c.path == self.1)
-                .map(|c| c.ssid.clone())
-        })
-        .unwrap_or_default();
+        let found = state(&self.0, |s| {
+            s.saved.iter().find(|c| c.path == self.1).map(|c| {
+                (
+                    c.ssid.clone(),
+                    c.uuid.clone(),
+                    c.timestamp,
+                    c.autoconnect,
+                    c.psk.is_some(),
+                )
+            })
+        });
+        let (ssid, uuid, timestamp, autoconnect, protected) = found.unwrap_or_default();
         let owned = |v: Variant<'_>| OwnedVariant::try_from(v).ok();
         let mut settings = HashMap::new();
         let mut connection = HashMap::new();
         connection.extend(owned(Variant::from(ssid.as_str())).map(|v| ("id".to_owned(), v)));
+        connection.extend(owned(Variant::from(uuid.as_str())).map(|v| ("uuid".to_owned(), v)));
         connection.extend(owned(Variant::from("802-11-wireless")).map(|v| ("type".to_owned(), v)));
+        connection.extend(owned(Variant::from(timestamp)).map(|v| ("timestamp".to_owned(), v)));
+        connection.extend(owned(Variant::from(autoconnect)).map(|v| ("autoconnect".to_owned(), v)));
         settings.insert("connection".to_owned(), connection);
         let mut wifi = HashMap::new();
         wifi.extend(owned(Variant::from(ssid.as_bytes())).map(|v| ("ssid".to_owned(), v)));
         settings.insert("802-11-wireless".to_owned(), wifi);
+        if protected {
+            let mut security = HashMap::new();
+            security.extend(owned(Variant::from("wpa-psk")).map(|v| ("key-mgmt".to_owned(), v)));
+            settings.insert("802-11-wireless-security".to_owned(), security);
+        }
         settings
+    }
+
+    fn get_secrets(
+        &self,
+        setting: &str,
+    ) -> zbus::fdo::Result<HashMap<String, HashMap<String, OwnedVariant>>> {
+        let (ssid, psk) = state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.path == self.1)
+                .map(|c| (c.ssid.clone(), c.psk.clone()))
+        })
+        .ok_or_else(|| failed("no such connection"))?;
+        state(&self.0, |s| s.calls.push(Call::GetSecrets { ssid }));
+        let mut values = HashMap::new();
+        if setting == "802-11-wireless-security"
+            && let Some(psk) = psk
+            && let Ok(v) = OwnedVariant::try_from(Variant::from(psk.as_str()))
+        {
+            values.insert("psk".to_owned(), v);
+        }
+        Ok([(setting.to_owned(), values)].into_iter().collect())
+    }
+
+    async fn update2(
+        &self,
+        settings: HashMap<String, HashMap<String, OwnedVariant>>,
+        _flags: u32,
+        _args: HashMap<String, OwnedVariant>,
+    ) -> zbus::fdo::Result<HashMap<String, OwnedVariant>> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        let psk = psk_of(&settings);
+        let autoconnect = settings
+            .get("connection")
+            .and_then(|c| c.get("autoconnect"))
+            .and_then(|v| v.downcast_ref::<bool>().ok());
+        state(&self.0, |s| {
+            if let Some(saved) = s.saved.iter_mut().find(|c| c.path == self.1) {
+                // The secrets an update leaves out are kept.
+                if psk.is_some() {
+                    saved.psk.clone_from(&psk);
+                    saved.secret.clone_from(&psk);
+                }
+                if let Some(on) = autoconnect {
+                    saved.autoconnect = on;
+                }
+                s.calls.push(Call::Update2 {
+                    ssid: saved.ssid.clone(),
+                    psk,
+                    autoconnect,
+                });
+            }
+        });
+        emit(&self.0, &self.1, CONNECTION, "Updated", &())
+            .await
+            .map_err(failed)?;
+        Ok(HashMap::new())
     }
 
     async fn update(
@@ -952,6 +1386,7 @@ impl SavedConnection {
         state(&self.0, |s| {
             if let Some(saved) = s.saved.iter_mut().find(|c| c.path == self.1) {
                 saved.psk.clone_from(&psk);
+                saved.secret.clone_from(&psk);
                 s.calls.push(Call::Update {
                     ssid: saved.ssid.clone(),
                     psk,
@@ -964,12 +1399,29 @@ impl SavedConnection {
     }
 
     async fn delete(&self) -> zbus::fdo::Result<()> {
+        if state(&self.0, |s| s.refuse) {
+            return Err(refused());
+        }
+        // In use: left first, as NetworkManager does.
+        let in_use = state(&self.0, |s| {
+            s.active.as_ref().is_some_and(|a| a.1 == self.1)
+        });
+        if in_use {
+            drop_active(&self.0, 2).await.map_err(failed)?;
+            device_state(&self.0, 30, 0).await.map_err(failed)?;
+        }
         state(&self.0, |s| {
             if let Some(at) = s.saved.iter().position(|c| c.path == self.1) {
                 let gone = s.saved.remove(at);
                 s.calls.push(Call::Delete { ssid: gone.ssid });
             }
         });
+        if let Some(connection) = self.0.connection.get() {
+            let _ = connection
+                .object_server()
+                .remove::<SavedConnection, _>(self.1.as_str())
+                .await;
+        }
         emit(
             &self.0,
             SETTINGS,

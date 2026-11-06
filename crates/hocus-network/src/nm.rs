@@ -1,5 +1,6 @@
 //! NetworkManager on the system bus, on a thread of its own: what it says,
-//! followed by its signals, and what the popover asks of it.
+//! followed by its signals, and what the bar's popover and the Settings'
+//! Réseau page ask of it.
 //!
 //! The thread keeps NetworkManager's objects as last said: the manager
 //! (`WirelessEnabled`, `Connectivity`, its check address), the devices
@@ -11,7 +12,10 @@
 //! `AccessPointAdded` and `…Removed`, devices and connections added and
 //! removed, `StateChanged` with its reason), and its owner on the bus, for
 //! when it stops or starts. Nothing is polled. After each burst of
-//! signals, what the bar shows is made again ([`snapshot`]) and published.
+//! signals, its owner is told ([`Heard::Now`]): the bar makes its row of it
+//! ([`View::network`]), the page its details ([`View::details`]). The
+//! devices' IP configurations and the saved connections' settings are
+//! kept whole for the page (never their secrets, read only when asked).
 //!
 //! What it asks: a scan (`RequestScan`, which NetworkManager limits: its
 //! refusal is ignored), the Wi-Fi on or off (`WirelessEnabled`), a saved
@@ -23,23 +27,33 @@
 //! which keeps it from connecting again by itself). A connection this
 //! thread added that fails is deleted, so that a wrong password is not
 //! saved.
+//!
+//! The page's asks: a saved connection's `connection.autoconnect` or
+//! password (`Update2`, to disk: NetworkManager keeps the secrets an
+//! update leaves out), its password read for the eye (`GetSecrets`), a
+//! connection forgotten (its settings and secrets read, then `Delete`)
+//! and given back (`AddConnection`, the same UUID, joined again if it was
+//! in use). Their answers go to the owner ([`Heard::Reply`]).
 
 use std::collections::HashMap;
 
-use iced::futures::StreamExt;
+use std::{sync::Arc, time::Duration};
+
+use futures_util::StreamExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use zbus::{
     Connection, MatchRule, Message, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant,
     Variant, fdo::DBusProxy,
 };
 
-use super::{
-    Ask,
-    model::{AccessPoint, Attempt, Failure, Network, Progress, Security, Wifi, listed, name_of},
-    publish,
+use crate::{
+    Ask, Ca, Join,
+    model::{
+        AccessPoint, Attempt, Current, Details, Failure, Network, Progress, Saved, Security, Wifi,
+        Wired, listed, name_of,
+    },
     secret::Secret,
 };
-use crate::levels::{Presence, RETRY_FIRST, next_retry};
 
 const NM: &str = "org.freedesktop.NetworkManager";
 const ROOT: &str = "/org/freedesktop/NetworkManager";
@@ -47,10 +61,17 @@ const SETTINGS: &str = "/org/freedesktop/NetworkManager/Settings";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 const DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
+const WIRED_IFACE: &str = "org.freedesktop.NetworkManager.Device.Wired";
 const ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const SETTINGS_IFACE: &str = "org.freedesktop.NetworkManager.Settings";
 const CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
+const IP4: &str = "org.freedesktop.NetworkManager.IP4Config";
+const IP6: &str = "org.freedesktop.NetworkManager.IP6Config";
+/// `Update2`'s flag: written to disk.
+const TO_DISK: u32 = 0x1;
+/// The settings whose secrets a connection forgotten keeps.
+const SECRET_SETTINGS: [&str; 4] = ["802-11-wireless-security", "802-1x", "vpn", "wireguard"];
 
 /// `NMDeviceType`.
 const ETHERNET: u32 = 1;
@@ -79,7 +100,67 @@ const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 type Props = HashMap<String, OwnedVariant>;
 type Settings = HashMap<String, HashMap<String, OwnedVariant>>;
 
-pub fn start(asks: UnboundedReceiver<Ask>) {
+/// A service that is away is tried again after this, doubled each time it
+/// is still away, up to [`RETRY_LAST`].
+const RETRY_FIRST: Duration = Duration::from_secs(2);
+const RETRY_LAST: Duration = Duration::from_secs(60);
+
+/// What NetworkManager's thread tells its owner.
+#[derive(Debug)]
+pub enum Heard<'a> {
+    /// What it says now, after a burst of signals.
+    Now(View<'a>),
+    /// The answer to an ask of the page's.
+    Reply(Reply),
+}
+
+/// The answer to an ask of the page's.
+#[derive(Debug)]
+pub enum Reply {
+    /// A saved connection's password, read ([`Ask::ReadPassword`]):
+    /// `None` when it has none or it could not be read.
+    Password {
+        uuid: String,
+        secret: Option<Secret>,
+    },
+    /// A connection deleted, kept for its undo ([`Ask::Forget`]).
+    Forgotten(Arc<Kept>),
+    /// A connection forgotten, back ([`Ask::Restore`]).
+    Restored(Arc<Kept>),
+    /// A change NetworkManager did not make: refused by polkit
+    /// (`denied`), or failed; its message.
+    Refused { denied: bool, message: String },
+}
+
+/// A connection forgotten: its settings with what secrets could be read,
+/// to give it back. Its `Debug` says no secret.
+pub struct Kept {
+    pub uuid: String,
+    pub name: String,
+    /// It was in use as it went: joined again when it comes back.
+    pub connected: bool,
+    /// Every secret it has was read: it comes back with its password.
+    pub secrets: bool,
+    settings: Settings,
+}
+
+impl std::fmt::Debug for Kept {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Kept")
+            .field("uuid", &self.uuid)
+            .field("name", &self.name)
+            .field("connected", &self.connected)
+            .field("secrets", &self.secrets)
+            .finish_non_exhaustive()
+    }
+}
+
+type On = Box<dyn FnMut(Heard<'_>) + Send>;
+
+/// Follows NetworkManager on a thread of its own, until `asks` closes:
+/// `on` hears what it says and its answers, on that thread.
+pub fn start(asks: UnboundedReceiver<Ask>, on: impl FnMut(Heard<'_>) + Send + 'static) {
+    let mut on: On = Box::new(on);
     let started = std::thread::Builder::new()
         .name("network".to_owned())
         .spawn(move || {
@@ -87,12 +168,37 @@ pub fn start(asks: UnboundedReceiver<Ask>) {
                 .enable_all()
                 .build();
             match runtime {
-                Ok(runtime) => runtime.block_on(run(asks)),
-                Err(err) => tracing::warn!(%err, "no runtime for NetworkManager"),
+                Ok(runtime) => runtime.block_on(run(asks, on)),
+                Err(err) => {
+                    tracing::warn!(%err, "no runtime for NetworkManager");
+                    on(Heard::Now(View::absent()));
+                }
             }
         });
     if let Err(err) = started {
         tracing::warn!(%err, "cannot follow NetworkManager");
+    }
+}
+
+/// Whether NetworkManager is there, to say once when it goes and comes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Presence {
+    Unknown,
+    There,
+    Away,
+}
+
+impl Presence {
+    fn now(&mut self, there: bool, what: &str, why: impl std::fmt::Display) {
+        let next = if there { Self::There } else { Self::Away };
+        match (*self, next) {
+            (Self::Away, Self::There) => tracing::info!("{what}: back"),
+            (Self::Unknown | Self::There, Self::Away) => {
+                tracing::info!("{what}: not there ({why}); hidden until it comes");
+            }
+            _ => {}
+        }
+        *self = next;
     }
 }
 
@@ -106,25 +212,29 @@ enum Input {
     ScanTimeout(u64),
 }
 
-async fn run(mut asks: UnboundedReceiver<Ask>) {
+async fn run(mut asks: UnboundedReceiver<Ask>, mut on: On) {
     let mut wait = RETRY_FIRST;
     let mut presence = Presence::Unknown;
     let connection = loop {
         match Connection::system().await {
             Ok(connection) => break connection,
             Err(err) => {
+                // Said once: a retry that fails again changes nothing, and
+                // wakes no one.
+                if presence != Presence::Away {
+                    on(Heard::Now(View::absent()));
+                }
                 presence.now(false, "NetworkManager (the system bus)", &err);
-                publish(Network::default());
                 while asks.try_recv().is_ok() {}
                 tokio::time::sleep(wait).await;
-                wait = next_retry(wait);
+                wait = (wait * 2).min(RETRY_LAST);
             }
         }
     };
     let (inputs, mut incoming) = unbounded_channel();
     if let Err(err) = listen(&connection, inputs.clone()).await {
         presence.now(false, "NetworkManager", &err);
-        publish(Network::default());
+        on(Heard::Now(View::absent()));
         return;
     }
     tokio::spawn({
@@ -147,6 +257,7 @@ async fn run(mut asks: UnboundedReceiver<Ask>) {
         tracking: Tracking::default(),
         attempts: 0,
         inputs,
+        on,
     };
     // Its owner now: the stream says only what changes.
     let owned = match DBusProxy::new(&client.connection).await {
@@ -206,14 +317,35 @@ struct Cache {
     devices: HashMap<String, Device>,
     aps: HashMap<String, Props>,
     actives: HashMap<String, Props>,
-    /// The saved Wi-Fi connections' SSIDs, by path.
-    saved: HashMap<String, Vec<u8>>,
+    /// The saved connections' settings (no secrets), by path.
+    saved: HashMap<String, Settings>,
+}
+
+impl Cache {
+    /// The saved Wi-Fi connections' SSIDs.
+    fn ssids(&self) -> impl Iterator<Item = (&String, Vec<u8>)> {
+        self.saved
+            .iter()
+            .filter_map(|(path, settings)| Some((path, wifi_ssid(settings)?)))
+    }
+
+    /// The saved connection whose UUID is `uuid`: its path, its settings.
+    fn by_uuid(&self, uuid: &str) -> Option<(&String, &Settings)> {
+        self.saved
+            .iter()
+            .find(|(_, settings)| text(settings, "connection", "uuid").as_deref() == Some(uuid))
+    }
 }
 
 #[derive(Debug, Default)]
 struct Device {
     props: Props,
     wireless: Props,
+    /// An Ethernet device's `Carrier` and `Speed`.
+    wired: Props,
+    /// Its IPv4 and IPv6 configurations, and their paths.
+    ip4: (String, Props),
+    ip6: (String, Props),
     /// Its last state change's reason.
     reason: u32,
 }
@@ -263,6 +395,7 @@ struct Client {
     tracking: Tracking,
     attempts: u64,
     inputs: UnboundedSender<Input>,
+    on: On,
 }
 
 impl Client {
@@ -279,9 +412,18 @@ impl Client {
         }
     }
 
-    fn publish(&self) {
+    fn publish(&mut self) {
         let scanning = matches!(self.scan, Scan::Running { .. });
-        publish(snapshot(&self.cache, scanning, self.attempt.clone()));
+        let view = View {
+            cache: Some(&self.cache),
+            scanning,
+            attempt: self.attempt.as_ref(),
+        };
+        (self.on)(Heard::Now(view));
+    }
+
+    fn reply(&mut self, reply: Reply) {
+        (self.on)(Heard::Reply(reply));
     }
 
     /// NetworkManager came (read it all) or went (forget it).
@@ -354,7 +496,24 @@ impl Client {
                 self.load_ap(&ap).await;
             }
         }
+        if device.kind() == ETHERNET {
+            device.wired = self.get_all(path, WIRED_IFACE).await.unwrap_or_default();
+        }
+        device.ip4 = self.config(&device.props, "Ip4Config", IP4).await;
+        device.ip6 = self.config(&device.props, "Ip6Config", IP6).await;
         self.cache.devices.insert(path.to_owned(), device);
+    }
+
+    /// A device's IP configuration named `name` in its `props`: its path
+    /// and its properties.
+    async fn config(&self, props: &Props, name: &str, interface: &str) -> (String, Props) {
+        match path(props, name) {
+            Some(at) => {
+                let read = self.get_all(&at, interface).await.unwrap_or_default();
+                (at, read)
+            }
+            None => (String::new(), Props::new()),
+        }
     }
 
     async fn load_ap(&mut self, path: &str) {
@@ -371,14 +530,9 @@ impl Client {
 
     async fn load_saved(&mut self, path: &str) {
         match self.settings(path).await {
-            Ok(settings) => match wifi_ssid(&settings) {
-                Some(ssid) => {
-                    self.cache.saved.insert(path.to_owned(), ssid);
-                }
-                None => {
-                    self.cache.saved.remove(path);
-                }
-            },
+            Ok(settings) => {
+                self.cache.saved.insert(path.to_owned(), settings);
+            }
             Err(err) => tracing::debug!(%err, path, "a saved connection that does not read"),
         }
     }
@@ -496,30 +650,72 @@ impl Client {
             }
             return;
         }
-        if let Some(device) = self.cache.devices.get_mut(path) {
-            match interface {
-                DEVICE => device.props.extend(changed),
-                WIRELESS => {
-                    let aps = changed.contains_key("AccessPoints");
-                    let scanned: Option<i64> = get(&changed, "LastScan");
-                    device.wireless.extend(changed);
-                    if let (Some(at), Scan::Running { last, .. }) = (scanned, self.scan)
-                        && at != last
-                    {
-                        self.scan = Scan::Idle;
-                    }
-                    if aps {
-                        let listed = paths(&device.wireless, "AccessPoints");
-                        for ap in &listed {
-                            if !self.cache.aps.contains_key(ap) {
-                                self.load_ap(ap).await;
-                            }
-                        }
-                        let all: Vec<String> = self.wifi_aps();
-                        self.cache.aps.retain(|p, _| all.contains(p));
-                    }
+        if interface == IP4 || interface == IP6 {
+            for device in self.cache.devices.values_mut() {
+                let config = if interface == IP4 {
+                    &mut device.ip4
+                } else {
+                    &mut device.ip6
+                };
+                if config.0 == path {
+                    config.1.extend(changed);
+                    return;
                 }
-                _ => {}
+            }
+            return;
+        }
+        if let Some(device) = self.cache.devices.get(path)
+            && interface == DEVICE
+        {
+            // A configuration replaced: read the new one.
+            let mut props = device.props.clone();
+            let configs = ["Ip4Config", "Ip6Config"].map(|n| changed.contains_key(n));
+            props.extend(changed);
+            let ip4 = if configs[0] {
+                Some(self.config(&props, "Ip4Config", IP4).await)
+            } else {
+                None
+            };
+            let ip6 = if configs[1] {
+                Some(self.config(&props, "Ip6Config", IP6).await)
+            } else {
+                None
+            };
+            if let Some(device) = self.cache.devices.get_mut(path) {
+                device.props = props;
+                if let Some(ip4) = ip4 {
+                    device.ip4 = ip4;
+                }
+                if let Some(ip6) = ip6 {
+                    device.ip6 = ip6;
+                }
+            }
+            return;
+        }
+        if let Some(device) = self.cache.devices.get_mut(path) {
+            if interface == WIRED_IFACE {
+                device.wired.extend(changed);
+                return;
+            }
+            if interface == WIRELESS {
+                let aps = changed.contains_key("AccessPoints");
+                let scanned: Option<i64> = get(&changed, "LastScan");
+                device.wireless.extend(changed);
+                if let (Some(at), Scan::Running { last, .. }) = (scanned, self.scan)
+                    && at != last
+                {
+                    self.scan = Scan::Idle;
+                }
+                if aps {
+                    let listed = paths(&device.wireless, "AccessPoints");
+                    for ap in &listed {
+                        if !self.cache.aps.contains_key(ap) {
+                            self.load_ap(ap).await;
+                        }
+                    }
+                    let all: Vec<String> = self.wifi_aps();
+                    self.cache.aps.retain(|p, _| all.contains(p));
+                }
             }
             return;
         }
@@ -640,6 +836,45 @@ impl Client {
     }
 
     async fn ask(&mut self, ask: Ask) {
+        // The page's, on saved connections: no device needed.
+        let ask = match ask {
+            Ask::Autoconnect { uuid, on } => {
+                let done = self
+                    .update(&uuid, |settings| {
+                        settings
+                            .entry("connection".to_owned())
+                            .or_default()
+                            .insert("autoconnect".to_owned(), owned(on)?);
+                        Ok(())
+                    })
+                    .await;
+                return self.answered(done, "autoconnect");
+            }
+            Ask::SetPassword { uuid, secret } => {
+                let done = self
+                    .update(&uuid, |settings| {
+                        let security = settings
+                            .entry("802-11-wireless-security".to_owned())
+                            .or_default();
+                        let wep = text_of(security, "key-mgmt").as_deref() == Some("none");
+                        let key = if wep { "wep-key0" } else { "psk" };
+                        security.insert(key.to_owned(), owned(secret.as_str())?);
+                        let flags = if wep { "wep-key-flags" } else { "psk-flags" };
+                        security.insert(flags.to_owned(), owned(0u32)?);
+                        Ok(())
+                    })
+                    .await;
+                return self.answered(done, "password");
+            }
+            Ask::ReadPassword { uuid } => {
+                let secret = self.password(&uuid).await;
+                self.reply(Reply::Password { uuid, secret });
+                return;
+            }
+            Ask::Forget { uuid } => return self.forget(&uuid).await,
+            Ask::Restore(kept) => return self.restore(kept).await,
+            ask => ask,
+        };
         let Some(device) = self.wifi().map(|(p, _)| p.to_owned()) else {
             return;
         };
@@ -677,7 +912,168 @@ impl Client {
                     }
                 }
             }
+            Ask::Autoconnect { .. }
+            | Ask::SetPassword { .. }
+            | Ask::ReadPassword { .. }
+            | Ask::Forget { .. }
+            | Ask::Restore(_) => {}
+            Ask::Join {
+                ssid,
+                hidden,
+                security,
+            } => self.join_new(&device, ssid, hidden, security).await,
         }
+    }
+
+    /// A change asked by the page done, or said refused.
+    fn answered(&mut self, done: zbus::Result<()>, what: &str) {
+        if let Err(err) = done {
+            tracing::warn!(%err, what, "NetworkManager did not change the connection");
+            self.reply(refused(&err));
+        }
+    }
+
+    /// The saved connection `uuid`'s settings changed by `change`, written
+    /// to disk. The secrets it leaves out, NetworkManager keeps.
+    async fn update(
+        &self,
+        uuid: &str,
+        change: impl FnOnce(&mut Settings) -> zbus::Result<()>,
+    ) -> zbus::Result<()> {
+        let path = self
+            .cache
+            .by_uuid(uuid)
+            .map(|(p, _)| p.clone())
+            .ok_or_else(|| zbus::Error::Failure(format!("no connection {uuid}")))?;
+        let mut settings = self.settings(&path).await?;
+        change(&mut settings)?;
+        let args: HashMap<&str, Variant<'_>> = HashMap::new();
+        self.call(&path, CONNECTION, "Update2", &(settings, TO_DISK, args))
+            .await?;
+        Ok(())
+    }
+
+    /// A saved Wi-Fi connection's password (its WEP key for a WEP one).
+    async fn password(&self, uuid: &str) -> Option<Secret> {
+        let (path, settings) = self.cache.by_uuid(uuid)?;
+        let wep = settings
+            .get("802-11-wireless-security")
+            .and_then(|s| text_of(s, "key-mgmt"))
+            .as_deref()
+            == Some("none");
+        let reply = self
+            .call(
+                path,
+                CONNECTION,
+                "GetSecrets",
+                &("802-11-wireless-security",),
+            )
+            .await;
+        let secrets: Settings = match reply.and_then(|r| r.body().deserialize()) {
+            Ok(secrets) => secrets,
+            Err(err) => {
+                tracing::info!(%err, "the password does not read");
+                return None;
+            }
+        };
+        let key = if wep { "wep-key0" } else { "psk" };
+        let said = text(&secrets, "802-11-wireless-security", key)?;
+        let mut secret = Secret::longest(said.chars().count().max(1));
+        secret.push(&said);
+        Some(secret)
+    }
+
+    /// The saved connection `uuid` deleted, left first if in use; its
+    /// settings and the secrets that read kept for its undo.
+    async fn forget(&mut self, uuid: &str) {
+        let Some(path) = self.cache.by_uuid(uuid).map(|(p, _)| p.clone()) else {
+            return;
+        };
+        let mut settings = match self.settings(&path).await {
+            Ok(settings) => settings,
+            Err(err) => return self.reply(refused(&err)),
+        };
+        let mut secrets = true;
+        let with_secrets: Vec<&str> = SECRET_SETTINGS
+            .into_iter()
+            .filter(|name| settings.contains_key(*name))
+            .collect();
+        for name in with_secrets {
+            let reply = self.call(&path, CONNECTION, "GetSecrets", &(name,)).await;
+            match reply.and_then(|r| r.body().deserialize::<Settings>()) {
+                Ok(read) => {
+                    for (group, values) in read {
+                        settings.entry(group).or_default().extend(values);
+                    }
+                }
+                Err(err) => {
+                    tracing::info!(%err, setting = name, "a secret does not read: forgotten without it");
+                    secrets = false;
+                }
+            }
+        }
+        let connected = self.cache.actives.values().any(|active| {
+            self::path(active, "Connection").as_deref() == Some(path.as_str())
+                && get::<u32>(active, "State").is_some_and(|s| s <= AC_ACTIVATED)
+        });
+        let name = text(&settings, "connection", "id").unwrap_or_default();
+        if let Err(err) = self.call(&path, CONNECTION, "Delete", &()).await {
+            tracing::warn!(%err, "NetworkManager did not delete the connection");
+            return self.reply(refused(&err));
+        }
+        tracing::info!(connected, secrets, "a connection forgotten");
+        self.reply(Reply::Forgotten(Arc::new(Kept {
+            uuid: uuid.to_owned(),
+            name,
+            connected,
+            secrets,
+            settings,
+        })));
+    }
+
+    /// A connection forgotten given back, and joined again if it was in
+    /// use.
+    async fn restore(&mut self, kept: Arc<Kept>) {
+        let mut borrowed: HashMap<&str, HashMap<&str, Variant<'_>>> = HashMap::new();
+        for (group, values) in &kept.settings {
+            let mut copy = HashMap::new();
+            for (key, value) in values {
+                match Variant::try_from(value) {
+                    Ok(value) => {
+                        copy.insert(key.as_str(), value);
+                    }
+                    Err(err) => tracing::debug!(%err, key, "a value not given back"),
+                }
+            }
+            borrowed.insert(group.as_str(), copy);
+        }
+        let added = self
+            .call(SETTINGS, SETTINGS_IFACE, "AddConnection", &(borrowed,))
+            .await
+            .and_then(|reply| reply.body().deserialize::<OwnedObjectPath>());
+        let added = match added {
+            Ok(added) => added,
+            Err(err) => {
+                tracing::warn!(%err, "NetworkManager did not take the connection back");
+                return self.reply(refused(&err));
+            }
+        };
+        tracing::info!(connected = kept.connected, "a connection given back");
+        if kept.connected
+            && let Some(device) = self.wifi().map(|(p, _)| p.to_owned())
+            && let (Ok(device), Ok(none)) = (
+                ObjectPath::try_from(device.as_str()),
+                ObjectPath::try_from("/"),
+            )
+        {
+            let activated = self
+                .call(ROOT, NM, "ActivateConnection", &(&added, device, none))
+                .await;
+            if let Err(err) = activated {
+                tracing::info!(%err, "the connection given back is not joined");
+            }
+        }
+        self.reply(Reply::Restored(kept));
     }
 
     async fn scan(&mut self, device: &str) {
@@ -739,9 +1135,8 @@ impl Client {
         self.tracking = Tracking::default();
         let saved = self
             .cache
-            .saved
-            .iter()
-            .find(|(_, s)| **s == ssid)
+            .ssids()
+            .find(|(_, s)| *s == ssid)
             .map(|(p, _)| p.clone());
         let started = match (saved, secret) {
             (Some(saved), secret) => self.activate_saved(device, &network, &saved, secret).await,
@@ -761,6 +1156,145 @@ impl Client {
                 self.finish(Progress::Failed(Failure::Other), None);
             }
         }
+    }
+
+    /// Joins `ssid` with a new connection of what its sheet asked: by its
+    /// access point when it is around, else (a hidden one) by its name.
+    async fn join_new(&mut self, device: &str, ssid: Vec<u8>, hidden: bool, security: Join) {
+        let ap = snapshot(&self.cache, false, None)
+            .networks
+            .into_iter()
+            .find(|n| n.ssid == ssid)
+            .map(|n| n.ap);
+        self.attempts += 1;
+        self.attempt = Some(Attempt {
+            id: self.attempts,
+            ssid: ssid.clone(),
+            state: Progress::Connecting,
+        });
+        self.tracking = Tracking::default();
+        let started = self
+            .add_and_activate_with(device, &ssid, hidden, ap.as_deref(), &security)
+            .await;
+        match started {
+            Ok((active, added)) => {
+                tracing::info!(hidden, "a connection from the sheet is on its way");
+                self.tracking.active = Some(active);
+                self.tracking.added = Some(added);
+            }
+            Err(err) => {
+                tracing::warn!(%err, "NetworkManager did not start the connection");
+                self.finish(Progress::Failed(Failure::Other), None);
+            }
+        }
+    }
+
+    /// A new connection to `ssid` as `security` says, its secrets saved
+    /// with it: its active connection and itself.
+    async fn add_and_activate_with(
+        &self,
+        device: &str,
+        ssid: &[u8],
+        hidden: bool,
+        ap: Option<&str>,
+        security: &Join,
+    ) -> zbus::Result<(String, String)> {
+        let mut settings: HashMap<&str, HashMap<&str, Variant<'_>>> = HashMap::new();
+        let wifi = settings.entry("802-11-wireless").or_default();
+        wifi.insert("ssid", Variant::from(ssid));
+        if hidden {
+            wifi.insert("hidden", Variant::from(true));
+        }
+        // Paths given to NetworkManager as its blobs' scheme says.
+        let blob = |path: &std::path::Path| {
+            let mut bytes = b"file://".to_vec();
+            bytes.extend_from_slice(path.as_os_str().as_encoded_bytes());
+            bytes.push(0);
+            bytes
+        };
+        let (ca, certificate, key) = match security {
+            Join::Eap(eap) => (
+                match &eap.ca {
+                    Ca::File(path) => Some(blob(path)),
+                    _ => None,
+                },
+                eap.certificate.as_deref().map(blob),
+                eap.key.as_deref().map(blob),
+            ),
+            _ => (None, None, None),
+        };
+        match security {
+            Join::Open => {}
+            Join::Psk { sae, secret } => {
+                let wsec = settings.entry("802-11-wireless-security").or_default();
+                wsec.insert(
+                    "key-mgmt",
+                    Variant::from(if *sae { "sae" } else { "wpa-psk" }),
+                );
+                wsec.insert("psk", Variant::from(secret.as_str()));
+                wsec.insert("psk-flags", Variant::from(0u32));
+            }
+            Join::Wep { secret } => {
+                let wsec = settings.entry("802-11-wireless-security").or_default();
+                wsec.insert("key-mgmt", Variant::from("none"));
+                wsec.insert("auth-alg", Variant::from("open"));
+                wsec.insert("wep-key0", Variant::from(secret.as_str()));
+                let kind: u32 = if crate::wep_is_key(secret.as_str()) {
+                    1
+                } else {
+                    2
+                };
+                wsec.insert("wep-key-type", Variant::from(kind));
+                wsec.insert("wep-key-flags", Variant::from(0u32));
+            }
+            Join::Eap(eap) => {
+                settings
+                    .entry("802-11-wireless-security")
+                    .or_default()
+                    .insert("key-mgmt", Variant::from("wpa-eap"));
+                let x = settings.entry("802-1x").or_default();
+                x.insert("eap", Variant::from(vec![eap.method]));
+                if let Some(inner) = eap.inner {
+                    x.insert("phase2-auth", Variant::from(inner));
+                }
+                x.insert("identity", Variant::from(eap.identity.as_str()));
+                if let Some(password) = &eap.password {
+                    x.insert("password", Variant::from(password.as_str()));
+                    x.insert("password-flags", Variant::from(0u32));
+                }
+                if eap.ca == Ca::System {
+                    x.insert("system-ca-certs", Variant::from(true));
+                }
+                if let Some(ca) = &ca {
+                    x.insert("ca-cert", Variant::from(ca.as_slice()));
+                }
+                if let Some(domain) = eap.domain.as_deref().filter(|d| !d.is_empty()) {
+                    x.insert("domain-suffix-match", Variant::from(domain));
+                }
+                if let Some(certificate) = &certificate {
+                    x.insert("client-cert", Variant::from(certificate.as_slice()));
+                }
+                if let Some(key) = &key {
+                    x.insert("private-key", Variant::from(key.as_slice()));
+                }
+                if let Some(password) = &eap.key_password {
+                    x.insert("private-key-password", Variant::from(password.as_str()));
+                    x.insert("private-key-password-flags", Variant::from(0u32));
+                }
+            }
+        }
+        let device = ObjectPath::try_from(device)?;
+        let ap = ObjectPath::try_from(ap.unwrap_or("/"))?;
+        let reply = self
+            .call(
+                ROOT,
+                NM,
+                "AddAndActivateConnection",
+                &(settings, device, ap),
+            )
+            .await?;
+        let (added, active): (OwnedObjectPath, OwnedObjectPath) = reply.body().deserialize()?;
+        Ok((active.as_str().to_owned(), added.as_str().to_owned()))
     }
 
     /// The saved connection `saved`, its password updated first if one is
@@ -833,6 +1367,220 @@ impl Client {
             .await?;
         let (added, active): (OwnedObjectPath, OwnedObjectPath) = reply.body().deserialize()?;
         Ok((active.as_str().to_owned(), Some(added.as_str().to_owned())))
+    }
+}
+
+/// What NetworkManager says, as its owner reads it after a burst.
+#[derive(Debug)]
+pub struct View<'a> {
+    /// `None`: NetworkManager is not there.
+    cache: Option<&'a Cache>,
+    scanning: bool,
+    attempt: Option<&'a Attempt>,
+}
+
+impl View<'_> {
+    fn absent() -> Self {
+        View {
+            cache: None,
+            scanning: false,
+            attempt: None,
+        }
+    }
+
+    /// What the bar shows.
+    pub fn network(&self) -> Network {
+        self.cache.map_or_else(Network::default, |cache| {
+            snapshot(cache, self.scanning, self.attempt.cloned())
+        })
+    }
+
+    /// What the Settings' Réseau page shows.
+    pub fn details(&self) -> Details {
+        let network = self.network();
+        let Some(cache) = self.cache else {
+            return Details {
+                network,
+                ..Details::default()
+            };
+        };
+        let wifi = wifi_device(cache);
+        // The saved connection in use on the Wi-Fi device: its active
+        // connection's, found by the device or the access point.
+        let using = wifi
+            .filter(|(_, d)| d.state() == ACTIVATED)
+            .and_then(|(at, d)| {
+                let by_device = path(&d.props, "ActiveConnection")
+                    .and_then(|active| cache.actives.get(&active));
+                let ap = path(&d.wireless, "ActiveAccessPoint");
+                by_device.or_else(|| {
+                    cache.actives.values().find(|active| {
+                        paths(active, "Devices").iter().any(|p| p == at)
+                            || (ap.is_some() && path(active, "SpecificObject") == ap)
+                    })
+                })
+            })
+            .and_then(|active| path(active, "Connection"));
+        let current = match (wifi, &network.current) {
+            (Some((_, device)), Some(current)) => {
+                let (ip4, ip6) = (&device.ip4.1, &device.ip6.1);
+                let first = |props: &Props| {
+                    dicts(props, "AddressData")
+                        .first()
+                        .and_then(|a| get::<String>(a, "address"))
+                };
+                let gateway =
+                    |props: &Props| get::<String>(props, "Gateway").filter(|g| !g.is_empty());
+                let (address, gateway) = match first(ip4) {
+                    Some(address) => (Some(address), gateway(ip4)),
+                    None => (first(ip6), gateway(ip6)),
+                };
+                let mut dns: Vec<String> = dicts(ip4, "NameserverData")
+                    .iter()
+                    .filter_map(|d| get::<String>(d, "address"))
+                    .collect();
+                if dns.is_empty() {
+                    dns = dicts(ip6, "NameserverData")
+                        .iter()
+                        .filter_map(|d| get::<String>(d, "address"))
+                        .collect();
+                }
+                Some(Current {
+                    uuid: using
+                        .as_ref()
+                        .and_then(|p| cache.saved.get(p))
+                        .and_then(|s| text(s, "connection", "uuid")),
+                    frequency: cache
+                        .aps
+                        .get(&current.ap)
+                        .and_then(|ap| get::<u32>(ap, "Frequency")),
+                    address,
+                    gateway,
+                    dns,
+                    mac: get::<String>(&device.wireless, "HwAddress").filter(|m| !m.is_empty()),
+                    speed: get::<u32>(&device.wireless, "Bitrate")
+                        .filter(|b| *b > 0)
+                        .map(|b| b / 1000),
+                })
+            }
+            _ => None,
+        };
+        let mut paths: Vec<&String> = cache.saved.keys().collect();
+        paths.sort_by_key(|p| p.as_str());
+        let saved = paths
+            .into_iter()
+            .filter_map(|at| {
+                let settings = cache.saved.get(at)?;
+                let ssid = wifi_ssid(settings)?;
+                Some(Saved {
+                    uuid: text(settings, "connection", "uuid").unwrap_or_default(),
+                    name: text(settings, "connection", "id").unwrap_or_else(|| name_of(&ssid)),
+                    ssid,
+                    timestamp: settings
+                        .get("connection")
+                        .and_then(|c| get::<u64>(c, "timestamp"))
+                        .unwrap_or(0),
+                    autoconnect: settings
+                        .get("connection")
+                        .and_then(|c| get::<bool>(c, "autoconnect"))
+                        .unwrap_or(true),
+                    security: saved_security(settings),
+                    identity: text(settings, "802-1x", "identity"),
+                    connected: using.as_deref() == Some(at.as_str()),
+                })
+            })
+            .collect();
+        let wired = cache
+            .devices
+            .iter()
+            .filter(|(_, d)| d.kind() == ETHERNET && d.state() != UNMANAGED)
+            .min_by_key(|(p, _)| p.as_str())
+            .map(|(_, d)| {
+                let first = |props: &Props| {
+                    dicts(props, "AddressData")
+                        .first()
+                        .and_then(|a| get::<String>(a, "address"))
+                };
+                let at = |name: &str| get::<String>(&d.props, name).unwrap_or_default();
+                let connected = d.state() == ACTIVATED;
+                Wired {
+                    usb: at("Path").contains("usb") || at("Udi").contains("/usb"),
+                    connected,
+                    speed: get::<u32>(&d.wired, "Speed").filter(|s| *s > 0),
+                    address: connected
+                        .then(|| first(&d.ip4.1).or_else(|| first(&d.ip6.1)))
+                        .flatten(),
+                }
+            });
+        Details {
+            wired,
+            hardware_enabled: get::<bool>(&cache.root, "WirelessHardwareEnabled").unwrap_or(true),
+            network,
+            current,
+            saved,
+        }
+    }
+}
+
+/// What a saved Wi-Fi connection asks, from its settings.
+fn saved_security(settings: &Settings) -> Security {
+    let Some(security) = settings.get("802-11-wireless-security") else {
+        return Security::Open;
+    };
+    match text_of(security, "key-mgmt").as_deref() {
+        Some("wpa-psk") => Security::Psk { sae: false },
+        Some("sae") => Security::Psk { sae: true },
+        Some("wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x") => Security::Enterprise,
+        Some("none") => Security::Wep,
+        _ => Security::Open,
+    }
+}
+
+/// A value of `settings`' group `group`, as text.
+fn text(settings: &Settings, group: &str, key: &str) -> Option<String> {
+    text_of(settings.get(group)?, key)
+}
+
+fn text_of(values: &Props, key: &str) -> Option<String> {
+    get::<String>(values, key)
+}
+
+/// A list of dictionaries (`aa{sv}`), as NetworkManager's `AddressData`.
+fn dicts(props: &Props, name: &str) -> Vec<Props> {
+    props
+        .get(name)
+        .and_then(|v| v.try_clone().ok())
+        .and_then(|v| Vec::<Props>::try_from(v).ok())
+        .unwrap_or_default()
+}
+
+fn owned<'a>(value: impl Into<Variant<'a>>) -> zbus::Result<OwnedVariant> {
+    OwnedVariant::try_from(value.into())
+}
+
+/// A refusal as the page says it: polkit's (`PermissionDenied`), or else.
+fn refused(err: &zbus::Error) -> Reply {
+    match err {
+        zbus::Error::MethodError(name, message, _) => Reply::Refused {
+            denied: name.as_str().ends_with("PermissionDenied")
+                || name.as_str().ends_with("AccessDenied"),
+            message: message.clone().unwrap_or_else(|| name.as_str().to_owned()),
+        },
+        // zbus's own for the bus's errors.
+        zbus::Error::FDO(fdo) => match fdo.as_ref() {
+            zbus::fdo::Error::AccessDenied(message) => Reply::Refused {
+                denied: true,
+                message: message.clone(),
+            },
+            other => Reply::Refused {
+                denied: false,
+                message: other.to_string(),
+            },
+        },
+        other => Reply::Refused {
+            denied: false,
+            message: other.to_string(),
+        },
     }
 }
 
@@ -913,7 +1661,8 @@ fn snapshot(cache: &Cache, scanning: bool, attempt: Option<Attempt>) -> Network 
     if cache.root.is_empty() {
         return Network::default();
     }
-    let saved = |ssid: &[u8]| cache.saved.values().any(|s| s == ssid);
+    let ssids: Vec<Vec<u8>> = cache.ssids().map(|(_, s)| s).collect();
+    let saved = |ssid: &[u8]| ssids.iter().any(|s| s == ssid);
     let wifi = wifi_device(cache);
     let enabled = get::<bool>(&cache.root, "WirelessEnabled").unwrap_or(false)
         && get::<bool>(&cache.root, "WirelessHardwareEnabled").unwrap_or(true);
@@ -995,7 +1744,7 @@ mod tests {
                     ("AccessPoints", owned(list)),
                     ("ActiveAccessPoint", owned(object_path(active))),
                 ]),
-                reason: 0,
+                ..Device::default()
             },
         );
         for (path, name, strength, rsn) in
@@ -1010,9 +1759,11 @@ mod tests {
                 ]),
             );
         }
+        let mut wifi = Props::new();
+        wifi.insert("ssid".to_owned(), owned(b"Livebox-A3F2".as_slice()));
         cache.saved.insert(
             "/org/freedesktop/NetworkManager/Settings/1".to_owned(),
-            b"Livebox-A3F2".to_vec(),
+            [("802-11-wireless".to_owned(), wifi)].into_iter().collect(),
         );
         cache
     }
