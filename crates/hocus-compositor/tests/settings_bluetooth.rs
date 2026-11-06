@@ -966,6 +966,8 @@ fn a_phone_that_starts_the_pairing_reaches_the_page_while_it_is_open() -> anyhow
     bed.shows(|s| sheet(s)["kind"] == "authorize")?;
     bed.click("sheet:cancel")?;
     bed.asked(&Call::Incoming(LEGACY.to_owned(), false))?;
+    // The sheet gone, its scrim with it: the sidebar takes the click.
+    bed.shows(|s| sheet(s).is_null())?;
     // The page left: the agent goes.
     bed.click("nav:home")?;
     bed.asked(&Call::UnregisterAgent)?;

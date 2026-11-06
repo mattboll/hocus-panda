@@ -141,6 +141,10 @@ pub struct State {
     pub(super) forgetting: Option<(String, String)>,
     /// The PIN typed in its sheet, and the question it answers.
     pub(super) pin: (u64, String),
+    /// The question last answered here: its sheet closes at once, before
+    /// BlueZ's thread says it is over (a click beside it then reaches the
+    /// page, not the sheet's scrim).
+    answered: Option<u64>,
     /// A device to pair once BlueZ lists it, by its address (`--pair`,
     /// the bar's "dans les Réglages").
     pair_wanted: Option<String>,
@@ -385,8 +389,15 @@ impl App {
                 Task::none()
             }
             Msg::Answer(answer) => {
-                if let Some(request) = self.bluetooth.bt.as_ref().and_then(|b| b.request.as_ref()) {
-                    self.bluetooth.ask(Ask::Answer(request.id, answer));
+                if let Some(id) = self
+                    .bluetooth
+                    .bt
+                    .as_ref()
+                    .and_then(|b| b.request.as_ref())
+                    .map(|r| r.id)
+                {
+                    self.bluetooth.ask(Ask::Answer(id, answer));
+                    self.bluetooth.answered = Some(id);
                 }
                 Task::none()
             }
@@ -419,10 +430,17 @@ impl App {
                     _ => return Task::none(),
                 };
                 self.bluetooth.ask(Ask::Answer(request.id, answer));
+                self.bluetooth.answered = Some(request.id);
                 Task::none()
             }
             Msg::CancelPairing => {
                 self.bluetooth.ask(Ask::CancelPairing);
+                self.bluetooth.answered = self
+                    .bluetooth
+                    .bt
+                    .as_ref()
+                    .and_then(|b| b.request.as_ref())
+                    .map(|r| r.id);
                 Task::none()
             }
             Msg::Connect(path) => {
@@ -652,7 +670,12 @@ impl App {
         if self.page != Page::Section(SectionId::Bluetooth) {
             return None;
         }
-        self.bluetooth.bt.as_ref()?.request.clone()
+        self.bluetooth
+            .bt
+            .as_ref()?
+            .request
+            .clone()
+            .filter(|r| Some(r.id) != self.bluetooth.answered)
     }
 
     /// Whether a sheet's countdown shows: it draws each second.
