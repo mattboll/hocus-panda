@@ -14,6 +14,7 @@
 //! time.
 
 mod common;
+mod settings_page;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -273,15 +274,9 @@ impl Bed {
         })
     }
 
+    /// The window's current places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
-        let log = self.log.clone();
-        let read = |log: &Path| -> Option<Value> { common::last_json(log, " places {") };
-        let mut seen = None;
-        self.hp.dispatch_until(WAIT, |_| {
-            seen = read(&log).filter(|p| p.get(id).is_some());
-            seen.is_some()
-        })?;
-        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", read(&log)))
+        settings_page::places_with(&mut self.hp, &self.log, id)
     }
 
     fn window(&self) -> anyhow::Result<Rect> {
