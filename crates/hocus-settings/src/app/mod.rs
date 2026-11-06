@@ -16,6 +16,7 @@ mod desktops_page;
 mod desktops_rules;
 mod desktops_trial;
 mod keyboard_page;
+mod keys_in;
 mod mouse;
 mod network;
 mod places;
@@ -530,25 +531,10 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             Subscription::run(heard),
-            event::listen_with(|event, status, _| match event {
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key,
-                    physical_key,
-                    modifiers,
-                    text,
-                    ..
-                }) => Some(Message::Key {
-                    key,
-                    physical: physical_key,
-                    modifiers,
-                    text: text.map(|t| t.to_string()),
-                    captured: status == event::Status::Captured,
-                }),
+            // The keys are not heard here but from the window's widgets, in
+            // their order (`keys_in`).
+            event::listen_with(|event, _, _| match event {
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
-                // The modifiers held while a shortcut is recorded (6.8).
-                Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
-                    Some(Message::Keys(keyboard_page::Msg::Mods(mods)))
-                }
                 Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
                 // The test area says which device scrolled (6.12).
                 Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
@@ -1618,6 +1604,13 @@ impl App {
         choices.iter().position(|c| c.value == value)
     }
 
+    /// Whether `Ctrl+F` goes to the search now: not while a shortcut is
+    /// recorded, nor while the screens' "Garder ?" or menu take every key
+    /// (as `Message::Key` and [`App::key`] have it).
+    fn ctrl_f_searches(&self) -> bool {
+        self.keys.recording.is_none() && !self.screens_take_keys()
+    }
+
     fn key(
         &mut self,
         key: &Key,
@@ -1631,16 +1624,14 @@ impl App {
             return task;
         }
         match key.as_ref() {
-            Key::Character(c) if ctrl && c.eq_ignore_ascii_case("f") => {
+            _ if keys_in::is_ctrl_f(key, modifiers) => {
                 self.focus = Focus::Search;
                 self.menu = None;
-                // Only a query to replace is selected: iced selects after
-                // the keys already received, so a key typed right after
-                // Ctrl+F would be selected and replaced by the next (#637).
-                if self.query.is_empty() {
-                    return operation::focus(SEARCH);
-                }
-                return Task::batch([operation::focus(SEARCH), operation::select_all(SEARCH)]);
+                // The field already has the keyboard, its text selected:
+                // the window's keys gave it as the key came, before the
+                // keys after it (`keys_in`). An operation now would apply
+                // after them: a selection would take them (#637, #669).
+                return Task::none();
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("w") => {
                 return self.close();

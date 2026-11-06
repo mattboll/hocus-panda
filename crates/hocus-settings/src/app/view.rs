@@ -15,6 +15,7 @@ use iced::{
 
 use super::{
     App, Focus, Message, Page, SEARCH, ToastAction,
+    keys_in::{KeysIn, Pressed},
     places::PAGE,
     style::{self, *},
 };
@@ -102,10 +103,22 @@ impl App {
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        let window = stack(layers).width(Length::Fill).height(Length::Fill);
+        // Its keys, in their order among the widgets' messages (#669).
+        KeysIn::new(
+            window,
+            |pressed: Pressed| Message::Key {
+                key: pressed.key,
+                physical: pressed.physical,
+                modifiers: pressed.modifiers,
+                text: pressed.text,
+                captured: pressed.captured,
+            },
+            // The modifiers held while a shortcut is recorded (6.8).
+            |mods| Message::Keys(super::keyboard_page::Msg::Mods(mods)),
+            self.ctrl_f_searches().then_some(SEARCH),
+        )
+        .into()
     }
 
     // --- The sidebar ------------------------------------------------------------------
