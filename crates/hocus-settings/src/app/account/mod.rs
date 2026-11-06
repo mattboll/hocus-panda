@@ -557,7 +557,12 @@ impl App {
     /// The name typed, saved if it changed and is not empty.
     fn account_save_name(&mut self) -> Task<Message> {
         // One at a time: the one asked shows until it is answered.
-        if self.account.asked.iter().any(|a| matches!(a, Asked::Name(..))) {
+        if self
+            .account
+            .asked
+            .iter()
+            .any(|a| matches!(a, Asked::Name(..)))
+        {
             return Task::none();
         }
         let Some(draft) = self.account.draft.take() else {

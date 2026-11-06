@@ -47,10 +47,10 @@ use zbus::{
 };
 
 use crate::{
-    Ask,
+    Ask, Ca, Join,
     model::{
         AccessPoint, Attempt, Current, Details, Failure, Network, Progress, Saved, Security, Wifi,
-        listed, name_of,
+        Wired, listed, name_of,
     },
     secret::Secret,
 };
@@ -61,6 +61,7 @@ const SETTINGS: &str = "/org/freedesktop/NetworkManager/Settings";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 const DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
+const WIRED_IFACE: &str = "org.freedesktop.NetworkManager.Device.Wired";
 const ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const SETTINGS_IFACE: &str = "org.freedesktop.NetworkManager.Settings";
@@ -340,6 +341,8 @@ impl Cache {
 struct Device {
     props: Props,
     wireless: Props,
+    /// An Ethernet device's `Carrier` and `Speed`.
+    wired: Props,
     /// Its IPv4 and IPv6 configurations, and their paths.
     ip4: (String, Props),
     ip6: (String, Props),
@@ -492,6 +495,9 @@ impl Client {
             for ap in paths(&device.wireless, "AccessPoints") {
                 self.load_ap(&ap).await;
             }
+        }
+        if device.kind() == ETHERNET {
+            device.wired = self.get_all(path, WIRED_IFACE).await.unwrap_or_default();
         }
         device.ip4 = self.config(&device.props, "Ip4Config", IP4).await;
         device.ip6 = self.config(&device.props, "Ip6Config", IP6).await;
@@ -687,6 +693,10 @@ impl Client {
             return;
         }
         if let Some(device) = self.cache.devices.get_mut(path) {
+            if interface == WIRED_IFACE {
+                device.wired.extend(changed);
+                return;
+            }
             if interface == WIRELESS {
                 let aps = changed.contains_key("AccessPoints");
                 let scanned: Option<i64> = get(&changed, "LastScan");
@@ -907,6 +917,11 @@ impl Client {
             | Ask::ReadPassword { .. }
             | Ask::Forget { .. }
             | Ask::Restore(_) => {}
+            Ask::Join {
+                ssid,
+                hidden,
+                security,
+            } => self.join_new(&device, ssid, hidden, security).await,
         }
     }
 
@@ -1143,6 +1158,145 @@ impl Client {
         }
     }
 
+    /// Joins `ssid` with a new connection of what its sheet asked: by its
+    /// access point when it is around, else (a hidden one) by its name.
+    async fn join_new(&mut self, device: &str, ssid: Vec<u8>, hidden: bool, security: Join) {
+        let ap = snapshot(&self.cache, false, None)
+            .networks
+            .into_iter()
+            .find(|n| n.ssid == ssid)
+            .map(|n| n.ap);
+        self.attempts += 1;
+        self.attempt = Some(Attempt {
+            id: self.attempts,
+            ssid: ssid.clone(),
+            state: Progress::Connecting,
+        });
+        self.tracking = Tracking::default();
+        let started = self
+            .add_and_activate_with(device, &ssid, hidden, ap.as_deref(), &security)
+            .await;
+        match started {
+            Ok((active, added)) => {
+                tracing::info!(hidden, "a connection from the sheet is on its way");
+                self.tracking.active = Some(active);
+                self.tracking.added = Some(added);
+            }
+            Err(err) => {
+                tracing::warn!(%err, "NetworkManager did not start the connection");
+                self.finish(Progress::Failed(Failure::Other), None);
+            }
+        }
+    }
+
+    /// A new connection to `ssid` as `security` says, its secrets saved
+    /// with it: its active connection and itself.
+    async fn add_and_activate_with(
+        &self,
+        device: &str,
+        ssid: &[u8],
+        hidden: bool,
+        ap: Option<&str>,
+        security: &Join,
+    ) -> zbus::Result<(String, String)> {
+        let mut settings: HashMap<&str, HashMap<&str, Variant<'_>>> = HashMap::new();
+        let wifi = settings.entry("802-11-wireless").or_default();
+        wifi.insert("ssid", Variant::from(ssid));
+        if hidden {
+            wifi.insert("hidden", Variant::from(true));
+        }
+        // Paths given to NetworkManager as its blobs' scheme says.
+        let blob = |path: &std::path::Path| {
+            let mut bytes = b"file://".to_vec();
+            bytes.extend_from_slice(path.as_os_str().as_encoded_bytes());
+            bytes.push(0);
+            bytes
+        };
+        let (ca, certificate, key) = match security {
+            Join::Eap(eap) => (
+                match &eap.ca {
+                    Ca::File(path) => Some(blob(path)),
+                    _ => None,
+                },
+                eap.certificate.as_deref().map(blob),
+                eap.key.as_deref().map(blob),
+            ),
+            _ => (None, None, None),
+        };
+        match security {
+            Join::Open => {}
+            Join::Psk { sae, secret } => {
+                let wsec = settings.entry("802-11-wireless-security").or_default();
+                wsec.insert(
+                    "key-mgmt",
+                    Variant::from(if *sae { "sae" } else { "wpa-psk" }),
+                );
+                wsec.insert("psk", Variant::from(secret.as_str()));
+                wsec.insert("psk-flags", Variant::from(0u32));
+            }
+            Join::Wep { secret } => {
+                let wsec = settings.entry("802-11-wireless-security").or_default();
+                wsec.insert("key-mgmt", Variant::from("none"));
+                wsec.insert("auth-alg", Variant::from("open"));
+                wsec.insert("wep-key0", Variant::from(secret.as_str()));
+                let kind: u32 = if crate::wep_is_key(secret.as_str()) {
+                    1
+                } else {
+                    2
+                };
+                wsec.insert("wep-key-type", Variant::from(kind));
+                wsec.insert("wep-key-flags", Variant::from(0u32));
+            }
+            Join::Eap(eap) => {
+                settings
+                    .entry("802-11-wireless-security")
+                    .or_default()
+                    .insert("key-mgmt", Variant::from("wpa-eap"));
+                let x = settings.entry("802-1x").or_default();
+                x.insert("eap", Variant::from(vec![eap.method]));
+                if let Some(inner) = eap.inner {
+                    x.insert("phase2-auth", Variant::from(inner));
+                }
+                x.insert("identity", Variant::from(eap.identity.as_str()));
+                if let Some(password) = &eap.password {
+                    x.insert("password", Variant::from(password.as_str()));
+                    x.insert("password-flags", Variant::from(0u32));
+                }
+                if eap.ca == Ca::System {
+                    x.insert("system-ca-certs", Variant::from(true));
+                }
+                if let Some(ca) = &ca {
+                    x.insert("ca-cert", Variant::from(ca.as_slice()));
+                }
+                if let Some(domain) = eap.domain.as_deref().filter(|d| !d.is_empty()) {
+                    x.insert("domain-suffix-match", Variant::from(domain));
+                }
+                if let Some(certificate) = &certificate {
+                    x.insert("client-cert", Variant::from(certificate.as_slice()));
+                }
+                if let Some(key) = &key {
+                    x.insert("private-key", Variant::from(key.as_slice()));
+                }
+                if let Some(password) = &eap.key_password {
+                    x.insert("private-key-password", Variant::from(password.as_str()));
+                    x.insert("private-key-password-flags", Variant::from(0u32));
+                }
+            }
+        }
+        let device = ObjectPath::try_from(device)?;
+        let ap = ObjectPath::try_from(ap.unwrap_or("/"))?;
+        let reply = self
+            .call(
+                ROOT,
+                NM,
+                "AddAndActivateConnection",
+                &(settings, device, ap),
+            )
+            .await?;
+        let (added, active): (OwnedObjectPath, OwnedObjectPath) = reply.body().deserialize()?;
+        Ok((active.as_str().to_owned(), added.as_str().to_owned()))
+    }
+
     /// The saved connection `saved`, its password updated first if one is
     /// given: its active connection.
     async fn activate_saved(
@@ -1336,7 +1490,30 @@ impl View<'_> {
                 })
             })
             .collect();
+        let wired = cache
+            .devices
+            .iter()
+            .filter(|(_, d)| d.kind() == ETHERNET && d.state() != UNMANAGED)
+            .min_by_key(|(p, _)| p.as_str())
+            .map(|(_, d)| {
+                let first = |props: &Props| {
+                    dicts(props, "AddressData")
+                        .first()
+                        .and_then(|a| get::<String>(a, "address"))
+                };
+                let at = |name: &str| get::<String>(&d.props, name).unwrap_or_default();
+                let connected = d.state() == ACTIVATED;
+                Wired {
+                    usb: at("Path").contains("usb") || at("Udi").contains("/usb"),
+                    connected,
+                    speed: get::<u32>(&d.wired, "Speed").filter(|s| *s > 0),
+                    address: connected
+                        .then(|| first(&d.ip4.1).or_else(|| first(&d.ip6.1)))
+                        .flatten(),
+                }
+            });
         Details {
+            wired,
             hardware_enabled: get::<bool>(&cache.root, "WirelessHardwareEnabled").unwrap_or(true),
             network,
             current,

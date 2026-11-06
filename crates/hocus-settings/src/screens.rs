@@ -203,6 +203,24 @@ pub enum Said {
     Refused(String),
     /// The line could not open, or closed.
     Gone,
+    /// How many desktops there are, and how many windows each has, every
+    /// screen's together (6.14).
+    Desktops {
+        count: usize,
+        windows: Vec<usize>,
+    },
+    /// Desktop `desktop` (from 1) taken out, its `windows` going to `to`
+    /// (numbered after).
+    DesktopRemoved {
+        desktop: usize,
+        to: usize,
+        windows: Vec<u64>,
+    },
+    /// A desktop put back at `desktop`, `windows` on it.
+    DesktopRestored {
+        desktop: usize,
+        windows: Vec<u64>,
+    },
 }
 
 /// A bar's form as the compositor says it.
@@ -314,6 +332,38 @@ pub fn read_line(line: &str) -> Option<Said> {
                 .unwrap_or_default()
                 .to_owned(),
             kept: ended.get("kept")?.as_bool()?,
+        });
+    }
+    let numbers = |v: Option<&serde_json::Value>| -> Vec<u64> {
+        v.and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(serde_json::Value::as_u64).collect())
+            .unwrap_or_default()
+    };
+    let at = |v: &serde_json::Value, key: &str| {
+        v.get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+    };
+    if let Some(desktops) = value.get("desktops") {
+        return Some(Said::Desktops {
+            count: at(desktops, "count")?,
+            windows: numbers(desktops.get("windows"))
+                .into_iter()
+                .map(|n| usize::try_from(n).unwrap_or(usize::MAX))
+                .collect(),
+        });
+    }
+    if let Some(removed) = value.get("desktop-removed") {
+        return Some(Said::DesktopRemoved {
+            desktop: at(removed, "desktop")?,
+            to: at(removed, "to")?,
+            windows: numbers(removed.get("windows")),
+        });
+    }
+    if let Some(restored) = value.get("desktop-restored") {
+        return Some(Said::DesktopRestored {
+            desktop: at(restored, "desktop")?,
+            windows: numbers(restored.get("windows")),
         });
     }
     value

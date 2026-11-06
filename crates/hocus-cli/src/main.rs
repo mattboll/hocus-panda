@@ -47,7 +47,7 @@ use hocus_agents::{Question, Report, Source, State, hooks};
 mod day;
 
 /// `hocus-settings`, in `PATH` or beside this program, which it becomes.
-fn settings(section: Option<&str>) -> ExitCode {
+fn settings(section: Option<&str>, join: Option<&str>) -> ExitCode {
     use std::os::unix::process::CommandExt as _;
     let beside = std::env::current_exe()
         .ok()
@@ -60,7 +60,12 @@ fn settings(section: Option<&str>) -> ExitCode {
         (false, Some(beside)) => beside,
         _ => PathBuf::from("hocus-settings"),
     };
-    let err = std::process::Command::new(&program).args(section).exec();
+    let mut command = std::process::Command::new(&program);
+    command.args(section);
+    if let Some(ssid) = join {
+        command.args(["--join", ssid]);
+    }
+    let err = command.exec();
     eprintln!("hocus: {}: {err}", program.display());
     ExitCode::FAILURE
 }
@@ -115,6 +120,9 @@ enum Command {
         /// keyboard, mouse, network, bluetooth, desktops, applications,
         /// agents, captures, power, account, date-and-time.
         section: Option<String>,
+        /// On network: the Wi-Fi network whose sheet opens (6.6).
+        #[arg(long)]
+        join: Option<String>,
     },
     /// Your day's accounts (docs/design/day.md).
     Day {
@@ -174,7 +182,7 @@ enum DayCommand {
 fn main() -> ExitCode {
     let args = Args::parse();
     match args.command {
-        Command::Settings { section } => settings(section.as_deref()),
+        Command::Settings { section, join } => settings(section.as_deref(), join.as_deref()),
         Command::Agent { name, state, pid } => {
             let state = match state.as_str() {
                 "ended" => None,

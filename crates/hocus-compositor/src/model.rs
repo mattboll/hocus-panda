@@ -7,14 +7,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-/// Space around windows the desktop places, and between the work area and
-/// the output's edges or a bar's reserved space (docs/design/windows.md §2).
-pub const GAP: i32 = 8;
-/// The pointer this close to a vertical or top edge of the work area
-/// snaps to a half or maximises.
-pub const SNAP_EDGE: i32 = 24;
-/// And this close to a corner, to a quarter.
-pub const SNAP_CORNER: i32 = 48;
+/// The rectangles, the snap zones, the edges a resize moves: the
+/// geometry the Settings' trial area shares (6.14).
+pub use hocus_geometry::{Edges, GAP, Rect, SNAP_CORNER, SNAP_EDGE, Side, Zone, torn_off};
 /// The resize band outside each edge, and how far a corner reaches along
 /// it (§8).
 pub const FRAME: i32 = 8;
@@ -31,58 +26,6 @@ pub const MIN_SIZE: (i32, i32) = (120, 80);
 /// A window, for as long as it is mapped. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WindowId(pub u64);
-
-/// A rectangle in the global logical space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Rect {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-}
-
-impl Rect {
-    pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    /// Smaller by `by` on every side; never negative.
-    pub fn inset(self, by: i32) -> Self {
-        Self {
-            x: self.x + by,
-            y: self.y + by,
-            width: (self.width - 2 * by).max(0),
-            height: (self.height - 2 * by).max(0),
-        }
-    }
-
-    pub const fn right(self) -> i32 {
-        self.x + self.width
-    }
-
-    pub const fn bottom(self) -> i32 {
-        self.y + self.height
-    }
-
-    pub fn contains(self, x: f64, y: f64) -> bool {
-        x >= f64::from(self.x)
-            && y >= f64::from(self.y)
-            && x < f64::from(self.right())
-            && y < f64::from(self.bottom())
-    }
-
-    pub fn centre(self) -> (f64, f64) {
-        (
-            f64::from(self.x) + f64::from(self.width) / 2.0,
-            f64::from(self.y) + f64::from(self.height) / 2.0,
-        )
-    }
-}
 
 /// Where the desktop places windows on an output: what layer surfaces
 /// leave of it (`non_exclusive`, global) less the space of its bar, `bar`
@@ -156,102 +99,6 @@ pub fn carried(rect: Rect, from: Rect, to: Rect) -> Rect {
     )
 }
 
-/// Where a window snaps: a half, a quarter, or the whole work area.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Zone {
-    Left,
-    Right,
-    Maximized,
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-/// Which sides of the work area a zone touches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    Start,
-    End,
-    Both,
-}
-
-impl Zone {
-    /// The zone's rectangle in `area`: halves and quarters keep the gap
-    /// between them.
-    pub fn rect(self, area: Rect) -> Rect {
-        let left_w = (area.width - GAP) / 2;
-        let top_h = (area.height - GAP) / 2;
-        let (x, w) = match self.horizontal() {
-            Side::Start => (area.x, left_w),
-            Side::End => (area.x + left_w + GAP, area.width - left_w - GAP),
-            Side::Both => (area.x, area.width),
-        };
-        let (y, h) = match self.vertical() {
-            Side::Start => (area.y, top_h),
-            Side::End => (area.y + top_h + GAP, area.height - top_h - GAP),
-            Side::Both => (area.y, area.height),
-        };
-        Rect::new(x, y, w.max(0), h.max(0))
-    }
-
-    pub fn horizontal(self) -> Side {
-        match self {
-            Self::Left | Self::TopLeft | Self::BottomLeft => Side::Start,
-            Self::Right | Self::TopRight | Self::BottomRight => Side::End,
-            Self::Maximized => Side::Both,
-        }
-    }
-
-    pub fn vertical(self) -> Side {
-        match self {
-            Self::TopLeft | Self::TopRight => Side::Start,
-            Self::BottomLeft | Self::BottomRight => Side::End,
-            Self::Left | Self::Right | Self::Maximized => Side::Both,
-        }
-    }
-
-    fn from_sides(horizontal: Side, vertical: Side) -> Self {
-        match (horizontal, vertical) {
-            (Side::Start, Side::Both) => Self::Left,
-            (Side::End, Side::Both) => Self::Right,
-            (Side::Start, Side::Start) => Self::TopLeft,
-            (Side::End, Side::Start) => Self::TopRight,
-            (Side::Start, Side::End) => Self::BottomLeft,
-            (Side::End, Side::End) => Self::BottomRight,
-            (Side::Both, _) => Self::Maximized,
-        }
-    }
-
-    /// The zone the pointer at (`x`, `y`) is in while dragging a window:
-    /// a corner (within [`SNAP_CORNER`] of it), the left or right edge (a
-    /// half) or the top edge (maximised), from the work area's edges; the
-    /// pointer may be past them, up to the output's edge.
-    pub fn at(area: Rect, x: f64, y: f64) -> Option<Self> {
-        let near = |d: f64, within: i32| d < f64::from(within);
-        let left = x - f64::from(area.x);
-        let right = f64::from(area.right()) - x;
-        let top = y - f64::from(area.y);
-        let bottom = f64::from(area.bottom()) - y;
-        let at_left = near(left, SNAP_EDGE);
-        let at_right = near(right, SNAP_EDGE);
-        let at_top = near(top, SNAP_EDGE);
-        let at_bottom = near(bottom, SNAP_EDGE);
-        let corner_x = near(left, SNAP_CORNER) || near(right, SNAP_CORNER);
-        let corner_y = near(top, SNAP_CORNER) || near(bottom, SNAP_CORNER);
-        let side_x = if left < right { Side::Start } else { Side::End };
-        let side_y = if top < bottom { Side::Start } else { Side::End };
-        // A corner: at an edge, and within reach of the other one.
-        if (at_left || at_right) && corner_y || (at_top || at_bottom) && corner_x {
-            return Some(Self::from_sides(side_x, side_y));
-        }
-        if at_left || at_right {
-            return Some(Self::from_sides(side_x, Side::Both));
-        }
-        at_top.then_some(Self::Maximized)
-    }
-}
-
 /// How a window is placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -262,45 +109,6 @@ pub enum Mode {
     Snapped(Zone),
     /// Over its whole output, the bar's space included.
     Fullscreen,
-}
-
-/// Which edges a resize moves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Edges {
-    pub left: bool,
-    pub right: bool,
-    pub top: bool,
-    pub bottom: bool,
-}
-
-impl Edges {
-    pub const fn any(self) -> bool {
-        self.left || self.right || self.top || self.bottom
-    }
-
-    /// Its CSS and cursor-shape name: `ew-resize`, `ns-resize`,
-    /// `nwse-resize` or `nesw-resize` (§8).
-    pub fn cursor_name(self) -> &'static str {
-        match (self.left || self.right, self.top || self.bottom) {
-            (true, false) => "ew-resize",
-            (false, true) => "ns-resize",
-            (true, true) if self.left == self.top => "nwse-resize",
-            (true, true) => "nesw-resize",
-            (false, false) => "default",
-        }
-    }
-
-    /// The edges of the corner of `rect` nearest to (`x`, `y`): what
-    /// `Super`+right-drag resizes.
-    pub fn nearest_corner(rect: Rect, x: f64, y: f64) -> Self {
-        let (cx, cy) = rect.centre();
-        Self {
-            left: x < cx,
-            right: x >= cx,
-            top: y < cy,
-            bottom: y >= cy,
-        }
-    }
 }
 
 /// Where the pointer at (`x`, `y`) is on the frame of a window at `rect`:
@@ -382,29 +190,6 @@ pub fn resized(
         }
     }
     out
-}
-
-/// Where a window dragged out of a zone goes: its size before it snapped,
-/// under the pointer at (`x`, `y`) at the same place across it (`along`,
-/// from 0 at its left to 1 at its right), and as far down as it was held
-/// (`held_down` of its `height` then): a header stays under the pointer,
-/// and a point further down than the smaller window reaches keeps its
-/// share of the height.
-pub fn torn_off(
-    restore: (i32, i32),
-    along: f64,
-    (held_down, height): (f64, i32),
-    x: f64,
-    y: f64,
-) -> (i32, i32) {
-    let left = x - along.clamp(0.0, 1.0) * f64::from(restore.0);
-    let restored = f64::from(restore.1);
-    let down = if held_down < restored {
-        held_down.max(0.0)
-    } else {
-        held_down / f64::from(height.max(1)) * restored
-    };
-    (left.round() as i32, (y - down).round() as i32)
 }
 
 /// What the keyboard asks of the focused window (§9).
