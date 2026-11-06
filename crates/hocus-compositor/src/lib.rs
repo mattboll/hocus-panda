@@ -24,6 +24,7 @@ mod emoji;
 mod focus;
 mod foreign;
 mod front;
+mod gestures;
 mod glass;
 pub mod going;
 mod grabs;
