@@ -532,6 +532,7 @@ impl State {
         self.model.set_desktop(id, desktop);
         if rule.as_ref().is_some_and(|r| r.above) {
             self.model.set_above(id, true);
+            self.tell_window_states(false);
         }
         let now = self.now();
         let mut managed = Managed::new(window.clone());
