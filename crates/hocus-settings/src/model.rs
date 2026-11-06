@@ -247,8 +247,8 @@ impl SectionId {
                 Work,
                 w("Applications", "Applications"),
                 w(
-                    "Les applications par défaut et celles qui démarrent avec la session.",
-                    "The default applications and those that start with the session.",
+                    "Celles qui ouvrent tes liens et tes fichiers, et celles qui démarrent avec la session.",
+                    "Those that open your links and files, and those that start with the session.",
                 ),
                 Icon::Apps,
                 "6.15",
@@ -919,6 +919,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
         SectionId::Desktops => crate::desktops::settings(),
+        SectionId::Apps => crate::applications::settings(),
         _ => &[],
     }
 }
@@ -948,6 +949,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
+        SectionId::Apps => crate::applications::outside(),
         _ => &[],
     }
 }

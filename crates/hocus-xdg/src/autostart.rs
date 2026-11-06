@@ -41,9 +41,9 @@ pub struct Entry {
     pub file: PathBuf,
     /// That file is in the first directory, the user's.
     pub user: bool,
-    /// A later directory (the system's) has a file of its name too: the
-    /// user's file, if there is one, is a copy of an installed entry.
-    pub installed: bool,
+    /// The file of its name in a later directory (the system's), if one:
+    /// the user's file, if there is one, is a copy of that installed entry.
+    pub installed: Option<PathBuf>,
     /// Its `Name` in the locale's language, else its id.
     pub name: String,
     pub comment: Option<String>,
@@ -60,6 +60,8 @@ pub struct Entry {
     /// `Hidden=true`: switched off.
     pub hidden: bool,
     pub here: Here,
+    /// The desktops its `OnlyShowIn` names.
+    pub only_in: Vec<String>,
 }
 
 impl Entry {
@@ -140,7 +142,7 @@ pub fn read(
         id: id.to_owned(),
         file: file.to_owned(),
         user: false,
-        installed: false,
+        installed: None,
         comment: text_of("Comment"),
         name,
         icon,
@@ -153,6 +155,7 @@ pub fn read(
             .filter(|d| !d.trim().is_empty()),
         hidden: group.flag("Hidden"),
         here,
+        only_in: group.raw("OnlyShowIn").map(list).unwrap_or_default(),
     })
 }
 
@@ -213,7 +216,7 @@ pub fn scan_in(
             };
             let mut entry = read(&id, file, &text, locale, desktops, path)?;
             entry.user = *at == 0;
-            entry.installed = found.iter().any(|(at, _)| *at > 0);
+            entry.installed = found.iter().find(|(at, _)| *at > 0).map(|(_, f)| f.clone());
             Some(entry)
         })
         .collect();
@@ -224,6 +227,68 @@ pub fn scan_in(
             .then_with(|| a.id.cmp(&b.id))
     });
     entries
+}
+
+/// `text` (a desktop entry) with `Hidden` set to `hidden` in its
+/// `[Desktop Entry]` group (`None`: its line taken out), all else as it
+/// was.
+pub fn with_hidden(text: &str, hidden: Option<bool>) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let start = lines.iter().position(|l| l.trim() == "[Desktop Entry]");
+    let (start, end) = match start {
+        Some(start) => {
+            let end = lines
+                .iter()
+                .enumerate()
+                .skip(start + 1)
+                .find(|(_, l)| l.trim().starts_with('['))
+                .map_or(lines.len(), |(i, _)| i);
+            (start, end)
+        }
+        None => {
+            lines.insert(0, "[Desktop Entry]".to_owned());
+            (0, 1)
+        }
+    };
+    let at = (start + 1..end).find(|&i| {
+        lines[i]
+            .split_once('=')
+            .is_some_and(|(k, _)| k.trim() == "Hidden")
+    });
+    match (at, hidden) {
+        (Some(i), Some(h)) => lines[i] = format!("Hidden={h}"),
+        (Some(i), None) => {
+            lines.remove(i);
+        }
+        (None, Some(h)) => {
+            // After the group's last key, before the blank lines.
+            let mut after = start + 1;
+            for (i, line) in lines.iter().enumerate().take(end).skip(start + 1) {
+                if !line.trim().is_empty() {
+                    after = i + 1;
+                }
+            }
+            lines.insert(after, format!("Hidden={h}"));
+        }
+        (None, None) => {}
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Whether the user's `copy` of an installed entry holds nothing but its
+/// `Hidden`: the installed file's text with `Hidden` put in, or nothing
+/// but `Hidden` (and `Type`).
+pub fn only_hidden(copy: &str, installed: Option<&str>) -> bool {
+    let without = with_hidden(copy, None);
+    if installed.is_some_and(|i| with_hidden(i, None) == without) {
+        return true;
+    }
+    Group::of(copy)
+        .pairs
+        .iter()
+        .all(|(key, _, _)| matches!(*key, "Hidden" | "Type"))
 }
 
 #[cfg(test)]
@@ -294,6 +359,27 @@ mod tests {
     }
 
     #[test]
+    fn hidden_is_set_in_place_or_added_or_taken_out() {
+        let text = "# x\n[Desktop Entry]\nName=A\nExec=a\n\n[Desktop Action b]\nName=B\n";
+        let off = with_hidden(text, Some(true));
+        assert_eq!(
+            off,
+            "# x\n[Desktop Entry]\nName=A\nExec=a\nHidden=true\n\n[Desktop Action b]\nName=B\n"
+        );
+        assert_eq!(
+            with_hidden(&off, Some(false)),
+            off.replace("Hidden=true", "Hidden=false")
+        );
+        assert_eq!(with_hidden(&off, None), text);
+        assert!(only_hidden(&off, Some(text)));
+        assert!(!only_hidden(
+            &off.replace("Name=A", "Name=Mine"),
+            Some(text)
+        ));
+        assert!(only_hidden("[Desktop Entry]\nHidden=true\n", None));
+    }
+
+    #[test]
     fn the_users_file_wins_and_says_where_it_comes_from() -> std::io::Result<()> {
         let user = tempfile::tempdir()?;
         let system = tempfile::tempdir()?;
@@ -313,7 +399,7 @@ mod tests {
         let entries = scan_in(&dirs, &Locale::default(), &desktops(), None);
         let seen: Vec<(&str, bool, bool, bool)> = entries
             .iter()
-            .map(|e| (e.id.as_str(), e.user, e.installed, e.starts()))
+            .map(|e| (e.id.as_str(), e.user, e.installed.is_some(), e.starts()))
             .collect();
         assert_eq!(
             seen,

@@ -1173,6 +1173,105 @@ row.
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
 
+## Applications (6.15)
+
+Issue #449, variant A, every question answered with its recommendation:
+the desktop itself starts the start-up applications once the bar shows
+(no systemd generator); the entries meant for other desktops are hidden
+behind a line. Section `applications` (`hocus settings applications`),
+TRAVAIL's second row. Under the title: "Celles qui ouvrent tes liens et
+tes fichiers, et celles qui démarrent avec la session."
+
+| Group | Row | Control | Written in |
+|---|---|---|---|
+| APPLICATIONS PAR DÉFAUT ("Valent aussi pour les autres applications") | Navigateur web | menu of applications | `mimeapps.list`: `x-scheme-handler/http`, `x-scheme-handler/https`, `text/html`, `application/xhtml+xml` |
+| | Courriel | menu | `x-scheme-handler/mailto` |
+| | Terminal | menu: Automatique, the terminals, Autre commande… | `[programs] terminal` |
+| | Vidéos | menu | `video/mp4`, `video/webm`, `video/x-matroska`, `video/quicktime`, `video/x-msvideo`, `video/mpeg`, `video/ogg` |
+| | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
+| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+
+- **Reading**: a thread of the page's own (`src/applications.rs`),
+  started the first time the page shows, reads the desktop entries as
+  the launcher does (`hocus-xdg`: `NoDisplay`, `Hidden`, `TryExec`
+  honoured), their icons in the user's icon theme (the launcher's lookup,
+  64 px), the defaults, the autostart entries as the session reads them,
+  and follows `mimeapps.list` and the autostart folder (inotify). Nothing
+  touches the disk on the window's thread.
+- **A menu of applications** (200 px): its button shows the
+  application's icon (22 px) and name; the list holds the applications
+  whose entry declares one of the row's types (`MimeType`), by name,
+  then a hint ("Celles qui ouvrent les pages web"). The current choice
+  is the row's first type's, resolved as the specification says
+  (`$XDG_CONFIG_HOME/mimeapps.list`, then `$XDG_CONFIG_DIRS`', then the
+  data directories' `applications/mimeapps.list`; their `[Default
+  Applications]`, then `[Added Associations]`, then `mimeinfo.cache`;
+  else the first application that declares it). When another of its
+  types opens elsewhere, a line under the row says it ("Les vidéos WebM
+  s'ouvrent avec VLC"). Choosing writes every type of the row in the
+  user's `[Default Applications]`, each line in place or added at the
+  group's end, the rest of the file kept, written beside then renamed
+  and read back ("Navigateur web : Chromium", "Annuler"). "Annuler"
+  writes the file back byte for byte when it is as written, else only
+  the row's lines as they were. No application for a row: "Aucune" at
+  45 %, inert, the line in amber ("Aucune application installée n'ouvre
+  les liens « mailto: ».").
+- **The terminal**: "Automatique" (`terminal = ""`: the first of kitty,
+  foot, alacritty, xterm in `PATH`, as the compositor looks; the button
+  shows the one found), the entries with `Categories=TerminalEmulator`
+  (their `Exec` without field codes is written), then "Autre commande…",
+  which turns the control into a 250 px Martian Mono field ("Lancée
+  telle quelle par Super+Entrée."); `Enter`, `Tab` or a click elsewhere
+  writes it once its program is found in `PATH` (looked for on the
+  page's thread), else the line says "Introuvable dans PATH :
+  kitty-nightly" in amber and nothing is written; `Esc` puts it back. A
+  command the file holds that is no entry's shows in that field. The
+  compositor follows `[programs]` live: the next `Super+Return` takes it.
+- **AU DÉMARRAGE DE LA SESSION**: a row per entry of
+  `$XDG_CONFIG_HOME/autostart` and each `$XDG_CONFIG_DIRS/autostart`
+  that runs here (the user's file of an id winning; a hidden one shows,
+  off; those whose `OnlyShowIn`/`NotShowIn` leave Hocuspanda out or whose
+  `TryExec` is missing are not rows), by name: its icon (30 px; a command
+  without an application `>_`), its name, "Installée avec l'application."
+  (with its `Comment` after " · " when 40 characters or fewer) or
+  "Ajoutée par toi." (with its command in Martian Mono when it is no
+  application's), a ✕ (28 px) for the user's own, a switch. Off, an
+  installed entry is the user's copy of it with `Hidden=true`; on again,
+  that copy goes when it holds nothing else (else `Hidden=false`). The
+  user's own: `Hidden=true`, then the key taken out. ✕ removes the
+  user's file ("KeePassXC enlevée du démarrage"; "Annuler" writes it
+  back byte for byte). "Slack au démarrage : non", "Annuler".
+- **+ Ajouter une application**: a sheet over the window (420 px, the
+  menus' surface, radius 14): "Ajouter au démarrage", a search field
+  holding the keyboard over the launcher's applications (those already
+  at start-up left out; every word typed in the name or the id, accents
+  and case aside, those starting with it first), 38 px rows, the first
+  selected, "Annuler" and "Ajouter" (green). Adding copies the
+  application's desktop file into `$XDG_CONFIG_HOME/autostart/ID.desktop`;
+  its row comes last in the group, lit as a search result. `↑`/`↓`
+  move, `Enter` adds, `Esc` closes.
+- **Under the card**: "Elles démarrent une fois la barre affichée, une
+  fois par session. En couper une ne la ferme pas maintenant." and, when
+  some entries are for other desktops only, "3 autres sont prévues pour
+  d'autres bureaux et ne démarrent pas ici · Les voir": they show under
+  the card at 45 %, with no switch ("Prévue pour GNOME.").
+- **The session** starts them (the compositor, `--session` only): see
+  [packaging/README.md](../../packaging/README.md).
+- **Keyboard**: the menus open with `Space`, `Enter` or `Alt+↓`, `↑`/`↓`
+  move, `Enter` chooses, `Esc` closes; a switch's ✕ comes after it in the
+  `Tab` order, and `Delete` on a user's row's switch removes it.
+- **The search**: par défaut, navigateur, firefox, liens, courriel,
+  mailto, terminal, console, vidéos, lecteur, images, photos,
+  visionneuse, ouvrir avec, démarrage, au lancement, session, démarrer
+  (default, browser, links, mail, player, viewer, open with, startup,
+  autostart, login); the keys `programs.terminal` and `mimeapps`.
+- **Choices made here (to confirm on the machine)**: an application
+  without an icon in the theme shows its initial on a colour of its id;
+  the toasts of an undo say "Annulé : Navigateur web : Firefox"; the
+  sheet's matching is by words, not the launcher's fuzzy ranking; a row
+  with nothing chosen yet (applications there, none set) says
+  "Choisir…".
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -1580,6 +1679,18 @@ the same bed with timedated faked on a D-Bus daemon of the test's own
 - `without_timedated_the_page_says_so`
 - `the_format_link_and_the_search_light_their_rows`
 - `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_applications.rs` (6.15), the same
+bed with applications, a `mimeapps.list` and autostart folders of the
+test's own (`XDG_CONFIG_DIRS` too):
+
+- `choosing_a_browser_writes_its_four_types_in_mimeapps_list_keeping_the_rest`
+- `annuler_puts_mimeapps_list_back_byte_for_byte`
+- `a_row_with_no_application_is_inert_and_says_so`
+- `other_command_writes_programs_terminal_and_super_return_uses_it`
+- `turning_off_an_installed_autostart_entry_writes_a_hidden_copy`
+- `adding_an_application_copies_its_entry_into_autostart`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's

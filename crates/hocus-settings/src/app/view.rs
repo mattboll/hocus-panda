@@ -102,6 +102,13 @@ impl App {
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
         }
+        // The Applications page's menu and sheet (6.15).
+        if let Some(menu) = self.apps_menu() {
+            layers.push(menu);
+        }
+        if let Some(sheet) = self.apps_sheet() {
+            layers.push(sheet);
+        }
         stack(layers)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -827,6 +834,9 @@ impl App {
         }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
+        }
+        if id == SectionId::Apps {
+            return self.apps_page(page);
         }
         if id == SectionId::Network {
             return self.network_page(page);
@@ -1742,6 +1752,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
+        "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {

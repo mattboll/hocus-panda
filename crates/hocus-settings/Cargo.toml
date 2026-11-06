@@ -27,6 +27,11 @@ hocus-sound = { path = "../hocus-sound", version = "0.2.0" }
 # The Réseau page's NetworkManager and radios, followed and set as the bar
 # does (6.6).
 hocus-network = { path = "../hocus-network", version = "0.2.0" }
+# The applications, their icons, the defaults (mimeapps.list) and the
+# start-up entries, read as the launcher and the session read them (6.15).
+hocus-xdg = { path = "../hocus-xdg", version = "0.2.0" }
+# The applications' PNG icons, decoded on the page's thread (6.15).
+image = { version = "0.25", default-features = false, features = ["png"] }
 toml_edit = "0.25.17"
 # The shell's toolkit and its settings (tech-choices, decision 2), as an
 # application window this time: winit's Wayland backend, no X11, no theme
@@ -76,7 +81,5 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
-# A picture to choose, in the wallpaper's tests.
-image = { version = "0.25", default-features = false, features = ["png"] }
 tempfile = "3.27.0"
 anyhow = "1.0.104"

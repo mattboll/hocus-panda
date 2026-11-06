@@ -11,6 +11,7 @@
 //! sliding, a menu opening) ask for frames only while they move.
 
 mod appearance_page;
+mod applications;
 mod bar_page;
 mod desktops_page;
 mod desktops_rules;
@@ -224,6 +225,9 @@ enum Undo {
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
     Power(power_page::ModeChoice),
+    /// A default application or a start-up one (mimeapps.list, autostart,
+    /// 6.15).
+    Apps(applications::Choice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -334,6 +338,8 @@ pub enum Message {
     Network(network::Msg),
     /// The Énergie page's (6.10).
     Power(power_page::Msg),
+    /// The Applications page's (6.15).
+    Apps(applications::Msg),
     Nothing,
 }
 
@@ -407,6 +413,9 @@ pub struct App {
     /// The Énergie page: the battery, the modes and logind as last said
     /// (6.10).
     power: power_page::State,
+    /// The Applications page: what its thread read, its menus and sheet
+    /// (6.15).
+    apps: applications::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -424,6 +433,7 @@ impl App {
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
+        let apps = applications::State::new(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -501,6 +511,7 @@ impl App {
             desktops: desktops_page::State::default(),
             network,
             power,
+            apps,
             fresh: None,
             parity: false,
         };
@@ -560,6 +571,10 @@ impl App {
                 _ => None,
             }),
         ];
+        // The terminal's command let go (6.15).
+        if let Some(pressed) = self.apps_subscription() {
+            subscriptions.push(pressed);
+        }
         if self.moving(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
@@ -615,6 +630,7 @@ impl App {
             || self.network_moving()
             || self.trial_moving(now)
             || self.rules_moving(now)
+            || self.apps_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -625,7 +641,7 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after(), self.time_after()]);
+        let task = Task::batch([task, self.bar_after(), self.time_after(), self.apps_after()]);
         self.sound_listen();
         self.wallpaper_want();
         self.network_visit();
@@ -705,6 +721,10 @@ impl App {
                 }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
+                    return task;
+                }
+                // The Applications page's menus, sheet and field (6.15).
+                if let Some(task) = self.apps_key_first(&key, modifiers) {
                     return task;
                 }
                 // A menu of the rules: `Esc` closes it.
@@ -848,6 +868,7 @@ impl App {
             }
             Message::Network(msg) => self.network_update(msg),
             Message::Power(msg) => self.power_update(msg),
+            Message::Apps(msg) => self.apps_update(msg),
         }
     }
 
@@ -1228,6 +1249,13 @@ impl App {
                 self.toast = None;
                 return self.power_undo(choice, false);
             }
+            Some(Undo::Apps(_)) => {
+                let Some(Undo::Apps(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.apps_undo(choice, false);
+            }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
                     return Task::none();
@@ -1300,6 +1328,12 @@ impl App {
                     return Task::none();
                 };
                 return self.power_undo(choice, true);
+            }
+            Some(Undo::Apps(_)) => {
+                let Some(Undo::Apps(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.apps_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1547,6 +1581,9 @@ impl App {
         }
         if section == SectionId::DateTime {
             return self.time_stops().into_iter().map(Control::Time).collect();
+        }
+        if section == SectionId::Apps {
+            return self.apps_stops().into_iter().map(Control::Apps).collect();
         }
         if section == SectionId::Keyboard {
             if self.keys.sub {
@@ -1806,6 +1843,7 @@ impl App {
             Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
+            Control::Apps(stop) => self.apps_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -2061,6 +2099,8 @@ enum Control {
     Network(network::Stop),
     /// The Énergie page's own (6.10).
     Power(power_page::Stop),
+    /// The Applications page's own (6.15).
+    Apps(applications::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

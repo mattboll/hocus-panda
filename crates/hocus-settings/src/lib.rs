@@ -21,11 +21,15 @@
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
 //!   and systemd's timedated followed and asked off the window's thread.
+//! - [`applications`]: the Applications page's default applications
+//!   (`mimeapps.list`, the terminal) and start-up applications (XDG
+//!   autostart), read and written on its thread (6.15).
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
 pub mod app;
 pub mod appearance;
+pub mod applications;
 pub mod apps;
 pub mod bar;
 pub mod desktops;
