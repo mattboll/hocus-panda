@@ -263,6 +263,21 @@ impl Bed {
         ))
     }
 
+    /// A point over the page, in the window's view whatever the page's
+    /// length: where the wheel scrolls it.
+    fn over_page(&mut self) -> anyhow::Result<(f64, f64)> {
+        let window = self.window()?;
+        Ok((f64::from(window.x) + 632.0, f64::from(window.y) + 400.0))
+    }
+
+    /// The pointer on the window's header, where nothing lights.
+    fn park(&mut self) -> anyhow::Result<()> {
+        let window = self.window()?;
+        self.hp
+            .pointer_move(f64::from(window.x) + 700.0, f64::from(window.y) + 30.0);
+        Ok(())
+    }
+
     fn point(&mut self, id: &str) -> anyhow::Result<()> {
         let at = self.at(id)?;
         self.hp.pointer_move(at.0 - 1.0, at.1);
@@ -459,12 +474,7 @@ fn the_test_area_says_which_device_scrolled() -> anyhow::Result<()> {
     );
     // The test area is under the groups: scrolled to with the wheel over
     // the page, then the wheel over its list.
-    let page = bed.at("page:mouse")?;
-    bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..20 {
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(20))?;
-    }
+    scroll_to(&mut bed, "try:list")?;
     bed.point("try:list")?;
     bed.hp.wheel(1);
     let shown = bed.shows(|s| s["mouse"]["recognised"] == "Reconnu : molette de la souris")?;
@@ -654,15 +664,39 @@ fn a_hand_edit_of_the_file_reaches_every_device() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The page scrolled down to the gestures' group, with the wheel over it.
-fn scroll_to_gestures(bed: &mut Bed) -> anyhow::Result<()> {
-    let page = bed.at("page:mouse")?;
-    bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..4 {
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(20))?;
+/// The page scrolled by the wheel `times` times three notches, the
+/// pointer over it each time.
+fn wheel_page(bed: &mut Bed, times: usize, notches: i32) -> anyhow::Result<()> {
+    for _ in 0..times {
+        let page = bed.over_page()?;
+        bed.hp.pointer_move(page.0, page.1);
+        bed.hp.wheel(notches);
+        wait(&mut bed.hp, Duration::from_millis(40))?;
     }
     Ok(())
+}
+
+/// The page scrolled down until `id` shows whole, with the wheel over it.
+fn scroll_to(bed: &mut Bed, id: &str) -> anyhow::Result<()> {
+    for _ in 0..40 {
+        let places = bed.places_with(id)?;
+        let window = bed.window()?;
+        let place = &places[id];
+        let bottom = place[1].as_f64().unwrap_or_default() + place[3].as_f64().unwrap_or_default();
+        if bottom + 40.0 <= f64::from(window.height) {
+            return Ok(());
+        }
+        let page = bed.over_page()?;
+        bed.hp.pointer_move(page.0, page.1);
+        bed.hp.wheel(3);
+        wait(&mut bed.hp, Duration::from_millis(60))?;
+    }
+    anyhow::bail!("{id} never came into view")
+}
+
+/// The page scrolled down until the gestures' card shows whole.
+fn scroll_to_gestures(bed: &mut Bed) -> anyhow::Result<()> {
+    scroll_to(bed, "card:gestures")
 }
 
 #[test]
@@ -771,11 +805,10 @@ fn the_diagrams_move_only_while_shown_and_focused() -> anyhow::Result<()> {
     scroll_to_gestures(&mut bed)?;
     bed.shows(|s| s["mouse"]["gestures"]["moving"] == true)?;
     let commits = bed.hp.window_commits();
-    wait(&mut bed.hp, Duration::from_millis(300))?;
-    assert!(
-        bed.hp.window_commits() > commits + 3,
-        "the diagrams stand still"
-    );
+    let drawn = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.window_commits() > commits + 5)?;
+    assert!(drawn, "the diagrams stand still");
     // Another window takes the focus: they stop.
     common::open(&mut bed.hp, "test.other", (300, 200))?;
     bed.shows(|s| s["mouse"]["gestures"]["moving"] == false)?;
@@ -872,23 +905,14 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let mouse = bed.hp.plug_device(MOUSE);
     bed.open()?;
     bed.shows(|s| s["mouse"]["mouse"].is_string())?;
-    bed.hp.pointer_move(5.0, 5.0);
+    bed.park()?;
     shoot(&mut bed, "mouse-touchpad.png")?;
     // The mouse's group and the gestures: the page scrolled.
-    let page = bed.at("page:mouse")?;
-    bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..4 {
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(20))?;
-    }
-    bed.hp.pointer_move(5.0, 5.0);
+    scroll_to(&mut bed, "card:mouse")?;
+    bed.park()?;
     shoot(&mut bed, "mouse-mouse-and-gestures.png")?;
     // The test area: scrolled with two fingers, the target double clicked.
-    bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..20 {
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(20))?;
-    }
+    scroll_to(&mut bed, "try:list")?;
     bed.point("try:list")?;
     bed.hp.finger_scroll(40.0);
     bed.shows(|s| s["mouse"]["recognised"] == "Reconnu : pavé tactile")?;
@@ -899,17 +923,12 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     // No mouse: one line in its group.
     bed.hp.unplug_device(mouse);
     bed.shows(|s| s["mouse"]["mouse"].is_null())?;
-    let page = bed.at("page:mouse")?;
-    bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..12 {
-        bed.hp.wheel(-3);
-        wait(&mut bed.hp, Duration::from_millis(20))?;
-    }
+    wheel_page(&mut bed, 12, -3)?;
     for _ in 0..2 {
         bed.hp.wheel(3);
         wait(&mut bed.hp, Duration::from_millis(20))?;
     }
-    bed.hp.pointer_move(5.0, 5.0);
+    bed.park()?;
     shoot(&mut bed, "mouse-no-mouse.png")?;
     Ok(())
 }
@@ -947,11 +966,13 @@ fn screenshots_of_the_gestures() -> anyhow::Result<()> {
         eprintln!("{}", path.display());
         Ok(())
     };
-    // A touchpad of four fingers: the group, its diagrams moving.
+    // A touchpad of four fingers and a mouse: the group, its diagrams
+    // moving.
     let Some(mut bed) = Bed::start_on(FILE, "2880x1800@2")? else {
         return Ok(());
     };
     bed.hp.plug_device(TOUCHPAD);
+    bed.hp.plug_device(MOUSE);
     bed.open()?;
     bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
     scroll_to_gestures(&mut bed)?;
@@ -979,6 +1000,7 @@ fn screenshots_of_the_gestures() -> anyhow::Result<()> {
         },
         ..TOUCHPAD
     });
+    bed.hp.plug_device(MOUSE);
     bed.open()?;
     bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
     scroll_to_gestures(&mut bed)?;

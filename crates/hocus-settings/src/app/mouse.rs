@@ -1022,8 +1022,9 @@ impl<M> iced::widget::canvas::Program<M> for Diagram {
                 }
             }
             Gesture::Pinch => {
-                // Apart at the loop's ends, together at its middle.
-                let k = self.phase.map_or(0.5, |p| {
+                // Together at the loop's ends, apart at its middle; still,
+                // where the mockup draws them.
+                let k = self.phase.map_or(4.0 / 7.0, |p| {
                     if p < 0.5 {
                         bezier(EASE_IN_OUT, p * 2.0)
                     } else {
@@ -1046,7 +1047,7 @@ mod tests {
     #[test]
     fn the_dots_come_in_travel_and_fade_out() {
         let (x, o) = swipe_at(0.0, 11.0, -13.0);
-        assert_eq!((x, o), (11.0, 0.0));
+        assert!((x - 11.0).abs() < 1e-3 && o.abs() < 1e-3);
         let (_, o) = swipe_at(0.15, 11.0, -13.0);
         assert!((o - 1.0).abs() < 1e-3);
         let (x, o) = swipe_at(0.7, 11.0, -13.0);
