@@ -146,6 +146,8 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 "fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
+`[[screen-sets]]` (each set of screens' arrangement, docs/design/windows.md
+§12; the sets seen are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
 `toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`

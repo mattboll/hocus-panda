@@ -445,21 +445,151 @@ Keyboard:
   the desktop it was going to. The pointer, if it was there,
   goes to the middle of the new screen; the focus stays on its window if
   that one still shows, otherwise it goes to the window on top that does.
-- When a screen of the same name comes back (the same connector), the
-  windows that came from it go back to it: on their desktop, at their
-  place (the same one on a screen of the same size, the same share of it
-  otherwise), in their state; the screen shows the desktop it showed.
-  A window no longer where it was put (the user moved or resized it,
-  changed it between floating, snapped and fullscreen, or sent it to
-  another desktop) stays where it is; minimising it or bringing it back
-  does not count. Each window remembers only the screen it left, its
-  desktop and its place there.
+- When a screen of the same identity comes back (below: its EDID's make,
+  model and serial, on any connector; #417), the windows that came from
+  it go back to it: on their desktop, at their place (the same one on a
+  screen of the same size, the same share of it otherwise), in their
+  state; the screen shows the desktop it showed. A window no longer where
+  it was put (the user moved or resized it, changed it between floating,
+  snapped and fullscreen, or sent it to another desktop) stays where it
+  is; minimising it or bringing it back does not count. Each window
+  remembers only the screen it left, its desktop and its place there,
+  for the session's length (nothing is written about windows); closed
+  meanwhile, it is forgotten.
+- **They fly back** (#417): each window shown before and after flies
+  from where it is to its place in **320 ms**, `cubic-bezier(0.22, 0.9,
+  0.3, 1)` (the desktops' curve), with no wobble and no transparency;
+  windows on desktops not shown are placed at once. Its place is its own
+  from the start (the drawing only travels), so a click or a key on a
+  flying window acts on it where it goes. Reduced motion: it fades in at
+  its place in 120 ms.
+- **The lid** closed with another screen plugged and on takes the
+  laptop's screen away exactly as an unplug, whatever the lid then does
+  (`[power] lid`, settings.md): its windows go to the other screen, the
+  bar too, and it is out of the set of screens (below); the lid opened
+  brings it back, its windows with it. With no other screen, the lid only
+  turns it off (7.2).
+- **Screens swapped while the machine slept** are seen at resume, in one
+  turn (the real screens' scan): a screen whose EDID changed on its
+  connector went, and another came; one gone and back with the same
+  identity is no change at all.
 - With every screen gone, the windows wait where they are; a screen
   that comes then shows those on it where they were, and takes those on
   none in the middle of its work area.
 - The real screens (tty) and the headless backend's outputs (in tests)
   come and go, through the same code; the nested window is one output
   that never goes.
+
+#### A screen's identity
+
+As built (#417; the maintainer's question 5): a screen is its EDID's
+make (the three letters), model (its name descriptor) and serial number
+(its serial descriptor, else the number in its header): `DEL U3423WE
+7XY1234`. A different monitor on the same cable is another screen; the
+same one on another cable is the same. Without a serial, its connector
+tells it apart, `DEL U2723QE (DP-2)`: two of one model without serials
+swap when their cables do. Without an EDID (a virtual machine's screens,
+the headless outputs) it is its connector, `HEADLESS-2`. Two screens of
+the same identity plugged at once: the second's connector is added. The
+journal says each screen's identity as it lights ("a screen, known as");
+the Settings get it on their line (`key`). The headless harness plugs a
+screen with an identity of its choice (`Headless::plug_screen`), on a
+connector unplugged before or a new one.
+
+#### Sets of screens
+
+- **A set** is the identities of the screens plugged and on: a screen
+  turned off by the file (`enabled = false`) or under the closed lid does
+  not count. The laptop alone, the laptop and the office's screen, the
+  laptop and the home's: three sets.
+- **Each set keeps its own arrangement** (question 6), in the
+  configuration file: `[[screen-sets]]`, its `screens`, its `primary`
+  (an identity) and one table per screen, by identity, with the keys of
+  `[outputs.NAME]` that arrange it (`position`, `mode`, `scale`, `vrr`).
+  What a set's table says wins over `[outputs.NAME]` and `[panel] output`,
+  which stay the defaults any set starts from: a set seen for the first
+  time takes them (then left to right, tops aligned). Plugging a set back
+  restores its arrangement in the same turn as its screens light (the
+  real screens light in its mode and scale at once).
+
+  ```toml
+  [[screen-sets]]
+  screens = ["BOE 0x0BCA (eDP-1)", "DEL U3423WE 7XY1234"]
+  primary = "DEL U3423WE 7XY1234"
+  [screen-sets.outputs."DEL U3423WE 7XY1234"]
+  position = [0, 0]
+  [screen-sets.outputs."BOE 0x0BCA (eDP-1)"]
+  position = [440, 1440]
+  ```
+- **The Settings write it** (settings.md, Écrans): with two screens or
+  more, what the user changes there (a place, a mode, a scale, VRR, the
+  primary screen) goes into the set in use's table, made when needed and
+  taken out when nothing but its screens is left; with one screen, into
+  `[outputs.NAME]`. Turning a screen off and its wallpaper stay
+  `[outputs.NAME]`'s. The compositor only reads the file.
+- **The sets seen** are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`
+  (each set's screens, their sizes, when it was last in use), written on a
+  thread, so that the Settings list them with the file's; "Oublier cet
+  ensemble" takes a set's table out of the file and its line out of that
+  list (`forget-set` on the Settings' line, the set in use never).
+- The bar stays on the primary screen (8.2, several bars, comes later).
+
+#### Saying it
+
+As built (#417; question 2, option C): when at least one window moved
+with a screen gone or back, the **winking panda** (its hat raised, never
+an agent state's pose) comes out of the bar's edge as an agent's panda
+does (bar.md §7 C: 170 px, its motion, 18 px from the bar, at the
+secretary's height), with a **blue bubble** (`rgba(16,24,44,0.95)`, a
+1 px border `#8FB3FF` at 45 %; under the pointer
+`rgba(22,32,58,0.97)`), two lines of 13 px, the first in bold
+`#B9CEFF`:
+
+| | Français | English |
+|---|---|---|
+| Gone | **L'écran externe 34 pouces est parti.** Firefox et foot sont ici, sur le bureau 1. | **The 34-inch screen left.** Firefox and foot are here, on desktop 1. |
+| Back | **Re-bonjour, écran externe 34 pouces !** Firefox et foot y retournent. | **Welcome back, 34-inch screen!** Firefox and foot go back to it. |
+
+The screen is "écran du portable" / "laptop screen" for the built-in
+one (the lid), "écran externe" / "external screen" when its size is not
+known. The windows are their applications' names, the focused one
+first: one ("Firefox est ici"), two ("Firefox et foot"), more ("Firefox,
+foot et 3 autres"), several of one application ("2 fenêtres foot"); "sur
+le bureau N" only when they are all on one desktop. A line longer than
+340 px is cut with an ellipsis.
+
+- It stays **4 s** (not the agents' 8 s), then goes back as a peek does.
+  A click on it sends it back at once (`peek-close`).
+- An agent's peek arriving meanwhile replaces it; it never replaces an
+  agent's (that one goes on; nothing is said of the screens). The
+  secretary's briefing open, nothing is said.
+- **Not while the session is locked**: the windows move, nothing is
+  said.
+- The compositor tells the shell `screens-moved gone|back
+  built-in|external INCHES DESKTOP`, then a tab and each window's
+  application id; the shell names them from their desktop entries.
+- Reduced motion, or a shell on the CPU: it fades in and out in place.
+
+#### Measured headless
+
+`tests/screens_return.rs`: two windows halved on a screen known as `DEL
+U3423WE 7XY1234` go to the other screen's halves, desktop 1, the focus
+kept; another screen on the same connector takes none of them and is a
+set of its own, right of the first; their screen back on another
+connector, they go back to it in their halves. Back, a window is drawn
+where it was, between its two places at 160 ms (past half way), at its
+place at 320 ms on the held clock; with reduced motion at its place at
+once. A file arranging two sets: each takes its places, scale and
+primary screen as its screens are plugged, a set not in the file left
+to right. The Settings forget a set seen (the set in use refused), the
+state file following. The lid closed with another screen on: the
+laptop's window on the other screen, the set without the laptop; opened,
+the window back at its place. With the real shell: no window, nothing
+said; two windows: the panda out beside the bar on the screen still
+there, saying "L’écran externe 27 pouces est parti. Foot et Firefox
+sont ici, sur le bureau 1.", still out at 3.9 s, back from 4 s, its
+surface gone; back, "Re-bonjour, écran externe 27 pouces ! Foot et
+Firefox y retournent."; locked, nothing said.
 
 #### What clients are told
 
@@ -693,3 +823,11 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 12. A window placed over the bar goes in front of it; the desktop's
     placements still keep off the bar, and the pointer pushed against the
     screen's edge brings the bar back in front (#519).
+13. Screens plugged and unplugged (#417, the s8a mockup, questions 1 to
+    7): windows go as in 8; the winking panda says it with a blue bubble
+    for 4 s; back, windows fly to their places in 320 ms; a window placed
+    meanwhile stays; a screen is known by its EDID's make, model and
+    serial, its connector only as a fallback; each set of screens keeps
+    its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
+    defaults; Écrans lists the sets known and forgets one. The peek's
+    panda is 170 px (was 96).

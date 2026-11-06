@@ -478,7 +478,7 @@ never on battery saver, never with reduced motion.
     an agent finishes (its panda with arms up). Once per change, and once
     more with the 5-minute reminder of a waiting agent (§6). Never for a
     stuck agent: the orange line and glow show it.
-  - **Where**: the 96 px panda comes out of the bar's edge at the agent's
+  - **Where**: the 170 px panda (96 px until #417) comes out of the bar's edge at the agent's
     row's height, 18 px from the bar, from under the bar's surface. Beside
     it, 8 px before it, a bubble: Manrope 13 px, 8 px and 12 px in,
     `rgba(30,26,18,0.92)` (`rgba(40,32,18,0.96)` under the pointer), radius
@@ -489,7 +489,7 @@ never on battery saver, never with reduced motion.
     since when `text.faint`), "**api-paiements** a fini" / "**api-paiements**
     is done" (`#7EE0A0`).
   - **Motion**: out in 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`, from
-    150 px under the bar, fading in over 260 ms (`ease-out`); still while
+    190 px under the bar (150 with the 96 px panda), fading in over 260 ms (`ease-out`); still while
     out; back into the bar after **8 s**, in 260 ms (`cubic-bezier(0.5, 0,
     0.75, 0.3)`), fading out over 220 ms (`ease-in`). With reduced motion,
     or a shell on the CPU: it fades in and out in place, without sliding.
@@ -499,6 +499,9 @@ never on battery saver, never with reduced motion.
   - Nothing is drawn at rest: it is a surface of the shell's above the
     windows, beside each bar, taking the pointer only where it draws, and
     gone once back.
+  - **Screens moved** (#417, windows.md §12 "Saying it"): the winking
+    panda comes out the same way, with a blue bubble of two lines, for
+    4 s; an agent's peek replaces it, it never replaces an agent's.
 
 ## 8. Going to an agent
 
@@ -2243,7 +2246,7 @@ issue #388): it stays out 8 s, and also comes out when an agent finishes.
 - **Reduced motion, or a shell on the CPU**: no slide; it fades in over
   260 ms (`ease-out`) and out over 220 ms (`ease-in`) in place. On the CPU
   the shell's buffers have no alpha: the bubble's card holds the panda
-  too (96 px high, the bubble's colour, made opaque, and its border round
+  too (170 px high since #417, the bubble's colour, made opaque, and its border round
   both, 8 px after the panda), without shadows, and the compositor cuts
   its rounded corners.
 - **A long name** is cut with an ellipsis at 280 px, so that the bubble
