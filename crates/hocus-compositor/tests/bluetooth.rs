@@ -724,11 +724,20 @@ fn pairing_without_a_code_works_one_asking_a_passkey_goes_to_the_settings_one_fa
     assert_eq!(bed.popovers(), vec![rect]);
     // The phone, second, is left to the Settings: a click opens their
     // Bluetooth page pairing it, and closes the popover (6.7).
-    bed.click(shape.nearby_row(rect, 1))?;
+    // The popover may not have heard the speaker's attempt end yet, and a
+    // click while something runs is ignored: clicked again until it opens.
     let args = bed.fakes.dir.path().join("settings-args");
-    let opened = bed.hp.dispatch_until(WAIT, |_| {
-        std::fs::read_to_string(&args).is_ok_and(|a| a.contains("bluetooth --pair 5C-12-AA-01-02-"))
-    })?;
+    let mut opened = false;
+    for _ in 0..5 {
+        bed.click(shape.nearby_row(rect, 1))?;
+        opened = bed.hp.dispatch_until(Duration::from_secs(2), |_| {
+            std::fs::read_to_string(&args)
+                .is_ok_and(|a| a.contains("bluetooth --pair 5C-12-AA-01-02-"))
+        })?;
+        if opened {
+            break;
+        }
+    }
     anyhow::ensure!(
         opened,
         "the Settings never opened: {:?}",

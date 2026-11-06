@@ -118,8 +118,12 @@ fn list_top(blocks: &[f64]) -> f64 {
     y + GAP + RULE_BLOCK + GAP + LABEL_ROW + GAP
 }
 
+/// The Settings' link at the popover's bottom (6.6): its divider and its
+/// 36 px row.
+const LINK_BLOCK: f64 = 4.0 + 1.0 + 4.0 + 36.0;
+
 /// The popover's height: `blocks`, then `rows` networks (none: the note)
-/// with `extra` under one of them.
+/// with `extra` under one of them, then the Settings' link.
 fn height(blocks: &[f64], rows: usize, extra: f64) -> i32 {
     let end = if rows == 0 {
         list_top(blocks) + NOTE
@@ -127,7 +131,7 @@ fn height(blocks: &[f64], rows: usize, extra: f64) -> i32 {
         let content = rows as f64 * ROW_STEP - 2.0 + extra;
         list_top(blocks) + content.min(236.0)
     };
-    (end + 14.0 + 1.0).round() as i32
+    (end + LINK_BLOCK + 14.0 + 1.0).round() as i32
 }
 
 /// The full bar's popover, `height` tall, on a 1920 × 1080 screen.
@@ -587,7 +591,7 @@ fn the_row_says_offline_off_connecting_a_cable_and_a_sign_in_page() -> anyhow::R
     bed.asked(&Call::Enable(false))?;
     bed.logged("link=Off")?;
     bed.popover_is(Some(popover(
-        (HEADER_END + GAP + NOTE + 15.0).round() as i32
+        (HEADER_END + GAP + NOTE + LINK_BLOCK + 15.0).round() as i32,
     )))?;
     Ok(())
 }
@@ -1019,7 +1023,7 @@ fn the_switch_disconnect_and_the_sign_in_page() -> anyhow::Result<()> {
     let switch = (f64::from(rect.x + 245), f64::from(rect.y + 29));
     bed.click(switch)?;
     bed.asked(&Call::Enable(false))?;
-    let off = popover((HEADER_END + GAP + NOTE + 15.0).round() as i32);
+    let off = popover((HEADER_END + GAP + NOTE + LINK_BLOCK + 15.0).round() as i32);
     bed.popover_is(Some(off))?;
     let switch = (switch.0, f64::from(off.y + 1 + 12 + 16));
     bed.click(switch)?;
@@ -1179,7 +1183,7 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     let item = bed.item();
     bed.click(item)?;
     bed.popover_is(Some(popover(
-        (HEADER_END + GAP + NOTE + 15.0).round() as i32
+        (HEADER_END + GAP + NOTE + LINK_BLOCK + 15.0).round() as i32,
     )))?;
     drop(bed);
     // No NetworkManager at all: the row is not drawn, nothing opens.

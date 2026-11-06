@@ -644,6 +644,10 @@ pub enum ToShell {
     /// No confirmation any more: the menu's rows again. Written
     /// `leave-end`.
     LeaveEnd,
+    /// The power button pressed, `[power] power-button = "ask"` (6.10):
+    /// the session menu (7.4) opens on `output`'s bar, as a click on the
+    /// footer's user opens it. Written `session-menu OUTPUT`.
+    SessionMenu { output: String },
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1831,6 +1835,7 @@ impl fmt::Display for ToShell {
             Self::LeaveCan(can) => can.write(f),
             Self::Leave(shown) => shown.write(f),
             Self::LeaveEnd => f.write_str("leave-end"),
+            Self::SessionMenu { output } => write!(f, "session-menu {output}"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -2126,6 +2131,9 @@ impl FromStr for ToShell {
             Some("curtain-end") => Ok(Self::CurtainEnd),
             Some("leave-can") => LeaveCan::read(&mut words).map(Self::LeaveCan),
             Some("leave-end") => Ok(Self::LeaveEnd),
+            Some("session-menu") => Ok(Self::SessionMenu {
+                output: word(&mut words, "output")?.to_owned(),
+            }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
@@ -2591,6 +2599,9 @@ mod tests {
                 },
             },
             ToShell::Clipboard {
+                output: "eDP-1".into(),
+            },
+            ToShell::SessionMenu {
                 output: "eDP-1".into(),
             },
         ]

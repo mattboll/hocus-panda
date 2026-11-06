@@ -188,6 +188,10 @@ impl State {
 
     /// A key by its keycode, from a device or a test.
     pub fn key(&mut self, code: smithay::input::keyboard::Keycode, state: KeyState, time: u32) {
+        // The power button, when logind left it to the desktop (6.10).
+        if self.power_key(code.raw(), state == KeyState::Pressed) {
+            return;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };

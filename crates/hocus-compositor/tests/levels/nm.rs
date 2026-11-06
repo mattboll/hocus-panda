@@ -42,6 +42,7 @@ const CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 const SETTINGS_IFACE: &str = "org.freedesktop.NetworkManager.Settings";
 const IP4: &str = "/org/freedesktop/NetworkManager/IP4Config/1";
 const IP4_WIRED: &str = "/org/freedesktop/NetworkManager/IP4Config/2";
+const IP4_VPN: &str = "/org/freedesktop/NetworkManager/IP4Config/3";
 
 /// How long a connection takes, and a scan.
 const TAKES: Duration = Duration::from_millis(400);
@@ -100,6 +101,12 @@ pub struct Setup {
     pub used: Vec<(&'static str, u64)>,
     /// Networks that do not say their name: joined by it, they appear.
     pub hidden: Vec<FakeAp>,
+    /// VPN connections: their name, their kind (`wireguard`, `openvpn`),
+    /// whether turning them on fails.
+    pub vpns: Vec<(&'static str, &'static str, bool)>,
+    /// NetworkManager's OpenVPN plugin is missing: such files do not
+    /// import.
+    pub no_openvpn: bool,
 }
 
 impl Default for Setup {
@@ -116,6 +123,8 @@ impl Default for Setup {
             check_uri: "http://check.hocus.test/portal",
             used: Vec::new(),
             hidden: Vec::new(),
+            vpns: Vec::new(),
+            no_openvpn: false,
         }
     }
 }
@@ -157,6 +166,12 @@ pub enum Call {
     },
     Disconnect,
     Deactivate,
+    /// A VPN imported with its user name and password.
+    VpnCredentials {
+        name: String,
+        user: String,
+        password: String,
+    },
 }
 
 #[derive(Debug)]
@@ -177,6 +192,8 @@ struct Saved {
     /// Seconds since the epoch; 0: never used.
     timestamp: u64,
     autoconnect: bool,
+    /// A VPN: its kind, whether it fails.
+    vpn: Option<(String, bool)>,
 }
 
 #[derive(Debug, Default)]
@@ -207,6 +224,10 @@ struct State {
     /// The settings each `AddAndActivateConnection` sent, flattened
     /// (`802-1x.identity` → its value).
     added: Vec<(String, BTreeMap<String, String>)>,
+    /// The VPN on, or on its way: its active connection, its saved one,
+    /// its state.
+    vpn_active: Vec<(String, String, u32)>,
+    no_openvpn: bool,
 }
 
 impl State {
@@ -220,7 +241,11 @@ impl State {
     }
 
     fn actives(&self) -> Vec<String> {
-        self.active.iter().map(|(p, ..)| p.clone()).collect()
+        self.active
+            .iter()
+            .map(|(p, ..)| p.clone())
+            .chain(self.vpn_active.iter().map(|(p, ..)| p.clone()))
+            .collect()
     }
 }
 
@@ -270,6 +295,7 @@ impl Nm {
                 portals: setup.portals.clone(),
                 later: setup.later.clone(),
                 hidden: setup.hidden.clone(),
+                no_openvpn: setup.no_openvpn,
                 device: if setup.enabled { 30 } else { 20 },
                 active_ap: "/".to_owned(),
                 takes: TAKES,
@@ -339,6 +365,11 @@ impl Nm {
                     });
                 }
             }
+            for (name, kind, fails) in &setup.vpns {
+                add_vpn(&served, name, kind, *fails, None, false).await?;
+            }
+            server.at(IP4_VPN, Ip4Vpn).await?;
+            server.at(SETTINGS, Test(served.clone())).await?;
             connection.request_name(NM).await?;
             Ok::<_, anyhow::Error>(())
         })?;
@@ -617,6 +648,7 @@ async fn add_saved(
             uuid: uuid.unwrap_or_else(|| format!("{n:08x}-7e57-4000-8000-000000000000")),
             timestamp: 0,
             autoconnect: true,
+            vpn: None,
         });
         p
     });
@@ -651,7 +683,7 @@ async fn add_active(shared: &Shared, saved: &str, ap: &str) -> anyhow::Result<St
     if let Some(connection) = shared.connection.get() {
         connection
             .object_server()
-            .at(p.as_str(), Active(shared.clone()))
+            .at(p.as_str(), Active(shared.clone(), p.clone()))
             .await?;
     }
     Ok(p)
@@ -680,7 +712,7 @@ async fn drop_active(shared: &Shared, reason: u32) -> anyhow::Result<()> {
                 .await?;
         }
     }
-    let connectivity = state(shared, |s| s.connectivity);
+    let (connectivity, actives) = state(shared, |s| (s.connectivity, s.actives()));
     changed(
         shared,
         WIFI,
@@ -693,10 +725,7 @@ async fn drop_active(shared: &Shared, reason: u32) -> anyhow::Result<()> {
         ROOT,
         NM,
         vec![
-            (
-                "ActiveConnections",
-                Variant::from(Vec::<OwnedObjectPath>::new()),
-            ),
+            ("ActiveConnections", Variant::from(paths(&actives))),
             ("Connectivity", Variant::from(connectivity)),
         ],
     )
@@ -879,6 +908,20 @@ impl Manager {
         _device: OwnedObjectPath,
         specific: OwnedObjectPath,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
+        let vpn = state(&self.0, |s| {
+            let saved = s.saved.iter().find(|c| c.path == connection.as_str())?;
+            let (_, fails) = saved.vpn.clone()?;
+            s.calls.push(Call::Activate {
+                ssid: saved.ssid.clone(),
+            });
+            Some(fails)
+        });
+        if let Some(fails) = vpn {
+            return activate_vpn(self.0.clone(), connection.as_str().to_owned(), fails)
+                .await
+                .map(|p| path(&p))
+                .map_err(failed);
+        }
         let saved = state(&self.0, |s| {
             let saved = s.saved.iter().find(|c| c.path == connection.as_str())?;
             s.calls.push(Call::Activate {
@@ -957,8 +1000,14 @@ impl Manager {
         Ok((path(&saved), path(&active)))
     }
 
-    async fn deactivate_connection(&self, _active: OwnedObjectPath) -> zbus::fdo::Result<()> {
+    async fn deactivate_connection(&self, active: OwnedObjectPath) -> zbus::fdo::Result<()> {
         state(&self.0, |s| s.calls.push(Call::Deactivate));
+        let vpn = state(&self.0, |s| {
+            s.vpn_active.iter().any(|v| v.0 == active.as_str())
+        });
+        if vpn {
+            return drop_vpn(&self.0, active.as_str(), 2).await.map_err(failed);
+        }
         drop_active(&self.0, 2).await.map_err(failed)?;
         device_state(&self.0, 30, 0).await.map_err(failed)
     }
@@ -1233,12 +1282,50 @@ impl Settings {
         state(&self.0, |s| s.saved.iter().map(|c| path(&c.path)).collect())
     }
 
+    fn get_connection_by_uuid(&self, uuid: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+        state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.uuid == uuid)
+                .map(|c| path(&c.path))
+        })
+        .ok_or_else(|| failed("no such connection"))
+    }
+
     async fn add_connection(
         &self,
         settings: HashMap<String, HashMap<String, OwnedVariant>>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         if state(&self.0, |s| s.refuse) {
             return Err(refused());
+        }
+        let text_of = |group: &str, key: &str| {
+            settings
+                .get(group)
+                .and_then(|c| c.get(key))
+                .and_then(|v| v.downcast_ref::<String>().ok())
+        };
+        // A VPN given back.
+        if let Some(kind) = text_of("connection", "type").filter(|t| t == "vpn" || t == "wireguard")
+        {
+            let name = text_of("connection", "id").unwrap_or_default();
+            let uuid = text_of("connection", "uuid");
+            let kind = if kind == "wireguard" {
+                "wireguard"
+            } else {
+                "openvpn"
+            };
+            state(&self.0, |s| {
+                s.calls.push(Call::AddConnection {
+                    ssid: name.clone(),
+                    uuid: uuid.clone().unwrap_or_default(),
+                    psk: None,
+                });
+            });
+            let p = add_vpn(&self.0, &name, kind, false, uuid, true)
+                .await
+                .map_err(failed)?;
+            return Ok(path(&p));
         }
         let ssid = ssid_of(&settings).ok_or_else(|| failed("no SSID"))?;
         let psk = psk_of(&settings);
@@ -1299,6 +1386,15 @@ impl SavedConnection {
             })
         });
         let (ssid, uuid, timestamp, autoconnect, protected) = found.unwrap_or_default();
+        let vpn = state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.path == self.1)
+                .and_then(|c| c.vpn.clone())
+        });
+        if let Some((kind, _)) = vpn {
+            return vpn_settings(&ssid, &uuid, autoconnect, &kind);
+        }
         let owned = |v: Variant<'_>| OwnedVariant::try_from(v).ok();
         let mut settings = HashMap::new();
         let mut connection = HashMap::new();
@@ -1355,6 +1451,34 @@ impl SavedConnection {
             .get("connection")
             .and_then(|c| c.get("autoconnect"))
             .and_then(|v| v.downcast_ref::<bool>().ok());
+        let dict_of = |key: &str| {
+            settings
+                .get("vpn")
+                .and_then(|v| v.get(key))
+                .and_then(|v| v.try_clone().ok())
+                .and_then(|v| HashMap::<String, String>::try_from(v).ok())
+                .unwrap_or_default()
+        };
+        let (data, secrets) = (dict_of("data"), dict_of("secrets"));
+        let id = settings
+            .get("connection")
+            .and_then(|c| c.get("id"))
+            .and_then(|v| v.downcast_ref::<String>().ok());
+        if let Some(user) = data.get("username") {
+            state(&self.0, |s| {
+                let name = s
+                    .saved
+                    .iter()
+                    .find(|c| c.path == self.1)
+                    .map(|c| c.ssid.clone())
+                    .unwrap_or_default();
+                s.calls.push(Call::VpnCredentials {
+                    name,
+                    user: user.clone(),
+                    password: secrets.get("password").cloned().unwrap_or_default(),
+                });
+            });
+        }
         state(&self.0, |s| {
             if let Some(saved) = s.saved.iter_mut().find(|c| c.path == self.1) {
                 // The secrets an update leaves out are kept.
@@ -1364,6 +1488,12 @@ impl SavedConnection {
                 }
                 if let Some(on) = autoconnect {
                     saved.autoconnect = on;
+                }
+                // A VPN renamed.
+                if saved.vpn.is_some()
+                    && let Some(id) = id.clone()
+                {
+                    saved.ssid = id;
                 }
                 s.calls.push(Call::Update2 {
                     ssid: saved.ssid.clone(),
@@ -1403,6 +1533,15 @@ impl SavedConnection {
             return Err(refused());
         }
         // In use: left first, as NetworkManager does.
+        let vpn_on = state(&self.0, |s| {
+            s.vpn_active
+                .iter()
+                .find(|v| v.1 == self.1)
+                .map(|v| v.0.clone())
+        });
+        if let Some(on) = vpn_on {
+            drop_vpn(&self.0, &on, 11).await.map_err(failed)?;
+        }
         let in_use = state(&self.0, |s| {
             s.active.as_ref().is_some_and(|a| a.1 == self.1)
         });
@@ -1434,26 +1573,274 @@ impl SavedConnection {
     }
 }
 
-struct Active(Shared);
+struct Active(Shared, String);
+
+impl Active {
+    /// The VPN's, if it is the VPN's: its saved connection, its state.
+    fn vpn(&self) -> Option<(String, u32)> {
+        state(&self.0, |s| {
+            s.vpn_active
+                .iter()
+                .find(|v| v.0 == self.1)
+                .map(|v| (v.1.clone(), v.2))
+        })
+    }
+
+    fn saved(&self) -> String {
+        match self.vpn() {
+            Some((saved, _)) => saved,
+            None => state(&self.0, |s| {
+                s.active.as_ref().map(|a| a.1.clone()).unwrap_or_default()
+            }),
+        }
+    }
+}
 
 #[zbus::interface(name = "org.freedesktop.NetworkManager.Connection.Active")]
 impl Active {
     #[zbus(property)]
     fn state(&self) -> u32 {
-        state(&self.0, |s| s.active.as_ref().map_or(4, |a| a.3))
+        match self.vpn() {
+            Some((_, s)) => s,
+            None => state(&self.0, |s| s.active.as_ref().map_or(4, |a| a.3)),
+        }
     }
 
     #[zbus(property)]
     fn connection(&self) -> OwnedObjectPath {
-        state(&self.0, |s| {
-            s.active.as_ref().map_or_else(none, |a| path(&a.1))
-        })
+        let saved = self.saved();
+        if saved.is_empty() {
+            none()
+        } else {
+            path(&saved)
+        }
     }
 
     #[zbus(property)]
     fn specific_object(&self) -> OwnedObjectPath {
+        if self.vpn().is_some() {
+            return none();
+        }
         state(&self.0, |s| {
             s.active.as_ref().map_or_else(none, |a| path(&a.2))
         })
     }
+
+    #[zbus(property)]
+    fn uuid(&self) -> String {
+        let saved = self.saved();
+        state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.path == saved)
+                .map(|c| c.uuid.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    #[zbus(property, name = "Type")]
+    fn kind(&self) -> String {
+        let saved = self.saved();
+        state(&self.0, |s| {
+            match s
+                .saved
+                .iter()
+                .find(|c| c.path == saved)
+                .and_then(|c| c.vpn.clone())
+            {
+                Some((kind, _)) if kind == "wireguard" => "wireguard".to_owned(),
+                Some(_) => "vpn".to_owned(),
+                None => "802-11-wireless".to_owned(),
+            }
+        })
+    }
+
+    #[zbus(property)]
+    fn ip4_config(&self) -> OwnedObjectPath {
+        match self.vpn() {
+            Some((_, 2)) => path(IP4_VPN),
+            Some(_) => none(),
+            None => path(IP4),
+        }
+    }
+}
+
+/// A VPN's IPv4 configuration.
+struct Ip4Vpn;
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager.IP4Config")]
+impl Ip4Vpn {
+    #[zbus(property)]
+    fn address_data(&self) -> Dicts {
+        vec![dict(&[("address", "10.8.0.6")])]
+    }
+}
+
+/// The tests' own door: a VPN's file imported, as nmcli's importers would
+/// (the fake `nmcli` calls it with `dbus-send`).
+struct Test(Shared);
+
+#[zbus::interface(name = "org.hocus.Test")]
+impl Test {
+    async fn import(&self, kind: String, file: String) -> zbus::fdo::Result<String> {
+        if kind == "openvpn" && state(&self.0, |s| s.no_openvpn) {
+            return Err(failed("Error: failed to find VPN plugin for openvpn."));
+        }
+        let name = std::path::Path::new(&file)
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let path = add_vpn(&self.0, &name, &kind, false, None, true)
+            .await
+            .map_err(failed)?;
+        let uuid = state(&self.0, |s| {
+            s.saved
+                .iter()
+                .find(|c| c.path == path)
+                .map(|c| c.uuid.clone())
+                .unwrap_or_default()
+        });
+        Ok(format!("Connection '{name}' ({uuid}) successfully added."))
+    }
+}
+
+/// A VPN connection saved: its path.
+async fn add_vpn(
+    shared: &Shared,
+    name: &str,
+    kind: &str,
+    fails: bool,
+    uuid: Option<String>,
+    announce: bool,
+) -> anyhow::Result<String> {
+    let p = add_saved(shared, name, None, uuid, false).await?;
+    state(shared, |s| {
+        if let Some(c) = s.saved.iter_mut().find(|c| c.path == p) {
+            c.vpn = Some((kind.to_owned(), fails));
+        }
+    });
+    if announce {
+        emit(
+            shared,
+            SETTINGS,
+            SETTINGS_IFACE,
+            "NewConnection",
+            &(path(&p),),
+        )
+        .await?;
+    }
+    Ok(p)
+}
+
+/// A VPN's settings, as NetworkManager's importers write them.
+fn vpn_settings(
+    name: &str,
+    uuid: &str,
+    autoconnect: bool,
+    kind: &str,
+) -> HashMap<String, HashMap<String, OwnedVariant>> {
+    let owned = |v: Variant<'_>| OwnedVariant::try_from(v).ok();
+    let wireguard = kind == "wireguard";
+    let mut settings = HashMap::new();
+    let mut connection = HashMap::new();
+    connection.extend(owned(Variant::from(name)).map(|v| ("id".to_owned(), v)));
+    connection.extend(owned(Variant::from(uuid)).map(|v| ("uuid".to_owned(), v)));
+    connection.extend(
+        owned(Variant::from(if wireguard { "wireguard" } else { "vpn" }))
+            .map(|v| ("type".to_owned(), v)),
+    );
+    connection.extend(owned(Variant::from(autoconnect)).map(|v| ("autoconnect".to_owned(), v)));
+    settings.insert("connection".to_owned(), connection);
+    if !wireguard {
+        let mut vpn = HashMap::new();
+        vpn.extend(
+            owned(Variant::from("org.freedesktop.NetworkManager.openvpn"))
+                .map(|v| ("service-type".to_owned(), v)),
+        );
+        let data: HashMap<String, String> = [("remote".to_owned(), "vpn.example.org".to_owned())]
+            .into_iter()
+            .collect();
+        vpn.extend(owned(Variant::from(data)).map(|v| ("data".to_owned(), v)));
+        settings.insert("vpn".to_owned(), vpn);
+    }
+    settings
+}
+
+/// The VPN `saved` turned on: on its way, then on (or failed: its server
+/// does not answer, reason 6).
+async fn activate_vpn(shared: Shared, saved: String, fails: bool) -> anyhow::Result<String> {
+    let p = state(&shared, |s| {
+        let p = format!(
+            "/org/freedesktop/NetworkManager/ActiveConnection/{}",
+            s.next()
+        );
+        s.vpn_active.push((p.clone(), saved.clone(), 1));
+        p
+    });
+    if let Some(connection) = shared.connection.get() {
+        connection
+            .object_server()
+            .at(p.as_str(), Active(shared.clone(), p.clone()))
+            .await?;
+    }
+    let actives = state(&shared, |s| s.actives());
+    changed(
+        &shared,
+        ROOT,
+        NM,
+        vec![("ActiveConnections", Variant::from(paths(&actives)))],
+    )
+    .await?;
+    let task = shared.clone();
+    let active = p.clone();
+    let takes = state(&shared, |s| s.takes);
+    tokio::spawn(async move {
+        tokio::time::sleep(takes).await;
+        if fails {
+            let _ = drop_vpn(&task, &active, 6).await;
+            return;
+        }
+        state(&task, |s| {
+            if let Some(v) = s.vpn_active.iter_mut().find(|v| v.0 == active) {
+                v.2 = 2;
+            }
+        });
+        let _ = changed(
+            &task,
+            &active,
+            ACTIVE,
+            vec![
+                ("State", Variant::from(2u32)),
+                ("Ip4Config", Variant::from(path(IP4_VPN))),
+            ],
+        )
+        .await;
+        let _ = emit(&task, &active, ACTIVE, "StateChanged", &(2u32, 0u32)).await;
+    });
+    Ok(p)
+}
+
+/// The VPN on at `active` off, for `reason`.
+async fn drop_vpn(shared: &Shared, active: &str, reason: u32) -> anyhow::Result<()> {
+    let gone = state(shared, |s| {
+        let at = s.vpn_active.iter().position(|v| v.0 == active)?;
+        Some(s.vpn_active.remove(at))
+    });
+    if let Some((p, ..)) = gone {
+        emit(shared, &p, ACTIVE, "StateChanged", &(4u32, reason)).await?;
+        if let Some(connection) = shared.connection.get() {
+            connection
+                .object_server()
+                .remove::<Active, _>(p.as_str())
+                .await?;
+        }
+    }
+    let actives = state(shared, |s| s.actives());
+    changed(
+        shared,
+        ROOT,
+        NM,
+        vec![("ActiveConnections", Variant::from(paths(&actives)))],
+    )
+    .await
 }
