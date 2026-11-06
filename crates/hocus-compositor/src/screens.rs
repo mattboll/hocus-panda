@@ -443,6 +443,10 @@ impl State {
         if self.swiping.as_ref() == Some(output) {
             self.swiping = None;
         }
+        if self.radial.as_ref().is_some_and(|r| r.output == *output) {
+            self.close_radial(None);
+        }
+        self.radial_out = None;
         self.seam_handle = None;
     }
 
@@ -475,7 +479,7 @@ impl State {
     /// Puts `id` on `output`'s desktop `desktop` at `rect` (global), at
     /// once: shown or not as that desktop is, minimised as it was;
     /// `restore`: where it floats again.
-    fn relocate(
+    pub(crate) fn relocate(
         &mut self,
         id: WindowId,
         output: &Output,

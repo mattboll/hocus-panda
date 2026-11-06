@@ -470,6 +470,9 @@ pub struct Model {
     /// Windows kept above the others, their dialogs with them (a rule's
     /// `above`, 6.14).
     above: std::collections::BTreeSet<WindowId>,
+    /// Windows on every desktop of their screen (#723): each switch takes
+    /// them along to the desktop it shows.
+    everywhere: std::collections::BTreeSet<WindowId>,
     /// The fullscreen window raised last: it covers those kept above
     /// while it stays in front.
     covering: Option<WindowId>,
@@ -553,6 +556,7 @@ impl Model {
     pub fn remove(&mut self, id: WindowId) {
         self.parents.retain(|w, p| *w != id && *p != id);
         self.above.remove(&id);
+        self.everywhere.remove(&id);
         if self.covering == Some(id) {
             self.covering = None;
         }
@@ -670,6 +674,33 @@ impl Model {
     /// Whether `id` is kept above the others.
     pub fn is_above(&self, id: WindowId) -> bool {
         self.above.contains(&id)
+    }
+
+    /// The windows kept above the others.
+    pub fn above(&self) -> impl Iterator<Item = WindowId> + '_ {
+        self.above.iter().copied()
+    }
+
+    /// `id` is on every desktop of its screen (`true`), or on its own.
+    pub fn set_everywhere(&mut self, id: WindowId, everywhere: bool) {
+        if !self.placements.contains_key(&id) {
+            return;
+        }
+        if everywhere {
+            self.everywhere.insert(id);
+        } else {
+            self.everywhere.remove(&id);
+        }
+    }
+
+    /// Whether `id` is on every desktop of its screen.
+    pub fn is_everywhere(&self, id: WindowId) -> bool {
+        self.everywhere.contains(&id)
+    }
+
+    /// The windows on every desktop of their screen.
+    pub fn everywhere(&self) -> impl Iterator<Item = WindowId> + '_ {
+        self.everywhere.iter().copied()
     }
 
     /// The windows kept above the others go on top, in their order, their

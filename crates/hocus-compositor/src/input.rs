@@ -15,8 +15,8 @@ use smithay::{
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            RelativeMotionEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
+            MotionEvent, RelativeMotionEvent,
         },
     },
     utils::{Logical, Point, SERIAL_COUNTER},
@@ -41,6 +41,9 @@ const GRIP_SLOP: f64 = 8.0;
 const SEAM_REACH: f64 = 12.0;
 /// How far around the handle's pill a press still takes it.
 const HANDLE_SLOP: f64 = 4.0;
+/// A right press that moves this far is a drag, not the radial menu's
+/// click.
+const RADIAL_SLOP: f64 = crate::radial::CLICK_SLOP;
 /// Two presses on a grip this close together maximise or restore.
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
@@ -61,6 +64,8 @@ pub(crate) enum Kept {
     InkClear,
     /// A key on the lock's form (7.1): the session is locked.
     Lock(crate::lock::LockKey),
+    /// A key while a window's radial menu is open (#723).
+    Radial(crate::radial::Key),
 }
 
 /// The digit of a key of the keyboard's top row, whatever the layout puts
@@ -216,6 +221,25 @@ impl State {
                 // the compositor's keys, only the virtual terminals' and
                 // the levels' work; everything else goes to the dialog.
                 let auth = this.auth_holds();
+                // A window's radial menu open (#723): its keys are its
+                // own, the modifiers go on.
+                if this.radial.is_some() && !auth {
+                    let sym = keysym.modified_sym();
+                    if is_modifier(sym) {
+                        return FilterResult::Forward;
+                    }
+                    if state != KeyState::Pressed {
+                        return if this.kept_keys.remove(&code) {
+                            FilterResult::Intercept(Kept::Release)
+                        } else {
+                            FilterResult::Forward
+                        };
+                    }
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::Radial(crate::radial::Key::of(
+                        sym, mods.shift,
+                    )));
+                }
                 if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key).filter(|_| !auth)
                 {
                     // Alt+Tab held: its keys are its own, the modifiers
@@ -344,6 +368,7 @@ impl State {
             Some(Kept::Capture(key)) => self.capture_key(key),
             Some(Kept::InkClear) => self.ink_clear(),
             Some(Kept::Lock(key)) => self.lock_key(key),
+            Some(Kept::Radial(key)) => self.radial_key(key),
             Some(Kept::Release) | None => {}
         }
         let mods = keyboard.modifier_state();
@@ -478,6 +503,44 @@ impl State {
         };
         // The laser's trail follows, over everything.
         self.ink_pointer(location);
+        // A right press that moved: Super and a drag resizes, as it always
+        // did, from where it was pressed; from the grip, nothing (#723).
+        if let Some(press) = self
+            .radial_press
+            .filter(|p| (location.x - p.at.x).hypot(location.y - p.at.y) >= RADIAL_SLOP)
+        {
+            self.radial_press = None;
+            if press.resizes
+                && let Some(rect) = self.rect_of(press.window)
+            {
+                self.kept_buttons.remove(&press.button);
+                let edges = Edges::nearest_corner(rect, press.at.x, press.at.y);
+                let start = GrabStartData {
+                    focus: None,
+                    button: press.button,
+                    location: press.at,
+                };
+                self.start_resize(press.window, edges, press.button, Some(start), press.serial);
+            }
+        }
+        // A window's radial menu open: no client sees the pointer.
+        if self.radial.is_some() {
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
+            self.radial_motion(location);
+            if !self.nested {
+                self.redraw = true;
+            }
+            return;
+        }
         // The authentication dialog keeps it from what it dims (7.5);
         // the capture open takes it, but over its toolbar (5.8).
         if !self.auth_keeps_pointer(location) && self.capture_motion(location, time) {
@@ -669,6 +732,28 @@ impl State {
             pointer.frame(self);
             return;
         }
+        // A window's radial menu (#723): the press that opens it, let go
+        // where it was; then the menu takes every press, no client seeing
+        // them.
+        if state == ButtonState::Released
+            && let Some(press) = self.radial_press.filter(|p| p.button == button)
+        {
+            self.radial_press = None;
+            self.kept_buttons.remove(&button);
+            self.open_radial(press.window, pointer.current_location());
+            return;
+        }
+        if self.radial.is_some() && !self.auth_holds() {
+            if state == ButtonState::Pressed {
+                self.kept_buttons.insert(button);
+                if matches!(button, BTN_LEFT | BTN_RIGHT) {
+                    self.radial_press(pointer.current_location());
+                }
+            } else {
+                self.kept_buttons.remove(&button);
+            }
+            return;
+        }
         if state == ButtonState::Pressed {
             self.pointer_refocus(time);
         }
@@ -761,6 +846,17 @@ impl State {
                         self.start_move(id, button, None, serial);
                     }
                 } else {
+                    // A right click on the grip: the window's radial menu,
+                    // as it is let go (#723).
+                    if button == BTN_RIGHT {
+                        self.radial_press = Some(crate::radial::Press {
+                            window: id,
+                            at,
+                            button,
+                            serial,
+                            resizes: false,
+                        });
+                    }
                     self.kept_buttons.insert(button);
                 }
                 return;
@@ -771,12 +867,17 @@ impl State {
                     self.start_move(id, button, None, serial);
                     return;
                 }
-                if button == BTN_RIGHT
-                    && modifiers.is_some_and(|m| self.resize_modifier(&m))
-                    && let Some(rect) = self.rect_of(id)
-                {
-                    let edges = Edges::nearest_corner(rect, at.x, at.y);
-                    self.start_resize(id, edges, button, None, serial);
+                // `Super` and the right button: a click opens the window's
+                // radial menu, a drag resizes it (#723).
+                if button == BTN_RIGHT && modifiers.is_some_and(|m| self.resize_modifier(&m)) {
+                    self.radial_press = Some(crate::radial::Press {
+                        window: id,
+                        at,
+                        button,
+                        serial,
+                        resizes: true,
+                    });
+                    self.kept_buttons.insert(button);
                     return;
                 }
             }
