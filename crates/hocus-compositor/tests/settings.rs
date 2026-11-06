@@ -606,6 +606,13 @@ fn an_unreadable_file_turns_it_read_only_and_the_last_readable_one_comes_back() 
     let aside =
         std::fs::read_to_string(bed.dir.path().join("config/hocuspanda/config.toml.broken"))?;
     assert_eq!(aside, broken);
+    // One click, one restore asked of the worker (#676).
+    let log = common::logged(&bed.log);
+    let asked = log
+        .matches("the last version that read is taken back")
+        .count()
+        + log.matches("no version to take back").count();
+    assert_eq!(asked, 1, "{log}");
     Ok(())
 }
 

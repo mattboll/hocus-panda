@@ -50,6 +50,15 @@ pub enum Why {
     Restored,
 }
 
+/// What a restore found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restore {
+    /// The file did not read: the last version that read took its place.
+    Taken,
+    /// The file reads: nothing to take back.
+    Reads,
+}
+
 /// A change kept for the home.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recent {
@@ -392,15 +401,21 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
     }
 
     /// The broken file kept as `config.toml.broken`, the last version that
-    /// read in its place.
+    /// read in its place: only while the file does not read. Asked again
+    /// once it reads (a click taken twice while the window lagged), it
+    /// would put the version just taken back aside, over the broken one
+    /// (#676).
     fn restore(&mut self) -> bool {
         let (Some(file), Some(good)) = (self.places.file.clone(), self.last_good()) else {
             return true;
         };
-        let done = (|| -> Result<(), String> {
+        let done = (|| -> Result<Restore, String> {
+            let read = hocus_config::read(&file)?;
+            if hocus_config::parse(&read.text).is_ok() {
+                return Ok(Restore::Reads);
+            }
             let kept = std::fs::read_to_string(&good)
                 .map_err(|err| format!("{}: {err}", good.display()))?;
-            let read = hocus_config::read(&file)?;
             let mut broken = read.real.clone().into_os_string();
             broken.push(".broken");
             if read.mode.is_some() {
@@ -408,12 +423,17 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
                     .map_err(|err| format!("{}: {err}", read.real.display()))?;
             }
             hocus_config::replace(&read.real, kept.as_bytes(), read.mode)
-                .map_err(|err| format!("{}: {err}", read.real.display()))
+                .map_err(|err| format!("{}: {err}", read.real.display()))?;
+            Ok(Restore::Taken)
         })();
         match done {
-            Ok(()) => {
+            Ok(Restore::Taken) => {
                 tracing::info!("the last version that read is taken back");
                 self.read(Why::Restored)
+            }
+            Ok(Restore::Reads) => {
+                tracing::info!("the file reads: no version to take back");
+                true
             }
             Err(why) => {
                 tracing::warn!(why, "the last version that read is not taken back");
@@ -614,6 +634,41 @@ mod tests {
         }];
         save_recent(Some(dir.path()), &kept);
         assert_eq!(load_recent(Some(dir.path())), kept);
+        Ok(())
+    }
+
+    /// A restore asked twice (a click taken twice while the window
+    /// lagged) takes the last version back once: what is kept aside stays
+    /// the broken file (#676).
+    #[test]
+    fn a_second_restore_keeps_the_broken_file_aside() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("config.toml");
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state)?;
+        let good = "[idle]\ndelay = 300\n";
+        let broken = "[idle\ndelay = 3\n";
+        std::fs::write(state.join("config.last-good.toml"), good)?;
+        std::fs::write(&file, broken)?;
+        let places = Places {
+            file: Some(file.clone()),
+            state: Some(state),
+            supplies: dir.path().join("supplies"),
+        };
+        let mut run = Run {
+            places: &places,
+            heard: |_: Heard| true,
+            text: None,
+            snapshot: None,
+            recent: Vec::new(),
+        };
+        assert!(run.restore());
+        assert!(run.restore());
+        assert_eq!(std::fs::read_to_string(&file)?, good);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml.broken"))?,
+            broken
+        );
         Ok(())
     }
 
