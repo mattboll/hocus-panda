@@ -246,19 +246,21 @@ fn actions() -> Vec<Action> {
             &["Alt+Shift+Tab"],
             (&["alt tab", "basculer"], &["alt tab", "switcher"]),
         ),
+        // « geste »: what three fingers sideways do, so the search for
+        // the touchpad's gestures lists them after its rows (#681).
         a(
             "desktop-left",
             DESKTOPS,
             w("Bureau de gauche", "Desktop on the left"),
             &["Super+Ctrl+Left"],
-            (&["espace de travail"], &["workspace"]),
+            (&["espace de travail", "geste"], &["workspace", "gesture"]),
         ),
         a(
             "desktop-right",
             DESKTOPS,
             w("Bureau de droite", "Desktop on the right"),
             &["Super+Ctrl+Right"],
-            (&["espace de travail"], &["workspace"]),
+            (&["espace de travail", "geste"], &["workspace", "gesture"]),
         ),
     ];
     const DESKTOP: [&[&str]; 9] = [
