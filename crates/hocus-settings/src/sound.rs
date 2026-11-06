@@ -237,6 +237,67 @@ pub fn line(sink: &Sink, graph: &Graph, input: bool, lang: Lang) -> String {
     .to_owned()
 }
 
+/// The most characters an output's name takes on the home's Sound card: a
+/// third of the page wide, beside its icon and volume (#722).
+const CARD_NAME_CHARS: usize = 16;
+
+/// An output's name on the home's Sound card, short enough to stay inside
+/// it (#722); the Sound page keeps the full name. A built-in controller's
+/// outputs are named after it ("Meteor Lake-P HD Audio Controller
+/// Speaker"): the card keeps what tells them apart ("Speaker"). A USB or
+/// Bluetooth device's are named after the device and then its profile
+/// ("Jabra Link 380 Analog Stereo"): the card keeps the device's name. A
+/// name still too long is cut with an ellipsis.
+pub fn card_name(sink: &Sink, graph: &Graph) -> String {
+    let device = sink.device.and_then(|d| graph.card(d));
+    let short = short_name(
+        &sink.description,
+        device.map(|c| c.description.as_str()),
+        bluetooth(sink, device) || sink.bus.as_deref() == Some("usb"),
+    );
+    ellipsized(short, CARD_NAME_CHARS)
+}
+
+/// `description` without its device's name in front, or the device's name
+/// alone when the device is what a person knows it by (`by_device`).
+fn short_name<'a>(description: &'a str, device: Option<&'a str>, by_device: bool) -> &'a str {
+    let description = description.trim();
+    let after = |prefix: &str| {
+        description
+            .strip_prefix(prefix)
+            .filter(|rest| rest.starts_with(' '))
+            .map(str::trim)
+            .filter(|rest| !rest.is_empty())
+    };
+    match device.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(device) if after(device).is_some() => {
+            if by_device {
+                device
+            } else {
+                after(device).unwrap_or(description)
+            }
+        }
+        // No device known, or one named otherwise: a controller's name
+        // still ends at "Controller".
+        _ => description
+            .rsplit_once(" Controller ")
+            .map(|(_, rest)| rest.trim())
+            .filter(|rest| !rest.is_empty())
+            .unwrap_or(description),
+    }
+}
+
+/// `name` in at most `most` characters, the last an ellipsis when it is cut.
+fn ellipsized(name: &str, most: usize) -> String {
+    if name.chars().count() <= most {
+        return name.to_owned();
+    }
+    let kept: String = name.chars().take(most.saturating_sub(1)).collect();
+    // Never a separator just before the ellipsis ("HDMI /…").
+    let kept = kept.trim_end_matches(|c: char| c.is_whitespace() || "/-·,(".contains(c));
+    format!("{kept}…")
+}
+
 /// A device's own volume, on its row: "45 %", or "muet" ("coupé" for an
 /// input).
 pub fn say_volume(sink: &Sink, input: bool, lang: Lang) -> String {
@@ -397,6 +458,99 @@ mod tests {
         assert_eq!(
             profile_line("headset-head-unit", false).map(|w| w.en),
             Some("Phone quality, to talk into the headset's microphone.")
+        );
+    }
+
+    #[test]
+    fn the_home_card_names_an_output_short_enough_to_stay_inside() {
+        let card = |id: u32, description: &str, api: &str| Card {
+            id,
+            name: format!("alsa_card.{id}"),
+            description: description.into(),
+            api: Some(api.into()),
+            profiles: Vec::new(),
+            profile: None,
+        };
+        let graph = Graph {
+            cards: vec![
+                card(40, "Meteor Lake-P HD Audio Controller", "alsa"),
+                card(41, "Built-in Audio", "alsa"),
+                card(42, "Jabra Link 380", "alsa"),
+                card(43, "WH-1000XM4", "bluez5"),
+                card(44, "Raptor Lake-P/U/H cAVS", "alsa"),
+            ],
+            ..Graph::new()
+        };
+        let named = |description: &str, device: Option<u32>, bus: Option<&str>| {
+            let mut output = sink(&[0.5, 0.5], &["FL", "FR"]);
+            output.description = description.into();
+            output.device = device;
+            output.bus = bus.map(str::to_owned);
+            card_name(&output, &graph)
+        };
+        let pci = Some("pci");
+        // A built-in controller's: what follows its name.
+        assert_eq!(
+            named("Meteor Lake-P HD Audio Controller Speaker", Some(40), pci),
+            "Speaker"
+        );
+        assert_eq!(
+            named(
+                "Meteor Lake-P HD Audio Controller Haut-parleurs",
+                Some(40),
+                pci
+            ),
+            "Haut-parleurs"
+        );
+        assert_eq!(
+            named("Raptor Lake-P/U/H cAVS Speaker + Headphones", Some(44), pci),
+            "Speaker + Headp…"
+        );
+        assert_eq!(
+            named("Built-in Audio Analog Stereo", Some(41), pci),
+            "Analog Stereo"
+        );
+        // Still too long: cut, never just after a separator.
+        assert_eq!(
+            named(
+                "Meteor Lake-P HD Audio Controller HDMI / DisplayPort 1 Output",
+                Some(40),
+                pci
+            ),
+            "HDMI / DisplayP…"
+        );
+        assert_eq!(
+            named(
+                "Meteor Lake-P HD Audio Controller HDMI / DisplayPort 3",
+                Some(40),
+                pci
+            ),
+            "HDMI / DisplayP…"
+        );
+        // A USB or Bluetooth device's: the device's name.
+        assert_eq!(
+            named("Jabra Link 380 Analog Stereo", Some(42), Some("usb")),
+            "Jabra Link 380"
+        );
+        assert_eq!(
+            named("WH-1000XM4", Some(43), Some("bluetooth")),
+            "WH-1000XM4"
+        );
+        // Its device unknown: a controller's name still goes.
+        assert_eq!(
+            named("Meteor Lake-P HD Audio Controller Speaker", None, pci),
+            "Speaker"
+        );
+        // A name not starting with its device's, short: as it is.
+        assert_eq!(named("Haut-parleurs", Some(41), pci), "Haut-parleurs");
+        assert_eq!(
+            named("Easy Effects Sink with a long name", None, None),
+            "Easy Effects Si…"
+        );
+        // Only a whole word of the device's name goes.
+        assert_eq!(
+            named("Built-in Audiophile", Some(41), pci),
+            "Built-in Audiop…"
         );
     }
 
