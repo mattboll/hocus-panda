@@ -167,8 +167,8 @@ pub enum Item {
     Window(u64),
     /// Its ✕: a click, or `Enter`, asks it to close.
     WindowClose(u64),
-    /// The windows' "+ N autres": the current desktop's list (3.9b), by a
-    /// click.
+    /// The windows' "+ N autres": the overview (8.5 A), by a click or
+    /// `Enter`.
     WindowsMore,
     /// The mini form's windows' item: their popover, by a hover or a
     /// click.
@@ -198,6 +198,7 @@ impl Item {
                 | Self::DayLater
                 | Self::Window(_)
                 | Self::WindowClose(_)
+                | Self::WindowsMore
         )
     }
 
@@ -1691,6 +1692,10 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
             tracing::debug!(window = id, "the bar's windows ask a window to close");
             Some(Effect::Tell(ToCompositor::Close(id)))
         }
+        Item::WindowsMore => {
+            tracing::debug!("the bar's windows ask for the overview");
+            Some(Effect::Tell(ToCompositor::Overview))
+        }
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1708,7 +1713,6 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Tasks
         | Item::TasksMore
         | Item::DayChoose
-        | Item::WindowsMore
         | Item::Windows
         | Item::WindowMenu(_) => None,
     }

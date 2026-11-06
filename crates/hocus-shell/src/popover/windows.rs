@@ -196,7 +196,8 @@ impl Panel {
     }
 
     /// What `item` does: a line brings its window and the popover closes;
-    /// a ✕ asks its window to close; "+ N", the desktop's list.
+    /// a ✕ asks its window to close; "+ N", the overview (8.5 A), the
+    /// popover closing.
     fn act(item: Item) {
         match item {
             Item::Window(id) => {
@@ -208,7 +209,11 @@ impl Panel {
                 tracing::debug!(window = id, "the windows' popover asks a window to close");
                 super::send(vec![Effect::Tell(ToCompositor::Close(id))]);
             }
-            Item::WindowsMore => event(Seen::Replace(Item::WindowsMore)),
+            Item::WindowsMore => {
+                tracing::debug!("the windows' popover asks for the overview");
+                super::send(vec![Effect::Tell(ToCompositor::Overview)]);
+                event(Seen::Chosen);
+            }
             _ => {}
         }
     }
