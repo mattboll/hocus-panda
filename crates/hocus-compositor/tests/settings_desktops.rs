@@ -315,6 +315,30 @@ impl Bed {
         Ok(())
     }
 
+    /// `word` typed in the search, once the field has the keyboard: its
+    /// first letter, until the field shows it (on a loaded machine the
+    /// field takes the keyboard a while after Ctrl+F), then the rest.
+    fn search_for(&mut self, word: &str) -> anyhow::Result<()> {
+        let first: String = word.chars().take(1).collect();
+        for _ in 0..10 {
+            chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_F]);
+            self.shows(|s| s["focus"] == "search")?;
+            wait(&mut self.hp, Duration::from_millis(100))?;
+            self.type_text(&first)?;
+            let log = self.log.clone();
+            let typed = self.hp.dispatch_until(Duration::from_secs(2), |_| {
+                common::last_json(&log, " shows {").is_some_and(|s| s["query"] == first.as_str())
+            })?;
+            if typed {
+                return self.type_text(&word[first.len()..]);
+            }
+            // Gone elsewhere: the search emptied, and again.
+            chord(&mut self.hp, &[common::KEY_ESC]);
+            self.shows(|s| s["query"] == "")?;
+        }
+        anyhow::bail!("the search never took {word:?}")
+    }
+
     /// The compositor's desktops (its only screen's count), once `count`.
     fn desktops_are(&mut self, count: usize) -> anyhow::Result<()> {
         let done = self
@@ -555,10 +579,7 @@ fn searching_aimant_ondule_and_move_modifier_finds_their_rows() -> anyhow::Resul
         ),
         ("workspaces", "Nombre de bureaux", "desktops.count"),
     ] {
-        chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
-        bed.shows(|s| s["focus"] == "search")?;
-        wait(&mut bed.hp, Duration::from_millis(100))?;
-        bed.type_text(word)?;
+        bed.search_for(word)?;
         let shown = bed.shows(|s| {
             s["query"] == word && s["results"].as_array().is_some_and(|r| !r.is_empty())
         })?;
@@ -881,10 +902,7 @@ fn searching_regle_finds_the_rules() -> anyhow::Result<()> {
         return Ok(());
     };
     bed.open()?;
-    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
-    bed.shows(|s| s["focus"] == "search")?;
-    wait(&mut bed.hp, Duration::from_millis(100))?;
-    bed.type_text("app-id")?;
+    bed.search_for("app-id")?;
     let shown = bed.shows(|s| {
         s["query"] == "app-id" && s["results"].as_array().is_some_and(|r| !r.is_empty())
     })?;
