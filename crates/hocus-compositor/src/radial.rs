@@ -845,6 +845,7 @@ impl State {
     /// The shell is told the windows kept above and those on all
     /// desktops, if they changed or `again`.
     pub fn tell_window_states(&mut self, again: bool) {
+        self.session_changed();
         let mut states = WindowStates {
             above: self.model.above().map(|w| w.0).collect(),
             all_desktops: self.model.everywhere().map(|w| w.0).collect(),

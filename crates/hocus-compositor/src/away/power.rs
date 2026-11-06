@@ -32,7 +32,6 @@ use crate::{
     State,
     config::{Lid, PowerButton},
     leave::logind::Ask,
-    shell::Bus,
 };
 
 use super::{Felt, is_internal, system::ToSystem};
@@ -298,20 +297,7 @@ impl State {
         } else {
             format!("Power saver on: battery at {percent} %.")
         };
-        let started = std::thread::Builder::new()
-            .name("power saver: notification".to_owned())
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build();
-                match runtime {
-                    Ok(runtime) => runtime.block_on(notify(bus, summary)),
-                    Err(err) => tracing::warn!(%err, "no runtime for the notification"),
-                }
-            });
-        if let Err(err) = started {
-            tracing::warn!(%err, "the power saver's notification is not sent");
-        }
+        crate::shell::notify(bus, "battery-caution", summary);
     }
 
     // --- What it says ------------------------------------------------------------------
@@ -341,43 +327,5 @@ impl State {
                 .map_or_else(|| "none".to_owned(), |l| format!("{l:.0}")),
             power.profile.as_deref().unwrap_or("none"),
         )
-    }
-}
-
-/// One notification, `org.freedesktop.Notifications.Notify` on `bus`.
-async fn notify(bus: Bus, summary: String) {
-    let builder = match &bus {
-        Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),
-        Bus::Session => zbus::connection::Builder::session(),
-    };
-    let connection = match builder.build().await {
-        Ok(connection) => connection,
-        Err(err) => {
-            tracing::warn!(%err, "no session bus: the power saver's notification is not sent");
-            return;
-        }
-    };
-    let hints: std::collections::HashMap<&str, zbus::Variant<'_>> =
-        std::collections::HashMap::new();
-    let sent = connection
-        .call_method(
-            Some("org.freedesktop.Notifications"),
-            "/org/freedesktop/Notifications",
-            Some("org.freedesktop.Notifications"),
-            "Notify",
-            &(
-                "Hocuspanda",
-                0u32,
-                "battery-caution",
-                summary.as_str(),
-                "",
-                Vec::<&str>::new(),
-                hints,
-                -1i32,
-            ),
-        )
-        .await;
-    if let Err(err) = sent {
-        tracing::warn!(%err, "the power saver's notification is not sent");
     }
 }

@@ -27,6 +27,9 @@ pub struct Config {
     pub screen_sets: Vec<ScreenSet>,
     pub shortcuts: Shortcuts,
     pub programs: Programs,
+    /// The last session's applications reopened at log in (windows.md
+    /// §14).
+    pub session: SessionSettings,
     pub appearance: Appearance,
     /// The desktop's background and the lock's (6.3).
     pub wallpaper: Wallpaper,
@@ -1855,6 +1858,21 @@ impl SystemKeyboard {
             }
         }
         (!keyboard.layout.is_empty()).then_some(keyboard)
+    }
+}
+
+/// The session, `[session]` (windows.md §14, 6.15).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionSettings {
+    /// At log in, the applications open at the last log out start again,
+    /// each window back in its place.
+    pub restore: bool,
+}
+
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self { restore: true }
     }
 }
 

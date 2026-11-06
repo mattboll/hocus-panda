@@ -877,6 +877,7 @@ impl crate::State {
             self.wobble = None;
         }
         self.model.set_hidden(id, true);
+        self.session_changed();
     }
 
     /// `id`'s desktop comes in sight: it shows where it was, unless
@@ -1014,6 +1015,7 @@ impl crate::State {
     /// the screen goes there too, the window with it (§12). A window on
     /// all desktops is then on that one only (#723).
     pub fn send_window_to_desktop(&mut self, id: WindowId, to: usize, follow: bool) {
+        self.session_changed();
         let Some(output) = self.output_of(id) else {
             return;
         };

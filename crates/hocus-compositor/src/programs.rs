@@ -171,49 +171,91 @@ pub fn spawn(command: String, env: Env) {
 /// that is there; one that runs in a terminal (`terminal`: the configured
 /// one, empty for the first of [`TERMINALS`] in `PATH`) after its `-e`.
 pub fn launch(launch: hocus_link::Launch, terminal: Option<String>, env: Env) {
+    launch_watched(launch, terminal, env, |_| {});
+}
+
+/// What became of an application started by [`launch_watched`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// It runs.
+    Started,
+    /// It could not start: no terminal for it, or its program would not
+    /// run.
+    Failed,
+    /// It ended; successfully or not.
+    Ended(bool),
+}
+
+/// [`launch`], saying what becomes of it to `said`, from its thread (the
+/// session's applications started again, windows.md §14).
+pub fn launch_watched(
+    launch: hocus_link::Launch,
+    terminal: Option<String>,
+    env: Env,
+    said: impl Fn(Outcome) + Send + 'static,
+) {
     on_a_thread(format!("launch {}", launch.id), move || {
-        let mut cmd = match terminal {
-            Some(configured) => {
-                let path = std::env::var_os("PATH");
-                let Some(terminal) = self::terminal(&configured, path.as_deref()) else {
-                    tracing::warn!(
-                        app = launch.id,
-                        looked_for = ?TERMINALS,
-                        "no terminal in PATH for an application that needs one"
-                    );
-                    return;
-                };
-                // The terminal as configured may hold its own arguments.
-                let mut cmd = env.command("/bin/sh");
-                cmd.arg("-c")
-                    .arg(format!("{terminal} -e \"$@\""))
-                    .arg("sh")
-                    .args(&launch.argv);
-                cmd
-            }
-            None => {
-                let Some((program, args)) = launch.argv.split_first() else {
-                    return;
-                };
-                let mut cmd = env.command(program);
-                cmd.args(args);
-                cmd
-            }
+        let Some(mut cmd) = command_for(&launch, terminal, &env) else {
+            said(Outcome::Failed);
+            return;
         };
-        if !launch.dir.is_empty() && Path::new(&launch.dir).is_dir() {
-            cmd.current_dir(&launch.dir);
-        }
         match cmd.spawn() {
             Ok(mut child) => {
                 tracing::info!(app = launch.id, pid = child.id(), "started");
+                said(Outcome::Started);
                 match child.wait() {
-                    Ok(status) => tracing::info!(app = launch.id, %status, "ended"),
+                    Ok(status) => {
+                        tracing::info!(app = launch.id, %status, "ended");
+                        said(Outcome::Ended(status.success()));
+                    }
                     Err(err) => tracing::warn!(app = launch.id, %err, "could not wait for it"),
                 }
             }
-            Err(err) => tracing::warn!(app = launch.id, %err, "could not start"),
+            Err(err) => {
+                tracing::warn!(app = launch.id, %err, "could not start");
+                said(Outcome::Failed);
+            }
         }
     });
+}
+
+/// The command that starts `launch`, as [`launch`] says; `None` when it
+/// needs a terminal and none is found (said in the log).
+fn command_for(
+    launch: &hocus_link::Launch,
+    terminal: Option<String>,
+    env: &Env,
+) -> Option<Command> {
+    let mut cmd = match terminal {
+        Some(configured) => {
+            let path = std::env::var_os("PATH");
+            let Some(terminal) = self::terminal(&configured, path.as_deref()) else {
+                tracing::warn!(
+                    app = launch.id,
+                    looked_for = ?TERMINALS,
+                    "no terminal in PATH for an application that needs one"
+                );
+                return None;
+            };
+            // The terminal as configured may hold its own arguments.
+            let mut cmd = env.command("/bin/sh");
+            cmd.arg("-c")
+                .arg(format!("{terminal} -e \"$@\""))
+                .arg("sh")
+                .args(&launch.argv);
+            cmd
+        }
+        None => {
+            let (program, args) = launch.argv.split_first()?;
+            let mut cmd = env.command(program);
+            cmd.args(args);
+            cmd
+        }
+    };
+    if !launch.dir.is_empty() && Path::new(&launch.dir).is_dir() {
+        cmd.current_dir(&launch.dir);
+    }
+    Some(cmd)
 }
 
 /// Starts the terminal: `configured`, or the first of [`TERMINALS`] in
