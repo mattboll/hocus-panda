@@ -4314,3 +4314,50 @@ by default), on every screen, followed as the file changes.
   (`a_popover_opens_on_the_inner_side_of_a_bar_on_the_left`), the halo
   around the bar and the panda out of its right edge
   (`the_halo_and_the_panda_come_out_of_a_bar_on_the_left`).
+
+### 6.16, how the bar calls the user for the agents (2026-11-06)
+
+Issue #450 (settings.md's "Agents"), its first part: the `[agents]` keys
+the page writes, followed as the file changes, before the page itself.
+
+- **The keys** (`[agents]`, kebab-case, unknown keys refused):
+  - `halo = "all" | "waiting" | "off"` (`"all"`): what of the agents
+    lights the halo (§6). `"waiting"` keeps only an agent waiting
+    (priority 2); `"off"` none of 2, 4 and 5. The meetings keep theirs
+    (1 and 3) whatever it says.
+  - `remind = "2m" | "5m" | "10m" | "never"` (`"5m"`, as before): when an
+    agent still waiting gets its one more wave, its panda peeking out
+    again with it. None with `halo = "off"`: the reminder is the halo's
+    (the page shows its row inert then).
+  - `peek = "waiting-and-done" | "waiting" | "off"`
+    (`"waiting-and-done"`, as before): for what a panda peeks out (§7 C).
+  - `pandas = true | false` (`true`): off, each agent's row shows a 10 px
+    dot of its state's colour (the streak's, §8: waiting `#F5B44A`, stuck
+    `#F2945B`, to see `#7EE0A0`, working `#6CC287`, resting `#A9B2C2`, at
+    55 % as the resting panda) in its panda's place, hopping as the panda
+    would. The secretary stays (she heads the group), and so does the
+    peek's panda (its own key). The mini form shows no agent's panda.
+- **Followed live** (`reload.rs`, `halo.rs`'s `agents_config_changed`):
+  the halo takes its new rules at once, what they leave out fading out as
+  when it is dealt with (500 ms; 200 ms with reduced motion), what they
+  bring back fading in without a wave; the agents' episodes are kept
+  whatever the rules say, so the peek still hears what began. The
+  reminder's timer is set again for the new time, counted from each
+  agent's start: an agent already past it is reminded of at once. The
+  peek follows its rule from the next panda; one out stays its 8 s. The
+  shell is told `agent-rows pandas` or `agent-rows dots` as it connects
+  and when it changes (`ToShell::AgentPandas`); only the agents' group
+  draws again.
+- **Tests** (`crates/hocus-compositor/tests/agents_live.rs`, the real
+  shell on the CPU): `"waiting"` lighting nothing for a finished or stuck
+  agent, `"off"` nothing for a waiting one but a meeting still, `"all"`
+  bringing the agents back in their order, and the table removed giving
+  the defaults (`halo_waiting_only_shows_no_glow_for_a_finished_agent`);
+  no panda with `peek = "off"`, none for a finished agent with
+  `"waiting"`, a panda out staying when it turns off
+  (`peek_off_never_shows_the_panda`); the reminder at 2 min, never, none
+  without a halo, and at once when the halo comes back past it
+  (`the_reminder_comes_after_the_time_chosen_or_never`); the rows' dots in
+  their colours, then the pandas back (`pandas_off_draws_dots_in_the_rows`).
+  Unit tests for the rules, the fade of what a rule leaves out, and the
+  reminder's times.

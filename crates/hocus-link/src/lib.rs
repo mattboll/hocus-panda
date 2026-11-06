@@ -517,6 +517,11 @@ pub enum ToShell {
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go. Written `no-peek`.
     NoPeek,
+    /// Whether the agents' rows show each agent's panda, or a dot of its
+    /// state's colour (`[agents] pandas`, 6.16): sent as the shell
+    /// connects and when the configuration changes it. Written
+    /// `agent-rows pandas` or `agent-rows dots`.
+    AgentPandas(bool),
     /// The screen of the focused window, else the pointer's: where the
     /// notifications' bubbles show (5.3). Sent as the shell connects and
     /// when it changes. Written `focus OUTPUT`.
@@ -1834,6 +1839,9 @@ impl fmt::Display for ToShell {
                 screen_name(&peek.name)
             ),
             Self::NoPeek => f.write_str("no-peek"),
+            Self::AgentPandas(pandas) => {
+                write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
+            }
             Self::Focus(output) => write!(f, "focus {output}"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
@@ -2185,6 +2193,7 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("agent-rows") => Ok(Self::AgentPandas(flag(words.next(), "pandas", "dots")?)),
             Some("copied") => Ok(Self::Copied {
                 app: match word(&mut words, "application")? {
                     "-" => String::new(),
@@ -3180,6 +3189,8 @@ mod tests {
             "recent eDP-1 12 x",
             "bar-windows",
             "bar-windows maybe",
+            "agent-rows",
+            "agent-rows panda",
             "bar-side",
             "bar-side up",
             "day slept",
@@ -3286,6 +3297,8 @@ mod tests {
                 name: "api-paiements".into(),
             }),
             ToShell::NoPeek,
+            ToShell::AgentPandas(true),
+            ToShell::AgentPandas(false),
             ToShell::Launcher {
                 output: "eDP-1".into(),
                 scale: 240,

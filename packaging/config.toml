@@ -294,6 +294,21 @@
 # skip-secrets = true
 # ignore = []
 
+# [agents]
+# How the bar calls you for the agents (Claude Code, Codex, herdr, and
+# what says its state with `hocus agent`), followed live. Which of their
+# states light the halo around the bar: "all" (an agent waiting for you,
+# stuck, or done and not seen), "waiting" (only an agent waiting for you)
+# or "off"; the meetings keep theirs. When an agent still waiting gets one
+# more wave, its panda peeking out again: "2m", "5m", "10m" or "never"
+# (none with halo = "off"). For what an agent's panda peeks out of the
+# bar for 8 s: "waiting-and-done", "waiting" or "off". Off, the agents'
+# rows show a dot of their state's colour instead of their pandas.
+# halo = "all"
+# remind = "5m"
+# peek = "waiting-and-done"
+# pandas = true
+
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the
 # session is idle, in seconds, from 1 to 86400, or "off". Idle, every

@@ -81,11 +81,11 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    AltTab, Appearance, Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings,
-    Config, Delay as PowerDelay, Desktops, DragKey, FormChoice, Idle as IdleSettings, Ink, Lid,
-    OldKeys as OldPowerKeys, OpenSize, OutputSettings, PanelScreens, Power as PowerSettings,
-    PowerAc, PowerBattery, PowerButton, Recording, Rule as WindowRule, ScaleFrom, SoundPrograms,
-    SystemKeyboard, Windows,
+    Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
+    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
+    HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
+    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
+    Remind, Rule as WindowRule, ScaleFrom, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.

@@ -40,6 +40,9 @@ pub struct Config {
     pub recording: Recording,
     /// What the clipboard's history keeps (6.17).
     pub clipboard: Clipboard,
+    /// How the bar calls the user for the agents: the halo, its reminder,
+    /// the panda peeking out, the pandas in the rows (6.16).
+    pub agents: Agents,
     pub idle: Idle,
     pub power: Power,
     /// Every mouse, trackball and trackpoint (6.12).
@@ -244,6 +247,95 @@ impl Clipboard {
 
 fn clip_keep<'de, D: Deserializer<'de>>(deserializer: D) -> Result<hocus_link::ClipKeep, D::Error> {
     hocus_link::ClipKeep::of(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+}
+
+/// How the bar calls the user for the agents, `[agents]` (6.16): the
+/// halo (bar.md §6), its reminder, the panda peeking out (§7 C) and the
+/// pandas in the agents' rows (4.1). The meetings' halo is not theirs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Agents {
+    pub halo: HaloRule,
+    /// One more wave, once, for an agent still waiting after this long;
+    /// its panda peeks out again with it.
+    pub remind: Remind,
+    pub peek: PeekRule,
+    /// Off: a dot of the state's colour in each agent's row instead of
+    /// its panda.
+    pub pandas: bool,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            halo: HaloRule::All,
+            remind: Remind::Five,
+            peek: PeekRule::WaitingAndDone,
+            pandas: true,
+        }
+    }
+}
+
+/// What of the agents lights the halo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HaloRule {
+    /// An agent waiting, stuck, or finished and not seen.
+    #[default]
+    All,
+    /// An agent waiting only.
+    Waiting,
+    /// No agent: the meetings' halo only.
+    Off,
+}
+
+/// When an agent still waiting is called again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum Remind {
+    #[serde(rename = "2m")]
+    Two,
+    #[default]
+    #[serde(rename = "5m")]
+    Five,
+    #[serde(rename = "10m")]
+    Ten,
+    #[serde(rename = "never")]
+    Never,
+}
+
+impl Remind {
+    /// After how long of waiting; `None`: never.
+    pub const fn after(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Two => Some(std::time::Duration::from_secs(2 * 60)),
+            Self::Five => Some(std::time::Duration::from_secs(5 * 60)),
+            Self::Ten => Some(std::time::Duration::from_secs(10 * 60)),
+            Self::Never => None,
+        }
+    }
+}
+
+/// For what an agent's panda peeks out of the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PeekRule {
+    /// An agent starts waiting, or finishes.
+    #[default]
+    WaitingAndDone,
+    /// An agent starts waiting.
+    Waiting,
+    Off,
+}
+
+impl PeekRule {
+    /// Whether a panda peeks out for `kind`.
+    pub const fn peeks(self, kind: hocus_link::PeekKind) -> bool {
+        match self {
+            Self::WaitingAndDone => true,
+            Self::Waiting => matches!(kind, hocus_link::PeekKind::Waiting),
+            Self::Off => false,
+        }
+    }
 }
 
 /// Screen recording, `[recording]` (5.10, 6.17).
@@ -2348,6 +2440,41 @@ mod tests {
             .collect();
         assert!(uncommented.contains("[shortcuts]"), "{uncommented}");
         assert_eq!(toml::from_str::<Config>(&uncommented)?, Config::default());
+        Ok(())
+    }
+
+    #[test]
+    fn agents_reads_its_four_keys_and_refuses_what_it_does_not_know() -> anyhow::Result<()> {
+        use super::{Agents, HaloRule, PeekRule, Remind};
+        assert_eq!(toml::from_str::<Config>("")?.agents, Agents::default());
+        let config: Config = toml::from_str(
+            "[agents]\nhalo = \"waiting\"\nremind = \"10m\"\npeek = \"off\"\npandas = false\n",
+        )?;
+        assert_eq!(
+            config.agents,
+            Agents {
+                halo: HaloRule::Waiting,
+                remind: Remind::Ten,
+                peek: PeekRule::Off,
+                pandas: false,
+            }
+        );
+        let config: Config = toml::from_str("[agents]\nremind = \"never\"\npeek = \"waiting\"\n")?;
+        assert_eq!(config.agents.remind.after(), None);
+        assert_eq!(config.agents.peek, PeekRule::Waiting);
+        assert_eq!(config.agents.halo, HaloRule::All);
+        assert_eq!(
+            Remind::Two.after(),
+            Some(std::time::Duration::from_secs(120))
+        );
+        for bad in [
+            "[agents]\nhalo = \"some\"\n",
+            "[agents]\nremind = \"3m\"\n",
+            "[agents]\npeek = \"done\"\n",
+            "[agents]\nwave = true\n",
+        ] {
+            assert!(toml::from_str::<Config>(bad).is_err(), "{bad:?}");
+        }
         Ok(())
     }
 }
