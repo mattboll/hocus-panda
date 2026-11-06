@@ -504,11 +504,16 @@ pub fn codex_remove(doc: &mut toml_edit::DocumentMut) -> bool {
 // --- What is remembered ------------------------------------------------------------
 
 /// What the desktop remembers between sessions: the tools the user
-/// declined ("Ne rien brancher"), and what plugging wrote, by tool.
+/// declined ("Ne rien brancher"), and when (the Settings say it, 6.16);
+/// what plugging wrote, by tool; whether Codex's hooks were approved
+/// (one has run since it was plugged in).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Memory {
     pub declined: BTreeSet<String>,
+    /// When each was declined, seconds since the epoch.
+    pub declined_on: BTreeMap<String, i64>,
     pub written: BTreeMap<String, Written>,
+    pub codex_approved: bool,
 }
 
 /// What plugging a tool in wrote.
@@ -553,7 +558,38 @@ impl Memory {
                 Some((tool.to_owned(), Written { hash, created }))
             })
             .collect();
-        Self { declined, written }
+        let declined_on = doc
+            .get("declined-on")
+            .and_then(|d| d.as_table_like())
+            .into_iter()
+            .flat_map(|t| t.iter())
+            .filter_map(|(tool, item)| Some((tool.to_owned(), item.as_integer()?)))
+            .collect();
+        let codex_approved = doc
+            .get("codex-approved")
+            .and_then(|c| c.as_bool())
+            .unwrap_or(false);
+        Self {
+            declined,
+            declined_on,
+            written,
+            codex_approved,
+        }
+    }
+
+    /// `tool` declined now.
+    pub fn decline(&mut self, tool: &str) {
+        self.declined.insert(tool.to_owned());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        self.declined_on.insert(tool.to_owned(), now);
+    }
+
+    /// `tool` no longer declined.
+    pub fn follow(&mut self, tool: &str) {
+        self.declined.remove(tool);
+        self.declined_on.remove(tool);
     }
 
     pub fn text(&self) -> String {
@@ -563,6 +599,15 @@ impl Memory {
         );
         let declined: Vec<String> = self.declined.iter().map(|d| format!("{d:?}")).collect();
         text.push_str(&format!("declined = [{}]\n", declined.join(", ")));
+        if self.codex_approved {
+            text.push_str("codex-approved = true\n");
+        }
+        if !self.declined_on.is_empty() {
+            text.push_str("\n[declined-on]\n");
+            for (tool, at) in &self.declined_on {
+                text.push_str(&format!("{tool} = {at}\n"));
+            }
+        }
         for (tool, written) in &self.written {
             text.push_str(&format!(
                 "\n[written.{tool}]\nhash = \"{:016x}\"\ncreated = {}\n",
@@ -675,6 +720,21 @@ pub fn unplugged_text(tool: Tool, text: &str) -> Option<String> {
     }
 }
 
+/// Whether `tool`'s settings read (no file reads: plugging makes one):
+/// one that does not is never written, and the Settings say so (6.16).
+pub fn reads(tool: Tool, places: &Places) -> bool {
+    let Ok(text) = std::fs::read_to_string(real(&places.settings(tool))) else {
+        return !places.settings(tool).exists();
+    };
+    match tool {
+        Tool::ClaudeCode => {
+            text.trim().is_empty()
+                || serde_json::from_str::<Value>(&text).is_ok_and(|v| v.is_object())
+        }
+        Tool::Codex => text.parse::<toml_edit::DocumentMut>().is_ok(),
+    }
+}
+
 /// Plugs `tool` in: its hooks into its settings, a copy of the file as it
 /// was kept beside it. Nothing is written if the file does not read.
 pub fn plug(tool: Tool, places: &Places, memory: &mut Memory) -> Result<(), String> {
@@ -691,7 +751,8 @@ pub fn plug(tool: Tool, places: &Places, memory: &mut Memory) -> Result<(), Stri
         })
         .transpose()?;
     if text.as_deref().is_some_and(|t| has_ours(tool, t)) {
-        memory.declined.remove(tool.word());
+        memory.follow(tool.word());
+        memory.save(places);
         return Ok(());
     }
     let new = plugged_text(tool, text.as_deref(), places)
@@ -707,7 +768,7 @@ pub fn plug(tool: Tool, places: &Places, memory: &mut Memory) -> Result<(), Stri
     }
     write_whole(&file, new.as_bytes(), mode).map_err(io)?;
     tracing::info!(tool = tool.word(), file = %file.display(), "plugged in");
-    memory.declined.remove(tool.word());
+    memory.follow(tool.word());
     memory.written.insert(
         tool.word().to_owned(),
         Written {
@@ -725,6 +786,9 @@ pub fn unplug(tool: Tool, places: &Places, memory: &mut Memory) -> Result<(), St
     let file = real(&places.settings(tool));
     let copy = copy_of(&file);
     let written = memory.written.remove(tool.word());
+    if tool == Tool::Codex {
+        memory.codex_approved = false;
+    }
     memory.save(places);
     let io = |e: std::io::Error| format!("{}: {e}", file.display());
     let current = match std::fs::read(&file) {
@@ -942,5 +1006,32 @@ mod tests {
             "{ broken"
         );
         Ok(())
+    }
+
+    #[test]
+    fn when_a_tool_was_declined_and_codexs_approval_are_remembered() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let p = places(dir.path());
+        let mut memory = Memory::default();
+        memory.decline("codex");
+        memory.codex_approved = true;
+        memory.save(&p);
+        let loaded = Memory::load(&p);
+        assert_eq!(loaded, memory);
+        assert!(
+            loaded
+                .declined_on
+                .get("codex")
+                .is_some_and(|at| *at > 1_700_000_000)
+        );
+        memory.follow("codex");
+        assert!(memory.declined.is_empty() && memory.declined_on.is_empty());
+        // A broken file reads as broken; none reads.
+        assert!(reads(Tool::ClaudeCode, &p));
+        std::fs::create_dir_all(dir.path().join(".claude")).expect("a folder");
+        std::fs::write(dir.path().join(".claude/settings.json"), "{ broken").expect("written");
+        assert!(!reads(Tool::ClaudeCode, &p));
+        std::fs::write(dir.path().join(".claude/settings.json"), "{}").expect("written");
+        assert!(reads(Tool::ClaudeCode, &p));
     }
 }

@@ -199,6 +199,12 @@ pub struct Agents {
     dirty: bool,
     told_tools: Option<Vec<AgentTool>>,
     pub told: Option<Vec<AgentShown>>,
+    /// The Settings' Agents page's line as last told (6.16), and how many
+    /// agents run.
+    told_settings: Option<String>,
+    running: usize,
+    /// Codex's approval asked of the watcher this session.
+    codex_heard: bool,
     /// The finished agents seen, by id: since when they were finished
     /// when seen (finished again later, they are not seen yet).
     seen: HashMap<u64, u64>,
@@ -432,6 +438,16 @@ impl Compositor {
                 agents.list.len() - 1
             }
         };
+        // A Codex hook that is not its turn's end ran: its hooks were
+        // approved in its `/hooks` (6.16).
+        if report.source == Source::Codex
+            && state != hocus_agents::State::Done
+            && !agents.codex_heard
+            && let Some(watcher) = &agents.watcher
+        {
+            agents.codex_heard = true;
+            watcher.ask(hocus_agents::watch::Ask::CodexHeard);
+        }
         let agent = &mut agents.list[index];
         if !agent.keys.contains(&key) {
             agent.keys.push(key);
@@ -1022,6 +1038,8 @@ impl Compositor {
         let seen = self.halo_seen(&listed);
         let agents: Vec<AgentShown> = listed.into_iter().map(|l| l.shown).collect();
         self.halo_agents(&seen);
+        self.agents.running = agents.len();
+        self.agents_tell_settings();
         if !self.shell_linked() {
             // Told everything once it connects (`tell_agents`); nothing
             // peeks out meanwhile.
@@ -1044,6 +1062,47 @@ impl Compositor {
         // there.
         self.peek_follows();
         self.peek_news();
+    }
+
+    /// What the Settings' Agents page is told (6.16): each tool and its
+    /// state, whether herdr is there and declined, whether Codex's hooks
+    /// were approved, how many agents run. One JSON line.
+    pub(crate) fn agents_settings_line(&self) -> String {
+        let tools: Vec<serde_json::Value> = self
+            .agent_tools()
+            .into_iter()
+            .map(|t| serde_json::json!({ "tool": t.tool, "state": t.state.name(), "file": t.file }))
+            .collect();
+        let snapshot = self.agents.tools;
+        serde_json::json!({ "agent-tools": {
+            "tools": tools,
+            "watched": self.agents.places.is_some(),
+            "herdr_found": snapshot.is_some_and(|t| t.herdr_found),
+            "herdr_declined": snapshot.is_some_and(|t| t.herdr_declined),
+            "codex_approved": snapshot.is_some_and(|t| t.codex_approved),
+            "running": self.agents.running,
+        } })
+        .to_string()
+    }
+
+    /// The line a Settings' line opening is told, kept as told.
+    pub(crate) fn agents_settings_opened(&mut self) -> String {
+        let line = self.agents_settings_line();
+        self.agents.told_settings = Some(line.clone());
+        line
+    }
+
+    /// The Settings' lines told the tools again, if they changed.
+    fn agents_tell_settings(&mut self) {
+        if self.displays.sessions.is_empty() {
+            return;
+        }
+        let line = self.agents_settings_line();
+        if self.agents.told_settings.as_ref() == Some(&line) {
+            return;
+        }
+        self.displays_send(None, &line);
+        self.agents.told_settings = Some(line);
     }
 
     /// The shell connected: it is told everything again.
