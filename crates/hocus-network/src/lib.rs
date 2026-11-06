@@ -32,26 +32,61 @@ pub enum Ask {
     /// The Wi-Fi on or off.
     Enable(bool),
     /// Join a saved or open network.
-    Connect { ssid: Vec<u8> },
+    Connect {
+        ssid: Vec<u8>,
+    },
     /// Join a protected network with this password.
-    ConnectWith { ssid: Vec<u8>, secret: Secret },
+    ConnectWith {
+        ssid: Vec<u8>,
+        secret: Secret,
+    },
     /// Disconnect the Wi-Fi device.
     Disconnect,
     /// Give up the connection under way.
     Abandon,
     /// A saved connection joined by itself, or not (`connection.autoconnect`).
-    Autoconnect { uuid: String, on: bool },
+    Autoconnect {
+        uuid: String,
+        on: bool,
+    },
     /// A saved Wi-Fi connection's password, read for the eye
     /// ([`Reply::Password`]).
-    ReadPassword { uuid: String },
+    ReadPassword {
+        uuid: String,
+    },
     /// A saved Wi-Fi connection's password changed, on disk.
-    SetPassword { uuid: String, secret: Secret },
+    SetPassword {
+        uuid: String,
+        secret: Secret,
+    },
     /// A saved connection deleted (left first if it is in use), its
     /// settings and secrets kept for its undo ([`Reply::Forgotten`]).
-    Forget { uuid: String },
+    Forget {
+        uuid: String,
+    },
     /// A connection forgotten, given back with its UUID, and joined again
     /// if it was in use ([`Reply::Restored`]).
     Restore(Arc<Kept>),
+    /// A VPN turned on, or off.
+    Activate {
+        uuid: String,
+    },
+    Deactivate {
+        uuid: String,
+    },
+    /// A connection renamed (`connection.id`).
+    Rename {
+        uuid: String,
+        name: String,
+    },
+    /// A VPN's file imported (`kind`: `wireguard`, `openvpn`), off, with
+    /// the user name and password an OpenVPN file asks
+    /// ([`Reply::Imported`]).
+    Import {
+        file: std::path::PathBuf,
+        kind: &'static str,
+        credentials: Option<(String, Secret)>,
+    },
     /// A network joined with what its sheet asked (the Settings'): a
     /// hidden one by its name alone, an 802.1X or WEP one.
     Join {

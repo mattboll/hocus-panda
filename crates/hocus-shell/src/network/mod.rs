@@ -13,7 +13,9 @@
 pub mod draw;
 pub mod model;
 
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError, mpsc};
+
+use hocus_network::rfkill::{self, Block, Radios};
 
 pub use hocus_network::{Ask, secret};
 
@@ -52,17 +54,73 @@ pub fn start() {
                 publish(view.network());
             }
         });
+        // The radios, for airplane mode (6.6): the bar only reads them,
+        // and unblocks the Wi-Fi's when its switch turns it on.
+        let (radio_asks, receive) = mpsc::channel();
+        let _ = RADIO_ASKS.set(Mutex::new(radio_asks));
+        rfkill::start(rfkill::device(), None, receive, |radios| {
+            *RADIOS.lock().unwrap_or_else(PoisonError::into_inner) = radios;
+            radios_changed();
+            true
+        });
+    }
+}
+
+/// The radios as rfkill last said them.
+static RADIOS: Mutex<Option<Radios>> = Mutex::new(None);
+static RADIO_ASKS: OnceLock<Mutex<mpsc::Sender<rfkill::Ask>>> = OnceLock::new();
+
+/// The Wi-Fi's radio unblocked: the switch turns it on in airplane mode,
+/// alone.
+pub fn unblock_wifi() {
+    if let Some(asks) = RADIO_ASKS.get() {
+        let sent = asks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(rfkill::Ask::Unblock(rfkill::WLAN));
+        if sent.is_err() {
+            tracing::warn!("the radios' thread has stopped: dropped");
+        }
+    }
+}
+
+/// The radios changed: the row and the popover say it.
+fn radios_changed() {
+    let Some(service) = SERVICE.get() else {
+        return;
+    };
+    let mut waker = service.waker.lock().unwrap_or_else(PoisonError::into_inner);
+    let change = Change {
+        row: true,
+        shown: false,
+    };
+    if waker.as_mut().is_some_and(|wake| !wake(change)) {
+        *waker = None;
+    }
+}
+
+/// Airplane mode, and the Wi-Fi's radio blocked by software (it is then
+/// off whatever NetworkManager says).
+fn radios(network: &mut Network) {
+    let radios = RADIOS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(radios) = radios.as_ref() {
+        network.airplane = radios.airplane();
+        if radios.block(rfkill::WLAN) != Block::No {
+            network.enabled = false;
+        }
     }
 }
 
 /// The network as last read.
 pub fn snapshot() -> Network {
-    SERVICE.get().map_or_else(Network::default, |s| {
+    let mut network = SERVICE.get().map_or_else(Network::default, |s| {
         s.network
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
-    })
+    });
+    radios(&mut network);
+    network
 }
 
 /// NetworkManager's thread says `network`: kept, and shown if it changed.
