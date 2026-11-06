@@ -646,7 +646,12 @@ pub fn open_field(at: At) {
         }
         before
     });
-    tracing::debug!(?at, "the field to add a task opens");
+    // Its surface, for the keys' log (`hocuspanda_shell::keys`).
+    let surface = match &at {
+        At::Group(bar) => draw::surface(bar),
+        At::Popover => None,
+    };
+    tracing::debug!(?at, ?surface, "the field to add a task opens");
     let mut effects = Vec::new();
     if let Some(before) = before.filter(|b| b.at != at) {
         effects.extend(let_keyboard_go(&before.at));
