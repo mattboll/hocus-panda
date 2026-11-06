@@ -417,7 +417,11 @@ fn the_power_button_ask_opens_the_session_menu() -> anyhow::Result<()> {
     assert!(hp.popover_surfaces().is_empty());
     hp.key(KEY_POWER, true);
     hp.key(KEY_POWER, false);
-    let open = hp.dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
+    // Drawn, not only placed: the menu's surface has its place, and the
+    // keyboard, from its first commit, before the shell has its window;
+    // a key that comes then is lost (#686). Esc is pressed on the menu
+    // shown, as a user would.
+    let open = hp.dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
     anyhow::ensure!(open, "the session menu did not open");
     hp.key(1, true); // Esc
     hp.key(1, false);
