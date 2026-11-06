@@ -5,7 +5,7 @@
 # VM has its own user, buses and services.
 #
 #   scripts/vm/debian.sh up            boot it (downloads the image once)
-#   scripts/vm/debian.sh copy          copy target/debug's hocuspanda and its shell into it
+#   scripts/vm/debian.sh copy          copy target/debug's programs into it
 #   scripts/vm/debian.sh install DEB   install a .deb (packaging/deb/build.sh)
 #   scripts/vm/debian.sh ssh [cmd…]    a shell, or a command, as the test user
 #   scripts/vm/debian.sh screen FILE [HEAD]  save what the VM's screen shows
@@ -22,8 +22,10 @@
 # HOCUS_VM_NAME names an instance (its directory there; `debian` by
 # default): another name, with other HOCUS_VM_SSH_PORT and
 # HOCUS_VM_HTTP_PORT, runs a second VM beside the first.
-# HOCUS_VM_HEADS=2 gives its GPU two screens (connectors Virtual-1 and
-# Virtual-2), for the screens' settings (6.9).
+# HOCUS_VM_HEADS=2 gives its GPU two screens, both lit, for several screens
+# (sprint 8): Virtual-1, 1280x800 at scale 1, and Virtual-2, of
+# HOCUS_VM_HEAD1_SIZE (2560x1440 by default) at HOCUS_VM_HEAD1_SCALE (1.5 by
+# default, in the VM's config.toml; empty: the automatic one).
 # HOCUS_VM_DISPLAY=gtk shows its screen in a window of the current
 # session, its keyboard and mouse for a person to try it by hand (any QEMU
 # display backend; `none` by default). Ctrl+Alt+G lets the keyboard go,
@@ -39,8 +41,10 @@ HTTP_PORT="${HOCUS_VM_HTTP_PORT:-2580}"
 MEMORY="${HOCUS_VM_MEMORY:-4G}"
 CPUS="${HOCUS_VM_CPUS:-4}"
 HEADS="${HOCUS_VM_HEADS:-1}"
+HEAD1_SIZE="${HOCUS_VM_HEAD1_SIZE:-2560x1440}"
+HEAD1_SCALE="${HOCUS_VM_HEAD1_SCALE-1.5}"
 # A second screen is lit once a display asks for it: a VNC server on a
-# socket, which `head-on` asks (SetDesktopSize).
+# socket, which light-head.py asks for a size once the VM runs.
 SECOND_HEAD=""
 [ "$HEADS" -gt 1 ] && SECOND_HEAD="-vnc unix:$WORK/vnc1,display=gpu0,head=1"
 DISPLAY_BACKEND="${HOCUS_VM_DISPLAY:-none}"
@@ -100,6 +104,18 @@ packages:
   - libpixman-1-0
   - libgbm1
   - libegl1
+  - libpipewire-0.3-0t64
+  - libpam0g
+  # What the .deb recommends and a session reads, besides the network's
+  # and Bluetooth's daemons (the VM's network is QEMU's).
+  - mesa-vulkan-drivers
+  - pipewire
+  - pipewire-bin
+  - wireplumber
+  - upower
+  - power-profiles-daemon
+  - xdg-desktop-portal
+  - polkitd
   - libgles2
   - fontconfig
   - fonts-noto-color-emoji
@@ -150,6 +166,10 @@ up() {
         -qmp unix:"$WORK/qmp",server,nowait \
         -serial file:"$WORK/serial.log" \
         -pidfile "$WORK/qemu.pid" -daemonize
+    if [ "$HEADS" -gt 1 ]; then
+        python3 "$(dirname "$0")/light-head.py" "$WORK/vnc1" \
+            "${HEAD1_SIZE%x*}" "${HEAD1_SIZE#*x}"
+    fi
     echo "booting; installing packages takes a few minutes"
     i=0
     until ssh_vm test -f /var/lib/cloud/instance/hocuspanda-ready 2>/dev/null; do
@@ -159,6 +179,11 @@ up() {
     done
     kill "$(cat "$WORK/http.pid")" 2>/dev/null || true
     rm -f "$WORK/http.pid"
+    # QEMU's screens all say 100 dpi: the second's scale is the
+    # configuration's.
+    if [ "$HEADS" -gt 1 ] && [ -n "$HEAD1_SCALE" ]; then
+        ssh_vm "mkdir -p ~/.config/hocuspanda && printf '[outputs.Virtual-2]\nscale = %s\n' '$HEAD1_SCALE' >> ~/.config/hocuspanda/config.toml"
+    fi
     echo "ready: scripts/vm/debian.sh ssh"
 }
 
@@ -168,10 +193,18 @@ copy() {
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CARGO_TARGET_DIR:-target}/debug/hocuspanda" \
         "${CARGO_TARGET_DIR:-target}/debug/hocuspanda-shell" \
-        "${CARGO_TARGET_DIR:-target}/debug/hocus" alex@127.0.0.1:bin/
+        "${CARGO_TARGET_DIR:-target}/debug/hocus" \
+        "${CARGO_TARGET_DIR:-target}/debug/hocus-settings" alex@127.0.0.1:bin/
     scp -q -i "$WORK/key" -P "$SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         scripts/vm/in-vm.sh alex@127.0.0.1:hocus-vm
+    # A library the image lacks would only show when the session fails.
+    missing=$(ssh_vm 'ldd ~/bin/* | grep "not found" | sort -u')
+    if [ -n "$missing" ]; then
+        echo "the VM lacks libraries these programs need:"
+        echo "$missing"
+        exit 1
+    fi
     echo "copied to ~/bin, and ~/hocus-vm to drive it"
 }
 
@@ -226,5 +259,5 @@ case "${1:-}" in
             printf 'sendkey %s\n' "$key" | socat - UNIX-CONNECT:"$WORK/monitor" >/dev/null
             sleep 0.05
         done ;;
-    *) sed -n '2,27p' "$0"; exit 2 ;;
+    *) sed -n '2,29p' "$0"; exit 2 ;;
 esac
