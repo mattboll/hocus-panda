@@ -802,8 +802,9 @@ impl State {
     }
 
     /// A touchpad gesture: three fingers across move the desktops (§12),
-    /// unless `[touchpad] swipe-desktops` is off; the others go to the
-    /// client under the pointer.
+    /// four up or down the launcher (6.13), as `[touchpad]` says
+    /// (`crate::gestures`); the others go to the client under the
+    /// pointer.
     pub(crate) fn gesture(&mut self, gesture: Gesture) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -812,24 +813,23 @@ impl State {
         if self.auth_keeps_pointer(pointer.current_location()) {
             return;
         }
+        // Locked (7.1): no swipe of the desktop's starts; the lock's
+        // surface has the pointer.
+        let starts = matches!(gesture, Gesture::SwipeBegin { .. });
+        if !(starts && self.locked()) && self.take_swipe(gesture, pointer.is_grabbed()) {
+            return;
+        }
+        self.gesture_to_client(gesture);
+    }
+
+    /// A touchpad gesture for the client under the pointer.
+    pub(crate) fn gesture_to_client(&mut self, gesture: Gesture) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
         match gesture {
-            // Locked (7.1): no desktop swipe; the lock's surface has the
-            // pointer.
-            _ if self.locked() => {}
-            Gesture::SwipeBegin { fingers: 3, .. }
-                if !pointer.is_grabbed() && self.config.touchpad.swipe_desktops =>
-            {
-                self.desktop_swipe_begin();
-                return;
-            }
-            Gesture::SwipeUpdate { time, delta } if self.swiping.is_some() => {
-                self.desktop_swipe_update(delta.x, delta.y, time);
-                return;
-            }
-            Gesture::SwipeEnd { cancelled, .. } if self.swiping.is_some() => {
-                self.desktop_swipe_end(cancelled);
-                return;
-            }
+            Gesture::SwipeBegin { .. } => self.swipes_given.0 += 1,
+            Gesture::SwipeUpdate { .. } => self.swipes_given.1 += 1,
             _ => {}
         }
         let serial = SERIAL_COUNTER.next_serial();

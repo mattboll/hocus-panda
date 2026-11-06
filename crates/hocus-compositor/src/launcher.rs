@@ -12,6 +12,12 @@
 //! says it closes (`closing`), the shell removing it after that. With
 //! reduced motion it only fades. The shell draws it once for that motion.
 //!
+//! Four fingers up on the touchpad (6.13, `crate::gestures`) open it
+//! following the fingers: while they hold it, how far it has come (its
+//! presence, 0 to 1) is theirs, its opacity and its panel's size going
+//! with it; let go, it goes on to whole, or back out, from where they
+//! left it, in the same times. Four fingers down close it the same way.
+//!
 //! An application the shell asks for ([`ToCompositor::Launch`]) starts as
 //! the compositor's other programs do, on a thread of its own, its first
 //! window taking the focus on the current desktop.
@@ -65,6 +71,15 @@ pub struct Launchers {
     tint: OnceCell<MemoryRenderBuffer>,
     /// The toasts shown, from their first frame.
     toasts: Vec<(LayerSurface, Duration)>,
+    /// How far the fingers have brought the open launcher (6.13), while
+    /// they hold it: 0 not there, 1 whole.
+    held: Option<f64>,
+    /// Where the next launcher's motion starts, when the fingers let it
+    /// go before its first frame.
+    start_from: Option<f64>,
+    /// It was closed before its first frame (a short swipe, or
+    /// `Super+Space` twice): that frame shows nothing.
+    closed_early: bool,
 }
 
 /// How the launcher's toast is drawn at a moment: how opaque, and how far
@@ -98,10 +113,14 @@ fn toast_look(opened: Duration, now: Duration, motion: bool) -> ToastLook {
 #[derive(Debug)]
 struct Shown {
     layer: LayerSurface,
-    /// Its first frame, on the compositor's clock.
+    /// Its first frame, on the compositor's clock; or when the fingers let
+    /// it go to whole.
     opened: Duration,
-    /// Since when it closes.
-    closing: Option<Duration>,
+    /// Its presence then: 0 from its first frame, else where the fingers
+    /// left it.
+    from: f64,
+    /// Since when it closes, and its presence then.
+    closing: Option<(Duration, f64)>,
 }
 
 /// How a launcher is drawn at a moment: how opaque it and what is behind
@@ -112,19 +131,34 @@ pub struct Look {
     pub scale: f64,
 }
 
-/// How a launcher opened at `opened` (and closing since `closing`) is drawn
-/// at `now`; `motion`: its panel grows and shrinks, else it only fades.
-fn look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool) -> Look {
+/// How a launcher opened at `opened` from presence `from` (and closing
+/// since `closing`, from its presence then) is drawn at `now`; `motion`:
+/// its panel grows and shrinks, else it only fades.
+fn look(
+    (opened, from): (Duration, f64),
+    closing: Option<(Duration, f64)>,
+    now: Duration,
+    motion: bool,
+) -> Look {
     let (alpha, grown) = match closing {
-        None => (
-            Tween::new(opened, LAUNCHER_OPEN, Bezier::EASE_OUT).at(now),
-            Tween::new(opened, LAUNCHER_OPEN, GROW).at(now),
-        ),
-        Some(since) => {
+        None => {
+            let towards = |t: f64| from + (1.0 - from) * t;
+            (
+                towards(Tween::new(opened, LAUNCHER_OPEN, Bezier::EASE_OUT).at(now)),
+                towards(Tween::new(opened, LAUNCHER_OPEN, GROW).at(now)),
+            )
+        }
+        Some((since, from)) => {
             let gone = Tween::new(since, LAUNCHER_CLOSE, Bezier::EASE_IN).at(now);
-            (1.0 - gone, 1.0 - gone)
+            (from * (1.0 - gone), from * (1.0 - gone))
         }
     };
+    held_look(alpha, grown, motion)
+}
+
+/// How a launcher `alpha` there, its panel `grown` from 0.97 (0) to whole
+/// (1), is drawn.
+fn held_look(alpha: f64, grown: f64, motion: bool) -> Look {
     let scale = if motion {
         LAUNCHER_SCALE + (1.0 - LAUNCHER_SCALE) * grown.clamp(0.0, 1.0)
     } else {
@@ -139,8 +173,16 @@ fn look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool
 impl Shown {
     fn moving(&self, now: Duration) -> bool {
         match self.closing {
-            Some(since) => now < since + LAUNCHER_CLOSE,
+            Some((since, _)) => now < since + LAUNCHER_CLOSE,
             None => now < self.opened + LAUNCHER_OPEN,
+        }
+    }
+
+    /// How far it has come at `now`, as its opacity says.
+    fn presence(&self, now: Duration, held: Option<f64>) -> f64 {
+        match (self.closing, held) {
+            (None, Some(held)) => held,
+            _ => f64::from(look((self.opened, self.from), self.closing, now, false).alpha),
         }
     }
 }
@@ -149,7 +191,46 @@ impl Launchers {
     /// The launcher `layer`, if it shows, and how.
     pub fn look(&self, layer: &LayerSurface, now: Duration, motion: bool) -> Option<Look> {
         let shown = self.shown.iter().find(|s| &s.layer == layer)?;
-        Some(look(shown.opened, shown.closing, now, motion))
+        Some(match (shown.closing, self.held) {
+            (None, Some(held)) => held_look(held, held, motion),
+            _ => look((shown.opened, shown.from), shown.closing, now, motion),
+        })
+    }
+
+    /// The fingers hold the open launcher at `presence` (6.13): it shows
+    /// that far, until they let go.
+    pub fn hold(&mut self, presence: f64) {
+        self.held = Some(presence.clamp(0.0, 1.0));
+    }
+
+    /// Whether the fingers hold it.
+    pub fn held(&self) -> bool {
+        self.held.is_some()
+    }
+
+    /// The fingers let it go at `now`: it goes on to whole (`whole`), or
+    /// out, from where they left it.
+    pub fn let_go(&mut self, now: Duration, whole: bool) {
+        let Some(from) = self.held.take() else {
+            return;
+        };
+        let mut any = false;
+        for shown in self.shown.iter_mut().filter(|s| s.closing.is_none()) {
+            any = true;
+            if whole {
+                shown.opened = now;
+                shown.from = from;
+            } else {
+                shown.closing = Some((now, from));
+            }
+        }
+        if !any {
+            if whole {
+                self.start_from = Some(from);
+            } else {
+                self.closed_early = true;
+            }
+        }
     }
 
     /// Whether one, or a toast, is still moving at `now`.
@@ -158,13 +239,15 @@ impl Launchers {
             now < opened + TOAST_IN
                 || (now >= opened + LAUNCHER_TOAST - TOAST_OUT && now < opened + LAUNCHER_TOAST)
         };
-        self.shown.iter().any(|s| s.moving(now))
+        self.shown
+            .iter()
+            .any(|s| s.moving(now) && !(s.closing.is_none() && self.held.is_some()))
             || self.toasts.iter().any(|(_, opened)| fading(*opened))
     }
 
     /// Whether a launcher shows, and is done moving by `at`.
     pub fn at_rest(&self, at: Duration) -> bool {
-        !self.shown.is_empty() && !self.shown.iter().any(|s| s.moving(at))
+        !self.shown.is_empty() && self.held.is_none() && !self.shown.iter().any(|s| s.moving(at))
     }
 
     /// When the toast shown first was first drawn, on the motions' clock.
@@ -289,10 +372,14 @@ impl State {
             return;
         }
         let opened = self.now();
-        self.panel.launchers.shown.push(Shown {
+        let launchers = &mut self.panel.launchers;
+        let closing = std::mem::take(&mut launchers.closed_early).then_some((opened, 0.0));
+        let from = launchers.start_from.take().unwrap_or(0.0);
+        launchers.shown.push(Shown {
             layer: layer.clone(),
             opened,
-            closing: None,
+            from,
+            closing,
         });
         self.redraw = true;
     }
@@ -303,14 +390,27 @@ impl State {
             return;
         }
         let now = self.now();
-        for shown in &mut self.panel.launchers.shown {
-            shown.closing.get_or_insert(now);
+        let launchers = &mut self.panel.launchers;
+        let held = launchers.held;
+        let mut any = false;
+        for shown in &mut launchers.shown {
+            if shown.closing.is_none() {
+                any = true;
+                shown.closing = Some((now, shown.presence(now, held)));
+            }
+        }
+        // Closed before its first frame: that frame shows nothing.
+        if !any {
+            launchers.closed_early = true;
         }
         self.redraw = true;
     }
 
     /// A layer surface went: if it was a launcher, its motion goes too.
     pub fn launcher_gone(&mut self, layer: &LayerSurface) {
+        if layer.namespace() == LAUNCHER_NAMESPACE {
+            self.panel.launchers.closed_early = false;
+        }
         self.panel.launchers.shown.retain(|s| &s.layer != layer);
         self.panel.launchers.toasts.retain(|(l, _)| l != layer);
     }
@@ -346,7 +446,39 @@ mod tests {
 
     fn at(opened: u64, closing: Option<u64>, now: u64, motion: bool) -> Look {
         let ms = Duration::from_millis;
-        look(ms(opened), closing.map(ms), ms(now), motion)
+        look(
+            (ms(opened), 0.0),
+            closing.map(|c| (ms(c), 1.0)),
+            ms(now),
+            motion,
+        )
+    }
+
+    #[test]
+    fn let_go_it_goes_on_from_where_the_fingers_left_it() {
+        let ms = Duration::from_millis;
+        // A third there, let go to whole: from a third, whole at 160 ms.
+        let start = look((ms(1000), 1.0 / 3.0), None, ms(1000), true);
+        assert!(
+            (f64::from(start.alpha) - 1.0 / 3.0).abs() < 1e-6,
+            "{start:?}"
+        );
+        assert!(
+            start.scale > LAUNCHER_SCALE && start.scale < 1.0,
+            "{start:?}"
+        );
+        assert_eq!(look((ms(1000), 1.0 / 3.0), None, ms(1160), true).alpha, 1.0);
+        // Let go to nothing from a fifth: out in 120 ms, never more.
+        let out = look((ms(0), 0.0), Some((ms(1000), 0.2)), ms(1000), true);
+        assert!((out.alpha - 0.2).abs() < 1e-6, "{out:?}");
+        assert_eq!(
+            look((ms(0), 0.0), Some((ms(1000), 0.2)), ms(1120), true).alpha,
+            0.0
+        );
+        // Held halfway: half there, its panel halfway to whole.
+        let half = held_look(0.5, 0.5, true);
+        assert_eq!(half.alpha, 0.5);
+        assert!((half.scale - (LAUNCHER_SCALE + 1.0) / 2.0).abs() < 1e-9);
     }
 
     #[test]

@@ -302,8 +302,8 @@ impl SectionId {
                 System,
                 w("Date et heure", "Date and time"),
                 w(
-                    "Le fuseau horaire et le format de l’heure.",
-                    "The time zone and the time's format.",
+                    "L’heure de l’ordinateur et son fuseau horaire. Leur format se règle dans Apparence et langue.",
+                    "The computer’s time and its time zone. Their format is set in Appearance and language.",
                 ),
                 Icon::DateTime,
                 "6.11",
@@ -943,6 +943,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
     match section {
         SectionId::Sound => crate::sound::outside(),
         SectionId::Bar => crate::bar::outside(),
+        SectionId::DateTime => crate::time::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
