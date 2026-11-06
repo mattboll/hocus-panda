@@ -152,6 +152,13 @@ pub fn locked(on: bool) {
     input(Input::Locked(on));
 }
 
+/// The wall clock may have moved apart from the monotonic clock: the
+/// machine resumed (logind), or the clock was set. Do not disturb's end is
+/// read again.
+pub fn clock_moved() {
+    input(Input::Clock { wall: wall_ms() });
+}
+
 /// The history's panel opened (`open`) or closed.
 pub fn history_open(open: bool) {
     input(Input::History {
@@ -222,7 +229,7 @@ fn keep() {
                 .as_deref()
                 .and_then(|file| std::fs::read_to_string(file).ok())
                 .map_or(Dnd::Off, |text| {
-                    dnd::decode(&text, dnd::session(), Instant::now())
+                    dnd::decode(&text, dnd::session(), Instant::now(), wall_ms())
                 });
             input(Input::Restored { notes, dnd });
             while let Ok(first) = writes.recv() {
@@ -399,8 +406,14 @@ pub fn effects() -> impl iced::futures::Stream<Item = Message> {
                 Vec::new()
             }
         };
+        let mut timer_end = None;
         loop {
-            let deadline = with(|c| c.stack.deadline());
+            let (deadline, end) = with(|c| (c.stack.deadline(), c.stack.dnd.wall_end()));
+            let end = end.map(on_system_clock);
+            if end != timer_end {
+                timer_end = end;
+                dnd_timer(end);
+            }
             let effects = match deadline {
                 Some(at) => {
                     use iced::futures::future::{Either, select};
@@ -423,6 +436,111 @@ pub fn effects() -> impl iced::futures::Stream<Item = Message> {
                 }
             }
         }
+    })
+}
+
+// --- Do not disturb's wall-clock end ---------------------------------------------------
+
+/// The morning's end on `CLOCK_REALTIME`, which goes on while the machine
+/// sleeps: the monotonic deadline the stack waits for falls behind across a
+/// suspend; this timer rings at the wall clock's 8:00, or as the machine
+/// resumes past it, or when the clock is set (`CANCEL_ON_SET`), and the
+/// stack reads its end again ([`Input::Clock`]). A thread of its own waits
+/// on it; the stack's stream sets it.
+struct DndTimer {
+    fd: std::os::fd::OwnedFd,
+    /// The end it is set to, on the system's clock (milliseconds).
+    end: Mutex<Option<i64>>,
+}
+
+static DND_TIMER: std::sync::OnceLock<Option<DndTimer>> = std::sync::OnceLock::new();
+
+/// `end` on the shell's wall clock (milliseconds), on the system's: the
+/// shell's may read a time of its own (`HOCUS_CLOCK_AT`, moved on by `day
+/// slept`), the timer is on the system's.
+fn on_system_clock(end: i64) -> i64 {
+    let shift = wall()
+        .timestamp()
+        .duration_since(jiff::Timestamp::now())
+        .as_millis();
+    // To the second: the two clocks are read a moment apart.
+    let shift = i64::try_from(shift).unwrap_or(0).div_euclid(1000) * 1000;
+    end.saturating_sub(shift)
+}
+
+/// Sets the timer to `end` (milliseconds on the system's clock), or unsets
+/// it.
+fn dnd_timer(end: Option<i64>) {
+    let Some(timer) = DND_TIMER.get_or_init(start_dnd_timer) else {
+        return;
+    };
+    *timer.end.lock().unwrap_or_else(PoisonError::into_inner) = end;
+    set_dnd_timer(timer, end);
+}
+
+fn set_dnd_timer(timer: &DndTimer, end: Option<i64>) {
+    use rustix::time::{Itimerspec, TimerfdTimerFlags, Timespec, timerfd_settime};
+    let zero = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // Unset: zero. A time already past rings at once.
+    let value = end.map(|end| end.max(1)).map_or(zero, |end| Timespec {
+        tv_sec: end.div_euclid(1000),
+        tv_nsec: end.rem_euclid(1000) * 1_000_000,
+    });
+    let flags = TimerfdTimerFlags::ABSTIME | TimerfdTimerFlags::CANCEL_ON_SET;
+    let spec = Itimerspec {
+        it_interval: zero,
+        it_value: value,
+    };
+    if let Err(err) = timerfd_settime(&timer.fd, flags, &spec) {
+        tracing::warn!(%err, "do not disturb's end is not watched on the wall clock");
+    }
+}
+
+fn start_dnd_timer() -> Option<DndTimer> {
+    use rustix::time::{TimerfdClockId, TimerfdFlags, timerfd_create};
+    let fd = match timerfd_create(TimerfdClockId::Realtime, TimerfdFlags::CLOEXEC) {
+        Ok(fd) => fd,
+        Err(err) => {
+            tracing::info!(%err, "do not disturb's end is not watched on the wall clock");
+            return None;
+        }
+    };
+    let started = std::thread::Builder::new()
+        .name("do not disturb: clock".to_owned())
+        .spawn(|| {
+            let Some(timer) = DND_TIMER.wait() else {
+                return;
+            };
+            loop {
+                let mut ticks = [0u8; 8];
+                match rustix::io::read(&timer.fd, &mut ticks) {
+                    // Rang: the stack ends it (or sets it again).
+                    Ok(_) => clock_moved(),
+                    // The clock set, or the machine resumed: set again,
+                    // the stack reading its end again.
+                    Err(rustix::io::Errno::CANCELED) => {
+                        let end = *timer.end.lock().unwrap_or_else(PoisonError::into_inner);
+                        set_dnd_timer(timer, end);
+                        clock_moved();
+                    }
+                    Err(rustix::io::Errno::INTR) => {}
+                    Err(err) => {
+                        tracing::info!(%err, "do not disturb's end is not watched on the wall clock");
+                        return;
+                    }
+                }
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "no thread to watch do not disturb's end");
+        return None;
+    }
+    Some(DndTimer {
+        fd,
+        end: Mutex::new(None),
     })
 }
 

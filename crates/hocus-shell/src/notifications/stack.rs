@@ -101,6 +101,11 @@ pub enum Input {
     /// What the history kept before the shell started again, and do not
     /// disturb as it was in this session.
     Restored { notes: Vec<(Note, Sight)>, dnd: Dnd },
+    /// The wall clock may have moved apart from the monotonic clock (the
+    /// machine resumed, the clock was set, do not disturb's wall-clock
+    /// timer rang), reading `wall` (milliseconds): do not disturb's end
+    /// read again.
+    Clock { wall: i64 },
 }
 
 /// What to carry out.
@@ -524,6 +529,7 @@ impl Stack {
                 tracing::debug!(on = dnd.is_on(), choice = ?dnd.choice(), "do not disturb");
                 self.dnd = dnd;
             }
+            Input::Clock { wall } => self.dnd_checked(now, wall),
             Input::Sharing(true) => {
                 if self.sharing.is_none() {
                     tracing::debug!("the screen is shared: bubbles are held");
@@ -563,7 +569,7 @@ impl Stack {
                 // Written then, with what came meanwhile (nothing was until
                 // then).
                 self.history.restore(notes);
-                if !self.dnd.is_on() && !dnd.over(now) {
+                if !self.dnd.is_on() && !dnd.over(now, super::wall_ms()) {
                     self.dnd = dnd;
                 }
                 self.restored = true;
@@ -607,15 +613,22 @@ impl Stack {
         self.history.closed(id);
     }
 
+    /// Do not disturb at `now`, the wall clock reading `wall`: over, or its
+    /// end read again (the morning's, at the wall clock's 8:00).
+    fn dnd_checked(&mut self, now: Instant, wall: i64) {
+        let dnd = self.dnd.checked(now, wall);
+        if dnd != self.dnd && !dnd.is_on() {
+            tracing::debug!("do not disturb ends at its time");
+        }
+        self.dnd = dnd;
+    }
+
     /// What is due at `now`: do not disturb over, countdowns ended,
     /// bubbles gone.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
         let before = self.marks();
         let mut effects = Vec::new();
-        if self.dnd.over(now) {
-            tracing::debug!("do not disturb ends at its time");
-            self.dnd = Dnd::Off;
-        }
+        self.dnd_checked(now, super::wall_ms());
         let expired: Vec<u64> = self
             .bubbles
             .iter()
