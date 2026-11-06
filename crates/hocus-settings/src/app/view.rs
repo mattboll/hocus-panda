@@ -8,8 +8,8 @@ use iced::{
     Alignment, Background, Border, Color, Element, Gradient, Length, Padding, Shadow, Theme,
     Vector, gradient,
     widget::{
-        Space, button, column, container, mouse_area, pin, rich_text, row, scrollable, slider,
-        span, stack, svg, text, text_input,
+        Space, button, column, container, mouse_area, pin, responsive, rich_text, row, scrollable,
+        slider, span, stack, svg, text, text_input,
     },
 };
 
@@ -780,10 +780,18 @@ impl App {
                             .font(BOLD)
                             .color(TEXT),
                         // Whatever the window's width, the state ends
-                        // at the card's edge (#722).
-                        container(t(state, 12.5, DIM.get()).wrapping(text::Wrapping::None))
-                            .width(Length::Fill)
-                            .clip(true),
+                        // with "…" before the card's edge, measured
+                        // against the room the card leaves it (#722).
+                        responsive(move |room| {
+                            t(
+                                elided(&state, 12.5, MANROPE, room.width - 1.0),
+                                12.5,
+                                DIM.get(),
+                            )
+                            .wrapping(text::Wrapping::None)
+                            .into()
+                        })
+                        .height(Length::Shrink),
                     ]
                     .spacing(2)
                     .width(Length::Fill),
