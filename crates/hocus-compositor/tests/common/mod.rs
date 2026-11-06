@@ -71,7 +71,12 @@ use wayland_protocols::{
     },
 };
 
-pub const WAIT: Duration = Duration::from_secs(10);
+/// How long a test waits for what it checks before it fails. Only a failing
+/// test waits it out, so it costs nothing when things go right. 10 s was
+/// too short on CI's four shared CPUs: tests failed right at it while the
+/// shell or the Settings were merely slow (#677, #679, #686, the featured
+/// calendars' test).
+pub const WAIT: Duration = Duration::from_secs(30);
 /// What test windows are filled with, ARGB.
 pub const WINDOW_COLOUR: u32 = 0xff3a_7bd5;
 /// A client-side shadow: black at 25 %, premultiplied.

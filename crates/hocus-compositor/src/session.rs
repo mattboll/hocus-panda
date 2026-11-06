@@ -4,8 +4,10 @@
 //! activated by D-Bus) shows in it. The session's launcher
 //! (`packaging/hocuspanda-session`) takes them back when it ends. A
 //! desktop portal a previous session left running is restarted then
-//! ([`portals`]).
+//! ([`portals`]). Once the bar shows, the session's start-up applications
+//! start ([`autostart`]).
 
+pub mod autostart;
 pub mod portals;
 
 use std::process::Output;

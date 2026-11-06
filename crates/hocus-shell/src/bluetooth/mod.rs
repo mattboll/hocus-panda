@@ -1,36 +1,23 @@
 //! Bluetooth in the connections (bar.md §4.3, §5, §9): its row under the
 //! Wi-Fi's, its popover's data, and what the popover asks of BlueZ.
 //!
-//! BlueZ is read on a thread of its own ([`bluez`]), never on the loop
-//! that draws: it pushes a [`Bluetooth`] each time what it shows changes,
-//! and takes the popover's asks ([`Ask`]) through a channel. The row draws
+//! BlueZ is read on a thread of its own (`hocus-bluetooth`, shared with
+//! the Settings), never on the loop that draws: it pushes a [`Bluetooth`]
+//! each time what it shows changes, and takes the popover's asks ([`Ask`])
+//! through a channel. The row draws
 //! on the connections' surface ([`draw`]), woken through the compositor
 //! only when what it shows changes, so that neither the levels nor the
 //! clock draw for Bluetooth, nor the row for a level. The popover, when it
 //! shows Bluetooth, is told of every change.
 
-pub mod bluez;
 pub mod draw;
 pub mod model;
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-pub use self::model::Bluetooth;
+pub use hocus_bluetooth::Ask;
 
-/// What the popover asks of BlueZ, by device path.
-#[derive(Debug)]
-pub enum Ask {
-    /// The adapter on or off.
-    Power(bool),
-    /// Look for devices around (while the popover is open), or stop.
-    Discover(bool),
-    Connect(String),
-    Disconnect(String),
-    /// Pair, trust, then connect.
-    Pair(String),
-    /// The shell ends: stop looking, then say so.
-    Quit(std::sync::mpsc::Sender<()>),
-}
+pub use self::model::Bluetooth;
 
 /// What changed, for whoever shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,21 +33,21 @@ type Waker = Box<dyn FnMut(Change) -> bool + Send>;
 struct Service {
     bluetooth: Mutex<Bluetooth>,
     waker: Mutex<Option<Waker>>,
-    asks: tokio::sync::mpsc::UnboundedSender<Ask>,
+    asks: hocus_bluetooth::Asks,
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
 
 /// Starts BlueZ's thread, once.
 pub fn start() {
-    let (asks, incoming) = tokio::sync::mpsc::unbounded_channel();
+    let (asks, incoming) = hocus_bluetooth::channel();
     let service = Service {
         bluetooth: Mutex::new(Bluetooth::default()),
         waker: Mutex::new(None),
         asks,
     };
     if SERVICE.set(service).is_ok() {
-        bluez::start(incoming);
+        hocus_bluetooth::start(incoming, hocus_bluetooth::Options::default(), publish);
     }
 }
 

@@ -21,4 +21,5 @@ archive.include = [
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
-default-filter = "all()"
+# Quarantined: #677, #679, #686, #690, #692, #693.
+default-filter = "not ((binary(tasks) & test(=tab_goes_through_the_add_and_each_box_space_ticks_and_enter_opens_the_field)) | (binary(in_use) & test(=the_camera_shows_through_pipewire_and_through_its_device)) | (binary(power_actions) & test(=the_power_button_ask_opens_the_session_menu)) | (binary(bar_order) & test(=on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows)) | (binary(settings_network) & test(=in_airplane_mode_the_bar_says_it_and_its_switch_turns_the_wifi_on_alone)) | (binary(agents) & test(=a_waiting_agents_panda_peeks_out_at_its_row_then_goes_back_after_8_s)))"

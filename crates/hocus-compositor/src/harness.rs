@@ -574,6 +574,12 @@ impl Headless {
         .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
+    /// The clipboard's history holds `items`, `pinned` of them pinned, as
+    /// a shell would say (6.17): for tests of the Settings without one.
+    pub fn clipboard_counted(&mut self, items: u32, pinned: u32) {
+        self.app.state.clipboard_counted(items, pinned);
+    }
+
     /// The shares under way (5.11).
     pub fn shares(&self) -> Vec<crate::ShareInfo> {
         self.app.state.share.info()
@@ -653,6 +659,13 @@ impl Headless {
     /// The bytes of recorded frames copied on the loop: a budget of 0.
     pub fn record_copied_on_loop(&self) -> u64 {
         self.app.state.record.copied_on_loop()
+    }
+
+    /// Starts the start-up applications of these autostart directories
+    /// (the user's first) once the bar shows, as `--session` does those of
+    /// the XDG directories; asked before the loop runs.
+    pub fn autostart(&mut self, dirs: Vec<std::path::PathBuf>) {
+        self.app.state.autostart = crate::session::autostart::Autostart::Waiting(dirs);
     }
 
     /// Tells the shell `message`, as the compositor would.

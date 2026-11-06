@@ -81,10 +81,11 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    AltTab, Appearance, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
-    Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
-    PanelScreens, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
-    Rule as WindowRule, ScaleFrom, SystemKeyboard, Windows,
+    Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
+    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
+    HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
+    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
+    Remind, Rule as WindowRule, ScaleFrom, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -248,6 +249,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
+    if options.session {
+        state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
+    }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     } else {

@@ -868,6 +868,7 @@ mod tests {
                 argv: vec![name.to_lowercase()],
                 terminal: false,
                 dir: None,
+                ..entries::Entry::default()
             })
             .map(|entry| apps::App {
                 folded: search::Folded::of(&entry.name, None, &[]),

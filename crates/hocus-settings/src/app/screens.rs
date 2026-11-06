@@ -338,7 +338,11 @@ impl App {
 
     fn screens_said(&mut self, said: Said) -> iced::Task<Message> {
         // The desktops' (6.14).
-        if self.desktops_said(&said) {
+        if self.desktops_said(&said) || self.agents_heard(&said) {
+            return iced::Task::none();
+        }
+        // The clipboard's history and the recording (6.17).
+        if self.captures_said(&said) {
             return iced::Task::none();
         }
         match said {
@@ -407,7 +411,10 @@ impl App {
             Said::Desktops { .. }
             | Said::DesktopRemoved { .. }
             | Said::DesktopRestored { .. }
-            | Said::Apps(_) => iced::Task::none(),
+            | Said::Apps(_)
+            | Said::AgentTools(_)
+            | Said::Clipboard { .. }
+            | Said::Recording(_) => iced::Task::none(),
         }
     }
 
@@ -969,6 +976,11 @@ impl App {
         }
         out.extend([USE, RESOLUTION, RATE, SCALE, VRR, PRIMARY].map(Control::Row));
         out
+    }
+
+    /// Whether the page takes every key first ([`App::screens_key_first`]).
+    pub(super) fn screens_take_keys(&self) -> bool {
+        self.screens.trial.is_some() || self.screens.menu.is_some()
     }
 
     /// A key the page takes first: the dialog's, a menu's. Whether it did.

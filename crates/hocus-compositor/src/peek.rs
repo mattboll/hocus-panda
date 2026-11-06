@@ -2,9 +2,10 @@
 //! when an agent starts waiting, or finishes, its panda (96 px) comes out
 //! from under the bar's edge, at its row's height, with a bubble saying
 //! who and why; it stays still for 8 s, then goes back in. It comes out
-//! once more with a waiting agent's 5-minute reminder (the halo's timer,
-//! [`crate::halo`]), never for a stuck agent. A click on it goes to the
-//! agent (4.3), and it goes back at once. The latest replaces the one out.
+//! once more with a waiting agent's reminder (the halo's timer, 5 min by
+//! default, [`crate::halo`]), never for a stuck agent. A click on it goes
+//! to the agent (4.3), and it goes back at once. The latest replaces the
+//! one out.
 //!
 //! The halo says what began ([`crate::halo::Halo::take_news`]); the
 //! compositor tells the shell (`peek`), which draws the panda and its
@@ -17,6 +18,10 @@
 //! on the CPU, it only fades in and out in place. Its two moments are a
 //! timer of the loop each, never a poll; then the shell is told that it is
 //! back (`no-peek`) and removes its surfaces: nothing is drawn at rest.
+//!
+//! `[agents] peek` (6.16) says for what a panda peeks out: an agent
+//! waiting or finished, waiting only, or never; followed live from the
+//! next one, a panda out staying its 8 s.
 //!
 //! While the secretary's briefing is open (the shell's `briefing open`,
 //! 4.7b), no panda peeks out, and one out goes back at once: it would show
@@ -167,17 +172,20 @@ impl State {
         self.popover_motion()
     }
 
-    /// What the halo says began: the latest of it peeks out.
+    /// What the halo says began: the latest of it peeks out, of what
+    /// `[agents] peek` lets out (6.16).
     pub(crate) fn peek_news(&mut self) {
         let news = self.halo.take_news();
+        let rule = self.config.agents.peek;
         let latest = news
             .into_iter()
             .rev()
-            .find_map(|(id, concern)| match concern {
+            .filter_map(|(id, concern)| match concern {
                 Concern::Waiting => Some((id, PeekKind::Waiting)),
                 Concern::ToSee => Some((id, PeekKind::Done)),
                 _ => None,
-            });
+            })
+            .find(|&(_, kind)| rule.peeks(kind));
         if let Some((id, kind)) = latest {
             self.peek_out(id, kind);
         }

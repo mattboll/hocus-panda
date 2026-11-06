@@ -35,7 +35,14 @@ pub struct Config {
     /// Drawing on the screen (6.14, docs/design/ink.md).
     pub ink: Ink,
     pub panel: Panel,
+    /// Where screenshots go, their format and the shutter (6.17).
+    pub capture: Capture,
     pub recording: Recording,
+    /// What the clipboard's history keeps (6.17).
+    pub clipboard: Clipboard,
+    /// How the bar calls the user for the agents: the halo, its reminder,
+    /// the panda peeking out, the pandas in the rows (6.16).
+    pub agents: Agents,
     pub idle: Idle,
     pub power: Power,
     /// Every mouse, trackball and trackpoint (6.12).
@@ -114,15 +121,233 @@ pub struct Config {
     /// a test's own only in the crate's tests (`test-auth`).
     #[serde(skip)]
     pub lock_auth: crate::lock::Authenticator,
+    /// Where the programs that play the shutter's sound (6.17), `wpctl`
+    /// and `pw-play`, are found. Not part of the file: the session's on
+    /// the `PATH`; none in tests (and headless), unless they give their
+    /// own, so that no test is heard.
+    #[serde(skip)]
+    pub sound_programs: SoundPrograms,
 }
 
-/// Screen recording, `[recording]` (5.10).
+/// Where the shutter's programs are found.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SoundPrograms {
+    /// Nowhere: no shutter is heard.
+    #[default]
+    None,
+    /// On the `PATH`.
+    Path,
+    /// In this folder (tests' fakes).
+    In(PathBuf),
+}
+
+impl Config {
+    /// A folder the file names (`[capture] folder`, `[recording]
+    /// folder`): absolute, or `~/` and the rest in the home; none when it
+    /// is empty (the default folder) or cannot be read so.
+    pub fn chosen_folder(&self, said: &str) -> Option<PathBuf> {
+        let said = said.trim();
+        if said.is_empty() {
+            return None;
+        }
+        let path = match said.strip_prefix("~/") {
+            Some(rest) => self.home.as_ref()?.join(rest),
+            None if said == "~" => self.home.clone()?,
+            None => PathBuf::from(said),
+        };
+        path.is_absolute().then_some(path)
+    }
+}
+
+/// The screen capture, `[capture]` (5.8, 6.17): where its images go, in
+/// which format, and whether the shutter is heard.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Capture {
+    /// Empty: the pictures' folder's "Captures d'écran" ("Screenshots").
+    /// Absolute, or from the home (`~/`). A folder that cannot be written
+    /// (gone, read-only) is passed over for the default one meanwhile.
+    pub folder: String,
+    /// The file's: the clipboard always gets PNG.
+    pub format: CaptureFormat,
+    /// A discreet click as the picture is taken, never when the sound is
+    /// muted.
+    pub sound: bool,
+}
+
+impl Default for Capture {
+    fn default() -> Self {
+        Self {
+            folder: String::new(),
+            format: CaptureFormat::Png,
+            sound: true,
+        }
+    }
+}
+
+/// A capture's file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureFormat {
+    #[default]
+    Png,
+    /// At quality 90: lighter, for photos.
+    Jpeg,
+}
+
+impl CaptureFormat {
+    /// Its files' extension.
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+        }
+    }
+}
+
+/// The clipboard's history, `[clipboard]` (5.6, 6.17).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Clipboard {
+    /// Off: nothing new is read or kept, the history shows its pinned
+    /// items only, and the others are erased.
+    pub history: bool,
+    /// How long what is not pinned is kept, 200 items at most: `"session"`
+    /// (never on disk), `"1d"`, `"7d"` or `"30d"`.
+    #[serde(deserialize_with = "clip_keep")]
+    pub keep: hocus_link::ClipKeep,
+    /// What a password manager marks secret, and what is copied from one
+    /// (KeePassXC, Bitwarden, 1Password, and [`Clipboard::ignore`]'s), is
+    /// never kept.
+    pub skip_secrets: bool,
+    /// More applications, by their ids, whose copies are never kept.
+    pub ignore: Vec<String>,
+}
+
+impl Default for Clipboard {
+    fn default() -> Self {
+        Self {
+            history: true,
+            keep: hocus_link::ClipKeep::Month,
+            skip_secrets: true,
+            ignore: Vec::new(),
+        }
+    }
+}
+
+impl Clipboard {
+    /// What the shell's history is told of it.
+    pub const fn rules(&self) -> hocus_link::ClipRules {
+        hocus_link::ClipRules {
+            history: self.history,
+            keep: self.keep,
+        }
+    }
+}
+
+fn clip_keep<'de, D: Deserializer<'de>>(deserializer: D) -> Result<hocus_link::ClipKeep, D::Error> {
+    hocus_link::ClipKeep::of(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+}
+
+/// How the bar calls the user for the agents, `[agents]` (6.16): the
+/// halo (bar.md §6), its reminder, the panda peeking out (§7 C) and the
+/// pandas in the agents' rows (4.1). The meetings' halo is not theirs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Agents {
+    pub halo: HaloRule,
+    /// One more wave, once, for an agent still waiting after this long;
+    /// its panda peeks out again with it.
+    pub remind: Remind,
+    pub peek: PeekRule,
+    /// Off: a dot of the state's colour in each agent's row instead of
+    /// its panda.
+    pub pandas: bool,
+}
+
+impl Default for Agents {
+    fn default() -> Self {
+        Self {
+            halo: HaloRule::All,
+            remind: Remind::Five,
+            peek: PeekRule::WaitingAndDone,
+            pandas: true,
+        }
+    }
+}
+
+/// What of the agents lights the halo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HaloRule {
+    /// An agent waiting, stuck, or finished and not seen.
+    #[default]
+    All,
+    /// An agent waiting only.
+    Waiting,
+    /// No agent: the meetings' halo only.
+    Off,
+}
+
+/// When an agent still waiting is called again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum Remind {
+    #[serde(rename = "2m")]
+    Two,
+    #[default]
+    #[serde(rename = "5m")]
+    Five,
+    #[serde(rename = "10m")]
+    Ten,
+    #[serde(rename = "never")]
+    Never,
+}
+
+impl Remind {
+    /// After how long of waiting; `None`: never.
+    pub const fn after(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Two => Some(std::time::Duration::from_secs(2 * 60)),
+            Self::Five => Some(std::time::Duration::from_secs(5 * 60)),
+            Self::Ten => Some(std::time::Duration::from_secs(10 * 60)),
+            Self::Never => None,
+        }
+    }
+}
+
+/// For what an agent's panda peeks out of the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PeekRule {
+    /// An agent starts waiting, or finishes.
+    #[default]
+    WaitingAndDone,
+    /// An agent starts waiting.
+    Waiting,
+    Off,
+}
+
+impl PeekRule {
+    /// Whether a panda peeks out for `kind`.
+    pub const fn peeks(self, kind: hocus_link::PeekKind) -> bool {
+        match self {
+            Self::WaitingAndDone => true,
+            Self::Waiting => matches!(kind, hocus_link::PeekKind::Waiting),
+            Self::Off => false,
+        }
+    }
+}
+
+/// Screen recording, `[recording]` (5.10, 6.17).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Recording {
     /// `"mp4"` (H.264 and AAC) or `"webm"` (VP9 and Opus).
     #[serde(deserialize_with = "record_format")]
     pub format: hocus_link::RecordFormat,
+    /// Empty: the videos' folder's "Enregistrements d'écran" ("Screen
+    /// recordings"). As `[capture] folder`.
+    pub folder: String,
 }
 
 fn record_format<'de, D: Deserializer<'de>>(
@@ -2215,6 +2440,41 @@ mod tests {
             .collect();
         assert!(uncommented.contains("[shortcuts]"), "{uncommented}");
         assert_eq!(toml::from_str::<Config>(&uncommented)?, Config::default());
+        Ok(())
+    }
+
+    #[test]
+    fn agents_reads_its_four_keys_and_refuses_what_it_does_not_know() -> anyhow::Result<()> {
+        use super::{Agents, HaloRule, PeekRule, Remind};
+        assert_eq!(toml::from_str::<Config>("")?.agents, Agents::default());
+        let config: Config = toml::from_str(
+            "[agents]\nhalo = \"waiting\"\nremind = \"10m\"\npeek = \"off\"\npandas = false\n",
+        )?;
+        assert_eq!(
+            config.agents,
+            Agents {
+                halo: HaloRule::Waiting,
+                remind: Remind::Ten,
+                peek: PeekRule::Off,
+                pandas: false,
+            }
+        );
+        let config: Config = toml::from_str("[agents]\nremind = \"never\"\npeek = \"waiting\"\n")?;
+        assert_eq!(config.agents.remind.after(), None);
+        assert_eq!(config.agents.peek, PeekRule::Waiting);
+        assert_eq!(config.agents.halo, HaloRule::All);
+        assert_eq!(
+            Remind::Two.after(),
+            Some(std::time::Duration::from_secs(120))
+        );
+        for bad in [
+            "[agents]\nhalo = \"some\"\n",
+            "[agents]\nremind = \"3m\"\n",
+            "[agents]\npeek = \"done\"\n",
+            "[agents]\nwave = true\n",
+        ] {
+            assert!(toml::from_str::<Config>(bad).is_err(), "{bad:?}");
+        }
         Ok(())
     }
 }

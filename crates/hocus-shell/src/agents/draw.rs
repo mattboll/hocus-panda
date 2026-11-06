@@ -34,7 +34,8 @@
 //! those coming from it fading in (300 ms), a row's tint changes over
 //! 300 ms, and the panda of an agent whose state changed (or that came)
 //! hops once (650 ms); then nothing moves. None of it with reduced motion
-//! or on the CPU.
+//! or on the CPU. With `[agents] pandas` off (6.16), a 10 px dot of the
+//! state's colour stands in each panda's place.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -84,6 +85,8 @@ const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 const PANDA_BOX: (f32, f32) = (126.0, 120.5);
 /// A resting agent's panda, asleep.
 const ASLEEP: f32 = 0.55;
+/// The dot in a panda's place, its diameter.
+const DOT: f32 = 10.0;
 /// The rows' motion: the slide, the fades and the tint, the hop.
 const SLIDE: Duration = Duration::from_millis(450);
 const SLIDE_CURVE: (f32, f32, f32, f32) = (0.2, 0.9, 0.25, 1.0);
@@ -547,6 +550,18 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
         channel(a.b, b.b),
         alpha,
     )
+}
+
+/// The dot in place of a row's panda (`[agents] pandas` off, 6.16): its
+/// state's colour, the streak's (bar.md §8).
+fn dot(look: Look) -> Color {
+    match look {
+        Look::Waiting => rgb(0xF5B44A),
+        Look::Stuck => rgb(0xF2945B),
+        Look::ToSee => rgb(0x7EE0A0),
+        Look::Working => rgb(0x6CC287),
+        Look::Resting => rgb(0xA9B2C2),
+    }
 }
 
 /// A row's tint and its word's colour.
@@ -1276,17 +1291,28 @@ impl Group {
             } else {
                 1.0
             };
-            // The drawing's box, 126 × 120.5, 30 px wide in its 30 px
-            // square (iced scales a drawing to the rectangle given).
-            let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
-            let place = Rectangle::new(
-                Point::new(rect.x + ROW_PAD, middle - tall / 2.0 + hop),
-                Size::new(PANDA, tall),
-            );
-            f.draw_svg(
-                place,
-                svg::Svg::new(panda(row.look).clone()).opacity(asleep * shown),
-            );
+            if super::pandas() {
+                // The drawing's box, 126 × 120.5, 30 px wide in its 30 px
+                // square (iced scales a drawing to the rectangle given).
+                let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
+                let place = Rectangle::new(
+                    Point::new(rect.x + ROW_PAD, middle - tall / 2.0 + hop),
+                    Size::new(PANDA, tall),
+                );
+                f.draw_svg(
+                    place,
+                    svg::Svg::new(panda(row.look).clone()).opacity(asleep * shown),
+                );
+            } else {
+                // Its dot in the panda's place, hopping as it would.
+                f.fill(
+                    &Path::circle(
+                        Point::new(rect.x + ROW_PAD + PANDA / 2.0, middle + hop),
+                        DOT / 2.0,
+                    ),
+                    faded(dot(row.look), asleep * shown),
+                );
+            }
             f.fill_text(kit::text_in(
                 kit::MANROPE_SEMIBOLD,
                 said(

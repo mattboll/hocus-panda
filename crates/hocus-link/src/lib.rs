@@ -517,6 +517,11 @@ pub enum ToShell {
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go. Written `no-peek`.
     NoPeek,
+    /// Whether the agents' rows show each agent's panda, or a dot of its
+    /// state's colour (`[agents] pandas`, 6.16): sent as the shell
+    /// connects and when the configuration changes it. Written
+    /// `agent-rows pandas` or `agent-rows dots`.
+    AgentPandas(bool),
     /// The screen of the focused window, else the pointer's: where the
     /// notifications' bubbles show (5.3). Sent as the shell connects and
     /// when it changes. Written `focus OUTPUT`.
@@ -542,6 +547,14 @@ pub enum ToShell {
     /// the screen of the focused window, else the pointer's, its field
     /// holding the keyboard; open, it closes. Written `clipboard OUTPUT`.
     Clipboard { output: String },
+    /// What the clipboard's history keeps (`[clipboard] history` and
+    /// `keep`, 6.17): sent as the shell connects and when the
+    /// configuration changes them. Written `clipboard-rules on 30d`.
+    ClipboardRules(ClipRules),
+    /// The Settings' "Effacer l'historique" (6.17): all but the pinned
+    /// items go, as the history's own "Tout effacer". Written
+    /// `clipboard-clear`.
+    ClipboardClear,
     /// The screen capture is open (5.8), or what its toolbar shows changed
     /// ([`CaptureBar`]).
     Capture(CaptureBar),
@@ -751,6 +764,67 @@ impl ClipKind {
 
 /// The most a clip holds: a larger offer is not kept (5.6).
 pub const CLIP_MAX: usize = 8 * 1024 * 1024;
+
+/// How long the clipboard's history keeps what is not pinned
+/// (`[clipboard] keep`, 6.17): until the session ends (never on disk), a
+/// day, a week or 30 days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClipKeep {
+    Session,
+    Day,
+    Week,
+    #[default]
+    Month,
+}
+
+impl ClipKeep {
+    pub const ALL: [Self; 4] = [Self::Session, Self::Day, Self::Week, Self::Month];
+
+    /// As the file and the line say it.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Day => "1d",
+            Self::Week => "7d",
+            Self::Month => "30d",
+        }
+    }
+
+    pub fn of(word: &str) -> Result<Self, BadLine> {
+        Self::ALL
+            .into_iter()
+            .find(|k| k.word() == word)
+            .ok_or_else(|| BadLine(format!("keep {word:?}: session, 1d, 7d or 30d")))
+    }
+
+    /// How many days an item is kept; none: as long as the session.
+    pub const fn days(self) -> Option<i64> {
+        match self {
+            Self::Session => None,
+            Self::Day => Some(1),
+            Self::Week => Some(7),
+            Self::Month => Some(30),
+        }
+    }
+}
+
+/// What the clipboard's history keeps (`[clipboard]`, 6.17): whether it
+/// keeps anything new (off, only the pinned items show, the others erased
+/// a moment later), and for how long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipRules {
+    pub history: bool,
+    pub keep: ClipKeep,
+}
+
+impl Default for ClipRules {
+    fn default() -> Self {
+        Self {
+            history: true,
+            keep: ClipKeep::Month,
+        }
+    }
+}
 
 /// The application the clipboard's history says a capture was copied from
 /// (5.8b): the history names it "Capture d'écran" / "Screenshot".
@@ -1535,6 +1609,10 @@ pub enum ToCompositor {
     /// `Ctrl+V` (`Ctrl+Shift+V` in a terminal). Written `clip paste KIND
     /// DATA` or `clip copy KIND DATA`, the data in base64.
     Clip { paste: bool, clip: Clip },
+    /// How many items the clipboard's history holds, and how many of them
+    /// are pinned (6.17): sent as the shell connects and when they change,
+    /// for the Settings' page. Written `clipboard-count ITEMS PINNED`.
+    ClipboardCount { items: u32, pinned: u32 },
     /// An emoji chosen in the picker or the launcher (5.7): it goes into
     /// the window that had the keyboard, through its text input when it
     /// has one, else pasted, the clipboard given back after. With `keep`
@@ -1761,6 +1839,9 @@ impl fmt::Display for ToShell {
                 screen_name(&peek.name)
             ),
             Self::NoPeek => f.write_str("no-peek"),
+            Self::AgentPandas(pandas) => {
+                write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
+            }
             Self::Focus(output) => write!(f, "focus {output}"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
@@ -1773,6 +1854,13 @@ impl fmt::Display for ToShell {
                 clip.write(f)
             }
             Self::Clipboard { output } => write!(f, "clipboard {output}"),
+            Self::ClipboardRules(rules) => write!(
+                f,
+                "clipboard-rules {} {}",
+                if rules.history { "on" } else { "off" },
+                rules.keep.word()
+            ),
+            Self::ClipboardClear => f.write_str("clipboard-clear"),
             Self::Emoji {
                 output,
                 scale,
@@ -2105,6 +2193,7 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("agent-rows") => Ok(Self::AgentPandas(flag(words.next(), "pandas", "dots")?)),
             Some("copied") => Ok(Self::Copied {
                 app: match word(&mut words, "application")? {
                     "-" => String::new(),
@@ -2121,6 +2210,11 @@ impl FromStr for ToShell {
             Some("clipboard") => Ok(Self::Clipboard {
                 output: word(&mut words, "output")?.to_owned(),
             }),
+            Some("clipboard-rules") => Ok(Self::ClipboardRules(ClipRules {
+                history: flag(words.next(), "on", "off")?,
+                keep: ClipKeep::of(word(&mut words, "keep")?)?,
+            })),
+            Some("clipboard-clear") => Ok(Self::ClipboardClear),
             Some("capture") => CaptureBar::read(&mut words).map(Self::Capture),
             Some("capture-end") => Ok(Self::CaptureEnd),
             Some("recording") => RecordingShown::read(&mut words).map(Self::Recording),
@@ -2357,6 +2451,9 @@ impl fmt::Display for ToCompositor {
                 write!(f, "clip {} ", if *paste { "paste" } else { "copy" })?;
                 clip.write(f)
             }
+            Self::ClipboardCount { items, pinned } => {
+                write!(f, "clipboard-count {items} {pinned}")
+            }
             Self::Emoji { keep, text } => {
                 write!(f, "emoji {} {text}", if *keep { "keep" } else { "insert" })
             }
@@ -2455,6 +2552,17 @@ impl FromStr for ToCompositor {
                 paste: flag(words.next(), "paste", "copy")?,
                 clip: Clip::read(&mut words)?,
             }),
+            Some("clipboard-count") => {
+                let mut count = |what| {
+                    word(&mut words, what)?
+                        .parse::<u32>()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::ClipboardCount {
+                    items: count("items")?,
+                    pinned: count("pinned")?,
+                })
+            }
             Some("emoji") => {
                 let keep = flag(words.next(), "keep", "insert")?;
                 let text = word(&mut words, "emoji")?;
@@ -2601,6 +2709,12 @@ mod tests {
             ToShell::Clipboard {
                 output: "eDP-1".into(),
             },
+            ToShell::ClipboardRules(ClipRules::default()),
+            ToShell::ClipboardRules(ClipRules {
+                history: false,
+                keep: ClipKeep::Session,
+            }),
+            ToShell::ClipboardClear,
             ToShell::SessionMenu {
                 output: "eDP-1".into(),
             },
@@ -2995,6 +3109,10 @@ mod tests {
                     data: vec![0x89, b'P', b'N', b'G', 0, 255],
                 },
             },
+            ToCompositor::ClipboardCount {
+                items: 143,
+                pinned: 3,
+            },
             ToCompositor::Raise {
                 pid: 4242,
                 app: "org.mozilla.firefox".into(),
@@ -3071,6 +3189,8 @@ mod tests {
             "recent eDP-1 12 x",
             "bar-windows",
             "bar-windows maybe",
+            "agent-rows",
+            "agent-rows panda",
             "bar-side",
             "bar-side up",
             "day slept",
@@ -3177,6 +3297,8 @@ mod tests {
                 name: "api-paiements".into(),
             }),
             ToShell::NoPeek,
+            ToShell::AgentPandas(true),
+            ToShell::AgentPandas(false),
             ToShell::Launcher {
                 output: "eDP-1".into(),
                 scale: 240,

@@ -15,6 +15,7 @@ use iced::{
 
 use super::{
     App, Focus, Message, Page, SEARCH, ToastAction,
+    keys_in::{KeysIn, Pressed},
     places::PAGE,
     style::{self, *},
 };
@@ -55,7 +56,11 @@ impl App {
         if let Some(preview) = self.bar_preview_layer() {
             layers.push(preview);
         }
-        if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
+        if let Some(menu) = self
+            .menu_list()
+            .or_else(|| self.sound_menu_list())
+            .or_else(|| self.bluetooth_menu_list())
+        {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .on_press(Message::CloseMenu)
@@ -92,20 +97,53 @@ impl App {
         if let Some(menu) = self.rules_menu_list() {
             layers.push(menu);
         }
+        // "+ Ajouter"'s (6.17).
+        if self.page == Page::Section(SectionId::Captures)
+            && let Some(menu) = self.captures_menu_list()
+        {
+            layers.push(menu);
+        }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
         }
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
         }
+        // The Agents page's consent sheet (6.16).
+        if let Some(sheet) = self.agents_sheet() {
+            layers.push(sheet);
+        }
+        // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
+        if let Some(sheet) = self.bluetooth_sheet() {
+            layers.push(sheet);
+        }
         // The time zone picker (6.11).
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        // The Applications page's menu and sheet (6.15).
+        if let Some(menu) = self.apps_menu() {
+            layers.push(menu);
+        }
+        if let Some(sheet) = self.apps_sheet() {
+            layers.push(sheet);
+        }
+        let window = stack(layers).width(Length::Fill).height(Length::Fill);
+        // Its keys, in their order among the widgets' messages (#669).
+        KeysIn::new(
+            window,
+            |pressed: Pressed| Message::Key {
+                key: pressed.key,
+                physical: pressed.physical,
+                modifiers: pressed.modifiers,
+                text: pressed.text,
+                captured: pressed.captured,
+            },
+            // The modifiers held while a shortcut is recorded (6.8).
+            |mods| Message::Keys(super::keyboard_page::Msg::Mods(mods)),
+            self.ctrl_f_searches().then_some(SEARCH),
+        )
+        .into()
     }
 
     // --- The sidebar ------------------------------------------------------------------
@@ -426,6 +464,10 @@ impl App {
                 crate::theme::ink(rgb(0xF5B44A)),
                 w("À confirmer", "To confirm"),
             ),
+            // The clipboard's history cleared (6.17): said, then saved again.
+            Some(FileState::Reads) | None if self.captures_cleared() => {
+                (ACCENT.get(), w("Effacé", "Cleared"))
+            }
             Some(FileState::Reads) | None => (ACCENT.get(), w("Enregistré", "Saved")),
             Some(FileState::Broken { .. }) => (ORANGE.get(), w("Lecture seule", "Read-only")),
             Some(FileState::NoFile) => (ORANGE.get(), w("Aucun fichier", "No file")),
@@ -487,6 +529,8 @@ impl App {
         .height(Length::Fill)
         .width(Length::Fill)
         .style(thin);
+        // Every wheel counted once the page has had it (#660).
+        let scrolled = super::wheels::Wheels::new(scrolled, Message::Wheeled);
         container(column![header, scrolled])
             .width(Length::Fill)
             .height(Length::Fill)
@@ -781,6 +825,7 @@ impl App {
                 }
             }
             SectionId::Sound => self.sound_card(),
+            SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
@@ -822,17 +867,29 @@ impl App {
         if id == SectionId::Bar {
             return self.bar_page(page);
         }
+        if id == SectionId::Bluetooth {
+            return self.bluetooth_page(page);
+        }
         if id == SectionId::DateTime {
             return self.time_page(page);
         }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
         }
+        if id == SectionId::Apps {
+            return self.apps_page(page);
+        }
+        if id == SectionId::Captures {
+            return self.captures_page(page);
+        }
         if id == SectionId::Network {
             return self.network_page(page);
         }
         if id == SectionId::Power {
             return self.power_page(page);
+        }
+        if id == SectionId::Agents {
+            return self.agents_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -933,7 +990,11 @@ impl App {
         let slot = Slot::of(setting, self.source);
         // A row no device plugged can take is drawn at 45 % (6.12).
         let not_here = self.unavailable(setting);
-        let ink = if not_here.is_some() || self.desktops_inert(setting) {
+        let ink = if not_here.is_some()
+            || self.desktops_inert(setting)
+            || self.agents_inert(setting)
+            || self.captures_inert(setting)
+        {
             INERT
         } else {
             1.0
@@ -943,7 +1004,11 @@ impl App {
             .font(SEMIBOLD)
             .color(fade(TEXT.get(), ink));
         // A key new with its page (6.4's side): "Nouveau" beside its name.
-        let name: El<'_> = match self.bar_chip(setting).or_else(|| self.mouse_chip(setting)) {
+        let chip = self
+            .bar_chip(setting)
+            .or_else(|| self.captures_new(setting).then(|| self.new_chip()))
+            .or_else(|| self.mouse_chip(setting));
+        let name: El<'_> = match chip {
             Some(chip) => row![name, chip]
                 .spacing(8)
                 .align_y(Alignment::Center)
@@ -966,6 +1031,14 @@ impl App {
                 fade(DIM.get(), ink)
             };
             words = words.push(t(line, 12.5, colour));
+        } else if let Some((line, warn)) = self.captures_line(setting.id) {
+            // The page's own (6.17): by the value, or warning in amber.
+            let colour = if warn {
+                fade(PEACH.get(), ink)
+            } else {
+                fade(DIM.get(), ink)
+            };
+            words = words.push(t(line, 12.5, colour));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
             words = words.push(t(why, 12.5, PEACH.get()));
@@ -982,6 +1055,9 @@ impl App {
             words = words.push(extra);
         }
         if let Some(extra) = self.desktops_row_extra(setting) {
+            words = words.push(extra);
+        }
+        if let Some(extra) = self.captures_row_extra(setting) {
             words = words.push(extra);
         }
         let inert = self.inert(setting);
@@ -1750,10 +1826,14 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
+        "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
+        "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
+        "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
+        "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

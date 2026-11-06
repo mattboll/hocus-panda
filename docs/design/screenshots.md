@@ -710,8 +710,43 @@ the 5.10 mockup: the indicator in the bar.
   layouts, the item's time, beat and buttons.
 - **Not built**: a lock screen of the desktop's own (the session leaving
   its terminal stands for it); the cursor's own indicator (none is drawn
-  yet); the WebM setting in the settings' UI (the settings sprint);
+  yet);
   DMA-BUF frames (shared memory, copied off the loop); a recording's
   frame of its own size following a window that changes size; VA-API
   measured on a real GPU (left to the maintainer's machine: tests never
   draw on one).
+
+## 6.17: where captures and recordings go (2026-11-06)
+
+What the Settings' "Captures et presse-papiers" page writes
+(docs/design/settings.md), followed live, read by the next capture or
+recording:
+
+- **`[capture] folder`** and **`[recording] folder`**: empty, the
+  pictures' (videos') folder's own, as before; else an absolute folder, or
+  one from the home (`~/Bureau/Captures`). A folder that is gone (a USB
+  key unplugged) or read-only is passed over for the default one, and not
+  made again: it applies again once it can be written. The toast and the
+  thumbnail say the folder used, its parent's name and its own.
+- **`[capture] format`**: `"png"` or `"jpeg"` (quality 90, what no screen
+  covers black, `.jpg`). The clipboard and the history always get the
+  PNG; the annotator writes the file back in its format, and its
+  annotated JPEG is read back as PNG for the clipboard; a JPEG is dragged
+  as `image/jpeg`.
+- **`[capture] sound`** (on by default): the shutter, at the flash, on a
+  thread: `wpctl get-volume @DEFAULT_AUDIO_SINK@` first (muted, or at 0:
+  nothing), then `pw-play` the sound theme's `screen-capture`
+  (`sounds/freedesktop/stereo/` in the data directories), else a 45 ms
+  click of our own (a 2.4 kHz tone and a little noise, falling away at
+  once, a quarter of full scale). Not for the recording's countdown. A
+  headless compositor plays none.
+- **`[recording] format`**, existing, now followed live too.
+- **Measured headless** (`crates/hocus-compositor/tests/captures_live.rs`,
+  `recording.rs`): a capture in a folder from the home as JPEG, the
+  clipboard's PNG of the same size; a folder gone, then read-only, passed
+  over for the default one, then used once writable; the shutter's fake
+  `wpctl` and `pw-play` asked, then only `wpctl` when muted, then nothing
+  with `sound = false`; a recording after the file says WebM and a folder,
+  VP9 there.
+- **The Settings' page** (6.17, settings.md, "Captures et presse-papiers")
+  writes all of these keys, with the history's (bar.md, 6.17).

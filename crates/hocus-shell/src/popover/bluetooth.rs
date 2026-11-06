@@ -4,8 +4,9 @@
 //! APPAREILS", the paired devices not connected, one row each, a click
 //! connecting one; "AUTOUR", the devices found around while the popover is
 //! open (named ones only), the strongest first, a click pairing one, those
-//! asking for a code greyed "dans les Réglages"; past four, that list
-//! scrolls.
+//! asking for a code say "dans les Réglages": a click opens the Settings'
+//! Bluetooth page, which pairs it (`--pair ADDRESS`); past four, that list
+//! scrolls. Its last row, "Réglages du Bluetooth…", opens that page.
 //!
 //! A row asked for says "Connexion…" or "Association…" with a spinner
 //! until BlueZ is done, the others inert meanwhile; a failure says so
@@ -23,9 +24,9 @@ use std::{
 };
 
 use iced::{
-    Point, Rectangle, Renderer, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
     widget::{
-        canvas::{self, Frame, Geometry},
+        canvas::{self, Frame, Geometry, Path},
         text::Alignment,
     },
     window,
@@ -46,7 +47,7 @@ use crate::{
         model::{Action, Device, Failure, Step},
     },
     levels::{
-        draw::{ACCENT, DIM, FAINT, LINE, MANROPE, TEXT, ring},
+        draw::{ACCENT, DIM, FAINT, LINE, MANROPE, TEXT, ring, stroke},
         model::Words,
     },
 };
@@ -69,6 +70,15 @@ const ERROR_BOTTOM: f32 = 6.0;
 const ERROR_ROOM: f32 = RIGHT - LEFT + 2.0 * ROW_OUT - ERROR_INDENT - ROW_PAD;
 /// A notch of a mouse's wheel scrolls two rows.
 const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
+/// The Settings' link at the bottom, as the sound's (6.5): its row, its
+/// tile.
+const LINK: f32 = 36.0;
+const LINK_TILE: f32 = 24.0;
+const LINK_TILE_RADIUS: f32 = 7.0;
+const LINK_TEXT: f32 = 13.5;
+const LINK_RADIUS: f32 = 8.0;
+const LINK_TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.07);
+const LINK_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
 
 // --- What the popover keeps while it is open -----------------------------------
 
@@ -82,6 +92,8 @@ enum Target {
     Mine(usize),
     /// A device around's row.
     Near(usize),
+    /// "Réglages du Bluetooth…".
+    Settings,
 }
 
 /// What it keeps between draws and between opening and closing.
@@ -150,7 +162,7 @@ impl Ui {
         self.seen = attempt.id;
         self.failed = match attempt.step {
             // A code asked: the row says "in Settings", nothing failed.
-            Step::Failed(Failure::Code) | Step::Done | Step::Running(_) => None,
+            Step::Failed(Failure::Code | Failure::Stopped) | Step::Done | Step::Running(_) => None,
             Step::Failed(failure) => Some((attempt.path.clone(), failure)),
         };
     }
@@ -234,6 +246,8 @@ struct Layout {
     blocks: Vec<(f32, f32)>,
     mine: Option<Section>,
     nearby: Option<Section>,
+    /// The Settings' link: its divider, its row's top.
+    link: (f32, f32),
     end: f32,
 }
 
@@ -242,7 +256,9 @@ fn error_lines(failure: Failure) -> Vec<String> {
     let words = kit::words();
     let said = match failure {
         Failure::NoAnswer => words.no_answer(),
-        Failure::Pairing | Failure::Code => words.pairing_failed(),
+        Failure::Pairing | Failure::Code | Failure::Cancelled | Failure::Stopped => {
+            words.pairing_failed()
+        }
     };
     kit::wrapped(said, ERROR, ERROR_ROOM)
 }
@@ -328,12 +344,17 @@ impl Layout {
         };
         let mine = on.then(|| section(&bt.paired, f32::INFINITY, &mut next));
         let nearby = on.then(|| section(nearby, LIST, &mut next));
+        // The link, under its divider (the sound's: 45 px).
+        let rule = y + RULE;
+        let top = rule + 1.0 + RULE;
+        y = top + LINK;
         Self {
             switch: bt.adapter,
             note,
             blocks,
             mine,
             nearby,
+            link: (rule, top),
             end: y,
         }
     }
@@ -428,6 +449,7 @@ impl<Message> canvas::Program<Message> for Panel {
             drawn.blocks(&mut frame);
             drawn.mine(&mut frame);
             drawn.nearby_head(&mut frame);
+            drawn.link(&mut frame);
             let mut all = Vec::new();
             if let Some(list) = layout.list() {
                 let mut frame_of_list = Frame::with_bounds(renderer, list.view);
@@ -591,11 +613,22 @@ impl Panel {
                 }
             }
             Some(Target::Near(i)) if !busy => {
-                if let Some(device) = state.nearby.get(i).filter(|d| !d.code) {
-                    ui(|ui| ui.failed = None);
+                let Some(device) = state.nearby.get(i) else {
+                    return;
+                };
+                ui(|ui| ui.failed = None);
+                if device.code {
+                    // A code to show: the Settings pair it, on their page.
+                    super::session::open_settings_with(vec![
+                        "bluetooth".to_owned(),
+                        "--pair".to_owned(),
+                        device.address.clone(),
+                    ]);
+                } else {
                     bluetooth::ask(Ask::Pair(device.path.clone()));
                 }
             }
+            Some(Target::Settings) => super::session::open_settings(Some("bluetooth")),
             _ => {}
         }
     }
@@ -723,33 +756,31 @@ fn shape(target: Target, layout: &Layout, scroll: f32, disconnect: f32) -> Optio
         }
         Target::Mine(i) => layout.mine.as_ref()?.row(i, 0.0)?,
         Target::Near(i) => layout.nearby.as_ref()?.row(i, scroll)?,
+        Target::Settings => Rectangle::new(
+            Point::new(LEFT - ROW_OUT, layout.link.1),
+            Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, LINK),
+        ),
     })
 }
 
 /// What can hold the keyboard, in `Tab`'s order: the switch, each
 /// Disconnect, then the rows that can be acted on (none while something
-/// runs; not those asking a code).
+/// runs), then the Settings' link.
 fn targets(layout: &Layout, bt: &Bluetooth, nearby: &[Device]) -> Vec<Target> {
     let mut order = Vec::new();
     if layout.switch {
         order.push(Target::Switch);
     }
     order.extend((0..layout.blocks.len()).map(Target::Disconnect));
-    if bt.running().is_some() {
-        return order;
+    if bt.running().is_none() {
+        if layout.mine.as_ref().is_some_and(|s| s.list.is_some()) {
+            order.extend((0..bt.paired.len()).map(Target::Mine));
+        }
+        if layout.list().is_some() {
+            order.extend((0..nearby.len()).map(Target::Near));
+        }
     }
-    if layout.mine.as_ref().is_some_and(|s| s.list.is_some()) {
-        order.extend((0..bt.paired.len()).map(Target::Mine));
-    }
-    if layout.list().is_some() {
-        order.extend(
-            nearby
-                .iter()
-                .enumerate()
-                .filter(|(_, d)| !d.code)
-                .map(|(i, _)| Target::Near(i)),
-        );
-    }
+    order.push(Target::Settings);
     order
 }
 
@@ -955,13 +986,9 @@ impl Drawn<'_> {
             name,
             target,
         } = row;
-        let enabled = running.is_none() && !(device.code && !device.paired);
+        let enabled = running.is_none();
         kit::row_fill(f, rect, false, enabled && self.hover(target));
-        let colour = if device.code && !device.paired {
-            FAINT
-        } else {
-            TEXT
-        };
+        let colour = TEXT;
         let middle = rect.center_y();
         let icon = Point::new(rect.x + ROW_PAD, middle - ICON / 2.0);
         kind(f, icon, ICON, device.kind, colour.get());
@@ -1020,9 +1047,70 @@ impl Drawn<'_> {
             Target::Switch => SWITCH.height / 2.0,
             Target::Disconnect(_) => SMALL_RADIUS,
             Target::Mine(_) | Target::Near(_) => ROW_RADIUS,
+            Target::Settings => LINK_RADIUS,
         };
         ring(f, rect, radius);
     }
+
+    /// "Réglages du Bluetooth…": the sliders' glyph in its tile, its
+    /// words, a chevron; lit under the pointer (the sound's, 6.5).
+    fn link(&self, f: &mut Frame) {
+        kit::rule(f, self.layout.link.0);
+        let Some(rect) = self.shape(Target::Settings) else {
+            return;
+        };
+        if self.hover(Target::Settings) {
+            f.fill(&kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
+        }
+        let middle = rect.center_y();
+        let tile = Rectangle::new(
+            Point::new(LEFT, middle - LINK_TILE / 2.0),
+            Size::new(LINK_TILE, LINK_TILE),
+        );
+        f.fill(&kit::rounded(tile, LINK_TILE_RADIUS), LINK_TILE_FILL);
+        let at = Point::new(tile.x + 4.5, tile.y + 4.5);
+        for segment in [
+            [(4.0, 7.0), (13.0, 7.0)],
+            [(17.0, 7.0), (20.0, 7.0)],
+            [(15.0, 4.5), (15.0, 9.5)],
+            [(4.0, 17.0), (7.0, 17.0)],
+            [(11.0, 17.0), (20.0, 17.0)],
+            [(9.0, 14.5), (9.0, 19.5)],
+        ] {
+            lines(f, at, 15.0 / 24.0, 2.2, DIM.get(), &segment);
+        }
+        let mut words = text(
+            self.words().bluetooth_settings().to_owned(),
+            Point::new(LEFT + LINK_TILE + ICON_GAP, middle),
+            LINK_TEXT,
+            TEXT.get(),
+            Alignment::Left,
+        );
+        words.font = kit::MANROPE_SEMIBOLD;
+        f.fill_text(words);
+        lines(
+            f,
+            Point::new(RIGHT - 14.0, middle - 7.0),
+            14.0 / 24.0,
+            2.4,
+            FAINT.get(),
+            &[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)],
+        );
+    }
+}
+
+/// Lines through `points` (SVG units from `at`, `scale` px a unit).
+fn lines(f: &mut Frame, at: Point, scale: f32, width: f32, colour: Color, points: &[(f32, f32)]) {
+    let p = |(x, y): (f32, f32)| Point::new(at.x + x * scale, at.y + y * scale);
+    let path = Path::new(|b| {
+        if let Some((first, rest)) = points.split_first() {
+            b.move_to(p(*first));
+            for point in rest {
+                b.line_to(p(*point));
+            }
+        }
+    });
+    f.stroke(&path, stroke(width * scale, colour));
 }
 
 /// A device's row to draw: where, which, its name as it fits, and what it
@@ -1037,7 +1125,8 @@ struct Row<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bluetooth::model::{Attempt, Kind};
+    use crate::bluetooth::model::Kind;
+    use hocus_bluetooth::Attempt;
 
     fn device(name: &str, paired: bool, connected: bool) -> Device {
         Device {
@@ -1046,8 +1135,7 @@ mod tests {
             kind: Kind::Headphones,
             paired,
             connected,
-            battery: None,
-            code: false,
+            ..Device::default()
         }
     }
 
@@ -1069,8 +1157,8 @@ mod tests {
         let mut ui = Ui::default();
         let mut off = bt();
         off.powered = false;
-        // Off: the header and its line.
-        assert_eq!(Layout::of(&off, &ui, &[]).height(), 90);
+        // Off: the header, its line, and the Settings' link (45 px).
+        assert_eq!(Layout::of(&off, &ui, &[]).height(), 135);
         let on = bt();
         ui.relist(&on);
         let nearby = ui.nearby(&on);
@@ -1116,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_can_be_asked_while_something_runs_nor_a_device_asking_a_code() {
+    fn nothing_can_be_asked_while_something_runs_but_the_settings_link() {
         let mut bt = bt();
         bt.nearby[1].code = true;
         let ui = Ui::default();
@@ -1132,13 +1220,18 @@ mod tests {
                 Target::Near(0)
             ]
         );
-        assert!(!order.contains(&Target::Near(1)));
+        // A device asking a code goes to the Settings: it can be chosen.
+        assert!(order.contains(&Target::Near(1)));
+        assert_eq!(order.last(), Some(&Target::Settings));
         bt.attempt = Some(Attempt {
             id: 1,
             path: bt.paired[0].path.clone(),
             step: Step::Running(Action::Connect),
         });
         let order = targets(&layout, &bt, &bt.nearby);
-        assert_eq!(order, [Target::Switch, Target::Disconnect(0)]);
+        assert_eq!(
+            order,
+            [Target::Switch, Target::Disconnect(0), Target::Settings]
+        );
     }
 }

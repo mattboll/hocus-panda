@@ -147,7 +147,7 @@ struct Kept {
 
 /// A Settings' line.
 #[derive(Debug)]
-struct Session {
+pub(crate) struct Session {
     id: u64,
     to: mpsc::Sender<String>,
 }
@@ -183,7 +183,7 @@ pub struct Displays {
     trial: Option<Trial>,
     kept: Option<Kept>,
     next_trial: u64,
-    sessions: Vec<Session>,
+    pub(crate) sessions: Vec<Session>,
     timer: Option<RegistrationToken>,
     /// The file's places were refused (overlapping, or a screen apart).
     places_refused: bool,
@@ -477,6 +477,13 @@ impl State {
                 let counts = self.desktop_counts();
                 let _ = to.send(Self::desktops_line(counts));
                 self.displays.desktops_told = Some(counts);
+                // The clipboard's history and the recording (6.17).
+                if let Some((items, pinned)) = self.clipboard.count {
+                    let _ = to.send(crate::clipboard::clipboard_count_line(items, pinned));
+                }
+                let _ = to.send(self.recording_line());
+                // The agents' tools (6.16).
+                let _ = to.send(self.agents_settings_opened());
                 self.displays.sessions.push(Session { id: session, to });
             }
             FromSettings::Closed { session } => {
@@ -520,6 +527,36 @@ impl State {
             // forgotten.
             (Some("bar-auto"), Some(name), None) => {
                 self.bar_auto(name);
+                None
+            }
+            // The Agents page's tools (6.16): plugged in or out, herdr
+            // followed or not; the watcher's thread writes, and the line
+            // hears the tools again.
+            (Some(word @ ("agent-plug" | "agent-unplug")), Some(tool), None) => {
+                match crate::agents::tool(tool) {
+                    Some(tool) => {
+                        let ask = if word == "agent-plug" {
+                            hocus_agents::watch::Ask::Plug(tool)
+                        } else {
+                            hocus_agents::watch::Ask::Unplug(tool)
+                        };
+                        self.agent_tools_asked(ask);
+                        None
+                    }
+                    None => Some(format!("no tool {tool}")),
+                }
+            }
+            (Some("agent-follow"), Some("herdr"), None) => {
+                self.agent_tools_asked(hocus_agents::watch::Ask::FollowHerdr);
+                None
+            }
+            (Some("agent-unfollow"), Some("herdr"), None) => {
+                self.agent_tools_asked(hocus_agents::watch::Ask::UnfollowHerdr);
+                None
+            }
+            // "Effacer l'historique" (6.17).
+            (Some("clipboard-clear"), None, None) => {
+                self.clipboard_clear();
                 None
             }
             // A desktop taken out, or put back with its windows (6.14,
@@ -592,7 +629,7 @@ impl State {
     }
 
     /// `line` to the Settings' line `session`, or to all of them.
-    fn displays_send(&mut self, session: Option<u64>, line: &str) {
+    pub(crate) fn displays_send(&mut self, session: Option<u64>, line: &str) {
         self.displays.sessions.retain(|s| {
             if session.is_some_and(|id| id != s.id) {
                 return true;

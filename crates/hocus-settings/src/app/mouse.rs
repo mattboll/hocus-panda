@@ -885,28 +885,7 @@ impl App {
 
     /// "Nouveau" beside the four-finger row's name.
     pub(super) fn mouse_chip(&self, setting: &Setting) -> Option<El<'_>> {
-        if setting.id != model::SWIPE_LAUNCHER {
-            return None;
-        }
-        Some(
-            container(
-                t(
-                    w("Nouveau", "New").get(self.lang).to_owned(),
-                    10.5,
-                    BLUE.get(),
-                )
-                .font(BOLD),
-            )
-            .padding([1, 6])
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(crate::theme::ink(rgba(
-                    143, 179, 255, 0.16,
-                )))),
-                border: border(5.0, 0.0, Color::TRANSPARENT),
-                ..container::Style::default()
-            })
-            .into(),
-        )
+        (setting.id == model::SWIPE_LAUNCHER).then(|| self.new_chip())
     }
 }
 

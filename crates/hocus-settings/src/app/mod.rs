@@ -10,12 +10,17 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod agents_page;
 mod appearance_page;
+mod applications;
 mod bar_page;
+mod bluetooth;
+mod captures_page;
 mod desktops_page;
 mod desktops_rules;
 mod desktops_trial;
 mod keyboard_page;
+mod keys_in;
 mod mouse;
 mod network;
 mod places;
@@ -26,6 +31,7 @@ mod style;
 mod time;
 mod view;
 mod wallpaper_page;
+mod wheels;
 
 use std::{
     collections::BTreeMap,
@@ -42,6 +48,7 @@ use iced::{
     window,
 };
 
+pub use bluetooth::stop as stop_bluetooth;
 pub use places::Places;
 
 use crate::{
@@ -69,6 +76,9 @@ const SLIDER_REST: Duration = Duration::from_millis(450);
 const TOAST_IN: Duration = Duration::from_millis(160);
 const MENU_IN: Duration = Duration::from_millis(140);
 const KNOB: Duration = Duration::from_millis(160);
+/// Collections of the places in a row that may disagree before they are
+/// said anyway ([`App::placed`]).
+const UNSETTLED: u8 = 4;
 /// How long a closing window waits for the writes it asked before it
 /// goes anyway (a file on a disk that hangs).
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
@@ -121,6 +131,8 @@ pub struct Start {
     pub lang: Lang,
     pub places: worker::Places,
     pub section: Option<SectionId>,
+    /// A Bluetooth device to pair on its page, by its address.
+    pub pair: Option<String>,
     /// A network whose sheet opens once it is around (`--join`, 6.6).
     pub join: Option<String>,
     pub user: String,
@@ -218,12 +230,19 @@ enum Write {
 enum Undo {
     File(Change),
     Sound(sound::Choice),
+    /// Bluetooth turned off on its page (in BlueZ).
+    Bluetooth(bluetooth::Choice),
     /// A time zone chosen (in timedated, 6.11).
     Time(time::Choice),
     /// A change of the Réseau page's (in NetworkManager, rfkill).
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
     Power(power_page::ModeChoice),
+    /// A tool plugged in or out, herdr followed or not (6.16).
+    Agents(agents_page::Choice),
+    /// A default application or a start-up one (mimeapps.list, autostart,
+    /// 6.15).
+    Apps(applications::Choice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -318,6 +337,8 @@ pub enum Message {
     Rescaled(f32),
     Placed(Places),
     Scrolled,
+    /// A wheel the window has taken, the page scrolled by it or not.
+    Wheeled,
     /// The mice and touchpads page's (6.12).
     Mouse(mouse::Msg),
     /// The keyboard's page and its shortcuts' (6.8).
@@ -326,14 +347,22 @@ pub enum Message {
     Wallpaper(wallpaper_page::Msg),
     /// The bar's page (6.4).
     Bar(bar_page::Msg),
+    /// The Bluetooth page's (6.7).
+    Bluetooth(bluetooth::Msg),
     /// The Date et heure page's (6.11).
     Time(time::Msg),
     /// The desktops and windows' page (6.14).
     Desktops(desktops_page::Msg),
+    /// The screenshots and clipboard's page (6.17).
+    Captures(captures_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
     /// The Énergie page's (6.10).
     Power(power_page::Msg),
+    /// The Agents page's (6.16).
+    Agents(agents_page::Msg),
+    /// The Applications page's (6.15).
+    Apps(applications::Msg),
     Nothing,
 }
 
@@ -390,23 +419,42 @@ pub struct App {
     /// What the log said last.
     said: String,
     said_places: String,
+    /// The wheels the window has taken, said with its places (`wheels`).
+    wheels: u64,
+    /// The serial of the last "shows" line, said with the places collected
+    /// after it (`shown`).
+    shows_serial: u64,
+    /// Collections of the places in a row that did not agree (see
+    /// [`App::placed`]).
+    unsettled: u8,
     /// The Son page: PipeWire as last heard.
     sound: sound::Sound,
     /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
     wallpaper: wallpaper_page::State,
     /// The bar's page: its preview's motions and clock (6.4).
     bar: bar_page::State,
+    /// The Bluetooth page: BlueZ as last heard (6.7).
+    bluetooth: bluetooth::State,
     /// The Date et heure page: timedated as last heard (6.11).
     time: time::State,
     /// The desktops and windows' page: the compositor's windows, a name
     /// changed, a desktop taken out waiting for it (6.14).
     desktops: desktops_page::State,
+    /// The screenshots and clipboard's page: the history's count, a
+    /// recording under way, "Effacer…" asking (6.17).
+    captures: captures_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
     /// The Énergie page: the battery, the modes and logind as last said
     /// (6.10).
     power: power_page::State,
+    /// The Agents page: the tools as the compositor says them, the
+    /// consent sheet, the preview and the pandas' motions (6.16).
+    agents: agents_page::State,
+    /// The Applications page: what its thread read, its menus and sheet
+    /// (6.15).
+    apps: applications::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -420,10 +468,13 @@ impl App {
         *HEARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
+        let bluetooth = bluetooth::State::start(sender.clone());
         let time = time::State::new(sender.clone());
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
+        let agents = agents_page::State::with(&sender);
+        let apps = applications::State::new(sender.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -494,16 +545,26 @@ impl App {
             keys: keyboard_page::Keys::default(),
             said: String::new(),
             said_places: String::new(),
+            wheels: 0,
+            shows_serial: 0,
+            unsettled: 0,
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
+            bluetooth,
             time,
             desktops: desktops_page::State::default(),
+            captures: captures_page::State::default(),
             network,
             power,
+            agents,
+            apps,
             fresh: None,
             parity: false,
         };
+        if let Some(address) = start.pair {
+            app.bluetooth_pair_address(address);
+        }
         app.wallpaper_start(to_screens.clone());
         app.screens_open(to_screens);
         if start.section == Some(SectionId::Sound) {
@@ -530,25 +591,10 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             Subscription::run(heard),
-            event::listen_with(|event, status, _| match event {
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key,
-                    physical_key,
-                    modifiers,
-                    text,
-                    ..
-                }) => Some(Message::Key {
-                    key,
-                    physical: physical_key,
-                    modifiers,
-                    text: text.map(|t| t.to_string()),
-                    captured: status == event::Status::Captured,
-                }),
+            // The keys are not heard here but from the window's widgets, in
+            // their order (`keys_in`).
+            event::listen_with(|event, _, _| match event {
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
-                // The modifiers held while a shortcut is recorded (6.8).
-                Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
-                    Some(Message::Keys(keyboard_page::Msg::Mods(mods)))
-                }
                 Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
                 // The test area says which device scrolled (6.12).
                 Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
@@ -568,8 +614,16 @@ impl App {
                 _ => None,
             }),
         ];
+        // The terminal's command let go (6.15).
+        if let Some(pressed) = self.apps_subscription() {
+            subscriptions.push(pressed);
+        }
         if self.moving(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
+        }
+        // A pairing code's countdown, each second while its sheet shows.
+        if self.bluetooth_ticking() {
+            subscriptions.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::Nothing));
         }
         // The Écrans page's drawing: a screen pressed, then following the
         // pointer wherever it goes in the window.
@@ -621,9 +675,14 @@ impl App {
             || self.mouse.moving(now)
             || self.gestures_moving()
             || self.bar_moving(now)
+            || self.bluetooth_moving()
+            || self.bluetooth_menu_moving(now)
             || self.network_moving()
             || self.trial_moving(now)
             || self.rules_moving(now)
+            || self.agents_moving(now)
+            || self.apps_moving(now)
+            || self.captures_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -634,10 +693,12 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after(), self.time_after()]);
+        let task = Task::batch([task, self.bar_after(), self.time_after(), self.apps_after()]);
         self.sound_listen();
+        self.bluetooth_want();
         self.wallpaper_want();
         self.network_visit();
+        self.agents_visit();
         self.network_after_key();
         self.now = Instant::now();
         // Whole frames after a scroll, a toast coming or going, and through
@@ -664,7 +725,7 @@ impl App {
             task
         };
         if place {
-            Task::batch([task, places()])
+            Task::batch([task, places(self.wheels, self.shows_serial)])
         } else {
             task
         }
@@ -712,12 +773,27 @@ impl App {
                     self.keys.adding = None;
                     return Task::none();
                 }
+                // The Agents page's consent sheet takes every key (6.16).
+                if let Some(task) = self.agents_key_first(&key) {
+                    return task;
+                }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
                     return task;
                 }
+                // The Applications page's menus, sheet and field (6.15).
+                if let Some(task) = self.apps_key_first(&key, modifiers) {
+                    return task;
+                }
                 // A menu of the rules: `Esc` closes it.
                 if key.as_ref() == Key::Named(Named::Escape) && self.rules_escape() {
+                    return Task::none();
+                }
+                // "+ Ajouter"'s menu, "Effacer…"'s confirmation (6.17).
+                if key.as_ref() == Key::Named(Named::Escape)
+                    && self.page == Page::Section(SectionId::Captures)
+                    && self.captures_escape()
+                {
                     return Task::none();
                 }
                 // A desktop's name: `Esc` keeps the old one, `Tab` writes.
@@ -761,7 +837,9 @@ impl App {
             Message::Toggle(slot) => {
                 let on = self.value(slot) == Some(Value::Bool(true));
                 self.knobs.insert(slot.setting, Instant::now());
-                self.change(slot, Value::Bool(!on))
+                self.agents_chose(slot, &Value::Bool(!on));
+                let say = self.captures_toggle_toast(slot, !on);
+                self.change_saying(slot, Value::Bool(!on), say)
             }
             Message::Menu(slot) => {
                 if !self.writable() {
@@ -777,11 +855,13 @@ impl App {
             Message::CloseMenu => {
                 self.menu = None;
                 self.sound.menu = None;
+                self.bluetooth.menu = None;
                 Task::none()
             }
             Message::Choose(slot, value) => {
                 self.menu = None;
                 self.bar_chose(slot, &value);
+                self.agents_chose(slot, &value);
                 let say = self.desktops_toast(slot, &value);
                 self.change_saying(slot, value, say)
             }
@@ -838,6 +918,10 @@ impl App {
             Message::Sound(msg) => self.sound_update(msg),
             Message::Screens(msg) => self.screens_update(msg),
             Message::Frame(_) | Message::Scrolled | Message::Nothing => Task::none(),
+            Message::Wheeled => {
+                self.wheels += 1;
+                Task::none()
+            }
             Message::Rescaled(scale) => {
                 self.scale = scale;
                 Task::none()
@@ -846,8 +930,10 @@ impl App {
             Message::Mouse(msg) => self.mouse_update(msg),
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
+            Message::Bluetooth(msg) => self.bluetooth_update(msg),
             Message::Time(msg) => self.time_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
+            Message::Captures(msg) => self.captures_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
                 if let keyboard_page::Msg::Mods(mods) = &msg {
@@ -857,6 +943,8 @@ impl App {
             }
             Message::Network(msg) => self.network_update(msg),
             Message::Power(msg) => self.power_update(msg),
+            Message::Agents(msg) => self.agents_update(msg),
+            Message::Apps(msg) => self.apps_update(msg),
         }
     }
 
@@ -1216,6 +1304,13 @@ impl App {
                 self.toast = None;
                 return self.sound_undo(choice, false);
             }
+            Some(Undo::Bluetooth(_)) => {
+                let Some(Undo::Bluetooth(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.bluetooth_undo(choice, false);
+            }
             Some(Undo::Time(_)) => {
                 let Some(Undo::Time(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1236,6 +1331,20 @@ impl App {
                 };
                 self.toast = None;
                 return self.power_undo(choice, false);
+            }
+            Some(Undo::Agents(_)) => {
+                let Some(Undo::Agents(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.agents_undo(choice, false);
+            }
+            Some(Undo::Apps(_)) => {
+                let Some(Undo::Apps(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.apps_undo(choice, false);
             }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
@@ -1292,6 +1401,12 @@ impl App {
                 };
                 return self.sound_undo(choice, true);
             }
+            Some(Undo::Bluetooth(_)) => {
+                let Some(Undo::Bluetooth(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.bluetooth_undo(choice, true);
+            }
             Some(Undo::Time(_)) => {
                 let Some(Undo::Time(choice)) = self.redo.pop() else {
                     return Task::none();
@@ -1309,6 +1424,18 @@ impl App {
                     return Task::none();
                 };
                 return self.power_undo(choice, true);
+            }
+            Some(Undo::Agents(_)) => {
+                let Some(Undo::Agents(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.agents_undo(choice, true);
+            }
+            Some(Undo::Apps(_)) => {
+                let Some(Undo::Apps(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.apps_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1402,6 +1529,7 @@ impl App {
     fn close_now(&mut self) -> Task<Message> {
         self.life = Life::Closed;
         self.sound.stop();
+        self.bluetooth_close();
         self.window.map_or_else(iced::exit, window::close)
     }
 
@@ -1488,9 +1616,27 @@ impl App {
     }
 
     /// Where things are now: a found row is scrolled to.
+    ///
+    /// Some of what the window draws is placed from these places (the bar's
+    /// preview): until two collections in a row agree, the window is not
+    /// laid out as they say, so they are collected again (a few times at
+    /// most) and said only then, settled (#660).
     fn placed(&mut self, places: Places) -> Task<Message> {
+        let settled = places == self.places;
         self.places = places;
-        self.log_places();
+        let again = if settled || self.unsettled >= UNSETTLED {
+            self.unsettled = 0;
+            self.log_places();
+            Task::none()
+        } else {
+            self.unsettled += 1;
+            self::places(self.wheels, self.shows_serial)
+        };
+        Task::batch([again, self.scroll_to_found()])
+    }
+
+    /// A found row scrolled to the page's middle, once placed.
+    fn scroll_to_found(&mut self) -> Task<Message> {
         let Some(setting) = self.scroll_to.take() else {
             return Task::none();
         };
@@ -1519,6 +1665,10 @@ impl App {
         tracing::info!(section = ?again.section, "launched again: the window comes forward");
         if let Some(section) = again.section.as_deref().and_then(SectionId::from_slug) {
             self.go(Page::Section(section));
+            // From the Bluetooth popover's row of a device with a code.
+            if let Some(address) = again.pair.clone() {
+                self.bluetooth_pair_address(address);
+            }
             // From the sound popover's link: the output in use lights.
             if section == SectionId::Sound {
                 self.light = Some(("sound.output", Instant::now()));
@@ -1554,8 +1704,18 @@ impl App {
         if section == SectionId::Sound {
             return self.sound_stops().into_iter().map(Control::Sound).collect();
         }
+        if section == SectionId::Bluetooth {
+            return self
+                .bluetooth_stops()
+                .into_iter()
+                .map(Control::Bluetooth)
+                .collect();
+        }
         if section == SectionId::DateTime {
             return self.time_stops().into_iter().map(Control::Time).collect();
+        }
+        if section == SectionId::Apps {
+            return self.apps_stops().into_iter().map(Control::Apps).collect();
         }
         if section == SectionId::Keyboard {
             if self.keys.sub {
@@ -1585,6 +1745,12 @@ impl App {
         }
         if section == SectionId::Power {
             return self.power_controls();
+        }
+        if section == SectionId::Agents {
+            return self.agents_controls();
+        }
+        if section == SectionId::Captures {
+            return self.captures_controls();
         }
         if section == SectionId::Network {
             return self
@@ -1629,6 +1795,13 @@ impl App {
         choices.iter().position(|c| c.value == value)
     }
 
+    /// Whether `Ctrl+F` goes to the search now: not while a shortcut is
+    /// recorded, nor while the screens' "Garder ?" or menu take every key
+    /// (as `Message::Key` and [`App::key`] have it).
+    fn ctrl_f_searches(&self) -> bool {
+        self.keys.recording.is_none() && !self.screens_take_keys()
+    }
+
     fn key(
         &mut self,
         key: &Key,
@@ -1641,17 +1814,19 @@ impl App {
         if let Some(task) = self.screens_key_first(key) {
             return task;
         }
+        // The Bluetooth page's sheets, rename field and menu (6.7).
+        if let Some(task) = self.bluetooth_key_first(key) {
+            return task;
+        }
         match key.as_ref() {
-            Key::Character(c) if ctrl && c.eq_ignore_ascii_case("f") => {
+            _ if keys_in::is_ctrl_f(key, modifiers) => {
                 self.focus = Focus::Search;
                 self.menu = None;
-                // Only a query to replace is selected: iced selects after
-                // the keys already received, so a key typed right after
-                // Ctrl+F would be selected and replaced by the next (#637).
-                if self.query.is_empty() {
-                    return operation::focus(SEARCH);
-                }
-                return Task::batch([operation::focus(SEARCH), operation::select_all(SEARCH)]);
+                // The field already has the keyboard, its text selected:
+                // the window's keys gave it as the key came, before the
+                // keys after it (`keys_in`). An operation now would apply
+                // after them: a selection would take them (#637, #669).
+                return Task::none();
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("w") => {
                 return self.close();
@@ -1813,10 +1988,14 @@ impl App {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Desktops(stop) => self.desktops_key(&stop, named),
+            Control::Captures(stop) => self.captures_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
+            Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
+            Control::Agents(stop) => self.agents_key(stop, named),
+            Control::Apps(stop) => self.apps_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1972,6 +2151,7 @@ impl App {
             || self.unavailable(setting).is_some()
             || self.desktops_inert(setting)
             || self.power_inert(setting)
+            || self.agents_inert(setting)
         {
             return true;
         }
@@ -2015,17 +2195,28 @@ impl App {
 
     /// What the window shows, said in the log as JSON when it changes:
     /// tests read it, as screen readers will (#11 of the bar's spec).
+    /// Each line has its `serial`, which the places collected after it
+    /// carry (`shown`): a test reads where to click from places at least as
+    /// recent as what it saw (#660).
     fn log(&mut self) {
-        let shown = view::shown(self);
+        let mut shown = view::shown(self);
         let text = shown.to_string();
         if text != self.said {
-            tracing::info!(target: "hocus_settings::shows", "shows {text}");
+            self.shows_serial += 1;
+            if let Some(fields) = shown.as_object_mut() {
+                fields.insert("serial".to_owned(), self.shows_serial.into());
+            }
+            tracing::info!(target: "hocus_settings::shows", "shows {shown}");
             self.said = text;
         }
     }
 
+    /// Each id's place, `wheels`: how many wheels the window had taken when
+    /// they were read, so that a test knows the page has taken its wheel,
+    /// whether it moved or not, and `shown`: the serial of the "shows" line
+    /// they follow (#660).
     fn log_places(&mut self) {
-        let at: serde_json::Map<String, serde_json::Value> = self
+        let mut at: serde_json::Map<String, serde_json::Value> = self
             .places
             .at
             .iter()
@@ -2042,6 +2233,8 @@ impl App {
                 )
             })
             .collect();
+        at.insert("wheels".to_owned(), self.places.wheels.into());
+        at.insert("shown".to_owned(), self.places.shown.into());
         let text = serde_json::Value::Object(at).to_string();
         if text != self.said_places {
             tracing::debug!(target: "hocus_settings::places", "places {text}");
@@ -2064,14 +2257,22 @@ enum Control {
     Wallpaper(wallpaper_page::Stop),
     /// The bar's page's own (6.4).
     Bar(bar_page::Stop),
+    /// The Bluetooth page's own (6.7).
+    Bluetooth(bluetooth::Stop),
     /// The Date et heure page's own (6.11).
     Time(time::Stop),
     /// The desktops and windows' page's own (6.14).
     Desktops(desktops_page::Stop),
+    /// The screenshots and clipboard's page's own (6.17).
+    Captures(captures_page::Stop),
     /// The network's page's own (6.6).
     Network(network::Stop),
     /// The Énergie page's own (6.10).
     Power(power_page::Stop),
+    /// The Agents page's own (6.16).
+    Agents(agents_page::Stop),
+    /// The Applications page's own (6.15).
+    Apps(applications::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2080,9 +2281,10 @@ enum TryPart {
     Target,
 }
 
-/// The places of what the window draws, after it is laid out.
-fn places() -> Task<Message> {
-    iced::advanced::widget::operate(places::Collect::default()).map(Message::Placed)
+/// The places of what the window draws, after it is laid out, with the
+/// wheels it had taken then and the serial of the last "shows" line.
+fn places(wheels: u64, shown: u64) -> Task<Message> {
+    iced::advanced::widget::operate(places::Collect::after(wheels, shown)).map(Message::Placed)
 }
 
 /// What the worker and second launches say, as messages.

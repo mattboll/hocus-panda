@@ -225,8 +225,8 @@ impl SectionId {
                 Connections,
                 w("Bluetooth", "Bluetooth"),
                 w(
-                    "Appairer un appareil, en oublier un.",
-                    "Pair a device, forget one.",
+                    "Associer un appareil, avec ou sans code ; le connecter, le renommer, l’oublier.",
+                    "Pair a device, with or without a code; connect it, rename it, forget it.",
                 ),
                 Icon::Bluetooth,
                 "6.7",
@@ -247,8 +247,8 @@ impl SectionId {
                 Work,
                 w("Applications", "Applications"),
                 w(
-                    "Les applications par défaut et celles qui démarrent avec la session.",
-                    "The default applications and those that start with the session.",
+                    "Celles qui ouvrent tes liens et tes fichiers, et celles qui démarrent avec la session.",
+                    "Those that open your links and files, and those that start with the session.",
                 ),
                 Icon::Apps,
                 "6.15",
@@ -258,8 +258,8 @@ impl SectionId {
                 Work,
                 w("Agents", "Agents"),
                 w(
-                    "Où lire l’état des agents, quels outils suivre, le halo et les pandas.",
-                    "Where the agents' states are read, which tools to follow, the halo and the pandas.",
+                    "D’où viennent les états de tes agents, quels outils suivre, et comment la barre t’appelle : le halo et les pandas.",
+                    "Where your agents’ states come from, which tools to follow, and how the bar calls you: the halo and the pandas.",
                 ),
                 Icon::Agents,
                 "6.16",
@@ -269,8 +269,8 @@ impl SectionId {
                 Work,
                 w("Captures et presse-papiers", "Screenshots and clipboard"),
                 w(
-                    "Où vont les captures et les enregistrements ; ce que garde le presse-papiers.",
-                    "Where screenshots and recordings go; what the clipboard keeps.",
+                    "Où vont tes captures et tes enregistrements de l’écran, et ce que garde l’historique du presse-papiers.",
+                    "Where your screenshots and screen recordings go, and what the clipboard’s history keeps.",
                 ),
                 Icon::Captures,
                 "6.17",
@@ -351,6 +351,8 @@ pub enum Icon {
     ChevronUp,
     Check,
     Arrow,
+    /// A folder (6.17's path buttons).
+    Folder,
 }
 
 impl Icon {
@@ -409,6 +411,7 @@ impl Icon {
             Self::ChevronUp => "M7 14 L12 9 L17 14",
             Self::Check => "M5 12.5 L10 17 L19 7.5",
             Self::Arrow => "M5 12 H19 M13.5 6.5 L19 12 L13.5 17.5",
+            Self::Folder => "M3.5 6.5 H9.5 L11.5 8.5 H20.5 V18.5 H3.5 Z",
         }
     }
 }
@@ -925,6 +928,9 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
         SectionId::Desktops => crate::desktops::settings(),
+        SectionId::Agents => crate::agents::settings(),
+        SectionId::Apps => crate::applications::settings(),
+        SectionId::Captures => crate::captures::settings(),
         _ => &[],
     }
 }
@@ -949,11 +955,15 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
     match section {
         SectionId::Sound => crate::sound::outside(),
         SectionId::Bar => crate::bar::outside(),
+        SectionId::Bluetooth => crate::bluetooth::outside(),
         SectionId::DateTime => crate::time::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
+        SectionId::Agents => crate::agents::outside(),
+        SectionId::Apps => crate::applications::outside(),
+        SectionId::Captures => crate::captures::outside(),
         _ => &[],
     }
 }

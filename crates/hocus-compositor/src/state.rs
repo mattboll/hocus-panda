@@ -233,6 +233,8 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
     pub programs: Programs,
+    /// The session's start-up applications, once the bar shows (6.15).
+    pub autostart: crate::session::autostart::Autostart,
     /// The bars' places and forms (docs/design/bar.md §2, §3).
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
@@ -345,6 +347,7 @@ impl State {
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
+        let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
         Self::foreign_globals(dh);
 
         Ok(Self {
@@ -417,7 +420,7 @@ impl State {
             redraw: true,
             strips: HashMap::new(),
             going: None,
-            halo: crate::halo::Halo::default(),
+            halo,
             peek: crate::peek::Peeks::default(),
             bubbles: crate::bubbles::Bubbles::default(),
             reminders: crate::reminders::Reminders::default(),
@@ -437,6 +440,7 @@ impl State {
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),
+            autostart: crate::session::autostart::Autostart::default(),
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),

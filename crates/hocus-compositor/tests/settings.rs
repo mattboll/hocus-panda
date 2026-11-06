@@ -21,7 +21,9 @@
 //! place on the screen added.
 
 mod common;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -240,33 +242,13 @@ impl Bed {
     /// `id` scrolled into view, clear of the toast, by the wheel (the
     /// Énergie page is taller than the window, 6.10).
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
-        let window = self.window()?;
-        for _ in 0..20 {
-            let place = self.places_with(id)?[id].clone();
-            let n = |i: usize| place[i].as_f64().unwrap_or_default();
-            let (top, bottom) = (n(1), n(1) + n(3));
-            let notches = if bottom > f64::from(window.height) - 90.0 {
-                2
-            } else if top < 56.0 {
-                -2
-            } else {
-                return Ok(());
-            };
-            self.hp.pointer_move(
-                f64::from(window.x) + 600.0,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.wheel(notches);
-            let log = self.log.clone();
-            let key = id.to_owned();
-            let moved = self.hp.dispatch_until(Duration::from_secs(2), |_| {
-                common::last_json(&log, " places {").is_some_and(|p| p[&key] != place)
-            })?;
-            if !moved {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 600.0,
+            notches: 2,
+            top: 56.0,
+            floor: Floor::Margin(90.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     /// The middle of `id` on the screen.
@@ -455,6 +437,42 @@ fn searching_veille_finds_the_suspend_delay_the_lid_and_the_button() -> anyhow::
     bed.hp.key(KEY_ESC, true);
     bed.hp.key(KEY_ESC, false);
     bed.shows(|s| s["query"] == "")?;
+    Ok(())
+}
+
+/// Keys typed faster than the window reads them (a loaded machine) reach
+/// it together, in one read: `Ctrl+F` selects the query before the letters
+/// typed after it, which replace it, whether the field had the keyboard or
+/// not (#669).
+#[test]
+fn a_word_typed_at_once_after_ctrl_f_replaces_the_query() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.type_text("veille")?;
+    bed.shows(|s| s["query"] == "veille" && s["focus"] == "search")?;
+    let at_once = |bed: &mut Bed, word: &str| -> anyhow::Result<()> {
+        chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+        for c in word.chars() {
+            let code = letter(c).ok_or_else(|| anyhow::anyhow!("no key for {c}"))?;
+            bed.hp.key(code, true);
+            bed.hp.key(code, false);
+        }
+        Ok(())
+    };
+    // The field has the keyboard.
+    at_once(&mut bed, "couleur")?;
+    bed.shows(|s| s["query"] == "couleur")?;
+    at_once(&mut bed, "veille")?;
+    bed.shows(|s| {
+        s["query"] == "veille" && s["results"].as_array().is_some_and(|r| !r.is_empty())
+    })?;
+    // A result opened: the field lets the keyboard go, the query stays.
+    bed.click("result:0")?;
+    bed.shows(|s| s["page"] == "power" && s["query"] == "veille")?;
+    at_once(&mut bed, "couleur")?;
+    bed.shows(|s| s["query"] == "couleur")?;
     Ok(())
 }
 

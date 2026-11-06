@@ -25,7 +25,7 @@ pub mod peek;
 
 use std::sync::{
     Mutex, PoisonError,
-    atomic::{AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, Note, ToolState};
@@ -454,6 +454,24 @@ pub fn minute() {
 pub fn shown_changed() {
     draw::stale();
     popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
+}
+
+/// Whether the rows show the agents' pandas, else a dot of their state's
+/// colour (`[agents] pandas`, 6.16).
+static PANDAS: AtomicBool = AtomicBool::new(true);
+
+pub fn pandas() -> bool {
+    PANDAS.load(Ordering::Relaxed)
+}
+
+/// The compositor says whether the rows show pandas: the group draws
+/// again if that changed.
+pub fn set_pandas(on: bool) {
+    if PANDAS.swap(on, Ordering::Relaxed) != on {
+        let rows = if on { "pandas" } else { "dots" };
+        tracing::debug!(%rows, "the agents' rows show them");
+        shown_changed();
+    }
 }
 
 /// The compositor says the tools.
