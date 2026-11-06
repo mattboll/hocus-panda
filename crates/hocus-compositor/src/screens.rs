@@ -475,7 +475,7 @@ impl State {
     /// Puts `id` on `output`'s desktop `desktop` at `rect` (global), at
     /// once: shown or not as that desktop is, minimised as it was;
     /// `restore`: where it floats again.
-    fn relocate(
+    pub(crate) fn relocate(
         &mut self,
         id: WindowId,
         output: &Output,

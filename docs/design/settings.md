@@ -849,7 +849,7 @@ Settings ask the compositor to suspend the desktop's own shortcuts
 so that the default applies and follows future defaults; a family of
 nine is one folded row that unfolds.
 
-- `src/keyboard.rs` holds the rows and the 64 actions of `shortcuts.rs`
+- `src/keyboard.rs` holds the rows and the 66 actions of `shortcuts.rs`
   (each a setting of its own: the search, the undo and the file's
   watching are 6.1's), `src/keys.rs` the chords as written, shown and
   recorded, `src/xkb.rs` XKB's registry (`evdev.xml`) and its French

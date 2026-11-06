@@ -12,6 +12,12 @@
 //! wakes the desktops' surface, nothing else (a change of their number
 //! resizes it, [`draw`]); the titles wake only an open list
 //! ([`crate::popover::desktop`]), never the tiles.
+//!
+//! With several screens (8.4), a bar on the primary screen alone shows a
+//! row of tiles per screen, its own first: the compositor says which
+//! screens a bar shows (`desk-screens`), with their sizes, and each one's
+//! desktops on their own lines, kept by screen. A tile is then a screen's
+//! (by its row, from 0) and a desktop's.
 
 pub mod draw;
 pub mod icons;
@@ -21,13 +27,78 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
-use hocus_link::{DESKTOPS_NAMESPACE, Desktops, Look, Recent, Titles};
+use hocus_link::{DESKTOPS_NAMESPACE, DeskScreen, Desktops, Look, Recent, Titles};
 
 use crate::popover::{self, Item};
 
 static DESKTOPS: Mutex<Option<HashMap<String, Desktops>>> = Mutex::new(None);
 static TITLES: Mutex<Option<HashMap<String, Titles>>> = Mutex::new(None);
 static RECENT: Mutex<Option<HashMap<String, Recent>>> = Mutex::new(None);
+/// The screens each bar shows a row of tiles for, by the bar's screen.
+static SCREENS: Mutex<Option<HashMap<String, Vec<DeskScreen>>>> = Mutex::new(None);
+
+/// The screens bar `bar` shows the desktops of, in its rows' order: its
+/// own first. Until the compositor says, its own alone, of no known size.
+pub fn screens(bar: &str) -> Vec<DeskScreen> {
+    SCREENS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|s| s.get(bar).cloned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            vec![DeskScreen {
+                output: bar.to_owned(),
+                width: 0,
+                height: 0,
+                built_in: false,
+                inches: 0,
+                number: 0,
+            }]
+        })
+}
+
+/// The screen of bar `bar`'s row `row` (from 0: its own), if there is one.
+pub fn screen_of(bar: &str, row: u8) -> Option<DeskScreen> {
+    screens(bar).into_iter().nth(usize::from(row))
+}
+
+/// The screen of bar `bar`'s row `row`, by name: the bar's own when there
+/// is no such row.
+pub fn output_of(bar: &str, row: u8) -> String {
+    screen_of(bar, row).map_or_else(|| bar.to_owned(), |s| s.output)
+}
+
+/// The compositor says which screens bar `bar` shows: kept, its surface
+/// resized to their rows and drawn again.
+pub fn set_screens(bar: String, said: Vec<DeskScreen>) {
+    SCREENS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(bar.clone(), said);
+    draw::rows_changed(&bar);
+    popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+    list_changed(Some(&bar));
+}
+
+/// The bars that show screen `output`'s desktops.
+fn bars_showing(output: &str) -> Vec<String> {
+    let screens = SCREENS.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut bars: Vec<String> = screens
+        .as_ref()
+        .map(|s| {
+            s.iter()
+                .filter(|(_, rows)| rows.iter().any(|r| r.output == output))
+                .map(|(bar, _)| bar.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if !bars.iter().any(|b| b == output) {
+        bars.push(output.to_owned());
+    }
+    bars
+}
 /// The desktops' names, by position, the same on every screen (6.14).
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -132,7 +203,9 @@ pub fn set(desktops: Desktops) {
             .map(|d| d.count);
     });
     if before != Some(count) {
-        draw::count(&output, usize::from(count));
+        for bar in bars_showing(&output) {
+            draw::rows_changed(&bar);
+        }
     }
     popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
     // The windows over the tiles, if what they list changed (#604).
@@ -164,24 +237,28 @@ pub fn set_recent(recent: Recent) {
     crate::windows::changed();
 }
 
-/// `change` on bar `bar`'s desktops: the list draws again if it shows one
-/// of them and its rows changed.
-fn listed(bar: &str, change: impl FnOnce()) {
-    let open = popover::with(|c| match c.open_on() {
-        Some((on, item @ (Item::Desktop(_) | Item::WindowsMore))) if on == bar => Some(item),
-        _ => None,
-    });
-    let open = open.map(|item| match item {
-        Item::Desktop(index) => usize::from(index),
+/// The screen and the desktop of the list that shows, and its bar.
+fn list_open() -> Option<(String, String, usize)> {
+    popover::with(|c| match c.open_on() {
+        Some((on, Item::Desktop { row, index })) => {
+            Some((on.to_owned(), output_of(on, row), usize::from(index)))
+        }
         // "+ N" shows the current desktop's list (#604).
-        _ => current(bar),
-    });
-    let before = open.map(|index| rows(bar, index));
+        Some((on, Item::WindowsMore)) => Some((on.to_owned(), on.to_owned(), current(on))),
+        _ => None,
+    })
+}
+
+/// `change` on screen `output`'s desktops: the list draws again if it
+/// shows one of them and its rows changed.
+fn listed(output: &str, change: impl FnOnce()) {
+    let open = list_open().filter(|(_, screen, _)| screen == output);
+    let before = open.as_ref().map(|(_, screen, index)| rows(screen, *index));
     change();
-    if let Some(index) = open
-        && before.as_ref() != Some(&rows(bar, index))
+    if let Some((bar, screen, index)) = open
+        && before.as_ref() != Some(&rows(&screen, index))
     {
-        list_changed(Some(bar));
+        list_changed(Some(&bar));
     }
 }
 
@@ -189,7 +266,7 @@ fn listed(bar: &str, change: impl FnOnce()) {
 /// shows, it draws again, to its new size.
 pub fn list_changed(bar: Option<&str>) {
     let effects = popover::with(|c| match c.open_on() {
-        Some((on, Item::Desktop(_) | Item::WindowsMore)) if bar.is_none_or(|b| b == on) => {
+        Some((on, Item::Desktop { .. } | Item::WindowsMore)) if bar.is_none_or(|b| b == on) => {
             let mut effects = c.refit();
             effects.push(popover::Effect::Wake(hocus_link::POPOVER_NAMESPACE));
             effects
@@ -216,15 +293,15 @@ pub struct Row {
     pub minimized: bool,
 }
 
-/// Desktop `index`'s windows on bar `bar`'s screen, front to back, then
-/// its minimised ones, with their titles (their application's id until
-/// the compositor says one).
-pub fn rows(bar: &str, index: usize) -> Vec<Row> {
-    let Some(desktops) = snapshot(bar) else {
+/// Desktop `index`'s windows on screen `output`, front to back, then its
+/// minimised ones, with their titles (their application's id until the
+/// compositor says one).
+pub fn rows(output: &str, index: usize) -> Vec<Row> {
+    let Some(desktops) = snapshot(output) else {
         return Vec::new();
     };
     let titles = TITLES.lock().unwrap_or_else(PoisonError::into_inner);
-    let titles = titles.as_ref().and_then(|t| t.get(bar));
+    let titles = titles.as_ref().and_then(|t| t.get(output));
     rows_of(&desktops, titles, index)
 }
 
@@ -258,6 +335,32 @@ mod tests {
     use hocus_link::DeskWindow;
 
     use super::*;
+
+    #[test]
+    fn a_bars_rows_are_its_screens_its_own_first() {
+        // Until the compositor says, its own screen alone.
+        let own = screens("TEST-0");
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].output, "TEST-0");
+        let screen = |output: &str| DeskScreen {
+            output: output.into(),
+            width: 1920,
+            height: 1080,
+            built_in: false,
+            inches: 0,
+            number: 1,
+        };
+        SCREENS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert_with(HashMap::new)
+            .insert("TEST-1".into(), vec![screen("TEST-1"), screen("TEST-2")]);
+        assert_eq!(output_of("TEST-1", 0), "TEST-1");
+        assert_eq!(output_of("TEST-1", 1), "TEST-2");
+        // A row no longer there: the bar's own.
+        assert_eq!(output_of("TEST-1", 4), "TEST-1");
+        assert_eq!(bars_showing("TEST-2"), ["TEST-1", "TEST-2"]);
+    }
 
     #[test]
     fn a_desktops_list_is_its_windows_front_to_back_with_their_titles() {

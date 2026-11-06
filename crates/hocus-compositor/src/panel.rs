@@ -309,6 +309,8 @@ impl State {
             self.redraw = true;
         }
         self.tell_screens(false);
+        // The rows of desktops the bars show (8.4).
+        self.tell_desk_screens();
         // The primary screen may have changed: the Settings are told.
         self.displays.dirty = true;
         // Locked (7.1): the form may move to another screen; an external

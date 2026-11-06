@@ -701,6 +701,10 @@ impl Shell {
                 desktops::set_recent(recent);
                 Task::none()
             }
+            ToShell::DeskScreens { bar, screens } => {
+                desktops::set_screens(bar, screens);
+                Task::none()
+            }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
                 Task::none()
@@ -1828,7 +1832,7 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Desktop(_) | popover::Item::WindowsMore => {
+            popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
                 canvas(popover::desktop::Panel {
                     id,
                     words: self.words,
@@ -2322,6 +2326,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // them (#604): only their surface draws.
                         Ok(ToShell::Recent(recent)) => {
                             desktops::set_recent(recent);
+                            continue;
+                        }
+                        // The screens a bar shows the desktops of (8.4):
+                        // only their surface draws, resized to their rows.
+                        Ok(ToShell::DeskScreens { bar, screens }) => {
+                            desktops::set_screens(bar, screens);
                             continue;
                         }
                         Ok(ToShell::BarWindows(shown)) => {

@@ -164,6 +164,8 @@ pub struct MoveGrab {
     floating: Option<Rect>,
     /// How far the magnet pulled it at the last motion (§6).
     pull: Pull,
+    /// Where it was when the drag began: its screen, its state, its place.
+    start: Option<crate::desktops::Placed>,
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -301,6 +303,14 @@ impl PointerGrab<State> for MoveGrab {
             // most of the window is; restored, it goes back where the drag
             // began.
             state.snap_from(self.id, zone, self.floating, Some(output));
+        }
+        // Onto another screen: on the desktop it shows (windows.md §12).
+        if let Some(start) = &self.start
+            && let Some(now) = state.output_of(self.id)
+            && now != start.output
+        {
+            let desktop = state.strip(&now).current();
+            state.model.set_desktop(self.id, desktop);
         }
         state.redraw = true;
     }
@@ -638,6 +648,7 @@ impl State {
             rigid: false,
             floating: (hold == Hold::Free).then_some(rect),
             pull: Pull::default(),
+            start: self.placed_now(id),
         };
         self.moving = Some(id);
         self.frame_cursor = Some(CursorIcon::Grabbing);

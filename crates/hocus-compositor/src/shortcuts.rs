@@ -49,6 +49,9 @@ pub enum Action {
     /// Takes the focused window to the desktop on that side of its
     /// screen, going there with it.
     TakeToDesktopBy(i32),
+    /// Sends the focused window to the screen on that side, onto the
+    /// desktop it shows (8.4).
+    MoveToScreen(i32),
     /// The bar's other form, on the screen under the pointer.
     ToggleBar,
     /// Volume, mute or brightness: to the shell, which keeps them.
@@ -250,6 +253,8 @@ shortcuts! {
     take_to_desktop_9: ["Super+Ctrl+Shift+9"] => Action::TakeToDesktop(8),
     take_to_desktop_left: ["Super+Ctrl+Shift+Left"] => Action::TakeToDesktopBy(-1),
     take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
+    move_to_screen_left: ["Super+Alt+Left"] => Action::MoveToScreen(-1),
+    move_to_screen_right: ["Super+Alt+Right"] => Action::MoveToScreen(1),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
     launcher: ["Super+Space"] => Action::Launcher,
     clipboard: ["Super+V"] => Action::Clipboard,
@@ -278,9 +283,23 @@ impl Shortcuts {
         key: Keysym,
         nested: bool,
     ) -> Option<(Action, Chord)> {
+        // Nested, `Super` is already `Alt+Super`: the default
+        // `Super+Alt+←/→` would be `Super+←/→`'s, so the screens have no
+        // default there; one set in the file is the user's.
+        let unset = Self::default();
         self.all().into_iter().find_map(|(mut chord, action)| {
             if nested && matches!(action, Action::SwitchWindows { .. }) && chord.alt {
                 chord.logo = true;
+            }
+            if nested
+                && matches!(action, Action::MoveToScreen(_))
+                && unset
+                    .move_to_screen_left
+                    .iter()
+                    .chain(&unset.move_to_screen_right)
+                    .any(|c| *c == chord)
+            {
+                return None;
             }
             chord.matches(mods, key, nested).then_some((action, chord))
         })
@@ -376,6 +395,7 @@ impl State {
             Action::SendToDesktop(to) => self.send_to_desktop(to, false),
             Action::TakeToDesktop(to) => self.send_to_desktop(to, true),
             Action::TakeToDesktopBy(delta) => self.take_to_desktop_by(delta),
+            Action::MoveToScreen(toward) => self.move_to_screen(toward),
             Action::ToggleBar => {
                 if let Some(output) = self.output_under_pointer() {
                     self.toggle_bar(&output.name());
@@ -538,6 +558,30 @@ mod tests {
         assert_eq!(
             nested(mods(false, false, false, true), Keysym::F4).map(|(a, _)| a),
             Some(Action::Close)
+        );
+        // Super+Alt+arrows send the focused window to the screen beside
+        // (8.4); nested, they are Super+arrows': no default there, one set
+        // in the file is taken.
+        assert_eq!(
+            action(mods(true, false, false, true), Keysym::Right),
+            Some(Action::MoveToScreen(1))
+        );
+        assert_eq!(
+            action(mods(true, false, false, true), Keysym::Left),
+            Some(Action::MoveToScreen(-1))
+        );
+        assert_eq!(
+            nested(mods(true, false, false, true), Keysym::Left).map(|(a, _)| a),
+            Some(Action::Snap(Snap::Half(Side::Start)))
+        );
+        let set = Shortcuts {
+            move_to_screen_right: vec!["Ctrl+Alt+Right".parse().expect("a chord")],
+            ..Shortcuts::default()
+        };
+        assert_eq!(
+            set.action(&mods(false, false, true, true), Keysym::Right, true)
+                .map(|(a, _)| a),
+            Some(Action::MoveToScreen(1))
         );
         // The level keys, alone, nested or not.
         let none = mods(false, false, false, false);

@@ -478,6 +478,15 @@ pub enum ToShell {
     /// changes, at most once a frame. Written `recent`, the screen's name,
     /// then the ids: `recent eDP-1 12 3 13`.
     Recent(Recent),
+    /// The screens whose desktops bar `bar` shows, one row of tiles each
+    /// (8.4): its own first, then the others left to right, then top to
+    /// bottom. Sent as the shell connects and when they change; each one's
+    /// desktops come on its own `desktops` line. Written `desk-screens`,
+    /// the bar's screen, then each screen as [`DeskScreen`] says.
+    DeskScreens {
+        bar: String,
+        screens: Vec<DeskScreen>,
+    },
     /// Whether the bar shows its screen's windows (`[panel] windows`,
     /// #604): sent as the shell connects and when the configuration
     /// changes it. Written `bar-windows shown` or `bar-windows hidden`.
@@ -1210,6 +1219,55 @@ impl Look {
     }
 }
 
+/// A screen whose desktops a bar shows (8.4): its name, its logical
+/// size (its tiles take its shape), and what names it as the Settings'
+/// Écrans page does: whether it is the built-in panel, its diagonal in
+/// inches (0: not known) and its number there. Written with commas:
+/// `DP-1,3440,1440,0,34,2`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeskScreen {
+    pub output: String,
+    pub width: u32,
+    pub height: u32,
+    pub built_in: bool,
+    pub inches: u32,
+    pub number: u32,
+}
+
+impl DeskScreen {
+    fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{},{},{},{},{},{}",
+            self.output,
+            self.width,
+            self.height,
+            u8::from(self.built_in),
+            self.inches,
+            self.number
+        )
+    }
+
+    fn read(word: &str) -> Result<Self, BadLine> {
+        let fields: Vec<&str> = word.split(',').collect();
+        let [output, width, height, built_in, inches, number] = fields[..] else {
+            return Err(BadLine(format!("a screen {word:?}")));
+        };
+        let n = |v: &str| {
+            v.parse::<u32>()
+                .map_err(|e| BadLine(format!("a screen's {v:?}: {e}")))
+        };
+        Ok(Self {
+            output: output.to_owned(),
+            width: n(width)?,
+            height: n(height)?,
+            built_in: flag(Some(built_in), "1", "0")?,
+            inches: n(inches)?,
+            number: n(number)?,
+        })
+    }
+}
+
 /// A screen's windows' titles, by their ids, in [`Desktops::windows`]'
 /// order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1746,6 +1804,14 @@ impl fmt::Display for ToShell {
                 write!(f, "recent {}", recent.output)?;
                 for id in &recent.ids {
                     write!(f, " {id}")?;
+                }
+                Ok(())
+            }
+            Self::DeskScreens { bar, screens } => {
+                write!(f, "desk-screens {bar}")?;
+                for screen in screens {
+                    f.write_str(" ")?;
+                    screen.write(f)?;
                 }
                 Ok(())
             }
@@ -2309,6 +2375,10 @@ impl FromStr for ToShell {
             })),
             Some("bar-windows") => Ok(Self::BarWindows(flag(words.next(), "shown", "hidden")?)),
             Some("bar-side") => Ok(Self::BarSide(word(&mut words, "side")?.parse()?)),
+            Some("desk-screens") => Ok(Self::DeskScreens {
+                bar: word(&mut words, "bar")?.to_owned(),
+                screens: words.map(DeskScreen::read).collect::<Result<_, _>>()?,
+            }),
             Some("bar-groups") => {
                 let order: Vec<BarGroup> = word(&mut words, "order")?
                     .split(',')
@@ -2719,6 +2789,37 @@ mod tests {
                 output: "eDP-1".into(),
             },
         ]
+    }
+
+    #[test]
+    fn the_screens_whose_desktops_a_bar_shows_read_back_as_written() {
+        let screens = ToShell::DeskScreens {
+            bar: "eDP-1".into(),
+            screens: vec![
+                DeskScreen {
+                    output: "eDP-1".into(),
+                    width: 1707,
+                    height: 1067,
+                    built_in: true,
+                    inches: 14,
+                    number: 1,
+                },
+                DeskScreen {
+                    output: "DP-1".into(),
+                    width: 3440,
+                    height: 1440,
+                    built_in: false,
+                    inches: 0,
+                    number: 2,
+                },
+            ],
+        };
+        assert_eq!(
+            screens.to_string(),
+            "desk-screens eDP-1 eDP-1,1707,1067,1,14,1 DP-1,3440,1440,0,0,2"
+        );
+        assert_eq!(screens.to_string().parse::<ToShell>(), Ok(screens));
+        assert!("desk-screens eDP-1 eDP-1,1,2".parse::<ToShell>().is_err());
     }
 
     #[test]

@@ -485,7 +485,7 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Brightness
                             | Item::Battery
                             | Item::Keyboard
-                            | Item::Desktop(_)
+                            | Item::Desktop { .. }
                             | Item::Sources
                             | Item::AnotherTool
                             | Item::Plug(_)

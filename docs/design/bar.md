@@ -312,8 +312,30 @@ group where it is.
 - **Motion**: the sketch follows the windows as they open, close, move and
   resize, and nothing draws at rest; nothing moves in the tiles but the
   ring, from the desktop left to the one shown (none with reduced motion).
-- **Several screens**: a bar shows its own screen's desktops (sprint 8
-  decides the rest).
+- **Several screens** (approved 2026-11-06, issue #420, variant A): each
+  screen keeps its own desktops (windows.md §12). With `[panel] screens =
+  "primary"` (the default) the primary screen's bar shows **one row of
+  tiles per connected screen**: its own first, then the others in the
+  screens' arrangement (left to right, then top to bottom, by their
+  positions). With `"all"`, each bar shows its own screen's row only.
+  **A row is shaped like its screen**: tiles keep the 4-a-row width; their
+  height follows the screen's aspect, 30 px at 16:10 (and narrower) down
+  to 20 px at 21:9 and wider (`30 × 1.6 / aspect`, on a whole pixel). A
+  bar showing one row alone keeps 3.9's 30 px tiles, whatever its
+  screen's shape: there is no other screen to tell it from.
+  No label: the shape and the sketch say which screen. 6 px between a
+  screen's own wrapped rows, 10 px between two screens' rows. A tile's
+  sketch, ring, icons and number are 3.9/3.9b's, from that screen's
+  `desktops` line (icons only in sketches of 12 × 12 px or more, so
+  rarely in 20 px tiles). A click, `Enter` or the wheel on a row switch
+  that row's screen, sliding as with the keys. The list of another
+  screen's tile adds a line under its title saying which screen, as the
+  Settings' Écrans page (6.9) names it: "sur l’écran externe 34 pouces"
+  / "on the 34-inch external screen" (12 px, `text.faint`). Screen
+  readers: "Écran externe 34 pouces, Bureau 2, 1 fenêtre" / "34-inch
+  external screen, Desktop 2, 1 window". A screen plugged in adds its row
+  (the surface grows, layer-shell); one unplugged takes it away (its
+  windows per windows.md §12). At rest nothing draws.
 - **Names** of desktops (`[desktops] names`, 6.14; windows.md §12): a
   tile's name for screen readers is "Travail, M fenêtres", its list's
   title "Travail"; without a name, "Bureau N, M fenêtres" / "Desktop N, M
@@ -368,7 +390,9 @@ the card's place, she is alone with a green "+" badge, and opens Sources.
 The halo and the peek work as in the full form, the peek at her head;
 spacer, the desktops (3.9, variant
 A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
-above the connections' buttons: the current one filled with the accent,
+above the connections' buttons (with several screens, 8.4: one block of
+dots per screen, in the full form's rows' order, 10 px apart, a wider
+screen's dots lower, 18 × 9 at 21:9): the current one filled with the accent,
 those with windows `rgba(255,255,255,0.30)`, the empty ones
 `rgba(255,255,255,0.10)` with a 1 px `rgba(255,255,255,0.12)` ring; a click
 goes to that desktop, the wheel as in the full form; resting 150 ms on a
@@ -4390,3 +4414,32 @@ Issue #450, its second part: what the Settings' Agents page reads and asks
 - **Tests** (`crates/hocus-compositor/tests/settings_agents.rs`, the real
   Settings, the tools in the test's home, a fake herdr): see settings.md.
 
+### 8.4, desktops across several screens (2026-11-06)
+
+What the approved s8b mockup shows for 8.4, variant A (issue #420); §4.4
+and §5 say the rest.
+
+- **The compositor tells** each bar which screens' desktops it shows,
+  `desk-screens BAR` then each screen as `OUTPUT,WIDTH,HEIGHT,BUILT-IN,
+  INCHES,NUMBER` (its logical size for its rows' shape; what names it as
+  the Écrans page does: the built-in panel, its diagonal, its number, 1
+  the built-in panel then by connector), as the shell connects and when
+  the screens come, go, move or resize, or `[panel] screens` changes. It
+  then tells every one of those screens' `desktops`, `titles` and
+  `recent` lines, as 3.9 says for a bar's own screen (at most once a frame
+  of that screen, never at rest).
+- **The shell** keeps the screens by bar and each screen's desktops by
+  screen; a tile is a row's (its screen's, 0 the bar's own) and a
+  desktop's. Its surface is as tall as the screens' rows (`desktops/
+  draw.rs`, `Group`): a 16:10 laptop's row of four and a 21:9 screen's
+  make 30 + 10 + 20 px of tiles. Each row's ring moves alone, from the
+  desktop its screen left to the one it shows.
+- **Not built**: the overview (8.5 A).
+- **Measured headless** (`crates/hocus-compositor/tests/desktops_screens.rs`,
+  the compositor alone): two screens, each switching alone; the primary
+  bar's rows (its own, then the other), one each with `screens = "all"`,
+  a row gone with its screen and back with it; `Super+Alt+→` and `←`
+  (windows.md §12), a snapped window in the same zone, nothing with no
+  screen on that side; a window dragged onto the other screen on the
+  desktop it shows. Unit tests for the rows' shape and heights, the
+  words, the link's line. On the GPU, the screenshots for the maintainer.
