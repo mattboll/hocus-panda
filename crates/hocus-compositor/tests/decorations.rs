@@ -215,6 +215,7 @@ fn pill_over(
     header: u32,
     app_id: &'static str,
     name: &str,
+    settled: impl Fn([f64; 3]) -> bool,
 ) -> anyhow::Result<([f64; 3], [f64; 3])> {
     let mut hp = compositor()?;
     let shows = Shows::KdeDecorated {
@@ -231,11 +232,20 @@ fn pill_over(
     let grip = grip_middle(window);
     hp.pointer_move(grip.0 - 1.0, grip.1);
     hp.pointer_move(grip.0, grip.1);
-    // Shown (120 ms), and what is under it read a frame or two later.
+    // Shown (120 ms), and what is under it read a frame or two later:
+    // as late as a loaded machine makes it, so until the pill takes the
+    // tone `settled` looks for.
     wait(&mut hp, Duration::from_millis(400))?;
     assert_eq!(hp.frame_cursor().as_deref(), Some("grab"));
-    let (w, h, px) = hp.screenshot(0)?;
-    let pill = rgb(&px, w, on_pill(grip));
+    let until = std::time::Instant::now() + WAIT;
+    let (w, h, px, pill) = loop {
+        let (w, h, px) = hp.screenshot(0)?;
+        let pill = rgb(&px, w, on_pill(grip));
+        if settled(pill) || std::time::Instant::now() > until {
+            break (w, h, px, pill);
+        }
+        wait(&mut hp, Duration::from_millis(50))?;
+    };
     // On the pill's row, well clear of it.
     let beside = rgb(&px, w, (grip.0 + 60.0, grip.1));
     if let Some(dir) = std::env::var_os("HOCUS_SHOT") {
@@ -277,7 +287,9 @@ fn save_top(
 
 #[test]
 fn on_a_light_header_the_grips_pill_turns_dark_and_stands_out() -> anyhow::Result<()> {
-    let (pill, header) = pill_over(LIGHT_HEADER, "test.light-header", "light-header")?;
+    let (pill, header) = pill_over(LIGHT_HEADER, "test.light-header", "light-header", |p| {
+        p[0] < 100.0
+    })?;
     assert!(
         header[0] > 200.0,
         "not the light header beside it: {header:?}"
@@ -290,7 +302,9 @@ fn on_a_light_header_the_grips_pill_turns_dark_and_stands_out() -> anyhow::Resul
 
 #[test]
 fn on_a_dark_header_the_grips_pill_stays_light_and_stands_out() -> anyhow::Result<()> {
-    let (pill, header) = pill_over(DARK_HEADER, "test.dark-header", "dark-header")?;
+    let (pill, header) = pill_over(DARK_HEADER, "test.dark-header", "dark-header", |p| {
+        p[0] > 150.0
+    })?;
     assert!(
         header[0] < 80.0,
         "not the dark header beside it: {header:?}"
