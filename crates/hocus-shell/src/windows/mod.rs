@@ -58,7 +58,7 @@ pub const MORE: f32 = 20.0;
 pub const ITEM: f32 = 34.0;
 
 /// A window as the bar lists it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Line {
     /// The compositor's id for it.
     pub id: u64,
@@ -70,6 +70,10 @@ pub struct Line {
     pub focused: bool,
     /// Minimised: greyed, its icon at half.
     pub minimized: bool,
+    /// Kept above the others, on all desktops (#723): a mark each after
+    /// its title.
+    pub above: bool,
+    pub everywhere: bool,
 }
 
 /// A row of the group.
@@ -113,8 +117,41 @@ pub fn lines_of(
                 .unwrap_or_else(|| w.app.clone()),
             focused: w.look == Look::Focused,
             minimized: w.look == Look::Minimized,
+            above: false,
+            everywhere: false,
         })
         .collect()
+}
+
+/// The windows kept above the others and those on all desktops, as the
+/// compositor last said (#723).
+static STATES: Mutex<Option<hocus_link::WindowStates>> = Mutex::new(None);
+
+/// The windows' states changed: their lines show their marks.
+pub fn set_states(states: hocus_link::WindowStates) {
+    *STATES.lock().unwrap_or_else(PoisonError::into_inner) = Some(states);
+    changed_now();
+    // A desktop's list or the mini form's popover shows them too.
+    let open = popover::with(|c| {
+        matches!(
+            c.open_on(),
+            Some((_, Item::Windows | Item::WindowsMore | Item::Desktop(_)))
+        )
+    });
+    if open {
+        popover::send(vec![Effect::Wake(POPOVER_NAMESPACE)]);
+    }
+}
+
+/// Whether window `id` is kept above the others, and on all desktops.
+pub fn marks(id: u64) -> (bool, bool) {
+    STATES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map_or((false, false), |s| {
+            (s.above.contains(&id), s.all_desktops.contains(&id))
+        })
 }
 
 /// Bar `bar`'s screen's current desktop's windows, as [`lines_of`] lists
@@ -125,7 +162,11 @@ pub fn lines(bar: &str) -> Vec<Line> {
     };
     let titles = crate::desktops::titles(bar);
     let recent = crate::desktops::recent(bar);
-    lines_of(&desktops, titles.as_ref(), recent.as_ref())
+    let mut lines = lines_of(&desktops, titles.as_ref(), recent.as_ref());
+    for line in &mut lines {
+        (line.above, line.everywhere) = marks(line.id);
+    }
+    lines
 }
 
 /// The rows `lines` take in `room` px: all of them when they are 3 at
@@ -628,7 +669,10 @@ impl Words {
                         (_, true) => "~",
                         _ => "",
                     };
-                    format!("«{}»{mark}", line.title)
+                    // Its states' marks (#723): above, on all desktops.
+                    let above = if line.above { "^" } else { "" };
+                    let everywhere = if line.everywhere { "∀" } else { "" };
+                    format!("«{}»{mark}{above}{everywhere}", line.title)
                 }
                 Row::More(n) => self.more(*n),
             })
@@ -658,8 +702,7 @@ mod tests {
             id,
             app: String::new(),
             title: format!("w{id}"),
-            focused: false,
-            minimized: false,
+            ..Line::default()
         }
     }
 

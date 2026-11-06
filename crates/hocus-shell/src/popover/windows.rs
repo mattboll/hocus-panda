@@ -175,7 +175,7 @@ impl Panel {
         state.titles = rows
             .iter()
             .map(|row| match row {
-                Row::Window(line) => cut(&line.title, width).0,
+                Row::Window(line) => cut(line, width).0,
                 Row::More(n) => self.words.more(*n),
             })
             .collect();
@@ -242,6 +242,20 @@ impl Panel {
                 }
                 redraw
             }
+            // A right click on a line: its window's menu, in the
+            // popover's place (#723).
+            mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                let (Item::Window(id) | Item::WindowClose(id)) = target? else {
+                    return None;
+                };
+                let bar = state.bar.clone()?;
+                let line = state.rows.iter().find_map(|row| match row {
+                    Row::Window(line) if line.id == id => Some(line.clone()),
+                    _ => None,
+                })?;
+                super::window_menu::ask(&bar, id, None, &line.title, &line.app);
+                redraw
+            }
             _ => None,
         }
     }
@@ -291,8 +305,7 @@ mod tests {
             id,
             app: String::new(),
             title: format!("w{id}"),
-            focused: false,
-            minimized: false,
+            ..Line::default()
         })
     }
 

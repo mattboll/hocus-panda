@@ -493,6 +493,15 @@ impl Panel {
                 }
                 redraw
             }
+            // A right click on a row: its window's menu, in the list's
+            // place (#723).
+            mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                let id = target?;
+                let shown = state.shown.as_ref()?;
+                let row = shown.rows.iter().find(|r| r.id == id)?;
+                super::window_menu::ask(&shown.bar, id, None, &row.title, &row.app);
+                redraw
+            }
             // The wheel or a touchpad over a list that scrolls.
             mouse::Event::WheelScrolled { delta } => {
                 let list = state.list();
