@@ -9,7 +9,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{BTN_LEFT, ClientHandle, Event, Shows, WAIT, compositor, open_showing, wait};
+use common::{BTN_LEFT, ClientHandle, Command, Event, Shows, WAIT, compositor, open_showing, wait};
 use hocus_compositor::{
     Headless,
     model::{Rect, WindowId},
@@ -230,6 +230,7 @@ fn pill_over(
         "the server's mode was not given"
     );
     let grip = grip_middle(window);
+    header_shown(&mut hp, grip, header)?;
     hp.pointer_move(grip.0 - 1.0, grip.1);
     hp.pointer_move(grip.0, grip.1);
     // Shown (120 ms), and what is under it read a frame or two later:
@@ -312,6 +313,79 @@ fn on_a_dark_header_the_grips_pill_stays_light_and_stands_out() -> anyhow::Resul
     assert!(pill[0] > 150.0, "the pill turned dark: {pill:?}");
     let ratio = contrast(pill, header);
     assert!(ratio >= 3.0, "the pill is {ratio:.2}:1 against the header");
+    Ok(())
+}
+
+/// Waits until the window's `header` (ARGB) shows on the grip's row, clear
+/// of the pill: the window opened whole, where it stays. A window still
+/// opening is drawn smaller, its top lower, and the screen's dark
+/// background there passes for a dark pill.
+fn header_shown(hp: &mut Headless, grip: (f64, f64), header: u32) -> anyhow::Result<()> {
+    let want = [(header >> 16) & 0xff, (header >> 8) & 0xff, header & 0xff].map(f64::from);
+    let until = std::time::Instant::now() + WAIT;
+    loop {
+        let (w, _, px) = hp.screenshot(0)?;
+        let beside = rgb(&px, w, (grip.0 + 60.0, grip.1));
+        if beside.iter().zip(want).all(|(a, b)| (a - b).abs() <= 2.0) {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < until,
+            "the header never showed: {beside:?}"
+        );
+        wait(hp, Duration::from_millis(50))?;
+    }
+}
+
+/// The pill's colour once `settled` holds of it, or after [`WAIT`].
+fn pill_until(
+    hp: &mut Headless,
+    grip: (f64, f64),
+    settled: impl Fn([f64; 3]) -> bool,
+) -> anyhow::Result<[f64; 3]> {
+    let until = std::time::Instant::now() + WAIT;
+    loop {
+        let (w, _, px) = hp.screenshot(0)?;
+        let pill = rgb(&px, w, on_pill(grip));
+        if settled(pill) || std::time::Instant::now() > until {
+            return Ok(pill);
+        }
+        wait(hp, Duration::from_millis(50))?;
+    }
+}
+
+/// The pill takes its new tone when what is under it changes once it is
+/// still: then only the tone changes, and it must still be drawn again.
+#[test]
+fn the_grips_pill_turns_dark_when_its_header_turns_light_under_it() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let shows = Shows::KdeDecorated {
+        app_id: "test.header-turns",
+        size: (500, 400),
+        server: true,
+        header: Some(DARK_HEADER),
+    };
+    let (window, client) = open_showing(&mut hp, "test.header-turns", shows)?;
+    assert!(
+        kde_mode(&mut hp, &client)?,
+        "the server's mode was not given"
+    );
+    let grip = grip_middle(window);
+    header_shown(&mut hp, grip, DARK_HEADER)?;
+    hp.pointer_move(grip.0 - 1.0, grip.1);
+    hp.pointer_move(grip.0, grip.1);
+    // Shown whole and light, then still: nothing moves on the screen
+    // any more.
+    let light = pill_until(&mut hp, grip, |p| p[0] > 150.0)?;
+    assert!(light[0] > 150.0, "the pill never showed light: {light:?}");
+    wait(&mut hp, Duration::from_millis(500))?;
+    client.commands.send(Command::Header(LIGHT_HEADER))?;
+    let dark = pill_until(&mut hp, grip, |p| p[0] < 100.0)?;
+    assert!(
+        dark[0] < 100.0,
+        "the pill stayed light over the light header: {dark:?}"
+    );
+    drop(client);
     Ok(())
 }
 

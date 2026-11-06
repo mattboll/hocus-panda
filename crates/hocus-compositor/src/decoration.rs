@@ -330,7 +330,9 @@ pub struct FrameIds {
     pulse: [Id; 8],
     ring: [Id; 8],
     shadow: [Id; 9],
-    grip: Id,
+    /// One for each tone: the pill changing tone is a new element, which
+    /// the damage tracker draws again even once the pill is still.
+    grip: [Id; 2],
 }
 
 impl Default for FrameIds {
@@ -341,7 +343,7 @@ impl Default for FrameIds {
             pulse: std::array::from_fn(|_| Id::new()),
             ring: std::array::from_fn(|_| Id::new()),
             shadow: std::array::from_fn(|_| Id::new()),
-            grip: Id::new(),
+            grip: [Id::new(), Id::new()],
         }
     }
 }
@@ -924,7 +926,7 @@ where
     Placed::new(renderer, &texture, all, dst, alpha)
         .map_err(|err| tracing::warn!(?err, "could not draw a grip"))
         .ok()
-        .map(|e| Keyed::new(e, ids.grip.clone()))
+        .map(|e| Keyed::new(e, ids.grip[tone as usize].clone()))
 }
 
 /// The handle of a seam centred on `centre` (logical, output-local),

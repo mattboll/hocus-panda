@@ -448,6 +448,9 @@ pub enum Command {
     CloseLayer,
     /// Titles its window, without drawing (a terminal's prompt does so).
     Title(&'static str),
+    /// Draws its window again with its header this colour (ARGB), as an
+    /// application turning to a dark theme.
+    Header(u32),
     /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
     ReadClipboard,
     /// Asks for its window to be activated (`xdg_activation_v1`) with this
@@ -868,6 +871,13 @@ fn run_client(
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
+                (Command::Header(colour), Some(window)) => {
+                    client.header = Some(colour);
+                    let surface = window.wl_surface().clone();
+                    let (size, margin) = (client.size, client.margin);
+                    client.draw_framed(&surface, size, margin);
+                }
+                (Command::Header(_), None) => {}
                 (Command::ReadClipboard, _) => client.read_clipboard(),
                 (Command::Activate(token), Some(window)) => {
                     let surface = window.wl_surface().clone();
