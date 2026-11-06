@@ -19,6 +19,8 @@
 //!   compositor's own geometry.
 //! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
+//! - [`bluetooth`]: the Bluetooth page's words and search; BlueZ itself is
+//!   `hocus-bluetooth`'s, as the bar's.
 //! - [`captures`]: where screenshots and recordings go, their formats,
 //!   the shutter, and what the clipboard's history keeps (6.17).
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
@@ -30,6 +32,7 @@ pub mod app;
 pub mod appearance;
 pub mod apps;
 pub mod bar;
+pub mod bluetooth;
 pub mod captures;
 pub mod desktops;
 pub mod devices;

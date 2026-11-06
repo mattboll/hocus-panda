@@ -404,7 +404,11 @@ mod tests {
     fn every_setting_of_the_page_is_found_by_its_words() {
         let ids: Vec<&str> = outside().iter().map(|o| o.id).collect();
         assert_eq!(ids.len(), 9);
-        let casque = crate::search::find("casque", Lang::French);
+        // The Bluetooth page's paired devices answer "casque" too.
+        let casque: Vec<_> = crate::search::find("casque", Lang::French)
+            .into_iter()
+            .filter(|f| f.target.section() == SectionId::Sound)
+            .collect();
         let found: Vec<&str> = casque.iter().map(|f| f.name).collect();
         assert_eq!(found, ["Sortie", "Entrée"], "{casque:?}");
         assert_eq!(casque[0].via.as_deref(), Some("casque"));

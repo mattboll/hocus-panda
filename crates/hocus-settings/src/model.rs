@@ -225,8 +225,8 @@ impl SectionId {
                 Connections,
                 w("Bluetooth", "Bluetooth"),
                 w(
-                    "Appairer un appareil, en oublier un.",
-                    "Pair a device, forget one.",
+                    "Associer un appareil, avec ou sans code ; le connecter, le renommer, l’oublier.",
+                    "Pair a device, with or without a code; connect it, rename it, forget it.",
                 ),
                 Icon::Bluetooth,
                 "6.7",
@@ -947,6 +947,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
     match section {
         SectionId::Sound => crate::sound::outside(),
         SectionId::Bar => crate::bar::outside(),
+        SectionId::Bluetooth => crate::bluetooth::outside(),
         SectionId::DateTime => crate::time::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),

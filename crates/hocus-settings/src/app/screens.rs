@@ -977,6 +977,11 @@ impl App {
         out
     }
 
+    /// Whether the page takes every key first ([`App::screens_key_first`]).
+    pub(super) fn screens_take_keys(&self) -> bool {
+        self.screens.trial.is_some() || self.screens.menu.is_some()
+    }
+
     /// A key the page takes first: the dialog's, a menu's. Whether it did.
     pub(super) fn screens_key_first(
         &mut self,
