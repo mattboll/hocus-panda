@@ -49,8 +49,8 @@ venir".
   `$XDG_RUNTIME_DIR/hocus-settings-<WAYLAND_DISPLAY>`. A second launch
   hands it its section and its activation token (`XDG_ACTIVATION_TOKEN`,
   which the compositor gives the programs it starts for the user) and the
-  network `--join` names (in hexadecimal, a name may hold spaces), then
-  ends. The first opens that section and asks for the focus with the token
+  network `--join` names (in hexadecimal, a name may hold spaces) and the
+  Bluetooth device `--pair` names (its address), then ends. The first opens that section and asks for the focus with the token
   over xdg-activation, on the connection winit drew the window on (winit
   has no focus request on Wayland: `src/activate.rs`, the crate's FFI
   boundary).
@@ -292,6 +292,133 @@ application's menu, mute and slider.
 
 **The home's card** says the output in use and its volume
 ("Haut-parleurs · 62 %").
+
+## Bluetooth (6.7)
+
+Built in parts from 2026-11-05 (issue #407), from the approved mockup
+([variant A](https://claude.ai/artifact/TJuioNUbbBZY96NtB2m5Lx#bluetooth))
+and the spec in the issue's last comment. The maintainer decided on
+2026-11-05: variant A; the computer is visible to other devices only while
+the page is open (no "Visible" switch); forgetting a device asks first;
+the bar's "dans les Réglages" rows open this page and pair there. Built
+in two parts: the switch, the paired devices, the devices around and
+pairing without a code; then the "⋯" menu, the code and PIN sheets and
+the bar's hand-off.
+
+**The page**, under its title and its line ("Associer un appareil, avec ou
+sans code ; le connecter, le renommer, l'oublier."), the words, icons,
+order and battery colours of the bar's popover (bar.md §9):
+
+- **The switch's card**: a 32 px tile (green while on), "Bluetooth", its
+  line "Visible sous le nom « portable-alex » tant que cette page est
+  ouverte." (the adapter's `Alias`), the switch (`Powered`). Turned off:
+  the toast "Bluetooth coupé" with "Annuler", which joins `Ctrl+Z`.
+- **MES APPAREILS**, "4 associés" on the label's right: those connected
+  (the last connected first), then the others by name. Each row: its
+  kind's tile (green while connected), its name (`Alias`), its line
+  ("Connecté", "Connectée" for a mouse, a speaker, a gamepad or a tablet,
+  " · batterie 82 %" from `Battery1`, the battery in `#F7B98A` at 15 % or
+  less; "Pas connecté", " · se connecte seul quand il s'allume" for a
+  trusted mouse, keyboard or gamepad; "Connexion…" with a spinner), and
+  "Connecter" / "Déconnecter". A device that does not answer says the
+  popover's "Il ne répond pas. Vérifie qu'il est allumé et à portée."
+  under its row until the page is left. None: "Aucun appareil associé."
+- **AUTOUR**, "Recherche…" with a spinner on the label's line for the
+  search's first 10 s: the devices around, not paired, named, the
+  strongest first, held in place while the pointer is over them, the
+  keyboard is on them or something runs (newcomers join at the end). Each
+  row: its tile, its name, its kind ("Écouteurs", "Casque", "Enceinte",
+  "Souris", "Clavier", "Manette", "Téléphone", "Tablette", "Ordinateur",
+  else "Appareil"), " · un code sera à vérifier" for a phone, a tablet or
+  a computer, and "Associer": pair, trust, connect (the bar's); meanwhile
+  its line says "Association…" with a spinner and the other rows are
+  inert; paired, it moves to MES APPAREILS, connected. A pairing that
+  fails (or asks a code, until the sheets come) says the popover's
+  "L'association a échoué. Mets l'appareil en mode association et
+  réessaie."; one the device gave up, "L'appareil a annulé
+  l'association."; one the user cancelled says nothing. None: "Aucun
+  nouvel appareil trouvé." The note under it.
+- **The "⋯" menu** of a paired device (6.1's menu, 210 px, while
+  Bluetooth is on): "Renommer…" (the name becomes a 240 px field, selected;
+  `Enter` sets `Alias`, `Esc` lets it go, empty gives back its own name;
+  toast "Renommé : « … »." with "Annuler"), "Se connecter seul" (checked
+  when `Trusted`; toast "« … » se connecte seul." / "… ne se connecte plus
+  seul." with "Annuler"), a divider, "Oublier cet appareil" (`#F7B98A`):
+  the 400 px sheet "Oublier « … » ?", "Annuler" / "Oublier" (`#F2945B`),
+  then `RemoveDevice`, the row goes, toast "« … » oublié." without
+  "Annuler", which `Ctrl+Z` skips.
+- **The sheets of a pairing** (440 px, over a scrim), by what BlueZ asks
+  the page's agent: a number to compare (`RequestConfirmation`: the code
+  in Martian Mono 34 as two groups of three, "Il reste 57 s", "Annuler",
+  "Le code est le même"; the device's kind named: "le téléphone",
+  "l'ordinateur", "la tablette"); a code to type on the device
+  (`DisplayPasskey`: six 36 × 46 cells, those typed lit green, "3 chiffres
+  tapés sur 6", "Annuler", which cancels the pairing; `DisplayPinCode` the
+  same without the count); a PIN or a passkey to give (`RequestPinCode`,
+  `RequestPasskey`: the "Code PIN" field, its hint, "Annuler", "Associer");
+  a device pairing by itself (`RequestAuthorization`: "« … » veut
+  s'associer à cet ordinateur.", "Refuser", "Associer"). `Enter` accepts,
+  `Esc` cancels; BlueZ's `Cancel` closes the sheet. A device that starts
+  the pairing while the page shows reaches the same sheets. Only the
+  countdown draws, each second, while its sheet shows.
+- **PLUS TARD**, inert with the amber chip: "Nom de l'ordinateur" (the
+  adapter's `Alias`) and "Recevoir des fichiers".
+- **Off**: the line "Coupé. Tes appareils restent associés : ils
+  reviennent quand tu le rallumes."; MES APPAREILS at 45 % and inert;
+  AUTOUR not drawn, no search. **Blocked** (`PowerState` "off-blocked",
+  rfkill): the line "Bloqué par l'interrupteur sans fil ou le mode avion."
+  in `#F7B98A`; the switch asks BlueZ, which refuses, and it stays off.
+  **No adapter, or no BlueZ**: the info box "Aucun adaptateur Bluetooth.
+  …", nothing else.
+
+**What lives where.** Nothing of the page is in `config.toml`: BlueZ
+keeps the pairings, the names and the trust; the header keeps
+"Enregistré". Changes from elsewhere (the bar's popover, a device coming)
+show without a toast.
+
+**How it reads and asks.** The crate `hocus-bluetooth` (no smithay, no
+iced), shared with the bar, which moved its BlueZ thread there: on a
+thread of the Settings' own, it reads BlueZ's objects with
+`GetManagedObjects`, then follows `InterfacesAdded`/`Removed`,
+`PropertiesChanged` under `/org/bluez` and BlueZ's owner, nothing polled,
+and sends the window what the page shows when it changes; what the page
+asks goes to that thread, and calls that wait on a device run aside
+(`Connect` 20 s at most, `Pair` 30 s, a minute from its start once a code
+shows, then given up). While the page shows in the open window:
+`StartDiscovery`, the adapter `Pairable` and `Discoverable` (BlueZ's
+`DiscoverableTimeout` left as it is, and `Discoverable` set again when the
+timeout ends it), and the Settings' agent (`org.bluez.Agent1`,
+`KeyboardDisplay`) registered and made BlueZ's default
+(`RequestDefaultAgent`), so that a device pairing by itself reaches the
+page. The agent waits for the user's answer without holding the thread,
+and lets through only the device the page pairs, or one the user
+accepted. Leaving the page or closing the window: `StopDiscovery`,
+`Discoverable` false, `UnregisterAgent`; as the program ends it waits half
+a second at most for them. The bar's agent (`NoInputNoOutput`) stays, not
+the default. A device that never answers the question is refused once its
+minute is over. Without a system bus, the thread says so once; only what
+changed reaches the window.
+
+**From the bar.** The popover's rows "dans les Réglages" (a phone, a
+tablet, a computer, a device whose pairing asked a code) start
+`hocus-settings bluetooth --pair ADDRESS` and close the popover; the page
+opens (or comes forward, `--pair` going with the second launch) and pairs
+that device as soon as BlueZ lists it. The popover's last row, "Réglages
+du Bluetooth…", opens the page.
+
+**The search** finds "Bluetooth" (bt, sans fil), "Mes appareils" (casque,
+écouteurs, souris, clavier, enceinte, manette), "Associer un appareil"
+(appairer, jumeler, ajouter, code, pin), "Oublier un appareil", "Renommer
+un appareil", "Se connecter seul" (the paired devices' card lights) and
+"Visible" (découvrable; the switch's card), in both languages.
+
+**The keyboard**: the switch, then MES APPAREILS and AUTOUR, one `Tab`
+stop each; `↑`/`↓` move the ring, `Enter` or `Space` acts on the row's
+button; on a paired device `Shift+F10` or the menu key opens its menu,
+`F2` renames it, `Delete` asks to forget it.
+
+**The home's card** says "2 appareils connectés", "Aucun appareil
+connecté", "Coupé", or "Aucun adaptateur".
 
 ## Réseau (6.6)
 
@@ -674,16 +801,19 @@ release; switching desktops stays three fingers only; the gesture always
 follows the fingers). The compositor's side is launcher.md's "6.13, as
 built".
 
-- **GESTES DU PAVÉ TACTILE**, after SOURIS, hidden without a touchpad.
-  On its label line's right, "Sur ce pavé : jusqu'à N doigts": the
+- **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
+  mouse group, hidden without a touchpad. On its label line's right,
+  "Sur ce pavé : jusqu'à N doigts": the
   largest of the touchpads' tap finger counts (libinput's
   `config_tap_finger_count()`, said by the compositor as `fingers=N` on
   each device's line of `hocus msg input-devices`).
 - Three rows of 68 px, each with a 64 × 44 finger diagram on its left
-  (a touchpad's outline, white 8 px dots, a dashed green trail): Trois
-  doigts de côté `[touchpad] swipe-desktops`, Quatre doigts vers le haut
-  `[touchpad] swipe-launcher` with its blue "Nouveau", and Ce qui reste
-  aux applications, "Toujours", a note (`Kind::Note`): not a setting,
+  (a touchpad's outline, white 8 px dots, a dashed green trail): three
+  fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
+  four fingers up ("Quatre doigts vers le haut", `[touchpad]
+  swipe-launcher`, with its blue "Nouveau" chip), and what is left to
+  applications ("Ce qui reste aux applications", always "Toujours"), a
+  note (`Kind::Note`): not a setting,
   never focused, never written. Under the card, the line on natural
   scrolling and reduced motion.
 - **The diagrams** move in a 1.8 s loop (the mockup's `side3`, `up4` and
@@ -1206,6 +1336,253 @@ row.
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
 
+## Agents (6.16)
+
+Issue #450, variant A, as its approved spec says it ("Decided
+(2026-11-05)": one menu each for the halo and the peek, a switch for the
+pandas in the rows, a menu for the reminder). Section `agents` (`hocus
+settings agents`), TRAVAIL's third row. The keys are followed live by the
+compositor (bar.md "6.16").
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LES OUTILS SUIVIS ("2 suivis · 3 agents en cours") | Claude Code, Codex, herdr | per tool: its 28 px mark, its state and line, its action | the compositor's watcher (4.0), not the file |
+| | Un autre outil | the command `hocus agent mon-agent waiting` and "Copier" | — |
+| LE HALO ("Les réunions gardent le leur") | Le halo | menu: Pour tout (beside it "attend, bloqué, fini"), Quand un agent t'attend (its button "Quand il t'attend"), Jamais | `[agents] halo` |
+| | Rappeler un agent qui t'attend | menu: Après 2, 5, 10 min, Jamais; at 45 % and inert while the halo is "Jamais" | `[agents] remind` |
+| | Aperçu | a 46 × 118 bar and "Attend · Bloqué · Fini" | — |
+| LES PANDAS ("Ils ne bougent qu'à un changement") | Le panda qui sort de la barre | its panda (58 px) on the left; menu: Quand un agent t'attend ou a fini ("Attend ou a fini"), Quand un agent t'attend, Jamais | `[agents] peek` |
+| | Les pandas dans les lignes des agents | switch; under it three agents as the bar's rows show them, their 48 px pandas or 10 px dots | `[agents] pandas` |
+| | Jamais au repos | "Toujours", static | — |
+
+- **Under the title**: "Le groupe des agents dans la barre, et sa place,
+  se règlent dans La barre ›", which opens 6.4 with its "Les agents" row
+  lit.
+- **The tools** come on the Settings' line (`agent-tools`, a JSON line
+  as the line opens and when they change: each tool and its state,
+  whether herdr is there and declined, whether Codex's hooks were
+  approved, how many agents run). States and actions are 4.0's: Branché
+  ("ses crochets sont dans ~/.claude/settings.json", "Débrancher"),
+  Branché · à approuver (Codex until one of its hooks has run), Trouvé,
+  pas branché ("Brancher"), Refusé ("avec « Ne rien brancher » le 30
+  octobre", "Brancher"), Pas sur cet ordinateur (the row at 40 %, no
+  action), herdr En marche / En marche · pas suivi / Ne tourne pas with
+  "Suivre herdr". A file that does not read (broken JSON or TOML): "… ne
+  se lit pas : il n'est pas touché." in peach, "Brancher" inert. Whether
+  a file reads and when a tool was declined are read on a thread (the
+  tool's file, `$XDG_STATE_HOME/hocuspanda/agents.toml`), as the line
+  changes and as the page opens; the Settings never write them.
+- **Brancher** opens the consent sheet (400 wide, `#1b2130`, the window
+  under it at 60 %): the mark and "Brancher Codex", what it lets the
+  desktop know, "FICHIER MODIFIÉ" and the file, "Une copie de l'original
+  est gardée…", for Codex "Codex te demandera ensuite de les approuver
+  avec /hooks."; "Annuler" and "Brancher" (it has the keyboard; `Tab` and
+  the arrows go from one to the other, `Enter` acts, `Esc` cancels).
+  Nothing is asked before its "Brancher"; then `agent-plug TOOL` on the
+  line, the watcher writes, and the row follows. Toast "Codex branché"
+  with "Annuler" (unplugs). **Débrancher** needs no consent
+  (`agent-unplug TOOL`; "Claude Code débranché", "Annuler" plugs it back
+  without asking). **Suivre herdr** off asks `agent-unfollow herdr`
+  (herdr declined, its agents go), on `agent-follow herdr`. `Ctrl+Z`
+  undoes and redoes all of them.
+- **The preview** plays the state chosen once: the wave down the bar in
+  600 ms (waiting only) as the glow fades in, then the glow stays, drawn
+  still; never with reduced motion (the glow at once). A state the halo
+  menu leaves out shows a plain bar and "Pas de halo pour ça". It writes
+  nothing; `←`/`→` move along it.
+- **The pandas** are shown larger than in the bar, and move only on a
+  change: the three sample pandas hop once (650 ms, one after the other)
+  as the page opens and as the switch turns on; the peek's panda comes up
+  (420 ms) when a choice lets it out, and sleeps at 40 % on "Jamais".
+  Nothing moves with reduced motion; at rest the window draws nothing.
+- **No tool at all**: a dashed card, "Aucun outil d'agent sur cet
+  ordinateur" and its line, then the command.
+- **The search** finds the rows by the spec's words (outils, crochets,
+  brancher, ne rien brancher, herdr, halo, lueur, vague, rappel, panda,
+  peek, bulle, commande, `hocus agent`…) and the keys (`agents.halo`,
+  `remind`, `peek`, `agents.pandas`).
+- **Choices made here (to confirm on the machine)**: Codex is "à
+  approuver" until one of its hooks (not its turn's end) has run since it
+  was plugged in, remembered in `agents.toml` (`codex-approved`); a
+  declined tool's day is remembered there too (`[declined-on]`); the
+  pandas are 48 px in the sample and 58 px for the peek (the spec's 30
+  px, larger as the maintainer asked); the sample of three rows under the
+  switch is the page's own; herdr declined and not running says "pas
+  suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
+  does not list the tools yet; "Enregistré" does not wait for the
+  watcher's answer.
+
+## Applications (6.15)
+
+Issue #449, variant A, every question answered with its recommendation:
+the desktop itself starts the start-up applications once the bar shows
+(no systemd generator); the entries meant for other desktops are hidden
+behind a line. Section `applications` (`hocus settings applications`),
+TRAVAIL's second row. Under the title: "Celles qui ouvrent tes liens et
+tes fichiers, et celles qui démarrent avec la session."
+
+| Group | Row | Control | Written in |
+|---|---|---|---|
+| APPLICATIONS PAR DÉFAUT ("Valent aussi pour les autres applications") | Navigateur web | menu of applications | `mimeapps.list`: `x-scheme-handler/http`, `x-scheme-handler/https`, `text/html`, `application/xhtml+xml` |
+| | Courriel | menu | `x-scheme-handler/mailto` |
+| | Terminal | menu: Automatique, the terminals, Autre commande… | `[programs] terminal` |
+| | Vidéos | menu | `video/mp4`, `video/webm`, `video/x-matroska`, `video/quicktime`, `video/x-msvideo`, `video/mpeg`, `video/ogg` |
+| | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
+| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+
+- **Reading**: a thread of the page's own (`src/applications.rs`),
+  started the first time the page shows, reads the desktop entries as
+  the launcher does (`hocus-xdg`: `NoDisplay`, `Hidden`, `TryExec`
+  honoured), their icons in the user's icon theme (the launcher's lookup,
+  64 px), the defaults, the autostart entries as the session reads them,
+  and follows `mimeapps.list` and the autostart folder (inotify). Nothing
+  touches the disk on the window's thread.
+- **A menu of applications** (200 px): its button shows the
+  application's icon (22 px) and name; the list holds the applications
+  whose entry declares one of the row's types (`MimeType`), by name,
+  then a hint ("Celles qui ouvrent les pages web"). The current choice
+  is the row's first type's, resolved as the specification says
+  (`$XDG_CONFIG_HOME/mimeapps.list`, then `$XDG_CONFIG_DIRS`', then the
+  data directories' `applications/mimeapps.list`; their `[Default
+  Applications]`, then `[Added Associations]`, then `mimeinfo.cache`;
+  else the first application that declares it). When another of its
+  types opens elsewhere, a line under the row says it ("Les vidéos WebM
+  s'ouvrent avec VLC"). Choosing writes every type of the row in the
+  user's `[Default Applications]`, each line in place or added at the
+  group's end, the rest of the file kept, written beside then renamed
+  and read back ("Navigateur web : Chromium", "Annuler"). "Annuler"
+  writes the file back byte for byte when it is as written, else only
+  the row's lines as they were. No application for a row: "Aucune" at
+  45 %, inert, the line in amber ("Aucune application installée n'ouvre
+  les liens « mailto: ».").
+- **The terminal**: "Automatique" (`terminal = ""`: the first of kitty,
+  foot, alacritty, xterm in `PATH`, as the compositor looks; the button
+  shows the one found), the entries with `Categories=TerminalEmulator`
+  (their `Exec` without field codes is written), then "Autre commande…",
+  which turns the control into a 250 px Martian Mono field ("Lancée
+  telle quelle par Super+Entrée."); `Enter`, `Tab` or a click elsewhere
+  writes it once its program is found in `PATH` (looked for on the
+  page's thread), else the line says "Introuvable dans PATH :
+  kitty-nightly" in amber and nothing is written; `Esc` puts it back. A
+  command the file holds that is no entry's shows in that field. The
+  compositor follows `[programs]` live: the next `Super+Return` takes it.
+- **AU DÉMARRAGE DE LA SESSION**: a row per entry of
+  `$XDG_CONFIG_HOME/autostart` and each `$XDG_CONFIG_DIRS/autostart`
+  that runs here (the user's file of an id winning; a hidden one shows,
+  off; those whose `OnlyShowIn`/`NotShowIn` leave Hocuspanda out or whose
+  `TryExec` is missing are not rows), by name: its icon (30 px; a command
+  without an application `>_`), its name, "Installée avec l'application."
+  (with its `Comment` after " · " when 40 characters or fewer) or
+  "Ajoutée par toi." (with its command in Martian Mono when it is no
+  application's), a ✕ (28 px) for the user's own, a switch. Off, an
+  installed entry is the user's copy of it with `Hidden=true`; on again,
+  that copy goes when it holds nothing else (else `Hidden=false`). The
+  user's own: `Hidden=true`, then the key taken out. ✕ removes the
+  user's file ("KeePassXC enlevée du démarrage"; "Annuler" writes it
+  back byte for byte). "Slack au démarrage : non", "Annuler".
+- **+ Ajouter une application**: a sheet over the window (420 px, the
+  menus' surface, radius 14): "Ajouter au démarrage", a search field
+  holding the keyboard over the launcher's applications (those already
+  at start-up left out; every word typed in the name or the id, accents
+  and case aside, those starting with it first), 38 px rows, the first
+  selected, "Annuler" and "Ajouter" (green). Adding copies the
+  application's desktop file into `$XDG_CONFIG_HOME/autostart/ID.desktop`;
+  its row comes last in the group, lit as a search result. `↑`/`↓`
+  move, `Enter` adds, `Esc` closes.
+- **Under the card**: "Elles démarrent une fois la barre affichée, une
+  fois par session. En couper une ne la ferme pas maintenant." and, when
+  some entries are for other desktops only, "3 autres sont prévues pour
+  d'autres bureaux et ne démarrent pas ici · Les voir": they show under
+  the card at 45 %, with no switch ("Prévue pour GNOME.").
+- **The session** starts them (the compositor, `--session` only): see
+  [packaging/README.md](../../packaging/README.md).
+- **Keyboard**: the menus open with `Space`, `Enter` or `Alt+↓`, `↑`/`↓`
+  move, `Enter` chooses, `Esc` closes; a switch's ✕ comes after it in the
+  `Tab` order, and `Delete` on a user's row's switch removes it.
+- **The search**: par défaut, navigateur, firefox, liens, courriel,
+  mailto, terminal, console, vidéos, lecteur, images, photos,
+  visionneuse, ouvrir avec, démarrage, au lancement, session, démarrer
+  (default, browser, links, mail, player, viewer, open with, startup,
+  autostart, login); the keys `programs.terminal` and `mimeapps`.
+- **Choices made here (to confirm on the machine)**: an application
+  without an icon in the theme shows its initial on a colour of its id;
+  the toasts of an undo say "Annulé : Navigateur web : Firefox"; the
+  sheet's matching is by words, not the launcher's fuzzy ranking; a row
+  with nothing chosen yet (applications there, none set) says
+  "Choisir…".
+
+## Captures et presse-papiers (6.17)
+
+Issue #451, variant A, as the issue's spec and its "Decided
+(2026-11-05)" specify it: the shutter on by default, never heard when the
+sound is muted; "Laisser de côté les mots de passe" a switch, amber when
+off; the history turned off erased (but its pinned items) once the
+toast is gone. Every key is followed live (screenshots.md and bar.md,
+6.17). Section `captures` (`hocus settings captures`), TRAVAIL's fourth
+row.
+
+| Group (its note) | Row | Control | Key |
+|---|---|---|---|
+| CAPTURES D'ÉCRAN ("Copiées et enregistrées") | Dossier | the path button (a folder icon, "Images › Captures d'écran"; opens it with `xdg-open`) and "Changer…" (the portal's folder chooser) | `[capture] folder` |
+| | Format | segmented PNG / JPEG | `[capture] format` |
+| | Son de l'obturateur ("Nouveau") | switch | `[capture] sound` |
+| ENREGISTREMENT DE L'ÉCRAN ("Le son et le micro se choisissent à chaque fois") | Dossier | as above, "Vidéos › Enregistrements d'écran" | `[recording] folder` |
+| | Format | segmented MP4 / WebM | `[recording] format` |
+| HISTORIQUE DU PRESSE-PAPIERS ("143 éléments · 3 épinglés", "Vide") | Garder ce que je copie | switch | `[clipboard] history` |
+| | Pendant | menu: Jusqu'à la fin de la session, 1 jour, 7 jours, 30 jours | `[clipboard] keep` |
+| | Laisser de côté les mots de passe | switch, the applications as chips under it | `[clipboard] skip-secrets`, `ignore` |
+| | Effacer l'historique | "Effacer…" | (the compositor's line) |
+
+- **Under the title**: "Impr, Super+Maj+R et Super+V se changent dans
+  Clavier et raccourcis ›" (6.8's row lit). Under the card: "Gardé
+  chiffré sur cet ordinateur ; sa clé est dans le trousseau de ta
+  session.", or "…dans un fichier lisible par toi seul." when the
+  history's key is `clipboard.key`.
+- **A folder**: its line is the next file's name ("« Capture du
+  2026-11-05 à 14-32-05.png »", today's date, the format's extension).
+  "Changer…" asks the portal's `FileChooser.OpenFile` with `directory`,
+  starting in the folder used, on a thread; the folder chosen is written
+  from the home (`~/Bureau/Captures`), "Dossier des captures : Bureau ›
+  Captures", "Annuler". A folder that is gone or read-only: the line in
+  amber, "Ce dossier n'existe plus (clé USB débranchée ?) : les captures
+  vont dans Images › Captures d'écran." ("Ce dossier ne s'écrit pas : …"
+  when read-only), its path at 60 %; the key stays. While a recording is
+  under way (the compositor's line says `{"recording": true}`), the
+  recordings' rows say "Pour le prochain enregistrement".
+- **The formats' lines** follow the value: "Sans perte : net pour du
+  texte et du code." / "Plus léger, pour les photos ; le presse-papiers
+  reçoit toujours du PNG."; "MP4 (H.264 et AAC) : se lit et s'envoie
+  partout." / "WebM (VP9 et Opus) : libre, plus léger, moins lu par les
+  téléphones."
+- **The history off**: its line "Coupé : Super+V ne montre que les
+  épinglés.", the rows under it at 45 %, inert; its toast says what goes,
+  "Historique coupé : 140 éléments effacés" (the count less the pinned),
+  "Annuler" within its 6 s turning it back on before the shell erases
+  anything. The count is the compositor's line's `{"clipboard": {"items",
+  "pinned"}}`, the shell's history as it shows.
+- **Passwords**: the chips (26 high, a 16 px tile with the application's
+  initial, its name): KeePassXC, Bitwarden, 1Password, then the file's
+  `ignore` (by their desktop entries' names, a ✕ each; `Delete` on a
+  focused one), then "+ Ajouter", a menu of the applications installed
+  (6.14's list) not left out yet: "Laissée de côté : Proton Pass",
+  "Retirée des mots de passe : Proton Pass", each with "Annuler". Off:
+  the line in amber, "Coupé : un mot de passe copié sera gardé dans
+  l'historique, chiffré, pendant 30 jours." (the keep chosen), the chips
+  at 45 %.
+- **"Effacer…"** turns in place into "Garder" (ghost) and "Effacer 140
+  éléments" (`rgba(242,84,91,0.12)`, `#FFB3B6`), its line "140 éléments,
+  sauf les 3 épinglés."; `Esc` or "Garder" go back. Confirmed, the
+  compositor's line is asked `clipboard-clear`, and the header says
+  "Effacé" for 4 s; no toast, nothing to undo.
+- **The search** finds the rows by the spec's words and their keys;
+  "Effacer l'historique" is the page's own row.
+- **Choices made here (to confirm on the machine)**: the keep's button
+  says its menu's words ("Jusqu'à la fin de la session"), not "La
+  session"; "+ Ajouter" is a menu of the installed applications (6.15's
+  sheet is not built); the chips' tiles are initials, not the
+  applications' icons; Super+V's "Historique coupé · Réglages" is a line,
+  not a link.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -1359,17 +1736,22 @@ file.
   JSON: the page, the sections, the query and its results, the lit row,
   the toast, the file's state, the banner, each row's value and warning)
   and **where its pieces are** (`hocus_settings::places`, at debug: each
-  id'd piece's place in the window, scrolling counted), as the shell says
-  what it draws. Tests read both; names for screen readers come with the
-  accessibility slice.
+  id'd piece's place in the window, scrolling counted; `wheels`: how
+  many wheels the window had taken when they were read, so that a test
+  scrolling the page knows its wheel was taken, moved or not, before it
+  clicks; and `shown`: the `serial` of the "shows" line they follow, said
+  once two collections agree, so that a test clicks where the window is
+  as it last showed), as the shell says what it draws. Tests read both; names for
+  screen readers come with the accessibility slice.
 
 ## Choices made here (to confirm on the machine)
 
 - The battery's dim in `[power.battery] idle` (6.10, above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet (AccountsService, 6.11).
-- The home's cards say "À venir" for Écrans, Réseau and Bluetooth until
-  their tickets give their state (Son's says its output, 6.5); Énergie's says the battery (or "Sur
+- The home's cards say "À venir" for Écrans and Réseau until their
+  tickets give their state (Son's says its output, 6.5; Bluetooth's how
+  many are connected, 6.7); Énergie's says the battery (or "Sur
   secteur") and the suspend delay; Apparence's "Sombre · français".
 - The keyboard's ring is drawn on the piece's own edge, not 2 px outside
   it; the labels' 0.1 em letter spacing is not drawn (iced has none).
@@ -1399,7 +1781,11 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.7, 6.11's Compte, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.11's Compte, 6.13 to 6.17, Day.1).
+- Bluetooth (6.7): turning Bluetooth on through rfkill while airplane
+  mode blocks it (with the Réseau page's rfkill, 6.6). The window hidden
+  (not closed) still searches and stays visible: the Settings do not know
+  it is hidden yet.
 - Réseau: the 802.1X sheet's anonymous identity and advanced options, a
   form to type a WireGuard tunnel, a secret agent for VPNs that ask at
   each connection (the spec's "later").
@@ -1517,6 +1903,40 @@ offered by its call mode, the page's settings found by their words
 (`hocus-settings`); the sound popover's height and its link's place
 (`hocus-shell`).
 
+`crates/hocus-compositor/tests/settings_bluetooth.rs` (6.7): the same
+window against a BlueZ faked on a private bus (`levels/bluez.rs`, the
+bar's), never the machine's:
+
+- `the_bluetooth_page_lists_paired_devices_and_those_around`
+- `a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect`
+- `pairing_without_a_code_moves_the_device_to_my_devices_connected`
+- `leaving_the_page_stops_the_search_and_hides_the_computer`
+- `off_blocked_and_without_adapter_say_so`
+- `the_keyboard_goes_through_the_lists`
+- `the_home_card_and_the_search_lead_to_the_page`
+- `at_rest_the_page_draws_nothing`
+- `pairing_a_phone_shows_the_code_and_confirms_it`
+- `annuler_on_a_code_refuses_it_and_says_nothing`
+- `pairing_a_keyboard_lights_the_digits_typed`
+- `a_legacy_device_asks_for_a_pin`
+- `a_phone_that_starts_the_pairing_reaches_the_page_while_it_is_open`
+- `the_device_giving_up_closes_the_sheet_and_says_so`
+- `forgetting_asks_then_removes_the_device`
+- `renaming_sets_the_alias_and_annuler_takes_it_back`
+- `connect_automatically_is_its_trust_and_annuler_takes_it_back`
+- `the_popovers_dans_les_reglages_row_opens_the_page_and_pairs` (the shell too)
+- `at_rest_with_a_sheet_closed_the_page_draws_nothing`
+- `screenshots_for_the_pull_request`,
+  `screenshots_of_the_codes_for_the_pull_request` (ignored;
+  `HOCUS_SHOTS=DIR`)
+
+Unit tests of 6.7: the kinds from icons, classes and appearances, the
+bar's row, what is shown of BlueZ's objects on, off and blocked
+(`hocus-bluetooth`); a device's words, the home's card, the page's
+settings found by their words, a second launch's `--pair`
+(`hocus-settings`); the popover's height with its link, its `Tab` order
+with the rows left to the Settings (`hocus-shell`).
+
 `crates/hocus-compositor/tests/settings_network.rs` (6.6): the real
 Settings against a NetworkManager of the test's own on a private system
 bus (`levels/nm.rs`) and radios of their own (`levels/rfkill.rs`, a Unix
@@ -1619,6 +2039,18 @@ the same bed with timedated faked on a D-Bus daemon of the test's own
 - `without_timedated_the_page_says_so`
 - `the_format_link_and_the_search_light_their_rows`
 - `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_applications.rs` (6.15), the same
+bed with applications, a `mimeapps.list` and autostart folders of the
+test's own (`XDG_CONFIG_DIRS` too):
+
+- `choosing_a_browser_writes_its_four_types_in_mimeapps_list_keeping_the_rest`
+- `annuler_puts_mimeapps_list_back_byte_for_byte`
+- `a_row_with_no_application_is_inert_and_says_so`
+- `other_command_writes_programs_terminal_and_super_return_uses_it`
+- `turning_off_an_installed_autostart_entry_writes_a_hidden_copy`
+- `adding_an_application_copies_its_entry_into_autostart`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's
