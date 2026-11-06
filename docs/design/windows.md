@@ -351,8 +351,12 @@ Keyboard:
   each); released past a quarter of a desktop, or on a flick (1.2
   desktops a second), the swipe goes on to the next desktop, otherwise it
   springs back, in the same 320 ms and curve; past the first and the last
-  desktop the strip barely follows. Three fingers going down, and four,
-  are left to applications.
+  desktop the strip barely follows. A three-finger swipe that starts
+  vertical is left to applications for its whole length (6.13: the
+  first 12 units of travel decide, the compositor keeping the events
+  until then); four fingers sideways too, while four fingers up and down
+  open and close the launcher (launcher.md, 6.13). The direction is the
+  fingers', whatever natural scrolling says.
 - **Which desktop shows**: while the strip moves (keys, swipe, a window
   sent), dots at the top centre of the screen show the desktops: 8 px
   high, 6 px apart, 18 px from the top, the current one 22 px wide in the

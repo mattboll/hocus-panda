@@ -563,8 +563,7 @@ kept, off by default; tap to click on by default.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
   côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
   to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
-  (written and read, but the four-finger launcher is 6.13's, #447: not
-  built yet).
+  (the four-finger launcher, 6.13: launcher.md).
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
