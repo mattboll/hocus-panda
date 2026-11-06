@@ -307,10 +307,11 @@ pub fn ask(ask: DayAsk) {
     }
 }
 
-/// The machine resumed: every account read again, and the meetings'
-/// reminders looked at on the wall clock again (Day.6).
+/// The machine resumed: every account read again, the meetings' reminders
+/// (Day.6) and do not disturb's end looked at on the wall clock again.
 pub fn resumed() {
     crate::reminder::resumed();
+    crate::notifications::clock_moved();
     refresh();
 }
 
