@@ -797,9 +797,11 @@ s8a mockup, questions 12 to 15):
   area) when dragged onto a screen where it fits, unless the user resized
   it meanwhile. It is never made smaller than its client's least size.
   Dragged within one screen, nothing changes; a window dropped in a snap
-  zone takes the zone. A screen unplugged, or the keys' move to the
-  screen beside (8.4), carries a window at the same share of the new work
-  area, no larger than it, as above.
+  zone takes the zone. A window sent to another screen (the keys'
+  `move-to-screen-left/right`, 8.4; the radial menu or the bar's; let go
+  on another screen's desktop tile) fits and takes its size back the same
+  way, at the same share of the new work area. A screen unplugged carries
+  its windows no larger than the new work area, as above.
 - **The pointer** (question 14, B): moving past an edge of its screen
   where no screen touches, toward a screen that lies beyond that edge's
   line (screens of different heights side by side), it goes to the
@@ -830,7 +832,9 @@ said once. A 1500×1000 window dropped on the screen at 2 takes its work
 area's size, inside it; dragged back, 1500×1000; shrunk again, resized by
 its right edge, dragged back: the size it was given. The pointer at
 (1290, 1000) moved 30 px left lands at (1260, 799); at (1290, 400), at
-(1260, 400); the outer edges stop it. An X11 window of 400×300 opened on
+(1260, 400); the outer edges stop it. Sent by `Super+Alt+←` and back
+by `Super+Alt+→`, the 1500×1000 window fits the screen at 2's work area,
+then is 1500×1000 again. An X11 window of 400×300 opened on
 the screen at 2 is 400×300 logical, its blue over 800×600 pixels. Its
 screenshots (by hand, `HOCUS_SHOTS=DIR`, the ignored tests
 `straddling_shots` with foot and `x11_shots` with xterm): each screen, the
