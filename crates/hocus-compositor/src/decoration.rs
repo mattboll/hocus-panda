@@ -11,6 +11,8 @@
 
 use std::{cell::RefCell, collections::BTreeMap};
 
+use crate::grip_tone::Tone;
+
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -31,11 +33,10 @@ pub const RADIUS: f64 = 8.0;
 /// The accent (`#6CC287`) and the unfocused rim, white at 18 %.
 pub const ACCENT: [u8; 4] = [0x6C, 0xC2, 0x87, 0xFF];
 pub const RIM: [u8; 4] = [0xFF, 0xFF, 0xFF, 46];
-/// The grip: a pill 44×4, radius 2, light at 75 %, 4 px inside the top
-/// edge (§7).
+/// The grip: a pill 44×4, radius 2, 4 px inside the top edge (§7), light
+/// or dark at 75 % after what is under it (`crate::grip_tone`).
 pub const GRIP_SIZE: (f64, f64) = (44.0, 4.0);
 pub const GRIP_INSET: f64 = 4.0;
-const GRIP_COLOUR: [u8; 4] = [0xEE, 0xF1, 0xF6, 191];
 /// The handle on the seam of a pair (§8): the grip's pill, along
 /// the seam, at its middle.
 pub const HANDLE_LENGTH: f64 = GRIP_SIZE.0;
@@ -364,8 +365,9 @@ pub enum RimKind {
 enum Piece {
     /// A rim of this colour and width (thousandths of a logical pixel).
     Rim([u8; 4], u32),
-    Grip,
-    /// The grip's pill upright, for a seam that runs down.
+    /// The grip's pill, in a tone; the seam's handle, light, lying.
+    Grip(Tone),
+    /// The grip's pill upright, light, for a seam that runs down.
     Handle,
     Preview,
     Box(BoxStyle),
@@ -406,8 +408,8 @@ impl Textures {
         let key = (piece, (scale * 1000.0).round() as u32);
         let draw = || match piece {
             Piece::Rim(rgba, width) => rim_texture(rgba, f64::from(width) / 1000.0, scale),
-            Piece::Grip => pill_texture(GRIP_SIZE, scale),
-            Piece::Handle => pill_texture((GRIP_SIZE.1, GRIP_SIZE.0), scale),
+            Piece::Grip(tone) => pill_texture(GRIP_SIZE, tone, scale),
+            Piece::Handle => pill_texture((GRIP_SIZE.1, GRIP_SIZE.0), Tone::Light, scale),
             Piece::Preview => preview_texture(scale),
             Piece::Box(style) => box_texture(style, scale),
         };
@@ -636,15 +638,15 @@ fn rim_texture(rgba: [u8; 4], width: f64, scale: f64) -> (MemoryRenderBuffer, i3
     (buffer(&pixels, side, side), corner)
 }
 
-/// The grip's pill, drawn whole, `size` logical pixels.
-fn pill_texture(size: (f64, f64), scale: f64) -> (MemoryRenderBuffer, i32) {
+/// The grip's pill in `tone`, drawn whole, `size` logical pixels.
+fn pill_texture(size: (f64, f64), tone: Tone, scale: f64) -> (MemoryRenderBuffer, i32) {
     let (w, h) = pill_pixels(size, scale);
     let (nw, nh) = (w as usize, h as usize);
     let pixels: Vec<u8> = (0..nw * nh)
         .flat_map(|i| {
             let (x, y) = ((i % nw) as f64 + 0.5, (i / nw) as f64 + 0.5);
             pixel(
-                GRIP_COLOUR,
+                tone.rgba(),
                 rounded_rect_coverage(x, y, (w, h), 0.0, w.min(h) / 2.0),
             )
         })
@@ -890,12 +892,14 @@ where
         .collect()
 }
 
-/// The grip of a window at `rect` (logical, output-local), `alpha` shown.
+/// The grip of a window at `rect` (logical, output-local), in `tone`,
+/// `alpha` shown.
 pub fn grip_element<R>(
     renderer: &mut R,
     textures: &Textures,
     ids: &FrameIds,
     rect: Rectangle<f64, Logical>,
+    tone: Tone,
     scale: f64,
     alpha: f32,
 ) -> Option<FramePiece<R>>
@@ -906,7 +910,7 @@ where
     if alpha <= 0.0 {
         return None;
     }
-    let (texture, _) = textures.get(Piece::Grip, scale);
+    let (texture, _) = textures.get(Piece::Grip(tone), scale);
     let at = Point::<f64, Logical>::from((
         rect.loc.x + (rect.size.w - GRIP_SIZE.0) / 2.0,
         rect.loc.y + GRIP_INSET,
@@ -944,7 +948,7 @@ where
     let (piece, size) = if vertical {
         (Piece::Handle, (HANDLE_THICKNESS, HANDLE_LENGTH))
     } else {
-        (Piece::Grip, (HANDLE_LENGTH, HANDLE_THICKNESS))
+        (Piece::Grip(Tone::Light), (HANDLE_LENGTH, HANDLE_THICKNESS))
     };
     let (texture, _) = textures.get(piece, scale);
     let at = Point::<f64, Logical>::from((centre.x - size.0 / 2.0, centre.y - size.1 / 2.0))

@@ -95,6 +95,7 @@ fn a_window_leaving_its_header_to_the_desktop_through_kdes_protocol_gets_the_gri
         app_id: "test.kde",
         size: (500, 400),
         server: true,
+        header: None,
     };
     let (window, client) = open_showing(&mut hp, "test.kde", shows)?;
     assert!(
@@ -138,6 +139,7 @@ fn a_window_drawing_its_own_header_through_kdes_protocol_gets_no_grip() -> anyho
         app_id: "test.kde-own",
         size: (500, 400),
         server: false,
+        header: None,
     };
     let (window, client) = open_showing(&mut hp, "test.kde-own", shows)?;
     // The protocol's default is the server's; asked, the client's own.
@@ -172,6 +174,130 @@ fn a_window_binding_no_decoration_protocol_gets_no_grip() -> anyhow::Result<()> 
     let (shown, cursor) = hover_grip(&mut hp, window, NOT_SHOWN)?;
     assert!(!shown, "a grip over its own header");
     assert_ne!(cursor.as_deref(), Some("grab"));
+    Ok(())
+}
+
+// --- The pill against what is under it (#719) -----------------------------
+
+/// KDE Connect's Kirigami header (#716), and Breeze Dark's.
+const LIGHT_HEADER: u32 = 0xffde_e0e2;
+const DARK_HEADER: u32 = 0xff31_363b;
+
+/// The colour at `at` on the screen: its rows are BGRA.
+fn rgb(px: &[u8], w: i32, at: (f64, f64)) -> [f64; 3] {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let i = (at.1 as usize * w as usize + at.0 as usize) * 4;
+    [px[i + 2], px[i + 1], px[i]].map(f64::from)
+}
+
+/// WCAG's contrast ratio between two sRGB colours.
+fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let luminance = |c: [f64; 3]| {
+        let lin = |v: f64| {
+            let v = v / 255.0;
+            if v <= 0.040_45 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+    };
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// A window leaving its header to the desktop whose top is `header`
+/// (ARGB), its grip shown: the pill's colour and the header's beside it.
+/// With `HOCUS_SHOT` set to a directory, the window's top is saved there
+/// as `<name>.png`, three times larger.
+fn pill_over(
+    header: u32,
+    app_id: &'static str,
+    name: &str,
+) -> anyhow::Result<([f64; 3], [f64; 3])> {
+    let mut hp = compositor()?;
+    let shows = Shows::KdeDecorated {
+        app_id,
+        size: (500, 400),
+        server: true,
+        header: Some(header),
+    };
+    let (window, client) = open_showing(&mut hp, app_id, shows)?;
+    assert!(
+        kde_mode(&mut hp, &client)?,
+        "the server's mode was not given"
+    );
+    let grip = grip_middle(window);
+    hp.pointer_move(grip.0 - 1.0, grip.1);
+    hp.pointer_move(grip.0, grip.1);
+    // Shown (120 ms), and what is under it read a frame or two later.
+    wait(&mut hp, Duration::from_millis(400))?;
+    assert_eq!(hp.frame_cursor().as_deref(), Some("grab"));
+    let (w, h, px) = hp.screenshot(0)?;
+    let pill = rgb(&px, w, on_pill(grip));
+    // On the pill's row, well clear of it.
+    let beside = rgb(&px, w, (grip.0 + 60.0, grip.1));
+    if let Some(dir) = std::env::var_os("HOCUS_SHOT") {
+        save_top(
+            &px,
+            (w, h),
+            window,
+            &std::path::Path::new(&dir).join(format!("{name}.png")),
+        )?;
+    }
+    drop(client);
+    Ok((pill, beside))
+}
+
+/// The top 60 px of `window` on a screen `size` large (BGRA rows), three
+/// times larger, as a PNG.
+#[allow(clippy::cast_sign_loss)]
+fn save_top(
+    px: &[u8],
+    size: (i32, i32),
+    window: Rect,
+    file: &std::path::Path,
+) -> anyhow::Result<()> {
+    const K: u32 = 3;
+    let (x0, y0) = ((window.x - 20).max(0) as u32, (window.y - 20).max(0) as u32);
+    let (cw, ch) = ((window.width + 40) as u32, 80u32);
+    let (cw, ch) = (cw.min(size.0 as u32 - x0), ch.min(size.1 as u32 - y0));
+    let mut out = vec![0u8; (cw * K * ch * K * 4) as usize];
+    for y in 0..ch * K {
+        for x in 0..cw * K {
+            let i = (((y0 + y / K) * size.0 as u32 + x0 + x / K) * 4) as usize;
+            let o = ((y * cw * K + x) * 4) as usize;
+            out[o..o + 4].copy_from_slice(&[px[i + 2], px[i + 1], px[i], 255]);
+        }
+    }
+    image::save_buffer(file, &out, cw * K, ch * K, image::ColorType::Rgba8)?;
+    Ok(())
+}
+
+#[test]
+fn on_a_light_header_the_grips_pill_turns_dark_and_stands_out() -> anyhow::Result<()> {
+    let (pill, header) = pill_over(LIGHT_HEADER, "test.light-header", "light-header")?;
+    assert!(
+        header[0] > 200.0,
+        "not the light header beside it: {header:?}"
+    );
+    assert!(pill[0] < 100.0, "the pill stayed light: {pill:?}");
+    let ratio = contrast(pill, header);
+    assert!(ratio >= 3.0, "the pill is {ratio:.2}:1 against the header");
+    Ok(())
+}
+
+#[test]
+fn on_a_dark_header_the_grips_pill_stays_light_and_stands_out() -> anyhow::Result<()> {
+    let (pill, header) = pill_over(DARK_HEADER, "test.dark-header", "dark-header")?;
+    assert!(
+        header[0] < 80.0,
+        "not the dark header beside it: {header:?}"
+    );
+    assert!(pill[0] > 150.0, "the pill turned dark: {pill:?}");
+    let ratio = contrast(pill, header);
+    assert!(ratio >= 3.0, "the pill is {ratio:.2}:1 against the header");
     Ok(())
 }
 

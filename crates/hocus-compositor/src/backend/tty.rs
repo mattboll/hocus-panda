@@ -833,6 +833,7 @@ impl TtyBackend {
         }
         state.send_frames(&screen.output, Some(&states));
         state.desktops_drawn(&screen.output);
+        state.read_under_grips(gles);
         if empty {
             pace(screen, crtc, state);
         }
