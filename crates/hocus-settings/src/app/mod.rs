@@ -13,6 +13,7 @@
 mod appearance_page;
 mod bar_page;
 mod bluetooth;
+mod captures_page;
 mod desktops_page;
 mod desktops_rules;
 mod desktops_trial;
@@ -339,6 +340,8 @@ pub enum Message {
     Time(time::Msg),
     /// The desktops and windows' page (6.14).
     Desktops(desktops_page::Msg),
+    /// The screenshots and clipboard's page (6.17).
+    Captures(captures_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
     /// The Énergie page's (6.10).
@@ -412,6 +415,9 @@ pub struct App {
     /// The desktops and windows' page: the compositor's windows, a name
     /// changed, a desktop taken out waiting for it (6.14).
     desktops: desktops_page::State,
+    /// The screenshots and clipboard's page: the history's count, a
+    /// recording under way, "Effacer…" asking (6.17).
+    captures: captures_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
@@ -512,6 +518,7 @@ impl App {
             bluetooth,
             time,
             desktops: desktops_page::State::default(),
+            captures: captures_page::State::default(),
             network,
             power,
             fresh: None,
@@ -622,6 +629,7 @@ impl App {
             || self.network_moving()
             || self.trial_moving(now)
             || self.rules_moving(now)
+            || self.captures_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -719,6 +727,13 @@ impl App {
                 if key.as_ref() == Key::Named(Named::Escape) && self.rules_escape() {
                     return Task::none();
                 }
+                // "+ Ajouter"'s menu, "Effacer…"'s confirmation (6.17).
+                if key.as_ref() == Key::Named(Named::Escape)
+                    && self.page == Page::Section(SectionId::Captures)
+                    && self.captures_escape()
+                {
+                    return Task::none();
+                }
                 // A desktop's name: `Esc` keeps the old one, `Tab` writes.
                 if self.desktops_editing() {
                     match key.as_ref() {
@@ -760,7 +775,8 @@ impl App {
             Message::Toggle(slot) => {
                 let on = self.value(slot) == Some(Value::Bool(true));
                 self.knobs.insert(slot.setting, Instant::now());
-                self.change(slot, Value::Bool(!on))
+                let say = self.captures_toggle_toast(slot, !on);
+                self.change_saying(slot, Value::Bool(!on), say)
             }
             Message::Menu(slot) => {
                 if !self.writable() {
@@ -849,6 +865,7 @@ impl App {
             Message::Bluetooth(msg) => self.bluetooth_update(msg),
             Message::Time(msg) => self.time_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
+            Message::Captures(msg) => self.captures_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
                 if let keyboard_page::Msg::Mods(mods) = &msg {
@@ -1612,6 +1629,9 @@ impl App {
         if section == SectionId::Power {
             return self.power_controls();
         }
+        if section == SectionId::Captures {
+            return self.captures_controls();
+        }
         if section == SectionId::Network {
             return self
                 .network_controls()
@@ -1846,6 +1866,7 @@ impl App {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Desktops(stop) => self.desktops_key(&stop, named),
+            Control::Captures(stop) => self.captures_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
@@ -2104,6 +2125,8 @@ enum Control {
     Time(time::Stop),
     /// The desktops and windows' page's own (6.14).
     Desktops(desktops_page::Stop),
+    /// The screenshots and clipboard's page's own (6.17).
+    Captures(captures_page::Stop),
     /// The network's page's own (6.6).
     Network(network::Stop),
     /// The Énergie page's own (6.10).

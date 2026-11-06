@@ -21,6 +21,8 @@
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
 //! - [`bluetooth`]: the Bluetooth page's words and search; BlueZ itself is
 //!   `hocus-bluetooth`'s, as the bar's.
+//! - [`captures`]: where screenshots and recordings go, their formats,
+//!   the shutter, and what the clipboard's history keeps (6.17).
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
 //!   and systemd's timedated followed and asked off the window's thread.
 //! - [`app`]: the window, drawn with iced as the shell is.
@@ -31,6 +33,7 @@ pub mod appearance;
 pub mod apps;
 pub mod bar;
 pub mod bluetooth;
+pub mod captures;
 pub mod desktops;
 pub mod devices;
 pub mod keyboard;

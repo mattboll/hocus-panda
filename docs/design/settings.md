@@ -1300,6 +1300,78 @@ row.
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
 
+## Captures et presse-papiers (6.17)
+
+Issue #451, variant A, as the issue's spec and its "Decided
+(2026-11-05)" specify it: the shutter on by default, never heard when the
+sound is muted; "Laisser de côté les mots de passe" a switch, amber when
+off; the history turned off erased (but its pinned items) once the
+toast is gone. Every key is followed live (screenshots.md and bar.md,
+6.17). Section `captures` (`hocus settings captures`), TRAVAIL's fourth
+row.
+
+| Group (its note) | Row | Control | Key |
+|---|---|---|---|
+| CAPTURES D'ÉCRAN ("Copiées et enregistrées") | Dossier | the path button (a folder icon, "Images › Captures d'écran"; opens it with `xdg-open`) and "Changer…" (the portal's folder chooser) | `[capture] folder` |
+| | Format | segmented PNG / JPEG | `[capture] format` |
+| | Son de l'obturateur ("Nouveau") | switch | `[capture] sound` |
+| ENREGISTREMENT DE L'ÉCRAN ("Le son et le micro se choisissent à chaque fois") | Dossier | as above, "Vidéos › Enregistrements d'écran" | `[recording] folder` |
+| | Format | segmented MP4 / WebM | `[recording] format` |
+| HISTORIQUE DU PRESSE-PAPIERS ("143 éléments · 3 épinglés", "Vide") | Garder ce que je copie | switch | `[clipboard] history` |
+| | Pendant | menu: Jusqu'à la fin de la session, 1 jour, 7 jours, 30 jours | `[clipboard] keep` |
+| | Laisser de côté les mots de passe | switch, the applications as chips under it | `[clipboard] skip-secrets`, `ignore` |
+| | Effacer l'historique | "Effacer…" | (the compositor's line) |
+
+- **Under the title**: "Impr, Super+Maj+R et Super+V se changent dans
+  Clavier et raccourcis ›" (6.8's row lit). Under the card: "Gardé
+  chiffré sur cet ordinateur ; sa clé est dans le trousseau de ta
+  session.", or "…dans un fichier lisible par toi seul." when the
+  history's key is `clipboard.key`.
+- **A folder**: its line is the next file's name ("« Capture du
+  2026-11-05 à 14-32-05.png »", today's date, the format's extension).
+  "Changer…" asks the portal's `FileChooser.OpenFile` with `directory`,
+  starting in the folder used, on a thread; the folder chosen is written
+  from the home (`~/Bureau/Captures`), "Dossier des captures : Bureau ›
+  Captures", "Annuler". A folder that is gone or read-only: the line in
+  amber, "Ce dossier n'existe plus (clé USB débranchée ?) : les captures
+  vont dans Images › Captures d'écran." ("Ce dossier ne s'écrit pas : …"
+  when read-only), its path at 60 %; the key stays. While a recording is
+  under way (the compositor's line says `{"recording": true}`), the
+  recordings' rows say "Pour le prochain enregistrement".
+- **The formats' lines** follow the value: "Sans perte : net pour du
+  texte et du code." / "Plus léger, pour les photos ; le presse-papiers
+  reçoit toujours du PNG."; "MP4 (H.264 et AAC) : se lit et s'envoie
+  partout." / "WebM (VP9 et Opus) : libre, plus léger, moins lu par les
+  téléphones."
+- **The history off**: its line "Coupé : Super+V ne montre que les
+  épinglés.", the rows under it at 45 %, inert; its toast says what goes,
+  "Historique coupé : 140 éléments effacés" (the count less the pinned),
+  "Annuler" within its 6 s turning it back on before the shell erases
+  anything. The count is the compositor's line's `{"clipboard": {"items",
+  "pinned"}}`, the shell's history as it shows.
+- **Passwords**: the chips (26 high, a 16 px tile with the application's
+  initial, its name): KeePassXC, Bitwarden, 1Password, then the file's
+  `ignore` (by their desktop entries' names, a ✕ each; `Delete` on a
+  focused one), then "+ Ajouter", a menu of the applications installed
+  (6.14's list) not left out yet: "Laissée de côté : Proton Pass",
+  "Retirée des mots de passe : Proton Pass", each with "Annuler". Off:
+  the line in amber, "Coupé : un mot de passe copié sera gardé dans
+  l'historique, chiffré, pendant 30 jours." (the keep chosen), the chips
+  at 45 %.
+- **"Effacer…"** turns in place into "Garder" (ghost) and "Effacer 140
+  éléments" (`rgba(242,84,91,0.12)`, `#FFB3B6`), its line "140 éléments,
+  sauf les 3 épinglés."; `Esc` or "Garder" go back. Confirmed, the
+  compositor's line is asked `clipboard-clear`, and the header says
+  "Effacé" for 4 s; no toast, nothing to undo.
+- **The search** finds the rows by the spec's words and their keys;
+  "Effacer l'historique" is the page's own row.
+- **Choices made here (to confirm on the machine)**: the keep's button
+  says its menu's words ("Jusqu'à la fin de la session"), not "La
+  session"; "+ Ajouter" is a menu of the installed applications (6.15's
+  sheet is not built); the chips' tiles are initials, not the
+  applications' icons; Super+V's "Historique coupé · Réglages" is a line,
+  not a link.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented

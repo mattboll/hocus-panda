@@ -269,8 +269,8 @@ impl SectionId {
                 Work,
                 w("Captures et presse-papiers", "Screenshots and clipboard"),
                 w(
-                    "Où vont les captures et les enregistrements ; ce que garde le presse-papiers.",
-                    "Where screenshots and recordings go; what the clipboard keeps.",
+                    "Où vont tes captures et tes enregistrements de l’écran, et ce que garde l’historique du presse-papiers.",
+                    "Where your screenshots and screen recordings go, and what the clipboard’s history keeps.",
                 ),
                 Icon::Captures,
                 "6.17",
@@ -351,6 +351,8 @@ pub enum Icon {
     ChevronUp,
     Check,
     Arrow,
+    /// A folder (6.17's path buttons).
+    Folder,
 }
 
 impl Icon {
@@ -409,6 +411,7 @@ impl Icon {
             Self::ChevronUp => "M7 14 L12 9 L17 14",
             Self::Check => "M5 12.5 L10 17 L19 7.5",
             Self::Arrow => "M5 12 H19 M13.5 6.5 L19 12 L13.5 17.5",
+            Self::Folder => "M3.5 6.5 H9.5 L11.5 8.5 H20.5 V18.5 H3.5 Z",
         }
     }
 }
@@ -919,6 +922,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
         SectionId::Desktops => crate::desktops::settings(),
+        SectionId::Captures => crate::captures::settings(),
         _ => &[],
     }
 }
@@ -949,6 +953,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
+        SectionId::Captures => crate::captures::outside(),
         _ => &[],
     }
 }
