@@ -1818,7 +1818,10 @@ file.
   scrolling the page knows its wheel was taken, moved or not, before it
   clicks; and `shown`: the `serial` of the "shows" line they follow, said
   once two collections agree, so that a test clicks where the window is
-  as it last showed), as the shell says what it draws. Tests read both; names for
+  as it last showed), as the shell says what it draws. Every "shows"
+  line is followed by places at least as recent, whatever changed it (a
+  light going out at a frame too), and the tests click only from those
+  (#684). Tests read both; names for
   screen readers come with the accessibility slice.
 
 ## Choices made here (to confirm on the machine)

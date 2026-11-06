@@ -700,7 +700,8 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        let place = !matches!(message, Message::Frame(_) | Message::Placed(_));
+        let mut place = !matches!(message, Message::Frame(_) | Message::Placed(_));
+        let shown = self.shows_serial;
         let framed = matches!(message, Message::Frame(_));
         // The network's page changes its shape at once (a sheet, a list):
         // whole frames, as after a scroll.
@@ -739,6 +740,10 @@ impl App {
             self.light = None;
         }
         self.log();
+        // Every "shows" line is followed by places at least as recent,
+        // whatever changed it (a light fading out at a frame too): a test
+        // waits for those before it clicks (#684).
+        place |= self.shows_serial != shown;
         let task = if self.life == Life::Closing && self.pending.is_empty() {
             Task::batch([task, self.close_now()])
         } else {

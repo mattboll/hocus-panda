@@ -186,16 +186,9 @@ impl Bed {
         })
     }
 
-    /// The window's places, once they hold `id`.
+    /// The window's current places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
-        let log = self.log.clone();
-        let read = |log: &Path| -> Option<Value> { common::last_json(log, " places {") };
-        let mut seen = None;
-        self.hp.dispatch_until(WAIT, |_| {
-            seen = read(&log).filter(|p| p.get(id).is_some());
-            seen.is_some()
-        })?;
-        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", read(&log)))
+        settings_page::places_with(&mut self.hp, &self.log, id)
     }
 
     fn window(&self) -> anyhow::Result<Rect> {
@@ -666,6 +659,23 @@ fn the_links_open_their_pages_with_their_row_lit() -> anyhow::Result<()> {
         bed.click("nav:bar")?;
         bed.shows(|s| s["page"] == "bar")?;
     }
+    Ok(())
+}
+
+/// A row's light goes out at a frame, nothing else happening: the window
+/// says its places again after it, as after anything it shows, so that a
+/// test waiting for places as recent as what it shows does not wait for
+/// ever (#684).
+#[test]
+fn the_places_follow_a_light_going_out() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("link:screens.primary")?;
+    bed.shows(|s| s["page"] == "screens" && s["lit"] == "screens.primary")?;
+    bed.shows(|s| s["page"] == "screens" && s["lit"].is_null())?;
+    bed.places_with("nav:bar")?;
     Ok(())
 }
 
