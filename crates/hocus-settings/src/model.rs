@@ -786,6 +786,9 @@ pub enum Kind {
     Swatches,
     /// A link to another section's page: "La barre ›" (6.2).
     Link(SectionId),
+    /// Not a setting: what the desktop never takes, said on the right
+    /// ("Toujours", 6.13's gestures). Nothing to focus or write.
+    Note(Words),
 }
 
 /// A group of rows on a section's page: its label, in capitals.
@@ -819,6 +822,9 @@ pub struct Setting {
 impl Setting {
     /// What `value` reads as on its row and in the toast.
     pub fn say(&self, value: &Value, lang: Lang) -> String {
+        if let Kind::Note(note) = &self.kind {
+            return note.get(lang).to_owned();
+        }
         if let Kind::Menu(choices) | Kind::Segmented(choices) = &self.kind
             && let Some(choice) = choices.iter().find(|c| &c.value == value)
         {

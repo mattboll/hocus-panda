@@ -743,8 +743,8 @@ kept, off by default; tap to click on by default.
 - **SOURIS**, `[pointer]` (every other pointer): Vitesse du pointeur
   `speed`, Accélération `acceleration` (`"adaptive"`, `"flat"`),
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
-- **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
-  côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
+- **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
+  Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
   to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
   (the four-finger launcher, 6.13: launcher.md).
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
@@ -791,6 +791,42 @@ Choices made here (to confirm on the machine): the dashed rims of the
 empty groups and of the target are drawn solid (iced draws no dashes);
 a USB mouse is "Souris USB" (a wireless receiver is not knowable); the
 list's lines read "Ligne N de la liste".
+
+### The gestures' group (6.13)
+
+Built 2026-11-06 (issue #447), variant A of the mockup, from the spec in
+the issue's last comment; every question answered with its
+recommendation (the launcher grows with four fingers and opens on
+release; switching desktops stays three fingers only; the gesture always
+follows the fingers). The compositor's side is launcher.md's "6.13, as
+built".
+
+- **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
+  mouse group, hidden without a touchpad. On its label line's right,
+  "Sur ce pavé : jusqu'à N doigts": the
+  largest of the touchpads' tap finger counts (libinput's
+  `config_tap_finger_count()`, said by the compositor as `fingers=N` on
+  each device's line of `hocus msg input-devices`).
+- Three rows of 68 px, each with a 64 × 44 finger diagram on its left
+  (a touchpad's outline, white 8 px dots, a dashed green trail): three
+  fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
+  four fingers up ("Quatre doigts vers le haut", `[touchpad]
+  swipe-launcher`, with its blue "Nouveau" chip), and what is left to
+  applications ("Ce qui reste aux applications", always "Toujours"), a
+  note (`Kind::Note`): not a setting,
+  never focused, never written. Under the card, the line on natural
+  scrolling and reduced motion.
+- **The diagrams** move in a 1.8 s loop (the mockup's `side3`, `up4` and
+  pinch, its curve applied between keyframes as CSS does), drawn on a
+  canvas, only while the group's card is in the page's view, the window
+  has the focus (iced's `Focused`/`Unfocused`) and motion is not reduced;
+  otherwise the dots stand at the trail's middle and nothing draws.
+- **A touchpad that senses fewer fingers**: three, the four-finger row at
+  45 %, inert, "Pas sur ce pavé tactile : il ne sent que trois doigts.";
+  two or fewer, both rows so. The value stays written for another pad.
+  A compositor that does not say the count leaves both rows as they are.
+- The search finds the three rows by « geste », « swipe », « doigts »,
+  « lanceur », « bureau », « pincer » and their keys.
 
 ## Clavier et raccourcis (6.8)
 
@@ -2044,7 +2080,13 @@ with the harness's touchpad and mouse:
 - `searching_tap_finds_tap_to_click`
 - `a_touchpad_gets_tap_to_click_by_default`
 - `a_hand_edit_of_the_file_reaches_every_device`
+- `the_gestures_group_says_the_fingers_and_switches_three_fingers_off`
+- `a_three_finger_touchpad_greys_the_four_finger_row`
+- `the_diagrams_move_only_while_shown_and_focused`
+- `with_reduced_motion_the_diagrams_stand_still`
+- `searching_geste_lists_the_three_gestures_rows_first`
 - `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
+- `screenshots_of_the_gestures` (ignored; `HOCUS_SHOTS=DIR`)
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_keyboard.rs` (6.8), the same bed

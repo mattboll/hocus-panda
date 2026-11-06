@@ -613,6 +613,14 @@ impl App {
                 // A close the compositor asks: what is pending is written
                 // first, as for ours.
                 Event::Window(window::Event::CloseRequested) => Some(Message::Close),
+                // The gestures' diagrams move only while it has the focus
+                // (6.13).
+                Event::Window(window::Event::Focused) => {
+                    Some(Message::Mouse(mouse::Msg::Focused(true)))
+                }
+                Event::Window(window::Event::Unfocused) => {
+                    Some(Message::Mouse(mouse::Msg::Focused(false)))
+                }
                 _ => None,
             }),
         ];
@@ -679,6 +687,7 @@ impl App {
             || self.knobs.values().any(|since| within(*since, KNOB))
             || self.screens_moving(now)
             || self.mouse.moving(now)
+            || self.gestures_moving()
             || self.bar_moving(now)
             || self.bluetooth_moving()
             || self.bluetooth_menu_moving(now)
@@ -1799,6 +1808,8 @@ impl App {
             let mut out: Vec<Control> = self
                 .mouse_visible()
                 .into_iter()
+                // A note is not a control (6.13).
+                .filter(|s| !matches!(s.kind, Kind::Note(_)))
                 .map(|s| Control::Setting(Slot::of(s, self.source)))
                 .collect();
             out.extend([Control::Try(TryPart::List), Control::Try(TryPart::Target)]);
