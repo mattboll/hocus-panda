@@ -125,6 +125,8 @@ pub struct Start {
     pub lang: Lang,
     pub places: worker::Places,
     pub section: Option<SectionId>,
+    /// A Bluetooth device to pair on its page, by its address.
+    pub pair: Option<String>,
     /// A network whose sheet opens once it is around (`--join`, 6.6).
     pub join: Option<String>,
     pub user: String,
@@ -526,6 +528,9 @@ impl App {
             fresh: None,
             parity: false,
         };
+        if let Some(address) = start.pair {
+            app.bluetooth_pair_address(address);
+        }
         app.wallpaper_start(to_screens.clone());
         app.screens_open(to_screens);
         if start.section == Some(SectionId::Sound) {
@@ -573,6 +578,10 @@ impl App {
         }
         if self.moving(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
+        }
+        // A pairing code's countdown, each second while its sheet shows.
+        if self.bluetooth_ticking() {
+            subscriptions.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::Nothing));
         }
         // The Écrans page's drawing: a screen pressed, then following the
         // pointer wherever it goes in the window.
@@ -624,6 +633,7 @@ impl App {
             || self.mouse.moving(now)
             || self.bar_moving(now)
             || self.bluetooth_moving()
+            || self.bluetooth_menu_moving(now)
             || self.network_moving()
             || self.trial_moving(now)
             || self.rules_moving(now)
@@ -786,6 +796,7 @@ impl App {
             Message::CloseMenu => {
                 self.menu = None;
                 self.sound.menu = None;
+                self.bluetooth.menu = None;
                 Task::none()
             }
             Message::Choose(slot, value) => {
@@ -1557,6 +1568,10 @@ impl App {
         tracing::info!(section = ?again.section, "launched again: the window comes forward");
         if let Some(section) = again.section.as_deref().and_then(SectionId::from_slug) {
             self.go(Page::Section(section));
+            // From the Bluetooth popover's row of a device with a code.
+            if let Some(address) = again.pair.clone() {
+                self.bluetooth_pair_address(address);
+            }
             // From the sound popover's link: the output in use lights.
             if section == SectionId::Sound {
                 self.light = Some(("sound.output", Instant::now()));
@@ -1692,6 +1707,10 @@ impl App {
         let ctrl = modifiers.control();
         // The screens' "Garder ?" (anywhere), the page's menu.
         if let Some(task) = self.screens_key_first(key) {
+            return task;
+        }
+        // The Bluetooth page's sheets, rename field and menu (6.7).
+        if let Some(task) = self.bluetooth_key_first(key) {
             return task;
         }
         match key.as_ref() {
@@ -1865,7 +1884,7 @@ impl App {
             Control::Bar(stop) => self.bar_key(&stop, named),
             Control::Desktops(stop) => self.desktops_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
-            Control::Bluetooth(stop) => self.bluetooth_key(stop, named),
+            Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),

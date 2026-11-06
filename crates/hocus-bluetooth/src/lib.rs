@@ -12,7 +12,9 @@
 mod bluez;
 pub mod model;
 
-pub use model::{Action, Attempt, Bluetooth, Device, Failure, Kind, Row, Step};
+pub use model::{
+    Action, Answer, Asked, Attempt, Bluetooth, Device, Failure, Kind, Request, Row, Step,
+};
 
 /// What is asked of BlueZ, by device path.
 #[derive(Debug)]
@@ -29,6 +31,17 @@ pub enum Ask {
     Disconnect(String),
     /// Pair, trust, then connect.
     Pair(String),
+    /// The user answers what the agent asked ([`Request::id`]).
+    Answer(u64, Answer),
+    /// The pairing under way given up (the user's "Annuler"), or what the
+    /// agent asks refused.
+    CancelPairing,
+    /// A device's name given (`Alias`; empty: its own again).
+    Rename(String, String),
+    /// A device may connect by itself, or not (`Trusted`).
+    Trust(String, bool),
+    /// A device forgotten: its pairing and its key erased (`RemoveDevice`).
+    Forget(String),
     /// The program ends: stop looking, hide the computer, then say so.
     Quit(std::sync::mpsc::Sender<()>),
 }
@@ -38,6 +51,17 @@ pub enum Ask {
 pub struct Options {
     /// Its agent's capability, as BlueZ's `RegisterAgent` takes it.
     pub capability: &'static str,
+    /// Its agent asks the user the codes ([`Bluetooth::request`]), and is
+    /// registered, BlueZ's default, only while the computer is visible.
+    pub asks_codes: bool,
+}
+
+impl Options {
+    /// The Settings': codes shown, compared and typed.
+    pub const CODES: Self = Self {
+        capability: "KeyboardDisplay",
+        asks_codes: true,
+    };
 }
 
 impl Default for Options {
@@ -45,6 +69,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             capability: "NoInputNoOutput",
+            asks_codes: false,
         }
     }
 }
