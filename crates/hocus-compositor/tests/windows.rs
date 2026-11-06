@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use common::{
     BTN_LEFT, ClientHandle, Command, Event, KEY_DOWN, KEY_F4, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA,
-    KEY_LEFTSHIFT, KEY_Q, KEY_RIGHT, KEY_UP, Shows, WAIT, chord, compositor, open, open_showing,
-    open_with, rect_of, wait, wait_for_rect,
+    KEY_LEFTSHIFT, KEY_Q, KEY_RIGHT, KEY_UP, Pointed, Shows, WAIT, chord, compositor, open,
+    open_showing, open_with, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::{
     Headless, HeadlessConfig, RendererChoice,
@@ -429,6 +429,56 @@ fn a_menu_takes_the_keyboard_and_a_press_elsewhere_closes_it() -> anyhow::Result
     assert!(done, "the menu was told to close");
     let window = &hp.windows()[0];
     assert!(window.keyboard && window.focused, "the keyboard is back");
+    Ok(())
+}
+
+/// What `client`'s pointer got, until it got `last`.
+fn pointed_until(
+    hp: &mut Headless,
+    client: &ClientHandle,
+    last: Pointed,
+) -> anyhow::Result<Vec<Pointed>> {
+    let mut seen = Vec::new();
+    let came = hp.dispatch_until(WAIT, |_| {
+        while let Ok(event) = client.events.try_recv() {
+            if let Event::Pointer(p) = event {
+                seen.push(p);
+            }
+        }
+        seen.last() == Some(&last)
+    })?;
+    anyhow::ensure!(came, "{last:?} never came: {seen:?}");
+    Ok(seen)
+}
+
+/// A press goes to what is under the pointer when it comes, though the
+/// pointer has not moved since something else was there (#692): here a
+/// window that opened under it.
+#[test]
+fn a_press_goes_to_a_window_that_came_under_a_still_pointer() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let pointing = |app_id| Shows::Pointing {
+        app_id,
+        size: (600, 400),
+    };
+    let (first, under) = open_showing(&mut hp, "test.first", pointing("test.first"))?;
+    let (x, y) = first.centre();
+    hp.pointer_move(x - 1.0, y);
+    hp.pointer_move(x, y);
+    pointed_until(&mut hp, &under, Pointed::Motion)?;
+    let (second, over) = open_showing(&mut hp, "test.second", pointing("test.second"))?;
+    anyhow::ensure!(second.contains(x, y), "{second:?} is not under the pointer");
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    let seen = pointed_until(&mut hp, &over, Pointed::Release)?;
+    assert!(seen.contains(&Pointed::Press), "{seen:?}");
+    let mut behind = Vec::new();
+    while let Ok(event) = under.events.try_recv() {
+        if let Event::Pointer(p) = event {
+            behind.push(p);
+        }
+    }
+    assert!(!behind.contains(&Pointed::Press), "{behind:?}");
     Ok(())
 }
 

@@ -1301,7 +1301,10 @@ impl Bed {
             f64::from(surface.x + surface.width / 2),
             f64::from(surface.y) + 19.5,
         );
-        common::click(&mut self.hp, item)?;
+        // On the row once nothing else of the bar's is over it (#692): a
+        // bar opened before the network was read has its desktops'
+        // surface where the row comes, until the shell moves it up.
+        common::click_on(&mut self.hp, item, hocus_link::CONNECTIONS_NAMESPACE)?;
         let open = self
             .hp
             .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
