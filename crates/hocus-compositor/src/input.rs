@@ -622,6 +622,25 @@ impl State {
             .then_some(id)
     }
 
+    /// The pointer's focus to what is under it now, if that is no longer
+    /// what has it: a surface came, went or moved under the pointer since
+    /// it last moved, and a press would go to what was there, not to what
+    /// is shown (#692). Not while a grab holds the pointer, nor over a
+    /// window's frame, where no client has it.
+    fn pointer_refocus(&mut self, time: u32) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if pointer.is_grabbed() || self.frame_cursor.is_some() {
+            return;
+        }
+        let at = pointer.current_location();
+        let under = self.surface_under(at).map(|(surface, _)| surface);
+        if under != pointer.current_focus() {
+            self.pointer_motion(at, time);
+        }
+    }
+
     /// A pointer button by its evdev code. A press focuses the window
     /// under the pointer and goes to it; with `Alt` the left button moves
     /// the window, with `Super` the right one resizes it, and the client
@@ -649,6 +668,9 @@ impl State {
             );
             pointer.frame(self);
             return;
+        }
+        if state == ButtonState::Pressed {
+            self.pointer_refocus(time);
         }
         // A press away from the authentication dialog does nothing (7.5).
         if state == ButtonState::Pressed && self.auth_keeps_pointer(pointer.current_location()) {
