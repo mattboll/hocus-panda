@@ -275,13 +275,16 @@ impl Bed {
     }
 
     /// A process holding the camera's device open, as a program opening
-    /// `/dev/video0` itself.
+    /// `/dev/video0` itself: `tail`, following it. Not a shell opening it
+    /// for the program it then becomes: the shell reads `/proc` as the
+    /// device is opened, which may be before that program replaced the
+    /// shell, and nothing tells it of the change.
     fn hold_device(&mut self) -> anyhow::Result<()> {
-        let child = Command::new("sh")
-            .arg("-c")
-            .arg("exec sleep 60 3<\"$0\"")
+        let child = Command::new("tail")
+            .arg("-f")
             .arg(self.devices.join("video0"))
             .stdin(Stdio::null())
+            .stdout(Stdio::null())
             .spawn()?;
         self.children.push(child);
         Ok(())
@@ -710,7 +713,7 @@ fn the_camera_shows_through_pipewire_and_through_its_device() -> anyhow::Result<
     bed.sign_since(mark, "Camera")?;
     eprintln!("the camera's device's sign in {:?}", started.elapsed());
     bed.logged("a camera's device is held open", |l| {
-        l.contains("program=\"sleep\"")
+        l.contains("program=\"tail\"")
     })?;
     Ok(())
 }
