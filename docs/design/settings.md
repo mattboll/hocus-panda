@@ -804,9 +804,15 @@ built".
 - **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
   mouse group, hidden without a touchpad. On its label line's right,
   "Sur ce pavé : jusqu'à N doigts": the
-  largest of the touchpads' tap finger counts (libinput's
-  `config_tap_finger_count()`, said by the compositor as `fingers=N` on
-  each device's line of `hocus msg input-devices`).
+  largest of the touchpads' finger counts, said by the compositor as
+  `fingers=N` on each device's line of `hocus msg input-devices`. A
+  touchpad's count is the most touches it senses (the largest
+  `BTN_TOOL_*TAP` key its evdev capabilities set, read from sysfs as it
+  is plugged), not libinput's tap finger count, which stops at three
+  where the same touchpad swipes with four (#720). A gesture seen with
+  more fingers raises it, and the compositor says the device again, so a
+  gesture the touchpad has been seen doing is never greyed out. A
+  touchpad whose count is not known says none, and nothing is greyed.
 - Three rows of 68 px, each with a 64 × 44 finger diagram on its left
   (a touchpad's outline, white 8 px dots, a dashed green trail): three
   fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
@@ -824,7 +830,8 @@ built".
 - **A touchpad that senses fewer fingers**: three, the four-finger row at
   45 %, inert, "Pas sur ce pavé tactile : il ne sent que trois doigts.";
   two or fewer, both rows so. The value stays written for another pad.
-  A compositor that does not say the count leaves both rows as they are.
+  A compositor that does not say the count, or a touchpad whose count
+  is not known (`fingers=0`), leaves both rows as they are.
 - The search finds the three rows by « geste », « swipe », « doigts »,
   « lanceur », « bureau », « pincer » and their keys. « geste » then
   lists Keyboard and shortcuts' "Bureau de gauche" and "Bureau de droite"

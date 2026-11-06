@@ -138,7 +138,11 @@ fn describe(device: &libinput::Device) -> Option<(DeviceKind, Bus, bool, Can, Op
     } else {
         DeviceKind::Pointer
     };
-    let (bus, integration) = udev_words(device);
+    let Udev {
+        bus,
+        integration,
+        fingers,
+    } = udev_words(device);
     let bus = match bus.as_deref() {
         Some("usb") => Bus::Usb,
         Some("bluetooth") => Bus::Bluetooth,
@@ -163,7 +167,7 @@ fn describe(device: &libinput::Device) -> Option<(DeviceKind, Bus, bool, Can, Op
         off_with_mouse: device
             .config_send_events_modes()
             .contains(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE),
-        fingers: device.config_tap_finger_count(),
+        fingers,
     };
     let click_default = match device.config_click_default_method() {
         Some(ClickMethod::Clickfinger) => Some(RightClick::TwoFingers),
@@ -173,21 +177,80 @@ fn describe(device: &libinput::Device) -> Option<(DeviceKind, Bus, bool, Can, Op
     Some((kind, bus, built_in, can, click_default))
 }
 
-/// udev's `ID_BUS` and `ID_INPUT_TOUCHPAD_INTEGRATION` for `device`.
+/// What udev knows of a device, read once as it is plugged.
+#[derive(Debug, Default)]
+struct Udev {
+    /// `ID_BUS`.
+    bus: Option<String>,
+    /// `ID_INPUT_TOUCHPAD_INTEGRATION`.
+    integration: Option<String>,
+    /// The most touches it senses at once, from its key capabilities; 0
+    /// when they do not say.
+    fingers: u32,
+}
+
+/// What udev knows of `device`.
 #[allow(unsafe_code)]
-fn udev_words(device: &libinput::Device) -> (Option<String>, Option<String>) {
+fn udev_words(device: &libinput::Device) -> Udev {
     // SAFETY: the libinput context was made from udev
     // (`Libinput::new_with_udev`, the tty backend's): the handle is that
     // context's, which the call requires. Its properties are udev's
     // database for the device, on tmpfs, read once as it is plugged.
     let Some(udev) = (unsafe { device.udev_device() }) else {
-        return (None, None);
+        return Udev::default();
     };
     let word = |name: &str| {
         udev.property_value(name)
             .map(|v| v.to_string_lossy().into_owned())
     };
-    (word("ID_BUS"), word("ID_INPUT_TOUCHPAD_INTEGRATION"))
+    // The event node's `device` is its input device, whose capabilities
+    // sysfs says (a file of the kernel's, read once as it is plugged).
+    let keys =
+        std::fs::read_to_string(udev.syspath().join("device/capabilities/key")).unwrap_or_default();
+    Udev {
+        bus: word("ID_BUS"),
+        integration: word("ID_INPUT_TOUCHPAD_INTEGRATION"),
+        fingers: sensed_fingers(&keys, usize::BITS),
+    }
+}
+
+const BTN_TOOL_QUINTTAP: u32 = 0x148;
+const BTN_TOOL_DOUBLETAP: u32 = 0x14d;
+const BTN_TOOL_TRIPLETAP: u32 = 0x14e;
+const BTN_TOOL_QUADTAP: u32 = 0x14f;
+
+/// The most touches a device senses, from sysfs's `capabilities/key` (hex
+/// words of `word_bits` bits, the highest first): the largest of its
+/// `BTN_TOOL_*TAP` keys, which the kernel sets from its touch slots and
+/// libinput counts fingers by. 0 when none is set.
+///
+/// libinput's tap finger count is not it: tapping recognises three fingers
+/// at most, where the same touchpad swipes with four (#720).
+fn sensed_fingers(keys: &str, word_bits: u32) -> u32 {
+    let has = |code: u32| {
+        keys.split_whitespace()
+            .rev()
+            .nth((code / word_bits) as usize)
+            .and_then(|w| u64::from_str_radix(w, 16).ok())
+            .is_some_and(|w| (w >> (code % word_bits)) & 1 == 1)
+    };
+    [
+        (BTN_TOOL_QUINTTAP, 5),
+        (BTN_TOOL_QUADTAP, 4),
+        (BTN_TOOL_TRIPLETAP, 3),
+        (BTN_TOOL_DOUBLETAP, 2),
+    ]
+    .into_iter()
+    .find(|(code, _)| has(*code))
+    .map_or(0, |(_, n)| n)
+}
+
+/// The count a touchpad says once a gesture was seen on it with
+/// `fingers`, if it rises: a gesture it was seen doing is never said out
+/// of its reach. An unknown count (0) stays unknown: nothing is greyed
+/// then, and a gesture only says the least it senses.
+fn raised(said: u32, fingers: u32) -> Option<u32> {
+    (said > 0 && fingers > said).then_some(fingers)
 }
 
 /// `given` set on libinput's `device`; what it refuses is logged.
@@ -327,6 +390,30 @@ impl State {
             "a pointing device unplugged"
         );
         self.input_devices.tell(&DeviceEvent::Removed(gone.said.id));
+    }
+
+    /// A gesture began on libinput's `device` with `fingers`: its count
+    /// raised to it, and said, if it was less.
+    pub fn gesture_seen(&mut self, device: &libinput::Device, fingers: u32) {
+        let Some(plugged) = self
+            .input_devices
+            .list
+            .iter_mut()
+            .find(|p| p.device.as_ref() == Some(device))
+        else {
+            return;
+        };
+        let Some(fingers) = raised(plugged.said.can.fingers, fingers) else {
+            return;
+        };
+        tracing::info!(
+            id = plugged.said.id,
+            fingers,
+            "a touchpad seen with more fingers than it said"
+        );
+        plugged.said.can.fingers = fingers;
+        let event = DeviceEvent::Changed(plugged.said.clone());
+        self.input_devices.tell(&event);
     }
 
     /// A test's device plugged in; its number.
@@ -476,6 +563,40 @@ mod tests {
         let (given, skipped) = settle(DeviceKind::Touchpad, PAD, &Pointer::default(), &touchpad);
         assert_eq!((given.scroll, given.click), (None, None));
         assert_eq!(skipped, ["right-click", "scroll"]);
+    }
+
+    #[test]
+    fn the_fingers_sensed_are_the_largest_tool_key() {
+        // A touchpad of five slots: QUINTTAP, DOUBLETAP, TRIPLETAP, QUADTAP.
+        assert_eq!(sensed_fingers("e520 10000 0 0 0 0\n", 64), 5);
+        // Up to QUADTAP (0x14f, bit 15 of word 5).
+        assert_eq!(sensed_fingers("e420 10000 0 0 0 0", 64), 4);
+        // Up to TRIPLETAP: what tap's count says, and here it is all.
+        assert_eq!(sensed_fingers("6420 10000 0 0 0 0", 64), 3);
+        assert_eq!(sensed_fingers("2420 10000 0 0 0 0", 64), 2);
+        // A mouse's buttons only, or nothing read: not known.
+        assert_eq!(sensed_fingers("70000 0 0 0 0", 64), 0);
+        assert_eq!(sensed_fingers("", 64), 0);
+        assert_eq!(sensed_fingers("not hex 0 0 0 0", 64), 0);
+        // 32-bit words: QUADTAP is bit 15 of word 10.
+        assert_eq!(
+            sensed_fingers("e420 0 10000 0 0 0 0 0 0 0 0", 32),
+            4,
+            "32-bit words"
+        );
+    }
+
+    #[test]
+    fn a_gesture_raises_the_fingers_never_lowers_them() {
+        // Three said, four seen: four.
+        assert_eq!(raised(3, 4), Some(4));
+        // Fewer or as many: unchanged.
+        assert_eq!(raised(5, 4), None);
+        assert_eq!(raised(4, 4), None);
+        assert_eq!(raised(4, 3), None);
+        // Not known: stays so, nothing greyed.
+        assert_eq!(raised(0, 3), None);
+        assert_eq!(raised(0, 4), None);
     }
 
     #[test]
