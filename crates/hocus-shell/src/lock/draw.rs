@@ -1082,7 +1082,7 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
         let (bars, slash) = match link {
             Link::Connected { bars, .. } => (*bars, false),
             Link::Wired | Link::Connecting => (4, false),
-            Link::Off | Link::Offline => (0, true),
+            Link::Off | Link::Offline | Link::Airplane => (0, true),
             Link::Hidden => (0, true),
         };
         crate::network::draw::wifi(f, rect.position(), 20.0, bars, TEXT.get(), slash, 1.0);

@@ -14,6 +14,7 @@ use crate::{
 const AIRPLANE: Words = w("MODE AVION", "AIRPLANE MODE");
 const WIFI: Words = w("WI-FI", "WI-FI");
 const CABLE: Words = w("CÂBLE", "CABLE");
+const VPN: Words = w("VPN", "VPN");
 
 /// The page's settings, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
@@ -32,7 +33,7 @@ pub fn outside() -> &'static [Outside] {
             keywords: (fr, en),
         }
     }
-    const ALL: [Outside; 8] = [
+    const ALL: [Outside; 9] = [
         o(
             "network.airplane",
             AIRPLANE,
@@ -92,6 +93,13 @@ pub fn outside() -> &'static [Outside] {
             w("Câble", "Cable"),
             &["ethernet", "filaire", "rj45"],
             &["ethernet", "wired", "rj45"],
+        ),
+        o(
+            "network.vpn",
+            VPN,
+            w("VPN", "VPN"),
+            &["wireguard", "openvpn", "tunnel", "importer"],
+            &["wireguard", "openvpn", "tunnel", "import"],
         ),
         o(
             "network.address",
@@ -475,6 +483,8 @@ mod tests {
         assert_eq!(found[0].name, "Réseau d’entreprise");
         let found = crate::search::find("rj45", Lang::French);
         assert_eq!(found[0].name, "Câble");
+        let found = crate::search::find("wireguard", Lang::French);
+        assert_eq!(found[0].name, "VPN");
         let found = crate::search::find("ssid", Lang::English);
         assert_eq!(found[0].name, "Hidden network");
     }

@@ -76,6 +76,7 @@ struct Bed {
     log: PathBuf,
     script: PathBuf,
     state: PathBuf,
+    shell_log: PathBuf,
 }
 
 /// The evdev code of a letter or a digit, on a US keyboard.
@@ -106,6 +107,33 @@ impl Bed {
         setup: Option<Setup>,
         radios: &[(u8, bool)],
         output: &str,
+    ) -> anyhow::Result<Option<Self>> {
+        Self::start_all(setup, radios, output, false)
+    }
+
+    /// The same with the shell (its bar, its Wi-Fi popover), which starts
+    /// the Settings by their script.
+    fn start_with_shell(setup: Setup, radios: &[(u8, bool)]) -> anyhow::Result<Option<Self>> {
+        Self::start_with_shell_on(setup, radios, "1920x1080")
+    }
+
+    fn start_with_shell_on(
+        setup: Setup,
+        radios: &[(u8, bool)],
+        output: &str,
+    ) -> anyhow::Result<Option<Self>> {
+        if common::shell_program().is_none() {
+            eprintln!("the shell is not built: build the workspace to run this test");
+            return Ok(None);
+        }
+        Self::start_all(Some(setup), radios, output, true)
+    }
+
+    fn start_all(
+        setup: Option<Setup>,
+        radios: &[(u8, bool)],
+        output: &str,
+        shell: bool,
     ) -> anyhow::Result<Option<Self>> {
         let Some(program) = common::settings_program() else {
             eprintln!("hocus-settings is not built: build the workspace to run this test");
@@ -156,6 +184,37 @@ impl Bed {
             ),
         )?;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+        // nmcli's import, as the fake NetworkManager's door does it.
+        let nmcli = root.join("bin/nmcli");
+        std::fs::write(
+            &nmcli,
+            "#!/bin/sh
+# nmcli connection import type KIND file PATH
+\
+             exec dbus-send --system --print-reply=literal --dest=org.freedesktop.NetworkManager \
+             /org/freedesktop/NetworkManager/Settings org.hocus.Test.Import \"string:$4\" \"string:$6\"\n",
+        )?;
+        std::fs::set_permissions(&nmcli, std::fs::Permissions::from_mode(0o755))?;
+        let shell_log = root.join("shell.log");
+        let shell_script = match common::shell_program().filter(|_| shell) {
+            Some(program) => Some(fakes.shell_with(
+                &program,
+                "fr_FR.UTF-8",
+                &[
+                    ("HOME", at("home")),
+                    ("XDG_CONFIG_HOME", at("config")),
+                    ("XDG_CACHE_HOME", at("cache")),
+                    ("XDG_STATE_HOME", at("state")),
+                    ("XDG_DATA_HOME", at("data")),
+                    ("ICED_BACKEND", "tiny-skia".to_owned()),
+                    ("HOCUS_RFKILL", rfkill.path.display().to_string()),
+                    ("PATH", format!("{}:/usr/bin:/bin", at("bin"))),
+                    ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+                ],
+                Some(&shell_log),
+            )?),
+            None => None,
+        };
         let mut config = Config {
             plain_background: true,
             french: true,
@@ -164,14 +223,28 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(file);
         config.appearance.reduced_motion = true;
-        let hp = Headless::start_with(
-            HeadlessConfig {
-                outputs: vec![output.parse()?],
-                renderer: RendererChoice::Pixman,
-                ..HeadlessConfig::default()
-            },
-            config,
-        )?;
+        let headless = HeadlessConfig {
+            outputs: vec![output.parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        };
+        let mut hp = match shell_script {
+            Some(script) => {
+                config.panel.form = hocus_compositor::FormChoice::Full;
+                let address = fakes.address.clone();
+                let mut hp = Headless::start_on_bus(headless, config, Some(script), Some(address))?;
+                let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| {
+                    !hp.connections_surfaces().is_empty()
+                        && hp.connections_commits() > 0
+                        && hp.levels_commits() > 0
+                })?;
+                anyhow::ensure!(drawn, "no connections' row");
+                common::at_rest(&mut hp)?;
+                hp
+            }
+            None => Headless::start_with(headless, config)?,
+        };
+        hp.pointer_move(5.0, 5.0);
         Ok(Some(Self {
             hp,
             fakes,
@@ -180,6 +253,7 @@ impl Bed {
             log,
             script,
             state: root.join("state/hocuspanda/airplane"),
+            shell_log,
         }))
     }
 
@@ -218,9 +292,14 @@ impl Bed {
         let open = self.hp.dispatch_until(Duration::from_secs(20), |hp| {
             hp.windows()
                 .iter()
-                .any(|w| w.app_id.as_deref() == Some(APP_ID) && w.keyboard)
+                .any(|w| w.app_id.as_deref() == Some(APP_ID))
         })?;
-        anyhow::ensure!(open, "the window never opened: {}", self.plain());
+        anyhow::ensure!(
+            open,
+            "the window never opened: {:?}\n{}",
+            self.hp.windows(),
+            self.plain()
+        );
         let shown = self.shows(|s| s["page"] == "network" && ready(s))?;
         self.places_with("row:network.airplane")?;
         Ok(shown)
@@ -1200,6 +1279,279 @@ fn launched_with_join_opens_that_networks_sheet() -> anyhow::Result<()> {
     Ok(())
 }
 
+// --- The third part: the VPNs, the popover's links, the bar's airplane -----
+
+impl Bed {
+    /// Waits until the shell logs `what`.
+    fn shell_logged(&mut self, what: &str) -> anyhow::Result<()> {
+        let log = self.shell_log.clone();
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| common::logged(&log).contains(what))?;
+        anyhow::ensure!(done, "the shell never logged {what:?}");
+        Ok(())
+    }
+
+    /// The Wi-Fi's popover opened from the bar's row: where it is.
+    fn wifi_popover(&mut self) -> anyhow::Result<Rect> {
+        // The connections' surface placed and sized (under the levels).
+        let placed = self.hp.dispatch_until(Duration::from_secs(20), |hp| {
+            hp.connections_surfaces()
+                .first()
+                .is_some_and(|(_, r)| r.width > 0 && r.height >= 36)
+        })?;
+        anyhow::ensure!(
+            placed,
+            "no connections: {:?}",
+            self.hp.connections_surfaces()
+        );
+        common::at_rest(&mut self.hp)?;
+        let surface = self
+            .hp
+            .connections_surfaces()
+            .first()
+            .map(|(_, r)| *r)
+            .ok_or_else(|| anyhow::anyhow!("no connections"))?;
+        let item = (
+            f64::from(surface.x + surface.width / 2),
+            f64::from(surface.y) + 19.5,
+        );
+        common::click(&mut self.hp, item)?;
+        let open = self
+            .hp
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+        anyhow::ensure!(
+            open,
+            "no popover from {item:?} on {surface:?}; the shell said:\n{}",
+            common::logged(&self.shell_log)
+                .lines()
+                .rev()
+                .take(40)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        common::at_rest(&mut self.hp)?;
+        Ok(common::drawn_popovers(&self.hp)[0])
+    }
+}
+
+/// The popover's row `i` under the network in use (3.5's sizes, at ×1):
+/// its header, the network's 48 px block, the divider, the label.
+fn popover_row(popover: Rect, i: usize) -> (f64, f64) {
+    let top = 45.0 + 6.0 + 48.0 + 6.0 + 9.0 + 6.0 + (4.0 + 12.0 * 1.366) + 6.0;
+    (
+        f64::from(popover.x) + 120.0,
+        f64::from(popover.y) + top + 38.0 * i as f64 + 18.0,
+    )
+}
+
+#[test]
+fn importing_a_wireguard_file_adds_a_vpn_that_is_off() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(home()), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let home_dir = bed.fakes.dir.path().join("home");
+    let (travail, bureau) = (home_dir.join("Travail.conf"), home_dir.join("Bureau.ovpn"));
+    std::fs::write(&travail, "[Interface]\nAddress = 10.8.0.6/24\n")?;
+    std::fs::write(
+        &bureau,
+        "client\nremote vpn.example.org 1194\nauth-user-pass\n",
+    )?;
+    let (_portal, asked) = bed.chooser(vec![travail, bureau])?;
+    bed.open()?;
+    bed.click("network:import")?;
+    bed.asked(&Call::Update2 {
+        ssid: "Travail".to_owned(),
+        psk: None,
+        autoconnect: Some(false),
+    })?;
+    // Said once NetworkManager lists it.
+    let added = bed.shows(|s| {
+        s["toast"] == "VPN « Travail » ajouté."
+            && find(&s["network"]["vpns"], "Travail")["line"] == "WireGuard · coupé"
+    })?;
+    assert_eq!(added["toast_action"], "undo");
+    let travail = find(&added["network"]["vpns"], "Travail");
+    assert_eq!(travail["line"], "WireGuard · coupé");
+    assert_eq!(travail["on"], false);
+    assert_eq!(
+        asked.lock().map(|a| a.clone()).unwrap_or_default(),
+        ["Importer un VPN"]
+    );
+    // "Annuler": the VPN goes.
+    bed.click("toast-action")?;
+    bed.asked(&Call::Delete {
+        ssid: "Travail".to_owned(),
+    })?;
+    bed.shows(|s| {
+        s["toast"] == "Annulé : VPN « Travail » retiré."
+            && find(&s["network"]["vpns"], "Travail").is_null()
+    })?;
+    // An OpenVPN file that asks for a user name and a password: asked
+    // first, then kept with it.
+    bed.click("network:import")?;
+    bed.shows(|s| s["network"]["sheet"]["name"] == "Bureau")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("alex")?;
+    bed.press(KEY_TAB);
+    bed.shows(|s| s["focus"] == "control:1")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("motdepasse")?;
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::VpnCredentials {
+        name: "Bureau".to_owned(),
+        user: "alex".to_owned(),
+        password: "motdepasse".to_owned(),
+    })?;
+    let bureau = bed.shows(|s| find(&s["network"]["vpns"], "Bureau").is_object())?;
+    assert_eq!(
+        find(&bureau["network"]["vpns"], "Bureau")["line"],
+        "OpenVPN · coupé"
+    );
+    assert!(
+        !bed.plain().contains("motdepasse"),
+        "the password was logged"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_openvpn_file_without_its_plugin_says_so() -> anyhow::Result<()> {
+    let setup = Setup {
+        no_openvpn: true,
+        ..home()
+    };
+    let Some(mut bed) = Bed::start(Some(setup), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let file = bed.fakes.dir.path().join("home/Maison.ovpn");
+    std::fs::write(&file, "client\nremote vpn.example.org 1194\n")?;
+    let (_portal, _) = bed.chooser(vec![file])?;
+    bed.open()?;
+    bed.click("network:import")?;
+    bed.shows(|s| {
+        s["toast"]
+            == "Le module OpenVPN de NetworkManager n’est pas installé (network-manager-openvpn)."
+    })?;
+    Ok(())
+}
+
+#[test]
+fn a_vpn_switch_activates_and_deactivates_it() -> anyhow::Result<()> {
+    let setup = Setup {
+        vpns: vec![("Travail", "wireguard", false), ("Panne", "openvpn", true)],
+        ..home()
+    };
+    let Some(mut bed) = Bed::start(Some(setup), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(names(&shown["network"]["vpns"]), ["Panne", "Travail"]);
+    bed.click("vpn-switch:Travail")?;
+    bed.asked(&Call::Activate {
+        ssid: "Travail".to_owned(),
+    })?;
+    let on = bed.shows(|s| find(&s["network"]["vpns"], "Travail")["on"] == true)?;
+    let line = find(&on["network"]["vpns"], "Travail")["line"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        line.starts_with("Connecté depuis ") && line.ends_with(" · WireGuard · 10.8.0.6"),
+        "{line}"
+    );
+    bed.click("vpn-switch:Travail")?;
+    bed.asked(&Call::Deactivate)?;
+    bed.shows(|s| find(&s["network"]["vpns"], "Travail")["line"] == "WireGuard · coupé")?;
+    // One that fails says why.
+    bed.click("vpn-switch:Panne")?;
+    bed.shows(|s| {
+        find(&s["network"]["vpns"], "Panne")["line"]
+            == "La connexion a échoué : le serveur ne répond pas"
+    })?;
+    // Its menu: renamed in place.
+    bed.click("vpn-menu:Travail")?;
+    bed.shows(|s| s["network"]["vpn_menu"] == true)?;
+    bed.click("option:0")?;
+    bed.shows(|s| s["network"]["renaming"] == "Travail")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.type_text("boulot")?;
+    bed.press(KEY_ENTER);
+    bed.shows(|s| find(&s["network"]["vpns"], "boulot").is_object())?;
+    // Deleted, and back with "Annuler".
+    bed.click("vpn-menu:boulot")?;
+    bed.shows(|s| s["network"]["vpn_menu"] == true)?;
+    bed.click("option:2")?;
+    bed.asked(&Call::Delete {
+        ssid: "boulot".to_owned(),
+    })?;
+    bed.shows(|s| s["toast"] == "VPN « boulot » supprimé.")?;
+    bed.click("toast-action")?;
+    bed.shows(|s| {
+        s["toast"] == "Annulé : VPN « boulot » revient."
+            && find(&s["network"]["vpns"], "boulot").is_object()
+    })?;
+    Ok(())
+}
+
+#[test]
+fn the_popovers_dans_les_reglages_row_opens_the_sheet_for_that_network() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_with_shell(home(), &[(WLAN, false)])? else {
+        return Ok(());
+    };
+    let popover = bed.wifi_popover()?;
+    // eduroam, third under Maison: 802.1X, "dans les Réglages".
+    common::click_on(
+        &mut bed.hp,
+        popover_row(popover, 2),
+        hocus_link::POPOVER_NAMESPACE,
+    )?;
+    bed.shell_logged("the Settings open on a network's sheet")?;
+    let open = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(APP_ID) && w.keyboard)
+    })?;
+    anyhow::ensure!(open, "the Settings never opened: {}", bed.plain());
+    bed.shows(|s| s["page"] == "network" && s["network"]["sheet"]["name"] == "eduroam")?;
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the popover stayed open");
+    // "Réglages du Wi-Fi…", the popover's last row.
+    bed.press(KEY_ESC);
+    bed.shows(|s| s["network"]["sheet"].is_null())?;
+    bed.hp.pointer_move(5.0, 5.0);
+    let popover = bed.wifi_popover()?;
+    let link = (
+        f64::from(popover.x + popover.width / 2),
+        f64::from(popover.y + popover.height - 15 - 18),
+    );
+    common::click_on(&mut bed.hp, link, hocus_link::POPOVER_NAMESPACE)?;
+    bed.shell_logged("section=\"network\"")?;
+    Ok(())
+}
+
+#[test]
+fn in_airplane_mode_the_bar_says_it_and_its_switch_turns_the_wifi_on_alone() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_with_shell(home(), &[(WLAN, true), (BLUETOOTH, true)])? else {
+        return Ok(());
+    };
+    // Every radio blocked: the row says "Mode avion".
+    bed.shell_logged("link=Airplane")?;
+    let popover = bed.wifi_popover()?;
+    let _ = popover;
+    // The switch (the first stop): the Wi-Fi's radio alone unblocked.
+    bed.press(KEY_TAB);
+    bed.press(KEY_ENTER);
+    bed.until("the Wi-Fi unblocked", |bed| {
+        bed.rfkill.soft(WLAN) == Some(false)
+    })?;
+    assert_eq!(bed.rfkill.soft(BLUETOOTH), Some(true));
+    assert_eq!(bed.rfkill.asked(), [(WLAN, false)]);
+    Ok(())
+}
+
 /// The second part's pictures, at ×2: `HOCUS_SHOTS=DIR`.
 #[test]
 #[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
@@ -1405,5 +1757,106 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     none.open_until(|s| s["network"]["manager"] == false)?;
     none.hp.pointer_move(5.0, 5.0);
     shoot(&mut none, "network-without-nm.png")?;
+    Ok(())
+}
+
+/// The third part's pictures, at ×2: `HOCUS_SHOTS=DIR`.
+#[test]
+#[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_vpns_and_the_bar() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let setup = Setup {
+        vpns: vec![
+            ("Travail", "wireguard", false),
+            ("Serveur perso", "openvpn", false),
+            ("Panne", "openvpn", true),
+        ],
+        ..home()
+    };
+    let Some(mut bed) =
+        Bed::start_with_shell_on(setup, &[(WLAN, false), (BLUETOOTH, false)], "3840x2160@2")?
+    else {
+        return Ok(());
+    };
+    // The bar's popover: "dans les Réglages" and "Réglages du Wi-Fi…".
+    let popover = bed.wifi_popover()?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    let around = |bed: &mut Bed, rect: Rect, name: &str| -> anyhow::Result<()> {
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let (x, y) = (
+            (rect.x * 2 - 24).max(0) as u32,
+            (rect.y * 2 - 24).max(0) as u32,
+        );
+        let image = image::imageops::crop_imm(
+            &image,
+            x,
+            y,
+            ((rect.width * 2 + 48) as u32).min(w as u32 - x),
+            ((rect.height * 2 + 48) as u32).min(h as u32 - y),
+        )
+        .to_image();
+        image.save(out.join(name))?;
+        eprintln!("{}", out.join(name).display());
+        Ok(())
+    };
+    around(&mut bed, popover, "popover-wifi.png")?;
+    bed.press(KEY_ESC);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the popover stayed open");
+    // The VPNs: one on, one failed.
+    bed.open()?;
+    bed.click("vpn-switch:Travail")?;
+    bed.shows(|s| find(&s["network"]["vpns"], "Travail")["on"] == true)?;
+    bed.click("vpn-switch:Panne")?;
+    bed.shows(|s| {
+        find(&s["network"]["vpns"], "Panne")["line"]
+            .as_str()
+            .is_some_and(|l| l.starts_with("La connexion a échoué"))
+    })?;
+    bed.scroll_to_show("network:import")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-vpns.png")?;
+    bed.click("vpn-menu:Serveur perso")?;
+    bed.shows(|s| s["network"]["vpn_menu"] == true)?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shot(&mut bed, &out, "network-vpn-menu.png")?;
+    bed.press(KEY_ESC);
+    bed.shows(|s| s["network"]["vpn_menu"] == false)?;
+    // Airplane mode: the bar's row says it.
+    bed.scroll_to_show("switch:network.airplane")?;
+    bed.click("switch:network.airplane")?;
+    bed.shell_logged("link=Airplane")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    let row = bed
+        .hp
+        .connections_surfaces()
+        .first()
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("no connections"))?;
+    let popover = bed.wifi_popover()?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    let both = Rect::new(
+        popover.x.min(row.x),
+        popover.y.min(row.y),
+        (popover.x + popover.width).max(row.x + row.width) - popover.x.min(row.x),
+        (popover.y + popover.height).max(row.y + row.height) - popover.y.min(row.y),
+    );
+    around(&mut bed, both, "bar-airplane.png")?;
     Ok(())
 }

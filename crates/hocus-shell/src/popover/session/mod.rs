@@ -986,8 +986,23 @@ pub(in crate::popover) fn open_settings(section: Option<&str>) {
         None => tracing::info!(program, "the Settings open from the footer"),
         Some(section) => tracing::info!(program, section, "the Settings open from a popover"),
     }
+    launch_settings(program, section.map(str::to_owned).into_iter().collect());
+}
+
+/// The Settings on Réseau, with that network's sheet (6.6): from the
+/// Wi-Fi popover's "dans les Réglages" rows.
+pub(in crate::popover) fn open_settings_join(ssid: &str) {
+    let program = settings_program();
+    tracing::info!(program, "the Settings open on a network's sheet");
+    launch_settings(
+        program,
+        vec!["network".to_owned(), "--join".to_owned(), ssid.to_owned()],
+    );
+}
+
+fn launch_settings(program: String, args: Vec<String>) {
     let mut argv = vec![program];
-    argv.extend(section.map(str::to_owned));
+    argv.extend(args);
     let launch = Launch {
         id: "hocus-settings".to_owned(),
         terminal: false,
