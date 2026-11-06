@@ -42,6 +42,7 @@ use hocus_compositor::{
 };
 use hocus_link::input::{Bus, Can, DeviceKind, InputDevice, RightClick};
 use serde_json::Value;
+use settings_page::{Floor, Wheel};
 
 const APP_ID: &str = "hocus-settings";
 const KEY_F: u32 = 33;
@@ -665,22 +666,17 @@ fn wheel_page(bed: &mut Bed, times: usize, notches: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The page scrolled down until `id` shows whole, with the wheel over it.
+/// The page scrolled until `id` shows whole, with the wheel over it,
+/// each wheel taken by the window before the next (#705): a wheel still
+/// on its way when the test reads where to point moved the page after.
 fn scroll_to(bed: &mut Bed, id: &str) -> anyhow::Result<()> {
-    for _ in 0..40 {
-        let places = bed.places_with(id)?;
-        let window = bed.window()?;
-        let place = &places[id];
-        let bottom = place[1].as_f64().unwrap_or_default() + place[3].as_f64().unwrap_or_default();
-        if bottom + 40.0 <= f64::from(window.height) {
-            return Ok(());
-        }
-        let page = bed.over_page()?;
-        bed.hp.pointer_move(page.0, page.1);
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(60))?;
-    }
-    anyhow::bail!("{id} never came into view")
+    let wheel = Wheel {
+        x: 632.0,
+        notches: 3,
+        top: 56.0,
+        floor: Floor::Margin(40.0),
+    };
+    settings_page::reveal(&mut bed.hp, &bed.log, APP_ID, id, &wheel)
 }
 
 /// The page scrolled down until the gestures' card shows whole.
