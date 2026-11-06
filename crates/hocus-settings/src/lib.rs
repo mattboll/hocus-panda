@@ -19,6 +19,8 @@
 //!   compositor's own geometry.
 //! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
+//! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
+//!   and systemd's timedated followed and asked off the window's thread.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
@@ -36,6 +38,7 @@ pub mod mouse;
 pub mod network;
 pub mod portal;
 pub mod power;
+pub mod power_bus;
 pub mod renderer;
 pub mod screens;
 pub mod search;
@@ -43,6 +46,8 @@ pub mod single;
 pub mod sound;
 pub mod store;
 pub mod theme;
+pub mod time;
+pub mod timedate;
 pub mod trial;
 pub mod wallpaper;
 pub mod worker;
