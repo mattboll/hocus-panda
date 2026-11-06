@@ -34,6 +34,12 @@
 //! dots per screen, a wider screen's dots lower (18 × 9 at 21:9). No
 //! label: the shape and the sketch say which screen. A click, `Enter` or
 //! the wheel on a group goes to a desktop of its screen.
+//!
+//! A window moved over a tile (8.5 B): the tile lights,
+//! `rgba(108,194,135,0.28)` with a 2 px `#7EE0A0` ring, as where the
+//! window would go; the compositor says which (`drop-over`), knowing where
+//! the tiles are as the surface says them (`desk-tiles`), each time they
+//! move or change.
 
 use std::{
     collections::HashMap,
@@ -42,7 +48,8 @@ use std::{
 };
 
 use hocus_link::{
-    DESKTOPS_NAMESPACE, DeskScreen, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look, SHARE,
+    DESKTOPS_NAMESPACE, DeskScreen, DeskTile, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look,
+    SHARE, ToCompositor,
 };
 use iced::{
     Color, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment, keyboard, mouse,
@@ -103,6 +110,47 @@ const DOT_RADIUS: f32 = 4.0;
 const DOT_FULL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.30));
 const DOT_EMPTY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+
+/// A tile a window would be let go on (8.5 B): lit green, ringed 2 px.
+const DROP_FILL: Ink = Ink::Fixed(Color::from_rgba8(108, 194, 135, 0.28));
+const DROP_RING: Ink = Ink::Fixed(Color::from_rgb8(0x7E, 0xE0, 0xA0));
+const DROP_RING_WIDTH: f32 = 2.0;
+
+/// Where each bar's tiles were last said to be, by the bar's screen.
+static TOLD: Mutex<Option<HashMap<String, Vec<DeskTile>>>> = Mutex::new(None);
+
+/// Bar `bar`'s tiles are `tiles` on its surface (as shown, `shown`): the
+/// compositor is told when that changed, for a window let go on one.
+fn tell_tiles(bar: &str, tiles: &[(Item, Rectangle)], shown: &[Shown]) {
+    let tiles: Vec<DeskTile> = tiles
+        .iter()
+        .filter_map(|(item, r)| {
+            let Item::Desktop { row, index } = item else {
+                return None;
+            };
+            Some(DeskTile {
+                output: shown.get(usize::from(*row))?.screen.output.clone(),
+                desktop: *index,
+                rect: [
+                    r.x.round() as i32,
+                    r.y.round() as i32,
+                    r.width.round() as i32,
+                    r.height.round() as i32,
+                ],
+            })
+        })
+        .collect();
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    let told = told.get_or_insert_with(HashMap::new);
+    if told.get(bar) == Some(&tiles) {
+        return;
+    }
+    told.insert(bar.to_owned(), tiles.clone());
+    popover::tell(ToCompositor::DeskTiles {
+        bar: bar.to_owned(),
+        tiles,
+    });
+}
 
 /// Between two screens' groups (8.4), in both forms.
 const SCREEN_GAP: f32 = 10.0;
@@ -592,6 +640,8 @@ impl<Message> canvas::Program<Message> for Tiles {
             })
             .collect();
         popover::with(|c| c.set_items(&self.bar, DESKTOPS_NAMESPACE, in_bar));
+        // While the bar switches forms there are none to let a window go on.
+        tell_tiles(&self.bar, &items, &state.shown);
         if !state.any() {
             return vec![frame.into_geometry()];
         }
@@ -616,6 +666,28 @@ impl<Message> canvas::Program<Message> for Tiles {
                             Form::Full => full(f, rect, desktops, index, hover, !moving, alpha),
                             Form::Mini => mini(f, rect, desktops, index, !moving, alpha),
                         }
+                    }
+                    // The tile a moved window is over (8.5 B).
+                    if let Some((output, index)) = super::drop_on(&self.bar)
+                        && output == desktops.output
+                        && index < desktops.count
+                    {
+                        let rect = self.rect(form, size, (row, usize::from(index)), &groups);
+                        let radius = match form {
+                            Form::Full => TILE_RADIUS,
+                            Form::Mini => DOT_RADIUS,
+                        };
+                        f.fill(
+                            &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                            faded(DROP_FILL.get(), alpha),
+                        );
+                        inner_ring(
+                            f,
+                            rect,
+                            radius,
+                            DROP_RING_WIDTH,
+                            faded(DROP_RING.get(), alpha),
+                        );
                     }
                     // The ring on its way.
                     if moving {

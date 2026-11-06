@@ -1724,6 +1724,43 @@ impl Headless {
             .map(smithay::output::Output::name)
     }
 
+    /// Bar `bar`'s desktops' tiles are where `tiles` say on its desktops'
+    /// surface, as the shell says them (8.5 B).
+    pub fn desk_tiles(&mut self, bar: &str, tiles: Vec<hocus_link::DeskTile>) {
+        self.app.state.desk_tiles_said(bar.to_owned(), tiles);
+    }
+
+    /// The tile a moved window is over: the bar's screen, the tile's
+    /// screen and desktop (from 0).
+    pub fn drop_over(&self) -> Option<(String, String, usize)> {
+        self.app
+            .state
+            .tile_drop
+            .over
+            .as_ref()
+            .map(|o| (o.bar.clone(), o.output.clone(), o.desktop))
+    }
+
+    /// The bars' tiles as the shell said them, global: the bar's screen,
+    /// the tile's screen and desktop (from 0), its middle.
+    pub fn desk_tile_middles(&self) -> Vec<(String, String, usize, (f64, f64))> {
+        self.app
+            .state
+            .tile_rects()
+            .into_iter()
+            .map(|(o, r)| {
+                let middle = (r.loc.x + r.size.w / 2.0, r.loc.y + r.size.h / 2.0);
+                (o.bar, o.output, o.desktop, middle)
+            })
+            .collect()
+    }
+
+    /// The moved window's share of its size as drawn now (8.5 B).
+    pub fn moved_scale(&self) -> f64 {
+        let state = &self.app.state;
+        state.tile_drop.scale(state.now())
+    }
+
     /// The next meeting is `near`, as the calendar will say: the halo
     /// lights without an agent.
     pub fn meeting_near(&mut self, near: Option<crate::halo::Meeting>) {

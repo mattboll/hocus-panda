@@ -705,6 +705,10 @@ impl Shell {
                 desktops::set_screens(bar, screens);
                 Task::none()
             }
+            ToShell::DropOver { bar, over } => {
+                desktops::set_drop(bar, over);
+                Task::none()
+            }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
                 Task::none()
@@ -2332,6 +2336,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // only their surface draws, resized to their rows.
                         Ok(ToShell::DeskScreens { bar, screens }) => {
                             desktops::set_screens(bar, screens);
+                            continue;
+                        }
+                        // A window moved over a tile (8.5 B): only the
+                        // tiles draw, that one lit.
+                        Ok(ToShell::DropOver { bar, over }) => {
+                            desktops::set_drop(bar, over);
                             continue;
                         }
                         Ok(ToShell::BarWindows(shown)) => {

@@ -638,6 +638,51 @@ fn a_click_on_a_tile_slides_to_its_desktop() -> anyhow::Result<()> {
 }
 
 #[test]
+fn a_window_let_go_on_a_tile_goes_to_that_desktop() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let (window, _client) = bed.open("test.dropped", (600, 400))?;
+    bed.settle()?;
+    // Alt+drag onto the second tile (8.5 B): the shell said where the
+    // tiles are; it lights the one under the window.
+    let mark = bed.mark();
+    let (x, y) = (f64::from(window.x + 100), f64::from(window.y + 100));
+    let to = bed.middle(1);
+    bed.hp.pointer_move(x, y);
+    bed.hp.key(KEY_LEFTALT, true);
+    bed.hp.button(BTN_LEFT, true);
+    for step in 1..=20 {
+        let t = f64::from(step) / 20.0;
+        bed.hp.pointer_move(x + (to.0 - x) * t, y + (to.1 - y) * t);
+        bed.hp.dispatch(Duration::from_millis(16))?;
+    }
+    let over = bed.hp.dispatch_until(WAIT, |hp| hp.drop_over().is_some())?;
+    anyhow::ensure!(over, "never over a tile");
+    assert_eq!(
+        bed.hp.drop_over(),
+        Some(("HEADLESS-1".to_owned(), "HEADLESS-1".to_owned(), 1))
+    );
+    assert_eq!(bed.hp.bar_in_front().as_deref(), Some("HEADLESS-1"));
+    bed.logged_after(
+        mark,
+        "a window over the tiles bar=\"HEADLESS-1\" over=Some((\"HEADLESS-1\", 1))",
+    )?;
+    bed.hp.button(BTN_LEFT, false);
+    bed.hp.key(KEY_LEFTALT, false);
+    // On the second desktop, at its place before the drag; the screen
+    // still on the first; the tile no longer lit.
+    let gone = bed.hp.dispatch_until(WAIT, |hp| hp.windows().is_empty())?;
+    anyhow::ensure!(gone, "still shown: {:?}", bed.hp.windows());
+    assert_eq!(bed.hp.desktop().0, 0);
+    bed.logged_after(mark, "a window over the tiles bar=\"HEADLESS-1\" over=None")?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_2]);
+    common::wait_for_rect(&mut bed.hp, "test.dropped", window)?;
+    Ok(())
+}
+
+#[test]
 fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());

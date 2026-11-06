@@ -336,6 +336,11 @@ group where it is.
   external screen, Desktop 2, 1 window". A screen plugged in adds its row
   (the surface grows, layer-shell); one unplugged takes it away (its
   windows per windows.md §12). At rest nothing draws.
+- **A window let go on a tile** (approved 2026-11-06, issue #490, 8.5 B):
+  a window moved over the tiles brings the bar in front at once; the tile
+  under it lights (`rgba(108,194,135,0.28)`, a 2 px `#7EE0A0` ring); let
+  go there, it goes to that desktop of that row's screen (windows.md §6,
+  "Onto a desktop's tile in the bar").
 - **Names** of desktops (`[desktops] names`, 6.14; windows.md §12): a
   tile's name for screen readers is "Travail, M fenêtres", its list's
   title "Travail"; without a name, "Bureau N, M fenêtres" / "Desktop N, M
@@ -4442,4 +4447,42 @@ and §5 say the rest.
   (windows.md §12), a snapped window in the same zone, nothing with no
   screen on that side; a window dragged onto the other screen on the
   desktop it shows. Unit tests for the rows' shape and heights, the
-  words, the link's line. On the GPU, the screenshots for the maintainer.
+  words, the link's line. The screenshots for the maintainer: the real
+  shell on the CPU, a 16:10 screen and a 21:9 one
+  (`tests/desktops_shots.rs`, by hand, `HOCUS_SHOTS=DIR`).
+
+### 8.5 B, a window let go on a desktop's tile (2026-11-06)
+
+What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
+8.5 A, comes later); windows.md §6 says the behaviour.
+
+- **Where the tiles are**: the shell says, for each bar, each tile's
+  screen, desktop and place on its desktops' surface (`desk-tiles BAR
+  OUTPUT,N,X,Y,W,H …`), whenever they move or change (not while the bar
+  switches forms, when there are none); the compositor knows where that
+  surface is. It finds the tile under the pointer at each motion of a
+  move, no more.
+- **What the shell is told**: `drop-over BAR OUTPUT N` as the window comes
+  over a tile, `drop-over BAR -` as it leaves the tiles or is let go; the
+  tiles' surface alone draws, that tile lit.
+- **The bar in front** while a window is over its tiles stays in front
+  until the move ends (`Front::Dropping`), then goes back under the
+  windows.
+- **The shrink** is drawn, not configured: the window keeps its size, its
+  picture scaled about the pointer (`render.rs`), 120 ms each way (at once
+  with reduced motion); nothing runs at rest.
+- **Measured headless**: the compositor alone, a layer surface of the
+  test's for the tiles' and the tiles said as the shell says them
+  (`crates/hocus-compositor/tests/desktop_drop.rs`): over the second
+  tile, told, the bar in front, the window at 30 %; let go, on the second
+  desktop at its place, the screens still on theirs, the bar back under;
+  let go on its own desktop's tile, back; on the other screen's tiles, to
+  that screen, shown on the desktop it shows, out of sight on another;
+  off the tiles, full size again, the bar still in front, `Esc` back
+  where it began. The real shell (`tests/bar_desktops.rs`): its tiles
+  said, the second one lit under the window, the window let go there on
+  the second desktop. The screenshots: `tests/desktops_shots.rs`, a window
+  over the wide screen's third tile, then let go there.
+- **Across screens on the way**: a window moved onto another screen takes
+  the desktop that screen shows as its centre crosses over, not once let
+  go, so that it stays in sight there.

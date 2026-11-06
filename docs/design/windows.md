@@ -134,6 +134,31 @@ open on), agents' badges on windows (slice 3).
   `Alt+Super`), `"alt"` or `"none"` (the frame only). Both followed as the
   file changes.
 
+### Onto a desktop's tile in the bar
+
+Approved 2026-11-06 (8.5 B, issue #490): the mouse's way to another
+desktop or screen, besides the keys (§12).
+
+- While a window is moved by the pointer (its header, `Alt`+drag, the
+  grip) and the pointer comes over a desktop's tile in a bar (bar.md
+  §4.4, any screen's row), the bar comes in front at once (no 300 ms;
+  #519 otherwise unchanged) and stays in front until the move ends.
+- Over a tile: the tile lights (`rgba(108,194,135,0.28)`, a 2 px
+  `#7EE0A0` ring); the window shrinks around the grab point to 30 % of
+  its size in 120 ms, following the pointer, without wobbling; the snap
+  zones and the magnet do nothing there (the tiles win over the right
+  edge's zone). Leaving the tiles gives its size back in 120 ms.
+- Let go on a tile: the window goes to that desktop of that tile's
+  screen, at the place and size (and in the state, snapped or floating)
+  it had before the drag, not where it was let go, leaving toward that
+  desktop's side as `Super+Shift+N` sends it; on another screen, at the
+  same share of its work area, as `Super+Alt+←/→` carries it. The
+  screens keep the desktops they show. Let go on the tile of the desktop
+  it is on, it goes back where the drag began.
+- `Esc` during a drag cancels it: the window goes back where the drag
+  began.
+- Minimised and fullscreen windows are not moved, as before.
+
 ### Magnetic edges
 
 While a window moves, each of its edges **sticks** to a nearby edge when

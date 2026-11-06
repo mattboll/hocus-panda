@@ -59,6 +59,8 @@ pub(crate) enum Kept {
     Capture(crate::capture::Key),
     /// `Esc` while strokes show: they go (docs/design/ink.md).
     InkClear,
+    /// `Esc` while a window is moved: it goes back (8.5 B).
+    CancelMove,
     /// A key on the lock's form (7.1): the session is locked.
     Lock(crate::lock::LockKey),
 }
@@ -270,6 +272,11 @@ impl State {
                 // `Esc` clears the strokes while they show, with whatever
                 // modifiers are still held from drawing; otherwise it goes
                 // to the window.
+                // `Esc` while a window is moved puts it back (8.5 B).
+                if sym == Keysym::Escape.raw() && this.moving.is_some() && !auth {
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::CancelMove);
+                }
                 if sym == Keysym::Escape.raw() && this.ink.shows() && !auth {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::InkClear);
@@ -343,6 +350,7 @@ impl State {
             }
             Some(Kept::Capture(key)) => self.capture_key(key),
             Some(Kept::InkClear) => self.ink_clear(),
+            Some(Kept::CancelMove) => self.cancel_move(),
             Some(Kept::Lock(key)) => self.lock_key(key),
             Some(Kept::Release) | None => {}
         }

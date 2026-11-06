@@ -36,6 +36,38 @@ static TITLES: Mutex<Option<HashMap<String, Titles>>> = Mutex::new(None);
 static RECENT: Mutex<Option<HashMap<String, Recent>>> = Mutex::new(None);
 /// The screens each bar shows a row of tiles for, by the bar's screen.
 static SCREENS: Mutex<Option<HashMap<String, Vec<DeskScreen>>>> = Mutex::new(None);
+/// The tile a window being moved is over (8.5 B): the bar's screen, the
+/// tile's screen and desktop.
+static DROP: Mutex<Option<(String, String, u8)>> = Mutex::new(None);
+
+/// The compositor says a window being moved is over bar `bar`'s tile
+/// `over` (its screen and desktop), or over none: that tile lights.
+pub fn set_drop(bar: String, over: Option<(String, u8)>) {
+    let now = over.map(|(output, desktop)| (bar.clone(), output, desktop));
+    let mut kept = DROP.lock().unwrap_or_else(PoisonError::into_inner);
+    let changed = match (&*kept, &now) {
+        (None, None) => false,
+        (Some((was, ..)), None) => *was == bar,
+        _ => *kept != now,
+    };
+    if !changed {
+        return;
+    }
+    *kept = now;
+    drop(kept);
+    tracing::debug!(bar, over = ?drop_on(&bar), "a window over the tiles");
+    popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+}
+
+/// The tile of bar `bar` a window being moved is over: its screen and
+/// desktop.
+pub fn drop_on(bar: &str) -> Option<(String, u8)> {
+    DROP.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|(on, ..)| on == bar)
+        .map(|(_, output, desktop)| (output.clone(), *desktop))
+}
 
 /// The screens bar `bar` shows the desktops of, in its rows' order: its
 /// own first. Until the compositor says, its own alone, of no known size.

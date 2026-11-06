@@ -1004,6 +1004,21 @@ impl crate::State {
         if from == to {
             return;
         }
+        self.send_window_to(id, to);
+    }
+
+    /// Sends window `id` to desktop `to` (from 0) of its screen, staying
+    /// here: it leaves toward its desktop's side, the dots show, and the
+    /// focus goes to the window on top there.
+    pub(crate) fn send_window_to(&mut self, id: WindowId, to: usize) {
+        let Some(output) = self.output_of(id) else {
+            return;
+        };
+        let strip = self.strip(&output);
+        let from = self.model.desktop(id);
+        if from == to || to >= strip.count() {
+            return;
+        }
         tracing::debug!(window = id.0, desktop = to + 1, "sent");
         let now = self.now();
         self.model.set_desktop(id, to);
