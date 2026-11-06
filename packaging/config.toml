@@ -301,7 +301,7 @@
 # stuck, or done and not seen), "waiting" (only an agent waiting for you)
 # or "off"; the meetings keep theirs. When an agent still waiting gets one
 # more wave, its panda peeking out again: "2m", "5m", "10m" or "never"
-# (none with halo = "off"). For what an agent's panda peeks out of the
+# (none while the halo is "off"). For what an agent's panda peeks out of the
 # bar for 8 s: "waiting-and-done", "waiting" or "off". Off, the agents'
 # rows show a dot of their state's colour instead of their pandas.
 # halo = "all"
