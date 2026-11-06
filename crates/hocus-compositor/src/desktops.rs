@@ -1075,19 +1075,23 @@ impl crate::State {
         strip.switch(strip.current(), now, reduced);
         self.set_strip(&output, strip);
         // Sent from the bar, another window may have the focus: it keeps
-        // it.
-        if !had_focus {
-            return;
+        // it. Else the focus goes to the window on top here.
+        if had_focus {
+            let next = self
+                .model
+                .stack()
+                .iter()
+                .rev()
+                .copied()
+                .find(|w| self.model.is_shown(*w) && self.output_of(*w).as_ref() == Some(&output))
+                .or_else(|| self.model.focused());
+            self.focus(next);
         }
-        let next = self
-            .model
-            .stack()
-            .iter()
-            .rev()
-            .copied()
-            .find(|w| self.model.is_shown(*w) && self.output_of(*w).as_ref() == Some(&output))
-            .or_else(|| self.model.focused());
-        self.focus(next);
+        // It stays in front as it leaves, over the window focused in its
+        // stead, and lands on top of its new desktop's (#728).
+        self.model.raise(id);
+        self.restack();
+        self.redraw = true;
     }
 
     /// Takes the focused window to the desktop on that side of its

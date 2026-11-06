@@ -432,3 +432,58 @@ fn sending_it_to_a_desktop_by_its_keys_takes_it_off_all_desktops() -> anyhow::Re
     assert!(sent, "{:?}", hp.all_windows());
     Ok(())
 }
+
+/// A window sent to the next desktop (#728): it stays in front of the
+/// window focused in its stead while it slides away, and lands on top of
+/// the windows of the desktop it goes to; sent back by its keys
+/// (`Super+Shift+1`), the same.
+#[test]
+fn a_window_sent_away_stays_in_front_as_it_leaves_and_lands_on_top() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    let on = |hp: &mut Headless, desktop: usize| -> anyhow::Result<()> {
+        let done = hp.dispatch_until(WAIT, |hp| hp.desktop().0 == desktop)?;
+        anyhow::ensure!(done, "never on desktop {}", desktop + 1);
+        Ok(())
+    };
+    let focused = |hp: &Headless| hp.windows().into_iter().find(|w| w.focused).map(|w| w.id);
+    let index = |hp: &Headless, id: WindowId| hp.stack().iter().position(|w| *w == id);
+    // Desktop 2 has a window already; desktop 1 two, the one sent on top.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    on(&mut hp, 1)?;
+    open(&mut hp, "test.there", (900, 700))?;
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_1]);
+    on(&mut hp, 0)?;
+    open(&mut hp, "test.behind", (900, 700))?;
+    open(&mut hp, "test.sent", (600, 400))?;
+    let (sent, behind, there) = (
+        id_of(&hp, "test.sent")?,
+        id_of(&hp, "test.behind")?,
+        id_of(&hp, "test.there")?,
+    );
+    let centre = opened(&mut hp, "test.sent")?;
+    hp.pointer_move(centre.0 + RING + 30.0, centre.1 + 5.0);
+    assert!(hp.radial().is_none());
+    // As it leaves: the one behind focused, the one sent still drawn over
+    // it, the stack's order the drawing's.
+    assert_eq!(focused(&hp), Some(behind));
+    assert_eq!(hp.stack().last(), Some(&sent), "{:?}", hp.stack());
+    let gone = hp.dispatch_until(WAIT, |hp| {
+        hp.all_windows()
+            .iter()
+            .any(|(w, _, d, shown)| *w == sent && *d == 1 && !shown)
+    })?;
+    anyhow::ensure!(gone, "not sent: {:?}", hp.all_windows());
+    // On desktop 2: over the window that was there.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    on(&mut hp, 1)?;
+    assert!(index(&hp, sent) > index(&hp, there), "{:?}", hp.stack());
+    assert_eq!(focused(&hp), Some(sent));
+    // Back by its keys: in front still as it leaves, on top over there.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, common::KEY_1]);
+    assert_eq!(focused(&hp), Some(there));
+    assert_eq!(hp.stack().last(), Some(&sent), "{:?}", hp.stack());
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_1]);
+    on(&mut hp, 0)?;
+    assert!(index(&hp, sent) > index(&hp, behind), "{:?}", hp.stack());
+    Ok(())
+}

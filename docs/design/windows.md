@@ -511,7 +511,10 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 - `Super+Shift+1…4` sends the focused window to that desktop, without
   switching: it leaves the screen toward its desktop's side, a screen's
   width in 320 ms easing in, as leaving windows do (it fades with reduced
-  motion), and the dots show. With `Ctrl`
+  motion), and the dots show. It stays in front as it leaves, over the
+  window focused in its stead, and lands on top of its new desktop's
+  windows (#728; the radial menu, the bar's menu and a tile it is let go
+  on send it the same way). With `Ctrl`
   too, it follows it: the window stays in place as the strip slides
   under it. `Super+Ctrl+Shift+←/→` takes it the same way to the desktop
   on that side of its screen; past the first or the last, it stays (no
