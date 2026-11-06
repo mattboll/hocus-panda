@@ -263,7 +263,7 @@ pub fn kind(f: &mut Frame, at: Point, size: f32, kind: Kind, colour: Color) {
         );
     };
     match kind {
-        Kind::Headphones => {
+        Kind::Headphones | Kind::Earbuds => {
             // `M4 15v-3a8 8 0 0 1 16 0v3`: up, over the top, down.
             let band = Path::new(|b| {
                 b.move_to(p(4.0, 15.0));
@@ -297,11 +297,11 @@ pub fn kind(f: &mut Frame, at: Point, size: f32, kind: Kind, colour: Color) {
             f.stroke(&Path::circle(p(12.0, 14.0), 3.5 * s), line);
             f.fill(&Path::circle(p(12.0, 7.0), 2.0 * s), colour);
         }
-        Kind::Phone => {
+        Kind::Phone | Kind::Tablet => {
             rect(f, 7.0, 2.0, 10.0, 20.0, 2.0);
             f.stroke(&Path::line(p(11.0, 18.0), p(13.0, 18.0)), line);
         }
-        Kind::Computer | Kind::Other => sign(f, at, size, colour, false, 1.0),
+        Kind::Computer | Kind::Gamepad | Kind::Other => sign(f, at, size, colour, false, 1.0),
     }
 }
 
@@ -318,7 +318,7 @@ mod tests {
             paired: true,
             connected: true,
             battery,
-            code: false,
+            ..Device::default()
         }
     }
 

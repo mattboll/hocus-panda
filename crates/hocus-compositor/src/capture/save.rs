@@ -1,7 +1,9 @@
 //! What becomes of a capture, on a thread of its own: its pieces (the
 //! screens' pixels as drawn for it) cut or put together into one image,
-//! encoded as PNG and written to the pictures' folder; and where that
-//! folder is, what the file is named, and the area kept for next time.
+//! encoded as PNG for the clipboard and written, as PNG or JPEG
+//! (`[capture] format`, 6.17), to the folder chosen (`[capture] folder`)
+//! or the pictures' folder's own; and where that folder is, what the
+//! file is named, and the area kept for next time.
 
 use std::{
     path::{Path, PathBuf},
@@ -11,6 +13,10 @@ use std::{
 use anyhow::Context;
 
 use super::geometry::Area;
+use crate::config::CaptureFormat;
+
+/// A JPEG's quality, of 100.
+const JPEG_QUALITY: u8 = 90;
 
 /// The pixels of a screen (or a window) as drawn for the capture: rows of
 /// premultiplied ARGB8888 (B, G, R, A in memory), `size` pixels, its top
@@ -42,8 +48,14 @@ pub struct Job {
     pub cut: Option<(u32, u32, u32, u32)>,
     /// When it was taken: its file's name says it, in local time.
     pub when: SystemTime,
-    /// The pictures' folder (`$XDG_PICTURES_DIR`); none: not saved.
+    /// The pictures' folder (`$XDG_PICTURES_DIR`); none: not saved,
+    /// unless a folder is chosen.
     pub pictures: Option<PathBuf>,
+    /// The folder `[capture] folder` names, if it does: used when it can
+    /// be written, else the default one is.
+    pub chosen: Option<PathBuf>,
+    /// The file's format.
+    pub format: CaptureFormat,
     pub french: bool,
 }
 
@@ -59,9 +71,9 @@ pub struct Saved {
     pub folder: String,
 }
 
-/// The pieces made one PNG and, with a pictures' folder, written there.
-/// The image is written even when the file cannot be: the clipboard
-/// still gets it.
+/// The pieces made one PNG and, with a folder, written there in the
+/// format asked. The image is made even when the file cannot be written:
+/// the clipboard still gets it.
 pub fn save(job: Job) -> anyhow::Result<Saved> {
     let image = compose(&job.pieces, job.cut).context("nothing to capture")?;
     let (width, height) = image.dimensions();
@@ -71,19 +83,40 @@ pub fn save(job: Job) -> anyhow::Result<Saved> {
         .context("could not encode the capture")?;
     let mut file = None;
     let mut folder = String::new();
-    if let Some(pictures) = &job.pictures {
-        let dir = pictures.join(folder_name(job.french));
+    let place = match &job.chosen {
+        Some(chosen) if writable(chosen) => Some((chosen.clone(), shown_chosen(chosen))),
+        chosen => {
+            if let Some(chosen) = chosen {
+                tracing::info!(
+                    folder = %chosen.display(),
+                    "the captures' folder cannot be written: the default one is used"
+                );
+            }
+            job.pictures.as_ref().map(|pictures| {
+                (
+                    pictures.join(folder_name(job.french)),
+                    shown_folder(pictures, job.french),
+                )
+            })
+        }
+    };
+    if let Some((dir, shown)) = place {
         let written = std::fs::create_dir_all(&dir)
             .with_context(|| format!("could not make {}", dir.display()))
             .and_then(|()| {
-                let path = unused(&dir, &file_name(job.when, job.french));
-                write_new(&path, &png)
+                let bytes = match job.format {
+                    CaptureFormat::Png => png.clone(),
+                    CaptureFormat::Jpeg => jpeg(&image)?,
+                };
+                let name = file_name(job.when, job.french, job.format.extension());
+                let path = unused(&dir, &name);
+                write_new(&path, &bytes)
                     .with_context(|| format!("could not write {}", path.display()))?;
                 Ok(path)
             });
         match written {
             Ok(path) => {
-                folder = shown_folder(pictures, job.french);
+                folder = shown;
                 file = Some(path);
             }
             Err(err) => tracing::warn!("{err:#}: the capture is only copied"),
@@ -96,6 +129,38 @@ pub fn save(job: Job) -> anyhow::Result<Saved> {
         file,
         folder,
     })
+}
+
+/// `image` as a JPEG, at [`JPEG_QUALITY`], what no screen covers black.
+fn jpeg(image: &image::RgbaImage) -> anyhow::Result<Vec<u8>> {
+    let rgb = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
+        .encode_image(&rgb)
+        .context("could not encode the capture as JPEG")?;
+    Ok(out)
+}
+
+/// Whether `dir` is a folder this user can write in: not gone (a USB key
+/// unplugged), not read-only. A folder gone is not made again: the key
+/// stays, and applies again once it is back.
+pub fn writable(dir: &Path) -> bool {
+    dir.is_dir() && rustix::fs::access(dir, rustix::fs::Access::WRITE_OK).is_ok()
+}
+
+/// A chosen folder as the toast says it: its parent's name, then its own.
+pub fn shown_chosen(dir: &Path) -> String {
+    let name = |p: Option<&Path>| {
+        p.and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let (parent, own) = (name(dir.parent()), name(Some(dir)));
+    if parent.is_empty() {
+        own
+    } else {
+        format!("{parent}/{own}")
+    }
 }
 
 /// The file, made for it alone (never over another).
@@ -217,17 +282,18 @@ fn shown_folder(pictures: &Path, french: bool) -> String {
 }
 
 /// "Capture du 2026-11-03 à 14-32-05.png", "Screenshot from 2026-11-03
-/// 14-32-05.png", at `when` in the local time zone.
-pub fn file_name(when: SystemTime, french: bool) -> String {
+/// 14-32-05.png", at `when` in the local time zone, its extension
+/// `extension`.
+pub fn file_name(when: SystemTime, french: bool, extension: &str) -> String {
     let zoned = jiff::Timestamp::try_from(when)
         .map(|t| t.to_zoned(jiff::tz::TimeZone::system()))
         .unwrap_or_else(|_| jiff::Timestamp::UNIX_EPOCH.to_zoned(jiff::tz::TimeZone::UTC));
     let day = zoned.strftime("%Y-%m-%d");
     let time = zoned.strftime("%H-%M-%S");
     if french {
-        format!("Capture du {day} à {time}.png")
+        format!("Capture du {day} à {time}.{extension}")
     } else {
-        format!("Screenshot from {day} {time}.png")
+        format!("Screenshot from {day} {time}.{extension}")
     }
 }
 
@@ -238,9 +304,9 @@ fn unused(dir: &Path, name: &str) -> PathBuf {
     if !first.exists() {
         return first;
     }
-    let stem = name.strip_suffix(".png").unwrap_or(name);
+    let (stem, extension) = name.rsplit_once('.').unwrap_or((name, "png"));
     (2..1000)
-        .map(|n| dir.join(format!("{stem} ({n}).png")))
+        .map(|n| dir.join(format!("{stem} ({n}).{extension}")))
         .find(|p| !p.exists())
         .unwrap_or(first)
 }
@@ -361,9 +427,9 @@ mod tests {
     #[test]
     fn the_files_name_says_when_in_the_users_language() {
         let when = SystemTime::UNIX_EPOCH;
-        let fr = file_name(when, true);
+        let fr = file_name(when, true, "png");
         assert!(fr.starts_with("Capture du ") && fr.contains(" à ") && fr.ends_with(".png"));
-        let en = file_name(when, false);
+        let en = file_name(when, false, "png");
         assert!(en.starts_with("Screenshot from ") && en.ends_with(".png"));
         // "2026-11-03 14-32-05": the date, then the time with dashes.
         let stamp = en
@@ -410,6 +476,8 @@ mod tests {
             cut: None,
             when: SystemTime::UNIX_EPOCH,
             pictures: Some(dir.path().to_path_buf()),
+            chosen: None,
+            format: CaptureFormat::Png,
             french: false,
         };
         let first = save(job())?;

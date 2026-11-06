@@ -64,6 +64,8 @@ pub struct FakeDevice {
     pub name: Option<&'static str>,
     /// BlueZ's icon name, or none.
     pub icon: &'static str,
+    /// Its Bluetooth LE appearance, if it says one.
+    pub appearance: Option<u16>,
     pub paired: bool,
     pub connected: bool,
     /// Its battery while connected.
@@ -79,6 +81,7 @@ impl FakeDevice {
         Self {
             name: Some(name),
             icon,
+            appearance: None,
             paired: true,
             connected: false,
             battery,
@@ -93,6 +96,7 @@ impl FakeDevice {
         Self {
             name: Some(name),
             icon,
+            appearance: None,
             paired: false,
             connected: false,
             battery: None,
@@ -115,6 +119,13 @@ impl FakeDevice {
 
     pub const fn pairing(self, pairing: Pairing) -> Self {
         Self { pairing, ..self }
+    }
+
+    pub const fn appearing(self, appearance: u16) -> Self {
+        Self {
+            appearance: Some(appearance),
+            ..self
+        }
     }
 }
 
@@ -154,6 +165,9 @@ pub enum Call {
     Pair(String),
     Trust(String),
     CancelPairing(String),
+    /// The adapter made visible to other devices, or hidden.
+    Discoverable(bool),
+    Pairable(bool),
 }
 
 #[derive(Debug)]
@@ -185,6 +199,8 @@ struct State {
     powered: bool,
     blocked: bool,
     discovering: bool,
+    discoverable: bool,
+    pairable: bool,
     devices: Vec<Dev>,
     later: Vec<FakeDevice>,
     count: u32,
@@ -307,6 +323,26 @@ impl Bluez {
 
     pub fn discovering(&self) -> bool {
         state(&self.shared, |s| s.discovering)
+    }
+
+    /// Whether other devices can find the computer.
+    pub fn discoverable(&self) -> bool {
+        state(&self.shared, |s| s.discoverable)
+    }
+
+    /// BlueZ's `DiscoverableTimeout` ends: the computer hidden, said.
+    pub fn discoverable_times_out(&self) -> anyhow::Result<()> {
+        let shared = self.shared.clone();
+        state(&shared, |s| s.discoverable = false);
+        self.handle.block_on(async move {
+            changed(
+                &shared,
+                ADAPTER_PATH,
+                ADAPTER,
+                vec![("Discoverable", Variant::from(false))],
+            )
+            .await
+        })
     }
 
     /// The adapter switched on or off, as if from elsewhere.
@@ -517,6 +553,10 @@ async fn power(shared: &Shared, on: bool) -> zbus::fdo::Result<()> {
                 .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         }
         values.push(("Discovering", Variant::from(false)));
+        // And it is no longer visible.
+        if state(shared, |s| std::mem::replace(&mut s.discoverable, false)) {
+            values.push(("Discoverable", Variant::from(false)));
+        }
     }
     changed(shared, ADAPTER_PATH, ADAPTER, values)
         .await
@@ -592,6 +632,44 @@ impl Adapter {
     #[zbus(property)]
     fn address(&self) -> String {
         "5C:12:AA:00:00:01".to_owned()
+    }
+
+    #[zbus(property)]
+    fn alias(&self) -> String {
+        "portable-alex".to_owned()
+    }
+
+    #[zbus(property)]
+    fn discoverable(&self) -> bool {
+        state(&self.0, |s| s.discoverable)
+    }
+
+    // BlueZ refuses it while the adapter is off.
+    #[zbus(property)]
+    fn set_discoverable(&mut self, on: bool) -> zbus::fdo::Result<()> {
+        state(&self.0, |s| {
+            s.calls.push(Call::Discoverable(on));
+            if !s.powered {
+                return Err(zbus::fdo::Error::Failed(
+                    "org.bluez.Error.NotReady".to_owned(),
+                ));
+            }
+            s.discoverable = on;
+            Ok(())
+        })
+    }
+
+    #[zbus(property)]
+    fn pairable(&self) -> bool {
+        state(&self.0, |s| s.pairable)
+    }
+
+    #[zbus(property)]
+    fn set_pairable(&mut self, on: bool) {
+        state(&self.0, |s| {
+            s.calls.push(Call::Pairable(on));
+            s.pairable = on;
+        });
     }
 
     async fn start_discovery(&self) -> zbus::fdo::Result<()> {
@@ -680,6 +758,13 @@ impl Device {
             .filter(|i| !i.is_empty())
             .map(str::to_owned)
             .ok_or_else(|| zbus::fdo::Error::UnknownProperty("Icon".to_owned()))
+    }
+
+    #[zbus(property)]
+    fn appearance(&self) -> zbus::fdo::Result<u16> {
+        self.with(|d| d.fake.appearance)
+            .flatten()
+            .ok_or_else(|| zbus::fdo::Error::UnknownProperty("Appearance".to_owned()))
     }
 
     #[zbus(property)]

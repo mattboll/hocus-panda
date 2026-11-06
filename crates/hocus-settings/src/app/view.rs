@@ -15,6 +15,7 @@ use iced::{
 
 use super::{
     App, Focus, Message, Page, SEARCH, ToastAction,
+    keys_in::{KeysIn, Pressed},
     places::PAGE,
     style::{self, *},
 };
@@ -109,10 +110,22 @@ impl App {
         if let Some(sheet) = self.apps_sheet() {
             layers.push(sheet);
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        let window = stack(layers).width(Length::Fill).height(Length::Fill);
+        // Its keys, in their order among the widgets' messages (#669).
+        KeysIn::new(
+            window,
+            |pressed: Pressed| Message::Key {
+                key: pressed.key,
+                physical: pressed.physical,
+                modifiers: pressed.modifiers,
+                text: pressed.text,
+                captured: pressed.captured,
+            },
+            // The modifiers held while a shortcut is recorded (6.8).
+            |mods| Message::Keys(super::keyboard_page::Msg::Mods(mods)),
+            self.ctrl_f_searches().then_some(SEARCH),
+        )
+        .into()
     }
 
     // --- The sidebar ------------------------------------------------------------------
@@ -788,6 +801,7 @@ impl App {
                 }
             }
             SectionId::Sound => self.sound_card(),
+            SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
@@ -828,6 +842,9 @@ impl App {
         }
         if id == SectionId::Bar {
             return self.bar_page(page);
+        }
+        if id == SectionId::Bluetooth {
+            return self.bluetooth_page(page);
         }
         if id == SectionId::DateTime {
             return self.time_page(page);
@@ -1750,6 +1767,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
+        "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },

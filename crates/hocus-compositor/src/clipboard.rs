@@ -16,8 +16,14 @@
 //! - **Never a secret**: a selection marked so (`x-kde-passwordManagerHint`
 //!   saying `secret`, `CLIPBOARD_STATE` saying `sensitive`, either unread
 //!   counting as so), or copied from a password manager's window
-//!   (Bitwarden, KeePassXC, 1Password), is not read, and the shell hears
-//!   nothing of it.
+//!   (Bitwarden, KeePassXC, 1Password, and `[clipboard] ignore`'s
+//!   applications), is not read, and the shell hears nothing of it; unless
+//!   `[clipboard] skip-secrets` is off (6.17).
+//! - **Off** (`[clipboard] history = false`, 6.17): nothing is read, a
+//!   capture's line is not made either. The shell is told the history's
+//!   rules (`clipboard-rules`) as it connects and as the file changes
+//!   them, and says how many items it holds (`clipboard-count`), which the
+//!   Settings' lines hear; their "Effacer l'historique" asks it to clear.
 //! - **Pasting** (`clip paste`): the clipboard takes the item, offered to
 //!   Wayland and X11 clients alike; once the window that had the keyboard
 //!   holds it again (the history lets it go as it closes), it gets
@@ -78,6 +84,9 @@ pub struct Clipboard {
     /// The types the client holding the clipboard offered, and where it
     /// is: what the emoji picker's paste reads to give it back (5.7).
     pub(crate) offered: Option<(Vec<String>, Source)>,
+    /// How many items the shell's history holds, and how many are pinned,
+    /// as it last said (6.17): for the Settings' lines.
+    pub(crate) count: Option<(u32, u32)>,
 }
 
 /// A paste waiting for its window to hold the keyboard, and for whether it
@@ -112,6 +121,12 @@ pub fn password_manager(app: &str) -> bool {
     PASSWORD_MANAGERS.iter().any(|name| app.contains(name))
 }
 
+/// Whether the application `app` is one of `ignored` (`[clipboard]
+/// ignore`, by their ids, case aside).
+pub fn ignored(app: &str, ignored: &[String]) -> bool {
+    !app.is_empty() && ignored.iter().any(|id| id.trim().eq_ignore_ascii_case(app))
+}
+
 /// What of a selection offered as `types` is read: the marks it has, and
 /// the text, else the image; nothing without either.
 pub(crate) fn wanted(types: &[String]) -> Option<(Vec<&'static str>, &'static str, ClipKind)> {
@@ -139,6 +154,11 @@ impl State {
         if !self.shell_linked() {
             return;
         }
+        let rules = &self.config.clipboard;
+        if !rules.history {
+            tracing::debug!("the clipboard's history is off: a copy not read");
+            return;
+        }
         self.clipboard.taken += 1;
         let number = self.clipboard.taken;
         let app = self
@@ -147,14 +167,19 @@ impl State {
             .and_then(|id| self.windows.get(&id))
             .and_then(|m| crate::windows::app_id(&m.window))
             .unwrap_or_default();
-        if password_manager(&app) {
+        let skip = rules.skip_secrets;
+        if skip && (password_manager(&app) || ignored(&app, &rules.ignore)) {
             tracing::debug!(app, "a password manager's copy: not kept");
             return;
         }
-        let Some((hints, main, kind)) = wanted(&types) else {
+        let Some((mut hints, main, kind)) = wanted(&types) else {
             tracing::debug!(?types, "a copy of nothing kept");
             return;
         };
+        // Secrets kept (6.17): their marks are not read.
+        if !skip {
+            hints.clear();
+        }
         self.loop_handle.insert_idle(move |app_| {
             app_.state
                 .read_selection(number, app, (hints, main, kind), from);
@@ -365,11 +390,48 @@ impl State {
     /// never read back as a client's copy is: this line is how the history
     /// hears of it.
     pub fn capture_in_history(&mut self, line: String) {
-        if !self.shell_linked() {
+        if !self.shell_linked() || !self.config.clipboard.history {
             return;
         }
         tracing::debug!("a capture for the clipboard's history");
         self.tell_shell_line(line);
+    }
+
+    /// The shell's history holds `items`, `pinned` of them pinned: the
+    /// Settings' lines hear it.
+    pub fn clipboard_counted(&mut self, items: u32, pinned: u32) {
+        if self.clipboard.count == Some((items, pinned)) {
+            return;
+        }
+        self.clipboard.count = Some((items, pinned));
+        let line = clipboard_count_line(items, pinned);
+        self.displays_send(None, &line);
+    }
+
+    /// The Settings' "Effacer l'historique": the shell's history keeps its
+    /// pinned items only.
+    pub(crate) fn clipboard_clear(&mut self) {
+        if !self.shell_linked() {
+            tracing::info!("no shell: no clipboard's history to clear");
+            return;
+        }
+        tracing::info!("the Settings clear the clipboard's history");
+        self.tell_shell(ToShell::ClipboardClear);
+    }
+
+    /// `[clipboard]` changed (6.17): what is read from now on, and the
+    /// shell's history told its rules if they changed.
+    pub(crate) fn clipboard_config_changed(&mut self, new: &crate::config::Clipboard) -> bool {
+        if *new == self.config.clipboard {
+            return false;
+        }
+        let rules = new.rules();
+        let told = rules != self.config.clipboard.rules();
+        self.config.clipboard = new.clone();
+        if told && self.shell_linked() {
+            self.tell_shell(ToShell::ClipboardRules(rules));
+        }
+        true
     }
 
     /// The keyboard went somewhere: a paste waiting for its window may go
@@ -468,6 +530,11 @@ impl State {
             output: output.name(),
         });
     }
+}
+
+/// What the Settings' lines are told of the history's items.
+pub(crate) fn clipboard_count_line(items: u32, pinned: u32) -> String {
+    serde_json::json!({ "clipboard": { "items": items, "pinned": pinned } }).to_string()
 }
 
 /// The line telling the clipboard's history of capture `capture` (the
@@ -638,6 +705,15 @@ mod tests {
         assert_eq!(hints, ["CLIPBOARD_STATE"]);
         assert_eq!((main, kind), ("image/png", ClipKind::Png));
         assert!(wanted(&types(&["text/html", "image/jpeg"])).is_none());
+    }
+
+    #[test]
+    fn ignored_applications_are_known_by_their_whole_ids() {
+        let list = vec!["com.protonpass.ProtonPass".to_owned()];
+        assert!(ignored("com.protonpass.ProtonPass", &list));
+        assert!(ignored("com.protonpass.protonpass", &list));
+        assert!(!ignored("com.protonpass", &list));
+        assert!(!ignored("", &list));
     }
 
     #[test]

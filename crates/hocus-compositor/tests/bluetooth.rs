@@ -210,7 +210,10 @@ fn start(shell: &Path, setup: Option<Setup>, wifi: bool) -> anyhow::Result<Bed> 
         .transpose()?;
     let log = fakes.dir.path().join("shell.log");
     let env = [
-        ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+        (
+            "RUST_LOG",
+            "warn,hocuspanda_shell=debug,hocus_bluetooth=debug".to_owned(),
+        ),
         ("HOCUS_BLUETOOTH_TIMEOUT", "1".to_owned()),
     ];
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;

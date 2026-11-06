@@ -467,7 +467,7 @@ pub fn close(how: Closed) {
             let (image, marks) = (editor.image.clone(), editor.marks.clone());
             spawn("write the annotated capture", move || {
                 let file = shot.file.clone();
-                match encode(&image, &marks).and_then(|png| replace(&file, &png)) {
+                match encode(&image, &marks, &file).and_then(|bytes| replace(&file, &bytes)) {
                     Ok(()) => {
                         tracing::info!(capture = shot.id, file = %file.display(), "the annotated capture is written");
                         super::tell(CaptureAsk::Annotated(shot.id));
@@ -520,7 +520,11 @@ fn save_as(image: Rectangle, z: f32) {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let name = words.annotated_name(&stem);
+        let extension = shot
+            .file
+            .extension()
+            .map_or_else(|| "png".to_owned(), |e| e.to_string_lossy().into_owned());
+        let name = words.annotated_name(&stem, &extension);
         let folder = shot.dir().map(Path::to_path_buf).unwrap_or_default();
         let chosen = super::portal::save_file(words.save_title(), &name, &folder, || {
             // The chooser shows: the editor steps aside.
@@ -545,7 +549,7 @@ fn save_as(image: Rectangle, z: f32) {
             }
         };
         let saved = path.and_then(|path| {
-            match encode(&original, &marks).and_then(|png| write_new(&path, &png)) {
+            match encode(&original, &marks, &path).and_then(|bytes| write_new(&path, &bytes)) {
                 Ok(()) => {
                     tracing::info!(file = %path.display(), "the capture is saved as");
                     Some(path)
@@ -597,14 +601,25 @@ fn spawn(name: &str, job: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// `image` with `marks`, as PNG.
-pub fn encode(image: &marks::Image, marks: &[Mark]) -> Result<Vec<u8>, String> {
+/// `image` with `marks`, as `file`'s extension says: JPEG (at quality
+/// 90, as the compositor writes captures, 6.17), else PNG.
+pub fn encode(image: &marks::Image, marks: &[Mark], file: &Path) -> Result<Vec<u8>, String> {
     let drawn = marks::render(image, marks);
-    let mut png = Vec::new();
-    drawn
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|err| format!("could not encode the capture: {err}"))?;
-    Ok(png)
+    let jpeg = file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    let mut bytes = Vec::new();
+    let written = if jpeg {
+        let rgb = image::DynamicImage::ImageRgba8(drawn).to_rgb8();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90).encode_image(&rgb)
+    } else {
+        drawn.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+    };
+    written.map_err(|err| format!("could not encode the capture: {err}"))?;
+    Ok(bytes)
 }
 
 /// `bytes` over `file`, whole or not at all (a new file renamed over it).
@@ -640,9 +655,9 @@ fn unused(dir: &Path, name: &str) -> PathBuf {
     if !first.exists() {
         return first;
     }
-    let stem = name.strip_suffix(".png").unwrap_or(name);
+    let (stem, extension) = name.rsplit_once('.').unwrap_or((name, "png"));
     (2..1000)
-        .map(|n| dir.join(format!("{stem} ({n}).png")))
+        .map(|n| dir.join(format!("{stem} ({n}).{extension}")))
         .find(|p| !p.exists())
         .unwrap_or(first)
 }
