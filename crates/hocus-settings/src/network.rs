@@ -4,7 +4,7 @@
 //! profiles), airplane mode in rfkill. The window's side is
 //! `app::network`.
 
-use hocus_network::model::{Current, Details, Saved, Security, Wifi};
+use hocus_network::model::{Current, Details, Saved, Security, Wifi, Wired};
 
 use crate::{
     lang::{Lang, Words, w},
@@ -13,6 +13,7 @@ use crate::{
 
 const AIRPLANE: Words = w("MODE AVION", "AIRPLANE MODE");
 const WIFI: Words = w("WI-FI", "WI-FI");
+const CABLE: Words = w("CÂBLE", "CABLE");
 
 /// The page's settings, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
@@ -31,7 +32,7 @@ pub fn outside() -> &'static [Outside] {
             keywords: (fr, en),
         }
     }
-    const ALL: [Outside; 4] = [
+    const ALL: [Outside; 8] = [
         o(
             "network.airplane",
             AIRPLANE,
@@ -52,6 +53,45 @@ pub fn outside() -> &'static [Outside] {
             w("Réseaux enregistrés", "Saved networks"),
             &["oublier", "supprimer", "mot de passe", "connus"],
             &["forget", "saved", "known", "password"],
+        ),
+        o(
+            "network.hidden",
+            WIFI,
+            w("Réseau masqué", "Hidden network"),
+            &["caché", "ssid"],
+            &["hidden", "ssid"],
+        ),
+        o(
+            "network.enterprise",
+            WIFI,
+            w("Réseau d’entreprise", "Enterprise network"),
+            &[
+                "802.1x",
+                "eduroam",
+                "eap",
+                "peap",
+                "ttls",
+                "certificat",
+                "radius",
+            ],
+            &[
+                "enterprise",
+                "802.1x",
+                "eduroam",
+                "eap",
+                "peap",
+                "ttls",
+                "certificate",
+                "radius",
+            ],
+        ),
+        o("network.wep", WIFI, w("WEP", "WEP"), &["wep"], &["wep"]),
+        o(
+            "network.cable",
+            CABLE,
+            w("Câble", "Cable"),
+            &["ethernet", "filaire", "rj45"],
+            &["ethernet", "wired", "rj45"],
         ),
         o(
             "network.address",
@@ -207,6 +247,45 @@ pub fn by_recent(saved: &[Saved]) -> Vec<Saved> {
     sorted
 }
 
+/// The cable's line: the device and its state, "Adaptateur Ethernet USB
+/// · débranché".
+pub fn wired_line(wired: &Wired, lang: Lang) -> String {
+    let device = if wired.usb {
+        w("Adaptateur Ethernet USB", "USB Ethernet adapter")
+    } else {
+        w("Port Ethernet", "Ethernet port")
+    };
+    let state = if wired.connected {
+        w("connecté", "connected")
+    } else {
+        w("débranché", "unplugged")
+    };
+    format!("{} · {}", device.get(lang), state.get(lang))
+}
+
+/// The cable's value: "Débranché", or "Connecté · 1 Gb/s · 192.168.1.30".
+pub fn wired_value(wired: &Wired, lang: Lang) -> String {
+    if !wired.connected {
+        return w("Débranché", "Unplugged").get(lang).to_owned();
+    }
+    let mut parts = vec![w("Connecté", "Connected").get(lang).to_owned()];
+    if let Some(speed) = wired.speed {
+        parts.push(match speed {
+            s if s >= 1000 && s % 1000 == 0 => format!("{} Gb/s", s / 1000),
+            s if s >= 1000 => {
+                let gb = format!("{:.1}", f64::from(s) / 1000.0);
+                let gb = if lang.fr() { gb.replace('.', ",") } else { gb };
+                format!("{gb} Gb/s")
+            }
+            s => format!("{s} Mb/s"),
+        });
+    }
+    if let Some(address) = &wired.address {
+        parts.push(address.clone());
+    }
+    parts.join(" · ")
+}
+
 /// The home's card: "Wi-Fi · Maison", "Câble", "Hors ligne", "Mode
 /// avion".
 pub fn card(details: Option<&Details>, airplane: bool, lang: Lang) -> String {
@@ -347,6 +426,44 @@ mod tests {
     }
 
     #[test]
+    fn the_cable_says_its_device_its_state_and_its_speed() {
+        let mut wired = Wired {
+            usb: true,
+            ..Wired::default()
+        };
+        assert_eq!(
+            wired_line(&wired, Lang::French),
+            "Adaptateur Ethernet USB · débranché"
+        );
+        assert_eq!(wired_value(&wired, Lang::English), "Unplugged");
+        wired.connected = true;
+        wired.speed = Some(2500);
+        wired.address = Some("192.168.1.30".to_owned());
+        assert_eq!(
+            wired_value(&wired, Lang::French),
+            "Connecté · 2,5 Gb/s · 192.168.1.30"
+        );
+        wired.usb = false;
+        wired.speed = Some(100);
+        assert_eq!(
+            wired_line(&wired, Lang::English),
+            "Ethernet port · connected"
+        );
+        assert_eq!(
+            wired_value(&wired, Lang::English),
+            "Connected · 100 Mb/s · 192.168.1.30"
+        );
+    }
+
+    #[test]
+    fn a_wep_secret_is_a_key_or_a_passphrase() {
+        assert!(hocus_network::wep_is_key("12345"));
+        assert!(hocus_network::wep_is_key("0123456789"));
+        assert!(!hocus_network::wep_is_key("012345678z"));
+        assert!(!hocus_network::wep_is_key("une phrase de passe"));
+    }
+
+    #[test]
     fn every_setting_of_the_page_is_found_by_its_words() {
         let found = crate::search::find("avion", Lang::French);
         assert_eq!(found[0].name, "Mode avion");
@@ -358,5 +475,11 @@ mod tests {
         );
         let found = crate::search::find("gateway", Lang::English);
         assert_eq!(found[0].name, "IP address");
+        let found = crate::search::find("eduroam", Lang::French);
+        assert_eq!(found[0].name, "Réseau d’entreprise");
+        let found = crate::search::find("rj45", Lang::French);
+        assert_eq!(found[0].name, "Câble");
+        let found = crate::search::find("ssid", Lang::English);
+        assert_eq!(found[0].name, "Hidden network");
     }
 }

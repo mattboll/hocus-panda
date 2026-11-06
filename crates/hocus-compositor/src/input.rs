@@ -22,6 +22,7 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
+use crate::grabs::EdgesExt as _;
 use crate::{
     State,
     grabs::{BTN_LEFT, BTN_RIGHT},

@@ -52,4 +52,67 @@ pub enum Ask {
     /// A connection forgotten, given back with its UUID, and joined again
     /// if it was in use ([`Reply::Restored`]).
     Restore(Arc<Kept>),
+    /// A network joined with what its sheet asked (the Settings'): a
+    /// hidden one by its name alone, an 802.1X or WEP one.
+    Join {
+        ssid: Vec<u8>,
+        hidden: bool,
+        security: Join,
+    },
+}
+
+/// What a network joined from the Settings' sheet asks.
+#[derive(Debug)]
+pub enum Join {
+    Open,
+    /// WPA or WPA2 personal, or WPA3's SAE (`sae`).
+    Psk {
+        sae: bool,
+        secret: Secret,
+    },
+    /// A WEP key (5 or 13 characters, 10 or 26 hexadecimal digits) or a
+    /// passphrase.
+    Wep {
+        secret: Secret,
+    },
+    /// 802.1X.
+    Eap(Box<Eap>),
+}
+
+/// An 802.1X network's settings, as its service informatique gives them.
+#[derive(Debug)]
+pub struct Eap {
+    /// NetworkManager's word: `peap`, `ttls` or `tls`.
+    pub method: &'static str,
+    /// Its inner authentication (`phase2-auth`): `mschapv2`, `gtc`, `pap`,
+    /// `mschap`, `chap`; none for TLS.
+    pub inner: Option<&'static str>,
+    pub identity: String,
+    /// PEAP's and TTLS's.
+    pub password: Option<Secret>,
+    pub ca: Ca,
+    /// `domain-suffix-match`.
+    pub domain: Option<String>,
+    /// TLS's: the user's certificate and key, the key's password.
+    pub certificate: Option<std::path::PathBuf>,
+    pub key: Option<std::path::PathBuf>,
+    pub key_password: Option<Secret>,
+}
+
+/// How the server's certificate is checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ca {
+    /// The system's authorities (`system-ca-certs`).
+    System,
+    File(std::path::PathBuf),
+    /// Not checked.
+    Unchecked,
+}
+
+/// Whether a WEP secret is a key (`wep-key-type` 1): 5 or 13 characters,
+/// 10 or 26 hexadecimal digits; else a passphrase (2).
+pub fn wep_is_key(secret: &str) -> bool {
+    let n = secret.chars().count();
+    let hex = secret.chars().all(|c| c.is_ascii_hexdigit());
+    matches!(n, 5 | 13) || (hex && matches!(n, 10 | 26))
 }

@@ -337,6 +337,10 @@ impl App {
     }
 
     fn screens_said(&mut self, said: Said) -> iced::Task<Message> {
+        // The desktops' (6.14).
+        if self.desktops_said(&said) {
+            return iced::Task::none();
+        }
         match said {
             Said::Screens(known) => {
                 self.screens.unavailable = false;
@@ -398,6 +402,9 @@ impl App {
                 self.screens.unavailable = true;
                 self.screens.trial = None;
                 self.screens.asked = None;
+                iced::Task::none()
+            }
+            Said::Desktops { .. } | Said::DesktopRemoved { .. } | Said::DesktopRestored { .. } => {
                 iced::Task::none()
             }
         }

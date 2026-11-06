@@ -250,6 +250,10 @@ While dragging a window:
 - `[windows] snap-by-drag = false` (6.14): no zone while dragging, and
   the magnet pulls at the edges too; the keys below still snap, and a
   snapped window dragged away still takes back its size.
+- The zones, the magnet and tearing a window off a zone are the crate
+  `hocus-geometry`'s, without smithay: the Settings' trial area
+  ("Bureaux et fenêtres", 6.14) moves its drawn windows with the same
+  code.
 
 Keyboard:
 
