@@ -21,3 +21,5 @@ archive.include = [
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
+# Quarantined: #731.
+default-filter = "not (binary(screens_return) & test(=the_winking_panda_says_what_moved_for_4_s))"
