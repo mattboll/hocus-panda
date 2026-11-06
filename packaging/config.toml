@@ -140,6 +140,24 @@
 #   vrr = true
 # Its own wallpaper, while [wallpaper] per-screen is true (else picture):
 #   wallpaper = "~/.local/share/hocuspanda/wallpapers/Montagne.jpg"
+#
+# Each set of screens (the screens plugged and on together) keeps its
+# own arrangement over the [outputs.NAME] above, which stay what a set
+# seen for the first time starts from. A screen is named by its EDID's
+# make, model and serial ("DEL U3423WE 7XY1234"), or by its connector
+# when it has none; the journal says it as it lights ("a screen, known
+# as"). With two screens or more, the Settings' Écrans page writes the
+# arrangement there: each screen's mode, position, scale and vrr, and
+# the primary screen (over [panel] output):
+#
+#   [[screen-sets]]
+#   screens = ["BOE 0x0BCA (eDP-1)", "DEL U3423WE 7XY1234"]
+#   primary = "DEL U3423WE 7XY1234"
+#   [screen-sets.outputs."DEL U3423WE 7XY1234"]
+#   position = [0, 0]
+#   [screen-sets.outputs."BOE 0x0BCA (eDP-1)"]
+#   position = [440, 1440]
+#   scale = 1.25
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and

@@ -710,12 +710,9 @@ impl State {
 
     fn lock_shown(&self) -> Option<LockShown> {
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
-        let output = crate::panel::primary(
-            &names,
-            &self.config.panel.output,
-            self.panel.home.as_deref(),
-        )
-        .unwrap_or_default();
+        let output =
+            crate::panel::primary(&names, &self.primary_wanted(), self.panel.home.as_deref())
+                .unwrap_or_default();
         let agents = self.agents.told.as_ref().map_or(0, |list| {
             list.iter().filter(|a| a.state == "waiting").count() as u32
         });

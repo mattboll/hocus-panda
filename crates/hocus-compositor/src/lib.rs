@@ -56,6 +56,7 @@ mod reload;
 mod reminders;
 mod render;
 mod rules;
+mod screen_sets;
 mod screens;
 mod session;
 mod share;
@@ -86,7 +87,8 @@ pub use config::{
     Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
     HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
     PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
-    Remind, Rule as WindowRule, ScaleFrom, SoundPrograms, SystemKeyboard, Windows,
+    Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SetScreen, SoundPrograms, SystemKeyboard,
+    Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -98,6 +100,7 @@ pub use hocus_link::Form as BarForm;
 pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use record::{RecordInfo, Source as RecordSource};
+pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;
 pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;

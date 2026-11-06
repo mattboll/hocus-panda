@@ -1,7 +1,9 @@
 //! Screens coming and going (docs/design/windows.md §12): the windows of a
 //! screen unplugged go to one still there, each on the same-numbered
-//! desktop and in its state; when a screen of the same name comes back,
-//! those the user did not place meanwhile go back where they were.
+//! desktop and in its state; when a screen of the same identity comes
+//! back ([`crate::screen_sets`]), those the user did not place meanwhile
+//! fly back where they were in 320 ms (fade in place with reduced
+//! motion). The winking panda says what moved ([`State::screens_peek`]).
 //!
 //! What clients are told when a screen goes comes in an order they rely
 //! on (#536): every surface leaves its `wl_output` before the global goes,
@@ -25,13 +27,15 @@ use smithay::{
 use crate::{
     State,
     model::{self, Mode, Rect, WindowId},
+    motion::{Bezier, Tween},
     windows::rect_of,
 };
 
 /// Where a window was on a screen that went, and where it was put then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CameFrom {
-    /// The screen's name, which it has again when it comes back.
+    /// The screen's key (its identity, [`crate::screen_sets`]), which it
+    /// has again when it comes back, on any connector.
     pub output: String,
     pub desktop: usize,
     /// The screen's size, and its work area from its top-left corner.
@@ -91,7 +95,7 @@ impl State {
     /// (docs/design/windows.md §12, "What clients are told").
     pub fn unplug_output(&mut self, output: &Output, global: GlobalId) {
         self.display_removed(output);
-        self.output_gone(output);
+        self.output_gone(output, true);
         // Also when it had no place on the desktop, which `output_gone`
         // then leaves as it is: nothing may be left on it.
         self.leave_output(output);
@@ -106,8 +110,9 @@ impl State {
     /// place across the screen, inside its work area. The focus and the
     /// pointer end up on a screen still there. Every surface on it leaves
     /// it, before its global goes.
-    fn output_gone(&mut self, output: &Output) {
+    fn output_gone(&mut self, output: &Output, say: bool) {
         let name = output.name();
+        let key = self.screen_key(&name);
         let (Some(geometry), Some(area)) = (
             self.space.output_geometry(output).map(rect_of),
             self.work_area(output),
@@ -163,6 +168,7 @@ impl State {
             windows = leaving.len(),
             "a screen went: its windows move"
         );
+        let moved: Vec<WindowId> = leaving.iter().map(|l| l.0).collect();
         for (id, rect, restore, earlier) in leaving {
             let desktop = self.model.desktop(id);
             let placed = match self.model.mode(id) {
@@ -178,7 +184,7 @@ impl State {
             let came_from = match earlier {
                 Some(earlier) => CameFrom { put, ..earlier },
                 None => CameFrom {
-                    output: name.clone(),
+                    output: key.clone(),
                     desktop,
                     size: (geometry.width, geometry.height),
                     area: shifted(area, geometry, -1),
@@ -192,6 +198,9 @@ impl State {
             }
         }
         self.refocus();
+        if say {
+            self.say_screens_moved(output, true, &moved);
+        }
         // The pointer was there: to the middle of the screen it went to.
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -260,8 +269,10 @@ impl State {
     /// `output` turned off by the file (6.9): it leaves the desktop as one
     /// unplugged does, its `wl_output` kept, and comes back by
     /// [`State::output_back`].
-    pub(crate) fn screen_turned_off(&mut self, output: &Output) {
-        self.output_gone(output);
+    /// `say`: the winking panda says what moved (the lid's, not the
+    /// file's: the user turned it off there).
+    pub(crate) fn screen_turned_off(&mut self, output: &Output, say: bool) {
+        self.output_gone(output, say);
         self.leave_output(output);
         self.close_layers_on(output);
     }
@@ -327,9 +338,14 @@ impl State {
     }
 
     /// `output` joined the desktop: the windows that left it go back where
-    /// they were, unless the user placed them elsewhere since.
-    pub fn output_back(&mut self, output: &Output) {
+    /// they were, unless the user placed them elsewhere since; those shown
+    /// before and after fly there. `say`: the winking panda says so (a
+    /// screen plugged, or the lid opened; not the file turning it on).
+    pub fn output_back(&mut self, output: &Output, say: bool) {
         let name = output.name();
+        let key = self.screen_key(&name);
+        let now = self.now();
+        let reduced = self.reduced_motion();
         let (Some(geometry), Some(area)) = (
             self.space.output_geometry(output).map(rect_of),
             self.work_area(output),
@@ -339,10 +355,11 @@ impl State {
         let returning: Vec<WindowId> = self
             .windows
             .iter()
-            .filter(|(_, m)| m.came_from.as_ref().is_some_and(|c| c.output == name))
+            .filter(|(_, m)| m.came_from.as_ref().is_some_and(|c| c.output == key))
             .map(|(id, _)| *id)
             .collect();
         let mut back = 0;
+        let mut flown = Vec::new();
         for id in returning {
             let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.take()) else {
                 continue;
@@ -365,8 +382,15 @@ impl State {
                 Mode::Snapped(zone) => zone.rect(area),
                 Mode::Fullscreen => geometry,
             };
+            let from = self
+                .model
+                .is_shown(id)
+                .then(|| self.visual_rect(id, now))
+                .flatten();
             self.relocate(id, output, came.desktop, rect, came.restore.map(place));
+            self.fly_back(id, from, now, reduced);
             back += 1;
+            flown.push(id);
         }
         // Windows on no screen, every screen having gone before: to this
         // one, in the middle of its work area.
@@ -399,8 +423,92 @@ impl State {
             );
             self.refocus();
         }
+        if say {
+            self.say_screens_moved(output, false, &flown);
+        }
         self.rearrange();
         self.redraw = true;
+    }
+
+    /// Window `id`, gone back to its screen, drawn from `from` (where it
+    /// showed before, global) to its place in 320 ms along the desktops'
+    /// curve; with reduced motion it fades in there in 120 ms. Not shown
+    /// before or now: placed at once.
+    fn fly_back(
+        &mut self,
+        id: WindowId,
+        from: Option<smithay::utils::Rectangle<f64, smithay::utils::Logical>>,
+        now: Duration,
+        reduced: bool,
+    ) {
+        let Some(from) = from else {
+            return;
+        };
+        if !self.model.is_shown(id) {
+            return;
+        }
+        let Some(managed) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if reduced {
+            managed.opening = Some(Tween::new(now, crate::motion::FADE_REDUCED, Bezier::LINEAR));
+        } else {
+            managed.settle = Some((
+                from,
+                Tween::new(now, crate::motion::SCREEN_BACK, Bezier::STRIP),
+            ));
+        }
+        self.redraw = true;
+    }
+
+    /// The windows that wait for a screen gone and would go back to it:
+    /// that screen's key, once for each.
+    pub(crate) fn windows_waiting(&self) -> Vec<String> {
+        self.windows
+            .iter()
+            .filter_map(|(id, m)| {
+                let came = m.came_from.as_ref()?;
+                (self.put_now(*id).as_ref() == Some(&came.put)).then(|| came.output.clone())
+            })
+            .collect()
+    }
+
+    /// `windows` moved with `output`, gone (`gone`) or back: the winking
+    /// panda says so, naming their applications, the focused one first.
+    fn say_screens_moved(&mut self, output: &Output, gone: bool, windows: &[WindowId]) {
+        if windows.is_empty() {
+            return;
+        }
+        let focused = self.model.focused();
+        let mut ordered: Vec<WindowId> = windows.to_vec();
+        ordered.sort_by_key(|id| (Some(*id) != focused, !self.model.is_shown(*id)));
+        let apps = ordered
+            .iter()
+            .filter_map(|id| self.windows.get(id))
+            .map(|m| crate::windows::app_id(&m.window).unwrap_or_default())
+            .collect();
+        let desktops: std::collections::BTreeSet<usize> =
+            windows.iter().map(|id| self.model.desktop(*id)).collect();
+        let desktop = match desktops.iter().next() {
+            Some(d) if desktops.len() == 1 => d + 1,
+            _ => 0,
+        };
+        let mm = output
+            .user_data()
+            .get::<crate::displays::Facts>()
+            .map_or((0, 0), |f| f.millimetres);
+        let inches = if mm.0 > 0 && mm.1 > 0 {
+            ((f64::from(mm.0).powi(2) + f64::from(mm.1).powi(2)).sqrt() / 25.4).round() as u32
+        } else {
+            0
+        };
+        self.screens_peek(hocus_link::ScreensMoved {
+            gone,
+            built_in: crate::away::is_internal(output),
+            inches,
+            desktop,
+            apps,
+        });
     }
 
     /// Whether `rect`'s centre (a point's, for an empty one) is on a

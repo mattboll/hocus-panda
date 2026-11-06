@@ -247,6 +247,8 @@ pub struct State {
     pub agents: crate::agents::Agents,
     /// The screens' settings, their trials and the Settings' lines (6.9).
     pub(crate) displays: crate::displays::Displays,
+    /// The screens' identities and their sets (windows.md §12).
+    pub(crate) screen_sets: crate::screen_sets::Sets,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
@@ -349,6 +351,7 @@ impl State {
         );
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
+        let screen_sets = crate::screen_sets::Sets::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
         let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
@@ -453,6 +456,7 @@ impl State {
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
             displays: crate::displays::Displays::default(),
+            screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
             gpu: None,

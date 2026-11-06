@@ -259,11 +259,7 @@ impl State {
         let wanted: Vec<String> = match self.config.panel.screens {
             PanelScreens::All => names.clone(),
             PanelScreens::Primary => {
-                let primary = primary(
-                    &names,
-                    &self.config.panel.output,
-                    self.panel.home.as_deref(),
-                );
+                let primary = primary(&names, &self.primary_wanted(), self.panel.home.as_deref());
                 if self.panel.home.is_none() {
                     self.panel.home.clone_from(&primary);
                 }
