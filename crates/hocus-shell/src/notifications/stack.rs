@@ -679,10 +679,22 @@ impl Stack {
             return;
         }
         if quiet {
+            tracing::info!(
+                id,
+                app = note.app,
+                low = note.urgency == Urgency::Low,
+                agent = note.agent,
+                "a notification without a bubble: to the history only"
+            );
             self.keep(note);
             return;
         }
         if self.dnd.is_on() && note.urgency != Urgency::Critical {
+            tracing::info!(
+                id,
+                app = note.app,
+                "a notification's bubble held: do not disturb"
+            );
             tracing::debug!(id, title = note.summary, "held: do not disturb");
             if let Some(held) = &mut self.sharing {
                 held.push(note.app.clone());
@@ -693,15 +705,36 @@ impl Stack {
         if let Some(held) = &mut self.sharing
             && note.urgency != Urgency::Critical
         {
+            tracing::info!(
+                id,
+                app = note.app,
+                "a notification's bubble held: the screen is shared"
+            );
             tracing::debug!(id, title = note.summary, "held: the screen is shared");
             held.push(note.app.clone());
             self.history.add(note, Sight::Unseen);
             return;
         }
+        let app = note.app.clone();
         self.history.add(note.clone(), Sight::Showing);
         self.queue.push_back(note);
         self.fill(now);
         self.relayout(effects);
+        // Not shown at once: said, so that the journal tells why.
+        if let Some(place) = self.queue.iter().position(|n| n.id == id) {
+            if self.locked {
+                tracing::info!(id, app, "a notification's bubble waits for the unlock");
+            } else {
+                let behind = self.bubbles.iter().filter(|b| !b.leaving()).count();
+                tracing::info!(
+                    id,
+                    app,
+                    behind,
+                    place = place + 1,
+                    "a notification's bubble waits its turn"
+                );
+            }
+        }
     }
 
     /// Straight to the history: a low one counted by the badge, an agent's
@@ -813,6 +846,15 @@ impl Stack {
             let serial = self.next;
             self.next += 1;
             let laid = draw::lay(&note);
+            // Its application and id, never what it says: the journal is
+            // read by others.
+            tracing::info!(
+                id = note.id,
+                app = note.app,
+                serial,
+                screen,
+                "a notification's bubble shows"
+            );
             tracing::debug!(
                 id = note.id,
                 serial,
