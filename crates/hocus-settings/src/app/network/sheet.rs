@@ -14,7 +14,7 @@ use hocus_network::{
     secret::{self, Secret},
 };
 use iced::{
-    Alignment, Background, Color, Length, Padding, Shadow, Task, Theme, Vector,
+    Alignment, Background, Color, Gradient, Length, Padding, Shadow, Task, Theme, Vector, gradient,
     widget::{Space, button, column, container, mouse_area, operation, pin, row, text, text_input},
 };
 
@@ -812,9 +812,12 @@ impl App {
                 left: 22.0,
             })
             .style(|_: &Theme| container::Style {
-                // The mockup's #1d2333 → #171c29, as one colour: a
-                // gradient redrawn in part on the CPU shows its seams.
-                background: Some(Background::Color(crate::theme::ink(rgb(0x1a202e)))),
+                // The mockup's #1d2333 → #171c29, top to bottom.
+                background: Some(Background::Gradient(Gradient::Linear(
+                    gradient::Linear::new(std::f32::consts::PI)
+                        .add_stop(0.0, crate::theme::ink(rgb(0x1d2333)))
+                        .add_stop(1.0, crate::theme::ink(rgb(0x171c29))),
+                ))),
                 border: border(14.0, 1.0, RIM_12.get()),
                 shadow: Shadow {
                     color: rgba(0, 0, 0, 0.55),

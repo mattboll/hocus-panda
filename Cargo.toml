@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Patched crates, built as the crates they replace (`[patch.crates-io]`).
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.2.0"
@@ -33,3 +35,8 @@ opt-level = 3
 [profile.dev.package.smithay]
 opt-level = 3
 debug-assertions = false
+
+# iced's CPU renderer draws every frame whole when a program asks it
+# (`iced_tiny_skia::draw_whole_frames`, #662): the Settings do.
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

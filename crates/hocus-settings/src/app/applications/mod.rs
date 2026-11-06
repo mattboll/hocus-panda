@@ -204,8 +204,6 @@ pub struct State {
     pub(super) added: Option<String>,
     /// The start-up entry lit by an undo.
     pub(super) lit: Option<String>,
-    /// The menu, the sheet and the others as last drawn.
-    drawn: (Option<Menu>, Option<(String, usize)>, bool),
 }
 
 impl State {
@@ -651,7 +649,6 @@ impl App {
                     };
                     self.apps.icons.insert(name, icon);
                 }
-                self.fresh = Some(Instant::now() + super::FRESH);
                 Task::none()
             }
             Heard::Checked { command, found } => self.apps_checked(command, found),
@@ -789,8 +786,7 @@ impl App {
     }
 
     /// After each message: the thread started the first time the page
-    /// shows; the menus and the sheet closed when it goes; whole frames
-    /// while they change.
+    /// shows; the menus and the sheet closed when it goes.
     pub(super) fn apps_after(&mut self) -> Task<Message> {
         if !self.apps_shows() {
             self.apps.menu = None;
@@ -799,15 +795,6 @@ impl App {
                 return self.terminal_commit();
             }
             return Task::none();
-        }
-        let drawn = (
-            self.apps.menu.map(|(m, _)| m),
-            self.apps.sheet.as_ref().map(|s| (s.query.clone(), s.at)),
-            self.apps.others,
-        );
-        if drawn != self.apps.drawn {
-            self.apps.drawn = drawn;
-            self.fresh = Some(Instant::now() + super::FRESH);
         }
         if self.apps.worker.is_none() {
             let to = self.apps.to.clone();

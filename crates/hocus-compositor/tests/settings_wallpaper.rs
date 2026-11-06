@@ -667,6 +667,9 @@ fn at_rest_the_wallpaper_page_commits_nothing() -> anyhow::Result<()> {
                 .all(|t| t["drawn"] == true || t["id"] == "tile:choose")
         }) && s["wallpaper"]["lock_drawn"] == true
     })?;
+    // The tile's toast gone (6 s): on a loaded machine it went within the
+    // quiet moment measured, and the window drew it going (#705).
+    bed.shows(|s| s["toast"].is_null())?;
     bed.hp.pointer_move(400.0, 1070.0);
     common::at_rest(&mut bed.hp)?;
     bed.hp.hold_clock();

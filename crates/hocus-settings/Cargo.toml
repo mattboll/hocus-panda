@@ -57,6 +57,10 @@ iced = { version = "0.14", default-features = false, features = [
     # The wallpapers' thumbnails (6.3), drawn by the page's thread.
     "image-without-codecs",
 ] }
+# Its CPU renderer, to draw every frame whole (#662; patched in the
+# workspace's manifest). The same crate iced draws with, its features
+# iced's.
+iced_tiny_skia = { version = "0.14.1", default-features = false }
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
 # the shell does).
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
