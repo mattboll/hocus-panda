@@ -458,6 +458,42 @@ fn searching_veille_finds_the_suspend_delay_the_lid_and_the_button() -> anyhow::
     Ok(())
 }
 
+/// Keys typed faster than the window reads them (a loaded machine) reach
+/// it together, in one read: `Ctrl+F` selects the query before the letters
+/// typed after it, which replace it, whether the field had the keyboard or
+/// not (#669).
+#[test]
+fn a_word_typed_at_once_after_ctrl_f_replaces_the_query() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.type_text("veille")?;
+    bed.shows(|s| s["query"] == "veille" && s["focus"] == "search")?;
+    let at_once = |bed: &mut Bed, word: &str| -> anyhow::Result<()> {
+        chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+        for c in word.chars() {
+            let code = letter(c).ok_or_else(|| anyhow::anyhow!("no key for {c}"))?;
+            bed.hp.key(code, true);
+            bed.hp.key(code, false);
+        }
+        Ok(())
+    };
+    // The field has the keyboard.
+    at_once(&mut bed, "couleur")?;
+    bed.shows(|s| s["query"] == "couleur")?;
+    at_once(&mut bed, "veille")?;
+    bed.shows(|s| {
+        s["query"] == "veille" && s["results"].as_array().is_some_and(|r| !r.is_empty())
+    })?;
+    // A result opened: the field lets the keyboard go, the query stays.
+    bed.click("result:0")?;
+    bed.shows(|s| s["page"] == "power" && s["query"] == "veille")?;
+    at_once(&mut bed, "couleur")?;
+    bed.shows(|s| s["query"] == "couleur")?;
+    Ok(())
+}
+
 #[test]
 fn changing_the_delay_writes_idle_delay_at_once_keeping_the_rest() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
