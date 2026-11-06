@@ -308,6 +308,11 @@ impl App {
             shear: trial.shear_at(now),
             preview: trial.preview(),
             dragging: trial.dragging(),
+            at: self
+                .places
+                .at
+                .get(TRIAL)
+                .map(|place| Point::new(place.x, place.y)),
             lang,
         })
         .width(trial::SCREEN.0 as f32)
@@ -320,7 +325,7 @@ impl App {
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center),
-                container(drawing).id("desktops:trial".to_owned()),
+                container(drawing).id(TRIAL.to_owned()),
                 column![
                     t(self.trial_said(), 12.5, TEXT.get()),
                     t(self.trial_motion(), 12.0, FAINT.get()),
@@ -364,6 +369,9 @@ impl App {
     }
 }
 
+/// The trial's screen's id: its place on the window.
+const TRIAL: &str = "desktops:trial";
+
 /// The screen as drawn.
 #[derive(Debug)]
 struct Drawing {
@@ -371,7 +379,24 @@ struct Drawing {
     shear: f64,
     preview: Option<Rect>,
     dragging: bool,
+    /// Where the screen is on the window, scrolling taken into account,
+    /// once its place is known.
+    at: Option<Point>,
     lang: Lang,
+}
+
+/// The pointer as the trial follows it (#688). iced hands every event of
+/// one read the cursor as the read left it: on a loaded machine, a press
+/// read together with the motions after it took the last one's place, the
+/// motions read with the press were dropped (the window did not drag yet)
+/// and so was the release. Each motion's own position, kept in order, and
+/// a press held here from the moment it is read, give each its own.
+#[derive(Debug, Default)]
+struct Pointer {
+    /// Where the last motion put it, on the window.
+    at: Option<Point>,
+    /// A press on the screen not let go yet.
+    pressed: bool,
 }
 
 fn point(x: f64, y: f64) -> Point {
@@ -457,36 +482,47 @@ impl Drawing {
 }
 
 impl canvas::Program<Message> for Drawing {
-    type State = ();
+    type State = Pointer;
 
     fn update(
         &self,
-        (): &mut (),
+        pointer: &mut Pointer,
         event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let local = |p: Point| (p.x - bounds.x, p.y - bounds.y);
+        // A point of the window on the screen; before the screen's place
+        // is known, the cursor as the page places it (scrolled with it).
+        let local = |on_window: Option<Point>| match (on_window, self.at) {
+            (Some(p), Some(at)) => Some((p.x - at.x, p.y - at.y)),
+            _ => cursor.position().map(|p| (p.x - bounds.x, p.y - bounds.y)),
+        };
+        let dragging = pointer.pressed || self.dragging;
         match event {
-            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let at = cursor.position_in(bounds)?;
-                Some(
-                    canvas::Action::publish(Message::Desktops(Msg::TrialPress(at.x, at.y)))
-                        .and_capture(),
-                )
-            }
-            // The cursor as the page places it: scrolled with it.
-            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.dragging => {
-                let (x, y) = local(cursor.position()?);
+            iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                pointer.at = Some(*position);
+                if !dragging {
+                    return None;
+                }
+                let (x, y) = local(Some(*position))?;
                 Some(canvas::Action::publish(Message::Desktops(Msg::TrialMove(
                     x, y,
                 ))))
             }
-            // Let go where the pointer is: a last motion not seen yet counts.
-            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-                if self.dragging =>
-            {
-                let (x, y) = cursor.position().map_or((f32::NAN, f32::NAN), local);
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let (x, y) = local(pointer.at)?;
+                if !(0.0..bounds.width).contains(&x) || !(0.0..bounds.height).contains(&y) {
+                    return None;
+                }
+                pointer.pressed = true;
+                Some(
+                    canvas::Action::publish(Message::Desktops(Msg::TrialPress(x, y))).and_capture(),
+                )
+            }
+            // Let go where the pointer is.
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if dragging => {
+                pointer.pressed = false;
+                let (x, y) = local(pointer.at).unwrap_or((f32::NAN, f32::NAN));
                 Some(canvas::Action::publish(Message::Desktops(
                     Msg::TrialRelease(x, y),
                 )))
@@ -497,7 +533,7 @@ impl canvas::Program<Message> for Drawing {
 
     fn draw(
         &self,
-        (): &(),
+        _: &Pointer,
         renderer: &Renderer,
         _: &Theme,
         bounds: Rectangle,
@@ -570,7 +606,7 @@ impl canvas::Program<Message> for Drawing {
 
     fn mouse_interaction(
         &self,
-        (): &(),
+        _: &Pointer,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {

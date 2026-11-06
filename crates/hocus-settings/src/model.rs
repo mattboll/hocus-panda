@@ -258,8 +258,8 @@ impl SectionId {
                 Work,
                 w("Agents", "Agents"),
                 w(
-                    "Où lire l’état des agents, quels outils suivre, le halo et les pandas.",
-                    "Where the agents' states are read, which tools to follow, the halo and the pandas.",
+                    "D’où viennent les états de tes agents, quels outils suivre, et comment la barre t’appelle : le halo et les pandas.",
+                    "Where your agents’ states come from, which tools to follow, and how the bar calls you: the halo and the pandas.",
                 ),
                 Icon::Agents,
                 "6.16",
@@ -291,8 +291,8 @@ impl SectionId {
                 System,
                 w("Compte", "Account"),
                 w(
-                    "Ton nom, ton avatar et ton mot de passe.",
-                    "Your name, your picture and your password.",
+                    "Ton nom, ton avatar et ton mot de passe. Les autres comptes de l’ordinateur se gèrent avec les outils du système.",
+                    "Your name, avatar and password. The computer’s other accounts are managed with the system’s tools.",
                 ),
                 Icon::Account,
                 "6.11",
@@ -786,6 +786,9 @@ pub enum Kind {
     Swatches,
     /// A link to another section's page: "La barre ›" (6.2).
     Link(SectionId),
+    /// Not a setting: what the desktop never takes, said on the right
+    /// ("Toujours", 6.13's gestures). Nothing to focus or write.
+    Note(Words),
 }
 
 /// A group of rows on a section's page: its label, in capitals.
@@ -819,6 +822,9 @@ pub struct Setting {
 impl Setting {
     /// What `value` reads as on its row and in the toast.
     pub fn say(&self, value: &Value, lang: Lang) -> String {
+        if let Kind::Note(note) = &self.kind {
+            return note.get(lang).to_owned();
+        }
         if let Kind::Menu(choices) | Kind::Segmented(choices) = &self.kind
             && let Some(choice) = choices.iter().find(|c| &c.value == value)
         {
@@ -922,6 +928,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
         SectionId::Desktops => crate::desktops::settings(),
+        SectionId::Agents => crate::agents::settings(),
         SectionId::Apps => crate::applications::settings(),
         SectionId::Captures => crate::captures::settings(),
         _ => &[],
@@ -950,10 +957,12 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Bar => crate::bar::outside(),
         SectionId::Bluetooth => crate::bluetooth::outside(),
         SectionId::DateTime => crate::time::outside(),
+        SectionId::Account => crate::account::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
+        SectionId::Agents => crate::agents::outside(),
         SectionId::Apps => crate::applications::outside(),
         SectionId::Captures => crate::captures::outside(),
         _ => &[],

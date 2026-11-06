@@ -2803,6 +2803,21 @@ impl Bed {
         Ok(out)
     }
 
+    /// The peek at a frame each 16 ms on the held clock, stepped until
+    /// `time` after `since`, each frame's time counted from `since`: the
+    /// same moments however late a loaded machine draws them.
+    fn peek_steps(&mut self, since: Duration, time: Duration) -> anyhow::Result<Vec<Peeked>> {
+        let mut out = Vec::new();
+        while self.hp.now() < since + time {
+            self.hp.step(common::STEP)?;
+            out.push(Peeked {
+                at: self.hp.now() - since,
+                look: self.hp.peek(),
+            });
+        }
+        Ok(out)
+    }
+
     /// The peek's surface, once drawn and where the shell put it.
     fn peek_surface(&mut self) -> anyhow::Result<Rect> {
         let shown = self.hp.dispatch_until(WAIT, |hp| {
@@ -2890,6 +2905,11 @@ const BAR_LEFT: f64 = 1920.0 - 8.0 - 196.0;
 /// out from under the bar in some 320 ms with a slight overshoot, fading
 /// in; then still, and back after 8 s on the clock; then its surfaces go
 /// and nothing draws.
+///
+/// Its 8 s count from its surface's first frame, on the compositor's
+/// clock: the test holds that clock and steps it, frame by frame, from
+/// that frame on, so that it counts from the same moment and sees the
+/// same frames however late a loaded machine draws them.
 #[test]
 fn a_waiting_agents_panda_peeks_out_at_its_row_then_goes_back_after_8_s() -> anyhow::Result<()> {
     let Some(mut bed) = peek_bed(false)? else {
@@ -2901,9 +2921,14 @@ fn a_waiting_agents_panda_peeks_out_at_its_row_then_goes_back_after_8_s() -> any
     bed.settle()?;
     assert_eq!(bed.hp.peeks_told(), 0);
     assert!(bed.hp.peek_surfaces().is_empty());
-    let start = Instant::now();
+    bed.hp.hold_clock();
     bed.hocus(&["agent", "build", "waiting"], None)?;
-    let samples = bed.peek_until(start, Duration::from_millis(1500))?;
+    let drawn = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.peek_since().is_some())?;
+    anyhow::ensure!(drawn, "no peek: {:?}", bed.hp.peek_surfaces());
+    let since = bed.hp.peek_since().unwrap_or_default();
+    let samples = bed.peek_steps(since, Duration::from_millis(1500))?;
     let shown: Vec<(Duration, Look)> = samples
         .iter()
         .filter_map(|s| s.look.map(|l| (s.at, l)))
@@ -2959,16 +2984,14 @@ fn a_waiting_agents_panda_peeks_out_at_its_row_then_goes_back_after_8_s() -> any
         assert!(drawn[0] > drawn[2] && drawn[0] < 60, "{drawn:?}");
     }
     // Still out at 7.5 s; back from 8 s on.
-    wait(
-        &mut bed.hp,
-        (start + Duration::from_millis(7500)).saturating_duration_since(Instant::now()),
-    )?;
+    bed.peek_steps(since, Duration::from_millis(7500))?;
     let out = bed.hp.peek_out();
     assert!(
         matches!(out, Some((_, PeekKind::Waiting, false))),
         "{out:?}"
     );
-    let samples = bed.peek_until(start, Duration::from_millis(9500))?;
+    let samples = bed.peek_steps(since, Duration::from_millis(9500))?;
+    bed.hp.release_clock();
     let back = samples
         .iter()
         .find(|s| s.look.is_none_or(|l| l.alpha < 1.0 || l.shift > 0.0))

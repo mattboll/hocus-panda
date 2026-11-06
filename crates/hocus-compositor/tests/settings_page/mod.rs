@@ -1,5 +1,6 @@
 //! The Settings' page scrolled with the wheel until what a test clicks is
-//! in view (#660), for every test file of the Settings that clicks.
+//! in view (#660), and where to click read from the window's current
+//! places (#684), for every test file of the Settings that clicks.
 //!
 //! Where to click is read from places that follow what the window last
 //! showed (`shown`, the serial of its last "shows" line), and each wheel
@@ -64,6 +65,26 @@ fn fresh(log: &Path, places: &Value) -> bool {
         .and_then(|s| s["serial"].as_u64())
         .unwrap_or(0);
     places["shown"].as_u64().unwrap_or(0) >= serial
+}
+
+/// The window's places once they hold `id` and follow its last "shows"
+/// line: where `id` is in what the window shows now (#684). The last
+/// places said, read alone, may be from before its last change (a page
+/// gone back to, a list still filling), and a click there lands on what
+/// was there.
+pub fn places_with(hp: &mut Headless, log: &Path, id: &str) -> anyhow::Result<Value> {
+    // What held, not what is read again after.
+    let mut seen = None;
+    hp.dispatch_until(WAIT, |_| {
+        seen = said(log).filter(|p| p.get(id).is_some() && fresh(log, p));
+        seen.is_some()
+    })?;
+    seen.ok_or_else(|| {
+        anyhow::anyhow!(
+            "{id} is nowhere in places as recent as what the window shows: {:?}",
+            said(log)
+        )
+    })
 }
 
 /// `id` scrolled into the window (`app_id`'s, whose log is `log`), by

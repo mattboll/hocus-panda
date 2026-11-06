@@ -147,7 +147,7 @@ struct Kept {
 
 /// A Settings' line.
 #[derive(Debug)]
-struct Session {
+pub(crate) struct Session {
     id: u64,
     to: mpsc::Sender<String>,
 }
@@ -183,7 +183,7 @@ pub struct Displays {
     trial: Option<Trial>,
     kept: Option<Kept>,
     next_trial: u64,
-    sessions: Vec<Session>,
+    pub(crate) sessions: Vec<Session>,
     timer: Option<RegistrationToken>,
     /// The file's places were refused (overlapping, or a screen apart).
     places_refused: bool,
@@ -482,6 +482,8 @@ impl State {
                     let _ = to.send(crate::clipboard::clipboard_count_line(items, pinned));
                 }
                 let _ = to.send(self.recording_line());
+                // The agents' tools (6.16).
+                let _ = to.send(self.agents_settings_opened());
                 self.displays.sessions.push(Session { id: session, to });
             }
             FromSettings::Closed { session } => {
@@ -525,6 +527,31 @@ impl State {
             // forgotten.
             (Some("bar-auto"), Some(name), None) => {
                 self.bar_auto(name);
+                None
+            }
+            // The Agents page's tools (6.16): plugged in or out, herdr
+            // followed or not; the watcher's thread writes, and the line
+            // hears the tools again.
+            (Some(word @ ("agent-plug" | "agent-unplug")), Some(tool), None) => {
+                match crate::agents::tool(tool) {
+                    Some(tool) => {
+                        let ask = if word == "agent-plug" {
+                            hocus_agents::watch::Ask::Plug(tool)
+                        } else {
+                            hocus_agents::watch::Ask::Unplug(tool)
+                        };
+                        self.agent_tools_asked(ask);
+                        None
+                    }
+                    None => Some(format!("no tool {tool}")),
+                }
+            }
+            (Some("agent-follow"), Some("herdr"), None) => {
+                self.agent_tools_asked(hocus_agents::watch::Ask::FollowHerdr);
+                None
+            }
+            (Some("agent-unfollow"), Some("herdr"), None) => {
+                self.agent_tools_asked(hocus_agents::watch::Ask::UnfollowHerdr);
                 None
             }
             // "Effacer l'historique" (6.17).

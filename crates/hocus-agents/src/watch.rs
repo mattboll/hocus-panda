@@ -45,9 +45,12 @@ pub struct Snapshot {
     pub codex: ToolState,
     /// herdr is on this computer (its program or its directory).
     pub herdr_found: bool,
-    /// The user said to plug nothing in while herdr was there: its agents
-    /// are not followed.
+    /// The user said to plug nothing in while herdr was there, or turned
+    /// "Suivre herdr" off (6.16): its agents are not followed.
     pub herdr_declined: bool,
+    /// One of Codex's hooks has run since it was plugged in: the user
+    /// approved them in Codex's `/hooks`.
+    pub codex_approved: bool,
 }
 
 impl Snapshot {
@@ -69,6 +72,11 @@ pub enum Ask {
     Decline,
     /// herdr, declined before, followed again (Sources' "Suivre").
     FollowHerdr,
+    /// herdr no longer followed (the Settings' "Suivre herdr" off, 6.16).
+    UnfollowHerdr,
+    /// One of Codex's hooks ran (not its turn's end, which needs no
+    /// approval): they were approved.
+    CodexHeard,
 }
 
 /// The watcher's thread: it ends when this is dropped.
@@ -206,7 +214,8 @@ pub fn look(places: &Places, memory: &Memory) -> Snapshot {
         claude_code: state(Tool::ClaudeCode),
         codex: state(Tool::Codex),
         herdr_found,
-        herdr_declined: herdr_found && memory.declined.contains("herdr"),
+        herdr_declined: memory.declined.contains("herdr"),
+        codex_approved: memory.codex_approved,
     }
 }
 
@@ -219,19 +228,32 @@ fn carry_out(ask: Ask, places: &Places, memory: &mut Memory) {
             let now = look(places, memory);
             for tool in [Tool::ClaudeCode, Tool::Codex] {
                 if now.of(tool) == ToolState::Found {
-                    memory.declined.insert(tool.word().to_owned());
+                    memory.decline(tool.word());
                 }
             }
-            if now.herdr_found {
-                memory.declined.insert("herdr".to_owned());
+            if now.herdr_found && !memory.declined.contains("herdr") {
+                memory.decline("herdr");
             }
             tracing::info!(declined = ?memory.declined, "plug nothing in");
             memory.save(places);
             Ok(())
         }
         Ask::FollowHerdr => {
-            memory.declined.remove("herdr");
+            memory.follow("herdr");
             tracing::info!("herdr followed again");
+            memory.save(places);
+            Ok(())
+        }
+        Ask::UnfollowHerdr => {
+            memory.decline("herdr");
+            tracing::info!("herdr no longer followed");
+            memory.save(places);
+            Ok(())
+        }
+        Ask::CodexHeard if memory.codex_approved => Ok(()),
+        Ask::CodexHeard => {
+            memory.codex_approved = true;
+            tracing::info!("Codex's hooks were approved: one ran");
             memory.save(places);
             Ok(())
         }

@@ -216,17 +216,9 @@ impl Bed {
         })
     }
 
-    /// The window's places, once they hold `id`.
+    /// The window's current places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
-        let log = self.log.clone();
-        let read = |log: &Path| -> Option<Value> { common::last_json(log, " places {") };
-        // What held, not what is read again after.
-        let mut seen = None;
-        self.hp.dispatch_until(WAIT, |_| {
-            seen = read(&log).filter(|p| p.get(id).is_some());
-            seen.is_some()
-        })?;
-        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", read(&log)))
+        settings_page::places_with(&mut self.hp, &self.log, id)
     }
 
     /// The window's place on the screen.
@@ -606,6 +598,13 @@ fn an_unreadable_file_turns_it_read_only_and_the_last_readable_one_comes_back() 
     let aside =
         std::fs::read_to_string(bed.dir.path().join("config/hocuspanda/config.toml.broken"))?;
     assert_eq!(aside, broken);
+    // One click, one restore asked of the worker (#676).
+    let log = common::logged(&bed.log);
+    let asked = log
+        .matches("the last version that read is taken back")
+        .count()
+        + log.matches("no version to take back").count();
+    assert_eq!(asked, 1, "{log}");
     Ok(())
 }
 

@@ -26,6 +26,11 @@ pub const MOUSE: RowGroup = RowGroup {
     label: w("SOURIS", "MOUSE"),
     per_source: false,
 };
+/// The gestures' rows (6.13).
+pub const SWIPE_DESKTOPS: &str = "touchpad.swipe-desktops";
+pub const SWIPE_LAUNCHER: &str = "touchpad.swipe-launcher";
+pub const LEFT_TO_APPS: &str = "touchpad.left-to-applications";
+
 pub const GESTURES: RowGroup = RowGroup {
     label: w("GESTES DU PAVÉ TACTILE", "TOUCHPAD GESTURES"),
     per_source: false,
@@ -307,16 +312,20 @@ pub fn settings() -> &'static [Setting] {
                 None,
             ),
             setting(
-                "touchpad.swipe-desktops",
+                SWIPE_DESKTOPS,
                 GESTURES,
                 w("Trois doigts de côté", "Three fingers sideways"),
                 Some(w(
-                    "Changer de bureau, en suivant les doigts.",
-                    "Change desktop, following the fingers.",
+                    "Changer de bureau sur l’écran sous le pointeur ; le bureau suit tes doigts, puis se pose ou revient.",
+                    "Switch desktop on the screen under the pointer; the desktop follows your fingers, then settles or springs back.",
                 )),
                 (
-                    &["geste", "bureau", "trois doigts", "glisser"],
-                    &["gesture", "swipe", "desktop", "three fingers"],
+                    &[
+                        "geste", "glisser", "doigts", "trois doigts", "bureau", "pavé",
+                    ],
+                    &[
+                        "gesture", "swipe", "fingers", "three fingers", "desktop", "touchpad",
+                    ],
                 ),
                 Kind::Switch,
                 place(
@@ -327,16 +336,20 @@ pub fn settings() -> &'static [Setting] {
                 None,
             ),
             setting(
-                "touchpad.swipe-launcher",
+                SWIPE_LAUNCHER,
                 GESTURES,
                 w("Quatre doigts vers le haut", "Four fingers up"),
                 Some(w(
-                    "Ouvrir le lanceur ; vers le bas, le refermer.",
-                    "Open the launcher; down, close it again.",
+                    "Ouvrir le lanceur, qui grandit avec tes doigts ; vers le bas, le refermer.",
+                    "Open the launcher, which grows with your fingers; down closes it.",
                 )),
                 (
-                    &["geste", "lanceur", "quatre doigts", "glisser"],
-                    &["gesture", "swipe", "launcher", "four fingers"],
+                    &[
+                        "geste", "glisser", "doigts", "quatre doigts", "lanceur", "pavé",
+                    ],
+                    &[
+                        "gesture", "swipe", "fingers", "four fingers", "launcher", "touchpad",
+                    ],
                 ),
                 Kind::Switch,
                 place(
@@ -344,6 +357,27 @@ pub fn settings() -> &'static [Setting] {
                     Codec::Bool,
                     Value::Bool(true),
                 ),
+                None,
+            ),
+            // Not a setting: what the desktop never takes.
+            setting(
+                LEFT_TO_APPS,
+                GESTURES,
+                w("Ce qui reste aux applications", "What is left to applications"),
+                Some(w(
+                    "Deux doigts pour défiler et pincer ; trois doigts vers le haut ou le bas ; quatre doigts de côté.",
+                    "Two fingers to scroll and pinch; three fingers up or down; four fingers sideways.",
+                )),
+                (
+                    &["geste", "doigts", "pincer", "applications", "pavé"],
+                    &["gesture", "fingers", "pinch", "applications", "touchpad"],
+                ),
+                Kind::Note(w("Toujours", "Always")),
+                Places::Page(Place {
+                    key: &["touchpad", "swipe-desktops"],
+                    codec: Codec::Bool,
+                    default: Value::Bool(true),
+                }),
                 None,
             ),
         ]
@@ -389,6 +423,9 @@ pub fn takes(setting: &str, devices: Option<&[InputDevice]>) -> bool {
             "touchpad.off-with-mouse" => can.off_with_mouse,
             "pointer.acceleration" => can.flat && can.adaptive,
             "pointer.left-handed" => can.left_handed,
+            // 0: a compositor that does not say it.
+            SWIPE_DESKTOPS => can.fingers == 0 || can.fingers >= 3,
+            SWIPE_LAUNCHER => can.fingers == 0 || can.fingers >= 4,
             _ => true,
         }
     })

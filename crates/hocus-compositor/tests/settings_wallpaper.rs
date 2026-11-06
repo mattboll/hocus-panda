@@ -241,16 +241,9 @@ impl Bed {
         })
     }
 
-    /// The window's places, once they hold `id`.
+    /// The window's current places, once they hold `id`.
     fn places_with(&mut self, id: &str) -> anyhow::Result<Value> {
-        let log = self.log.clone();
-        // What held, not what is read again after.
-        let mut seen = None;
-        self.hp.dispatch_until(WAIT, |_| {
-            seen = places(&log).filter(|p| p.get(id).is_some());
-            seen.is_some()
-        })?;
-        seen.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", places(&log)))
+        settings_page::places_with(&mut self.hp, &self.log, id)
     }
 
     fn window(&self) -> anyhow::Result<hocus_compositor::model::Rect> {
@@ -353,10 +346,6 @@ impl Bed {
         }
         anyhow::bail!("screen {screen} shows {seen:?} at {at:?}, not about {like:?}")
     }
-}
-
-fn places(log: &Path) -> Option<Value> {
-    common::last_json(log, " places {")
 }
 
 fn near(a: [u8; 3], b: [u8; 3]) -> bool {
