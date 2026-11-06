@@ -19,6 +19,13 @@
 //! it, or its window getting the keyboard, acknowledges it, and the halo
 //! no longer counts it. The reminder of a waiting agent is a timer of the
 //! loop at its fifth minute, never polled.
+//!
+//! `[agents]` (6.16) says what of the agents it shows (`halo`: all,
+//! waiting only, none; the meetings keep theirs) and when the reminder
+//! comes (`remind`: 2, 5 or 10 min, never; none without a halo for the
+//! agents), followed live: what a new rule leaves out fades out as when
+//! it is dealt with. The agents' episodes are kept whatever it says, so
+//! the peek still hears what began.
 
 use std::{cell::RefCell, collections::BTreeMap, collections::HashMap, time::Duration};
 
@@ -38,6 +45,7 @@ use smithay::{
 
 use crate::{
     State,
+    config::{HaloRule, Remind},
     going::{ShaderElement, Shaders},
     motion::{Bezier, Tween},
 };
@@ -52,7 +60,8 @@ pub const WAVE_BAND: f64 = 0.4;
 pub const FADE_IN: Duration = Duration::from_millis(600);
 pub const FADE_OUT: Duration = Duration::from_millis(500);
 pub const FADE_REDUCED: Duration = Duration::from_millis(200);
-/// An agent still waiting after this long gets one more wave.
+/// An agent still waiting after this long gets one more wave, by
+/// default (`[agents] remind`).
 pub const REMINDER: Duration = Duration::from_secs(5 * 60);
 
 /// What concerns the user, the most important first: their order is the
@@ -72,6 +81,11 @@ pub enum Concern {
 }
 
 impl Concern {
+    /// Whether it is an agent's, not a meeting's.
+    pub const fn agents(self) -> bool {
+        matches!(self, Self::Waiting | Self::Stuck | Self::ToSee)
+    }
+
     /// The agent's state as the shell is told it (`hocus-link`'s words).
     pub fn of_agent(state: &str) -> Option<Self> {
         match state {
@@ -327,17 +341,79 @@ pub struct Halo {
     /// or finishes, unless the user looks at it, and a waiting agent's
     /// reminder; taken by [`Halo::take_news`].
     news: Vec<(u64, Concern)>,
+    /// What of the agents it shows, and when it reminds (`[agents]`).
+    rules: Rules,
+}
+
+/// What of the agents the halo shows, and when it reminds of a waiting
+/// one (`[agents] halo` and `remind`, 6.16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Rules {
+    pub halo: HaloRule,
+    pub remind: Remind,
+}
+
+impl Rules {
+    pub const fn of(agents: &crate::config::Agents) -> Self {
+        Self {
+            halo: agents.halo,
+            remind: agents.remind,
+        }
+    }
+
+    /// Whether the halo shows `concern`.
+    pub const fn shows(self, concern: Concern) -> bool {
+        match (self.halo, concern) {
+            (_, Concern::MeetingNow | Concern::MeetingSoon) | (HaloRule::All, _) => true,
+            (HaloRule::Waiting, c) => matches!(c, Concern::Waiting),
+            (HaloRule::Off, _) => false,
+        }
+    }
+
+    /// After how long of waiting an agent is reminded of: never without a
+    /// halo for the agents.
+    pub const fn reminder(self) -> Option<Duration> {
+        match self.halo {
+            HaloRule::Off => None,
+            HaloRule::All | HaloRule::Waiting => self.remind.after(),
+        }
+    }
 }
 
 impl Halo {
-    /// What concerns the user most, if anything.
+    /// A halo following `rules`.
+    pub fn with(rules: Rules) -> Self {
+        Self {
+            rules,
+            ..Self::default()
+        }
+    }
+
+    /// What concerns the user most, if anything, of what the rules show.
     pub fn concern(&self) -> Option<Concern> {
         self.episodes
             .values()
             .filter(|e| !e.acknowledged)
             .map(|e| e.concern)
             .chain(self.meeting)
+            .filter(|&c| self.rules.shows(c))
             .min()
+    }
+
+    /// The rules it follows.
+    pub const fn rules(&self) -> Rules {
+        self.rules
+    }
+
+    /// It follows `rules` from now: what they leave out fades out, what
+    /// they bring back fades in, without a wave. Whether what shows
+    /// changed.
+    pub fn set_rules(&mut self, rules: Rules, now: Duration, motion: Motion) -> bool {
+        if rules == self.rules {
+            return false;
+        }
+        self.rules = rules;
+        self.show(now, motion, None)
     }
 
     /// The agents as they are now. An agent that starts waiting, unless
@@ -407,19 +483,23 @@ impl Halo {
         self.show(now, motion, concern)
     }
 
-    /// When the next reminder is due: the fifth minute of an agent waiting,
-    /// not reminded yet.
+    /// When the next reminder is due: the fifth minute (`[agents]
+    /// remind`) of an agent waiting, not reminded yet.
     pub fn next_reminder(&self) -> Option<Duration> {
+        let after = self.rules.reminder()?;
         self.episodes
             .values()
             .filter(|e| e.concern == Concern::Waiting && !e.acknowledged && !e.reminded)
-            .map(|e| e.since + REMINDER)
+            .map(|e| e.since + after)
             .min()
     }
 
     /// The reminders due by `now` run their wave, once. Whether what shows
     /// changed.
     pub fn remind(&mut self, now: Duration, motion: Motion) -> bool {
+        let Some(after) = self.rules.reminder() else {
+            return false;
+        };
         // A timer may fire a hair early.
         let by = now + Duration::from_millis(1);
         let mut due = false;
@@ -427,7 +507,7 @@ impl Halo {
             if episode.concern == Concern::Waiting
                 && !episode.acknowledged
                 && !episode.reminded
-                && episode.since + REMINDER <= by
+                && episode.since + after <= by
             {
                 episode.reminded = true;
                 due = true;
@@ -531,6 +611,28 @@ impl State {
         if self.halo.meeting(near, now, motion) {
             self.redraw = true;
         }
+    }
+
+    /// `[agents]` changed (6.16, [`crate::reload`]): the halo follows its
+    /// new rules (what they leave out fades out), the reminder its new
+    /// time, the peek its rule from the next panda (one out stays its
+    /// 8 s), and the shell is told whether its rows show pandas. Whether
+    /// anything changed.
+    pub(crate) fn agents_config_changed(&mut self, new: &crate::config::Agents) -> bool {
+        if *new == self.config.agents {
+            return false;
+        }
+        let pandas = new.pandas != self.config.agents.pandas;
+        self.config.agents = *new;
+        let (now, motion) = (self.now(), self.halo_motion());
+        if self.halo.set_rules(Rules::of(new), now, motion) {
+            self.redraw = true;
+        }
+        self.arm_reminder();
+        if pandas && self.shell_linked() {
+            self.tell_shell(hocus_link::ToShell::AgentPandas(new.pandas));
+        }
+        true
     }
 
     /// The reminder's timer for the next one due, if it is not the one set.
@@ -1103,6 +1205,106 @@ mod tests {
         );
         assert_eq!(halo.waves, 3);
         assert_eq!(halo.next_reminder(), Some(again - ms(1000) + REMINDER));
+    }
+
+    fn rules(halo: HaloRule, remind: Remind) -> Rules {
+        Rules { halo, remind }
+    }
+
+    #[test]
+    fn its_rules_say_what_of_the_agents_shows_and_never_the_meetings() {
+        let mut halo = Halo::with(rules(HaloRule::Waiting, Remind::Five));
+        let now = ms(0);
+        halo.agents(
+            &[agent(1, "done", now), agent(2, "failed", now)],
+            now,
+            Motion::Full,
+        );
+        assert_eq!(halo.concern(), None);
+        halo.meeting(Some(Meeting::InTen), now, Motion::Full);
+        assert_eq!(halo.concern(), Some(Concern::MeetingSoon));
+        halo.meeting(None, now, Motion::Full);
+        halo.agents(
+            &[
+                agent(1, "done", now),
+                agent(2, "failed", now),
+                agent(3, "waiting", now),
+            ],
+            now,
+            Motion::Full,
+        );
+        assert_eq!(halo.concern(), Some(Concern::Waiting));
+        // The meeting's wave, then the waiting agent's.
+        assert_eq!(halo.waves, 2);
+        let mut off = Halo::with(rules(HaloRule::Off, Remind::Five));
+        off.agents(&[agent(3, "waiting", now)], now, Motion::Full);
+        assert_eq!((off.concern(), off.waves), (None, 0));
+        // What began is news all the same: the peek has its own rule.
+        assert_eq!(off.take_news(), vec![(3, Concern::Waiting)]);
+        off.meeting(Some(Meeting::InTwo), now, Motion::Full);
+        assert_eq!(off.concern(), Some(Concern::MeetingNow));
+    }
+
+    #[test]
+    fn what_a_new_rule_leaves_out_fades_out_and_comes_back_without_a_wave() {
+        let mut halo = Halo::default();
+        halo.agents(&[agent(1, "done", ms(0))], ms(0), Motion::Full);
+        assert_eq!(
+            halo.at(ms(1000)).map(|s| s.glow),
+            Some(Concern::ToSee.glow())
+        );
+        let waiting = rules(HaloRule::Waiting, Remind::Five);
+        assert!(halo.set_rules(waiting, ms(1000), Motion::Full));
+        assert!(!halo.set_rules(waiting, ms(1000), Motion::Full));
+        // Out in 500 ms, as when it is dealt with.
+        let fading = halo.at(ms(1250)).expect("fading");
+        assert_eq!(fading.concern, None);
+        assert!(fading.glow.border > 0.0 && fading.glow.border < 0.45);
+        assert!(halo.moving(ms(1499)));
+        assert_eq!(halo.at(ms(1500)), None);
+        // Back to all: it fades in, with no wave.
+        assert!(halo.set_rules(Rules::default(), ms(2000), Motion::Full));
+        assert_eq!(halo.concern(), Some(Concern::ToSee));
+        assert_eq!(
+            halo.at(ms(2600)).map(|s| s.glow),
+            Some(Concern::ToSee.glow())
+        );
+        assert_eq!(halo.waves, 0);
+    }
+
+    #[test]
+    fn the_reminder_comes_at_the_time_chosen_never_without_a_halo() {
+        let since = ms(10_000);
+        let waiting = [agent(1, "waiting", since)];
+        for (remind, after) in [
+            (Remind::Two, Some(Duration::from_secs(120))),
+            (Remind::Five, Some(REMINDER)),
+            (Remind::Ten, Some(Duration::from_secs(600))),
+            (Remind::Never, None),
+        ] {
+            for halo_rule in [HaloRule::All, HaloRule::Waiting, HaloRule::Off] {
+                let mut halo = Halo::with(rules(halo_rule, remind));
+                halo.agents(&waiting, since, Motion::Still);
+                let due = after.filter(|_| halo_rule != HaloRule::Off);
+                assert_eq!(
+                    halo.next_reminder(),
+                    due.map(|a| since + a),
+                    "{remind:?} {halo_rule:?}"
+                );
+                halo.take_news();
+                halo.remind(since + Duration::from_secs(3600), Motion::Still);
+                assert_eq!(
+                    halo.take_news().len(),
+                    usize::from(due.is_some()),
+                    "{remind:?} {halo_rule:?}"
+                );
+            }
+        }
+        // Changed while it waits: the new time counts from its start.
+        let mut halo = Halo::default();
+        halo.agents(&waiting, since, Motion::Still);
+        halo.set_rules(rules(HaloRule::All, Remind::Two), since, Motion::Still);
+        assert_eq!(halo.next_reminder(), Some(since + Duration::from_secs(120)));
     }
 
     #[test]

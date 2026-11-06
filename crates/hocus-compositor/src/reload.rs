@@ -11,9 +11,11 @@
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
-//! `[capture]`, `[recording]` and `[clipboard]` (6.17). A keyboard whose layouts or options changed has its
-//! keymap compiled on the thread too (XKB reads its files), the loop only
-//! taking it in; its repeat is given to clients again.
+//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[agents]`
+//! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
+//! layouts or options changed has its keymap compiled on the thread too
+//! (XKB reads its files), the loop only taking it in; its repeat is given
+//! to clients again.
 
 use std::{
     ffi::OsString,
@@ -268,6 +270,11 @@ impl State {
         // What the clipboard's history reads and keeps (6.17, clipboard.rs).
         if self.clipboard_config_changed(&new.clipboard) {
             followed.push("[clipboard]");
+        }
+        // The halo, its reminder, the peek and the rows' pandas (6.16,
+        // halo.rs).
+        if self.agents_config_changed(&new.agents) {
+            followed.push("[agents]");
         }
         // Idleness, locking, sleeping, the lid, the power button and the
         // power saver (6.10, away/power.rs).
