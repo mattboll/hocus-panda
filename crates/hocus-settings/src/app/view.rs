@@ -784,7 +784,7 @@ impl App {
                         // against the room the card leaves it (#722).
                         responsive(move |room| {
                             t(
-                                elided(&state, 12.5, MANROPE, room.width - 1.0),
+                                elided_keeping(&state.0, &state.1, 12.5, MANROPE, room.width - 1.0),
                                 12.5,
                                 DIM.get(),
                             )
@@ -824,9 +824,11 @@ impl App {
     }
 
     /// A home card's state now.
-    fn card_state(&self, id: SectionId) -> String {
+    /// A home card's state now: what may be cut to fit, and what is kept
+    /// whole after it (the Sound card's volume).
+    fn card_state(&self, id: SectionId) -> (String, String) {
         let lang = self.lang;
-        match id {
+        let whole = match id {
             SectionId::Power => {
                 let slot =
                     crate::model::setting("power.suspend-after").map(|s| Slot::of(s, self.source));
@@ -844,14 +846,15 @@ impl App {
                     (None, Lang::English) => format!("On AC · {suspend}"),
                 }
             }
-            SectionId::Sound => self.sound_card(),
+            SectionId::Sound => return self.sound_card(),
             SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
                 .to_owned(),
             _ => w("À venir", "Coming").get(lang).to_owned(),
-        }
+        };
+        (whole, String::new())
     }
 
     // --- A section's page -------------------------------------------------------------
@@ -1815,7 +1818,10 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         SectionId::Appearance,
     ]
     .iter()
-    .map(|id| serde_json::json!([id.name(lang), app.card_state(*id)]))
+    .map(|id| {
+        let (cut, kept) = app.card_state(*id);
+        serde_json::json!([id.name(lang), format!("{cut}{kept}")])
+    })
     .collect();
     serde_json::json!({
         "page": page,

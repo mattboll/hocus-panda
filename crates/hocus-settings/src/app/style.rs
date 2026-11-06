@@ -213,6 +213,23 @@ pub fn elided(s: &str, size: f32, font: Font, room: f32) -> String {
     fitted(s, room, |cut| measure(cut, size, font))
 }
 
+/// `head` then `kept`, in `font` at `size`, `head` alone cut with "…" when
+/// both do not fit `room` px.
+pub fn elided_keeping(head: &str, kept: &str, size: f32, font: Font, room: f32) -> String {
+    fitted_keeping(head, kept, room, |s| measure(s, size, font))
+}
+
+/// `head` then `kept` as they are when `width` says they fit `room`, else
+/// `head` cut to leave `kept` whole after it ("Haut-parl… · 62 %").
+pub fn fitted_keeping(head: &str, kept: &str, room: f32, width: impl Fn(&str) -> f32) -> String {
+    let whole = format!("{head}{kept}");
+    if kept.is_empty() || width(&whole) <= room {
+        return fitted(&whole, room, width);
+    }
+    let left = room - width(kept);
+    format!("{}{kept}", fitted(head, left, width))
+}
+
 /// `s` as it is when `width` says it fits `room`, else its longest start
 /// that fits with "…" after it, never a space or a separator just before
 /// the ellipsis ("Sur secteur ·…").
@@ -307,6 +324,28 @@ mod tests {
             let cut = fitted(line, room, tens);
             assert!(tens(&cut) <= room || cut == "…", "{cut:?} in {room}");
         }
+    }
+
+    #[test]
+    fn a_value_after_the_name_is_kept_whole_and_the_name_cut() {
+        let (name, volume) = ("Haut-parleurs", " · 62 %");
+        // Both fit: as they are.
+        assert_eq!(
+            fitted_keeping(name, volume, 200.0, tens),
+            "Haut-parleurs · 62 %"
+        );
+        // Not both: the name cut, the volume whole.
+        assert_eq!(
+            fitted_keeping(name, volume, 190.0, tens),
+            "Haut-parleu… · 62 %"
+        );
+        assert_eq!(fitted_keeping(name, volume, 140.0, tens), "Haut-p… · 62 %");
+        // Never a separator before the ellipsis.
+        assert_eq!(fitted_keeping(name, volume, 130.0, tens), "Haut… · 62 %");
+        // Hardly room for the volume: the ellipsis alone before it.
+        assert_eq!(fitted_keeping(name, volume, 80.0, tens), "… · 62 %");
+        // Nothing kept: the line cut as any other.
+        assert_eq!(fitted_keeping(name, "", 60.0, tens), "Haut…");
     }
 
     #[test]

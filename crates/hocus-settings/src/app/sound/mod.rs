@@ -1176,15 +1176,23 @@ impl App {
         }
     }
 
-    /// The home's card: the output in use and its volume.
-    pub(super) fn sound_card(&self) -> String {
+    /// The home's card: the output in use, and its volume, which the card
+    /// keeps whole when the name has to be cut.
+    pub(super) fn sound_card(&self) -> (String, String) {
         match (self.sound.output(), self.sound.graph.as_deref()) {
-            (Some(sink), Some(graph)) => format!(
-                "{} · {}",
-                model::card_name(sink, graph),
-                model::say_volume(sink, false, self.lang)
+            (Some(sink), Some(graph)) => {
+                let volume = model::say_volume(sink, false, self.lang);
+                let kept = if volume.is_empty() {
+                    volume
+                } else {
+                    format!(" · {volume}")
+                };
+                (model::card_name(sink, graph), kept)
+            }
+            _ => (
+                w("Aucune sortie", "No output").get(self.lang).to_owned(),
+                String::new(),
             ),
-            _ => w("Aucune sortie", "No output").get(self.lang).to_owned(),
         }
     }
 }
