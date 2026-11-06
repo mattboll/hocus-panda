@@ -118,7 +118,7 @@ impl Bed {
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
                  XDG_DATA_DIRS='{}' TZ=UTC HOCUS_CLOCK_AT='2026-11-04T14:00:00' \
-                 RUST_LOG=warn,hocuspanda_shell=debug\n\
+                 RUST_LOG=warn,hocuspanda_shell=debug,hocuspanda_shell::keys=trace\n\
                  exec '{}' \"$@\" 2>>'{}'\n",
                 at("home"),
                 at("config"),
@@ -809,7 +809,16 @@ fn tab_goes_through_the_add_and_each_box_space_ticks_and_enter_opens_the_field()
     bed.press(KEY_ENTER);
     bed.field_opens(from)?;
     bed.type_text("ok");
-    bed.logged_after(from, &["the tasks show", "«ok» focused=true"])?;
+    // Lost letters (#677) say where they went: the keyboard's enters and
+    // each key's window, from the start (the field's surface is on the
+    // line "the field to add a task opens").
+    bed.logged_after(from, &["the tasks show", "«ok» focused=true"])
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "{e}\nthe keys:\n{}",
+                bed.lines_since(0, "hocuspanda_shell::keys").join("\n")
+            )
+        })?;
     bed.press(KEY_ENTER);
     bed.logged_after(from, &["the day holds", "«ok»"])?;
     Ok(())

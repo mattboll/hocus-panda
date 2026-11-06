@@ -49,6 +49,10 @@
 //!
 //! Nothing here reads the connection, nor wakes: the keyboard's events are
 //! handled as the widgets get theirs.
+//!
+//! The log says where the keys went: each enter and leave and each change
+//! of the holder (debug), each keyboard event's window, its kind and its
+//! route (trace, `hocuspanda_shell::keys=trace`), never what was typed.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -196,6 +200,7 @@ impl Keys {
     /// The compositor told the shell's keyboard an enter or a leave.
     fn told(&mut self, told: Told) {
         self.undo = None;
+        let was = self.holder;
         self.holder = match told {
             // Numbered after every window made so far.
             Told::Enter => Holder::Entering {
@@ -203,6 +208,7 @@ impl Keys {
             },
             Told::Leave => Holder::Unknown,
         };
+        tracing::debug!(?told, ?was, now = ?self.holder, "the compositor moved the keyboard");
     }
 
     /// Where `event`, handed to window `here`, goes; what it tells of the
@@ -213,6 +219,7 @@ impl Keys {
             && matches!(event, Event::Window(window::Event::Unfocused))
         {
             // Those modifiers were a leave's.
+            tracing::debug!(window = ?here, ?holder, "the keyboard was not on this window: a leave's unfocus");
             self.holder = holder;
             return Route::Here;
         }
@@ -232,6 +239,24 @@ impl Keys {
         let Event::Keyboard(key) = event else {
             return Route::Here;
         };
+        let was = self.holder;
+        let route = self.route_key(here, key, entered_maybe);
+        // Which window each key was handed to, and where it goes: what a
+        // key lost to the wrong window leaves to read (#677). Never what
+        // was typed.
+        tracing::trace!(
+            window = ?here,
+            key = key_kind(key),
+            ?was,
+            now = ?self.holder,
+            ?route,
+            "a keyboard event"
+        );
+        route
+    }
+
+    /// Where keyboard event `key`, handed to window `here`, goes.
+    fn route_key(&mut self, here: window::Id, key: &keyboard::Event, entered_maybe: bool) -> Route {
         match self.holder {
             Holder::Unknown => Route::Here,
             Holder::Entering { .. } | Holder::Opened { .. } if entered_maybe => {
@@ -262,6 +287,7 @@ impl Keys {
         if self.kept.is_empty() {
             return Vec::new();
         }
+        tracing::trace!(window = ?id, kept = self.kept.len(), "the keyboard events kept, for their windows");
         let mut taken = Vec::new();
         self.kept.retain(|(to, event)| {
             if *to == id {
@@ -272,6 +298,15 @@ impl Keys {
             }
         });
         taken
+    }
+}
+
+/// What a keyboard event is, for the log: never its key nor its text.
+fn key_kind(key: &keyboard::Event) -> &'static str {
+    match key {
+        keyboard::Event::KeyPressed { .. } => "pressed",
+        keyboard::Event::KeyReleased { .. } => "released",
+        keyboard::Event::ModifiersChanged(_) => "modifiers",
     }
 }
 
