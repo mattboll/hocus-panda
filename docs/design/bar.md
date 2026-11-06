@@ -666,8 +666,12 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   joins "my devices", then its block); failed: "L'association a échoué.
   Mets l'appareil en mode association et réessaie." / "Pairing failed. Put
   the device in pairing mode and try again." under its row. One that asks
-  for a code (a phone or a computer, or one that asked the agent for one)
-  is greyed, inert, "dans les Réglages" / "in Settings" (6.7 pairs those).
+  for a code (a phone, a tablet or a computer, or one that asked the agent
+  for one) says "dans les Réglages" / "in Settings": a click starts
+  `hocus-settings bluetooth --pair ADDRESS` and closes the popover, the
+  Settings' Bluetooth page pairing it (6.7). The last row, under a
+  divider, "Réglages du Bluetooth…" / "Bluetooth settings…" (36 px, as
+  the sound's), opens that page; it is the last `Tab` stop.
   None: "Aucun nouvel appareil trouvé." / "No new device found."
   ("Recherche des appareils…" / "Searching for devices…" while the first
   pass runs). The rows around keep their order while the pointer is over
@@ -1361,7 +1365,7 @@ phone and keyboard slots are not part of the product.
   **Telling a code before the click**: BlueZ says nothing of the pairing
   method ahead, so a phone or a computer (its `Icon`, else its class or
   appearance) is taken to ask for one and shows "dans les Réglages",
-  inert. Any other that asks the agent for a PIN, a passkey, or a
+  left to the Settings. Any other that asks the agent for a PIN, a passkey, or a
   confirmation is refused (`org.bluez.Error.Rejected`): its pairing fails,
   and its row turns "dans les Réglages" for the rest of the session,
   without a failure message. The agent authorizes only the device the

@@ -249,6 +249,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
     state.programs.wait(options.spawn, options.session);
+    if options.session {
+        state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
+    }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
     } else {

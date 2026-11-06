@@ -257,6 +257,11 @@ impl State {
             self.tell_shell(hocus_link::ToShell::BarWindows(new.panel.windows));
             followed.push("[panel] windows");
         }
+        // The terminal (6.15): read for each `Super+Return`.
+        if new.programs != self.config.programs {
+            self.config.programs = new.programs.clone();
+            followed.push("[programs]");
+        }
         // Where captures and recordings go, their formats and the
         // shutter (6.17): read as each capture or recording starts.
         if new.capture != self.config.capture {

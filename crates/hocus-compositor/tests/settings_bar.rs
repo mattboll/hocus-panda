@@ -13,7 +13,9 @@
 //! draws. What the window shows is read from its log, never on a time.
 
 mod common;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -214,42 +216,13 @@ impl Bed {
 
     /// `id` scrolled into the window with the wheel over the page.
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
-        let mut last = self.place_of(id)?;
-        for _ in 0..60 {
-            let window = self.window()?;
-            let (top, bottom) = (last[1], last[1] + last[3]);
-            // Clear of the toast at the window's bottom.
-            let notches = if bottom > f64::from(window.height) - 90.0 {
-                2
-            } else if top < 56.0 {
-                -2
-            } else {
-                wait(&mut self.hp, Duration::from_millis(100))?;
-                let now = self.place_of(id)?;
-                if now == last {
-                    return Ok(());
-                }
-                last = now;
-                continue;
-            };
-            self.hp.pointer_move(
-                f64::from(window.x) + 500.0,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.wheel(notches);
-            let before = last;
-            let log = self.log.clone();
-            let key = id.to_owned();
-            let moved = self.hp.dispatch_until(Duration::from_secs(2), |_| {
-                read_place(&log, &key).is_some_and(|p| p != before)
-            })?;
-            // At the page's end: as far as it goes.
-            if !moved {
-                return Ok(());
-            }
-            last = self.place_of(id)?;
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 500.0,
+            notches: 2,
+            top: 56.0,
+            floor: Floor::Margin(90.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     fn click(&mut self, id: &str) -> anyhow::Result<()> {
@@ -313,13 +286,6 @@ impl Bed {
         anyhow::ensure!(done, "the laptop's bar: {:?}", self.hp.bars());
         Ok(())
     }
-}
-
-fn read_place(log: &Path, id: &str) -> Option<[f64; 4]> {
-    let places = common::last_json(log, " places {")?;
-    let place = places.get(id)?;
-    let n = |i: usize| place[i].as_f64();
-    Some([n(0)?, n(1)?, n(2)?, n(3)?])
 }
 
 fn form_row<'a>(shown: &'a Value, name: &str) -> &'a Value {

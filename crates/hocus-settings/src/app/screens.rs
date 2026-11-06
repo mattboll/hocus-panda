@@ -341,6 +341,10 @@ impl App {
         if self.desktops_said(&said) || self.agents_heard(&said) {
             return iced::Task::none();
         }
+        // The clipboard's history and the recording (6.17).
+        if self.captures_said(&said) {
+            return iced::Task::none();
+        }
         match said {
             Said::Screens(known) => {
                 self.screens.unavailable = false;
@@ -408,7 +412,9 @@ impl App {
             | Said::DesktopRemoved { .. }
             | Said::DesktopRestored { .. }
             | Said::Apps(_)
-            | Said::AgentTools(_) => iced::Task::none(),
+            | Said::AgentTools(_)
+            | Said::Clipboard { .. }
+            | Said::Recording(_) => iced::Task::none(),
         }
     }
 

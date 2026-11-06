@@ -8,8 +8,11 @@
 //! the devices asked to appear then; a device connects (`Connected`, its
 //! `Battery1` appearing), refuses, or does not answer until it is given up
 //! (`Disconnect` cancels it); a pairing succeeds without a code (Just
-//! Works), fails, or asks the agent registered for a passkey and fails
-//! when the agent refuses. Every change is signalled with its values
+//! Works), fails, or asks the agent of whoever asked it (else the default
+//! one) for a passkey, a PIN, to confirm a number, or shows it a code to
+//! type, and fails when the agent refuses or the device gives up; a
+//! device can ask the default agent to pair by itself. A device is named,
+//! trusted and forgotten as BlueZ does it. Every change is signalled with its values
 //! (`PropertiesChanged`, `InterfacesAdded` and `…Removed`), and what the
 //! shell asked is recorded, for the tests to compare.
 #![allow(dead_code)]
@@ -54,6 +57,13 @@ pub enum Pairing {
     JustWorks,
     /// It asks the agent for a passkey to type.
     Passkey,
+    /// Both sides show this number: the agent confirms it.
+    Confirm(u32),
+    /// The agent shows this number, typed on the device a digit at a time
+    /// up to `typed` digits (six: then it pairs; fewer: it waits).
+    Display { passkey: u32, typed: u16 },
+    /// It asks the agent for a PIN, this one.
+    Pin(&'static str),
     /// Not in pairing mode.
     Fails,
 }
@@ -168,6 +178,22 @@ pub enum Call {
     /// The adapter made visible to other devices, or hidden.
     Discoverable(bool),
     Pairable(bool),
+    DefaultAgent,
+    UnregisterAgent,
+    Distrust(String),
+    Alias(String, String),
+    Remove(String),
+    /// A device that asked to pair by itself, let in or not.
+    Incoming(String, bool),
+    /// The answer the agent gave a passkey or a PIN.
+    Code(String),
+}
+
+/// What a device asks the default agent when it pairs by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Incoming {
+    Confirm(u32),
+    Authorize,
 }
 
 #[derive(Debug)]
@@ -177,6 +203,8 @@ struct Dev {
     paired: bool,
     trusted: bool,
     connected: bool,
+    /// The name given to it, if one.
+    alias: Option<String>,
     /// Its battery's interface is served.
     battery: bool,
     /// Wakes a connection or a pairing under way, to give it up.
@@ -204,8 +232,12 @@ struct State {
     devices: Vec<Dev>,
     later: Vec<FakeDevice>,
     count: u32,
-    /// The agent registered: its owner on the bus, and its path.
-    agent: Option<(String, String)>,
+    /// The agents registered: their owners on the bus, and their paths.
+    agents: Vec<(String, String)>,
+    /// The default agent's owner.
+    default_agent: Option<String>,
+    /// The agent the pairing under way asks.
+    asked_agent: Option<(String, String)>,
     calls: Vec<Call>,
     /// How long a connection, a refusal or a pairing takes.
     takes: Duration,
@@ -310,6 +342,130 @@ impl Bluez {
                 .find(|d| d.name() == name)
                 .map_or((false, false), |d| (d.paired, d.trusted))
         })
+    }
+
+    /// Whether a device named `name` is known (not forgotten).
+    pub fn known(&self, name: &str) -> bool {
+        state(&self.shared, |s| s.devices.iter().any(|d| d.name() == name))
+    }
+
+    /// The name given to `name`, if one.
+    pub fn alias(&self, name: &str) -> Option<String> {
+        state(&self.shared, |s| {
+            s.devices
+                .iter()
+                .find(|d| d.name() == name)
+                .and_then(|d| d.alias.clone())
+        })
+    }
+
+    /// Whether an agent is registered and BlueZ's default.
+    pub fn default_agent(&self) -> bool {
+        state(&self.shared, |s| {
+            s.default_agent
+                .as_ref()
+                .is_some_and(|d| s.agents.iter().any(|(o, _)| o == d))
+        })
+    }
+
+    /// Device `name`, not paired, asks the default agent to pair by itself;
+    /// paired if it lets it (`Call::Incoming` says the answer).
+    pub fn incoming(&self, name: &str, asked: Incoming) -> anyhow::Result<()> {
+        let shared = self.shared.clone();
+        let (path, agent) = state(&shared, |s| {
+            let path = s
+                .devices
+                .iter()
+                .find(|d| d.name() == name)
+                .map(|d| d.path.clone());
+            let agent = s
+                .default_agent
+                .as_ref()
+                .and_then(|d| s.agents.iter().find(|(o, _)| o == d).cloned());
+            (path, agent)
+        });
+        let path = path.ok_or_else(|| anyhow::anyhow!("no {name}"))?;
+        let (owner, at) = agent.ok_or_else(|| anyhow::anyhow!("no default agent"))?;
+        let name = name.to_owned();
+        self.handle.spawn(async move {
+            let Some(connection) = shared.connection.get().cloned() else {
+                return;
+            };
+            let device = OwnedObjectPath::try_from(path.as_str()).unwrap_or_default();
+            let asked = match asked {
+                Incoming::Confirm(passkey) => {
+                    connection
+                        .call_method(
+                            Some(owner.as_str()),
+                            at.as_str(),
+                            Some("org.bluez.Agent1"),
+                            "RequestConfirmation",
+                            &(device, passkey),
+                        )
+                        .await
+                }
+                Incoming::Authorize => {
+                    connection
+                        .call_method(
+                            Some(owner.as_str()),
+                            at.as_str(),
+                            Some("org.bluez.Agent1"),
+                            "RequestAuthorization",
+                            &(device,),
+                        )
+                        .await
+                }
+            };
+            let accepted = asked.is_ok();
+            state(&shared, |s| {
+                s.calls.push(Call::Incoming(name, accepted));
+                if let Some(d) = s.dev_mut(&path)
+                    && accepted
+                {
+                    d.paired = true;
+                }
+            });
+            if accepted {
+                let _ = changed(
+                    &shared,
+                    &path,
+                    DEVICE,
+                    vec![("Paired", Variant::from(true))],
+                )
+                .await;
+            }
+        });
+        Ok(())
+    }
+
+    /// The device being paired gives up: BlueZ cancels what it asked the
+    /// agent, and the pairing fails.
+    pub fn give_up(&self, name: &str) -> anyhow::Result<()> {
+        let shared = self.shared.clone();
+        let (cancel, agent) = state(&shared, |s| {
+            let cancel = s
+                .devices
+                .iter()
+                .find(|d| d.name() == name)
+                .map(|d| d.cancel.clone());
+            (cancel, s.asked_agent.clone())
+        });
+        let cancel = cancel.ok_or_else(|| anyhow::anyhow!("no {name}"))?;
+        self.handle.block_on(async move {
+            if let (Some((owner, at)), Some(connection)) = (agent, shared.connection.get()) {
+                let _ = connection
+                    .call_method(
+                        Some(owner.as_str()),
+                        at.as_str(),
+                        Some("org.bluez.Agent1"),
+                        "Cancel",
+                        &(),
+                    )
+                    .await;
+            }
+            cancel.notify_waiters();
+        });
+        Ok(())
     }
 
     /// Connections, refusals and pairings take `takes` from now on.
@@ -448,6 +604,7 @@ async fn add_device(shared: &Shared, fake: FakeDevice) -> anyhow::Result<String>
             paired: fake.paired,
             trusted: fake.paired,
             connected: fake.connected,
+            alias: None,
             battery: false,
             cancel: Arc::new(Notify::new()),
         });
@@ -576,12 +733,28 @@ impl AgentManager {
         let owner = header.sender().map(|s| s.to_string()).unwrap_or_default();
         state(&self.0, |s| {
             s.calls.push(Call::RegisterAgent(capability));
-            s.agent = Some((owner, agent.as_str().to_owned()));
+            s.agents.retain(|(o, _)| *o != owner);
+            s.agents.push((owner, agent.as_str().to_owned()));
         });
     }
 
-    fn unregister_agent(&self, _agent: OwnedObjectPath) {
-        state(&self.0, |s| s.agent = None);
+    fn request_default_agent(&self, _agent: OwnedObjectPath, #[zbus(header)] header: Header<'_>) {
+        let owner = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        state(&self.0, |s| {
+            s.calls.push(Call::DefaultAgent);
+            s.default_agent = Some(owner);
+        });
+    }
+
+    fn unregister_agent(&self, _agent: OwnedObjectPath, #[zbus(header)] header: Header<'_>) {
+        let owner = header.sender().map(|s| s.to_string()).unwrap_or_default();
+        state(&self.0, |s| {
+            s.calls.push(Call::UnregisterAgent);
+            s.agents.retain(|(o, _)| *o != owner);
+            if s.default_agent.as_deref() == Some(owner.as_str()) {
+                s.default_agent = None;
+            }
+        });
     }
 }
 
@@ -703,6 +876,40 @@ impl Adapter {
         Ok(())
     }
 
+    async fn remove_device(&self, device: OwnedObjectPath) -> zbus::fdo::Result<()> {
+        let path = device.as_str().to_owned();
+        let name = state(&self.0, |s| {
+            let i = s.devices.iter().position(|d| d.path == path)?;
+            let dev = s.devices.remove(i);
+            Some((dev.name(), dev.battery))
+        });
+        let Some((name, battery)) = name else {
+            return Err(zbus::fdo::Error::Failed(
+                "org.bluez.Error.DoesNotExist".to_owned(),
+            ));
+        };
+        state(&self.0, |s| s.calls.push(Call::Remove(name)));
+        // Aside: removing objects changes the object server, which this
+        // method holds.
+        let shared = self.0.clone();
+        tokio::spawn(async move {
+            let Some(connection) = shared.connection.get() else {
+                return;
+            };
+            if battery {
+                let _ = connection
+                    .object_server()
+                    .remove::<Battery, _>(path.as_str())
+                    .await;
+            }
+            let _ = connection
+                .object_server()
+                .remove::<Device, _>(path.as_str())
+                .await;
+        });
+        Ok(())
+    }
+
     async fn stop_discovery(&self) -> zbus::fdo::Result<()> {
         let was = state(&self.0, |s| {
             s.calls.push(Call::StopDiscovery);
@@ -741,7 +948,20 @@ impl Device {
 
     #[zbus(property)]
     fn alias(&self) -> String {
-        self.with(Dev::name).unwrap_or_default()
+        self.with(|d| d.alias.clone().unwrap_or_else(|| d.name()))
+            .unwrap_or_default()
+    }
+
+    // An empty alias gives the device its own name back.
+    #[zbus(property)]
+    fn set_alias(&mut self, alias: String) {
+        state(&self.0, |s| {
+            if let Some(d) = s.dev_mut(&self.1) {
+                let name = d.name();
+                d.alias = (!alias.is_empty()).then(|| alias.clone());
+                s.calls.push(Call::Alias(name, alias));
+            }
+        });
     }
 
     // `Name` only when the device said it.
@@ -785,7 +1005,13 @@ impl Device {
             Some(d.name())
         });
         if let Some(name) = name {
-            state(&self.0, |s| s.calls.push(Call::Trust(name)));
+            state(&self.0, |s| {
+                s.calls.push(if trusted {
+                    Call::Trust(name)
+                } else {
+                    Call::Distrust(name)
+                });
+            });
         }
     }
 
@@ -845,45 +1071,147 @@ impl Device {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
-    async fn pair(&self) -> zbus::fdo::Result<()> {
-        let Some((name, pairing)) = self.with(|d| (d.name(), d.fake.pairing)) else {
+    async fn pair(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        let Some((name, pairing, cancel)) =
+            self.with(|d| (d.name(), d.fake.pairing, d.cancel.clone()))
+        else {
             return Err(zbus::fdo::Error::UnknownObject(self.1.clone()));
         };
+        let caller = header.sender().map(|s| s.to_string()).unwrap_or_default();
         state(&self.0, |s| s.calls.push(Call::Pair(name)));
         tokio::time::sleep(takes(&self.0)).await;
-        match pairing {
-            Pairing::JustWorks => {}
-            Pairing::Fails => {
+        // BlueZ asks the agent of whoever asked for the pairing, else the
+        // default one.
+        let agent = state(&self.0, |s| {
+            let agent = s
+                .agents
+                .iter()
+                .find(|(o, _)| *o == caller)
+                .or_else(|| {
+                    let default = s.default_agent.as_ref()?;
+                    s.agents.iter().find(|(o, _)| o == default)
+                })
+                .cloned();
+            s.asked_agent = agent.clone();
+            agent
+        });
+        let connection = self.0.connection.get().cloned();
+        let device = OwnedObjectPath::try_from(self.1.as_str()).unwrap_or_default();
+        let shared = self.0.clone();
+        let asking = async move {
+            let rejected = || {
+                failed(
+                    "org.bluez.Error.AuthenticationRejected",
+                    "Authentication Rejected",
+                )
+            };
+            if pairing == Pairing::JustWorks {
+                return Ok(());
+            }
+            if pairing == Pairing::Fails {
                 return Err(failed(
                     "org.bluez.Error.AuthenticationFailed",
                     "Authentication Failed",
                 ));
             }
-            Pairing::Passkey => {
-                // BlueZ asks the agent of whoever asked for the pairing.
-                let agent = state(&self.0, |s| s.agent.clone());
-                let connection = self.0.connection.get().cloned();
-                let (Some((owner, path)), Some(connection)) = (agent, connection) else {
-                    return Err(failed("org.bluez.Error.AuthenticationFailed", "no agent"));
-                };
-                let device = OwnedObjectPath::try_from(self.1.as_str()).unwrap_or_default();
-                let asked = connection
+            let (Some((owner, path)), Some(connection)) = (agent, connection) else {
+                return Err(failed("org.bluez.Error.AuthenticationFailed", "no agent"));
+            };
+            match pairing {
+                Pairing::Passkey => {
+                    let asked = connection
+                        .call_method(
+                            Some(owner.as_str()),
+                            path.as_str(),
+                            Some("org.bluez.Agent1"),
+                            "RequestPasskey",
+                            &(device,),
+                        )
+                        .await
+                        .map_err(|_| rejected())?;
+                    let key: u32 = asked.body().deserialize().map_err(|_| rejected())?;
+                    state(&shared, |s| s.calls.push(Call::Code(key.to_string())));
+                    Ok(())
+                }
+                Pairing::Pin(pin) => {
+                    let asked = connection
+                        .call_method(
+                            Some(owner.as_str()),
+                            path.as_str(),
+                            Some("org.bluez.Agent1"),
+                            "RequestPinCode",
+                            &(device,),
+                        )
+                        .await
+                        .map_err(|_| rejected())?;
+                    let given: String = asked.body().deserialize().map_err(|_| rejected())?;
+                    state(&shared, |s| s.calls.push(Call::Code(given.clone())));
+                    if given == pin {
+                        Ok(())
+                    } else {
+                        Err(rejected())
+                    }
+                }
+                Pairing::Confirm(passkey) => connection
                     .call_method(
                         Some(owner.as_str()),
                         path.as_str(),
                         Some("org.bluez.Agent1"),
-                        "RequestPasskey",
-                        &(device,),
+                        "RequestConfirmation",
+                        &(device, passkey),
                     )
-                    .await;
-                if asked.is_err() {
-                    return Err(failed(
-                        "org.bluez.Error.AuthenticationRejected",
-                        "Authentication Rejected",
-                    ));
+                    .await
+                    .map(|_| ())
+                    .map_err(|_| rejected()),
+                Pairing::Display { passkey, typed } => {
+                    for entered in 0..=typed {
+                        connection
+                            .call_method(
+                                Some(owner.as_str()),
+                                path.as_str(),
+                                Some("org.bluez.Agent1"),
+                                "DisplayPasskey",
+                                &(device.clone(), passkey, entered),
+                            )
+                            .await
+                            .map_err(|_| rejected())?;
+                        tokio::time::sleep(takes(&shared)).await;
+                    }
+                    if typed >= 6 {
+                        Ok(())
+                    } else {
+                        // Waits for the rest, which never comes.
+                        std::future::pending::<()>().await;
+                        Ok(())
+                    }
                 }
+                Pairing::JustWorks | Pairing::Fails => Ok(()),
             }
-        }
+        };
+        // Whichever comes first: the agent's answer, or the pairing given
+        // up (`CancelPairing`, the device giving up).
+        let (first, mut done) = tokio::sync::mpsc::channel(2);
+        let answered = first.clone();
+        let asked = tokio::spawn(async move {
+            let _ = answered.send(asking.await).await;
+        });
+        let given_up = tokio::spawn(async move {
+            cancel.notified().await;
+            let _ = first
+                .send(Err(failed(
+                    "org.bluez.Error.AuthenticationCanceled",
+                    "Authentication Canceled",
+                )))
+                .await;
+        });
+        let result = done
+            .recv()
+            .await
+            .unwrap_or_else(|| Err(failed("org.bluez.Error.Failed", "gone")));
+        asked.abort();
+        given_up.abort();
+        state(&self.0, |s| s.asked_agent = None);
+        result?;
         state(&self.0, |s| {
             if let Some(d) = s.dev_mut(&self.1) {
                 d.paired = true;

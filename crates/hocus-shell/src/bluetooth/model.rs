@@ -100,6 +100,15 @@ impl Words {
         }
     }
 
+    /// The popover's last row: the Settings' Bluetooth page.
+    pub fn bluetooth_settings(self) -> &'static str {
+        if self.fr() {
+            "Réglages du Bluetooth…"
+        } else {
+            "Bluetooth settings…"
+        }
+    }
+
     pub fn no_new_device(self) -> &'static str {
         if self.fr() {
             "Aucun nouvel appareil trouvé."

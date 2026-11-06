@@ -233,6 +233,8 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
     pub programs: Programs,
+    /// The session's start-up applications, once the bar shows (6.15).
+    pub autostart: crate::session::autostart::Autostart,
     /// The bars' places and forms (docs/design/bar.md §2, §3).
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
@@ -438,6 +440,7 @@ impl State {
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),
+            autostart: crate::session::autostart::Autostart::default(),
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),

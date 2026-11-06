@@ -225,6 +225,13 @@ pub enum Said {
     Apps(Vec<String>),
     /// The agents' tools (6.16).
     AgentTools(crate::agents::Tools),
+    /// The clipboard's history's items, and its pinned ones (6.17).
+    Clipboard {
+        items: u32,
+        pinned: u32,
+    },
+    /// Whether a recording is under way (6.17).
+    Recording(bool),
 }
 
 /// A bar's form as the compositor says it.
@@ -366,6 +373,21 @@ pub fn read_line(line: &str) -> Option<Said> {
     }
     if let Some(tools) = value.get("agent-tools") {
         return crate::agents::Tools::read(tools).map(Said::AgentTools);
+    }
+    if let Some(clipboard) = value.get("clipboard") {
+        let count = |key| {
+            clipboard
+                .get(key)
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+        };
+        return Some(Said::Clipboard {
+            items: count("items")?,
+            pinned: count("pinned")?,
+        });
+    }
+    if let Some(on) = value.get("recording").and_then(serde_json::Value::as_bool) {
+        return Some(Said::Recording(on));
     }
     if let Some(apps) = value.get("apps").and_then(|a| a.as_array()) {
         return Some(Said::Apps(
