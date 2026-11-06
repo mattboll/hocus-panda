@@ -864,6 +864,10 @@ impl Shell {
                 popover::session::set_shown(None);
                 Task::none()
             }
+            ToShell::SessionMenu { output } => {
+                popover::session::open(&output);
+                Task::none()
+            }
         }
     }
 
@@ -2447,6 +2451,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::LeaveEnd) => {
                             popover::session::set_shown(None);
+                            continue;
+                        }
+                        Ok(ToShell::SessionMenu { output }) => {
+                            popover::session::open(&output);
                             continue;
                         }
                         _ => {}

@@ -404,9 +404,10 @@ impl App {
                 self.screens.asked = None;
                 iced::Task::none()
             }
-            Said::Desktops { .. } | Said::DesktopRemoved { .. } | Said::DesktopRestored { .. } => {
-                iced::Task::none()
-            }
+            Said::Desktops { .. }
+            | Said::DesktopRemoved { .. }
+            | Said::DesktopRestored { .. }
+            | Said::Apps(_) => iced::Task::none(),
         }
     }
 
@@ -2650,7 +2651,7 @@ pub(super) fn switch<'a>(
     switch.into()
 }
 
-fn menu_button<'a>(
+pub(super) fn menu_button<'a>(
     said: String,
     inert: bool,
     focused: bool,

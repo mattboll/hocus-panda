@@ -414,7 +414,8 @@ fn hocus_msg_idle_says_who_holds_it() -> anyhow::Result<()> {
     assert_eq!(
         ask_idle(&mut bus.hp)?,
         "state counting\ndelay 300 s\nleft 240.0 s\nheld-by nothing\n\
-         away here\nscreens on\npower ac\nsleep-inhibitor none\n"
+         away here\nscreens on\npower ac\nsleep-inhibitor none\n\
+         lid open system\nlevel none\nprofile none\nsaver ready\n"
     );
     let (_, video) = open_with(&mut bus.hp, "test.video", (640, 360), false)?;
     video.commands.send(Command::Inhibit(true))?;
@@ -430,7 +431,8 @@ fn hocus_msg_idle_says_who_holds_it() -> anyhow::Result<()> {
         ask_idle(&mut bus.hp)?,
         "state held\ndelay 300 s\nheld-by inhibitor test.video\n\
          held-by screensaver Firefox: video-playing\n\
-         away here\nscreens on\npower ac\nsleep-inhibitor none\n"
+         away here\nscreens on\npower ac\nsleep-inhibitor none\n\
+         lid open system\nlevel none\nprofile none\nsaver ready\n"
     );
     Ok(())
 }

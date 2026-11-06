@@ -703,6 +703,7 @@ impl Words {
         match link {
             Link::Hidden => "",
             Link::Wired => self.wired(),
+            Link::Airplane => self.airplane_mode(),
             Link::Off => self.wifi_off(),
             Link::Offline => self.offline(),
             Link::Connecting => self.connecting(),
@@ -725,6 +726,7 @@ fn full(f: &mut Frame, rect: Rectangle, link: &Link, state: &State, alpha: f32) 
     let colour = match link {
         Link::Connected { .. } | Link::Wired => TEXT,
         Link::Connecting => DIM,
+        Link::Airplane => DIM,
         Link::Off | Link::Offline | Link::Hidden => FAINT,
     };
     f.fill_text(canvas::Text {
@@ -766,6 +768,7 @@ fn glyph(f: &mut Frame, at: Point, size: f32, link: &Link, alpha: f32) {
             wifi(f, at, size, *bars, faded(TEXT.get(), alpha), false, alpha)
         }
         Link::Connecting => wifi(f, at, size, 4, faded(DIM.get(), alpha), false, alpha),
+        Link::Airplane => airplane(f, at, size, faded(DIM.get(), alpha)),
         Link::Off | Link::Offline | Link::Hidden => {
             wifi(f, at, size, 0, faded(TEXT.get(), alpha), true, alpha);
         }
@@ -784,6 +787,37 @@ pub(crate) fn dot(f: &mut Frame, centre: Point, alpha: f32) {
 }
 
 // --- Icons, from the mockup's SVGs (a 24-unit box) ------------------------------
+
+/// The plane of airplane mode, `size` px at `at` (the 6.6 mockup's).
+pub(crate) fn airplane(f: &mut Frame, at: Point, size: f32, colour: Color) {
+    let s = size / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
+    let plane = Path::new(|b| {
+        b.move_to(p(10.6, 4.0));
+        b.bezier_curve_to(p(10.6, 2.6), p(13.4, 2.6), p(13.4, 4.0));
+        for (x, y) in [
+            (13.4, 9.6),
+            (21.0, 14.2),
+            (21.0, 16.2),
+            (13.4, 13.8),
+            (13.4, 18.4),
+            (15.8, 20.2),
+            (15.8, 21.4),
+            (12.0, 20.4),
+            (8.2, 21.4),
+            (8.2, 20.2),
+            (10.6, 18.4),
+            (10.6, 13.8),
+            (3.0, 16.2),
+            (3.0, 14.2),
+            (10.6, 9.6),
+        ] {
+            b.line_to(p(x, y));
+        }
+        b.close();
+    });
+    f.stroke(&plane, stroke(1.8 * s, colour));
+}
 
 /// The Wi-Fi's icon, `size` px at `at`: its dot and three arcs, the first
 /// `bars` in `colour`, the others unlit; slashed when off or offline.

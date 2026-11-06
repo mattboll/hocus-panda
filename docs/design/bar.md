@@ -237,8 +237,10 @@ group where it is.
   every arc in `text.dim` and "Connexion…" / "Connecting…" in `text.dim`;
   Wi-Fi on without a network, the icon slashed and "Hors ligne" /
   "Offline" in `text.faint`; Wi-Fi off, slashed, "Wi-Fi coupé" / "Wi-Fi
-  off"; a cable connected (first, whatever the Wi-Fi does), a cable's icon
-  and "Câble" / "Wired". A 7 px `#F2945B` dot (ringed with the bar's
+  off"; airplane mode on (6.6: every Wi-Fi, Bluetooth and mobile radio
+  blocked, as rfkill says), a plane and "Mode avion" / "Airplane mode" in
+  `text.dim`; a cable connected (first, whatever the Wi-Fi does), a
+  cable's icon and "Câble" / "Wired". A 7 px `#F2945B` dot (ringed with the bar's
   colour) at the icon's top right when a sign-in page waits.
 - **Bluetooth's row** (approved 2026-10-29, issue #363, variant A), 2 px
   under the Wi-Fi's, the Bluetooth sign as its icon: one device connected,
@@ -591,7 +593,10 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   no switch without a Wi-Fi adapter, and "Aucune carte Wi-Fi." / "No Wi-Fi
   adapter." instead. A cable connected: a 32 px line, its icon and
   "Connecté par câble" / "Connected by cable" (13.5 px, `text.dim`). Off:
-  "Le Wi-Fi est coupé." / "Wi-Fi is off." and nothing else. The network
+  "Le Wi-Fi est coupé." / "Wi-Fi is off." and nothing else ("Le mode avion
+  est activé." / "Airplane mode is on." in airplane mode, where the switch
+  turns the Wi-Fi alone back on: its radio unblocked, then
+  `WirelessEnabled`). The network
   connected: a block of 48 px at least on `rgba(108,194,135,0.10)`,
   radius 8, its icon in `#6CC287`, its name (14 px, 600, cut), under it
   "Connecté" / "Connected" (12.5 px, `#6CC287`) or, behind a sign-in page,
@@ -607,11 +612,15 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   one 36 px row per network but the connected one: its signal, its name
   (14 px, cut), "enregistré" / "saved" (12 px, `text.faint`) when a
   connection is saved for it, "dans les Réglages" / "in Settings" for those
-  it cannot join (802.1X, WEP: their rows greyed and inert), a 14 px lock
+  it cannot join (802.1X, WEP: a click starts `hocus-settings network
+  --join SSID` through the compositor, with an activation token, and closes
+  the popover: the Settings open on that network's sheet, 6.6), a 14 px lock
   for protected ones; strongest first; past six rows the list scrolls
   (236 px at most: six rows and a peek of the seventh, a 6 px thumb). None:
   "Aucun réseau trouvé." / "No network found." ("Recherche des réseaux…" /
-  "Searching for networks…" while the first scan runs). A saved or open
+  "Searching for networks…" while the first scan runs). Last, under a
+  divider, a 36 px row "Réglages du Wi-Fi…" / "Wi-Fi settings…" drawn as
+  the sound popover's link, which opens the Settings on Réseau (6.6). A saved or open
   network joins with a click, its row saying "Connexion…" with a spinner
   until NetworkManager says it is done, the others inert meanwhile. A
   protected one unfolds under its row (the row's block lit

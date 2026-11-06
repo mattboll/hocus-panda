@@ -132,6 +132,14 @@ pub fn set_shown(shown: Option<LeaveShown>) {
     super::changed(Item::User);
 }
 
+/// The power button asks what to do (6.10): the menu opens on `output`'s
+/// bar, as a click on the footer's user opens it.
+pub fn open(output: &str) {
+    let effects = super::with(|c| c.open_session(output, Instant::now()));
+    super::send(effects);
+    super::changed(Item::User);
+}
+
 /// The popover opens: what logind allows is read again.
 pub(super) fn opening() {
     super::tell(ToCompositor::Leave(LeaveAsk::Open));
@@ -978,8 +986,23 @@ pub(in crate::popover) fn open_settings(section: Option<&str>) {
         None => tracing::info!(program, "the Settings open from the footer"),
         Some(section) => tracing::info!(program, section, "the Settings open from a popover"),
     }
+    launch_settings(program, section.map(str::to_owned).into_iter().collect());
+}
+
+/// The Settings on Réseau, with that network's sheet (6.6): from the
+/// Wi-Fi popover's "dans les Réglages" rows.
+pub(in crate::popover) fn open_settings_join(ssid: &str) {
+    let program = settings_program();
+    tracing::info!(program, "the Settings open on a network's sheet");
+    launch_settings(
+        program,
+        vec!["network".to_owned(), "--join".to_owned(), ssid.to_owned()],
+    );
+}
+
+fn launch_settings(program: String, args: Vec<String>) {
     let mut argv = vec![program];
-    argv.extend(section.map(str::to_owned));
+    argv.extend(args);
     let launch = Launch {
         id: "hocus-settings".to_owned(),
         terminal: false,

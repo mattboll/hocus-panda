@@ -45,6 +45,12 @@ pub const SNAP: &str = "windows.snap-by-drag";
 pub const WOBBLE: &str = "windows.wobble";
 pub const ALT_TAB_ROW: &str = "windows.alt-tab";
 pub const INK: &str = "ink.enabled";
+/// The rules per application, a row of the page's own (6.14).
+pub const RULES: &str = "desktops.rules";
+pub const RULES_GROUP: RowGroup = RowGroup {
+    label: w("RÈGLES PAR APPLICATION", "RULES PER APPLICATION"),
+    per_source: false,
+};
 /// Keyboard's "Raccourcis du bureau", the page's link lights it.
 pub const SHORTCUTS: &str = "keyboard.shortcuts";
 
@@ -141,6 +147,178 @@ pub fn removed_said(name: &str, moved: usize, to: &str, lang: Lang) -> String {
         (Lang::English, 1) => format!("“{name}” removed: its window goes to “{to}”"),
         (Lang::English, n) => format!("“{name}” removed: its {n} windows go to “{to}”"),
     }
+}
+
+/// A rule per application, `[[windows.rules]]`, as the file says it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Rule {
+    pub app_id: String,
+    /// From 1; none: where it is opened.
+    pub desktop: Option<i64>,
+    /// `"maximized"`, `"left"`, `"right"`, `"fullscreen"`; none: its last
+    /// size.
+    pub size: Option<String>,
+    pub above: bool,
+}
+
+/// The rules the file holds, as the window keeps them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Rules(pub Vec<Rule>);
+
+/// The sizes a rule may give, as written, and said.
+pub const SIZES: [(&str, Words); 5] = [
+    ("last", w("Sa dernière taille", "Its last size")),
+    ("maximized", w("Maximisée", "Maximised")),
+    ("left", w("Moitié gauche", "Left half")),
+    ("right", w("Moitié droite", "Right half")),
+    ("fullscreen", w("Plein écran", "Full screen")),
+];
+
+/// The rules the file holds, in its order (those without an app id left
+/// out).
+pub fn rules_of(doc: &toml_edit::DocumentMut) -> Vec<Rule> {
+    let Some(rules) = doc.get("windows").and_then(|w| w.get("rules")) else {
+        return Vec::new();
+    };
+    let tables: Vec<&dyn toml_edit::TableLike> = match rules {
+        toml_edit::Item::ArrayOfTables(a) => {
+            a.iter().map(|t| t as &dyn toml_edit::TableLike).collect()
+        }
+        toml_edit::Item::Value(toml_edit::Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_inline_table().map(|t| t as &dyn toml_edit::TableLike))
+            .collect(),
+        _ => Vec::new(),
+    };
+    tables
+        .into_iter()
+        .filter_map(|t| {
+            Some(Rule {
+                app_id: t.get("app-id")?.as_str()?.to_owned(),
+                desktop: t.get("desktop").and_then(toml_edit::Item::as_integer),
+                size: t
+                    .get("size")
+                    .and_then(toml_edit::Item::as_str)
+                    .filter(|s| *s != "last")
+                    .map(ToOwned::to_owned),
+                above: t
+                    .get("above")
+                    .and_then(toml_edit::Item::as_bool)
+                    .unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+/// The rules as the file writes them: an array of inline tables (the
+/// worker writes it as `[[windows.rules]]`), none for an empty list.
+pub fn rules_toml(rules: &[Rule]) -> Option<String> {
+    if rules.is_empty() {
+        return None;
+    }
+    let tables: Vec<String> = rules
+        .iter()
+        .map(|r| {
+            let mut fields = vec![format!(
+                "app-id = {}",
+                toml_edit::Value::from(r.app_id.as_str())
+            )];
+            if let Some(d) = r.desktop {
+                fields.push(format!("desktop = {d}"));
+            }
+            if let Some(size) = &r.size {
+                fields.push(format!("size = {}", toml_edit::Value::from(size.as_str())));
+            }
+            if r.above {
+                fields.push("above = true".to_owned());
+            }
+            format!("{{ {} }}", fields.join(", "))
+        })
+        .collect();
+    Some(format!("[{}]", tables.join(", ")))
+}
+
+/// The rules once desktop `index` (from 0) is taken out: those naming it
+/// point to the one that took its windows, the later ones move down one.
+pub fn rules_without(rules: &[Rule], index: usize) -> Vec<Rule> {
+    let gone = i64::try_from(index + 1).unwrap_or(i64::MAX);
+    rules
+        .iter()
+        .cloned()
+        .map(|mut r| {
+            r.desktop = r.desktop.map(|d| match d.cmp(&gone) {
+                std::cmp::Ordering::Less => d,
+                std::cmp::Ordering::Equal => (d - 1).max(1),
+                std::cmp::Ordering::Greater => d - 1,
+            });
+            r
+        })
+        .collect()
+}
+
+/// What a rule does, as its row says it: "Toujours sur « Courrier » ·
+/// au-dessus des autres", or that it does nothing yet.
+pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(d) = rule.desktop.and_then(|d| usize::try_from(d - 1).ok()) {
+        let name = name_of(names, d, lang);
+        parts.push(match lang {
+            Lang::French => format!("Toujours sur « {name} »"),
+            Lang::English => format!("Always on “{name}”"),
+        });
+    }
+    if let Some(size) = &rule.size
+        && let Some((_, said)) = SIZES.iter().find(|(word, _)| word == size)
+    {
+        let said = said.get(lang);
+        parts.push(match lang {
+            Lang::French => format!("s’ouvre {}", said.to_lowercase()),
+            Lang::English => format!("opens {}", said.to_lowercase()),
+        });
+    }
+    if rule.above {
+        parts.push(
+            w("au-dessus des autres", "above the others")
+                .get(lang)
+                .to_owned(),
+        );
+    }
+    if parts.is_empty() {
+        return w(
+            "Aucune règle encore : elle s’ouvre comme les autres.",
+            "No rule yet: it opens like the others.",
+        )
+        .get(lang)
+        .to_owned();
+    }
+    let said = parts.join(" · ");
+    let mut chars = said.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// The page's rows the model does not hold, for the search.
+pub fn outside() -> &'static [crate::model::Outside] {
+    const ALL: [crate::model::Outside; 1] = [crate::model::Outside {
+        id: RULES,
+        section: SectionId::Desktops,
+        group: RULES_GROUP.label,
+        name: w("Règles par application", "Rules per application"),
+        keywords: (
+            &[
+                "règle",
+                "application",
+                "au-dessus",
+                "toujours",
+                "ouvrir",
+                "app-id",
+            ],
+            &["rule", "application", "above", "always", "open", "app-id"],
+        ),
+    }];
+    &ALL
 }
 
 fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
@@ -385,6 +563,50 @@ mod tests {
         assert_eq!(trimmed(renamed(&names, 2, ""), 4), ["Travail"]);
         assert_eq!(trimmed(names.clone(), 1), ["Travail"]);
         assert_eq!(toml_list(&names), "[\"Travail\", \"\", \"Courrier\"]");
+    }
+
+    #[test]
+    fn the_rules_read_write_and_move_down_with_their_desktops() -> Result<(), String> {
+        let doc: toml_edit::DocumentMut = "[[windows.rules]]\napp-id = \"org.example.Mail\"\n\
+             desktop = 2\nsize = \"maximized\"\nabove = true\n\n[[windows.rules]]\n\
+             app-id = \"foot\"\n\n[[windows.rules]]\nsize = \"left\"\n"
+            .parse()
+            .map_err(|e| format!("{e}"))?;
+        let rules = rules_of(&doc);
+        assert_eq!(rules.len(), 2, "one without an app id left out");
+        assert_eq!(rules[0].desktop, Some(2));
+        let names = vec!["Travail".to_owned(), "Courrier".to_owned()];
+        assert_eq!(
+            rule_said(&rules[0], &names, Lang::French),
+            "Toujours sur « Courrier » · s’ouvre maximisée · au-dessus des autres"
+        );
+        assert_eq!(
+            rule_said(&rules[1], &names, Lang::French),
+            "Aucune règle encore : elle s’ouvre comme les autres."
+        );
+        assert_eq!(
+            rules_toml(&rules).as_deref(),
+            Some(
+                "[{ app-id = \"org.example.Mail\", desktop = 2, size = \"maximized\", above = true }, { app-id = \"foot\" }]"
+            )
+        );
+        assert_eq!(rules_toml(&[]), None);
+        // Desktop 2 taken out: its rule to 1; one on 3 to 2.
+        let three = Rule {
+            app_id: "x".into(),
+            desktop: Some(3),
+            ..Rule::default()
+        };
+        let moved = rules_without(&[rules[0].clone(), three], 1);
+        assert_eq!(moved[0].desktop, Some(1));
+        assert_eq!(moved[1].desktop, Some(2));
+        // The first taken out: its rule stays on the first, the next one.
+        let first = Rule {
+            desktop: Some(1),
+            ..Rule::default()
+        };
+        assert_eq!(rules_without(&[first], 0)[0].desktop, Some(1));
+        Ok(())
     }
 
     #[test]

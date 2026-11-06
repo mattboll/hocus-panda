@@ -61,7 +61,7 @@ const WIFI_PARTS: [&str; 4] = [
 
 /// A tile's tone: neutral, green (on, connected), blue (airplane mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tone {
+pub(super) enum Tone {
     Plain,
     Green,
     Blue,
@@ -124,7 +124,7 @@ pub(super) fn wifi_glyph<'a>(lit: u8, size: f32, color: Color) -> El<'a> {
 }
 
 /// A 32 px tile around `inner`.
-fn tile<'a>(inner: impl FnOnce(Color) -> El<'a>, tone: Tone, alpha: f32) -> El<'a> {
+pub(super) fn tile<'a>(inner: impl FnOnce(Color) -> El<'a>, tone: Tone, alpha: f32) -> El<'a> {
     let (fill, ink) = match tone {
         Tone::Plain => (rgba(255, 255, 255, 0.06), DIM.get()),
         Tone::Green => (rgba(108, 194, 135, 0.16), GREEN.get()),
@@ -157,7 +157,7 @@ pub(super) fn spinner<'a>(size: f32, color: Color, turning: bool) -> El<'a> {
 /// A row of the page: its tile, its name and lines, its control on the
 /// right; 54 px at least (46 for a compact one).
 #[allow(clippy::too_many_arguments)]
-fn page_row<'a>(
+pub(super) fn page_row<'a>(
     tile: El<'a>,
     name: El<'a>,
     lines: Vec<El<'a>>,
@@ -206,7 +206,7 @@ fn page_row<'a>(
 }
 
 /// A row's name, at `alpha`, and what follows it (a lock, a chip).
-fn name<'a>(said: String, alpha: f32, after: Option<El<'a>>) -> El<'a> {
+pub(super) fn name<'a>(said: String, alpha: f32, after: Option<El<'a>>) -> El<'a> {
     let said = text(said)
         .size(14)
         .font(SEMIBOLD)
@@ -221,7 +221,7 @@ fn name<'a>(said: String, alpha: f32, after: Option<El<'a>>) -> El<'a> {
     }
 }
 
-fn line<'a>(said: impl Into<String>, color: Color) -> El<'a> {
+pub(super) fn line<'a>(said: impl Into<String>, color: Color) -> El<'a> {
     t(said.into(), 12.5, color).into()
 }
 
@@ -317,7 +317,7 @@ fn note<'a>(words: &'static str) -> El<'a> {
 
 impl App {
     /// A switch of the page, its knob sliding over 160 ms.
-    fn network_switch(
+    pub(super) fn network_switch(
         &self,
         key: &'static str,
         on: bool,
@@ -424,6 +424,8 @@ impl App {
         if let Some(cable) = self.network_cable_group() {
             page = page.push(cable);
         }
+        // VPN.
+        page = page.push(self.network_vpn_group());
         // PLUS TARD.
         let hotspot = page_row(
             tile(|c| wifi_glyph(4, 18.0, c), Tone::Plain, INERT),
@@ -1365,6 +1367,9 @@ impl App {
                 "connected": wired.connected,
             })),
             "card": self.network_card(),
+            "vpns": self.network_vpn_shown(),
+            "vpn_menu": self.network.vpn_menu.is_some(),
+            "renaming": self.network.renaming.as_ref().map(|(_, name)| name.clone()),
         })
     }
 }

@@ -145,7 +145,7 @@ impl State {
         self.leave_logind(Ask::Can);
     }
 
-    fn leave_logind(&self, ask: Ask) {
+    pub(crate) fn leave_logind(&self, ask: Ask) {
         if let Some(logind) = &self.leave.logind {
             logind.ask(ask);
         }
@@ -269,9 +269,15 @@ impl State {
     }
 
     /// "Mettre en veille": the session locks first, then the machine
-    /// sleeps.
+    /// sleeps; with `[power] lock-before-sleep = false`, it sleeps at
+    /// once.
     fn leave_suspend(&mut self) {
         if !self.leave.can.suspend.allowed() || self.leave.phase != Phase::Idle {
+            return;
+        }
+        if !self.config.power.lock_before_sleep {
+            tracing::info!("suspend, unlocked (lock-before-sleep off)");
+            self.leave_logind(Ask::Act(Act::Suspend));
             return;
         }
         tracing::info!("suspend: the session locks first");
@@ -344,6 +350,25 @@ impl State {
             self.display_handle
                 .backend_handle()
                 .kill_client(client.id(), DisconnectReason::ConnectionClosed);
+        }
+    }
+
+    /// The power button, `[power] power-button = "power-off"` (6.10): the
+    /// shutdown as the session menu does it after its countdown, every
+    /// window asked to close first; the password first when polkit wants
+    /// it (then the countdown, as the menu's).
+    pub(crate) fn leave_power_off(&mut self) {
+        if self.leave.phase != Phase::Idle {
+            return;
+        }
+        let output = self.bubbles_screen().map(|o| o.name()).unwrap_or_default();
+        match self.leave.can.shut_down {
+            Can::Challenge => self.leave_ask(LeaveAction::ShutDown, output),
+            can if can.allowed() => {
+                tracing::info!("the power button: the machine powers off");
+                self.leave_close_windows(LeaveAction::ShutDown, output);
+            }
+            _ => tracing::info!("the power button: logind does not allow powering off"),
         }
     }
 
@@ -420,6 +445,14 @@ impl State {
                     Act::Restart => self.end(Ending::Restarted),
                     Act::ShutDown => self.end(Ending::PoweredOff),
                 }
+            }
+            Said::SleepHeld(held) => {
+                let who: Vec<&str> = held.iter().map(|i| i.who.as_str()).collect();
+                tracing::info!(
+                    ?who,
+                    "logind's idle inhibitors keep the machine awake: later"
+                );
+                self.idle_suspend_put_off();
             }
             Said::Acted(act, Err(err)) => {
                 tracing::warn!(?act, err, "logind refused");

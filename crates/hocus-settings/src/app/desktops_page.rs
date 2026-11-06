@@ -53,6 +53,8 @@ pub struct State {
     removals: Vec<Removal>,
     /// "ESSAYER ICI".
     pub trial: super::desktops_trial::TrialState,
+    /// "RÈGLES PAR APPLICATION".
+    pub rules: super::desktops_rules::RulesState,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,14 @@ pub enum Msg {
     TrialMove(f32, f32),
     TrialRelease(f32, f32),
     Hold,
+    /// A rule opened or folded, taken out; a menu of the rules opened, a
+    /// choice of it; its "above" switched; the menu closed.
+    RuleEdit(usize),
+    RuleRemove(usize),
+    RuleMenu(super::desktops_rules::RuleMenu),
+    RuleChoose(super::desktops_rules::RuleMenu, usize),
+    RuleAbove(usize),
+    CloseRuleMenu,
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -122,6 +132,10 @@ pub enum Stop {
     Remove(usize),
     Add,
     Hold,
+    RuleEdit(usize),
+    RuleRemove(usize),
+    RuleMenu(super::desktops_rules::RuleMenu),
+    RuleAbove(usize),
 }
 
 impl App {
@@ -181,6 +195,7 @@ impl App {
                 out.push(Control::Desktops(Stop::Hold));
             }
         }
+        out.extend(self.rules_controls().into_iter().map(Control::Desktops));
         out
     }
 
@@ -200,6 +215,12 @@ impl App {
                 self.trial_update(&msg);
                 iced::Task::none()
             }
+            Msg::RuleEdit(_)
+            | Msg::RuleRemove(_)
+            | Msg::RuleMenu(_)
+            | Msg::RuleChoose(..)
+            | Msg::RuleAbove(_)
+            | Msg::CloseRuleMenu => self.rules_update(msg),
             Msg::Step(true) | Msg::Add => {
                 self.desktop_add();
                 iced::Task::none()
@@ -362,6 +383,19 @@ impl App {
             value: (!after_names.is_empty() || !names.is_empty())
                 .then(|| model::toml_list(&after_names)),
         });
+        // The rules naming it go with its windows, the later ones down one.
+        let rules = self
+            .snapshot
+            .as_ref()
+            .map(|s| s.rules.0.clone())
+            .unwrap_or_default();
+        let moved_rules = model::rules_without(&rules, index);
+        if moved_rules != rules {
+            edits.push(KeyEdit {
+                key: vec!["windows".into(), "rules".into()],
+                value: model::rules_toml(&moved_rules),
+            });
+        }
         let said = KeysSaid {
             done: model::removed_said(&name, moved.len(), &to, lang),
             undone: match lang {
@@ -493,6 +527,10 @@ impl App {
                 self.desktops_answered(None);
                 true
             }
+            Said::Apps(apps) => {
+                self.rules_apps(apps.clone());
+                true
+            }
             Said::Gone => {
                 self.desktops.windows = None;
                 if self.desktops.waiting.is_some() {
@@ -516,6 +554,9 @@ impl App {
             Stop::Remove(i) => Msg::Remove(*i),
             Stop::Add => Msg::Add,
             Stop::Hold => Msg::Hold,
+            Stop::RuleEdit(_) | Stop::RuleRemove(_) | Stop::RuleMenu(_) | Stop::RuleAbove(_) => {
+                return self.rules_key(stop);
+            }
         };
         self.desktops_update(msg)
     }
@@ -697,7 +738,23 @@ impl App {
             head(model::DRAW.label.get(lang), None),
             vec![model_row(model::INK)],
         ));
+        page = page.push(group(
+            head(model::RULES_GROUP.label.get(lang), None),
+            self.rules_rows(),
+        ));
         container(page).id("page:desktops".to_owned()).into()
+    }
+
+    pub(super) fn desktop_names_now(&self) -> Vec<String> {
+        self.desktop_names()
+    }
+
+    pub(super) fn desktop_count_now(&self) -> usize {
+        self.desktop_count()
+    }
+
+    pub(super) fn desktops_row_frame<'a>(&self, id: &'static str, body: El<'a>) -> El<'a> {
+        self.desktops_frame(id, body)
     }
 
     /// A row's frame, lit when found: its words, then its control.
@@ -998,6 +1055,7 @@ impl App {
             "editing": self.desktops.editing.as_ref().map(|(i, now)| serde_json::json!([i, now])),
             "waiting": self.desktops.waiting.is_some(),
             "trial": self.trial_shown(),
+            "rules": self.rules_shown(),
             "wobble_off": why(model::WOBBLE),
             "ink_off": why(model::INK),
         })
