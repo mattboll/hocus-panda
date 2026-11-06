@@ -19,12 +19,19 @@ pub struct Again {
     pub token: Option<String>,
     /// A Bluetooth device to pair, by its address (`--pair`).
     pub pair: Option<String>,
+    /// A network whose sheet to open (`--join SSID`, 6.6).
+    pub join: Option<String>,
 }
 
 impl Again {
     fn line(&self) -> String {
+        // The network's name may hold spaces: in hexadecimal.
+        let join: String = self.join.as_deref().map_or_else(
+            || "-".to_owned(),
+            |name| name.bytes().map(|b| format!("{b:02x}")).collect(),
+        );
         format!(
-            "open {} {} {}\n",
+            "open {} {} {join} {}\n",
             self.section.as_deref().unwrap_or("-"),
             self.token.as_deref().unwrap_or("-"),
             self.pair.as_deref().unwrap_or("-")
@@ -35,9 +42,19 @@ impl Again {
         let mut words = line.split_whitespace();
         (words.next()? == "open").then_some(())?;
         let word = |w: Option<&str>| w.filter(|w| *w != "-").map(str::to_owned);
+        let section = word(words.next());
+        let token = word(words.next());
+        let join = word(words.next()).and_then(|hex| {
+            let bytes: Option<Vec<u8>> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+                .collect();
+            String::from_utf8(bytes?).ok()
+        });
         Some(Self {
-            section: word(words.next()),
-            token: word(words.next()),
+            section,
+            token,
+            join,
             pair: word(words.next()),
         })
     }
@@ -147,21 +164,37 @@ mod tests {
         let again = Again {
             section: Some("power".to_owned()),
             token: Some("hocus-12".to_owned()),
+            join: None,
             pair: None,
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
         let again = Again {
             section: Some("bluetooth".to_owned()),
             token: None,
+            join: None,
             pair: Some("5C:12:AA:01:02:05".to_owned()),
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
+        let join = Again {
+            section: Some("network".to_owned()),
+            token: None,
+            join: Some("Café Lomi".to_owned()),
+            pair: None,
+        };
+        assert_eq!(Again::parse(&join.line()), Some(join));
         let bare = Again {
             section: None,
             token: None,
+            join: None,
             pair: None,
         };
-        assert_eq!(bare.line(), "open - - -\n");
+        assert_eq!(bare.line(), "open - - - -\n");
+        // Lines of Settings before 6.6 and 6.7.
+        assert_eq!(
+            Again::parse("open sound -\n").and_then(|a| a.section),
+            Some("sound".to_owned())
+        );
+        assert_eq!(Again::parse("open sound - -\n").and_then(|a| a.pair), None);
         assert_eq!(Again::parse(&bare.line()), Some(bare));
         assert_eq!(Again::parse("close"), None);
     }

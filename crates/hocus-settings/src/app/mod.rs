@@ -13,6 +13,8 @@
 mod appearance_page;
 mod bar_page;
 mod bluetooth;
+mod desktops_page;
+mod desktops_trial;
 mod keyboard_page;
 mod mouse;
 mod network;
@@ -120,6 +122,8 @@ pub struct Start {
     pub section: Option<SectionId>,
     /// A Bluetooth device to pair on its page, by its address.
     pub pair: Option<String>,
+    /// A network whose sheet opens once it is around (`--join`, 6.6).
+    pub join: Option<String>,
     pub user: String,
     /// Where second launches knock, taken once by the window.
     pub listener: std::sync::Arc<Mutex<Option<std::os::unix::net::UnixListener>>>,
@@ -323,6 +327,8 @@ pub enum Message {
     Bar(bar_page::Msg),
     /// The Bluetooth page's (6.7).
     Bluetooth(bluetooth::Msg),
+    /// The desktops and windows' page (6.14).
+    Desktops(desktops_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
     Nothing,
@@ -389,6 +395,9 @@ pub struct App {
     bar: bar_page::State,
     /// The Bluetooth page: BlueZ as last heard (6.7).
     bluetooth: bluetooth::State,
+    /// The desktops and windows' page: the compositor's windows, a name
+    /// changed, a desktop taken out waiting for it (6.14).
+    desktops: desktops_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
@@ -406,7 +415,8 @@ impl App {
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
         let bluetooth = bluetooth::State::start(sender.clone());
-        let network = network::State::start(&sender, start.places.state.clone());
+        let mut network = network::State::start(&sender, start.places.state.clone());
+        network.joining = start.join.clone();
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -481,6 +491,7 @@ impl App {
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
             bluetooth,
+            desktops: desktops_page::State::default(),
             network,
             fresh: None,
             parity: false,
@@ -603,6 +614,7 @@ impl App {
             || self.bluetooth_moving()
             || self.bluetooth_menu_moving(now)
             || self.network_moving()
+            || self.trial_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -651,6 +663,22 @@ impl App {
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
+        // A desktop's name being changed is written as the pointer goes
+        // elsewhere (6.14).
+        if self.desktops_editing()
+            && matches!(
+                message,
+                Message::Toggle(_)
+                    | Message::Menu(_)
+                    | Message::Section(_)
+                    | Message::Home
+                    | Message::Query(_)
+                    | Message::Close
+                    | Message::Result(_)
+            )
+        {
+            self.desktops_commit();
+        }
         match message {
             Message::Window(id) => {
                 self.window = id;
@@ -675,6 +703,17 @@ impl App {
                 if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     self.keys.adding = None;
                     return Task::none();
+                }
+                // A desktop's name: `Esc` keeps the old one, `Tab` writes.
+                if self.desktops_editing() {
+                    match key.as_ref() {
+                        Key::Named(Named::Escape) => {
+                            self.desktops_cancel();
+                            return operation::focus("nothing");
+                        }
+                        Key::Named(Named::Tab) => self.desktops_commit(),
+                        _ => {}
+                    }
                 }
                 self.key(&key, modifiers, text.as_deref(), captured)
             }
@@ -728,7 +767,8 @@ impl App {
             Message::Choose(slot, value) => {
                 self.menu = None;
                 self.bar_chose(slot, &value);
-                self.change(slot, value)
+                let say = self.desktops_toast(slot, &value);
+                self.change_saying(slot, value, say)
             }
             Message::Slide(slot, value) => self.slide(slot, value),
             Message::Settled(serial) => match self.sliding {
@@ -792,7 +832,14 @@ impl App {
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
             Message::Bluetooth(msg) => self.bluetooth_update(msg),
-            Message::Keys(msg) => self.keys_update(msg),
+            Message::Desktops(msg) => self.desktops_update(msg),
+            Message::Keys(msg) => {
+                // The trial area's move key, held for real (6.14).
+                if let keyboard_page::Msg::Mods(mods) = &msg {
+                    self.trial_mods(*mods);
+                }
+                self.keys_update(msg)
+            }
             Message::Network(msg) => self.network_update(msg),
         }
     }
@@ -1047,6 +1094,12 @@ impl App {
 
     /// `value` written at `slot`, at once.
     fn change(&mut self, slot: Slot, value: Value) -> Task<Message> {
+        self.change_saying(slot, value, None)
+    }
+
+    /// The same, its toast saying `say` instead of the setting and its
+    /// value, when given.
+    fn change_saying(&mut self, slot: Slot, value: Value, say: Option<String>) -> Task<Message> {
         if !self.writable() {
             return Task::none();
         }
@@ -1054,7 +1107,8 @@ impl App {
         if understood && self.value(slot) == Some(value.clone()) {
             return Task::none();
         }
-        self.ask_write(slot, Raw::Set(value), Doing::New, None);
+        let batch = None;
+        self.ask(slot, Raw::Set(value), Doing::New, None, batch, say);
         Task::none()
     }
 
@@ -1185,6 +1239,10 @@ impl App {
             }
         }
         for change in changes {
+            // A desktop taken out comes back with its windows first (6.14).
+            if let Some(task) = self.desktops_again(&change, true) {
+                return task;
+            }
             match &change {
                 Change::Slot { slot, before, .. } => {
                     let (slot, before) = (*slot, before.clone());
@@ -1238,6 +1296,9 @@ impl App {
             }
         }
         for change in changes {
+            if let Some(task) = self.desktops_again(&change, false) {
+                return task;
+            }
             match &change {
                 Change::Slot { slot, after, .. } => {
                     let (slot, after) = (*slot, after.clone());
@@ -1435,15 +1496,24 @@ impl App {
                 self.light = Some(("sound.output", Instant::now()));
             }
         }
-        let (Some(id), Some(token)) = (self.window, again.token) else {
-            return Task::none();
+        // From the Wi-Fi popover's "dans les Réglages": that network's
+        // sheet (6.6).
+        let join = if let Some(name) = again.join {
+            self.network.joining = Some(name);
+            self.network_try_join()
+        } else {
+            Task::none()
         };
-        window::run(id, move |window| {
+        let (Some(id), Some(token)) = (self.window, again.token) else {
+            return join;
+        };
+        let raise = window::run(id, move |window| {
             if let Some(surface) = activate::Surface::of(window) {
                 surface.activate(token);
             }
         })
-        .map(|()| Message::Nothing)
+        .map(|()| Message::Nothing);
+        Task::batch([raise, join])
     }
 
     // --- The keyboard -----------------------------------------------------------------
@@ -1485,6 +1555,9 @@ impl App {
         }
         if section == SectionId::Bar {
             return self.bar_controls();
+        }
+        if section == SectionId::Desktops {
+            return self.desktops_controls();
         }
         if section == SectionId::Network {
             return self
@@ -1714,6 +1787,7 @@ impl App {
         match control {
             Control::Wallpaper(stop) => self.wallpaper_key(&stop, named),
             Control::Bar(stop) => self.bar_key(&stop, named),
+            Control::Desktops(stop) => self.desktops_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
             Control::Network(stop) => self.network_key(stop, named),
@@ -1868,7 +1942,7 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.unavailable(setting).is_some() {
+        if !self.writable() || self.unavailable(setting).is_some() || self.desktops_inert(setting) {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -1962,6 +2036,8 @@ enum Control {
     Bar(bar_page::Stop),
     /// The Bluetooth page's own (6.7).
     Bluetooth(bluetooth::Stop),
+    /// The desktops and windows' page's own (6.14).
+    Desktops(desktops_page::Stop),
     /// The network's page's own (6.6).
     Network(network::Stop),
 }

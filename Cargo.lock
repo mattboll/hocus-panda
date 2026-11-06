@@ -1649,6 +1649,7 @@ dependencies = [
  "fontdue",
  "hocus-agents",
  "hocus-compositor",
+ "hocus-geometry",
  "hocus-link",
  "image",
  "jiff",
@@ -1702,6 +1703,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-geometry"
+version = "0.2.0"
+
+[[package]]
 name = "hocus-link"
 version = "0.2.0"
 dependencies = [
@@ -1729,6 +1734,7 @@ dependencies = [
  "hocus-agents",
  "hocus-bluetooth",
  "hocus-config",
+ "hocus-geometry",
  "hocus-link",
  "hocus-network",
  "hocus-sound",

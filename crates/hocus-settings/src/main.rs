@@ -23,16 +23,31 @@ fn main() -> ExitCode {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
         .init();
-    let arg = std::env::args().nth(1);
-    if arg.as_deref().is_some_and(|a| a == "--help" || a == "-h") {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let arg = args.first().filter(|a| !a.starts_with("--")).cloned();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
         let slugs: Vec<&str> = SectionId::ALL.iter().map(|s| s.section().slug).collect();
         println!(
-            "hocus-settings [SECTION] [--pair ADDRESS]\n\nSections: {}",
+            "hocus-settings [SECTION] [--join SSID] [--pair ADDRESS]\n\nSections: {}\n--join: the Réseau page opens that network's sheet.\n--pair: the Bluetooth page pairs that device.",
             slugs.join(", ")
         );
         return ExitCode::SUCCESS;
     }
-    let section = arg.as_deref().and_then(SectionId::from_slug);
+    // `--join SSID`: the Wi-Fi popover's "dans les Réglages" rows (6.6).
+    let join = args
+        .iter()
+        .position(|a| a == "--join")
+        .and_then(|at| args.get(at + 1))
+        .cloned();
+    let section = arg
+        .as_deref()
+        .and_then(SectionId::from_slug)
+        .or_else(|| join.is_some().then_some(SectionId::Network))
+        .or_else(|| {
+            args.iter()
+                .any(|a| a == "--pair")
+                .then_some(SectionId::Bluetooth)
+        });
     if arg.is_some() && section.is_none() {
         tracing::warn!(section = arg, "no such section: the home opens");
     }
@@ -47,6 +62,7 @@ fn main() -> ExitCode {
         token: std::env::var("XDG_ACTIVATION_TOKEN")
             .ok()
             .filter(|t| !t.is_empty()),
+        join: join.clone(),
     };
     let listener = match single::start(&again) {
         Start::Told => return ExitCode::SUCCESS,
@@ -65,6 +81,7 @@ fn main() -> ExitCode {
                 .map_or_else(|| PathBuf::from("/sys/class/power_supply"), PathBuf::from),
         },
         section,
+        join,
         pair,
         user: user_name(),
         listener: std::sync::Arc::new(std::sync::Mutex::new(listener)),

@@ -14,12 +14,11 @@ use hocus_network::{
     rfkill::Block,
 };
 use iced::{
-    Alignment, Background, Color, Gradient, Length, Padding, Radians, Rotation, Shadow, Theme,
-    Vector, gradient,
+    Alignment, Background, Color, Length, Padding, Radians, Rotation, Shadow, Theme, Vector,
     widget::{Space, button, column, container, mouse_area, row, svg, text, text_input},
 };
 
-use super::{Msg, PASSWORD_FIELD, SHEET_FIELD, Stop, now};
+use super::{Msg, PASSWORD_FIELD, Stop, now};
 use crate::{
     app::{
         App, Message,
@@ -33,8 +32,8 @@ use crate::{
 
 /// The page's colours: on and connected (the mockup's green), airplane
 /// mode's line, its tile.
-const GREEN: Ink = Ink::Dark(rgb(0x6CC287));
-const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
+pub(super) const GREEN: Ink = Ink::Dark(rgb(0x6CC287));
+pub(super) const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
 const LATER: Ink = Ink::Dark(rgb(0xF5B44A));
 
 /// The page's glyphs: the mockup's 24 px stroke paths.
@@ -45,10 +44,13 @@ const CHEVRON_RIGHT: &str = "M9 6 L15 12 L9 18";
 const CHEVRON_LEFT: &str = "M15 6 L9 12 L15 18";
 const CHEVRON_DOWN: &str = "M6 9 L12 15 L18 9";
 const CHEVRON_UP: &str = "M6 15 L12 9 L18 15";
-const EYE: &str = "M2.5 12 C5 7 8.5 5 12 5 C15.5 5 19 7 21.5 12 C19 17 15.5 19 12 19 C8.5 19 5 17 2.5 12 Z M12 15 A3 3 0 1 0 12 9 A3 3 0 1 0 12 15 Z";
-const EYE_SHUT: &str = "M2.5 12 C5 7 8.5 5 12 5 C15.5 5 19 7 21.5 12 C19 17 15.5 19 12 19 C8.5 19 5 17 2.5 12 Z M12 15 A3 3 0 1 0 12 9 A3 3 0 1 0 12 15 Z M4 4 L20 20";
+pub(super) const EYE: &str = "M2.5 12 C5 7 8.5 5 12 5 C15.5 5 19 7 21.5 12 C19 17 15.5 19 12 19 C8.5 19 5 17 2.5 12 Z M12 15 A3 3 0 1 0 12 9 A3 3 0 1 0 12 15 Z";
+pub(super) const EYE_SHUT: &str = "M2.5 12 C5 7 8.5 5 12 5 C15.5 5 19 7 21.5 12 C19 17 15.5 19 12 19 C8.5 19 5 17 2.5 12 Z M12 15 A3 3 0 1 0 12 9 A3 3 0 1 0 12 15 Z M4 4 L20 20";
 const SPINNER: &str = "M12 3.5 A8.5 8.5 0 1 1 3.5 12";
 const WARNING: &str = "M12 4 L21 19.5 H3 Z M12 10 V14 M12 16.8 V17";
+const PLUS: &str = "M12 5 V19 M5 12 H19";
+const CABLE: &str =
+    "M7 3.5 H17 V10 H14.5 V13 H9.5 V10 H7 Z M12 13 V20.5 M9.8 6.5 V7.5 M12 6.5 V7.5 M14.2 6.5 V7.5";
 /// The Wi-Fi's dot and arcs, from the smallest.
 const WIFI_PARTS: [&str; 4] = [
     "M12 19.5 V19.6",
@@ -101,7 +103,7 @@ fn glyph(paths: &[(&'static str, f32)], color: Color, width: f32) -> svg::Handle
         .clone()
 }
 
-fn draw<'a>(path: &'static str, size: f32, color: Color) -> El<'a> {
+pub(super) fn draw<'a>(path: &'static str, size: f32, color: Color) -> El<'a> {
     svg(glyph(&[(path, 1.0)], color, 1.8))
         .width(size)
         .height(size)
@@ -109,7 +111,7 @@ fn draw<'a>(path: &'static str, size: f32, color: Color) -> El<'a> {
 }
 
 /// The Wi-Fi's glyph, `lit` of its four parts lit, the others faint.
-fn wifi_glyph<'a>(lit: u8, size: f32, color: Color) -> El<'a> {
+pub(super) fn wifi_glyph<'a>(lit: u8, size: f32, color: Color) -> El<'a> {
     let parts: Vec<(&'static str, f32)> = WIFI_PARTS
         .iter()
         .enumerate()
@@ -137,7 +139,7 @@ fn tile<'a>(inner: impl FnOnce(Color) -> El<'a>, tone: Tone, alpha: f32) -> El<'
 }
 
 /// The spinner, turning once in 0.9 s (still with reduced motion).
-fn spinner<'a>(size: f32, color: Color, turning: bool) -> El<'a> {
+pub(super) fn spinner<'a>(size: f32, color: Color, turning: bool) -> El<'a> {
     static START: OnceLock<Instant> = OnceLock::new();
     let start = *START.get_or_init(Instant::now);
     let angle = if turning {
@@ -224,7 +226,12 @@ fn line<'a>(said: impl Into<String>, color: Color) -> El<'a> {
 }
 
 /// A secondary button: 28 px (`small`) or 32.
-fn secondary<'a>(said: String, press: Option<Message>, focused: bool, small: bool) -> El<'a> {
+pub(super) fn secondary<'a>(
+    said: String,
+    press: Option<Message>,
+    focused: bool,
+    small: bool,
+) -> El<'a> {
     let alpha = if press.is_some() { 1.0 } else { INERT };
     let (height, size, radius, pad) = if small {
         (28.0, 12.5, 7.0, 11.0)
@@ -396,6 +403,9 @@ impl App {
             rows = rows.push(divided(true, current));
         }
         rows = rows.push(divided(true, self.network_saved_row()));
+        if self.network.wifi_on() {
+            rows = rows.push(divided(true, self.network_hidden_row()));
+        }
         page = page.push(
             container(
                 column![
@@ -409,6 +419,10 @@ impl App {
         // RÉSEAUX DISPONIBLES, while the Wi-Fi is on.
         if self.network.wifi_on() {
             page = page.push(self.network_around_group());
+        }
+        // CÂBLE, with an Ethernet device.
+        if let Some(cable) = self.network_cable_group() {
+            page = page.push(cable);
         }
         // PLUS TARD.
         let hotspot = page_row(
@@ -661,6 +675,84 @@ impl App {
         ))
     }
 
+    /// "Réseau masqué" and its "Rejoindre…".
+    fn network_hidden_row(&self) -> El<'_> {
+        let lang = self.lang;
+        page_row(
+            tile(|c| draw(PLUS, 18.0, c), Tone::Plain, 1.0),
+            name(
+                w("Réseau masqué", "Hidden network").get(lang).to_owned(),
+                1.0,
+                None,
+            ),
+            vec![line(
+                w(
+                    "Un réseau qui ne dit pas son nom : on le tape pour le rejoindre.",
+                    "A network that does not say its name: type it to join.",
+                )
+                .get(lang),
+                DIM.get(),
+            )],
+            container(secondary(
+                w("Rejoindre…", "Join…").get(lang).to_owned(),
+                Some(Message::Network(Msg::Hidden)),
+                self.network_focused(Stop::Hidden),
+                true,
+            ))
+            .id("network:hidden".to_owned())
+            .into(),
+            Some("row:network.hidden".to_owned()),
+            self.lit("network.hidden"),
+            false,
+            false,
+        )
+    }
+
+    /// CÂBLE: the Ethernet device, unplugged or connected; no control.
+    fn network_cable_group(&self) -> Option<El<'_>> {
+        let lang = self.lang;
+        let wired = self.network.details.as_deref()?.wired.as_ref()?;
+        let value: El<'_> = t(
+            model::wired_value(wired, lang),
+            13.5,
+            if wired.connected {
+                GREEN.get()
+            } else {
+                DIM.get()
+            },
+        )
+        .into();
+        let row = page_row(
+            tile(
+                |c| draw(CABLE, 18.0, c),
+                if wired.connected {
+                    Tone::Green
+                } else {
+                    Tone::Plain
+                },
+                1.0,
+            ),
+            name(w("Câble", "Cable").get(lang).to_owned(), 1.0, None),
+            vec![line(model::wired_line(wired, lang), DIM.get())],
+            value,
+            Some("row:network.cable".to_owned()),
+            self.lit("network.cable"),
+            false,
+            false,
+        );
+        Some(
+            container(
+                column![
+                    group_head(w("CÂBLE", "CABLE").get(lang), None),
+                    card_box(row)
+                ]
+                .spacing(8),
+            )
+            .id("group:network.cable".to_owned())
+            .into(),
+        )
+    }
+
     fn network_saved_row(&self) -> El<'_> {
         let lang = self.lang;
         let count = self.network.details.as_deref().map_or(0, |d| d.saved.len());
@@ -753,7 +845,8 @@ impl App {
                 self.network_around_row(wifi, connecting, focused && self.network.cursor.0 == i);
             rows = rows.push(divided(i > 0, row));
         }
-        let list = mouse_area(card_box(rows.into()))
+        // The search's "Réseau d'entreprise" and "WEP" show the list.
+        let list = mouse_area(container(card_box(rows.into())).id("row:network.wep".to_owned()))
             .on_enter(Message::Network(Msg::Hover(true)))
             .on_exit(Message::Network(Msg::Hover(false)));
         container(
@@ -773,7 +866,7 @@ impl App {
             ]
             .spacing(8),
         )
-        .id("group:network.around".to_owned())
+        .id("row:network.enterprise".to_owned())
         .into()
     }
 
@@ -802,9 +895,7 @@ impl App {
             } else {
                 w("Se connecter…", "Connect…")
             };
-            // 802.1X and WEP join from their sheet, which comes with the
-            // page's second part.
-            let can = !busy && (at_once || wifi.security.joinable());
+            let can = !busy;
             secondary(
                 label.get(lang).to_owned(),
                 can.then(|| Message::Network(Msg::Connect(wifi.ssid.clone()))),
@@ -1189,217 +1280,6 @@ impl App {
         .into()
     }
 
-    // --- The sheet ------------------------------------------------------------------
-
-    /// The sheet over the page, under its scrim.
-    pub(in crate::app) fn network_sheet(&self) -> Option<El<'_>> {
-        let sheet = self.network.sheet.as_ref()?;
-        let lang = self.lang;
-        let title = match lang {
-            Lang::French => format!("Se connecter à « {} »", sheet.name),
-            Lang::English => format!("Connect to \u{201c}{}\u{201d}", sheet.name),
-        };
-        let waiting = sheet.waiting();
-        let wrong = sheet.failed == Some(hocus_network::model::Failure::Secret);
-        let field_focused = self.network_focused(Stop::SheetField);
-        let mut input = text_input("", &sheet.text)
-            .id(SHEET_FIELD)
-            .secure(!sheet.shown)
-            .size(13.5)
-            .font(MANROPE)
-            .padding(0)
-            .style(style::search);
-        if !waiting {
-            input = input
-                .on_input(|s| Message::Network(Msg::SheetInput(s)))
-                .on_submit(Message::Network(Msg::SheetConnect));
-        }
-        let rim = if wrong {
-            ORANGE.get()
-        } else if field_focused {
-            crate::theme::ink(rgba(108, 194, 135, 0.65))
-        } else {
-            RIM_12.get()
-        };
-        let field = container(
-            row![
-                container(input).width(Length::Fill),
-                button(draw(
-                    if sheet.shown { EYE_SHUT } else { EYE },
-                    15.0,
-                    DIM.get()
-                ))
-                .width(26)
-                .height(26)
-                .padding(5.5)
-                .on_press(Message::Network(Msg::SheetEye))
-                .style(flat(None, HOVER.get(), 6.0, false)),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .height(34)
-        .center_y(34)
-        .padding(Padding {
-            top: 0.0,
-            right: 4.0,
-            bottom: 0.0,
-            left: 10.0,
-        })
-        .style(boxed(
-            crate::theme::ink(rgba(255, 255, 255, 0.06)),
-            9.0,
-            Some((1.0, rim)),
-        ))
-        .id("sheet:field".to_owned());
-        let mut fields = column![
-            t(w("Mot de passe", "Password").get(lang), 12.0, DIM.get()).font(BOLD),
-            field
-        ]
-        .spacing(5);
-        match sheet.failed {
-            Some(hocus_network::model::Failure::Secret) => {
-                fields = fields.push(t(
-                    w(
-                        "Mot de passe incorrect. Vérifie-le et réessaie.",
-                        "Wrong password. Check it and try again.",
-                    )
-                    .get(lang),
-                    12.0,
-                    PEACH.get(),
-                ));
-            }
-            Some(hocus_network::model::Failure::Other) => {
-                fields = fields.push(t(
-                    w(
-                        "La connexion a échoué. Réessaie.",
-                        "Could not connect. Try again.",
-                    )
-                    .get(lang),
-                    12.0,
-                    PEACH.get(),
-                ));
-            }
-            None => {}
-        }
-        let filled = sheet.filled();
-        let connect_focused = self.network_focused(Stop::SheetConnect);
-        let connect: El<'_> = if waiting {
-            container(
-                row![
-                    spinner(14.0, DEEP.get(), !self.reduced_motion),
-                    t(w("Connexion…", "Connecting…").get(lang), 13.0, DEEP.get()).font(BOLD)
-                ]
-                .spacing(7)
-                .align_y(Alignment::Center),
-            )
-            .height(32)
-            .padding([0, 14])
-            .center_y(32)
-            .style(boxed(fade(GREEN.get(), INERT), 8.0, None))
-            .into()
-        } else {
-            let mut b = button(
-                container(
-                    t(
-                        w("Se connecter", "Connect").get(lang),
-                        13.0,
-                        if filled {
-                            DEEP.get()
-                        } else {
-                            fade(TEXT.get(), INERT)
-                        },
-                    )
-                    .font(BOLD),
-                )
-                .height(Length::Fill)
-                .center_y(Length::Fill),
-            )
-            .height(32)
-            .padding([0, 14])
-            .style(move |_, _| button::Style {
-                background: Some(Background::Color(if filled {
-                    GREEN.get()
-                } else {
-                    crate::theme::ink(rgba(255, 255, 255, 0.04))
-                })),
-                text_color: TEXT.get(),
-                border: if connect_focused {
-                    ring(8.0)
-                } else {
-                    border(8.0, 1.0, if filled { GREEN.get() } else { RIM_12.get() })
-                },
-                ..button::Style::default()
-            });
-            if filled {
-                b = b.on_press(Message::Network(Msg::SheetConnect));
-            }
-            b.into()
-        };
-        let actions = row![
-            Space::new().width(Length::Fill),
-            container(secondary(
-                w("Annuler", "Cancel").get(lang).to_owned(),
-                Some(Message::Network(Msg::SheetCancel)),
-                self.network_focused(Stop::SheetCancel),
-                false,
-            ))
-            .id("sheet:cancel".to_owned()),
-            container(connect).id("sheet:connect".to_owned()),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        let panel = container(
-            column![
-                row![
-                    wifi_glyph(4, 18.0, TEXT.get()),
-                    text(title).size(17).font(BOLD).color(TEXT)
-                ]
-                .spacing(10)
-                .align_y(Alignment::Center),
-                fields,
-                container(actions).padding(Padding::default().top(4)),
-            ]
-            .spacing(14),
-        )
-        .width(460)
-        .padding(Padding {
-            top: 20.0,
-            right: 22.0,
-            bottom: 18.0,
-            left: 22.0,
-        })
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Gradient(Gradient::Linear(
-                gradient::Linear::new(std::f32::consts::PI)
-                    .add_stop(0.0, crate::theme::ink(rgb(0x1d2333)))
-                    .add_stop(1.0, crate::theme::ink(rgb(0x171c29))),
-            ))),
-            border: border(14.0, 1.0, RIM_12.get()),
-            shadow: Shadow {
-                color: rgba(0, 0, 0, 0.55),
-                offset: Vector::new(0.0, 24.0),
-                blur_radius: 60.0,
-            },
-            ..container::Style::default()
-        })
-        .id("sheet".to_owned());
-        Some(
-            mouse_area(
-                container(panel)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center(Length::Fill)
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(rgba(7, 9, 15, 0.62))),
-                        ..container::Style::default()
-                    }),
-            )
-            .on_press(Message::Nothing)
-            .into(),
-        )
-    }
-
     // --- What the page shows, for the log -------------------------------------------
 
     pub(in crate::app) fn network_shown(&self) -> serde_json::Value {
@@ -1422,10 +1302,8 @@ impl App {
                         "connecting"
                     } else if model::joins_at_once(n) {
                         "connect"
-                    } else if n.security.joinable() {
-                        "sheet"
                     } else {
-                        "none"
+                        "sheet"
                     },
                 })
             })
@@ -1480,11 +1358,11 @@ impl App {
                 "editing": p.editing,
                 "read": !p.text.is_empty(),
             })),
-            "sheet": self.network.sheet.as_ref().map(|s| serde_json::json!({
-                "name": s.name,
-                "filled": s.filled(),
-                "waiting": s.waiting(),
-                "error": s.failed.map(|f| format!("{f:?}")),
+            "sheet": self.network.sheet.as_ref().map(super::sheet::Sheet::shown),
+            "wired": details.and_then(|d| d.wired.as_ref()).map(|wired| serde_json::json!({
+                "line": model::wired_line(wired, lang),
+                "value": model::wired_value(wired, lang),
+                "connected": wired.connected,
             })),
             "card": self.network_card(),
         })

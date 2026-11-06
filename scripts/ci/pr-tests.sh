@@ -3,6 +3,7 @@
 # suite, which runs on main after each merge (.github/workflows/ci.yml).
 #
 #   scripts/ci/pr-tests.sh BASE [full]
+#   scripts/ci/pr-tests.sh --plan BASE [full]   # only says whether it is everything
 #
 # - a test file changed (crates/C/tests/NAME.rs): that test binary;
 # - a crate's sources changed: its unit tests;
@@ -16,6 +17,11 @@
 # a test binary does not build: they are built first.
 set -euo pipefail
 
+plan=
+if [ "${1:-}" = --plan ]; then
+    plan=1
+    shift
+fi
 base=$1
 full=${2:-}
 
@@ -34,10 +40,14 @@ programs() {
 
 if [ -n "$full" ] || grep -qE '^(Cargo\.lock|Cargo\.toml|rust-toolchain(\.toml)?|\.config/nextest\.toml)$|^crates/[^/]+/tests/(common|levels|fakes)/' <<< "$changed"; then
     echo "Everything: the workspace, its harness or full was asked."
+    # CI then runs it as main does, built once and in four jobs.
+    [ -n "$plan" ] && { echo "full=true" >> "${GITHUB_OUTPUT:-/dev/stdout}"; exit 0; }
     programs
     run --workspace
     exit 0
 fi
+
+[ -n "$plan" ] && { echo "full=false" >> "${GITHUB_OUTPUT:-/dev/stdout}"; exit 0; }
 
 declare -A units=() tests=()
 
