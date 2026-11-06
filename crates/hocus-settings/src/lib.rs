@@ -19,6 +19,8 @@
 //!   compositor's own geometry.
 //! - [`wallpaper`] and [`portal`]: the wallpaper's page's keys, its
 //!   thumbnails and one's own pictures, the desktop portal's file chooser.
+//! - [`captures`]: where screenshots and recordings go, their formats,
+//!   the shutter, and what the clipboard's history keeps (6.17).
 //! - [`app`]: the window, drawn with iced as the shell is.
 
 pub mod activate;
@@ -26,6 +28,7 @@ pub mod app;
 pub mod appearance;
 pub mod apps;
 pub mod bar;
+pub mod captures;
 pub mod desktops;
 pub mod devices;
 pub mod keyboard;
