@@ -513,9 +513,9 @@ with its settings, its UUID and the secrets that could be read
 (`AddConnection`), and joins it again if it was in use ("… revient, sans
 son mot de passe." when a secret did not read).
 
-**The sheet**: a 460 px panel over a `rgba(7,9,15,0.62)` scrim (one
-colour, `#1a202e`: the mockup's gradient redrawn in part on the CPU shows
-its seams), "Se connecter à « … »" or "Rejoindre un réseau masqué", its
+**The sheet**: a 460 px panel (the mockup's `#1d2333 → #171c29`, top to
+bottom) over a `rgba(7,9,15,0.62)` scrim, "Se connecter à « … »" or
+"Rejoindre un réseau masqué", its
 fields by kind; the keyboard starts in the first empty one, what is typed
 before a field takes the keyboard goes in it, `Tab` goes through the
 fields and the buttons and never out:
@@ -1796,15 +1796,19 @@ file.
   while they move; toasts go and sliders are written on one-shot timers.
   The caret of the search field blinks while the field has the keyboard
   (iced's), and draws then.
-- **Whole frames where pixels could stay behind.** On the CPU, iced
-  (tiny-skia) draws only what it finds changed between frames, and
-  misses what is drawn past a piece's bounds: a shadow (the toast's), an
-  anti-aliased stroke, a canvas's text moved with the page (6.4's
-  preview). Those pixels stayed on screen after a scroll. For 150 ms
-  after a scroll, a toast coming or going, and any motion, each frame's
-  background is a 1024th of blue apart from the last one's
-  (`app::background_of`), which makes iced draw the whole window; at
-  rest nothing changes and nothing draws.
+- **Every frame draws the whole window.** On the CPU, iced (tiny-skia)
+  drew only the regions it found changed since the buffer's last frame,
+  and missed what is drawn past a piece's bounds: a shadow (the toast's),
+  an anti-aliased stroke, a canvas's text moved with the page (6.4's
+  preview), a gradient drawn in pieces (its seams), a closed menu. Those
+  pixels stayed on screen. The Settings ask iced's CPU renderer to draw
+  each frame whole (`iced_tiny_skia::draw_whole_frames`, a patch of the
+  workspace's in `vendor/iced_tiny_skia`, #662). A whole frame of the
+  window at 1100 × 760, scale 2, takes about 40 ms on a 2023 laptop's CPU
+  (20 to 70 ms); the regions found changed cost as much or more after a
+  scroll, a toast or a menu, which change most of the window. At rest
+  nothing changes and nothing draws. On the GPU, wgpu draws every frame
+  whole already.
 - The worker's threads: one owns the file (reads, writes, the last
   version that read, the recent changes in
   `$XDG_STATE_HOME/hocuspanda/settings-recent`), one waits in inotify's
@@ -1895,6 +1899,10 @@ that nothing draws at rest.
 - `a_value_not_understood_warns_on_its_row`
 - `a_second_launch_brings_the_first_forward`
 - `at_rest_it_commits_nothing`
+- `after_a_scroll_round_trip_and_a_toast_the_window_is_as_before`: on
+  the Power page and the Appearance and language page at scale 2, the
+  window's pixels after a scroll, a switch, a menu and toasts are those
+  before them (#662)
 - `the_grip_shows_on_hover_at_the_top_edge_and_a_drag_on_it_moves_the_window`
 - `the_close_button_esc_and_ctrl_w_close_the_window`
 - `a_change_made_just_before_closing_is_on_disk`

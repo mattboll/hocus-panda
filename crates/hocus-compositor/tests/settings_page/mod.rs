@@ -151,3 +151,77 @@ fn window(hp: &Headless, app_id: &str) -> anyhow::Result<Rect> {
         .map(|w| w.rect)
         .ok_or_else(|| anyhow::anyhow!("no settings window"))
 }
+
+/// The window's pixels at the screen's `scale`, `window` cut out of
+/// screen `screen`.
+pub fn window_pixels(
+    hp: &mut Headless,
+    screen: usize,
+    scale: usize,
+    window: Rect,
+) -> anyhow::Result<Vec<u8>> {
+    let (w, _, px) = hp.screenshot(screen)?;
+    let at = |n: i32| usize::try_from(n).unwrap_or_default() * scale;
+    let (x, y, cw, ch) = (
+        at(window.x),
+        at(window.y),
+        at(window.width),
+        at(window.height),
+    );
+    let mut out = Vec::with_capacity(cw * ch * 4);
+    for row in y..y + ch {
+        let start = (row * w as usize + x) * 4;
+        out.extend_from_slice(&px[start..start + cw * 4]);
+    }
+    Ok(out)
+}
+
+/// How many pixels of `a` and `b` differ.
+pub fn differ(a: &[u8], b: &[u8]) -> usize {
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
+        .filter(|(a, b)| a != b)
+        .count()
+        + a.len().abs_diff(b.len()) / 4
+}
+
+/// Waits until no window has committed for 500 ms (a caret blinks: 3 s at
+/// most).
+pub fn still(hp: &mut Headless) -> anyhow::Result<()> {
+    let mut last = hp.window_commits();
+    let mut still = 0;
+    for _ in 0..60 {
+        common::wait(hp, Duration::from_millis(100))?;
+        let now = hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+        if still >= 5 {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("the window never kept still")
+}
+
+/// The page of the window `app_id` (whose log is `log`) scrolled down
+/// twice and back to its top by the wheel over it, each wheel taken and
+/// drawn before the next; then the pointer out of the window.
+pub fn scroll_round_trip(hp: &mut Headless, log: &Path, app_id: &str) -> anyhow::Result<()> {
+    let window = window(hp, app_id)?;
+    let over = (
+        f64::from(window.x) + 600.0,
+        f64::from(window.y) + f64::from(window.height) / 2.0,
+    );
+    let before = said(log).map_or(0, |p| wheels(&p));
+    for (taken, notches) in (before + 1..).zip([3, 3, -40]) {
+        hp.pointer_move(over.0 - 1.0, over.1);
+        hp.pointer_move(over.0, over.1);
+        hp.wheel(notches);
+        let took = hp.dispatch_until(WHEEL, |_| said(log).is_some_and(|p| wheels(&p) >= taken))?;
+        anyhow::ensure!(took, "the window never took the wheel: {:?}", said(log));
+        still(hp)?;
+    }
+    hp.pointer_move(5.0, 5.0);
+    Ok(())
+}

@@ -14,7 +14,8 @@
 //! forward; at rest, the window commits nothing. And of #603: the grip
 //! shows on hover at the top edge and a drag on it moves the window; ✕,
 //! `Esc` and `Ctrl+W` close it; a change made just before closing is on
-//! disk.
+//! disk. And of #662: a scroll, a switch, a menu and toasts leave nothing
+//! on screen.
 //!
 //! What the window shows is read from its log, as it says it ("shows" and
 //! "places" lines, JSON): the places are the window's own, the window's
@@ -694,6 +695,76 @@ fn at_rest_it_commits_nothing() -> anyhow::Result<()> {
     anyhow::ensure!(still >= 10, "the window never came to rest");
     wait(&mut bed.hp, Duration::from_secs(3))?;
     assert_eq!(bed.hp.window_commits(), last, "the window drew at rest");
+    Ok(())
+}
+
+/// What a frame draws past a piece's bounds (a toast's, a switch's knob's
+/// and a menu's shadows, anti-aliased edges, text moved with the page)
+/// leaves nothing on screen (#662). On the Power page, a toast, a scroll
+/// down and back up, a switch turned off and on and a menu opened and
+/// closed; on the Appearance and language page, a toast and a scroll down
+/// and back up: once the toasts are gone, the window at scale 2 on the
+/// CPU is, pixel for pixel, what it was before them.
+#[test]
+fn after_a_scroll_round_trip_and_a_toast_the_window_is_as_before() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_on(FILE, "2880x1800@2")? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.power()?;
+    let window = bed.window()?;
+    // The pointer away from the window: nothing under it is hovered.
+    bed.hp.pointer_move(5.0, 5.0);
+    settings_page::still(&mut bed.hp)?;
+    let before = settings_page::window_pixels(&mut bed.hp, 0, 2, window)?;
+    // A toast: the file changed by hand, a comment added.
+    std::fs::write(bed.file(), format!("{FILE}# Read again.\n"))?;
+    bed.shows(|s| s["toast"] == "config.toml a changé : relu.")?;
+    settings_page::scroll_round_trip(&mut bed.hp, &bed.log, APP_ID)?;
+    // A switch turned off and on again: its knob slides, its shadow with
+    // it.
+    bed.click("control:power.lock-on-idle")?;
+    bed.written(|t| t.contains("lock-on-idle = false"))?;
+    settings_page::still(&mut bed.hp)?;
+    bed.click("control:power.lock-on-idle")?;
+    bed.written(|t| !t.contains("lock-on-idle = false"))?;
+    settings_page::still(&mut bed.hp)?;
+    // A menu opened and closed, its shadow with it.
+    bed.click("control:power.idle")?;
+    bed.shows(|s| {
+        s["menu"]
+            .as_str()
+            .is_some_and(|m| m.starts_with("power.idle"))
+    })?;
+    bed.places_with("option:0")?;
+    settings_page::still(&mut bed.hp)?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.shows(|s| s["menu"].is_null())?;
+    bed.hp.pointer_move(5.0, 5.0);
+    // The toasts gone, the lit row out.
+    bed.shows(|s| s["toast"].is_null() && s["lit"].is_null())?;
+    settings_page::still(&mut bed.hp)?;
+    let after = settings_page::window_pixels(&mut bed.hp, 0, 2, window)?;
+    let power = settings_page::differ(&before, &after);
+    // The Appearance and language page.
+    bed.click("nav:appearance")?;
+    bed.shows(|s| s["page"] == "appearance")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    settings_page::still(&mut bed.hp)?;
+    let before = settings_page::window_pixels(&mut bed.hp, 0, 2, window)?;
+    std::fs::write(bed.file(), format!("{FILE}# Read again, twice.\n"))?;
+    bed.shows(|s| s["toast"] == "config.toml a changé : relu.")?;
+    settings_page::scroll_round_trip(&mut bed.hp, &bed.log, APP_ID)?;
+    bed.shows(|s| s["toast"].is_null() && s["lit"].is_null())?;
+    settings_page::still(&mut bed.hp)?;
+    let after = settings_page::window_pixels(&mut bed.hp, 0, 2, window)?;
+    let appearance = settings_page::differ(&before, &after);
+    assert_eq!(
+        (power, appearance),
+        (0, 0),
+        "pixels differ from before on the Power page, on the Appearance page"
+    );
     Ok(())
 }
 

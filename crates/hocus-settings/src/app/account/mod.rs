@@ -165,14 +165,7 @@ pub struct State {
     pub(super) passwd: bool,
     /// The picture before the last one asked, for its undo.
     before: Option<Arc<Vec<u8>>>,
-    /// The popover and the sheet as last drawn.
-    drawn: Drawn,
 }
-
-type Drawn = (
-    Option<usize>,
-    Option<(bool, bool, bool, bool, Option<bool>, [bool; 3])>,
-);
 
 impl State {
     pub fn new(to: UnboundedSender<Message>) -> Self {
@@ -645,25 +638,6 @@ impl App {
                 return self.account_save_name();
             }
             return Task::none();
-        }
-        // Whole frames while the popover or the sheet changes (as the
-        // picker's, `background_of`).
-        let drawn = (
-            self.account.popover,
-            self.account.sheet.as_ref().map(|s| {
-                (
-                    s.running,
-                    s.wrong_current,
-                    s.refused.is_some(),
-                    s.failed.is_some(),
-                    s.matching(),
-                    s.shown,
-                )
-            }),
-        );
-        if drawn != self.account.drawn {
-            self.account.drawn = drawn;
-            self.fresh = Some(std::time::Instant::now() + super::FRESH);
         }
         if self.account.asks.is_none() {
             let to = self.account.to.clone();
