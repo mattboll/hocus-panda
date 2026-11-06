@@ -24,8 +24,14 @@ use std::{
     sync::mpsc::TryRecvError,
 };
 
-use common::{ClientHandle, Command, Event, KEY_1, KEY_2, KEY_H, KEY_LEFTMETA, WAIT, chord};
-use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use common::{
+    ClientHandle, Command, Event, KEY_1, KEY_2, KEY_ESC, KEY_H, KEY_LEFTMETA, WAIT, chord,
+};
+use hocus_compositor::{
+    Config, FormChoice, Headless, HeadlessConfig, RendererChoice,
+    model::{Rect, WindowId},
+    radial::{RING, Sector},
+};
 use hocus_link::{
     DESKTOPS_NAMESPACE, MEETING_NAMESPACE, TASKS_NAMESPACE, TODAY_NAMESPACE, WINDOWS_NAMESPACE,
 };
@@ -242,6 +248,9 @@ fn no_group(hp: &Headless) -> bool {
 
 /// What the windows said they draw at rest, the last time.
 const AT_REST: &str = "the windows are drawn at rest";
+/// What a window's menu said it shows (#723).
+const MENU: &str = "the window's menu shows it";
+const BTN_RIGHT: u32 = 0x111;
 
 impl Bed {
     /// Waits until the shell's last line of `what` holds all of `holds`:
@@ -467,6 +476,67 @@ impl Bed {
         }
         image.save(Path::new(&folder).join(format!("bar-windows-{what}.png")))?;
         Ok(())
+    }
+
+    /// With `HOCUS_SHOTS` naming a folder: `rect` of the screen, as
+    /// `WHAT.png`.
+    fn shot_of(&mut self, what: &str, rect: Rect) -> anyhow::Result<()> {
+        let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
+            return Ok(());
+        };
+        common::at_rest(&mut self.hp)?;
+        let (width, height, bytes) = self.hp.screenshot(0)?;
+        let x0 = rect.x.clamp(0, width - 1);
+        let y0 = rect.y.clamp(0, height - 1);
+        let (w, h) = (rect.width.min(width - x0), rect.height.min(height - y0));
+        let mut image = image::RgbaImage::new(w as u32, h as u32);
+        for y in 0..h {
+            for x in 0..w {
+                let at = usize::try_from((y0 + y) * width + x0 + x)? * 4;
+                let p = &bytes[at..at + 4];
+                image.put_pixel(x as u32, y as u32, image::Rgba([p[2], p[1], p[0], 255]));
+            }
+        }
+        image.save(Path::new(&folder).join(format!("{what}.png")))?;
+        Ok(())
+    }
+
+    /// A right click on `item` of the bar's windows (#723).
+    fn right_click(&mut self, item: &str) -> anyhow::Result<()> {
+        let (x, y) = self.item_at(item, SCREEN.0)?;
+        let drawn = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.undrawn_at(x, y).is_empty())?;
+        anyhow::ensure!(drawn, "the windows never drawn at {:?}", (x, y));
+        common::over(&mut self.hp, (x, y), WINDOWS_NAMESPACE)?;
+        self.hp.button(BTN_RIGHT, true);
+        self.hp.button(BTN_RIGHT, false);
+        Ok(())
+    }
+
+    /// Where the window's menu's `target` (as it logs them: `Above`,
+    /// `Tile{screen:0,desktop:1}`) is on the screen, once its popover is
+    /// drawn.
+    fn menu_at(&mut self, target: &str) -> anyhow::Result<(f64, f64)> {
+        let line = self.last_is(MENU, &[&format!("{target}@")])?;
+        let at = line
+            .split(&format!("{target}@"))
+            .nth(1)
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|r| r.split_once(','))
+            .ok_or_else(|| anyhow::anyhow!("no {target} in {line:?}"))?;
+        let (x, y): (f64, f64) = (at.0.parse()?, at.1.parse()?);
+        let popover = self.menu()?;
+        Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
+    }
+
+    /// The window's menu's popover, once drawn.
+    fn menu(&mut self) -> anyhow::Result<Rect> {
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+        anyhow::ensure!(done, "no menu drawn\n{}", self.windows_log());
+        Ok(common::drawn_popovers(&self.hp)[0])
     }
 
     /// The brightness of the screen's pixel at `(x, y)`.
@@ -899,5 +969,155 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.windows_commits() > windows)?;
     anyhow::ensure!(drew, "the retitle drew nothing");
+    Ok(())
+}
+
+/// A right click on a window's line opens its menu beside the bar (#723):
+/// the radial menu's actions, "Envoyer sur" with the screen's desktops,
+/// the window's own ringed; its Close asks the window to close.
+#[test]
+fn a_right_click_on_a_line_opens_its_windows_menu_beside_the_bar() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.shows(&format!("«{}»*; «{}»", FIREFOX.1, FOOT.1))?;
+    let id = bed.id_of(FOOT.0)?;
+    bed.right_click(&format!("Window({id})"))?;
+    bed.last_is(
+        MENU,
+        &[
+            &format!("window={id} "),
+            "shows=Agrandir; Réduire; Au premier plan=off; Sur tous les bureaux=off; ENVOYER SUR ",
+            "[1* 2 3 4]; Fermer",
+        ],
+    )?;
+    let menu = bed.menu()?;
+    // 240 px, beside the bar, whole on the screen.
+    assert_eq!(menu.width, 240);
+    assert!(menu.x + menu.width <= FULL_X - 8, "{menu:?}");
+    assert!(menu.y >= 0 && menu.y + menu.height <= 1080, "{menu:?}");
+    bed.shot_of("window-menu", Rect::new(1920 - 560, 1080 - 560, 560, 560))?;
+    // `Esc` closes it; its Close asks the window.
+    chord(&mut bed.hp, &[KEY_ESC]);
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(gone, "the menu stays after Esc");
+    bed.right_click(&format!("Window({id})"))?;
+    let close = bed.menu_at("Close")?;
+    common::click(&mut bed.hp, close)?;
+    bed.asked_to_close(FOOT.0)?;
+    Ok(())
+}
+
+/// Its switches flip and the line shows their marks; a tile sends the
+/// window to that desktop, the screen staying (#723).
+#[test]
+fn the_window_menus_switches_and_tiles_act_on_its_window() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    bed.right_click(&format!("Window({id})"))?;
+    let above = bed.menu_at("Above")?;
+    common::click(&mut bed.hp, above)?;
+    let done = bed.hp.dispatch_until(WAIT, |hp| hp.above(WindowId(id)))?;
+    anyhow::ensure!(done, "not kept above");
+    bed.last_is(MENU, &["Au premier plan=on"])?;
+    let all = bed.menu_at("AllDesktops")?;
+    common::click(&mut bed.hp, all)?;
+    let done = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.everywhere() == vec![WindowId(id)])?;
+    anyhow::ensure!(done, "not on all desktops");
+    bed.shows(&format!("«{}»*; «{}»^∀", FIREFOX.1, FOOT.1))?;
+    bed.shot_of(
+        "window-menu-switches",
+        Rect::new(1920 - 560, 1080 - 560, 560, 560),
+    )?;
+    // Desktop 3's tile: there alone, out of sight, the screen staying.
+    let tile = bed.menu_at("Tile{screen:0,desktop:2}")?;
+    common::click(&mut bed.hp, tile)?;
+    let done = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.all_windows()
+            .iter()
+            .any(|(w, _, d, shown)| *w == WindowId(id) && *d == 2 && !shown)
+            && hp.popover_surfaces().is_empty()
+    })?;
+    anyhow::ensure!(done, "not sent: {:?}", bed.hp.all_windows());
+    assert!(bed.hp.everywhere().is_empty());
+    assert_eq!(bed.hp.desktop().0, 0);
+    bed.shows(&format!("«{}»*", FIREFOX.1))?;
+    Ok(())
+}
+
+/// The radial menu over a window, with the bar (#723): Super and a right
+/// click over the bar opens nothing; over the window, the ring on the
+/// pointer. With `HOCUS_SHOTS`, the ring open, a sector lit, Close
+/// armed, a toggle on.
+#[test]
+fn the_radial_menu_opens_over_a_window_never_over_the_bar() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    let (rect, handle) = common::open_with(&mut bed.hp, "foot", (1100, 700), false)?;
+    handle.commands.send(Command::Title(FOOT.1))?;
+    bed.clients.push(("foot", handle));
+    bed.shows(&format!("«{}»*", FOOT.1))?;
+    let super_click = |hp: &mut Headless, (x, y): (f64, f64)| {
+        hp.pointer_move(x, y);
+        hp.key(KEY_LEFTMETA, true);
+        hp.button(BTN_RIGHT, true);
+        hp.button(BTN_RIGHT, false);
+        hp.key(KEY_LEFTMETA, false);
+    };
+    // Over the bar: nothing.
+    let bar = (f64::from(FULL_X + 90), 300.0);
+    super_click(&mut bed.hp, bar);
+    assert!(bed.hp.radial().is_none(), "opened over the bar");
+    let at = (
+        f64::from(rect.x + rect.width / 2),
+        f64::from(rect.y + rect.height / 2),
+    );
+    super_click(&mut bed.hp, at);
+    let seen = bed.hp.radial().expect("the menu over the window");
+    assert_eq!(seen.centre, at);
+    let around = Rect::new(at.0 as i32 - 220, at.1 as i32 - 210, 440, 420);
+    // Up, lit.
+    bed.hp.pointer_move(at.0, at.1 - 60.0);
+    bed.hp.pointer_move(at.0, at.1 - 80.0);
+    assert_eq!(bed.hp.radial().map(|r| r.lit), Some(Some(Sector::Up)));
+    bed.shot_of("radial-lit", around)?;
+    // Close, rested on.
+    let a = 135_f64.to_radians();
+    let close = (at.0 + 80.0 * a.cos(), at.1 + 80.0 * a.sin());
+    bed.hp.pointer_move(close.0, close.1);
+    let armed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.radial().is_some_and(|r| r.armed))?;
+    anyhow::ensure!(armed, "Close never armed");
+    bed.shot_of("radial-close", around)?;
+    // Always on top, by a gesture; open again, its toggle on.
+    bed.hp.pointer_move(at.0 + 40.0, at.1 - 40.0);
+    let a = (-45_f64).to_radians();
+    bed.hp.pointer_move(
+        at.0 + (RING + 20.0) * a.cos(),
+        at.1 + (RING + 20.0) * a.sin(),
+    );
+    assert!(bed.hp.radial().is_none());
+    bed.shows(&format!("«{}»*^", FOOT.1))?;
+    super_click(&mut bed.hp, at);
+    assert!(
+        bed.hp
+            .radial()
+            .is_some_and(|r| r.on[Sector::UpRight.index()])
+    );
+    bed.hp.pointer_move(at.0 - 70.0, at.1);
+    bed.hp.pointer_move(at.0 - 80.0, at.1 + 2.0);
+    bed.shot_of("radial-toggle-on", around)?;
+    chord(&mut bed.hp, &[KEY_ESC]);
+    assert!(bed.hp.radial().is_none());
     Ok(())
 }
