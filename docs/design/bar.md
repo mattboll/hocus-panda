@@ -153,7 +153,7 @@ group where it is.
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
-| — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the desktop's list; none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
+| — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
@@ -4133,8 +4133,8 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   most recent focus (the compositor's own order, Alt+Tab's), at most 3;
   minimised ones too, greyed and their icon at half, as their desktop's
   list has them (3.9c). Past 3, a 20 px "+ N autres" / "+ N more"
-  (12.5 px, `text.faint`) opens the current desktop's list (3.9b, every
-  window of the desktop) beside it, until the overview comes (8.5). No
+  (12.5 px, `text.faint`) opens the overview (8.5 A, windows.md §12b;
+  the current desktop's list, 3.9b, until then); again, it closes it. No
   window on the desktop: no group.
 - **A line**: 30 px, 6 px past the group's sides, radius 8: the
   application's icon (18 px, from the icon theme as the tiles find
@@ -4179,8 +4179,8 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   button (radius 10) 14 px over the dots, lit `0.06` under the pointer,
   `0.08` while its popover shows; a 150 ms hover or a click opens the
   popover: 240 px, the popovers' glass, its bottom on the item's, the
-  same lines (up to 3, with their ✕) and "+ N", which gives way to the
-  desktop's list. A line brings its window and closes the popover; a ✕
+  same lines (up to 3, with their ✕) and "+ N", which closes it and
+  opens the overview (8.5 A, windows.md §12b). A line brings its window and closes the popover; a ✕
   asks its window to close, the popover staying and following the
   windows as they go. `Tab` and the arrows go through the lines, their
   ✕ and "+ N"; `Esc` closes it.
@@ -4489,7 +4489,7 @@ and §5 say the rest.
   draw.rs`, `Group`): a 16:10 laptop's row of four and a 21:9 screen's
   make 30 + 10 + 20 px of tiles. Each row's ring moves alone, from the
   desktop its screen left to the one it shows.
-- **Not built**: the overview (8.5 A).
+- **The overview** (8.5 A): windows.md §12b.
 - **Measured headless** (`crates/hocus-compositor/tests/desktops_screens.rs`,
   the compositor alone): two screens, each switching alone; the primary
   bar's rows (its own, then the other), one each with `screens = "all"`,
@@ -4504,7 +4504,7 @@ and §5 say the rest.
 ### 8.5 B, a window let go on a desktop's tile (2026-11-06)
 
 What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
-8.5 A, comes later); windows.md §6 says the behaviour.
+8.5 A, is windows.md §12b); windows.md §6 says the behaviour.
 
 - **Where the tiles are**: the shell says, for each bar, each tile's
   screen, desktop and place on its desktops' surface (`desk-tiles BAR

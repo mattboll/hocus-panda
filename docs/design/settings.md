@@ -777,8 +777,11 @@ kept, off by default; tap to click on by default.
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
   Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
-  to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
-  (the four-finger launcher, 6.13: launcher.md).
+  to applications), Quatre doigts vers le haut ou le bas `[touchpad] swipe-launcher`
+  (up the four-finger launcher, 6.13: launcher.md; down the overview,
+  8.5 A: windows.md §12b; its line "Vers le haut, le lanceur, qui
+  grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes
+  bureaux, ou le lanceur se referme.").
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -848,8 +851,9 @@ built".
 - Three rows of 68 px, each with a 64 × 44 finger diagram on its left
   (a touchpad's outline, white 8 px dots, a dashed green trail): three
   fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
-  four fingers up ("Quatre doigts vers le haut", `[touchpad]
-  swipe-launcher`, with its blue "Nouveau" chip), and what is left to
+  four fingers up or down ("Quatre doigts vers le haut ou le bas",
+  `[touchpad] swipe-launcher`, with its blue "Nouveau" chip; down opens
+  the overview since 8.5 A, its diagram still the fingers going up), and what is left to
   applications ("Ce qui reste aux applications", always "Toujours"), a
   note (`Kind::Note`): not a setting,
   never focused, never written. Under the card, the line on natural
