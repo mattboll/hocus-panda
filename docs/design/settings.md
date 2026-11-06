@@ -306,12 +306,11 @@ the spec in the issue's last comment. The maintainer decided:
 - the networks around are listed on the page too;
 - VPN in v1: a WireGuard or OpenVPN file imported, no form.
 
-Built in three parts. **The first** (#654): airplane mode, the Wi-Fi,
-the network in use, the saved networks, the networks around and the
-sheet of a WPA or WPA3 network. **The second**: the hidden network, the
-802.1X and WEP sheets, the cable, `--join`. **The third**: the VPNs, the
-bar's popover's "dans les Réglages" rows and "Réglages du Wi-Fi…", the
-bar's airplane mode.
+Built in three parts: airplane mode, the Wi-Fi, the network in use, the
+saved networks, the networks around and a WPA network's sheet (#654);
+the hidden network, the 802.1X and WEP sheets, the cable, `--join`
+(#661); the VPNs, the bar's popover's "dans les Réglages" rows and
+"Réglages du Wi-Fi…", the bar's airplane mode (the third).
 
 **The page**, under its title and its line ("Le Wi-Fi et ses réseaux
 enregistrés, les réseaux masqués et d'entreprise, le câble, les VPN et le
@@ -346,6 +345,30 @@ blue for airplane mode on):
   Ethernet") and its state ("· débranché", "· connecté"); its value
   "Débranché", or green "Connecté · 1 Gb/s · 192.168.1.30" (`Speed` of
   `Device.Wired`, the IPv4 address). No control.
+- **VPN**: a row per NetworkManager VPN connection (`vpn`, `wireguard`),
+  by name: a shield tile (green while on), its name, its line ("WireGuard
+  · coupé", "OpenVPN · off", green "Connecté depuis 09:12 · WireGuard ·
+  10.8.0.6": since when the page's thread saw it on, the address of its
+  IPv4 configuration; "Connexion…" with a spinner; failed, in `#F7B98A`,
+  "La connexion a échoué : <why>", NetworkManager's reason in words, until
+  it is tried again), a 30 px "⋯" and its switch (`ActivateConnection`
+  with no device, `DeactivateConnection`). The "⋯" menu: "Renommer…" (the
+  name becomes a field: `Enter` writes `connection.id`, `Esc` gives up),
+  "Se connecter seul" (ticked, `connection.autoconnect`), a divider,
+  "Supprimer" (`#F7B98A`: deleted at once, "VPN « Travail » supprimé."
+  with "Annuler", which gives it back with its settings and the secrets
+  that read, on again if it was). Then "Ajouter un VPN" and "Importer un
+  fichier…": the portal's chooser (`*.conf`, `*.ovpn`), then `nmcli
+  connection import type wireguard|openvpn file PATH` on the page's
+  thread (NetworkManager's own importers and plugins), the connection then
+  made not to connect by itself (`Update2`); toast "VPN « Travail »
+  ajouté." with "Annuler" (deleted: "Annulé : VPN « Travail » retiré.", not
+  redone). An OpenVPN file with a bare `auth-user-pass` opens a sheet for
+  the user name and the password first, saved with it (`vpn.data`
+  `username`, `password-flags` 0, `vpn.secrets` `password`). A plugin
+  missing: "Le module OpenVPN de NetworkManager n'est pas installé
+  (network-manager-openvpn)."; another refusal: "NetworkManager n'a pas
+  importé le fichier : …".
 - **PLUS TARD**: "Partage de connexion Wi-Fi", inert, amber chip.
 
 **The saved networks' sub-page**: "‹ Réseau", its title and line, one row
@@ -401,8 +424,8 @@ gone once the password is edited; another failure: "La connexion a
 `AddAndActivateConnection`, its secrets saved with it; a connection added
 that fails is deleted (3.5's).
 
-**`--join SSID`** (the bar's popover's "dans les Réglages" rows, part
-three): the page, then that network's sheet once NetworkManager lists it
+**`--join SSID`** (the bar's popover's "dans les Réglages" rows; its
+"Réglages du Wi-Fi…" opens the page): the page, then that network's sheet once NetworkManager lists it
 (joined at once if it is open or saved); a second launch with it brings
 the window forward on that sheet.
 
@@ -986,8 +1009,7 @@ rows are dropped, the group is "ALT+TAB"); a desktop removed while it has
 windows gives them to the one before it; Super chosen to move turns the
 ink off; every key is followed live (windows.md §5, §6, §9, §11, §12,
 ink.md). Section `desktops` (`hocus settings desktops`), TRAVAIL's first
-row. The rules per application ("RÈGLES PAR APPLICATION") come with their
-own pull request.
+row.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
@@ -1050,17 +1072,40 @@ own pull request.
   jumps), settling with an overshoot in about 400 ms; none without it or
   with reduced motion, where the zone is taken at once. Nothing in it is
   written.
+- **RÈGLES PAR APPLICATION**: a row per rule (`[[windows.rules]]`, in
+  the file's order): a 28 px tile (the application's initial on a colour
+  of its id), its name (its desktop entry's, else its id), what it does
+  ("Toujours sur « Courrier » · s'ouvre maximisée · au-dessus des
+  autres"; nothing set: "Aucune règle encore : elle s'ouvre comme les
+  autres."), "Modifier" ("Replier" open) and a ✕. Open, three rows 58 px
+  in: "Bureau" (menu: "Celui où tu l'ouvres", "1 · Travail", "2 ·
+  Courrier"…), "En s'ouvrant" (menu: Sa dernière taille, Maximisée,
+  Moitié gauche, Moitié droite, Plein écran) and "Au-dessus des autres"
+  (switch). Last, "Une autre application" with "+ Ajouter une règle": the
+  applications installed without a rule (the XDG data directories'
+  desktop entries, read on a thread as the program starts; their
+  windows' id is `StartupWMClass`, else the entry's id), those with a
+  window open first (asked of the compositor on the screens' line,
+  `windows-apps`; one open without an entry by its id). Picking one adds
+  its rule with only `app-id`, open. Each change writes the rules whole,
+  as an array of tables ("Règle ajoutée : Musique", "Règle de Courrier :
+  …", "Règle de Courrier retirée", each with "Annuler"). A desktop taken
+  out moves the rules naming it to the one that took its windows, the
+  later ones down one, in the same write.
 - **The search** finds the rows by their names, the spec's words in both
   languages (espaces de travail, aimant, moitié, quart, ondule, encre,
   laser; workspaces, magnet, snap, tiling, wobbly, ink) and their keys
   (`count`, `names`, `move-modifier`, `snap-by-drag`, `wobble`,
-  `alt-tab`); "Raccourcis du bureau" is Clavier et raccourcis' own row.
+  `alt-tab`, `app-id`); "Règles par application" lights the rules' last
+  row; "Raccourcis du bureau" is Clavier et raccourcis' own row.
 - **Choices made here (to confirm on the machine)**: the toast of a name
   says "Nom du bureau N : …"; the ink's line in amber like the wobble's;
   the stepper's − and + are text glyphs; a chip with its field open grows
   and the chips after it wrap; the trial's zones use the compositor's
   thresholds (24 px edges, 48 px corners) rather than the mockup's smaller
-  ones, and its preview shows at once, without the desktop's 80 ms wait.
+  ones, and its preview shows at once, without the desktop's 80 ms wait;
+  a rule's tile is the application's initial, not its icon; the rules'
+  menus take the pointer, `Esc` closes them (no arrow keys in them).
 
 ## Saving
 
@@ -1256,9 +1301,9 @@ file.
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
 - The pages whose tickets are not built yet (6.7, 6.11, 6.13 to 6.17, Day.1).
-- Réseau's third part (#406): the VPNs, the popover's links, the bar's
-  airplane mode. The 802.1X sheet's anonymous identity and advanced
-  options (the spec's "later").
+- Réseau: the 802.1X sheet's anonymous identity and advanced options, a
+  form to type a WireGuard tunnel, a secret agent for VPNs that ask at
+  each connection (the spec's "later").
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).
@@ -1394,6 +1439,14 @@ socket given as `HOCUS_RFKILL`):
 - `a_wep_network_sends_its_key`
 - `the_cable_says_unplugged_then_connected`
 - `launched_with_join_opens_that_networks_sheet`
+- `importing_a_wireguard_file_adds_a_vpn_that_is_off` (and an OpenVPN
+  file's user name and password)
+- `an_openvpn_file_without_its_plugin_says_so`
+- `a_vpn_switch_activates_and_deactivates_it` (a failure's reason, the
+  "⋯" menu's rename and delete with its undo)
+- `the_popovers_dans_les_reglages_row_opens_the_sheet_for_that_network`
+  (with the shell; and "Réglages du Wi-Fi…")
+- `in_airplane_mode_the_bar_says_it_and_its_switch_turns_the_wifi_on_alone`
 - `screenshots_for_the_pull_request`, `screenshots_of_the_sheets`
   (ignored; `HOCUS_SHOTS=DIR`)
 

@@ -946,6 +946,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),
+        SectionId::Desktops => crate::desktops::outside(),
         _ => &[],
     }
 }

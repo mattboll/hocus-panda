@@ -64,7 +64,8 @@ pub struct Recent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Heard {
     Read {
-        snapshot: Snapshot,
+        /// Boxed: the other messages are small.
+        snapshot: Box<Snapshot>,
         why: Why,
         /// What the raw values were before, for an undo of each change.
         before: Vec<(Slot, Raw)>,
@@ -298,7 +299,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             .last_good()
             .and_then(|p| p.metadata().ok()?.modified().ok());
         (self.heard)(Heard::Read {
-            snapshot,
+            snapshot: Box::new(snapshot),
             why,
             before,
             before_keys,

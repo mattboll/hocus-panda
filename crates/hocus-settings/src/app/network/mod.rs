@@ -13,6 +13,7 @@
 
 mod sheet;
 mod view;
+mod vpn;
 
 use std::{
     sync::{Arc, Mutex, PoisonError, mpsc},
@@ -73,6 +74,8 @@ pub enum Msg {
     /// "Rejoindre…": a hidden network's sheet.
     Hidden,
     Sheet(sheet::Msg),
+    /// The VPNs' (6.6).
+    Vpn(vpn::Msg),
 }
 
 /// An answer of NetworkManager's thread, taken once (it may hold a
@@ -116,6 +119,11 @@ pub enum Choice {
         airplane: bool,
     },
     Forget(Forgot),
+    /// A VPN imported from a file.
+    Imported {
+        uuid: String,
+        name: String,
+    },
 }
 
 /// A control of the page that takes the keyboard, in `Tab`'s order.
@@ -140,6 +148,10 @@ pub enum Stop {
     SheetField(sheet::Field),
     SheetCancel,
     SheetConnect,
+    /// A VPN's "⋯", its switch, by its place; "Importer un fichier…".
+    VpnMenu(usize),
+    VpnSwitch(usize),
+    Import,
 }
 
 /// A saved network's password, unfolded.
@@ -181,6 +193,10 @@ pub struct State {
     to: Option<UnboundedSender<Message>>,
     /// A network whose sheet opens once it is around (`--join`).
     pub(super) joining: Option<String>,
+    /// The VPN whose "⋯" menu is open, and the one renamed (its name as
+    /// typed), by UUID.
+    pub(super) vpn_menu: Option<String>,
+    pub(super) renaming: Option<(String, String)>,
 }
 
 impl State {
@@ -474,6 +490,7 @@ impl App {
                 self.network_open_sheet(Sheet::hidden())
             }
             Msg::Sheet(msg) => self.network_sheet_update(msg),
+            Msg::Vpn(msg) => self.network_vpn_update(msg),
         }
     }
 
@@ -542,39 +559,75 @@ impl App {
                     self.network.password = None;
                 }
                 let name = kept.name.clone();
+                let vpn = kept.vpn;
+                // An import taken back: said, and nothing to redo.
+                if doing == Doing::Undo {
+                    let text = match lang {
+                        Lang::French => format!("Annulé : VPN « {name} » retiré."),
+                        Lang::English => format!("Undone: VPN \u{201c}{name}\u{201d} removed."),
+                    };
+                    return self.toast(text, ToastAction::None, UNDONE);
+                }
                 self.undo.push(Undo::Network(Choice::Forget(Forgot(kept))));
+                let gone = match (lang, vpn) {
+                    (Lang::French, true) => format!("VPN « {name} » supprimé"),
+                    (Lang::English, true) => format!("VPN \u{201c}{name}\u{201d} deleted"),
+                    (Lang::French, false) => format!("« {name} » oublié"),
+                    (Lang::English, false) => format!("\u{201c}{name}\u{201d} forgotten"),
+                };
                 if doing == Doing::Redo {
                     let text = match lang {
-                        Lang::French => format!("Rétabli : « {name} » oublié."),
-                        Lang::English => format!("Redone: \u{201c}{name}\u{201d} forgotten."),
+                        Lang::French => format!("Rétabli : {gone}."),
+                        Lang::English => format!("Redone: {gone}."),
                     };
                     return self.toast(text, ToastAction::None, UNDONE);
                 }
                 self.redo.clear();
-                let text = match lang {
-                    Lang::French => format!("« {name} » oublié."),
-                    Lang::English => format!("\u{201c}{name}\u{201d} forgotten."),
-                };
-                self.toast(text, ToastAction::Undo, TOAST)
+                self.toast(format!("{gone}."), ToastAction::Undo, TOAST)
             }
             Reply::Restored(kept) => {
                 let doing = take(&mut self.network.restoring, &kept.uuid).unwrap_or(Doing::Undo);
-                let name = kept.name.clone();
+                let vpn = if kept.vpn { "VPN " } else { "" };
+                let name = match lang {
+                    Lang::French => format!("{vpn}« {} »", kept.name),
+                    Lang::English => format!("{vpn}\u{201c}{}\u{201d}", kept.name),
+                };
                 let secrets = kept.secrets;
                 if doing == Doing::Undo {
                     self.redo.push(Undo::Network(Choice::Forget(Forgot(kept))));
                 }
                 let text = match (lang, secrets) {
-                    (Lang::French, true) => format!("Annulé : « {name} » revient."),
-                    (Lang::English, true) => format!("Undone: \u{201c}{name}\u{201d} is back."),
+                    (Lang::French, true) => format!("Annulé : {name} revient."),
+                    (Lang::English, true) => format!("Undone: {name} is back."),
                     (Lang::French, false) => {
-                        format!("Annulé : « {name} » revient, sans son mot de passe.")
+                        format!("Annulé : {name} revient, sans son mot de passe.")
                     }
                     (Lang::English, false) => {
-                        format!("Undone: \u{201c}{name}\u{201d} comes back, without its password.")
+                        format!("Undone: {name} comes back, without its password.")
                     }
                 };
                 self.toast(text, ToastAction::None, UNDONE)
+            }
+            Reply::Imported { uuid, name } => {
+                self.undo.push(Undo::Network(Choice::Imported {
+                    uuid,
+                    name: name.clone(),
+                }));
+                self.redo.clear();
+                let text = match lang {
+                    Lang::French => format!("VPN « {name} » ajouté."),
+                    Lang::English => format!("VPN \u{201c}{name}\u{201d} added."),
+                };
+                self.toast(text, ToastAction::Undo, TOAST)
+            }
+            Reply::NotImported { plugin, message } => {
+                let text = match (plugin.as_deref(), lang) {
+                    (Some("openvpn"), Lang::French) => "Le module OpenVPN de NetworkManager n’est pas installé (network-manager-openvpn).".to_owned(),
+                    (Some("openvpn"), Lang::English) => "NetworkManager's OpenVPN plugin is not installed (network-manager-openvpn).".to_owned(),
+                    (_, Lang::French) => format!("NetworkManager n’a pas importé le fichier : {message}"),
+                    (_, Lang::English) => format!("NetworkManager did not import the file: {message}"),
+                };
+                self.toast(text, ToastAction::None, TOAST)
             }
             Reply::Refused { denied, message } => {
                 self.network.forgetting.clear();
@@ -627,8 +680,18 @@ impl App {
                 }
                 self.light = Some(("network.wifi", Instant::now()));
             }
+            Choice::Imported { uuid, .. } => {
+                // Taken back: deleted (its toast once it is); not redone.
+                if !redo {
+                    self.network.forgetting.push((uuid.clone(), Doing::Undo));
+                    self.network.ask(Ask::Forget { uuid: uuid.clone() });
+                }
+                return Task::none();
+            }
             Choice::Forget(Forgot(kept)) => {
-                self.network_sub(true);
+                if !kept.vpn {
+                    self.network_sub(true);
+                }
                 if redo {
                     self.network
                         .forgetting
@@ -747,6 +810,11 @@ impl App {
     }
 }
 
+/// The message that closes a VPN's open menu.
+pub(super) fn close_vpn_menu() -> Msg {
+    Msg::Vpn(vpn::Msg::CloseMenu)
+}
+
 /// The message that closes the sheet's open menu.
 pub(super) fn close_sheet_menu() -> Msg {
     Msg::Sheet(sheet::Msg::CloseMenu)
@@ -763,6 +831,12 @@ impl App {
             && sheet.menu.take().is_some()
         {
             return Some(Task::none());
+        }
+        if self.network.vpn_menu.take().is_some() {
+            return Some(Task::none());
+        }
+        if self.network.renaming.take().is_some() {
+            return Some(operation::focus("nothing"));
         }
         if self.network.sheet.is_some() {
             self.network_close_sheet();
@@ -864,6 +938,10 @@ impl App {
         if self.network.wifi_on() && !self.network.around().is_empty() {
             stops.push(Stop::Around);
         }
+        for i in 0..self.network_vpns().len() {
+            stops.extend([Stop::VpnMenu(i), Stop::VpnSwitch(i)]);
+        }
+        stops.push(Stop::Import);
         stops
     }
 
@@ -953,6 +1031,18 @@ impl App {
                 self.network_update(msg)
             }
             Stop::Hidden => self.network_update(Msg::Hidden),
+            Stop::VpnMenu(i) | Stop::VpnSwitch(i) => {
+                let Some(vpn) = self.network_vpns().get(i).cloned() else {
+                    return Task::none();
+                };
+                let msg = if matches!(stop, Stop::VpnMenu(_)) {
+                    vpn::Msg::Menu(vpn.uuid)
+                } else {
+                    vpn::Msg::Switch(vpn.uuid)
+                };
+                self.network_update(Msg::Vpn(msg))
+            }
+            Stop::Import => self.network_update(Msg::Vpn(vpn::Msg::Import)),
             Stop::SheetCancel => self.network_update(Msg::Sheet(sheet::Msg::Cancel)),
             Stop::SheetConnect => self.network_update(Msg::Sheet(sheet::Msg::Connect)),
             Stop::SheetField(_) => Task::none(),
@@ -988,6 +1078,10 @@ impl App {
         (!self.network.sub && self.network.wifi_on() && details.network.scanning)
             || details.network.connecting_to().is_some()
             || self.network.sheet.as_ref().is_some_and(Sheet::waiting)
+            || details
+                .vpns
+                .iter()
+                .any(|v| v.state == hocus_network::model::VpnState::Connecting)
     }
 }
 
@@ -999,6 +1093,7 @@ fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
         Choice::Wifi { on: true, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
         Choice::Wifi { on: false, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
         Choice::Forget(_) => w("Réseau oublié", "Network forgotten"),
+        Choice::Imported { .. } => w("VPN ajouté", "VPN added"),
     }
     .get(lang);
     let back = match choice {
@@ -1007,6 +1102,7 @@ fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
         Choice::Wifi { on: true, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
         Choice::Wifi { on: false, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
         Choice::Forget(_) => w("réseau revenu", "network back"),
+        Choice::Imported { .. } => w("VPN retiré", "VPN removed"),
     }
     .get(lang);
     match (doing, lang) {

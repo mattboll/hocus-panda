@@ -49,8 +49,8 @@ use zbus::{
 use crate::{
     Ask, Ca, Join,
     model::{
-        AccessPoint, Attempt, Current, Details, Failure, Network, Progress, Saved, Security, Wifi,
-        Wired, listed, name_of,
+        AccessPoint, Attempt, Current, Details, Failure, Network, Progress, Saved, Security, Vpn,
+        VpnKind, VpnState, Wifi, Wired, listed, name_of,
     },
     secret::Secret,
 };
@@ -130,6 +130,14 @@ pub enum Reply {
     /// A change NetworkManager did not make: refused by polkit
     /// (`denied`), or failed; its message.
     Refused { denied: bool, message: String },
+    /// A VPN imported from a file ([`Ask::Import`]), off.
+    Imported { uuid: String, name: String },
+    /// A VPN's file not imported: `plugin` names the NetworkManager plugin
+    /// missing (`openvpn`), if that is why; nmcli's message.
+    NotImported {
+        plugin: Option<String>,
+        message: String,
+    },
 }
 
 /// A connection forgotten: its settings with what secrets could be read,
@@ -141,6 +149,8 @@ pub struct Kept {
     pub connected: bool,
     /// Every secret it has was read: it comes back with its password.
     pub secrets: bool,
+    /// A VPN, not a Wi-Fi network.
+    pub vpn: bool,
     settings: Settings,
 }
 
@@ -319,6 +329,12 @@ struct Cache {
     actives: HashMap<String, Props>,
     /// The saved connections' settings (no secrets), by path.
     saved: HashMap<String, Settings>,
+    /// The VPNs' active connections: since when they are on (seconds since
+    /// the epoch), their IPv4 configuration; why a VPN last failed, by
+    /// its UUID.
+    vpn_since: HashMap<String, u64>,
+    vpn_ip4: HashMap<String, Props>,
+    vpn_failed: HashMap<String, u32>,
 }
 
 impl Cache {
@@ -524,6 +540,16 @@ impl Client {
 
     async fn load_active(&mut self, path: &str) {
         if let Ok(props) = self.get_all(path, ACTIVE).await {
+            if vpn_type(&props) {
+                if get::<u32>(&props, "State") == Some(AC_ACTIVATED) {
+                    self.cache
+                        .vpn_since
+                        .entry(path.to_owned())
+                        .or_insert_with(now);
+                }
+                let ip4 = self.config(&props, "Ip4Config", IP4).await;
+                self.cache.vpn_ip4.insert(path.to_owned(), ip4.1);
+            }
             self.cache.actives.insert(path.to_owned(), props);
         }
     }
@@ -728,7 +754,13 @@ impl Client {
         if interface == ACTIVE
             && let Some(active) = self.cache.actives.get_mut(path)
         {
+            let config = changed.contains_key("Ip4Config");
             active.extend(changed);
+            if config && vpn_type(active) {
+                let props = active.clone();
+                let ip4 = self.config(&props, "Ip4Config", IP4).await;
+                self.cache.vpn_ip4.insert(path.to_owned(), ip4.1);
+            }
         }
     }
 
@@ -761,6 +793,28 @@ impl Client {
     async fn active_state(&mut self, path: &str, state: u32, reason: u32) {
         if let Some(active) = self.cache.actives.get_mut(path) {
             active.insert("State".to_owned(), OwnedVariant::from(state));
+            // A VPN: since when it is on, why it failed.
+            if vpn_type(active) {
+                let uuid = get::<String>(active, "Uuid").unwrap_or_default();
+                match state {
+                    AC_ACTIVATED => {
+                        self.cache.vpn_since.insert(path.to_owned(), now());
+                        self.cache.vpn_failed.remove(&uuid);
+                        let props = active.clone();
+                        let ip4 = self.config(&props, "Ip4Config", IP4).await;
+                        self.cache.vpn_ip4.insert(path.to_owned(), ip4.1);
+                    }
+                    AC_DEACTIVATED => {
+                        self.cache.vpn_since.remove(path);
+                        // Not by the user, nor because it went.
+                        if !matches!(reason, 0..=2 | 11) {
+                            tracing::info!(reason, "a VPN failed");
+                            self.cache.vpn_failed.insert(uuid, reason);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
         if self.tracking.active.as_deref() != Some(path) {
             return;
@@ -872,6 +926,32 @@ impl Client {
                 return;
             }
             Ask::Forget { uuid } => return self.forget(&uuid).await,
+            Ask::Activate { uuid } => {
+                self.cache.vpn_failed.remove(&uuid);
+                let done = self.activate_vpn(&uuid).await;
+                return self.answered(done, "activate");
+            }
+            Ask::Deactivate { uuid } => {
+                let done = self.deactivate(&uuid).await;
+                return self.answered(done, "deactivate");
+            }
+            Ask::Rename { uuid, name } => {
+                let done = self
+                    .update(&uuid, |settings| {
+                        settings
+                            .entry("connection".to_owned())
+                            .or_default()
+                            .insert("id".to_owned(), owned(name.as_str())?);
+                        Ok(())
+                    })
+                    .await;
+                return self.answered(done, "rename");
+            }
+            Ask::Import {
+                file,
+                kind,
+                credentials,
+            } => return self.import(file, kind, credentials).await,
             Ask::Restore(kept) => return self.restore(kept).await,
             ask => ask,
         };
@@ -916,12 +996,158 @@ impl Client {
             | Ask::SetPassword { .. }
             | Ask::ReadPassword { .. }
             | Ask::Forget { .. }
-            | Ask::Restore(_) => {}
+            | Ask::Restore(_)
+            | Ask::Activate { .. }
+            | Ask::Deactivate { .. }
+            | Ask::Rename { .. }
+            | Ask::Import { .. } => {}
             Ask::Join {
                 ssid,
                 hidden,
                 security,
             } => self.join_new(&device, ssid, hidden, security).await,
+        }
+    }
+
+    /// The VPN `uuid` turned on (no device, no specific object).
+    async fn activate_vpn(&self, uuid: &str) -> zbus::Result<()> {
+        let path = self
+            .cache
+            .by_uuid(uuid)
+            .map(|(p, _)| p.clone())
+            .ok_or_else(|| zbus::Error::Failure(format!("no connection {uuid}")))?;
+        let (connection, none) = (
+            ObjectPath::try_from(path.as_str())?,
+            ObjectPath::try_from("/")?,
+        );
+        self.call(
+            ROOT,
+            NM,
+            "ActivateConnection",
+            &(connection, none.clone(), none),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// The connection `uuid`'s active connection turned off.
+    async fn deactivate(&self, uuid: &str) -> zbus::Result<()> {
+        let active = self
+            .cache
+            .actives
+            .iter()
+            .find(|(_, a)| get::<String>(a, "Uuid").as_deref() == Some(uuid))
+            .map(|(p, _)| p.clone())
+            .ok_or_else(|| zbus::Error::Failure(format!("{uuid} is not on")))?;
+        let active = ObjectPath::try_from(active.as_str())?;
+        self.call(ROOT, NM, "DeactivateConnection", &(active,))
+            .await?;
+        Ok(())
+    }
+
+    /// A VPN's file imported with NetworkManager's own importers (`nmcli
+    /// connection import`, its plugins'), then made not to connect by
+    /// itself, with the user name and password given for an OpenVPN file
+    /// that asks them.
+    async fn import(
+        &mut self,
+        file: std::path::PathBuf,
+        kind: &'static str,
+        credentials: Option<(String, Secret)>,
+    ) {
+        let program = std::env::var("HOCUS_NMCLI").unwrap_or_else(|_| "nmcli".to_owned());
+        let path = file.clone();
+        let ran = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(&program)
+                .args(["connection", "import", "type", kind, "file"])
+                .arg(&path)
+                .stdin(std::process::Stdio::null())
+                .output()
+        })
+        .await;
+        let output = match ran {
+            Ok(Ok(output)) => output,
+            Ok(Err(err)) => {
+                return self.reply(Reply::NotImported {
+                    plugin: None,
+                    message: format!("nmcli: {err}"),
+                });
+            }
+            Err(err) => {
+                return self.reply(Reply::NotImported {
+                    plugin: None,
+                    message: err.to_string(),
+                });
+            }
+        };
+        let said = String::from_utf8_lossy(&output.stdout).into_owned();
+        let errors = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let uuid = said
+            .split('(')
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(str::to_owned)
+            .filter(|u| u.len() >= 32);
+        let Some(uuid) = uuid.filter(|_| output.status.success()) else {
+            tracing::warn!(errors, "nmcli did not import the VPN");
+            let plugin = errors
+                .to_lowercase()
+                .contains("plugin")
+                .then(|| kind.to_owned());
+            return self.reply(Reply::NotImported {
+                plugin,
+                message: if errors.is_empty() { said } else { errors },
+            });
+        };
+        // Found by its UUID: the signal of its coming may not be read yet.
+        let found = self
+            .call(
+                SETTINGS,
+                SETTINGS_IFACE,
+                "GetConnectionByUuid",
+                &(uuid.as_str(),),
+            )
+            .await
+            .and_then(|r| r.body().deserialize::<OwnedObjectPath>());
+        let path = match found {
+            Ok(path) => path.as_str().to_owned(),
+            Err(err) => return self.reply(refused(&err)),
+        };
+        let updated = async {
+            let mut settings = self.settings(&path).await?;
+            settings
+                .entry("connection".to_owned())
+                .or_default()
+                .insert("autoconnect".to_owned(), owned(false)?);
+            if let Some((user, password)) = &credentials {
+                let vpn = settings.entry("vpn".to_owned()).or_default();
+                let mut data: HashMap<String, String> = vpn
+                    .get("data")
+                    .and_then(|v| v.try_clone().ok())
+                    .and_then(|v| HashMap::<String, String>::try_from(v).ok())
+                    .unwrap_or_default();
+                data.insert("username".to_owned(), user.clone());
+                data.insert("password-flags".to_owned(), "0".to_owned());
+                vpn.insert("data".to_owned(), owned(data)?);
+                let secrets: HashMap<String, String> =
+                    [("password".to_owned(), password.as_str().to_owned())]
+                        .into_iter()
+                        .collect();
+                vpn.insert("secrets".to_owned(), owned(secrets)?);
+            }
+            let name = text(&settings, "connection", "id").unwrap_or_default();
+            let args: HashMap<&str, Variant<'_>> = HashMap::new();
+            self.call(&path, CONNECTION, "Update2", &(settings, TO_DISK, args))
+                .await?;
+            Ok::<_, zbus::Error>(name)
+        }
+        .await;
+        match updated {
+            Ok(name) => {
+                tracing::info!(kind, "a VPN imported");
+                self.reply(Reply::Imported { uuid, name });
+            }
+            Err(err) => self.reply(refused(&err)),
         }
     }
 
@@ -1021,12 +1247,14 @@ impl Client {
             tracing::warn!(%err, "NetworkManager did not delete the connection");
             return self.reply(refused(&err));
         }
-        tracing::info!(connected, secrets, "a connection forgotten");
+        let vpn = is_vpn(&settings);
+        tracing::info!(connected, secrets, vpn, "a connection forgotten");
         self.reply(Reply::Forgotten(Arc::new(Kept {
             uuid: uuid.to_owned(),
             name,
             connected,
             secrets,
+            vpn,
             settings,
         })));
     }
@@ -1059,7 +1287,19 @@ impl Client {
             }
         };
         tracing::info!(connected = kept.connected, "a connection given back");
-        if kept.connected
+        if kept.connected && kept.vpn {
+            let none = ObjectPath::try_from("/").ok();
+            if let Some(none) = none {
+                let _ = self
+                    .call(
+                        ROOT,
+                        NM,
+                        "ActivateConnection",
+                        &(&added, none.clone(), none),
+                    )
+                    .await;
+            }
+        } else if kept.connected
             && let Some(device) = self.wifi().map(|(p, _)| p.to_owned())
             && let (Ok(device), Ok(none)) = (
                 ObjectPath::try_from(device.as_str()),
@@ -1490,6 +1730,51 @@ impl View<'_> {
                 })
             })
             .collect();
+        let vpns = cache
+            .saved
+            .values()
+            .filter(|s| is_vpn(s))
+            .map(|settings| {
+                let uuid = text(settings, "connection", "uuid").unwrap_or_default();
+                let kind = if text(settings, "connection", "type").as_deref() == Some("wireguard") {
+                    VpnKind::WireGuard
+                } else {
+                    let service = text(settings, "vpn", "service-type").unwrap_or_default();
+                    if service.contains("openvpn") {
+                        VpnKind::OpenVpn
+                    } else {
+                        VpnKind::Other(service.rsplit('.').next().unwrap_or_default().to_owned())
+                    }
+                };
+                let active = cache
+                    .actives
+                    .iter()
+                    .find(|(_, a)| get::<String>(a, "Uuid").as_deref() == Some(uuid.as_str()));
+                let state = match active.map(|(p, a)| (p, get::<u32>(a, "State").unwrap_or(0))) {
+                    Some((path, AC_ACTIVATED)) => VpnState::On {
+                        since: cache.vpn_since.get(path).copied(),
+                        address: cache.vpn_ip4.get(path).and_then(|ip4| {
+                            dicts(ip4, "AddressData")
+                                .first()
+                                .and_then(|a| get::<String>(a, "address"))
+                        }),
+                    },
+                    Some((_, 0 | 1)) => VpnState::Connecting,
+                    _ => VpnState::Off,
+                };
+                Vpn {
+                    name: text(settings, "connection", "id").unwrap_or_default(),
+                    autoconnect: settings
+                        .get("connection")
+                        .and_then(|c| get::<bool>(c, "autoconnect"))
+                        .unwrap_or(true),
+                    failed: cache.vpn_failed.get(&uuid).copied(),
+                    uuid,
+                    kind,
+                    state,
+                }
+            })
+            .collect();
         let wired = cache
             .devices
             .iter()
@@ -1514,12 +1799,36 @@ impl View<'_> {
             });
         Details {
             wired,
+            vpns,
             hardware_enabled: get::<bool>(&cache.root, "WirelessHardwareEnabled").unwrap_or(true),
             network,
             current,
             saved,
         }
     }
+}
+
+/// Now, in seconds since the epoch.
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Whether an active connection is a VPN's.
+fn vpn_type(active: &Props) -> bool {
+    matches!(
+        get::<String>(active, "Type").as_deref(),
+        Some("vpn" | "wireguard")
+    )
+}
+
+/// Whether saved settings are a VPN's.
+fn is_vpn(settings: &Settings) -> bool {
+    matches!(
+        text(settings, "connection", "type").as_deref(),
+        Some("vpn" | "wireguard")
+    )
 }
 
 /// What a saved Wi-Fi connection asks, from its settings.
@@ -1703,6 +2012,7 @@ fn snapshot(cache: &Cache, scanning: bool, attempt: Option<Attempt>) -> Network 
         networks: listed(&aps, saved),
         scanning: scanning && enabled,
         attempt,
+        airplane: false,
     }
 }
 

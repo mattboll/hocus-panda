@@ -100,6 +100,14 @@ const BUTTON_TEXT: f32 = 13.0;
 /// A password's dots.
 const DOT: f32 = 2.6;
 const DOT_ADVANCE: f32 = 8.0;
+/// The Settings' link at the bottom, as the sound popover's (6.5).
+const LINK: f32 = 36.0;
+const LINK_TILE: f32 = 24.0;
+const LINK_TILE_RADIUS: f32 = 7.0;
+const LINK_TEXT: f32 = 13.5;
+const LINK_RADIUS: f32 = 8.0;
+const LINK_TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.07);
+const LINK_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
 /// A notch of a mouse's wheel scrolls two rows.
 const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
 
@@ -123,6 +131,8 @@ enum Target {
     Eye,
     Cancel,
     Join,
+    /// "Réglages du Wi-Fi…" (6.6).
+    Settings,
 }
 
 /// What it keeps between draws and between opening and closing: the
@@ -390,6 +400,9 @@ struct Layout {
     rows: Vec<(f32, f32)>,
     /// The unfolded row, and its error's lines.
     unfolded: Option<(usize, usize)>,
+    /// "Réglages du Wi-Fi…": its divider's top, its row's.
+    link_rule: f32,
+    link: f32,
     end: f32,
 }
 
@@ -478,6 +491,9 @@ impl Layout {
                 list,
             }
         });
+        // The Settings' link, last.
+        let link_rule = y + RULE;
+        let link = link_rule + 1.0 + RULE;
         Self {
             switch: network.hardware,
             wired,
@@ -487,7 +503,9 @@ impl Layout {
             section,
             rows: tops,
             unfolded,
-            end: y,
+            link_rule,
+            link,
+            end: link + LINK,
         }
     }
 
@@ -650,6 +668,7 @@ impl<Message> canvas::Program<Message> for Panel {
             };
             drawn.header(&mut frame);
             drawn.blocks(&mut frame);
+            drawn.link(&mut frame);
             let mut geometry = vec![];
             if let Some(shown) = layout.list() {
                 let view = shown.view;
@@ -852,6 +871,10 @@ impl Panel {
             Target::Eye => layout.form(scroll, (cancel, join))?.eye,
             Target::Cancel => layout.form(scroll, (cancel, join))?.cancel,
             Target::Join => layout.form(scroll, (cancel, join))?.join,
+            Target::Settings => Rectangle::new(
+                Point::new(LEFT - ROW_OUT, layout.link),
+                Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, LINK),
+            ),
         })
     }
 
@@ -862,8 +885,13 @@ impl Panel {
         match target {
             Some(Target::Switch) => {
                 let on = ui(|ui| ui.switch.flip(network.enabled, Instant::now(), self.motion));
+                // In airplane mode, the Wi-Fi alone comes back (6.6).
+                if on {
+                    network::unblock_wifi();
+                }
                 network::ask(Ask::Enable(on));
             }
+            Some(Target::Settings) => super::session::open_settings(Some("network")),
             Some(Target::Disconnect) => network::ask(Ask::Disconnect),
             Some(Target::Portal) => {
                 if let Some(uri) = network.check_uri.clone() {
@@ -875,7 +903,12 @@ impl Panel {
                 let Some(row) = state.rows.get(i).cloned() else {
                     return;
                 };
-                if busy || !row.security.joinable() {
+                if busy {
+                    return;
+                }
+                // 802.1X and WEP: their sheet in the Settings (6.6).
+                if !row.security.joinable() {
+                    super::session::open_settings_join(&row.name);
                     return;
                 }
                 let unfold = matches!(row.security, Security::Psk { .. }) && !row.saved;
@@ -1074,11 +1107,12 @@ fn targets(layout: &Layout, ui: &Ui, rows: &[Wifi], network: &Network) -> Vec<Ta
         order.push(Target::Portal);
     }
     if layout.list().is_none() {
+        order.push(Target::Settings);
         return order;
     }
     let busy = network.connecting_to().is_some();
-    for (i, row) in rows.iter().enumerate() {
-        if row.security.joinable() && !busy {
+    for i in 0..rows.len() {
+        if !busy {
             order.push(Target::Row(i));
         }
         if layout.unfolded.is_some_and(|(u, _)| u == i) {
@@ -1088,6 +1122,7 @@ fn targets(layout: &Layout, ui: &Ui, rows: &[Wifi], network: &Network) -> Vec<Ta
             }
         }
     }
+    order.push(Target::Settings);
     order
 }
 
@@ -1173,7 +1208,9 @@ impl Drawn<'_> {
             ));
         }
         if let Some(top) = self.layout.note {
-            let note = if network.hardware {
+            let note = if network.airplane {
+                words.airplane_is_on()
+            } else if network.hardware {
                 words.wifi_is_off()
             } else {
                 words.no_adapter()
@@ -1223,6 +1260,53 @@ impl Drawn<'_> {
         }
     }
 
+    /// "Réglages du Wi-Fi…": the sliders' glyph in its tile, its words, a
+    /// chevron; lit under the pointer (6.5's link).
+    fn link(&self, f: &mut Frame) {
+        kit::rule(f, self.layout.link_rule);
+        let Some(rect) = self.shape(Target::Settings) else {
+            return;
+        };
+        if self.hover(Target::Settings) {
+            f.fill(&rounded(rect, LINK_RADIUS), LINK_HOVER);
+        }
+        let middle = rect.center_y();
+        let tile = Rectangle::new(
+            Point::new(LEFT, middle - LINK_TILE / 2.0),
+            Size::new(LINK_TILE, LINK_TILE),
+        );
+        f.fill(&rounded(tile, LINK_TILE_RADIUS), LINK_TILE_FILL);
+        let at = Point::new(tile.x + 4.5, tile.y + 4.5);
+        let s = 15.0 / 24.0;
+        for segment in [
+            [(4.0, 7.0), (13.0, 7.0)],
+            [(17.0, 7.0), (20.0, 7.0)],
+            [(15.0, 4.5), (15.0, 9.5)],
+            [(4.0, 17.0), (7.0, 17.0)],
+            [(11.0, 17.0), (20.0, 17.0)],
+            [(9.0, 14.5), (9.0, 19.5)],
+        ] {
+            polyline(f, at, s, 2.2, DIM.get(), &segment);
+        }
+        let mut words = text(
+            self.words().wifi_settings().to_owned(),
+            Point::new(LEFT + LINK_TILE + ICON_GAP, middle),
+            LINK_TEXT,
+            TEXT.get(),
+            Alignment::Left,
+        );
+        words.font = kit::MANROPE_SEMIBOLD;
+        f.fill_text(words);
+        polyline(
+            f,
+            Point::new(RIGHT - 14.0, middle - 7.0),
+            14.0 / 24.0,
+            2.4,
+            FAINT.get(),
+            &[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)],
+        );
+    }
+
     /// The network connected: its block, its name, its state, Disconnect.
     fn current(&self, f: &mut Frame, top: f32, height: f32, current: &Wifi) {
         let words = self.words();
@@ -1269,7 +1353,7 @@ impl Drawn<'_> {
                 continue;
             };
             let unfolded = self.layout.unfolded.is_some_and(|(u, _)| u == i);
-            let joinable = row.security.joinable() && busy.is_none();
+            let joinable = busy.is_none();
             if unfolded {
                 if let Some(block) = self.layout.block(i, self.ui.scroll) {
                     kit::row_fill(f, block, false, true);
@@ -1277,8 +1361,7 @@ impl Drawn<'_> {
             } else {
                 kit::row_fill(f, rect, false, joinable && self.hover(Target::Row(i)));
             }
-            let enterprise = !row.security.joinable();
-            let colour = if enterprise { FAINT } else { TEXT };
+            let colour = TEXT;
             let middle = rect.center_y();
             let icon = Point::new(rect.x + ROW_PAD, middle - ICON / 2.0);
             wifi(f, icon, ICON, row.bars(), colour.get(), false, 1.0);
@@ -1611,6 +1694,27 @@ impl Panel {
     }
 }
 
+/// Lines through `points` (SVG units from `at`, `scale` px a unit).
+fn polyline(
+    f: &mut Frame,
+    at: Point,
+    scale: f32,
+    width: f32,
+    colour: Color,
+    points: &[(f32, f32)],
+) {
+    let p = |(x, y): (f32, f32)| Point::new(at.x + x * scale, at.y + y * scale);
+    let path = Path::new(|b| {
+        if let Some((first, rest)) = points.split_first() {
+            b.move_to(p(*first));
+            for point in rest {
+                b.line_to(p(*point));
+            }
+        }
+    });
+    f.stroke(&path, stroke(width * scale, colour));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1665,10 +1769,10 @@ mod tests {
     fn its_height_follows_what_it_shows() {
         let now = Instant::now();
         let mut ui = Ui::default();
-        // Off: the header and its line.
+        // Off: the header and its line, then the Settings' link (45 px).
         let mut off = network(&[]);
         off.enabled = false;
-        assert_eq!(Layout::of(&off, &ui, &[], now).height(), 90);
+        assert_eq!(Layout::of(&off, &ui, &[], now).height(), 90 + 45);
         // Eight networks: six and a peek, the list at its most.
         let eight: Vec<(&str, u8)> = ["a", "b", "c", "d", "e", "f", "g", "h"]
             .iter()

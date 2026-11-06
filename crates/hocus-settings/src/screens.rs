@@ -221,6 +221,8 @@ pub enum Said {
         desktop: usize,
         windows: Vec<u64>,
     },
+    /// The applications with a window open, by their ids.
+    Apps(Vec<String>),
 }
 
 /// A bar's form as the compositor says it.
@@ -359,6 +361,13 @@ pub fn read_line(line: &str) -> Option<Said> {
             to: at(removed, "to")?,
             windows: numbers(removed.get("windows")),
         });
+    }
+    if let Some(apps) = value.get("apps").and_then(|a| a.as_array()) {
+        return Some(Said::Apps(
+            apps.iter()
+                .filter_map(|a| a.as_str().map(ToOwned::to_owned))
+                .collect(),
+        ));
     }
     if let Some(restored) = value.get("desktop-restored") {
         return Some(Said::DesktopRestored {
