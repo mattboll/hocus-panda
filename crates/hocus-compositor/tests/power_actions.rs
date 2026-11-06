@@ -24,7 +24,9 @@ use std::{
 use common::{WAIT, open_with};
 use hocus_compositor::{
     Authenticator, Config, Headless, HeadlessConfig, Lid, LockState, OutputSpec, PowerButton,
-    PowerDelay, RendererChoice, away::Shown, away::power::Saver,
+    PowerDelay, RendererChoice,
+    away::Shown,
+    away::power::{LidRead, Saver},
 };
 
 const CURTAIN: Duration = Duration::from_secs(10);
@@ -354,6 +356,171 @@ fn the_lid_does_what_power_lid_says_and_docked_only_turns_the_panel_off() -> any
     Ok(())
 }
 
+/// The laptop alone, `lid = "suspend"`: closed, the panel off and logind
+/// asked to sleep. The lid opened while asleep, its event never came
+/// (#730): as the machine wakes the lid is read again (UPower's
+/// `LidIsClosed`, no signal), the panel on, still locked, no new sleep.
+#[test]
+fn the_lid_opened_while_asleep_is_read_again_as_the_machine_wakes() -> anyhow::Result<()> {
+    let Some(system) = System::start(Services {
+        lid: Some(false),
+        ..Services::battery(80.0)
+    })?
+    else {
+        return Ok(());
+    };
+    let mut set = config();
+    set.power.lid = Lid::Suspend;
+    let mut hp = system.compositor(&["1920x1200"], set, None)?;
+    hp.set_internal("HEADLESS-1");
+    system.wait_ready(&mut hp)?;
+    system.change_quietly(|s| s.lid = Some(true));
+    hp.lid(true);
+    system.wait_call(&mut hp, "Suspend false")?;
+    assert!(hp.screens_on().is_empty());
+    system.prepare_for_sleep(true)?;
+    let locked = hp.dispatch_until(WAIT, |hp| hp.lock_state() == LockState::Locked)?;
+    anyhow::ensure!(locked, "never locked");
+    system.change_quietly(|s| s.lid = Some(false));
+    system.prepare_for_sleep(false)?;
+    let read = hp.dispatch_until(WAIT, |hp| {
+        hp.state().lid_read_state() == LidRead::Known && !hp.state().lid_closed()
+    })?;
+    anyhow::ensure!(read, "the lid not read again: {}", hp.state().away_said());
+    assert_eq!(hp.screens_on(), ["HEADLESS-1"]);
+    assert_eq!(hp.lock_state(), LockState::Locked);
+    assert_eq!(system.calls(), ["Suspend false"]);
+    Ok(())
+}
+
+/// Woken with the lid still closed (UPower says so as it is read again):
+/// the panel off again, nothing else asked (no new sleep). UPower then
+/// says it opened: the panel on, whether libinput's event comes or not.
+#[test]
+fn woken_with_the_lid_closed_the_panel_waits_for_it_to_open() -> anyhow::Result<()> {
+    let Some(system) = System::start(Services {
+        lid: Some(false),
+        ..Services::battery(80.0)
+    })?
+    else {
+        return Ok(());
+    };
+    let mut set = config();
+    set.power.lid = Lid::Suspend;
+    let mut hp = system.compositor(&["1920x1200"], set, None)?;
+    hp.set_internal("HEADLESS-1");
+    system.wait_ready(&mut hp)?;
+    system.change_quietly(|s| s.lid = Some(true));
+    hp.lid(true);
+    system.wait_call(&mut hp, "Suspend false")?;
+    system.prepare_for_sleep(true)?;
+    let locked = hp.dispatch_until(WAIT, |hp| hp.lock_state() == LockState::Locked)?;
+    anyhow::ensure!(locked, "never locked");
+    system.prepare_for_sleep(false)?;
+    let read = hp.dispatch_until(WAIT, |hp| hp.state().lid_read_state() == LidRead::Known)?;
+    anyhow::ensure!(read, "the lid not read again: {}", hp.state().away_said());
+    common::wait(&mut hp, Duration::from_millis(200))?;
+    assert!(hp.state().lid_closed());
+    assert!(hp.screens_on().is_empty());
+    assert_eq!(
+        system.calls(),
+        ["Suspend false"],
+        "no sleep again at waking"
+    );
+    system.change(|s| s.lid = Some(false))?;
+    let open = hp.dispatch_until(WAIT, |hp| hp.screens_on() == ["HEADLESS-1"])?;
+    anyhow::ensure!(open, "UPower's opening not taken");
+    assert!(!hp.state().lid_closed());
+    Ok(())
+}
+
+/// Nothing can say the lid's state after waking (no `LidIsClosed`, no
+/// ACPI on a test's bus): the laptop's screen, the only one, is lit all
+/// the same rather than left black on a state from before the sleep.
+#[test]
+fn unsure_of_the_lid_after_waking_the_only_screen_is_lit() -> anyhow::Result<()> {
+    let Some(system) = System::start(Services::battery(80.0))? else {
+        return Ok(());
+    };
+    let mut set = config();
+    set.power.lid = Lid::Suspend;
+    let mut hp = system.compositor(&["1920x1200"], set, None)?;
+    hp.set_internal("HEADLESS-1");
+    system.wait_ready(&mut hp)?;
+    hp.lid(true);
+    system.wait_call(&mut hp, "Suspend false")?;
+    assert!(hp.screens_on().is_empty());
+    system.prepare_for_sleep(true)?;
+    let locked = hp.dispatch_until(WAIT, |hp| hp.lock_state() == LockState::Locked)?;
+    anyhow::ensure!(locked, "never locked");
+    system.prepare_for_sleep(false)?;
+    let lit = hp.dispatch_until(WAIT, |hp| hp.screens_on() == ["HEADLESS-1"])?;
+    anyhow::ensure!(lit, "the only screen left off: {}", hp.state().away_said());
+    common::wait(&mut hp, Duration::from_millis(200))?;
+    assert_eq!(hp.screens_on(), ["HEADLESS-1"]);
+    assert_eq!(hp.state().lid_read_state(), LidRead::Asked);
+    assert_eq!(system.calls(), ["Suspend false"]);
+    Ok(())
+}
+
+/// Back from another terminal (the tty's `ActivateSession`), the lid is
+/// read again: opened meanwhile without its event, the panel comes on.
+/// Docked, the laptop's screen is not lit before the answer.
+#[test]
+fn back_from_another_terminal_the_lid_is_read_again() -> anyhow::Result<()> {
+    let Some(system) = System::start(Services {
+        lid: Some(false),
+        ..Services::battery(80.0)
+    })?
+    else {
+        return Ok(());
+    };
+    let mut set = config();
+    set.power.lid = Lid::ScreenOff;
+    let mut hp = system.compositor(&["1920x1200"], set, None)?;
+    hp.set_internal("HEADLESS-1");
+    system.wait_ready(&mut hp)?;
+    system.change_quietly(|s| s.lid = Some(true));
+    hp.lid(true);
+    assert!(hp.screens_on().is_empty());
+    system.change_quietly(|s| s.lid = Some(false));
+    hp.session_back();
+    let open = hp.dispatch_until(WAIT, |hp| {
+        !hp.state().lid_closed() && hp.screens_on() == ["HEADLESS-1"]
+    })?;
+    anyhow::ensure!(open, "the lid not read again: {}", hp.state().away_said());
+    assert_eq!(hp.lock_state(), LockState::Unlocked);
+    Ok(())
+}
+
+/// With another screen on, a lid not yet read again keeps the laptop's
+/// screen off (it is not the only one): read closed, it stays off.
+#[test]
+fn docked_the_lid_read_again_closed_keeps_the_panel_off() -> anyhow::Result<()> {
+    let Some(system) = System::start(Services {
+        lid: Some(true),
+        ..Services::battery(80.0).on_ac()
+    })?
+    else {
+        return Ok(());
+    };
+    let mut set = config();
+    set.power.lid = Lid::Suspend;
+    let mut hp = system.compositor(&["1920x1200", "2560x1440"], set, None)?;
+    hp.set_internal("HEADLESS-1");
+    system.wait_ready(&mut hp)?;
+    hp.lid(true);
+    common::wait(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(hp.screens_on(), ["HEADLESS-2"]);
+    hp.session_back();
+    assert_eq!(hp.screens_on(), ["HEADLESS-2"], "lit before the answer");
+    let read = hp.dispatch_until(WAIT, |hp| hp.state().lid_read_state() == LidRead::Known)?;
+    anyhow::ensure!(read, "the lid not read again: {}", hp.state().away_said());
+    assert_eq!(hp.screens_on(), ["HEADLESS-2"]);
+    assert!(system.calls().is_empty(), "{:?}", system.calls());
+    Ok(())
+}
+
 /// Without logind's inhibitor (refused), the lid and the button are the
 /// system's: the panel goes off, nothing else; the button's key goes on.
 #[test]
@@ -663,6 +830,8 @@ struct Services {
     refuse_handles: bool,
     /// logind's inhibitors listed.
     idle_inhibitors: Vec<(String, String, String, String, u32, u32)>,
+    /// UPower's `LidIsClosed`; `None`: it cannot say (an error).
+    lid: Option<bool>,
 }
 
 impl Services {
@@ -673,6 +842,7 @@ impl Services {
             profile: "balanced".into(),
             refuse_handles: false,
             idle_inhibitors: Vec::new(),
+            lid: None,
         }
     }
 
@@ -758,6 +928,14 @@ impl UPower {
     #[zbus(property)]
     fn on_battery(&self) -> bool {
         held(&self.0).services.on_battery
+    }
+
+    #[zbus(property)]
+    fn lid_is_closed(&self) -> zbus::fdo::Result<bool> {
+        held(&self.0)
+            .services
+            .lid
+            .ok_or_else(|| zbus::fdo::Error::Failed("no lid known".into()))
     }
 }
 
@@ -953,6 +1131,12 @@ impl System {
                 .await
         })?;
         Ok(())
+    }
+
+    /// What the services say, changed without a signal: as a lid opened
+    /// while the machine slept may never be told.
+    fn change_quietly(&self, change: impl FnOnce(&mut Services)) {
+        change(&mut held(&self.shared).services);
     }
 
     fn calls(&self) -> Vec<String> {

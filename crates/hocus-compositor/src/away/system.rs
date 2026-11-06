@@ -12,17 +12,25 @@
 //!   `handle-power-key`, taken once and held for the session: logind
 //!   leaves the lid and the button to the compositor (`[power] lid`,
 //!   `power-button`); refused, logind keeps its own handling.
-//! - **UPower**: `OnBattery`, and its display device's level when a
-//!   battery is there; **power-profiles-daemon**: `ActiveProfile`, set as
-//!   the loop asks (the automatic power saver). Read as the thread starts
-//!   and again when their properties change or either comes back; only
-//!   what changed goes to the loop.
+//! - **UPower**: `OnBattery`, `LidIsClosed`, and its display device's
+//!   level when a battery is there; **power-profiles-daemon**:
+//!   `ActiveProfile`, set as the loop asks (the automatic power saver).
+//!   Read as the thread starts and again when their properties change or
+//!   either comes back; only what changed goes to the loop.
+//! - **The lid read again** as the loop asks (after a sleep, back from
+//!   another terminal): UPower's `LidIsClosed`, and ACPI's
+//!   `/proc/acpi/button/lid/*/state` on the machine's bus when UPower
+//!   does not say it is open: open if either says so.
 //!
 //! The bus is the system's on a virtual terminal, or the one given
 //! (`--system-bus`): nested or headless without one, none is read, so that
 //! a test never reaches the developer's machine.
 
-use std::os::fd::OwnedFd;
+use std::{
+    os::fd::OwnedFd,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use smithay::reexports::calloop::channel::Sender;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -38,6 +46,8 @@ const DEVICE: &str = "org.freedesktop.UPower.Device";
 const PROFILES: &str = "org.freedesktop.UPower.PowerProfiles";
 const PROFILES_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
+/// ACPI's lid buttons, each with its `state` file.
+const ACPI_LIDS: &str = "/proc/acpi/button/lid";
 
 /// Which system bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +74,9 @@ pub enum FromSystem {
     Level(Option<f64>),
     /// power-profiles-daemon's profile; `None`: no power-profiles-daemon.
     Profile(Option<String>),
+    /// The lid closed or open, as read when the loop asked or as UPower
+    /// changed it; `None`: nothing could say.
+    Lid(Option<bool>),
 }
 
 /// What the loop asks of the thread.
@@ -73,6 +86,8 @@ pub enum ToSystem {
     Inhibit,
     /// power-profiles-daemon's profile set so.
     Profile(String),
+    /// The lid's state read again.
+    ReadLid,
 }
 
 pub fn start(bus: Bus, to_loop: Sender<FromSystem>, asks: UnboundedReceiver<ToSystem>) {
@@ -111,8 +126,12 @@ async fn run(bus: Bus, to_loop: Sender<FromSystem>, mut asks: UnboundedReceiver<
             return;
         }
     };
+    // ACPI's files only with the machine's bus: a bus given is a test's,
+    // or a machine's other than this one.
+    let acpi = matches!(bus, Bus::System).then(|| PathBuf::from(ACPI_LIDS));
     tokio::spawn(sleeps(connection.clone(), to_loop.clone()));
-    tokio::spawn(power(connection.clone(), to_loop.clone()));
+    let lid_seen = LidSeen::default();
+    tokio::spawn(power(connection.clone(), to_loop.clone(), lid_seen.clone()));
     handles(&connection, &to_loop).await;
     // The first inhibitor once the signal is listened to: `sleeps` takes
     // it as it starts; each one after, as the loop asks.
@@ -120,6 +139,11 @@ async fn run(bus: Bus, to_loop: Sender<FromSystem>, mut asks: UnboundedReceiver<
         match ask {
             ToSystem::Inhibit => inhibit(&connection, &to_loop).await,
             ToSystem::Profile(profile) => set_profile(&connection, &profile).await,
+            ToSystem::ReadLid => {
+                let closed = read_lid(&connection, acpi.as_deref(), &lid_seen).await;
+                tracing::info!(?closed, "the lid read again");
+                let _ = to_loop.send(FromSystem::Lid(closed));
+            }
         }
     }
 }
@@ -230,7 +254,7 @@ async fn inhibit(connection: &Connection, to_loop: &Sender<FromSystem>) {
 
 /// UPower's `OnBattery` and level, power-profiles-daemon's profile, to
 /// the loop as they change.
-async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
+async fn power(connection: Connection, to_loop: Sender<FromSystem>, lid_seen: LidSeen) {
     // UPower's root, its display device and power-profiles-daemon's
     // object are all under UPower's path.
     let rule = MatchRule::builder()
@@ -263,7 +287,7 @@ async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
         }
     };
     let mut said = Said::default();
-    read_power(&connection, &to_loop, &mut said).await;
+    read_power(&connection, &to_loop, &mut said, &lid_seen).await;
     // Both streams into one: whichever says something, read again.
     let (wake, mut woken) = tokio::sync::mpsc::unbounded_channel::<()>();
     let on_change = wake.clone();
@@ -294,7 +318,7 @@ async fn power(connection: Connection, to_loop: Sender<FromSystem>) {
     });
     while woken.recv().await.is_some() {
         while woken.try_recv().is_ok() {}
-        read_power(&connection, &to_loop, &mut said).await;
+        read_power(&connection, &to_loop, &mut said, &lid_seen).await;
     }
 }
 
@@ -304,6 +328,19 @@ struct Said {
     battery: Option<bool>,
     level: Option<Option<f64>>,
     profile: Option<Option<String>>,
+}
+
+/// UPower's `LidIsClosed` as last seen, by its changes or by a reading
+/// the loop asked: a change is one from that, whichever saw it.
+#[derive(Debug, Clone, Default)]
+struct LidSeen(Arc<Mutex<Option<bool>>>);
+
+impl LidSeen {
+    /// `closed` seen now: whether it differs from what was.
+    fn see(&self, closed: bool) -> bool {
+        let mut seen = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.replace(closed) != Some(closed)
+    }
 }
 
 /// One property, if its service answers.
@@ -325,7 +362,12 @@ async fn property(
     reply.body().deserialize::<OwnedVariant>().ok()
 }
 
-async fn read_power(connection: &Connection, to_loop: &Sender<FromSystem>, said: &mut Said) {
+async fn read_power(
+    connection: &Connection,
+    to_loop: &Sender<FromSystem>,
+    said: &mut Said,
+    lid_seen: &LidSeen,
+) {
     let root = (UPOWER, UPOWER_PATH, UPOWER);
     let battery = property(connection, root, "OnBattery")
         .await
@@ -335,6 +377,13 @@ async fn read_power(connection: &Connection, to_loop: &Sender<FromSystem>, said:
     if said.battery != Some(battery) {
         said.battery = Some(battery);
         let _ = to_loop.send(FromSystem::OnBattery(battery));
+    }
+    // The lid as UPower sees it: its opening may come here when
+    // libinput's event did not (#730).
+    if let Some(closed) = upower_lid(connection).await
+        && lid_seen.see(closed)
+    {
+        let _ = to_loop.send(FromSystem::Lid(Some(closed)));
     }
     let device = (UPOWER, DISPLAY_DEVICE, DEVICE);
     let present = property(connection, device, "IsPresent")
@@ -362,5 +411,76 @@ async fn read_power(connection: &Connection, to_loop: &Sender<FromSystem>, said:
     if said.profile.as_ref() != Some(&profile) {
         said.profile = Some(profile.clone());
         let _ = to_loop.send(FromSystem::Profile(profile));
+    }
+}
+
+/// UPower's `LidIsClosed`, if it is there and there is a lid.
+async fn upower_lid(connection: &Connection) -> Option<bool> {
+    let root = (UPOWER, UPOWER_PATH, UPOWER);
+    let present = property(connection, root, "LidIsPresent")
+        .await
+        .and_then(|v| v.downcast_ref::<bool>().ok());
+    if present == Some(false) {
+        return None;
+    }
+    property(connection, root, "LidIsClosed")
+        .await
+        .and_then(|v| v.downcast_ref::<bool>().ok())
+}
+
+/// The lid's state now: open if UPower or ACPI says so, closed if one
+/// says so and none says open; `None` if neither can say.
+async fn read_lid(connection: &Connection, acpi: Option<&Path>, seen: &LidSeen) -> Option<bool> {
+    let upower = upower_lid(connection).await;
+    if let Some(closed) = upower {
+        seen.see(closed);
+    }
+    if upower == Some(false) {
+        return upower;
+    }
+    // A few lines of procfs, on this thread: never on the loop.
+    let acpi = acpi.and_then(acpi_lid);
+    if acpi == Some(false) {
+        return acpi;
+    }
+    upower.or(acpi)
+}
+
+/// ACPI's lids in `dir` (`LID0/state`: `state:      open`): open if one
+/// is, closed if one is and none open, `None` without any.
+fn acpi_lid(dir: &Path) -> Option<bool> {
+    let mut closed = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let Ok(text) = std::fs::read_to_string(entry.path().join("state")) else {
+            continue;
+        };
+        match parse_acpi_lid(&text) {
+            Some(false) => return Some(false),
+            Some(true) => closed = Some(true),
+            None => {}
+        }
+    }
+    closed
+}
+
+/// One ACPI lid's `state` file: `Some(true)` closed, `Some(false)` open.
+fn parse_acpi_lid(text: &str) -> Option<bool> {
+    match text.split(':').nth(1)?.trim() {
+        "closed" => Some(true),
+        "open" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_acpi_lid;
+
+    #[test]
+    fn acpis_lid_state_reads() {
+        assert_eq!(parse_acpi_lid("state:      open\n"), Some(false));
+        assert_eq!(parse_acpi_lid("state:      closed\n"), Some(true));
+        assert_eq!(parse_acpi_lid("state:      unsupported\n"), None);
+        assert_eq!(parse_acpi_lid(""), None);
     }
 }

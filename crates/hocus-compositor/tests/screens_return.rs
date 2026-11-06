@@ -414,13 +414,11 @@ fn the_winking_panda_says_what_moved_for_4_s() -> anyhow::Result<()> {
     // Beside the bar, on the screen still there.
     let (screen, _) = hp.peek_surfaces()[0].clone();
     assert_eq!(screen, FIRST);
-    let said = common::logged(&log);
-    assert!(
-        said.contains(
-            "L’écran externe 27 pouces est parti. Foot et Firefox sont ici, sur le bureau 1."
-        ),
-        "{said}"
-    );
+    // The shell says it once it drew it, which can come after the
+    // surface shows on a loaded machine.
+    let line = "L’écran externe 27 pouces est parti. Foot et Firefox sont ici, sur le bureau 1.";
+    let said = hp.dispatch_until(WAIT, |_| common::logged(&log).contains(line))?;
+    assert!(said, "{}", common::logged(&log));
     // Still out at 3.9 s, going back from 4 s.
     let since = hp.peek_since().unwrap_or_default();
     hp.hold_clock();

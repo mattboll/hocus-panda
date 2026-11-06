@@ -13,7 +13,11 @@
 //!   (its `handle-lid-switch` inhibitor): `suspend`, `lock` (the laptop's
 //!   panel off), `screen-off`, `nothing`; docked on AC with another screen
 //!   on (`lid-ignored-when-docked`), only the panel goes off. Without the
-//!   inhibitor logind decides, and the panel goes off as before.
+//!   inhibitor logind decides, and the panel goes off as before. Its
+//!   state is libinput's switch, read again after a sleep and back from
+//!   another terminal (UPower's `LidIsClosed`, else ACPI's), since an
+//!   opening while asleep may never come as an event (#730): until it is
+//!   read, the laptop's screen alone is lit whatever the lid said before.
 //! - **The power button** (`[power] power-button`, its `handle-power-key`
 //!   inhibitor): a press opens the session menu (`ask`), suspends, or
 //!   powers off as the session menu does; without the inhibitor the key
@@ -54,9 +58,22 @@ pub enum Saver {
     Spent,
 }
 
+/// What the lid's state rests on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LidRead {
+    /// Its last event or reading, nothing since that could have hidden a
+    /// change.
+    #[default]
+    Known,
+    /// The machine woke or the session came back since: read again, and
+    /// not answered yet (or no service could say).
+    Asked,
+}
+
 /// What the loop keeps of the power's services.
 #[derive(Debug, Default)]
 pub struct Power {
+    lid_read: LidRead,
     /// logind's `block` inhibitor of the lid and the power button: held,
     /// the compositor handles them.
     handles: Option<OwnedFd>,
@@ -153,6 +170,7 @@ impl State {
     /// The lid closed or opened: what `[power] lid` says; opened, the
     /// panel on again and the user there.
     pub fn lid(&mut self, closed: bool) {
+        self.away.power.lid_read = LidRead::Known;
         if self.away.lid_closed == closed {
             return;
         }
@@ -169,13 +187,7 @@ impl State {
             return;
         }
         let power = self.config.power;
-        let docked = power.lid_ignored_when_docked
-            && !self.away.battery
-            && self
-                .space
-                .outputs()
-                .any(|o| !is_internal(o) && !self.display_off(o));
-        if docked {
+        if self.lid_docked() {
             tracing::info!("docked on AC: only the laptop's panel goes off");
             self.set_lid_dark(true);
             return;
@@ -196,6 +208,81 @@ impl State {
             Lid::ScreenOff => self.set_lid_dark(true),
             Lid::Nothing => {}
         }
+    }
+
+    /// Docked: on AC, a screen that is not the laptop's on, and the file
+    /// lets that keep the session going (`lid-ignored-when-docked`).
+    fn lid_docked(&self) -> bool {
+        self.config.power.lid_ignored_when_docked && !self.away.battery && self.other_screen_on()
+    }
+
+    /// A screen on that is not the laptop's own.
+    fn other_screen_on(&self) -> bool {
+        self.space
+            .outputs()
+            .any(|o| !is_internal(o) && !self.display_off(o))
+    }
+
+    /// Whether the lid closed turns the laptop's panel off, as [`Self::lid`]
+    /// does, without its action (sleep, lock).
+    fn lid_darkens(&self) -> bool {
+        !(self.lid_handled() && !self.lid_docked() && self.config.power.lid == Lid::Nothing)
+    }
+
+    /// The lid's state may have changed unseen (`why`: the machine woke,
+    /// the session came back): it is read again off the loop. Until then
+    /// the laptop's screen, if no other is on, is lit: a lid opened while
+    /// asleep must not leave the only screen black.
+    pub(crate) fn lid_again(&mut self, why: &'static str) {
+        self.away.power.lid_read = LidRead::Asked;
+        if self.away.lid_dark && !self.other_screen_on() {
+            tracing::info!(why, "the lid read again: the laptop's screen lit meanwhile");
+            self.set_lid_dark(false);
+        } else {
+            tracing::info!(why, "the lid read again");
+        }
+        self.to_system(ToSystem::ReadLid);
+    }
+
+    /// The lid's state as read from the system (UPower, else ACPI), asked
+    /// or changed; `None`: none could say. Opened, it is opened as by its
+    /// event. Closed, it is taken only as the answer to a reading asked
+    /// ([`Self::lid_again`]): the panel off as the lid wants, nothing
+    /// done (the machine just woke); a closing otherwise is libinput's.
+    pub(crate) fn lid_read(&mut self, closed: Option<bool>) {
+        match closed {
+            None => {
+                if self.away.power.lid_read == LidRead::Asked {
+                    tracing::info!("the lid's state could not be read: the only screen stays lit");
+                }
+            }
+            Some(false) => {
+                self.away.power.lid_read = LidRead::Known;
+                if self.away.lid_closed {
+                    tracing::info!("the lid read: open");
+                    self.lid(false);
+                }
+            }
+            Some(true) => {
+                if self.away.power.lid_read != LidRead::Asked {
+                    return;
+                }
+                self.away.power.lid_read = LidRead::Known;
+                tracing::info!(was = self.away.lid_closed, "the lid read: closed");
+                self.away.lid_closed = true;
+                self.set_lid_dark(self.lid_darkens());
+            }
+        }
+    }
+
+    /// Back from another terminal: what changed meanwhile was not seen.
+    pub fn session_back(&mut self) {
+        self.lid_again("the session came back");
+    }
+
+    /// What the lid's state rests on now.
+    pub fn lid_read_state(&self) -> LidRead {
+        self.away.power.lid_read
     }
 
     // --- The power button -----------------------------------------------------------
