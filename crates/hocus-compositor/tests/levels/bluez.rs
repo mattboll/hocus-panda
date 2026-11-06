@@ -40,6 +40,23 @@ fn takes(shared: &Shared) -> Duration {
     state(shared, |s| s.takes)
 }
 
+/// A connection, a refusal or a pairing's answer: after `takes`, and not
+/// while the test holds the answers ([`Bluez::hold`]), so that it sees
+/// what shows meanwhile however slow the window is to say it.
+async fn answers(shared: &Shared) {
+    tokio::time::sleep(takes(shared)).await;
+    loop {
+        let released = shared.released.notified();
+        tokio::pin!(released);
+        // Listening before the state is read: a release in between wakes it.
+        released.as_mut().enable();
+        if !state(shared, |s| s.held) {
+            return;
+        }
+        released.await;
+    }
+}
+
 /// What a device does when asked to connect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answer {
@@ -241,6 +258,8 @@ struct State {
     calls: Vec<Call>,
     /// How long a connection, a refusal or a pairing takes.
     takes: Duration,
+    /// Their answers held until released.
+    held: bool,
 }
 
 impl State {
@@ -256,6 +275,8 @@ impl State {
 struct Inner {
     state: Mutex<State>,
     connection: OnceLock<Connection>,
+    /// The held answers released.
+    released: Notify,
 }
 
 type Shared = Arc<Inner>;
@@ -290,6 +311,7 @@ impl Bluez {
                 ..State::default()
             }),
             connection: OnceLock::new(),
+            released: Notify::new(),
         });
         let address = address.to_owned();
         let served = shared.clone();
@@ -471,6 +493,18 @@ impl Bluez {
     /// Connections, refusals and pairings take `takes` from now on.
     pub fn set_takes(&self, takes: Duration) {
         state(&self.shared, |s| s.takes = takes);
+    }
+
+    /// Connections, refusals and pairings wait, from now on, until
+    /// [`Self::release`].
+    pub fn hold(&self) {
+        state(&self.shared, |s| s.held = true);
+    }
+
+    /// The answers held given.
+    pub fn release(&self) {
+        state(&self.shared, |s| s.held = false);
+        self.shared.released.notify_waiters();
     }
 
     pub fn powered(&self) -> bool {
@@ -1041,13 +1075,13 @@ impl Device {
         state(&self.0, |s| s.calls.push(Call::Connect(name.clone())));
         match answer {
             Answer::Connects => {
-                tokio::time::sleep(takes(&self.0)).await;
+                answers(&self.0).await;
                 connect(&self.0, &self.1, true)
                     .await
                     .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
             }
             Answer::Refuses => {
-                tokio::time::sleep(takes(&self.0)).await;
+                answers(&self.0).await;
                 Err(failed(
                     "org.bluez.Error.Failed",
                     "br-connection-page-timeout",
@@ -1079,7 +1113,7 @@ impl Device {
         };
         let caller = header.sender().map(|s| s.to_string()).unwrap_or_default();
         state(&self.0, |s| s.calls.push(Call::Pair(name)));
-        tokio::time::sleep(takes(&self.0)).await;
+        answers(&self.0).await;
         // BlueZ asks the agent of whoever asked for the pairing, else the
         // default one.
         let agent = state(&self.0, |s| {
