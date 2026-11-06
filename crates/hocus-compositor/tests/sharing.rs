@@ -1129,6 +1129,15 @@ fn notifications_are_held_while_sharing_and_summed_up_at_its_end() -> anyhow::Re
         log.contains("body=\"Slack (2), Signal · dans l'historique\""),
         "{log}"
     );
+    // The journal says why each made no bubble, and what showed instead,
+    // never what they said (#710).
+    let held = log
+        .lines()
+        .filter(|l| l.contains("a notification's bubble held: the screen is shared"))
+        .collect::<Vec<_>>();
+    assert_eq!(held.len(), 3, "{log}");
+    assert!(held.iter().all(|l| !l.contains("Camille")), "{held:?}");
+    assert!(log.contains("a notification's bubble shows id=0 "), "{log}");
     assert!(bed.shares().is_empty());
     Ok(())
 }

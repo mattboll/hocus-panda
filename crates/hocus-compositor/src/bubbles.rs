@@ -115,6 +115,11 @@ impl State {
             return;
         }
         let opened = self.now();
+        // Said, so that the journal tells a bubble the shell opened from
+        // one the screen showed (#710).
+        if hocus_link::is_bubble(layer.namespace()) {
+            tracing::info!(namespace = layer.namespace(), "a bubble is drawn");
+        }
         self.bubbles.shown.push(Shown {
             layer: layer.clone(),
             opened,
@@ -135,7 +140,16 @@ impl State {
     }
 
     /// A layer surface went: if it was a bubble, its motion goes too.
+    /// One that never showed is said: the shell took it for shown, the
+    /// user never saw it (#710).
     pub fn bubble_gone(&mut self, layer: &LayerSurface) {
+        let shown = self.bubbles.shown.iter().any(|s| &s.layer == layer);
+        if !shown && hocus_link::is_bubble(layer.namespace()) {
+            tracing::warn!(
+                namespace = layer.namespace(),
+                "a bubble's surface went without ever being drawn"
+            );
+        }
         self.bubbles.shown.retain(|s| &s.layer != layer);
     }
 

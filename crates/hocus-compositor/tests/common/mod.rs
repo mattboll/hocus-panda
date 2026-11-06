@@ -350,6 +350,10 @@ pub enum Shows {
         margin: (i32, i32),
         colour: u32,
     },
+    /// A layer surface of the top layer in `namespace`, anchored to the
+    /// screen's top right corner, that never draws: no buffer ever comes,
+    /// as a client that failed to draw its first frame.
+    Undrawn { namespace: &'static str },
     /// An xdg toplevel of this size drawn with a translucent shadow
     /// `margin` wide around it, outside its window geometry, as
     /// client-side decorated applications draw theirs.
@@ -415,6 +419,8 @@ pub enum Command {
     CopyPng(&'static [u8]),
     /// Closes its window, as an application quitting.
     Close,
+    /// Destroys its layer surface.
+    CloseLayer,
     /// Titles its window, without drawing (a terminal's prompt does so).
     Title(&'static str),
     /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
@@ -582,6 +588,7 @@ fn run_client(
         clear: false,
         checkered: false,
         fill: None,
+        undrawn: false,
         caret: None,
         text_inputs: None,
         text_input: None,
@@ -752,6 +759,16 @@ fn run_client(
             client.fill = Some(colour);
             client.layer = Some(layer);
         }
+        Some(Shows::Undrawn { namespace }) => {
+            let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
+            let surface = client.compositor.create_surface(&qh);
+            let layer = shell.create_layer_surface(&qh, surface, Layer::Top, Some(namespace), None);
+            layer.set_anchor(Anchor::RIGHT | Anchor::TOP);
+            layer.set_size(340, 80);
+            layer.commit();
+            client.undrawn = true;
+            client.layer = Some(layer);
+        }
         Some(Shows::Bar { height }) => {
             let shell = LayerShell::bind(&globals, &qh).context("no layer shell")?;
             let surface = client.compositor.create_surface(&qh);
@@ -786,6 +803,7 @@ fn run_client(
                     client.copy(conn, &qh, clip);
                 }
                 (Command::Close, _) => client.window = None,
+                (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
                 (Command::ReadClipboard, _) => client.read_clipboard(),
@@ -930,6 +948,8 @@ struct Client {
     checkered: bool,
     /// Its surface's colour, when not a window's.
     fill: Option<u32>,
+    /// Its layer surface never draws ([`Shows::Undrawn`]).
+    undrawn: bool,
     /// A writing client's caret, its text input, and what is committed
     /// to it until `done`; whether Ctrl is held.
     caret: Option<(i32, i32, i32, i32)>,
@@ -1110,6 +1130,9 @@ impl LayerShellHandler for Client {
         _: u32,
     ) {
         self.size = (configure.new_size.0.max(1), configure.new_size.1.max(1));
+        if self.undrawn {
+            return;
+        }
         let surface = layer.wl_surface().clone();
         self.draw(&surface, self.size);
     }

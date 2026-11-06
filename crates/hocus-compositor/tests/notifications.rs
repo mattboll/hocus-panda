@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{KEY_ESC, WAIT};
+use common::{Command as Asked, KEY_ESC, Shows, WAIT};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{MatchRule, MessageStream, OwnedVariant, Variant};
 
@@ -395,6 +395,11 @@ impl Bed {
             self.idle(Duration::from_millis(50))?;
         }
         anyhow::bail!("{id}'s time was not up:\n{}", self.log())
+    }
+
+    /// Waits until the shell logged `what`; the line.
+    fn logged_line(&mut self, what: &str) -> anyhow::Result<String> {
+        self.logged_since(0, what)
     }
 
     /// Where the log is now: what it says after is new.
@@ -1069,6 +1074,9 @@ fn do_not_disturb_holds_a_normal_bubble_but_lets_a_critical_one_show() -> anyhow
     let mark = bed.mark();
     bed.notify(Notice::default())?;
     bed.logged_since(mark, "held: do not disturb")?;
+    let held = bed.logged_since(mark, "a notification's bubble held: do not disturb")?;
+    assert!(held.contains("app=\"Slack\""), "{held}");
+    assert!(!held.contains("Camille"), "its text in the journal: {held}");
     bed.logged_since(mark, "the bell unread=1 dnd=true")?;
     bed.idle(Duration::from_millis(500))?;
     assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
@@ -1171,4 +1179,161 @@ fn an_expired_bubbles_action_is_invoked_from_the_history() -> anyhow::Result<()>
     bed.hears(&format!("action {id} reply"))?;
     bed.hears(&format!("closed {id} 2"))?;
     Ok(())
+}
+
+// --- What the journal says (#710) ----------------------------------------------------
+
+/// The compositor's lines, as the session's journal has them (`INFO` and
+/// over), while its guard is held on the test's thread, the compositor's.
+#[derive(Clone, Default)]
+struct Journal(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Journal {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Journal {
+    fn kept() -> (Self, tracing::subscriber::DefaultGuard) {
+        let journal = Self::default();
+        let writer = journal.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter("info")
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        (journal, tracing::subscriber::set_default(subscriber))
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap_or_else(PoisonError::into_inner)).into_owned()
+    }
+}
+
+/// The journal says what became of each notification's bubble, by its
+/// application and id, never by what it says: shown (and drawn, by the
+/// compositor), waiting its turn behind the three shown, waiting for the
+/// unlock, or none for a low one.
+#[test]
+fn the_journal_says_what_became_of_each_bubble_without_its_text() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let (journal, _kept) = Journal::kept();
+    let mut bed = start(&shell, |_, _| {})?;
+    let long = Notice {
+        timeout: 30_000,
+        ..Notice::default()
+    };
+    for _ in 0..3 {
+        bed.notify(Notice { ..long })?;
+    }
+    bed.shows(3)?;
+    let fourth = bed.notify(Notice { ..long })?;
+    let waits = bed.logged_line("a notification's bubble waits its turn")?;
+    assert!(
+        waits.contains(&format!("id={fourth} app=\"Slack\" behind=3 place=1")),
+        "{waits}"
+    );
+    bed.notify(Notice {
+        urgency: Some(0),
+        ..long
+    })?;
+    let low = bed.logged_line("a notification without a bubble: to the history only")?;
+    assert!(low.contains("low=true agent=false"), "{low}");
+    bed.hp.lock();
+    bed.logged("the session is locked")?;
+    let locked = bed.notify(Notice { ..long })?;
+    let unlock = bed.logged_line("a notification's bubble waits for the unlock")?;
+    assert!(
+        unlock.contains(&format!("id={locked} app=\"Slack\"")),
+        "{unlock}"
+    );
+    let log = bed.log();
+    let said: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("a notification's bubble") || l.contains("without a bubble"))
+        .collect();
+    let shows = said.iter().filter(|l| l.contains("bubble shows")).count();
+    assert_eq!(shows, 3, "{said:#?}");
+    assert!(
+        said.iter()
+            .all(|l| l.contains(" INFO ") && !l.contains("Camille") && !l.contains("maquette")),
+        "{said:#?}"
+    );
+    // The compositor drew each of the three.
+    let drawn = journal.text();
+    for serial in 1..=3 {
+        assert!(
+            drawn.contains(&format!(
+                "a bubble is drawn namespace=\"hocus-bubble-{serial}\""
+            )),
+            "{drawn}"
+        );
+    }
+    assert!(!drawn.contains("without ever being drawn"), "{drawn}");
+    Ok(())
+}
+
+/// A bubble's surface that goes without ever having been drawn is said
+/// (`WARN`): the shell took it for shown, the user never saw it. One
+/// drawn is said as it first is, and nothing as it goes.
+#[test]
+fn a_bubble_never_drawn_is_said_as_it_goes() -> anyhow::Result<()> {
+    let (journal, _kept) = Journal::kept();
+    let mut hp = common::compositor()?;
+    let undrawn = common::client(
+        hp.socket(),
+        Some(Shows::Undrawn {
+            namespace: "hocus-bubble-7",
+        }),
+    )?;
+    let drawn = common::client(
+        hp.socket(),
+        Some(Shows::Layer {
+            namespace: "hocus-bubble-8",
+            size: (340, 80),
+            margin: (8, 8),
+            colour: 0xFF20_2030,
+        }),
+    )?;
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        !hp.layer_rects("hocus-bubble-7").is_empty()
+            && journal_has(&journal, "a bubble is drawn namespace=\"hocus-bubble-8\"")
+    })?;
+    anyhow::ensure!(placed, "{}", journal.text());
+    undrawn.commands.send(Asked::CloseLayer)?;
+    drawn.commands.send(Asked::CloseLayer)?;
+    let said = hp.dispatch_until(WAIT, |hp| {
+        hp.layer_rects("hocus-bubble-7").is_empty() && hp.layer_rects("hocus-bubble-8").is_empty()
+    })?;
+    anyhow::ensure!(said, "{}", journal.text());
+    let text = journal.text();
+    let warned: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("a bubble's surface went without ever being drawn"))
+        .collect();
+    assert_eq!(warned.len(), 1, "{text}");
+    assert!(
+        warned[0].contains(" WARN ") && warned[0].contains("namespace=\"hocus-bubble-7\""),
+        "{text}"
+    );
+    assert!(
+        !text.contains("a bubble is drawn namespace=\"hocus-bubble-7\""),
+        "{text}"
+    );
+    Ok(())
+}
+
+fn journal_has(journal: &Journal, what: &str) -> bool {
+    journal.text().contains(what)
 }

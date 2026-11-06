@@ -206,6 +206,21 @@ Codex's terminal notifications carry no name of Codex's: they are bubbles.
 - **A replacement** that is of low urgency, or an agent's, takes the
   bubble it replaces away (without a signal) and goes to the history.
 
+### What the journal says (#710)
+
+So that a bubble that did not show can be told apart from one that was
+held, each notification's bubble is said at `INFO`, by its application
+and id, never by its title or its text (the journal is read by others):
+
+- the shell: `a notification's bubble shows` (its serial and screen);
+  `held: do not disturb`; `held: the screen is shared`; `waits for the
+  unlock`; `waits its turn` (`behind` the bubbles shown, its `place` in
+  the queue); `a notification without a bubble: to the history only`
+  (low, or an agents' tool's);
+- the compositor: `a bubble is drawn` at its surface's first frame, by
+  its namespace; and a `WARN`, `a bubble's surface went without ever
+  being drawn`, for one the shell opened that never showed.
+
 ### Not built
 
 - The history, "clear all", do not disturb (built in 5.4, below); the
@@ -235,7 +250,10 @@ The real shell on a D-Bus daemon of the test's own
 - an action invokes its key and closes; the card invokes `default` and
   closes; the ✕ closes without an action; `CloseNotification` closes (3);
 - Claude Code plugged in: "Claude is waiting for your input" titled
-  "Claude Code" makes no bubble and no dot; "Login successful" makes one.
+  "Claude Code" makes no bubble and no dot; "Login successful" makes one;
+- the journal says each bubble shown (and drawn), waiting its turn,
+  waiting for the unlock, or none for a low one, without its text; a
+  bubble's surface that goes undrawn is said as a warning.
 
 Unit tests for the stack (the rules above), the card's layout, the
 surfaces' places, the markup, the timeouts, the actions, the agents'
