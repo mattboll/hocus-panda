@@ -117,6 +117,7 @@ impl App {
                 .font(SEMIBOLD),
             ]
             .spacing(7)
+            .height(Length::Fill)
             .align_y(Alignment::Center),
         )
         .height(30)
@@ -273,6 +274,7 @@ impl App {
                 t(w("Changer…", "Change…").get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
+            .height(Length::Fill)
             .align_y(Alignment::Center),
         )
         .height(30)
@@ -436,12 +438,16 @@ impl App {
         }
         let removable = self.account.picture.is_some();
         let mut remove = button(
-            t(
-                w("Retirer", "Remove").get(lang),
-                13.0,
-                fade(TEXT.get(), if removable { 1.0 } else { INERT }),
+            container(
+                t(
+                    w("Retirer", "Remove").get(lang),
+                    13.0,
+                    fade(TEXT.get(), if removable { 1.0 } else { INERT }),
+                )
+                .font(SEMIBOLD),
             )
-            .font(SEMIBOLD),
+            .height(Length::Fill)
+            .center_y(Length::Fill),
         )
         .height(30)
         .padding([0, 12])
@@ -460,6 +466,7 @@ impl App {
                 .font(SEMIBOLD),
             ]
             .spacing(7)
+            .height(Length::Fill)
             .align_y(Alignment::Center),
         )
         .height(30)

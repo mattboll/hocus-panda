@@ -36,6 +36,7 @@ use serde_json::Value;
 const APP_ID: &str = "hocus-settings";
 const KEY_ENTER: u32 = 28;
 const KEY_BACKSPACE: u32 = 14;
+const KEY_END: u32 = 107;
 const KEY_MINUS: u32 = 12;
 
 /// The fake's current password, a new one it takes, one it refuses.
@@ -572,6 +573,8 @@ fn the_display_name_is_saved_on_enter() -> anyhow::Result<()> {
     // Esc puts back what was there.
     bed.click("box:account-name")?;
     wait(&mut bed.hp, Duration::from_millis(50))?;
+    // At its end (a second click there chose a word).
+    bed.key(KEY_END)?;
     bed.type_text("xyz")?;
     bed.shows(|s| s["account"]["draft"] == "Alex Dupontxyz")?;
     bed.key(KEY_ESC)?;
