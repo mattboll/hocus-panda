@@ -734,6 +734,10 @@ impl Shell {
                 agents::peek::back();
                 Task::none()
             }
+            ToShell::AgentPandas(pandas) => {
+                agents::set_pandas(pandas);
+                Task::none()
+            }
             ToShell::Focus(screen) => {
                 notifications::focus(screen);
                 Task::none()
@@ -2353,6 +2357,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            continue;
+                        }
+                        // The rows' pandas or dots (6.16): their group
+                        // alone draws.
+                        Ok(ToShell::AgentPandas(pandas)) => {
+                            agents::set_pandas(pandas);
                             continue;
                         }
                         // The bubbles' screen: their stack alone.

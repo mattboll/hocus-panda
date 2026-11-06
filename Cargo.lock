@@ -1739,6 +1739,7 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-sound",
+ "hocus-xdg",
  "iced",
  "image",
  "jiff",

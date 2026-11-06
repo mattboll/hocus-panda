@@ -18,7 +18,7 @@ use std::{
 };
 
 /// A desktop entry the launcher shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Entry {
     /// Its desktop file id: its path under `applications/`, `/` made `-`,
     /// without `.desktop` (`org.mozilla.firefox`).
@@ -33,12 +33,21 @@ pub struct Entry {
     pub terminal: bool,
     /// Its working directory, if it names one.
     pub dir: Option<String>,
+    /// The types it opens (`MimeType`): the Settings' default
+    /// applications (6.15).
+    pub mime_types: Vec<String>,
+    /// Its `Categories` (`TerminalEmulator`).
+    pub categories: Vec<String>,
+    /// Its `Exec` as written, unescaped, field codes kept.
+    pub exec: String,
+    /// Its desktop file.
+    pub file: PathBuf,
 }
 
 /// What a desktop file is to the launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Read {
-    Shown(Entry),
+    Shown(Box<Entry>),
     /// Not shown, and hides the files of the same id further down.
     Hidden,
 }
@@ -386,7 +395,7 @@ pub fn read(
         .raw("Path")
         .map(unescape)
         .filter(|d| !d.trim().is_empty());
-    Some(Read::Shown(Entry {
+    Some(Read::Shown(Box::new(Entry {
         id: id.to_owned(),
         name,
         generic,
@@ -395,7 +404,11 @@ pub fn read(
         argv,
         terminal: group.flag("Terminal"),
         dir,
-    }))
+        mime_types: group.raw("MimeType").map(list).unwrap_or_default(),
+        categories: group.raw("Categories").map(list).unwrap_or_default(),
+        exec: group.raw("Exec").map(unescape).unwrap_or_default(),
+        file: file.to_owned(),
+    })))
 }
 
 /// `XDG_DATA_HOME` (or `~/.local/share`), then `XDG_DATA_DIRS` (or
@@ -467,7 +480,7 @@ pub fn scan(dirs: &[PathBuf], locale: &Locale, desktops: &[String]) -> Vec<Entry
             match read(&id, &file, &text, locale, desktops, path.as_deref()) {
                 Some(Read::Shown(entry)) => {
                     seen.insert(id);
-                    entries.push(entry);
+                    entries.push(*entry);
                 }
                 Some(Read::Hidden) => {
                     seen.insert(id);
@@ -494,7 +507,7 @@ mod tests {
             &desktops,
             None,
         ) {
-            Some(Read::Shown(entry)) => Some(entry),
+            Some(Read::Shown(entry)) => Some(*entry),
             _ => None,
         }
     }

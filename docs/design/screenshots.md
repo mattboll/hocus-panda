@@ -710,7 +710,7 @@ the 5.10 mockup: the indicator in the bar.
   layouts, the item's time, beat and buttons.
 - **Not built**: a lock screen of the desktop's own (the session leaving
   its terminal stands for it); the cursor's own indicator (none is drawn
-  yet); the WebM setting in the settings' UI (the settings sprint);
+  yet);
   DMA-BUF frames (shared memory, copied off the loop); a recording's
   frame of its own size following a window that changes size; VA-API
   measured on a real GPU (left to the maintainer's machine: tests never
@@ -748,4 +748,5 @@ recording:
   `wpctl` and `pw-play` asked, then only `wpctl` when muted, then nothing
   with `sound = false`; a recording after the file says WebM and a folder,
   VP9 there.
-
+- **The Settings' page** (6.17, settings.md, "Captures et presse-papiers")
+  writes all of these keys, with the history's (bar.md, 6.17).

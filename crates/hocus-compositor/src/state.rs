@@ -347,6 +347,7 @@ impl State {
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
+        let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
         Self::foreign_globals(dh);
 
         Ok(Self {
@@ -419,7 +420,7 @@ impl State {
             redraw: true,
             strips: HashMap::new(),
             going: None,
-            halo: crate::halo::Halo::default(),
+            halo,
             peek: crate::peek::Peeks::default(),
             bubbles: crate::bubbles::Bubbles::default(),
             reminders: crate::reminders::Reminders::default(),

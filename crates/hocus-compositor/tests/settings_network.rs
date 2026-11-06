@@ -25,7 +25,9 @@ mod fakes;
 mod nm;
 #[path = "levels/rfkill.rs"]
 mod rfkill;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
 use common::{BTN_LEFT, KEY_ESC, WAIT, wait};
@@ -399,33 +401,16 @@ impl Bed {
         Ok(())
     }
 
-    /// The page scrolled with the wheel until `id` is in the window.
+    /// The page scrolled with the wheel until `id` is in the window, each
+    /// wheel taken by the window before the next (#660).
     fn scroll_to_show(&mut self, id: &str) -> anyhow::Result<()> {
-        let window = self.window()?;
-        let mut place = self.places_with(id)?[id].clone();
-        for _ in 0..60 {
-            let n = |i: usize| place[i].as_f64().unwrap_or_default();
-            if n(1) >= 50.0 && n(1) + n(3) <= f64::from(window.height) - 10.0 {
-                return Ok(());
-            }
-            let middle = (
-                f64::from(window.x) + f64::from(window.width) * 0.6,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.pointer_move(middle.0 - 1.0, middle.1);
-            self.hp.pointer_move(middle.0, middle.1);
-            self.hp.wheel(if n(1) < 50.0 { -1 } else { 1 });
-            let log = self.log.clone();
-            let mut moved = None;
-            self.hp.dispatch_until(WAIT, |_| {
-                moved = common::last_json(&log, " places {")
-                    .and_then(|p| p.get(id).cloned())
-                    .filter(|p| *p != place);
-                moved.is_some()
-            })?;
-            place = moved.ok_or_else(|| anyhow::anyhow!("{id} never came into view: {place}"))?;
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 660.0,
+            notches: 1,
+            top: 50.0,
+            floor: Floor::Margin(10.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     fn press(&mut self, key: u32) {

@@ -15,7 +15,9 @@
 //! drawn. What the window shows is read from its log ("shows" lines).
 
 mod common;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{
     collections::HashMap,
     os::unix::fs::PermissionsExt,
@@ -474,33 +476,13 @@ impl Bed {
 
     /// `id` scrolled into view, clear of the toast, by the wheel.
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
-        let window = self.window()?;
-        for _ in 0..20 {
-            let place = self.places_with(id)?[id].clone();
-            let n = |i: usize| place[i].as_f64().unwrap_or_default();
-            let (top, bottom) = (n(1), n(1) + n(3));
-            let notches = if bottom > f64::from(window.height) - 90.0 {
-                2
-            } else if top < 56.0 {
-                -2
-            } else {
-                return Ok(());
-            };
-            self.hp.pointer_move(
-                f64::from(window.x) + 600.0,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.wheel(notches);
-            let log = self.log.clone();
-            let key = id.to_owned();
-            let moved = self.hp.dispatch_until(Duration::from_secs(2), |_| {
-                common::last_json(&log, " places {").is_some_and(|p| p[&key] != place)
-            })?;
-            if !moved {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 600.0,
+            notches: 2,
+            top: 56.0,
+            floor: Floor::Margin(90.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     fn window(&self) -> anyhow::Result<hocus_compositor::model::Rect> {

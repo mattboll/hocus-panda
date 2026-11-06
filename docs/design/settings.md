@@ -1377,6 +1377,177 @@ row.
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
 
+## Applications (6.15)
+
+Issue #449, variant A, every question answered with its recommendation:
+the desktop itself starts the start-up applications once the bar shows
+(no systemd generator); the entries meant for other desktops are hidden
+behind a line. Section `applications` (`hocus settings applications`),
+TRAVAIL's second row. Under the title: "Celles qui ouvrent tes liens et
+tes fichiers, et celles qui démarrent avec la session."
+
+| Group | Row | Control | Written in |
+|---|---|---|---|
+| APPLICATIONS PAR DÉFAUT ("Valent aussi pour les autres applications") | Navigateur web | menu of applications | `mimeapps.list`: `x-scheme-handler/http`, `x-scheme-handler/https`, `text/html`, `application/xhtml+xml` |
+| | Courriel | menu | `x-scheme-handler/mailto` |
+| | Terminal | menu: Automatique, the terminals, Autre commande… | `[programs] terminal` |
+| | Vidéos | menu | `video/mp4`, `video/webm`, `video/x-matroska`, `video/quicktime`, `video/x-msvideo`, `video/mpeg`, `video/ogg` |
+| | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
+| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+
+- **Reading**: a thread of the page's own (`src/applications.rs`),
+  started the first time the page shows, reads the desktop entries as
+  the launcher does (`hocus-xdg`: `NoDisplay`, `Hidden`, `TryExec`
+  honoured), their icons in the user's icon theme (the launcher's lookup,
+  64 px), the defaults, the autostart entries as the session reads them,
+  and follows `mimeapps.list` and the autostart folder (inotify). Nothing
+  touches the disk on the window's thread.
+- **A menu of applications** (200 px): its button shows the
+  application's icon (22 px) and name; the list holds the applications
+  whose entry declares one of the row's types (`MimeType`), by name,
+  then a hint ("Celles qui ouvrent les pages web"). The current choice
+  is the row's first type's, resolved as the specification says
+  (`$XDG_CONFIG_HOME/mimeapps.list`, then `$XDG_CONFIG_DIRS`', then the
+  data directories' `applications/mimeapps.list`; their `[Default
+  Applications]`, then `[Added Associations]`, then `mimeinfo.cache`;
+  else the first application that declares it). When another of its
+  types opens elsewhere, a line under the row says it ("Les vidéos WebM
+  s'ouvrent avec VLC"). Choosing writes every type of the row in the
+  user's `[Default Applications]`, each line in place or added at the
+  group's end, the rest of the file kept, written beside then renamed
+  and read back ("Navigateur web : Chromium", "Annuler"). "Annuler"
+  writes the file back byte for byte when it is as written, else only
+  the row's lines as they were. No application for a row: "Aucune" at
+  45 %, inert, the line in amber ("Aucune application installée n'ouvre
+  les liens « mailto: ».").
+- **The terminal**: "Automatique" (`terminal = ""`: the first of kitty,
+  foot, alacritty, xterm in `PATH`, as the compositor looks; the button
+  shows the one found), the entries with `Categories=TerminalEmulator`
+  (their `Exec` without field codes is written), then "Autre commande…",
+  which turns the control into a 250 px Martian Mono field ("Lancée
+  telle quelle par Super+Entrée."); `Enter`, `Tab` or a click elsewhere
+  writes it once its program is found in `PATH` (looked for on the
+  page's thread), else the line says "Introuvable dans PATH :
+  kitty-nightly" in amber and nothing is written; `Esc` puts it back. A
+  command the file holds that is no entry's shows in that field. The
+  compositor follows `[programs]` live: the next `Super+Return` takes it.
+- **AU DÉMARRAGE DE LA SESSION**: a row per entry of
+  `$XDG_CONFIG_HOME/autostart` and each `$XDG_CONFIG_DIRS/autostart`
+  that runs here (the user's file of an id winning; a hidden one shows,
+  off; those whose `OnlyShowIn`/`NotShowIn` leave Hocuspanda out or whose
+  `TryExec` is missing are not rows), by name: its icon (30 px; a command
+  without an application `>_`), its name, "Installée avec l'application."
+  (with its `Comment` after " · " when 40 characters or fewer) or
+  "Ajoutée par toi." (with its command in Martian Mono when it is no
+  application's), a ✕ (28 px) for the user's own, a switch. Off, an
+  installed entry is the user's copy of it with `Hidden=true`; on again,
+  that copy goes when it holds nothing else (else `Hidden=false`). The
+  user's own: `Hidden=true`, then the key taken out. ✕ removes the
+  user's file ("KeePassXC enlevée du démarrage"; "Annuler" writes it
+  back byte for byte). "Slack au démarrage : non", "Annuler".
+- **+ Ajouter une application**: a sheet over the window (420 px, the
+  menus' surface, radius 14): "Ajouter au démarrage", a search field
+  holding the keyboard over the launcher's applications (those already
+  at start-up left out; every word typed in the name or the id, accents
+  and case aside, those starting with it first), 38 px rows, the first
+  selected, "Annuler" and "Ajouter" (green). Adding copies the
+  application's desktop file into `$XDG_CONFIG_HOME/autostart/ID.desktop`;
+  its row comes last in the group, lit as a search result. `↑`/`↓`
+  move, `Enter` adds, `Esc` closes.
+- **Under the card**: "Elles démarrent une fois la barre affichée, une
+  fois par session. En couper une ne la ferme pas maintenant." and, when
+  some entries are for other desktops only, "3 autres sont prévues pour
+  d'autres bureaux et ne démarrent pas ici · Les voir": they show under
+  the card at 45 %, with no switch ("Prévue pour GNOME.").
+- **The session** starts them (the compositor, `--session` only): see
+  [packaging/README.md](../../packaging/README.md).
+- **Keyboard**: the menus open with `Space`, `Enter` or `Alt+↓`, `↑`/`↓`
+  move, `Enter` chooses, `Esc` closes; a switch's ✕ comes after it in the
+  `Tab` order, and `Delete` on a user's row's switch removes it.
+- **The search**: par défaut, navigateur, firefox, liens, courriel,
+  mailto, terminal, console, vidéos, lecteur, images, photos,
+  visionneuse, ouvrir avec, démarrage, au lancement, session, démarrer
+  (default, browser, links, mail, player, viewer, open with, startup,
+  autostart, login); the keys `programs.terminal` and `mimeapps`.
+- **Choices made here (to confirm on the machine)**: an application
+  without an icon in the theme shows its initial on a colour of its id;
+  the toasts of an undo say "Annulé : Navigateur web : Firefox"; the
+  sheet's matching is by words, not the launcher's fuzzy ranking; a row
+  with nothing chosen yet (applications there, none set) says
+  "Choisir…".
+
+## Captures et presse-papiers (6.17)
+
+Issue #451, variant A, as the issue's spec and its "Decided
+(2026-11-05)" specify it: the shutter on by default, never heard when the
+sound is muted; "Laisser de côté les mots de passe" a switch, amber when
+off; the history turned off erased (but its pinned items) once the
+toast is gone. Every key is followed live (screenshots.md and bar.md,
+6.17). Section `captures` (`hocus settings captures`), TRAVAIL's fourth
+row.
+
+| Group (its note) | Row | Control | Key |
+|---|---|---|---|
+| CAPTURES D'ÉCRAN ("Copiées et enregistrées") | Dossier | the path button (a folder icon, "Images › Captures d'écran"; opens it with `xdg-open`) and "Changer…" (the portal's folder chooser) | `[capture] folder` |
+| | Format | segmented PNG / JPEG | `[capture] format` |
+| | Son de l'obturateur ("Nouveau") | switch | `[capture] sound` |
+| ENREGISTREMENT DE L'ÉCRAN ("Le son et le micro se choisissent à chaque fois") | Dossier | as above, "Vidéos › Enregistrements d'écran" | `[recording] folder` |
+| | Format | segmented MP4 / WebM | `[recording] format` |
+| HISTORIQUE DU PRESSE-PAPIERS ("143 éléments · 3 épinglés", "Vide") | Garder ce que je copie | switch | `[clipboard] history` |
+| | Pendant | menu: Jusqu'à la fin de la session, 1 jour, 7 jours, 30 jours | `[clipboard] keep` |
+| | Laisser de côté les mots de passe | switch, the applications as chips under it | `[clipboard] skip-secrets`, `ignore` |
+| | Effacer l'historique | "Effacer…" | (the compositor's line) |
+
+- **Under the title**: "Impr, Super+Maj+R et Super+V se changent dans
+  Clavier et raccourcis ›" (6.8's row lit). Under the card: "Gardé
+  chiffré sur cet ordinateur ; sa clé est dans le trousseau de ta
+  session.", or "…dans un fichier lisible par toi seul." when the
+  history's key is `clipboard.key`.
+- **A folder**: its line is the next file's name ("« Capture du
+  2026-11-05 à 14-32-05.png »", today's date, the format's extension).
+  "Changer…" asks the portal's `FileChooser.OpenFile` with `directory`,
+  starting in the folder used, on a thread; the folder chosen is written
+  from the home (`~/Bureau/Captures`), "Dossier des captures : Bureau ›
+  Captures", "Annuler". A folder that is gone or read-only: the line in
+  amber, "Ce dossier n'existe plus (clé USB débranchée ?) : les captures
+  vont dans Images › Captures d'écran." ("Ce dossier ne s'écrit pas : …"
+  when read-only), its path at 60 %; the key stays. While a recording is
+  under way (the compositor's line says `{"recording": true}`), the
+  recordings' rows say "Pour le prochain enregistrement".
+- **The formats' lines** follow the value: "Sans perte : net pour du
+  texte et du code." / "Plus léger, pour les photos ; le presse-papiers
+  reçoit toujours du PNG."; "MP4 (H.264 et AAC) : se lit et s'envoie
+  partout." / "WebM (VP9 et Opus) : libre, plus léger, moins lu par les
+  téléphones."
+- **The history off**: its line "Coupé : Super+V ne montre que les
+  épinglés.", the rows under it at 45 %, inert; its toast says what goes,
+  "Historique coupé : 140 éléments effacés" (the count less the pinned),
+  "Annuler" within its 6 s turning it back on before the shell erases
+  anything. The count is the compositor's line's `{"clipboard": {"items",
+  "pinned"}}`, the shell's history as it shows.
+- **Passwords**: the chips (26 high, a 16 px tile with the application's
+  initial, its name): KeePassXC, Bitwarden, 1Password, then the file's
+  `ignore` (by their desktop entries' names, a ✕ each; `Delete` on a
+  focused one), then "+ Ajouter", a menu of the applications installed
+  (6.14's list) not left out yet: "Laissée de côté : Proton Pass",
+  "Retirée des mots de passe : Proton Pass", each with "Annuler". Off:
+  the line in amber, "Coupé : un mot de passe copié sera gardé dans
+  l'historique, chiffré, pendant 30 jours." (the keep chosen), the chips
+  at 45 %.
+- **"Effacer…"** turns in place into "Garder" (ghost) and "Effacer 140
+  éléments" (`rgba(242,84,91,0.12)`, `#FFB3B6`), its line "140 éléments,
+  sauf les 3 épinglés."; `Esc` or "Garder" go back. Confirmed, the
+  compositor's line is asked `clipboard-clear`, and the header says
+  "Effacé" for 4 s; no toast, nothing to undo.
+- **The search** finds the rows by the spec's words and their keys;
+  "Effacer l'historique" is the page's own row.
+- **Choices made here (to confirm on the machine)**: the keep's button
+  says its menu's words ("Jusqu'à la fin de la session"), not "La
+  session"; "+ Ajouter" is a menu of the installed applications (6.15's
+  sheet is not built); the chips' tiles are initials, not the
+  applications' icons; Super+V's "Historique coupé · Réglages" is a line,
+  not a link.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -1530,9 +1701,13 @@ file.
   JSON: the page, the sections, the query and its results, the lit row,
   the toast, the file's state, the banner, each row's value and warning)
   and **where its pieces are** (`hocus_settings::places`, at debug: each
-  id'd piece's place in the window, scrolling counted), as the shell says
-  what it draws. Tests read both; names for screen readers come with the
-  accessibility slice.
+  id'd piece's place in the window, scrolling counted; `wheels`: how
+  many wheels the window had taken when they were read, so that a test
+  scrolling the page knows its wheel was taken, moved or not, before it
+  clicks; and `shown`: the `serial` of the "shows" line they follow, said
+  once two collections agree, so that a test clicks where the window is
+  as it last showed), as the shell says what it draws. Tests read both; names for
+  screen readers come with the accessibility slice.
 
 ## Choices made here (to confirm on the machine)
 
@@ -1843,6 +2018,18 @@ the same bed with timedated faked on a D-Bus daemon of the test's own
 - `without_timedated_the_page_says_so`
 - `the_format_link_and_the_search_light_their_rows`
 - `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_applications.rs` (6.15), the same
+bed with applications, a `mimeapps.list` and autostart folders of the
+test's own (`XDG_CONFIG_DIRS` too):
+
+- `choosing_a_browser_writes_its_four_types_in_mimeapps_list_keeping_the_rest`
+- `annuler_puts_mimeapps_list_back_byte_for_byte`
+- `a_row_with_no_application_is_inert_and_says_so`
+- `other_command_writes_programs_terminal_and_super_return_uses_it`
+- `turning_off_an_installed_autostart_entry_writes_a_hidden_copy`
+- `adding_an_application_copies_its_entry_into_autostart`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 Unit tests: the sections and groups, the delays' and the idle delay's
