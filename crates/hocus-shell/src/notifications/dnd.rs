@@ -2,11 +2,15 @@
 //! the history, the badge counting them), critical ones still showing. It
 //! ends by itself at the time chosen: an hour on, the next 8:00, or never.
 //!
-//! The end is on the monotonic clock, its time read once from the wall
-//! clock as it starts (for an hour, an hour on both; for the morning, the
-//! wall clock's time until 8:00). It survives a restart of the shell, not a
-//! new session: it is written in the session's runtime directory with the
-//! compositor's process id, which starts the shell again.
+//! An hour is on the monotonic clock: an hour awake. The morning is the
+//! wall clock's 8:00, which the monotonic clock misses across a suspend
+//! (it stops meanwhile): its end there is only the wait until then, read
+//! from the wall clock as it starts and again whenever the wall clock may
+//! have moved apart (a resume, a clock set: [`Dnd::checked`]); whether it
+//! is over is always the wall clock's say. It survives a restart of the
+//! shell, not a new session: it is written in the session's runtime
+//! directory with the compositor's process id, which starts the shell
+//! again.
 
 use std::time::{Duration, Instant};
 
@@ -40,7 +44,7 @@ impl Choice {
 }
 
 /// When it ends: on the monotonic clock, and the wall clock's time then
-/// (milliseconds), which the panel says.
+/// (milliseconds), which the panel says (and which ends the morning).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Until {
     pub at: Instant,
@@ -103,10 +107,55 @@ impl Dnd {
         self.until().map(|u| u.at)
     }
 
-    /// Whether it is over at `now`.
-    pub fn over(self, now: Instant) -> bool {
-        self.deadline().is_some_and(|at| at <= now)
+    /// The wall clock's end (milliseconds), when that is what ends it: the
+    /// morning's.
+    pub fn wall_end(self) -> Option<i64> {
+        match self {
+            Self::On {
+                choice: Choice::Morning,
+                until: Some(until),
+            } => Some(until.wall),
+            _ => None,
+        }
     }
+
+    /// Whether it is over at `now`, the wall clock reading `wall`
+    /// (milliseconds): an hour on the monotonic clock, the morning on the
+    /// wall clock.
+    pub fn over(self, now: Instant, wall: i64) -> bool {
+        match self.wall_end() {
+            Some(end) => end <= wall,
+            None => self.deadline().is_some_and(|at| at <= now),
+        }
+    }
+
+    /// As it is at `now`, the wall clock reading `wall`: off once over;
+    /// else the morning's end on the monotonic clock read again from the
+    /// wall clock, which a suspend (or a clock set) moved apart from it.
+    #[must_use]
+    pub fn checked(self, now: Instant, wall: i64) -> Self {
+        if self.over(now, wall) {
+            return Self::Off;
+        }
+        match self {
+            Self::On {
+                choice: Choice::Morning,
+                until: Some(until),
+            } => Self::On {
+                choice: Choice::Morning,
+                until: Some(Until {
+                    at: now + left(until.wall, wall),
+                    wall: until.wall,
+                }),
+            },
+            dnd => dnd,
+        }
+    }
+}
+
+/// From the wall clock's `wall` to its `end` (milliseconds), none if past.
+fn left(end: i64, wall: i64) -> Duration {
+    Duration::from_millis(u64::try_from(end.saturating_sub(wall)).unwrap_or(0))
 }
 
 /// The next 8:00 after `wall`, in its time zone.
@@ -151,9 +200,10 @@ pub fn encode(dnd: Dnd, session: u32) -> Option<String> {
     Some(text)
 }
 
-/// What `text` says, in session `session` at `now`: off when it was another
-/// session's, or it ended meanwhile.
-pub fn decode(text: &str, session: u32, now: Instant) -> Dnd {
+/// What `text` says, in session `session` at `now`, the wall clock reading
+/// `wall` (milliseconds): off when it was another session's, or it ended
+/// meanwhile.
+pub fn decode(text: &str, session: u32, now: Instant, wall: i64) -> Dnd {
     let mut fields = std::collections::HashMap::new();
     for line in text.lines() {
         if let Some((name, value)) = line.split_once(' ') {
@@ -170,14 +220,17 @@ pub fn decode(text: &str, session: u32, now: Instant) -> Dnd {
         fields.get("until").and_then(|u| u.parse::<u64>().ok()),
         fields.get("wall").and_then(|w| w.parse::<i64>().ok()),
     ) {
-        (Some(at), Some(wall)) => {
-            let left = Duration::from_micros(at.saturating_sub(monotonic_us()));
-            if left.is_zero() {
+        (Some(at), Some(end)) => {
+            let remaining = match choice {
+                Choice::Morning => left(end, wall),
+                _ => Duration::from_micros(at.saturating_sub(monotonic_us())),
+            };
+            if remaining.is_zero() {
                 return Dnd::Off;
             }
             Some(Until {
-                at: now + left,
-                wall,
+                at: now + remaining,
+                wall: end,
             })
         }
         _ if choice == Choice::Always => None,
@@ -217,8 +270,9 @@ mod tests {
         let until = hour.until().expect("an end");
         let said = zoned(until.wall, &at).expect("a time");
         assert_eq!((said.hour(), said.minute()), (15, 32));
-        assert!(!hour.over(now + Duration::from_secs(3599)));
-        assert!(hour.over(now + Duration::from_secs(3600)));
+        let ms = at.timestamp().as_millisecond();
+        assert!(!hour.over(now + Duration::from_secs(3599), ms));
+        assert!(hour.over(now + Duration::from_secs(3600), ms));
         let morning = Dnd::starting(Choice::Morning, now, &at);
         // 14:32 to 8:00 the next day.
         let left = Duration::from_secs((24 * 60 - (14 * 60 + 32) + 8 * 60) * 60);
@@ -231,7 +285,58 @@ mod tests {
         assert_eq!(early.deadline(), Some(now + Duration::from_secs(5 * 3600)));
         let always = Dnd::starting(Choice::Always, now, &at);
         assert_eq!(always.deadline(), None);
-        assert!(always.is_on() && !always.over(now + Duration::from_secs(1 << 30)));
+        assert!(always.is_on() && !always.over(now + Duration::from_secs(1 << 30), i64::MAX));
+    }
+
+    /// Suspended overnight, the monotonic clock stopped: the morning still
+    /// ends at the wall clock's 8:00, as the machine resumes past it; the
+    /// hour, an hour awake.
+    #[test]
+    fn the_morning_ends_at_the_wall_clocks_eight_across_a_suspend() {
+        let now = Instant::now();
+        let at = wall("2026-11-02T23:10:00+01:00[Europe/Paris]");
+        let ms = |z: &str| wall(z).timestamp().as_millisecond();
+        let morning = Dnd::starting(Choice::Morning, now, &at);
+        assert_eq!(
+            morning.wall_end(),
+            Some(ms("2026-11-03T08:00:00+01:00[Europe/Paris]"))
+        );
+        // Suspended at 23:20, ten minutes awake: resumed at 8:30, the
+        // monotonic clock 10 minutes on, its deadline hours ahead.
+        let awake = now + Duration::from_secs(600);
+        let resumed = ms("2026-11-03T08:30:00+01:00[Europe/Paris]");
+        assert!(morning.deadline().is_some_and(|d| d > awake));
+        assert!(morning.over(awake, resumed));
+        assert_eq!(morning.checked(awake, resumed), Dnd::Off);
+        // Resumed at 6:00: still on, its end two hours on.
+        let early = ms("2026-11-03T06:00:00+01:00[Europe/Paris]");
+        let checked = morning.checked(awake, early);
+        assert_eq!(checked.choice(), Some(Choice::Morning));
+        assert_eq!(
+            checked.deadline(),
+            Some(awake + Duration::from_secs(2 * 3600))
+        );
+        assert_eq!(checked.wall_end(), morning.wall_end());
+        // The monotonic deadline reached before the wall clock's 8:00 (a
+        // clock set back): not over, its end moved on.
+        let due = morning.deadline().expect("an end");
+        let behind = ms("2026-11-03T07:59:00+01:00[Europe/Paris]");
+        assert!(!morning.over(due, behind));
+        assert_eq!(
+            morning.checked(due, behind).deadline(),
+            Some(due + Duration::from_secs(60))
+        );
+        // The hour: an hour awake, whatever the wall clock says.
+        let hour = Dnd::starting(Choice::Hour, now, &at);
+        assert_eq!(hour.wall_end(), None);
+        assert!(!hour.over(awake, resumed));
+        assert_eq!(hour.checked(awake, resumed), hour);
+        assert!(hour.over(now + Duration::from_secs(3600), resumed));
+        // Read back after a suspend past 8:00 (a shell started again): off.
+        let text = encode(morning, 4242).expect("on");
+        assert_eq!(decode(&text, 4242, awake, resumed), Dnd::Off);
+        let back = decode(&text, 4242, awake, early);
+        assert_eq!(back.deadline(), Some(awake + Duration::from_secs(2 * 3600)));
     }
 
     #[test]
@@ -240,7 +345,8 @@ mod tests {
         let at = wall("2026-11-02T14:32:00+01:00[Europe/Paris]");
         let hour = Dnd::starting(Choice::Hour, now, &at);
         let text = encode(hour, 4242).expect("on");
-        let back = decode(&text, 4242, Instant::now());
+        let ms = at.timestamp().as_millisecond();
+        let back = decode(&text, 4242, Instant::now(), ms);
         assert_eq!(back.choice(), Some(Choice::Hour));
         let left = back
             .deadline()
@@ -248,10 +354,10 @@ mod tests {
             .saturating_duration_since(now);
         assert!(left > Duration::from_secs(3590) && left <= Duration::from_secs(3601));
         assert_eq!(back.until().map(|u| u.wall), hour.until().map(|u| u.wall));
-        assert_eq!(decode(&text, 7, now), Dnd::Off);
+        assert_eq!(decode(&text, 7, now, ms), Dnd::Off);
         let always = encode(Dnd::starting(Choice::Always, now, &at), 4242).expect("on");
         assert_eq!(
-            decode(&always, 4242, now),
+            decode(&always, 4242, now, ms),
             Dnd::On {
                 choice: Choice::Always,
                 until: None

@@ -314,8 +314,9 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
 - While on, bubbles are held: they go straight to the history, except
   critical ones, which still show.
 - The bell shows a slash in amber (`#F5C46E`).
-- It ends by itself at the chosen time, on the monotonic clock with the
-  wall clock read for the target.
+- It ends by itself at the chosen time: an hour on the monotonic clock
+  (an hour awake), the morning at the wall clock's 8:00, even after a
+  suspend.
 - It survives a restart of the shell, but not a new session.
 
 **Keeping**
@@ -469,9 +470,14 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
 
 - **The switch** turns it on for an hour; a chip chooses again from now:
   an hour, the next 8:00 ("Jusqu'à demain, 8 h", "Jusqu'à 8 h" before
-  8:00), or no limit. Its end is on the monotonic clock: the wall clock
-  read once for how long until the target. The stack's deadline wakes it
-  at its end; it turns off by itself, the bell losing its slash.
+  8:00), or no limit. An hour's end is on the monotonic clock: the wall
+  clock read once for how long until the target. The morning's is the
+  wall clock's 8:00 (#711): the monotonic clock stops while the machine
+  sleeps, so its wait is read again from the wall clock as the machine
+  resumes (logind's `PrepareForSleep`), when the clock is set, and on a
+  `CLOCK_REALTIME` timer set to 8:00, which rings on resume past it. The
+  stack's deadline wakes it at its end; it turns off by itself, the bell
+  losing its slash.
 - **While on**, a bubble of normal or low urgency is held: no bubble, to
   the history, not seen; a critical one shows. A bubble already on screen
   stays its time; a replacement of one on screen updates it.

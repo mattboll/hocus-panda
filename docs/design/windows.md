@@ -170,6 +170,20 @@ maximises or restores. Chosen over a thin title bar after trying both in
 the prototype. The top resize band is the window's first 4 px; the grip
 sits just below it.
 
+The pill stands out from what lies under it (#719): light (`#EEF1F6` at
+75 %) over a dark header, dark (`#141926` at 75 %, the light theme's
+text) over a light one, at least 3:1 against it either way. Which one is
+decided from the window's own pixels around the pill (2 px around it):
+their mean colour, and the tone whose pill has the higher contrast
+against it; the other tone takes over only once it does 15 % better, so
+a mid-grey header does not make it flicker. Before anything is read, and
+over a mostly transparent spot, the pill is light. The pixels are read
+only while the grip shows, once per commit of the window's surface: the
+renderer copies those few pixels after a frame is drawn and they are read
+at the next frame, so the loop never waits on the GPU
+(`crates/hocus-compositor/src/grip_tone.rs`). The seam's handle (section
+8) stays light: under it is the gap between two windows, not a header.
+
 Which windows have no header of their own (#716):
 
 - A Wayland window that leaves its decorations to the desktop, through

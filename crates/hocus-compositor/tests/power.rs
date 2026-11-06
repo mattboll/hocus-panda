@@ -106,7 +106,11 @@ fn start(
 ) -> anyhow::Result<Bed> {
     let fakes = Fakes::start_with_power(power)?;
     let log = fakes.dir.path().join("shell.log");
-    let env = [("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned())];
+    // Each key's window and route (#677), said when the bar draws again.
+    let env = [(
+        "RUST_LOG",
+        "warn,hocuspanda_shell=debug,hocuspanda_shell::keys=trace".to_owned(),
+    )];
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let mut config = Config::default();
     config.panel.form = form;
@@ -296,6 +300,24 @@ impl Bed {
             wait(&mut self.hp, Duration::from_millis(50))?;
         }
         anyhow::bail!("{seen} pixels at {at:?}, not within {between:?}")
+    }
+}
+
+/// The bar's commits are still `bars`; else, what the keys did: one sent
+/// to a window gone and taken for the keyboard's holder woke every surface
+/// (#714).
+fn bar_not_drawn(bed: &Bed, bars: u64) {
+    let drawn = bed.hp.bar_commits();
+    if drawn != bars {
+        let keys: Vec<String> = plain(&bed.log)
+            .lines()
+            .filter(|l| l.contains("hocuspanda_shell::keys"))
+            .map(str::to_owned)
+            .collect();
+        panic!(
+            "the bar was drawn again: {drawn} commits for {bars}\nthe keys:\n{}",
+            keys.join("\n")
+        );
     }
 }
 
@@ -881,10 +903,15 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
         bed.hp.pointer_move(inside.0, inside.1);
         // Open and still: nothing draws.
         assert_eq!(rest(&mut bed)?, (0, 0, 0, 0));
-        assert_eq!(bed.hp.bar_commits(), bars, "the bar was drawn again");
+        bar_not_drawn(&bed, bars);
+        // Esc: closed, the row holds the keyboard; Esc again lets it go.
+        // Each once the compositor moved the keyboard, as a user sees it
+        // move: not sent to a popover the shell already closed.
         bed.press(KEY_ESC);
         bed.popover_is(None)?;
+        bed.keyboard_on(Some("hocus-bar-levels"))?;
         bed.press(KEY_ESC);
+        bed.keyboard_on(None)?;
     }
 
     // A tile under the pointer: the popover alone draws, its rectangle
@@ -908,7 +935,7 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
         anyhow::ensure!(drawn, "the popover did not draw the hover");
         wait(&mut bed.hp, Duration::from_millis(100))?;
         assert_eq!(bed.hp.levels_commits(), levels, "the levels were drawn");
-        assert_eq!(bed.hp.bar_commits(), bars, "the bar was drawn again");
+        bar_not_drawn(&bed, bars);
         if bed.hp.clock_commits() == clocks {
             assert_eq!(bed.hp.take_damage(0), Some(rect));
             // The battery changes: the levels and the popover draw it,
@@ -919,7 +946,7 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
                 hp.popover_commits() > popover + 1 && hp.levels_commits() > levels
             })?;
             assert!(both, "the change was not drawn");
-            assert_eq!(bed.hp.bar_commits(), bars, "the bar was drawn again");
+            bar_not_drawn(&bed, bars);
             assert_eq!(bed.hp.connections_commits(), connections);
             return Ok(());
         }

@@ -57,6 +57,8 @@ pub struct Managed {
     /// its client takes the new size.
     pub resizing: Option<Resizing>,
     pub grip: Grip,
+    /// Its grip's pill light or dark, after what is under it (#719).
+    pub grip_tone: crate::grip_tone::GripTone,
     /// Where it was before it went fullscreen.
     pub before_fullscreen: Mode,
     /// Where it is while it does not show (minimised, or on a desktop out
@@ -162,6 +164,7 @@ impl Managed {
             requested: None,
             resizing: None,
             grip: Grip::Hidden,
+            grip_tone: crate::grip_tone::GripTone::default(),
             before_fullscreen: Mode::Floating,
             away: None,
             travel: None,

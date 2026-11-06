@@ -47,6 +47,17 @@
 //! lost (iced_layershell hands it to that surface, which it does not have
 //! yet): that lasts one round trip to the compositor.
 //!
+//! A window the shell closed may still be sent keys: those typed before
+//! the compositor heard of it (`Esc` closing a popover, `Tab` at once).
+//! layershellev, whose current surface it was, hands them to iced's first
+//! window, whichever that is, and the compositor's next enter may be read
+//! with them already (#677). So the shell follows layershellev's current
+//! window too, from the windows' events: the one last focused (an enter, a
+//! press or its making makes a surface current, and layershellev tells it
+//! `Focused`) or opened. A keyboard event handed to another window is one
+//! of those: it says nothing of which window holds the keyboard, and the
+//! closed window, if it held it, holds it no more.
+//!
 //! Nothing here reads the connection, nor wakes: the keyboard's events are
 //! handled as the widgets get theirs.
 //!
@@ -184,6 +195,9 @@ struct Keys {
     /// The keyboard events handed to other windows than the one holding
     /// the keyboard, for that one, in order.
     kept: Vec<(window::Id, Event)>,
+    /// The window layershellev hands the keyboard's events to, as far as
+    /// the windows' events say (see the module's comment).
+    current: Option<window::Id>,
 }
 
 impl Default for Keys {
@@ -192,6 +206,7 @@ impl Default for Keys {
             holder: Holder::Unknown,
             undo: None,
             kept: Vec::new(),
+            current: None,
         }
     }
 }
@@ -214,6 +229,9 @@ impl Keys {
     /// Where `event`, handed to window `here`, goes; what it tells of the
     /// holder taken in.
     fn route(&mut self, here: window::Id, event: &Event) -> Route {
+        if let Event::Window(window::Event::Focused | window::Event::Opened { .. }) = event {
+            self.current = Some(here);
+        }
         if let Some((id, holder)) = self.undo.take()
             && id == here
             && matches!(event, Event::Window(window::Event::Unfocused))
@@ -250,6 +268,7 @@ impl Keys {
             ?was,
             now = ?self.holder,
             ?route,
+            current = ?self.current,
             "a keyboard event"
         );
         route
@@ -257,9 +276,18 @@ impl Keys {
 
     /// Where keyboard event `key`, handed to window `here`, goes.
     fn route_key(&mut self, here: window::Id, key: &keyboard::Event, entered_maybe: bool) -> Route {
+        // Handed to iced's first window, layershellev's current one closed.
+        let gone = self.current.filter(|current| *current != here);
+        if let Some(gone) = gone
+            && matches!(self.holder, Holder::Window(id) | Holder::Opened { id, .. } if id == gone)
+        {
+            tracing::debug!(window = ?gone, "the window holding the keyboard is gone");
+            self.holder = Holder::Unknown;
+            self.undo = None;
+        }
         match self.holder {
             Holder::Unknown => Route::Here,
-            Holder::Entering { .. } | Holder::Opened { .. } if entered_maybe => {
+            Holder::Entering { .. } | Holder::Opened { .. } if entered_maybe && gone.is_none() => {
                 tracing::debug!(window = ?here, "the keyboard is on this window");
                 if let keyboard::Event::ModifiersChanged(_) = key {
                     self.undo = Some((here, self.holder));
@@ -608,6 +636,10 @@ mod tests {
         Event::Window(window::Event::Unfocused)
     }
 
+    fn focused() -> Event {
+        Event::Window(window::Event::Focused)
+    }
+
     fn opened() -> Event {
         Event::Window(window::Event::Opened {
             position: None,
@@ -660,13 +692,18 @@ mod tests {
         assert_eq!(keys.route(toast, &opened()), Route::Here);
         assert_eq!(keys.route(field, &opened()), Route::Here);
         assert_eq!(keys.route(field, &key()), Route::Here);
+        // Pressed, the toast is handed the keys.
+        assert_eq!(keys.route(toast, &focused()), Route::Here);
         assert_eq!(keys.route(toast, &key()), Route::To(field));
         // A window made after the enter says nothing of it.
         keys.told(Told::Enter);
         let bubble = window::Id::unique();
         assert_eq!(keys.route(bubble, &opened()), Route::Here);
         assert_eq!(keys.route(bubble, &key()), Route::Here);
+        // Pressed, the field is handed them again, then the bubble.
+        assert_eq!(keys.route(field, &focused()), Route::Here);
         assert_eq!(keys.route(field, &key()), Route::Here);
+        assert_eq!(keys.route(bubble, &focused()), Route::Here);
         assert_eq!(keys.route(bubble, &key()), Route::To(field));
     }
 
@@ -692,6 +729,46 @@ mod tests {
         assert_eq!(keys.route(picker, &modifiers()), Route::To(launcher));
         assert_eq!(keys.route(picker, &unfocused()), Route::Here);
         assert_eq!(keys.route(picker, &key()), Route::To(launcher));
+    }
+
+    /// `Esc` closes a popover holding the keyboard, `Shift+Tab` typed at
+    /// once: sent to the popover, which the shell has no more, it is handed
+    /// to iced's first window, the compositor's enter on the group (which
+    /// focuses it) read with it already. The group holds the keyboard
+    /// (#677).
+    #[test]
+    fn keys_handed_elsewhere_than_the_current_window_settle_nothing() {
+        let (first, group) = (window::Id::unique(), window::Id::unique());
+        let mut keys = Keys::default();
+        let popover = window::Id::unique();
+        keys.told(Told::Enter);
+        assert_eq!(keys.route(popover, &opened()), Route::Here);
+        assert_eq!(keys.route(popover, &key()), Route::Here);
+        keys.told(Told::Enter);
+        assert_eq!(keys.route(first, &key()), Route::Here);
+        assert_eq!(keys.route(first, &modifiers()), Route::Here);
+        // The enter, then its modifiers: the group holds it.
+        assert_eq!(keys.route(group, &focused()), Route::Here);
+        assert_eq!(keys.route(group, &modifiers()), Route::Here);
+        assert_eq!(keys.route(group, &key()), Route::Here);
+        // A press on the first window makes it current: the keys it is
+        // handed then go to the group.
+        assert_eq!(keys.route(first, &focused()), Route::Here);
+        assert_eq!(keys.route(first, &key()), Route::To(group));
+    }
+
+    /// The same, the compositor's enter not read yet: the closed popover
+    /// holds the keyboard no more, the keys go where they are handed.
+    #[test]
+    fn a_window_gone_holds_the_keyboard_no_more() {
+        let first = window::Id::unique();
+        let popover = window::Id::unique();
+        let mut keys = Keys::default();
+        keys.told(Told::Enter);
+        assert_eq!(keys.route(popover, &opened()), Route::Here);
+        assert_eq!(keys.route(popover, &key()), Route::Here);
+        assert_eq!(keys.route(first, &key()), Route::Here);
+        assert_eq!(keys.route(first, &modifiers()), Route::Here);
     }
 
     #[test]

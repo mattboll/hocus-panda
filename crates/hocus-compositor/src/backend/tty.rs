@@ -167,6 +167,20 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
                     app.state.input_device_added(device.clone());
                 }
                 InputEvent::DeviceRemoved { device } => app.state.input_device_removed(device),
+                // A touchpad never said to sense fewer fingers than it
+                // was seen gesturing with (#720).
+                InputEvent::GestureSwipeBegin { event } => {
+                    use smithay::backend::input::{Event as _, GestureBeginEvent as _};
+                    app.state.gesture_seen(&event.device(), event.fingers());
+                }
+                InputEvent::GesturePinchBegin { event } => {
+                    use smithay::backend::input::{Event as _, GestureBeginEvent as _};
+                    app.state.gesture_seen(&event.device(), event.fingers());
+                }
+                InputEvent::GestureHoldBegin { event } => {
+                    use smithay::backend::input::{Event as _, GestureBeginEvent as _};
+                    app.state.gesture_seen(&event.device(), event.fingers());
+                }
                 _ => {}
             }
             app.state.process_input_event(event);
@@ -833,6 +847,7 @@ impl TtyBackend {
         }
         state.send_frames(&screen.output, Some(&states));
         state.desktops_drawn(&screen.output);
+        state.read_under_grips(gles);
         if empty {
             pace(screen, crtc, state);
         }

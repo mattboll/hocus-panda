@@ -216,5 +216,6 @@ impl WinitBackend {
         }
         state.send_frames(&self.output, None);
         state.desktops_drawn(&self.output);
+        state.read_under_grips(self.backend.renderer());
     }
 }
