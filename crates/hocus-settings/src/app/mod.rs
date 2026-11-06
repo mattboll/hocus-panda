@@ -67,8 +67,6 @@ pub const SIZE: (f32, f32) = (1100.0, 760.0);
 pub const LEAST: (f32, f32) = (860.0, 560.0);
 
 /// How long toasts stay.
-/// How long whole frames go on after what can leave pixels behind.
-const FRESH: Duration = Duration::from_millis(150);
 const TOAST: Duration = Duration::from_secs(6);
 const UNDONE: Duration = Duration::from_millis(3500);
 /// A slider is written this long after it stops moving.
@@ -94,23 +92,6 @@ const SEARCH: &str = "search";
 /// The window's background (the content's) and its text.
 pub fn background() -> iced::Color {
     style::CONTENT.get()
-}
-
-/// The window's background for `app`'s next frame: [`background`], its
-/// blue a 1024th apart on every other frame while the window is
-/// [`App::fresh`]. On the CPU, iced draws only what it finds changed
-/// between frames, and misses what is drawn past a piece's bounds (a
-/// shadow, an anti-aliased stroke, a canvas's text moved with the page):
-/// that stays on screen after a scroll, a toast or a motion. A changed
-/// background makes it draw the whole window, so these frames leave
-/// nothing behind; at rest nothing changes and nothing draws.
-#[must_use]
-pub fn background_of(app: &App) -> iced::Color {
-    let mut colour = background();
-    if app.parity {
-        colour.b = (colour.b + 1.0 / 1024.0).min(1.0);
-    }
-    colour
 }
 
 pub fn text() -> iced::Color {
@@ -339,6 +320,7 @@ pub enum Message {
     /// The screen's scale the window draws at, changed.
     Rescaled(f32),
     Placed(Places),
+    /// The page scrolled or the window resized: its places said again.
     Scrolled,
     /// A wheel the window has taken, the page scrolled by it or not.
     Wheeled,
@@ -463,10 +445,6 @@ pub struct App {
     /// The Applications page: what its thread read, its menus and sheet
     /// (6.15).
     apps: applications::State,
-    /// Until then, every frame draws the whole window ([`background_of`]),
-    /// and which of two backgrounds the next one has.
-    fresh: Option<Instant>,
-    parity: bool,
 }
 
 impl App {
@@ -569,8 +547,6 @@ impl App {
             power,
             agents,
             apps,
-            fresh: None,
-            parity: false,
         };
         if let Some(address) = start.pair {
             app.bluetooth_pair_address(address);
@@ -658,14 +634,8 @@ impl App {
         Subscription::batch(subscriptions)
     }
 
-    /// Whether frames are needed at `now`: something moves, or whole
-    /// frames go on ([`background_of`]).
+    /// Whether something moves at `now`: frames are needed.
     fn moving(&self, now: Instant) -> bool {
-        self.in_motion(now) || self.fresh.is_some_and(|until| now < until)
-    }
-
-    /// Whether something moves at `now`.
-    fn in_motion(&self, now: Instant) -> bool {
         let within = |since: Instant, d: Duration| now.saturating_duration_since(since) < d;
         if self.reduced_motion {
             return self
@@ -702,11 +672,6 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut place = !matches!(message, Message::Frame(_) | Message::Placed(_));
         let shown = self.shows_serial;
-        let framed = matches!(message, Message::Frame(_));
-        // The network's page changes its shape at once (a sheet, a list):
-        // whole frames, as after a scroll.
-        let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
-        let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
         let task = Task::batch([
             task,
@@ -722,15 +687,6 @@ impl App {
         self.agents_visit();
         self.network_after_key();
         self.now = Instant::now();
-        // Whole frames after a scroll, a toast coming or going, and through
-        // any motion and a moment after it: two at least, one in each of
-        // the window's buffers.
-        if scrolled || toast != self.toast.as_ref().map(|t| t.serial) || self.in_motion(self.now) {
-            self.fresh = Some(self.now + FRESH);
-        }
-        if framed {
-            self.parity = !self.parity;
-        }
         self.knobs
             .retain(|_, since| self.now.saturating_duration_since(*since) < KNOB);
         if self

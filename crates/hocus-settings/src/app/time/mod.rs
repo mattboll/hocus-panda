@@ -110,8 +110,6 @@ pub struct State {
     /// The date and the time typed, while they are.
     pub(super) draft: Option<(String, String)>,
     pub(super) picker: Option<Picker>,
-    /// The picker as last drawn: open, its query and its row.
-    drawn: Option<(String, usize)>,
     /// The next minute's tick is asked.
     ticking: bool,
 }
@@ -475,17 +473,6 @@ impl App {
     pub(super) fn time_after(&mut self) -> Task<Message> {
         if !self.time_shows() {
             self.time.picker = None;
-        }
-        // The picker opened, changed or closed: whole frames for a moment
-        // (`background_of`), or what it covered stays on screen.
-        let drawn = self
-            .time
-            .picker
-            .as_ref()
-            .map(|p| (p.query.clone(), p.selected));
-        if drawn != self.time.drawn {
-            self.time.drawn = drawn;
-            self.fresh = Some(std::time::Instant::now() + super::FRESH);
         }
         if !self.time_shows() {
             return Task::none();

@@ -6,14 +6,14 @@
 //!
 //! The order: a section's name first, then settings whose name starts a
 //! word with the first word typed, then names holding it, then settings
-//! found by a nearby word, then the settings of a section found by its
-//! name. Eight at most.
+//! found by a nearby word, then shortcuts so found, then the settings of
+//! a section found by its name. Eight at most.
 
 use unicode_normalization::UnicodeNormalization as _;
 
 use crate::{
     lang::Lang,
-    model::{Outside, SectionId, Setting, all_settings, outside_of},
+    model::{Kind, Outside, SectionId, Setting, all_settings, outside_of},
 };
 
 /// At most this many results.
@@ -223,8 +223,12 @@ pub fn find(query: &str, lang: Lang) -> Vec<Found> {
             (Target::Section(_), None, None) => continue,
             (_, Some(i), _) if entry.folded.starts_word(i) => 1,
             (_, Some(_), _) => 2,
+            // A shortcut found by a nearby word after the settings so
+            // found: « geste » lists the touchpad's gestures, then the
+            // keys that do the same (#681).
+            (Target::Setting(setting), None, Some(_)) if setting.kind == Kind::Shortcut => 4,
             (_, None, Some(_)) => 3,
-            (_, None, None) => 4,
+            (_, None, None) => 5,
         };
         found.push(Found {
             target: entry.target,
@@ -276,6 +280,25 @@ mod tests {
         assert_eq!(first.via, None);
         assert_eq!(found[3].via.as_deref(), Some("veille"));
         assert_eq!(found[3].hit, None);
+    }
+
+    #[test]
+    fn geste_lists_the_gestures_then_the_keys_that_change_desktop() {
+        let ids: Vec<String> = find("geste", Lang::French)
+            .iter()
+            .map(|f| f.target.id())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "touchpad.swipe-desktops",
+                "touchpad.swipe-launcher",
+                "touchpad.left-to-applications",
+                "shortcuts.desktop-left",
+                "shortcuts.desktop-right",
+            ]
+        );
+        assert_eq!(names("gesture", Lang::English)[3], "Desktop on the left");
     }
 
     #[test]

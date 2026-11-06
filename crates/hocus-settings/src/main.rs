@@ -69,6 +69,10 @@ fn main() -> ExitCode {
         Start::First(listener) => listener,
     };
     hocus_settings::renderer::choose();
+    // On the CPU, every frame drawn whole: the regions iced finds changed
+    // miss what is drawn past a piece's bounds, which stayed on screen
+    // (#662). The window draws only when something changed.
+    iced_tiny_skia::draw_whole_frames(true);
     // Before the window: it reads folders.
     hocus_settings::bar::find_fonts();
     hocus_settings::appearance::find_cursor_themes();
@@ -109,8 +113,8 @@ fn main() -> ExitCode {
                 iced::Theme::Dark
             }
         })
-        .style(|app: &App, _: &iced::Theme| iced::theme::Style {
-            background_color: app::background_of(app),
+        .style(|_: &App, _: &iced::Theme| iced::theme::Style {
+            background_color: app::background(),
             text_color: app::text(),
         })
         .settings(settings)

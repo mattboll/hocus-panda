@@ -42,6 +42,7 @@ use hocus_compositor::{
 };
 use hocus_link::input::{Bus, Can, DeviceKind, InputDevice, RightClick};
 use serde_json::Value;
+use settings_page::{Floor, Wheel};
 
 const APP_ID: &str = "hocus-settings";
 const KEY_F: u32 = 33;
@@ -257,18 +258,12 @@ impl Bed {
     }
 
     /// A point over the page, in the window's view whatever the page's
-    /// length: where the wheel scrolls it.
+    /// length: where the wheel scrolls it. The page's own middle is not:
+    /// at scale 2 it fell below the window, and the wheel turned over the
+    /// desktop (#681).
     fn over_page(&mut self) -> anyhow::Result<(f64, f64)> {
         let window = self.window()?;
         Ok((f64::from(window.x) + 632.0, f64::from(window.y) + 400.0))
-    }
-
-    /// The pointer on the window's header, where nothing lights.
-    fn park(&mut self) -> anyhow::Result<()> {
-        let window = self.window()?;
-        self.hp
-            .pointer_move(f64::from(window.x) + 700.0, f64::from(window.y) + 30.0);
-        Ok(())
     }
 
     fn point(&mut self, id: &str) -> anyhow::Result<()> {
@@ -554,7 +549,7 @@ fn searching_tap_finds_tap_to_click() -> anyhow::Result<()> {
 }
 
 #[test]
-fn searching_geste_lists_the_three_gestures_rows_first() -> anyhow::Result<()> {
+fn searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -563,18 +558,20 @@ fn searching_geste_lists_the_three_gestures_rows_first() -> anyhow::Result<()> {
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
     bed.type_text("geste")?;
     let shown = bed.shows(|s| {
-        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 3)
+        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 5)
     })?;
     let targets: Vec<&str> = shown["results"]
         .as_array()
         .map(|r| r.iter().filter_map(|f| f["target"].as_str()).collect())
         .unwrap_or_default();
     assert_eq!(
-        targets[..3],
+        targets,
         [
             "touchpad.swipe-desktops",
             "touchpad.swipe-launcher",
-            "touchpad.left-to-applications"
+            "touchpad.left-to-applications",
+            "shortcuts.desktop-left",
+            "shortcuts.desktop-right"
         ],
         "{shown}"
     );
@@ -669,22 +666,17 @@ fn wheel_page(bed: &mut Bed, times: usize, notches: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The page scrolled down until `id` shows whole, with the wheel over it.
+/// The page scrolled until `id` shows whole, with the wheel over it,
+/// each wheel taken by the window before the next (#705): a wheel still
+/// on its way when the test reads where to point moved the page after.
 fn scroll_to(bed: &mut Bed, id: &str) -> anyhow::Result<()> {
-    for _ in 0..40 {
-        let places = bed.places_with(id)?;
-        let window = bed.window()?;
-        let place = &places[id];
-        let bottom = place[1].as_f64().unwrap_or_default() + place[3].as_f64().unwrap_or_default();
-        if bottom + 40.0 <= f64::from(window.height) {
-            return Ok(());
-        }
-        let page = bed.over_page()?;
-        bed.hp.pointer_move(page.0, page.1);
-        bed.hp.wheel(3);
-        wait(&mut bed.hp, Duration::from_millis(60))?;
-    }
-    anyhow::bail!("{id} never came into view")
+    let wheel = Wheel {
+        x: 632.0,
+        notches: 3,
+        top: 56.0,
+        floor: Floor::Margin(40.0),
+    };
+    settings_page::reveal(&mut bed.hp, &bed.log, APP_ID, id, &wheel)
 }
 
 /// The page scrolled down until the gestures' card shows whole.
@@ -898,11 +890,11 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let mouse = bed.hp.plug_device(MOUSE);
     bed.open()?;
     bed.shows(|s| s["mouse"]["mouse"].is_string())?;
-    bed.park()?;
+    bed.hp.pointer_move(5.0, 5.0);
     shoot(&mut bed, "mouse-touchpad.png")?;
     // The mouse's group and the gestures: the page scrolled.
     scroll_to(&mut bed, "card:mouse")?;
-    bed.park()?;
+    bed.hp.pointer_move(5.0, 5.0);
     shoot(&mut bed, "mouse-mouse-and-gestures.png")?;
     // The test area: scrolled with two fingers, the target double clicked.
     scroll_to(&mut bed, "try:list")?;
@@ -921,7 +913,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         bed.hp.wheel(3);
         wait(&mut bed.hp, Duration::from_millis(20))?;
     }
-    bed.park()?;
+    bed.hp.pointer_move(5.0, 5.0);
     shoot(&mut bed, "mouse-no-mouse.png")?;
     Ok(())
 }
