@@ -261,6 +261,8 @@ mod tests {
             names,
             [
                 "Mettre en veille après",
+                "Verrouiller avant la mise en veille",
+                "Éteindre l’écran",
                 "Couvercle fermé",
                 "Bouton d’alimentation"
             ]
@@ -272,8 +274,8 @@ mod tests {
             Some("veille")
         );
         assert_eq!(first.via, None);
-        assert_eq!(found[1].via.as_deref(), Some("veille"));
-        assert_eq!(found[1].hit, None);
+        assert_eq!(found[3].via.as_deref(), Some("veille"));
+        assert_eq!(found[3].hit, None);
     }
 
     #[test]
@@ -299,7 +301,7 @@ mod tests {
         );
         assert_eq!(
             names("idle.delay", Lang::French),
-            ["Éteindre l’écran après"]
+            ["Assombrir l’écran après"]
         );
         assert_eq!(names("couvercle", Lang::English)[0], "Lid closed");
         // Every word must be found.
