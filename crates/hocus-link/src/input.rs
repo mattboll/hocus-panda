@@ -76,8 +76,9 @@ pub struct Can {
     /// Turned off while an external mouse is plugged
     /// (`DISABLED_ON_EXTERNAL_MOUSE`).
     pub off_with_mouse: bool,
-    /// The most fingers it senses at once (libinput's tap finger count;
-    /// 0 for a device that does not tap): the gestures it can make (6.13).
+    /// The most fingers it senses at once (its `BTN_TOOL_*TAP` keys,
+    /// raised to the most fingers a gesture was seen with; 0 when not
+    /// known, which greys nothing): the gestures it can make (6.13).
     /// Written `fingers=N`.
     pub fingers: u32,
 }
