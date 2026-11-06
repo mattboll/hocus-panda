@@ -933,7 +933,7 @@ impl App {
             .font(SEMIBOLD)
             .color(fade(TEXT.get(), ink));
         // A key new with its page (6.4's side): "Nouveau" beside its name.
-        let name: El<'_> = match self.bar_chip(setting) {
+        let name: El<'_> = match self.bar_chip(setting).or_else(|| self.mouse_chip(setting)) {
             Some(chip) => row![name, chip]
                 .spacing(8)
                 .align_y(Alignment::Center)
@@ -969,15 +969,21 @@ impl App {
         }
         let inert = self.inert(setting);
         let focused = matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&super::Control::Setting(slot)));
-        // The row 54 px at least: 36 inside its padding.
+        // The row 54 px at least: 36 inside its padding; with a gesture's
+        // diagram, 68 (6.13).
+        let diagram = self.gesture_diagram(setting.id, ink);
         let control = row![
-            Space::new().height(36),
+            Space::new().height(if diagram.is_some() { 50 } else { 36 }),
             container(self.control(setting, slot, inert, focused))
                 .id(format!("control:{}", setting.id)),
         ]
         .align_y(Alignment::Center);
         let lit = self.lit(setting.id);
-        container(row![words, control].spacing(16).align_y(Alignment::Center))
+        let line = match diagram {
+            Some(diagram) => row![diagram, words, control],
+            None => row![words, control],
+        };
+        container(line.spacing(16).align_y(Alignment::Center))
             .padding(Padding {
                 top: 9.0,
                 right: 14.0,
@@ -1218,6 +1224,10 @@ impl App {
             }
             Kind::Swatches => self.swatches(slot, inert, focused),
             Kind::Link(to) => self.link_control(*to),
+            Kind::Note(note) => text(note.get(self.lang))
+                .size(13.5)
+                .color(fade(DIM.get(), alpha))
+                .into(),
             Kind::Text => {
                 let said = match value {
                     Some(crate::model::Value::Text(t)) => t,

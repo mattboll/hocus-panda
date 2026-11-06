@@ -7,7 +7,7 @@
 //! One device a line, words separated by spaces:
 //!
 //! ```text
-//! device 3 touchpad internal built-in can=tap,clickfinger,button-areas,edge,two-fingers,dwt,natural,accel,off-with-mouse click-default=corner speed=0.0 tap=on drag=on click=two-fingers dwt=on natural=off scroll=two-fingers off-with-mouse=off
+//! device 3 touchpad internal built-in can=tap,clickfinger,button-areas,edge,two-fingers,dwt,natural,accel,off-with-mouse fingers=4 click-default=corner speed=0.0 tap=on drag=on click=two-fingers dwt=on natural=off scroll=two-fingers off-with-mouse=off
 //! device 4 pointer usb external can=accel,flat,adaptive,natural,left-handed speed=-0.5 acceleration=flat natural=off left-handed=off
 //! ```
 //!
@@ -76,6 +76,10 @@ pub struct Can {
     /// Turned off while an external mouse is plugged
     /// (`DISABLED_ON_EXTERNAL_MOUSE`).
     pub off_with_mouse: bool,
+    /// The most fingers it senses at once (libinput's tap finger count;
+    /// 0 for a device that does not tap): the gestures it can make (6.13).
+    /// Written `fingers=N`.
+    pub fingers: u32,
 }
 
 /// What the compositor gave a device: `None` where it gave nothing (the
@@ -194,6 +198,10 @@ impl Can {
         .collect()
     }
 
+    fn with_fingers(self, fingers: u32) -> Self {
+        Self { fingers, ..self }
+    }
+
     fn of(list: &str) -> Result<Self, String> {
         let mut can = Self::default();
         for word in list.split(',').filter(|w| !w.is_empty()) {
@@ -252,6 +260,9 @@ impl fmt::Display for InputDevice {
             self.id,
             self.can.words().join(",")
         )?;
+        if self.can.fingers > 0 {
+            write!(f, " fingers={}", self.can.fingers)?;
+        }
         if let Some(click) = self.click_default {
             write!(f, " click-default={}", click.word())?;
         }
@@ -329,7 +340,8 @@ impl FromStr for InputDevice {
                 .ok_or_else(|| format!("not NAME=VALUE: {word}"))?;
             let a = &mut device.applied;
             match name {
-                "can" => device.can = Can::of(value)?,
+                "can" => device.can = Can::of(value)?.with_fingers(device.can.fingers),
+                "fingers" => device.can.fingers = value.parse().map_err(|_| "a finger count")?,
                 "click-default" => {
                     device.click_default = Some(RightClick::of(value).ok_or("a click method")?);
                 }
@@ -407,6 +419,7 @@ mod tests {
                 dwt: true,
                 natural: true,
                 accel: true,
+                fingers: 4,
                 ..Can::default()
             },
             click_default: Some(RightClick::Corner),
@@ -423,6 +436,7 @@ mod tests {
         };
         let line = touchpad.to_string();
         assert!(line.starts_with("device 3 touchpad internal built-in can=tap,"));
+        assert!(line.contains(" fingers=4 "), "{line}");
         assert_eq!(line.parse::<InputDevice>(), Ok(touchpad.clone()));
         let mouse = InputDevice {
             id: 4,

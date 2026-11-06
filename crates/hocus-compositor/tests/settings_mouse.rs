@@ -16,6 +16,14 @@
 //! reaches every device, and `swipe-desktops` off keeps three fingers off
 //! the desktops.
 //!
+//! Then the gestures' group (6.13, issue #447): it says how many fingers
+//! the touchpad senses, its rows have their diagrams and 68 px, the last
+//! one a note never focused; turning three fingers off writes
+//! `[touchpad] swipe-desktops`, which the compositor follows; a touchpad
+//! that senses three fingers greys the four-finger row; the diagrams move
+//! only while the group shows and the window has the focus, and never
+//! with reduced motion.
+//!
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), never on a time.
 
@@ -62,6 +70,7 @@ const TOUCHPAD: FakeDevice = FakeDevice {
         adaptive: true,
         left_handed: true,
         off_with_mouse: true,
+        fingers: 4,
     },
     click_default: Some(RightClick::Corner),
 };
@@ -82,6 +91,7 @@ const MOUSE: FakeDevice = FakeDevice {
         adaptive: true,
         left_handed: true,
         off_with_mouse: false,
+        fingers: 0,
     },
     click_default: None,
 };
@@ -92,6 +102,9 @@ fn letter(c: char) -> Option<u32> {
         'a' => 30,
         'p' => 25,
         't' => 20,
+        'g' => 34,
+        'e' => 18,
+        's' => 31,
         _ => return None,
     })
 }
@@ -366,6 +379,7 @@ fn the_page_lists_the_touchpad_and_the_mouse() -> anyhow::Result<()> {
             "pointer.left-handed",
             "touchpad.swipe-desktops",
             "touchpad.swipe-launcher",
+            "touchpad.left-to-applications",
         ]
     );
     // What applies: tap on, the pad's own right click, the file's mouse.
@@ -447,7 +461,7 @@ fn the_test_area_says_which_device_scrolled() -> anyhow::Result<()> {
     // the page, then the wheel over its list.
     let page = bed.at("page:mouse")?;
     bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..12 {
+    for _ in 0..20 {
         bed.hp.wheel(3);
         wait(&mut bed.hp, Duration::from_millis(20))?;
     }
@@ -536,6 +550,34 @@ fn searching_tap_finds_tap_to_click() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn searching_geste_lists_the_three_gestures_rows_first() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(TOUCHPAD);
+    bed.open()?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+    bed.type_text("geste")?;
+    let shown = bed.shows(|s| {
+        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 3)
+    })?;
+    let targets: Vec<&str> = shown["results"]
+        .as_array()
+        .map(|r| r.iter().filter_map(|f| f["target"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        targets[..3],
+        [
+            "touchpad.swipe-desktops",
+            "touchpad.swipe-launcher",
+            "touchpad.left-to-applications"
+        ],
+        "{shown}"
+    );
+    Ok(())
+}
+
 /// The compositor's side, without the window: tap on by default, which
 /// libinput's own default is not, and the rest as the pad can take it.
 #[test]
@@ -609,6 +651,154 @@ fn a_hand_edit_of_the_file_reaches_every_device() -> anyhow::Result<()> {
             .iter()
             .all(|d| d.applied.speed == Some(-0.5))
     );
+    Ok(())
+}
+
+/// The page scrolled down to the gestures' group, with the wheel over it.
+fn scroll_to_gestures(bed: &mut Bed) -> anyhow::Result<()> {
+    let page = bed.at("page:mouse")?;
+    bed.hp.pointer_move(page.0, page.1);
+    for _ in 0..4 {
+        bed.hp.wheel(3);
+        wait(&mut bed.hp, Duration::from_millis(20))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn the_gestures_group_says_the_fingers_and_switches_three_fingers_off() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(TOUCHPAD);
+    bed.open()?;
+    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
+    assert_eq!(
+        row(&shown, "touchpad.left-to-applications")["value"],
+        "Toujours"
+    );
+    for id in ["touchpad.swipe-desktops", "touchpad.swipe-launcher"] {
+        assert_eq!(row(&shown, id)["value"], "oui", "{id}");
+        assert_eq!(row(&shown, id)["inert"], false, "{id}");
+    }
+    // Each row 68 px, a 64 × 44 diagram on its left; the line under the
+    // card.
+    let places = bed.places_with("diagram:touchpad.left-to-applications")?;
+    let n = |id: &str, i: usize| places[id][i].as_f64().unwrap_or_default();
+    for id in [
+        "touchpad.swipe-desktops",
+        "touchpad.swipe-launcher",
+        "touchpad.left-to-applications",
+    ] {
+        let diagram = format!("diagram:{id}");
+        assert_eq!((n(&diagram, 2), n(&diagram, 3)), (64.0, 44.0), "{id}");
+        assert!(n(&format!("row:{id}"), 3) >= 68.0, "{id}");
+    }
+    assert!(n("gestures:note", 1) > n("card:gestures", 1) + n("card:gestures", 3) - 1.0);
+    // Three fingers off: the line written, the toast, the compositor.
+    scroll_to_gestures(&mut bed)?;
+    bed.click_row("touchpad.swipe-desktops")?;
+    let text = bed.written(|t| t.contains("swipe-desktops = false"))?;
+    assert_eq!(
+        text,
+        format!("{FILE}\n[touchpad]\nswipe-desktops = false\n")
+    );
+    let shown = bed.shows(|s| s["toast"].is_string())?;
+    assert_eq!(shown["toast"], "Trois doigts de côté : non");
+    let followed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !hp.state().config.touchpad.swipe_desktops)?;
+    assert!(followed, "the compositor never read it");
+    Ok(())
+}
+
+#[test]
+fn a_three_finger_touchpad_greys_the_four_finger_row() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(FakeDevice {
+        can: Can {
+            fingers: 3,
+            ..TOUCHPAD.can
+        },
+        ..TOUCHPAD
+    });
+    bed.open()?;
+    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
+    let launcher = row(&shown, "touchpad.swipe-launcher");
+    assert_eq!(launcher["inert"], true);
+    assert_eq!(
+        launcher["not_here"],
+        "Pas sur ce pavé tactile : il ne sent que trois doigts."
+    );
+    // Its value stays written for another touchpad.
+    assert_eq!(launcher["value"], "oui");
+    assert_eq!(row(&shown, "touchpad.swipe-desktops")["inert"], false);
+    // Another touchpad, of two fingers: the largest count counts.
+    bed.hp.plug_device(FakeDevice {
+        can: Can {
+            fingers: 2,
+            ..TOUCHPAD.can
+        },
+        ..TOUCHPAD
+    });
+    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
+    assert_eq!(
+        row(&shown, "touchpad.swipe-desktops")["inert"],
+        false,
+        "the largest count"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_diagrams_move_only_while_shown_and_focused() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(TOUCHPAD);
+    bed.open()?;
+    // Below the page's fold: still, and nothing draws.
+    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
+    assert_eq!(shown["mouse"]["gestures"]["moving"], false);
+    bed.hp.pointer_move(5.0, 5.0);
+    wait(&mut bed.hp, Duration::from_millis(1000))?;
+    let commits = bed.hp.window_commits();
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    assert_eq!(bed.hp.window_commits(), commits, "the window drew at rest");
+    // Shown: they move, frame after frame.
+    scroll_to_gestures(&mut bed)?;
+    bed.shows(|s| s["mouse"]["gestures"]["moving"] == true)?;
+    let commits = bed.hp.window_commits();
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(
+        bed.hp.window_commits() > commits + 3,
+        "the diagrams stand still"
+    );
+    // Another window takes the focus: they stop.
+    common::open(&mut bed.hp, "test.other", (300, 200))?;
+    bed.shows(|s| s["mouse"]["gestures"]["moving"] == false)?;
+    Ok(())
+}
+
+#[test]
+fn with_reduced_motion_the_diagrams_stand_still() -> anyhow::Result<()> {
+    let file = format!("{FILE}\n[appearance]\nreduced-motion = true\n");
+    let Some(mut bed) = Bed::start(&file)? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(TOUCHPAD);
+    bed.open()?;
+    bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
+    scroll_to_gestures(&mut bed)?;
+    bed.places_with("diagram:touchpad.swipe-desktops")?;
+    wait(&mut bed.hp, Duration::from_millis(400))?;
+    let shown = bed.shows(|s| s["mouse"].is_object())?;
+    assert_eq!(shown["mouse"]["gestures"]["moving"], false);
+    let commits = bed.hp.window_commits();
+    wait(&mut bed.hp, Duration::from_millis(400))?;
+    assert_eq!(bed.hp.window_commits(), commits, "the window drew at rest");
     Ok(())
 }
 
@@ -695,7 +885,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, "mouse-mouse-and-gestures.png")?;
     // The test area: scrolled with two fingers, the target double clicked.
     bed.hp.pointer_move(page.0, page.1);
-    for _ in 0..8 {
+    for _ in 0..20 {
         bed.hp.wheel(3);
         wait(&mut bed.hp, Duration::from_millis(20))?;
     }
@@ -721,5 +911,78 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     }
     bed.hp.pointer_move(5.0, 5.0);
     shoot(&mut bed, "mouse-no-mouse.png")?;
+    Ok(())
+}
+
+/// The gestures' pull request's screenshots (6.13), the window at scale 2
+/// on the CPU: written to `$HOCUS_SHOTS` when it names a folder. Run by
+/// hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_of_the_gestures() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let shoot = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        wait(&mut bed.hp, Duration::from_millis(500))?;
+        let window = bed.window()?;
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let pad = 24;
+        let x = (window.x * 2 - pad).max(0) as u32;
+        let y = (window.y * 2 - pad).max(0) as u32;
+        let cw = ((window.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+        let ch = ((window.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    // A touchpad of four fingers: the group, its diagrams moving.
+    let Some(mut bed) = Bed::start_on(FILE, "2880x1800@2")? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(TOUCHPAD);
+    bed.open()?;
+    bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
+    scroll_to_gestures(&mut bed)?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "gestures.png")?;
+    // Three fingers off: the toast.
+    bed.click_row("touchpad.swipe-desktops")?;
+    bed.shows(|s| s["toast"].is_string())?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "gestures-off.png")?;
+    // Searching « geste ».
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
+    bed.type_text("geste")?;
+    bed.shows(|s| s["query"] == "geste")?;
+    shoot(&mut bed, "gestures-search.png")?;
+    drop(bed);
+    // A touchpad of three fingers.
+    let Some(mut bed) = Bed::start_on(FILE, "2880x1800@2")? else {
+        return Ok(());
+    };
+    bed.hp.plug_device(FakeDevice {
+        can: Can {
+            fingers: 3,
+            ..TOUCHPAD.can
+        },
+        ..TOUCHPAD
+    });
+    bed.open()?;
+    bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
+    scroll_to_gestures(&mut bed)?;
+    bed.hp.pointer_move(5.0, 5.0);
+    shoot(&mut bed, "gestures-three-fingers.png")?;
     Ok(())
 }
