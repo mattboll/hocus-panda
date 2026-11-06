@@ -154,12 +154,12 @@ impl Words {
     }
 
     /// The name a copy saved without a file chooser takes, beside the
-    /// capture: "Capture du … (annotée).png".
-    pub fn annotated_name(self, stem: &str) -> String {
+    /// capture, in its format: "Capture du … (annotée).png".
+    pub fn annotated_name(self, stem: &str, extension: &str) -> String {
         if self.fr {
-            format!("{stem} (annotée).png")
+            format!("{stem} (annotée).{extension}")
         } else {
-            format!("{stem} (annotated).png")
+            format!("{stem} (annotated).{extension}")
         }
     }
 
@@ -382,7 +382,8 @@ fn decoded(id: u64) -> Option<Arc<marks::Image>> {
 /// Capture `file`'s image, read and decoded (on a thread of the caller's).
 fn read_image(file: &Path) -> Result<marks::Image, String> {
     let bytes = std::fs::read(file).map_err(|err| format!("{}: {err}", file.display()))?;
-    image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+    // PNG, or JPEG (`[capture] format`, 6.17).
+    image::load_from_memory(&bytes)
         .map(|i| i.to_rgba8())
         .map_err(|err| format!("{}: {err}", file.display()))
 }

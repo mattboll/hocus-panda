@@ -481,6 +481,7 @@ impl Shell {
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
                 meeting::linked();
+                clipboard::linked();
                 Task::none()
             }
             Message::FromCompositor(line) => match line.parse::<ToShell>() {
@@ -746,6 +747,14 @@ impl Shell {
             }
             ToShell::Clipboard { output } => {
                 popover::toggle_clipboard(&output);
+                Task::none()
+            }
+            ToShell::ClipboardRules(rules) => {
+                clipboard::rules(rules);
+                Task::none()
+            }
+            ToShell::ClipboardClear => {
+                clipboard::clear();
                 Task::none()
             }
             ToShell::Emoji {
@@ -2362,6 +2371,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::Clipboard { output }) => {
                             popover::toggle_clipboard(&output);
+                            continue;
+                        }
+                        // What the history keeps (6.17), and the
+                        // Settings' clear: on its own thread.
+                        Ok(ToShell::ClipboardRules(rules)) => {
+                            clipboard::rules(rules);
+                            continue;
+                        }
+                        Ok(ToShell::ClipboardClear) => {
+                            clipboard::clear();
                             continue;
                         }
                         // The emoji picker: its own surface.

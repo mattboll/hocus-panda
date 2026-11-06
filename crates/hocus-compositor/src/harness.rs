@@ -574,6 +574,12 @@ impl Headless {
         .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
+    /// The clipboard's history holds `items`, `pinned` of them pinned, as
+    /// a shell would say (6.17): for tests of the Settings without one.
+    pub fn clipboard_counted(&mut self, items: u32, pinned: u32) {
+        self.app.state.clipboard_counted(items, pinned);
+    }
+
     /// The shares under way (5.11).
     pub fn shares(&self) -> Vec<crate::ShareInfo> {
         self.app.state.share.info()

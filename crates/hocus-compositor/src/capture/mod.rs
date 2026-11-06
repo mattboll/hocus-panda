@@ -25,6 +25,10 @@
 //!   toast.
 //! - `Shift+Print` and `Alt+Print` take the screen under the pointer and
 //!   the focused window at once.
+//! - The file goes to `[capture] folder` when it can be written, else to
+//!   the pictures' folder's own, as PNG or JPEG (`[capture] format`); the
+//!   shutter is heard as it flashes (`[capture] sound`, [`shutter`]),
+//!   all read at each capture (6.17).
 //! - The area is kept in the state directory, written off the loop as the
 //!   capture closes.
 //! - Then (5.9) the shell shows the capture's thumbnail and its editor,
@@ -35,6 +39,7 @@ mod draw;
 pub mod geometry;
 pub(crate) mod save;
 pub mod shoot;
+mod shutter;
 
 use std::{
     collections::HashSet,
@@ -1074,6 +1079,14 @@ impl State {
     pub(crate) fn capture_taken(&mut self, shot: Shot, job: save::Job, flash: Vec<(String, Area)>) {
         if !self.reduced_motion() && !flash.is_empty() {
             self.capture.flash = Some((flash, self.now()));
+        }
+        // The shutter, with the flash (6.17).
+        if self.config.capture.sound {
+            shutter::Player {
+                programs: self.config.sound_programs.clone(),
+                remote: self.config.pipewire_remote.clone(),
+            }
+            .play();
         }
         self.redraw = true;
         let Some(done) = self.capture_done() else {
