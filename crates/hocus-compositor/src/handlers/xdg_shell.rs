@@ -457,6 +457,12 @@ impl State {
         }
         if let Some(mode) = self.opening_rule(window).and_then(|r| r.size.mode()) {
             self.open_as(toplevel, Some(mode));
+            return;
+        }
+        // A window of the last session: its saved size from its first frame
+        // (windows.md §14).
+        if let Some((w, h)) = self.session_first_size(window) {
+            toplevel.with_pending_state(|s| s.size = Some((w, h).into()));
         }
     }
 

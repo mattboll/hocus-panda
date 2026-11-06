@@ -572,7 +572,7 @@ impl State {
     }
 
     /// Where `id` is, as far as the user places it.
-    fn put_now(&self, id: WindowId) -> Option<Put> {
+    pub(crate) fn put_now(&self, id: WindowId) -> Option<Put> {
         let mode = self.model.mode(id);
         Some(Put {
             output: self.output_of(id)?.name(),
@@ -630,7 +630,7 @@ impl State {
 
     /// The focus stays on its window if it still shows; otherwise it goes
     /// to the window on top that does.
-    fn refocus(&mut self) {
+    pub(crate) fn refocus(&mut self) {
         let next = self
             .model
             .focused()

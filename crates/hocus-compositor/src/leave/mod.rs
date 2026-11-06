@@ -262,6 +262,7 @@ impl State {
             _ => {}
         }
         tracing::info!(why, action = ?phase.action(), "the session's end is cancelled");
+        self.session_stays();
         self.leave_logind(Ask::Watch(false));
         self.leave.inhibitors.clear();
         self.leave_disarm();
@@ -289,6 +290,8 @@ impl State {
     /// Every window asked to close, given 5 s.
     fn leave_close_windows(&mut self, action: LeaveAction, output: String) {
         self.leave_logind(Ask::Watch(false));
+        // The session as it is, before its windows close (windows.md §14).
+        self.session_leaving();
         let windows: Vec<WindowId> = self.windows.keys().copied().collect();
         tracing::info!(count = windows.len(), "every window is asked to close");
         for id in &windows {

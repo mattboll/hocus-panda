@@ -448,9 +448,14 @@ impl App {
         .align_y(Alignment::Center)
         .height(28);
         let rows = self.startup_rows();
+        // The last session's applications reopened, first (windows.md §14).
         let mut card = column![];
+        if let Some(setting) = crate::model::setting(model::RESTORE) {
+            card = card.push(self.row(setting, &self.controls()));
+        }
         if rows.is_empty() {
-            card = card.push(
+            card = card.push(divided(
+                true,
                 container(t(
                     if self.apps.known.is_some() {
                         w(
@@ -464,11 +469,12 @@ impl App {
                     13.0,
                     DIM.get(),
                 ))
-                .padding([16, 16]),
-            );
+                .padding([16, 16])
+                .into(),
+            ));
         }
-        for (i, entry) in rows.iter().enumerate() {
-            card = card.push(divided(i > 0, self.startup_row(entry)));
+        for entry in &rows {
+            card = card.push(divided(true, self.startup_row(entry)));
         }
         let mut foot: Vec<El<'_>> = vec![
             t(

@@ -907,7 +907,21 @@ impl App {
         None
     }
 
-    /// The page's controls, in `Tab`'s order.
+    /// The page's controls, in `Tab`'s order: its own, and the last
+    /// session's switch (a setting of the model) after "+ Ajouter".
+    pub(super) fn apps_controls(&self) -> Vec<super::Control> {
+        let mut out = Vec::new();
+        for stop in self.apps_stops() {
+            let add = stop == Stop::Add;
+            out.push(super::Control::Apps(stop));
+            if add && let Some(setting) = crate::model::setting(model::RESTORE) {
+                out.push(super::Control::Setting(Slot::of(setting, self.source)));
+            }
+        }
+        out
+    }
+
+    /// The page's own controls, in `Tab`'s order.
     pub(super) fn apps_stops(&self) -> Vec<Stop> {
         let mut stops = Vec::new();
         let Some(known) = &self.apps.known else {

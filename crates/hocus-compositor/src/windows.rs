@@ -469,6 +469,7 @@ impl State {
         } else if !resizing {
             self.place_in_space(window, (rect.x, rect.y));
         }
+        self.session_changed();
         self.redraw = true;
     }
 
@@ -597,6 +598,10 @@ impl State {
         } else {
             self.restack();
             self.sync_activated();
+        }
+        // A window of the last session goes back in its place (§14).
+        if parent.is_none() {
+            self.session_window_mapped(id, &window);
         }
         self.share_sources_changed();
         self.redraw = true;
@@ -742,6 +747,7 @@ impl State {
         if marked {
             self.tell_window_states(false);
         }
+        self.session_changed();
         self.redraw = true;
     }
 
@@ -866,6 +872,7 @@ impl State {
         for w in &above {
             self.space.raise_element(w, false);
         }
+        self.session_changed();
     }
 
     /// Puts smithay's stacking in the model's order.

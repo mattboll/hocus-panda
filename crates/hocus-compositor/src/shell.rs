@@ -746,6 +746,63 @@ fn vulkan_driver(kernel: &str) -> Option<&'static str> {
     })
 }
 
+/// Sends one notification, `org.freedesktop.Notifications.Notify` on
+/// `bus` (the shell serves it, 5.3), from `Hocuspanda` with `icon`, on a
+/// thread of its own: a call to another process never holds the loop.
+pub fn notify(bus: Bus, icon: &'static str, summary: String) {
+    let started = std::thread::Builder::new()
+        .name("notification".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match runtime {
+                Ok(runtime) => runtime.block_on(notify_on(bus, icon, summary)),
+                Err(err) => tracing::warn!(%err, "no runtime for a notification"),
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "a notification is not sent");
+    }
+}
+
+async fn notify_on(bus: Bus, icon: &str, summary: String) {
+    let builder = match &bus {
+        Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),
+        Bus::Session => zbus::connection::Builder::session(),
+    };
+    let connection = match builder.build().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::warn!(%err, summary, "no session bus: a notification is not sent");
+            return;
+        }
+    };
+    let hints: std::collections::HashMap<&str, zbus::Variant<'_>> =
+        std::collections::HashMap::new();
+    let sent = connection
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "Hocuspanda",
+                0u32,
+                icon,
+                summary.as_str(),
+                "",
+                Vec::<&str>::new(),
+                hints,
+                -1i32,
+            ),
+        )
+        .await;
+    if let Err(err) = sent {
+        tracing::warn!(%err, summary, "a notification is not sent");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
