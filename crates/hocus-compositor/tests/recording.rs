@@ -658,6 +658,46 @@ fn webm_is_vp9_and_opus_as_its_setting_says() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `[recording] format` and `folder` written while the compositor runs
+/// (6.17, the Settings' page): the next recording takes them.
+#[test]
+fn the_format_and_the_folder_follow_the_file_live() -> anyhow::Result<()> {
+    if !ready() {
+        return Ok(());
+    }
+    let place = tempfile::tempdir()?;
+    let file = place.path().join("config.toml");
+    std::fs::write(&file, "")?;
+    let mut bed = Bed::start_with(&["1280x800"], false, |config| {
+        config.file = Some(file.clone());
+    })?;
+    let films = place.path().join("Films");
+    std::fs::create_dir_all(&films)?;
+    let new = file.with_extension("new");
+    std::fs::write(
+        &new,
+        format!(
+            "[recording]\nformat = \"webm\"\nfolder = \"{}\"\n",
+            films.display()
+        ),
+    )?;
+    std::fs::rename(&new, &file)?;
+    let read = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.recording.format == hocus_link::RecordFormat::WebM
+    })?;
+    anyhow::ensure!(read, "the file is not read");
+    bed.choose(CaptureMode::Screen, false, false)?;
+    bed.start_recording()?;
+    bed.record_for(Duration::from_millis(500))?;
+    let saved = bed.stop()?;
+    assert_eq!(saved.parent(), Some(films.as_path()));
+    assert!(saved.to_string_lossy().ends_with(".webm"), "{saved:?}");
+    let probed = probe(&saved)?;
+    let kinds: Vec<&str> = probed.streams.iter().map(|s| s.1.as_str()).collect();
+    assert_eq!(kinds, ["vp9"], "{probed:?}");
+    Ok(())
+}
+
 #[test]
 fn one_recording_at_a_time() -> anyhow::Result<()> {
     if !ready() {

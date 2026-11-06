@@ -54,7 +54,7 @@ pub const SWIPE_COMPLETES: f64 = 0.25;
 /// Or when the fingers leave this fast, in desktops a second.
 pub const SWIPE_FLICK: f64 = 1.2;
 /// Finger travel before a swipe knows whether it goes across or down.
-const SWIPE_AXIS: f64 = 12.0;
+pub(crate) const SWIPE_AXIS: f64 = 12.0;
 /// How far past the first or last desktop the strip follows, stiffly.
 const OVERSCROLL: f64 = 0.12;
 

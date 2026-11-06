@@ -17,12 +17,15 @@ mod desktops_page;
 mod desktops_rules;
 mod desktops_trial;
 mod keyboard_page;
+mod keys_in;
 mod mouse;
 mod network;
 mod places;
+mod power_page;
 mod screens;
 mod sound;
 mod style;
+mod time;
 mod view;
 mod wallpaper_page;
 
@@ -222,8 +225,12 @@ enum Undo {
     Sound(sound::Choice),
     /// Bluetooth turned off on its page (in BlueZ).
     Bluetooth(bluetooth::Choice),
+    /// A time zone chosen (in timedated, 6.11).
+    Time(time::Choice),
     /// A change of the Réseau page's (in NetworkManager, rfkill).
     Network(network::Choice),
+    /// The power mode (power-profiles-daemon's, 6.10).
+    Power(power_page::ModeChoice),
     Picture {
         path: PathBuf,
         bytes: std::sync::Arc<Vec<u8>>,
@@ -328,10 +335,14 @@ pub enum Message {
     Bar(bar_page::Msg),
     /// The Bluetooth page's (6.7).
     Bluetooth(bluetooth::Msg),
+    /// The Date et heure page's (6.11).
+    Time(time::Msg),
     /// The desktops and windows' page (6.14).
     Desktops(desktops_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
+    /// The Énergie page's (6.10).
+    Power(power_page::Msg),
     Nothing,
 }
 
@@ -396,12 +407,17 @@ pub struct App {
     bar: bar_page::State,
     /// The Bluetooth page: BlueZ as last heard (6.7).
     bluetooth: bluetooth::State,
+    /// The Date et heure page: timedated as last heard (6.11).
+    time: time::State,
     /// The desktops and windows' page: the compositor's windows, a name
     /// changed, a desktop taken out waiting for it (6.14).
     desktops: desktops_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
+    /// The Énergie page: the battery, the modes and logind as last said
+    /// (6.10).
+    power: power_page::State,
     /// Until then, every frame draws the whole window ([`background_of`]),
     /// and which of two backgrounds the next one has.
     fresh: Option<Instant>,
@@ -416,8 +432,10 @@ impl App {
         let file = start.places.file.clone();
         let sound = sound::Sound::start(sender.clone());
         let bluetooth = bluetooth::State::start(sender.clone());
+        let time = time::State::new(sender.clone());
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
+        let power = power_page::State::start(&sender);
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -492,8 +510,10 @@ impl App {
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
             bluetooth,
+            time,
             desktops: desktops_page::State::default(),
             network,
+            power,
             fresh: None,
             parity: false,
         };
@@ -526,25 +546,10 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             Subscription::run(heard),
-            event::listen_with(|event, status, _| match event {
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key,
-                    physical_key,
-                    modifiers,
-                    text,
-                    ..
-                }) => Some(Message::Key {
-                    key,
-                    physical: physical_key,
-                    modifiers,
-                    text: text.map(|t| t.to_string()),
-                    captured: status == event::Status::Captured,
-                }),
+            // The keys are not heard here but from the window's widgets, in
+            // their order (`keys_in`).
+            event::listen_with(|event, _, _| match event {
                 Event::Window(window::Event::Resized(_)) => Some(Message::Scrolled),
-                // The modifiers held while a shortcut is recorded (6.8).
-                Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
-                    Some(Message::Keys(keyboard_page::Msg::Mods(mods)))
-                }
                 Event::Window(window::Event::Rescaled(scale)) => Some(Message::Rescaled(scale)),
                 // The test area says which device scrolled (6.12).
                 Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
@@ -627,7 +632,7 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after()]);
+        let task = Task::batch([task, self.bar_after(), self.time_after()]);
         self.sound_listen();
         self.bluetooth_want();
         self.wallpaper_want();
@@ -705,6 +710,10 @@ impl App {
                 if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     self.keys.adding = None;
                     return Task::none();
+                }
+                // The time zone picker's, the time's fields' (6.11).
+                if let Some(task) = self.time_key_first(&key, captured) {
+                    return task;
                 }
                 // A menu of the rules: `Esc` closes it.
                 if key.as_ref() == Key::Named(Named::Escape) && self.rules_escape() {
@@ -838,6 +847,7 @@ impl App {
             Message::Wallpaper(msg) => self.wallpaper_update(msg),
             Message::Bar(msg) => self.bar_update(msg),
             Message::Bluetooth(msg) => self.bluetooth_update(msg),
+            Message::Time(msg) => self.time_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
@@ -847,6 +857,7 @@ impl App {
                 self.keys_update(msg)
             }
             Message::Network(msg) => self.network_update(msg),
+            Message::Power(msg) => self.power_update(msg),
         }
     }
 
@@ -855,7 +866,11 @@ impl App {
     fn heard(&mut self, heard: Heard) -> Task<Message> {
         match heard {
             Heard::Power { source, battery } => {
-                self.source = source;
+                self.power.kernel_on_battery = source == Source::Battery;
+                // UPower, once heard, says it better (`power_page`).
+                if self.power.now.as_ref().is_none_or(|n| !n.upower) {
+                    self.source = source;
+                }
                 self.battery = battery;
                 Task::none()
             }
@@ -1209,12 +1224,26 @@ impl App {
                 self.toast = None;
                 return self.bluetooth_undo(choice, false);
             }
+            Some(Undo::Time(_)) => {
+                let Some(Undo::Time(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.time_undo(choice, false);
+            }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.undo.pop() else {
                     return Task::none();
                 };
                 self.toast = None;
                 return self.network_undo(choice, false);
+            }
+            Some(Undo::Power(_)) => {
+                let Some(Undo::Power(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.power_undo(choice, false);
             }
             Some(Undo::Picture { .. }) => {
                 let Some(Undo::Picture { path, bytes }) = self.undo.pop() else {
@@ -1277,11 +1306,23 @@ impl App {
                 };
                 return self.bluetooth_undo(choice, true);
             }
+            Some(Undo::Time(_)) => {
+                let Some(Undo::Time(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.time_undo(choice, true);
+            }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.redo.pop() else {
                     return Task::none();
                 };
                 return self.network_undo(choice, true);
+            }
+            Some(Undo::Power(_)) => {
+                let Some(Undo::Power(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.power_undo(choice, true);
             }
             Some(Undo::File(_)) if self.writable() => match self.redo.pop() {
                 Some(Undo::File(change)) => change,
@@ -1539,6 +1580,9 @@ impl App {
                 .map(Control::Bluetooth)
                 .collect();
         }
+        if section == SectionId::DateTime {
+            return self.time_stops().into_iter().map(Control::Time).collect();
+        }
         if section == SectionId::Keyboard {
             if self.keys.sub {
                 return Vec::new();
@@ -1564,6 +1608,9 @@ impl App {
         }
         if section == SectionId::Desktops {
             return self.desktops_controls();
+        }
+        if section == SectionId::Power {
+            return self.power_controls();
         }
         if section == SectionId::Network {
             return self
@@ -1606,6 +1653,13 @@ impl App {
         choices.iter().position(|c| c.value == value)
     }
 
+    /// Whether `Ctrl+F` goes to the search now: not while a shortcut is
+    /// recorded, nor while the screens' "Garder ?" or menu take every key
+    /// (as `Message::Key` and [`App::key`] have it).
+    fn ctrl_f_searches(&self) -> bool {
+        self.keys.recording.is_none() && !self.screens_take_keys()
+    }
+
     fn key(
         &mut self,
         key: &Key,
@@ -1623,16 +1677,14 @@ impl App {
             return task;
         }
         match key.as_ref() {
-            Key::Character(c) if ctrl && c.eq_ignore_ascii_case("f") => {
+            _ if keys_in::is_ctrl_f(key, modifiers) => {
                 self.focus = Focus::Search;
                 self.menu = None;
-                // Only a query to replace is selected: iced selects after
-                // the keys already received, so a key typed right after
-                // Ctrl+F would be selected and replaced by the next (#637).
-                if self.query.is_empty() {
-                    return operation::focus(SEARCH);
-                }
-                return Task::batch([operation::focus(SEARCH), operation::select_all(SEARCH)]);
+                // The field already has the keyboard, its text selected:
+                // the window's keys gave it as the key came, before the
+                // keys after it (`keys_in`). An operation now would apply
+                // after them: a selection would take them (#637, #669).
+                return Task::none();
             }
             Key::Character(c) if ctrl && c.eq_ignore_ascii_case("w") => {
                 return self.close();
@@ -1796,7 +1848,9 @@ impl App {
             Control::Desktops(stop) => self.desktops_key(&stop, named),
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
+            Control::Time(stop) => self.time_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
+            Control::Power(stop) => self.power_key(stop, named),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
                 match named {
@@ -1948,7 +2002,11 @@ impl App {
     /// Whether `setting`'s control does not apply now: the file does not
     /// read, or the switch it needs is off.
     fn inert(&self, setting: &Setting) -> bool {
-        if !self.writable() || self.unavailable(setting).is_some() || self.desktops_inert(setting) {
+        if !self.writable()
+            || self.unavailable(setting).is_some()
+            || self.desktops_inert(setting)
+            || self.power_inert(setting)
+        {
             return true;
         }
         setting.needs.is_some_and(|needs| {
@@ -2042,10 +2100,14 @@ enum Control {
     Bar(bar_page::Stop),
     /// The Bluetooth page's own (6.7).
     Bluetooth(bluetooth::Stop),
+    /// The Date et heure page's own (6.11).
+    Time(time::Stop),
     /// The desktops and windows' page's own (6.14).
     Desktops(desktops_page::Stop),
     /// The network's page's own (6.6).
     Network(network::Stop),
+    /// The Énergie page's own (6.10).
+    Power(power_page::Stop),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

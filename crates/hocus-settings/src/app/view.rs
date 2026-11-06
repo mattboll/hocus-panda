@@ -15,6 +15,7 @@ use iced::{
 
 use super::{
     App, Focus, Message, Page, SEARCH, ToastAction,
+    keys_in::{KeysIn, Pressed},
     places::PAGE,
     style::{self, *},
 };
@@ -106,10 +107,26 @@ impl App {
         if let Some(sheet) = self.bluetooth_sheet() {
             layers.push(sheet);
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        // The time zone picker (6.11).
+        if let Some(picker) = self.time_picker() {
+            layers.push(picker);
+        }
+        let window = stack(layers).width(Length::Fill).height(Length::Fill);
+        // Its keys, in their order among the widgets' messages (#669).
+        KeysIn::new(
+            window,
+            |pressed: Pressed| Message::Key {
+                key: pressed.key,
+                physical: pressed.physical,
+                modifiers: pressed.modifiers,
+                text: pressed.text,
+                captured: pressed.captured,
+            },
+            // The modifiers held while a shortcut is recorded (6.8).
+            |mods| Message::Keys(super::keyboard_page::Msg::Mods(mods)),
+            self.ctrl_f_searches().then_some(SEARCH),
+        )
+        .into()
     }
 
     // --- The sidebar ------------------------------------------------------------------
@@ -830,11 +847,17 @@ impl App {
         if id == SectionId::Bluetooth {
             return self.bluetooth_page(page);
         }
+        if id == SectionId::DateTime {
+            return self.time_page(page);
+        }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
         }
         if id == SectionId::Network {
             return self.network_page(page);
+        }
+        if id == SectionId::Power {
+            return self.power_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -888,7 +911,7 @@ impl App {
         container(page).id(format!("page:{}", section.slug)).into()
     }
 
-    fn segmented(&self, focused: bool) -> El<'_> {
+    pub(super) fn segmented(&self, focused: bool) -> El<'_> {
         let option = |source: Source| {
             let chosen = self.source == source;
             container(
@@ -961,6 +984,13 @@ impl App {
             words = words.push(t(self.fit_line(), 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = self.bar_line(setting.id) {
             words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
+        } else if let Some((line, warns)) = self.power_line(setting.id) {
+            let colour = if warns {
+                PEACH.get()
+            } else {
+                fade(DIM.get(), ink)
+            };
+            words = words.push(t(line, 12.5, colour));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
             words = words.push(t(why, 12.5, PEACH.get()));
@@ -1635,6 +1665,19 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
             })
             .collect(),
         Page::Section(SectionId::Screens) => Vec::new(),
+        Page::Section(SectionId::Power) => app
+            .power_visible()
+            .into_iter()
+            .map(|s| {
+                let slot = Slot::of(s, app.source);
+                serde_json::json!({
+                    "id": s.id,
+                    "value": app.said_value(slot),
+                    "warn": app.warning(s, slot),
+                    "inert": app.inert(s),
+                })
+            })
+            .collect(),
         Page::Section(SectionId::Mouse) => app
             .mouse_visible()
             .into_iter()
@@ -1723,8 +1766,10 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
+        "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
+        "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

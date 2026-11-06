@@ -72,6 +72,31 @@ const EDITOR_FROST: crate::glass::Frost = crate::glass::Frost {
 };
 /// The types a capture is dragged as.
 const URIS: &str = "text/uri-list";
+const JPEG: &str = "image/jpeg";
+
+/// The type of a capture's file, by its extension (`[capture] format`,
+/// 6.17).
+fn image_type(file: Option<&Path>) -> &'static str {
+    let jpeg = file
+        .and_then(Path::extension)
+        .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    if jpeg { JPEG } else { crate::clipboard::PNG }
+}
+
+/// A capture's file read back as PNG, which the clipboard always gets: a
+/// JPEG's (6.17) decoded and encoded again.
+fn as_png(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    const MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.starts_with(MAGIC) {
+        return Ok(bytes);
+    }
+    let image = image::load_from_memory(&bytes).map_err(|err| format!("not an image: {err}"))?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|err| format!("could not encode it as PNG: {err}"))?;
+    Ok(png)
+}
 
 /// What is dragged: a capture (its address and its image), or a
 /// recording's file (its address alone).
@@ -203,7 +228,9 @@ impl State {
             return;
         };
         programs::on_a_thread("read the annotated capture".to_owned(), move || {
-            let png = std::fs::read(&file).map_err(|err| format!("{}: {err}", file.display()));
+            let png = std::fs::read(&file)
+                .map_err(|err| format!("{}: {err}", file.display()))
+                .and_then(as_png);
             // Its line for the clipboard's history, which replaces the item
             // the capture made (5.8b).
             let history = png
@@ -249,12 +276,13 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let has_file = self
+        let file = self
             .capture
             .after
             .taken
             .get(&id)
-            .is_some_and(|t| t.file.is_some());
+            .and_then(|t| t.file.clone());
+        let has_file = file.is_some();
         let (Some(start), Some(serial)) = (
             pointer.grab_start_data(),
             pointer.with_grab(|serial, _| serial),
@@ -268,7 +296,7 @@ impl State {
         tracing::info!(id, "the capture is dragged");
         self.capture.after.dragging = Some(Dragged::Capture(id));
         let metadata = SourceMetadata {
-            mime_types: vec![URIS.to_owned(), crate::clipboard::PNG.to_owned()],
+            mime_types: vec![URIS.to_owned(), image_type(file.as_deref()).to_owned()],
             dnd_action: DndAction::Copy,
         };
         let dh = self.display_handle.clone();
