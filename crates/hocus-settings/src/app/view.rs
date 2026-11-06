@@ -70,6 +70,14 @@ impl App {
         // The network's sheet, over the page (6.6).
         if let Some(sheet) = self.network_sheet() {
             layers.push(sheet);
+            if let Some(menu) = self.network_sheet_menu() {
+                layers.push(
+                    mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+                        .on_press(Message::Network(super::network::close_sheet_menu()))
+                        .into(),
+                );
+                layers.push(menu);
+            }
         }
         if let Some(toast) = self.toast_view() {
             layers.push(toast);
@@ -804,6 +812,9 @@ impl App {
         if id == SectionId::DateTime {
             return self.time_page(page);
         }
+        if id == SectionId::Desktops {
+            return self.desktops_page(page);
+        }
         if id == SectionId::Network {
             return self.network_page(page);
         }
@@ -906,7 +917,11 @@ impl App {
         let slot = Slot::of(setting, self.source);
         // A row no device plugged can take is drawn at 45 % (6.12).
         let not_here = self.unavailable(setting);
-        let ink = if not_here.is_some() { INERT } else { 1.0 };
+        let ink = if not_here.is_some() || self.desktops_inert(setting) {
+            INERT
+        } else {
+            1.0
+        };
         let name = text(setting.name.get(lang))
             .size(14)
             .font(SEMIBOLD)
@@ -928,6 +943,9 @@ impl App {
             words = words.push(t(self.fit_line(), 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = self.bar_line(setting.id) {
             words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
+        } else if let Some(why) = self.desktops_why_not(setting.id) {
+            // Why it does not apply now, in place of its line (6.14).
+            words = words.push(t(why, 12.5, PEACH.get()));
         } else if let Some(line) = setting.line {
             words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
@@ -938,6 +956,9 @@ impl App {
             words = words.push(t(warning, 12.5, PEACH.get()));
         }
         if let Some(extra) = self.bar_row_extra(setting, ink) {
+            words = words.push(extra);
+        }
+        if let Some(extra) = self.desktops_row_extra(setting) {
             words = words.push(extra);
         }
         let inert = self.inert(setting);
@@ -1684,6 +1705,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
+        "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
