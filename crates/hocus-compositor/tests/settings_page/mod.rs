@@ -1,8 +1,10 @@
 //! The Settings' page scrolled with the wheel until what a test clicks is
 //! in view (#660), for every test file of the Settings that clicks.
 //!
-//! Each wheel is waited for until the window says it has taken it: its
-//! places carry how many wheels they follow (`wheels`). Without that, a
+//! Where to click is read from places that follow what the window last
+//! showed (`shown`, the serial of its last "shows" line), and each wheel
+//! is waited for until the window says it has taken it: its places carry
+//! how many wheels they follow (`wheels`). Without that, a
 //! wheel the window had not read yet (a loaded machine) scrolled the page
 //! after the test had read where to click, and the click landed on
 //! nothing; a page that "kept still for a moment" said nothing of a wheel
@@ -54,6 +56,16 @@ fn wheels(places: &Value) -> u64 {
     places["wheels"].as_u64().unwrap_or(0)
 }
 
+/// Whether `places` follow the last "shows" line: the window is laid out
+/// as it last said, not as it was a moment before (its places are said
+/// after what it shows, and once settled).
+fn fresh(log: &Path, places: &Value) -> bool {
+    let serial = common::last_json(log, " shows {")
+        .and_then(|s| s["serial"].as_u64())
+        .unwrap_or(0);
+    places["shown"].as_u64().unwrap_or(0) >= serial
+}
+
 /// `id` scrolled into the window (`app_id`'s, whose log is `log`), by
 /// wheels over its page, each taken by the window before the next. At the
 /// page's end, where a wheel moves nothing, as far as it goes.
@@ -67,7 +79,7 @@ pub fn reveal(
     for _ in 0..60 {
         let mut places = None;
         hp.dispatch_until(WAIT, |_| {
-            places = said(log).filter(|p| p.get(id).is_some());
+            places = said(log).filter(|p| p.get(id).is_some() && fresh(log, p));
             places.is_some()
         })?;
         let places = places.ok_or_else(|| anyhow::anyhow!("{id} is nowhere: {:?}", said(log)))?;
@@ -98,7 +110,7 @@ pub fn reveal(
         hp.wheel(notches);
         let mut after = None;
         hp.dispatch_until(WHEEL, |_| {
-            after = said(log).filter(|p| wheels(p) > taken);
+            after = said(log).filter(|p| wheels(p) > taken && fresh(log, p));
             after.is_some()
         })?;
         let after = after

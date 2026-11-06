@@ -73,6 +73,9 @@ const SLIDER_REST: Duration = Duration::from_millis(450);
 const TOAST_IN: Duration = Duration::from_millis(160);
 const MENU_IN: Duration = Duration::from_millis(140);
 const KNOB: Duration = Duration::from_millis(160);
+/// Collections of the places in a row that may disagree before they are
+/// said anyway ([`App::placed`]).
+const UNSETTLED: u8 = 4;
 /// How long a closing window waits for the writes it asked before it
 /// goes anyway (a file on a disk that hangs).
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
@@ -404,6 +407,12 @@ pub struct App {
     said_places: String,
     /// The wheels the window has taken, said with its places (`wheels`).
     wheels: u64,
+    /// The serial of the last "shows" line, said with the places collected
+    /// after it (`shown`).
+    shows_serial: u64,
+    /// Collections of the places in a row that did not agree (see
+    /// [`App::placed`]).
+    unsettled: u8,
     /// The Son page: PipeWire as last heard.
     sound: sound::Sound,
     /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
@@ -512,6 +521,8 @@ impl App {
             said: String::new(),
             said_places: String::new(),
             wheels: 0,
+            shows_serial: 0,
+            unsettled: 0,
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
@@ -669,7 +680,7 @@ impl App {
             task
         };
         if place {
-            Task::batch([task, places(self.wheels)])
+            Task::batch([task, places(self.wheels, self.shows_serial)])
         } else {
             task
         }
@@ -1513,9 +1524,27 @@ impl App {
     }
 
     /// Where things are now: a found row is scrolled to.
+    ///
+    /// Some of what the window draws is placed from these places (the bar's
+    /// preview): until two collections in a row agree, the window is not
+    /// laid out as they say, so they are collected again (a few times at
+    /// most) and said only then, settled (#660).
     fn placed(&mut self, places: Places) -> Task<Message> {
+        let settled = places == self.places;
         self.places = places;
-        self.log_places();
+        let again = if settled || self.unsettled >= UNSETTLED {
+            self.unsettled = 0;
+            self.log_places();
+            Task::none()
+        } else {
+            self.unsettled += 1;
+            self::places(self.wheels, self.shows_serial)
+        };
+        Task::batch([again, self.scroll_to_found()])
+    }
+
+    /// A found row scrolled to the page's middle, once placed.
+    fn scroll_to_found(&mut self) -> Task<Message> {
         let Some(setting) = self.scroll_to.take() else {
             return Task::none();
         };
@@ -2059,18 +2088,26 @@ impl App {
 
     /// What the window shows, said in the log as JSON when it changes:
     /// tests read it, as screen readers will (#11 of the bar's spec).
+    /// Each line has its `serial`, which the places collected after it
+    /// carry (`shown`): a test reads where to click from places at least as
+    /// recent as what it saw (#660).
     fn log(&mut self) {
-        let shown = view::shown(self);
+        let mut shown = view::shown(self);
         let text = shown.to_string();
         if text != self.said {
-            tracing::info!(target: "hocus_settings::shows", "shows {text}");
+            self.shows_serial += 1;
+            if let Some(fields) = shown.as_object_mut() {
+                fields.insert("serial".to_owned(), self.shows_serial.into());
+            }
+            tracing::info!(target: "hocus_settings::shows", "shows {shown}");
             self.said = text;
         }
     }
 
-    /// Each id's place, and `wheels`: how many wheels the window had taken
-    /// when they were read, so that a test knows the page has taken its
-    /// wheel, whether it moved or not (#660).
+    /// Each id's place, `wheels`: how many wheels the window had taken when
+    /// they were read, so that a test knows the page has taken its wheel,
+    /// whether it moved or not, and `shown`: the serial of the "shows" line
+    /// they follow (#660).
     fn log_places(&mut self) {
         let mut at: serde_json::Map<String, serde_json::Value> = self
             .places
@@ -2090,6 +2127,7 @@ impl App {
             })
             .collect();
         at.insert("wheels".to_owned(), self.places.wheels.into());
+        at.insert("shown".to_owned(), self.places.shown.into());
         let text = serde_json::Value::Object(at).to_string();
         if text != self.said_places {
             tracing::debug!(target: "hocus_settings::places", "places {text}");
@@ -2131,9 +2169,9 @@ enum TryPart {
 }
 
 /// The places of what the window draws, after it is laid out, with the
-/// wheels it had taken then.
-fn places(wheels: u64) -> Task<Message> {
-    iced::advanced::widget::operate(places::Collect::after(wheels)).map(Message::Placed)
+/// wheels it had taken then and the serial of the last "shows" line.
+fn places(wheels: u64, shown: u64) -> Task<Message> {
+    iced::advanced::widget::operate(places::Collect::after(wheels, shown)).map(Message::Placed)
 }
 
 /// What the worker and second launches say, as messages.

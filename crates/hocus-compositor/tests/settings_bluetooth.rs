@@ -22,7 +22,9 @@ mod bluez;
 mod common;
 #[path = "levels/fakes.rs"]
 mod fakes;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -351,32 +353,13 @@ impl Bed {
 
     /// `id` scrolled into the window with the wheel over the page.
     fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
-        for _ in 0..40 {
-            let [_, y, _, h] = self.place_of(id)?;
-            let window = self.window()?;
-            let notches = if y + h > f64::from(window.height) - 90.0 {
-                2
-            } else if y < 56.0 {
-                -2
-            } else {
-                return Ok(());
-            };
-            self.hp.pointer_move(
-                f64::from(window.x) + 500.0,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.wheel(notches);
-            let log = self.log.clone();
-            let key = id.to_owned();
-            let before = [y, h];
-            let moved = self.hp.dispatch_until(Duration::from_secs(2), |_| {
-                read_place(&log, &key).is_some_and(|p| [p[1], p[3]] != before)
-            })?;
-            if !moved {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 500.0,
+            notches: 2,
+            top: 56.0,
+            floor: Floor::Margin(90.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     fn click(&mut self, id: &str) -> anyhow::Result<()> {
@@ -412,13 +395,6 @@ impl Bed {
         self.hp.key(code, false);
         wait(&mut self.hp, Duration::from_millis(10))
     }
-}
-
-fn read_place(log: &Path, id: &str) -> Option<[f64; 4]> {
-    let places = common::last_json(log, " places {")?;
-    let place = places.get(id)?;
-    let n = |i: usize| place[i].as_f64();
-    Some([n(0)?, n(1)?, n(2)?, n(3)?])
 }
 
 /// A row of the page's list `list` (`mine`, `nearby`), by its name.
