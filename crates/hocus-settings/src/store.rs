@@ -105,6 +105,8 @@ pub struct Snapshot {
     pub screens_placed: Vec<String>,
     /// `[panel] output`, the primary screen named.
     pub primary_output: Option<String>,
+    /// The sets of screens the file arranges (`[[screen-sets]]`).
+    pub screen_sets: Vec<SetFile>,
     /// `[wallpaper]` and the screens' wallpapers (6.3).
     pub wallpaper: Box<crate::wallpaper::File>,
     /// The bar's keys the page writes itself (6.4).
@@ -113,7 +115,48 @@ pub struct Snapshot {
     pub rules: Box<crate::desktops::Rules>,
 }
 
+/// A set of screens the file arranges: its name ([`set_name`]), its
+/// primary screen, and the screens it places.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetFile {
+    pub name: String,
+    pub primary: Option<String>,
+    pub placed: Vec<String>,
+}
+
+/// The sets of screens `doc` arranges.
+fn sets_of(doc: &DocumentMut) -> Vec<SetFile> {
+    let Some(sets) = doc.get(SCREEN_SETS).and_then(Item::as_array_of_tables) else {
+        return Vec::new();
+    };
+    sets.iter()
+        .map(|t| SetFile {
+            name: set_of(t),
+            primary: t
+                .get("primary")
+                .and_then(Item::as_str)
+                .map(ToOwned::to_owned),
+            placed: t
+                .get("outputs")
+                .and_then(Item::as_table_like)
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter(|(_, o)| o.get("position").is_some())
+                        .map(|(k, _)| k.to_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
 impl Snapshot {
+    /// The file's arrangement of set `name`.
+    pub fn screen_set(&self, name: &str) -> Option<&SetFile> {
+        self.screen_sets.iter().find(|s| s.name == name)
+    }
+
     /// What the file says of `slot` (nothing when it does not read).
     pub fn reading(&self, slot: Slot) -> &Reading {
         self.readings.get(&slot).unwrap_or(&Reading::Absent)
@@ -194,6 +237,7 @@ pub fn read(text: &str) -> Snapshot {
                 .and_then(|p| p.get("output"))
                 .and_then(Item::as_str)
                 .map(ToOwned::to_owned),
+            screen_sets: sets_of(&doc),
             wallpaper: Box::new(crate::wallpaper::File::of(&doc)),
             bar: Box::new(crate::bar::File::of(&doc)),
             rules: Box::new(crate::desktops::Rules(crate::desktops::rules_of(&doc))),
@@ -210,6 +254,7 @@ pub fn read(text: &str) -> Snapshot {
             text_scale: 100,
             screens_placed: Vec::new(),
             primary_output: None,
+            screen_sets: Vec::new(),
             wallpaper: Box::default(),
             bar: Box::default(),
             rules: Box::default(),
@@ -477,7 +522,11 @@ pub fn check(text: &str, slot: Slot, raw: &Raw) -> Result<(), String> {
 
 /// One key written by a page itself (6.9's screens): its tables then its
 /// name (`["outputs", "DP-2", "mode"]`), and its value as TOML, or `None`
-/// to take it out.
+/// to take it out. A set of screens' (windows.md §12) is
+/// `["screen-sets", SET, …]`, `SET` its screens one per line: the
+/// `[[screen-sets]]` table whose `screens` are those, made when a key is
+/// written in it, taken out when nothing but its screens is left;
+/// `["screen-sets", SET]` alone is that whole table, as an inline table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyEdit {
     pub key: Vec<String>,
@@ -494,9 +543,163 @@ pub fn keys_now(doc: &DocumentMut, keys: &[Vec<String>]) -> Vec<KeyEdit> {
         .collect()
 }
 
+/// The sets of screens' tables (`[[screen-sets]]`).
+pub const SCREEN_SETS: &str = "screen-sets";
+
+/// A set's name in a key: its screens, sorted, one per line.
+pub fn set_name(screens: &[String]) -> String {
+    let mut screens = screens.to_vec();
+    screens.sort();
+    screens.join("\n")
+}
+
+/// The screens a set's `table` is for, as a set's name.
+fn set_of(table: &Table) -> String {
+    let screens: Vec<String> = table
+        .get("screens")
+        .and_then(Item::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    set_name(&screens)
+}
+
+/// The key, if it is in a set's table: the set's name and the rest.
+fn in_set(key: &[String]) -> Option<(&str, &[String])> {
+    match key {
+        [first, name, rest @ ..] if first == SCREEN_SETS => Some((name.as_str(), rest)),
+        _ => None,
+    }
+}
+
+/// `edit`, a key of a set's table, written into `doc`.
+fn write_set_key(
+    doc: &mut DocumentMut,
+    name: &str,
+    rest: &[String],
+    value: Option<&str>,
+) -> Result<(), String> {
+    let new = value
+        .map(|text| {
+            text.parse::<toml_edit::Value>()
+                .map_err(|err| format!("{text}: {err}"))
+        })
+        .transpose()?;
+    let root = doc.as_table_mut();
+    let index = root
+        .get(SCREEN_SETS)
+        .and_then(Item::as_array_of_tables)
+        .and_then(|sets| sets.iter().position(|t| set_of(t) == name));
+    // The whole table.
+    if rest.is_empty() {
+        let table = match new {
+            Some(value) => Some(
+                value
+                    .as_inline_table()
+                    .ok_or("a set is a table")?
+                    .clone()
+                    .into_table(),
+            ),
+            None => None,
+        };
+        put_set(root, index, table);
+        return Ok(());
+    }
+    let mut table = match index {
+        Some(i) => root
+            .get(SCREEN_SETS)
+            .and_then(Item::as_array_of_tables)
+            .and_then(|sets| sets.get(i))
+            .cloned()
+            .unwrap_or_default(),
+        None if new.is_none() => return Ok(()),
+        None => {
+            let mut made = Table::new();
+            let mut screens = toml_edit::Array::new();
+            for screen in name.split('\n').filter(|s| !s.is_empty()) {
+                screens.push(screen);
+            }
+            made.insert("screens", Item::Value(toml_edit::Value::Array(screens)));
+            made
+        }
+    };
+    let (last, tables) = rest.split_last().ok_or("an empty key")?;
+    match new {
+        Some(mut new) => {
+            let mut at: &mut dyn TableLike = &mut table;
+            for part in tables {
+                let item = at.entry(part).or_insert_with(|| {
+                    let mut made = Table::new();
+                    made.set_implicit(true);
+                    Item::Table(made)
+                });
+                at = item
+                    .as_table_like_mut()
+                    .ok_or_else(|| format!("{part} is not a table"))?;
+            }
+            match at.get_mut(last).and_then(Item::as_value_mut) {
+                Some(old) => {
+                    *new.decor_mut() = old.decor().clone();
+                    *old = new;
+                }
+                None => {
+                    at.insert(last, Item::Value(new));
+                }
+            }
+        }
+        None => {
+            remove_key(&mut table, rest);
+        }
+    }
+    // Nothing but its screens: the table goes.
+    let empty = table.iter().all(|(k, _)| k == "screens");
+    put_set(root, index, (!empty).then_some(table));
+    Ok(())
+}
+
+/// `table` in `root`'s sets at `index` (or after them), or that one out;
+/// no set left, no `[[screen-sets]]`.
+fn put_set(root: &mut Table, index: Option<usize>, table: Option<Table>) {
+    let mut sets = root
+        .get(SCREEN_SETS)
+        .and_then(Item::as_array_of_tables)
+        .cloned()
+        .unwrap_or_default();
+    match (index, table) {
+        (Some(i), Some(t)) => {
+            if let Some(at) = sets.get_mut(i) {
+                *at = t;
+            }
+        }
+        (Some(i), None) => {
+            sets.remove(i);
+        }
+        (None, Some(t)) => sets.push(t),
+        (None, None) => {}
+    }
+    if sets.is_empty() {
+        root.remove(SCREEN_SETS);
+    } else {
+        root.insert(SCREEN_SETS, Item::ArrayOfTables(sets));
+    }
+}
+
 /// The value at `key`; an array of tables (`[[windows.rules]]`) as an
 /// array of inline tables.
 fn value_at(table: &dyn TableLike, key: &[String]) -> Option<toml_edit::Value> {
+    if let Some((set, rest)) = in_set(key) {
+        let root = table.get(SCREEN_SETS)?.as_array_of_tables()?;
+        let found = root.iter().find(|t| set_of(t) == set)?;
+        if rest.is_empty() {
+            return Some(toml_edit::Value::InlineTable(
+                found.clone().into_inline_table(),
+            ));
+        }
+        return value_at(found, rest);
+    }
     let (name, tables) = key.split_last()?;
     let mut table = table;
     for part in tables {
@@ -538,6 +741,10 @@ fn canonical(value: &toml_edit::Value) -> String {
 /// came).
 pub fn write_keys(doc: &mut DocumentMut, edits: &[KeyEdit]) -> Result<(), String> {
     for edit in edits {
+        if let Some((set, rest)) = in_set(&edit.key) {
+            write_set_key(doc, set, rest, edit.value.as_deref())?;
+            continue;
+        }
         let (name, tables) = edit.key.split_last().ok_or("an empty key")?;
         let tables_of_key = tables;
         let new = edit
@@ -813,6 +1020,89 @@ mod tests {
         let out = doc.to_string();
         assert!(out.contains("[outputs.A]\nposition = [3440, 0]\n"), "{out}");
         assert!(out.contains("[outputs.B]\nposition = [0, 80]\n"), "{out}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_set_of_screens_takes_its_keys_and_goes_with_its_last() -> anyhow::Result<()> {
+        let key = |parts: &[&str]| parts.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        let set = set_name(&["HEADLESS-2".to_owned(), "DEL U3423WE 7XY1234".to_owned()]);
+        let place = |who: &str| key(&[SCREEN_SETS, &set, "outputs", who, "position"]);
+        let mut doc = hocus_config::parse(FILE)?;
+        let edits = [
+            KeyEdit {
+                key: place("DEL U3423WE 7XY1234"),
+                value: Some("[0, 0]".to_owned()),
+            },
+            KeyEdit {
+                key: place("HEADLESS-2"),
+                value: Some("[0, 1440]".to_owned()),
+            },
+            KeyEdit {
+                key: key(&[SCREEN_SETS, &set, "primary"]),
+                value: Some("\"HEADLESS-2\"".to_owned()),
+            },
+        ];
+        let before = keys_now(
+            &doc,
+            &edits.iter().map(|e| e.key.clone()).collect::<Vec<_>>(),
+        );
+        assert!(before.iter().all(|e| e.value.is_none()));
+        write_keys(&mut doc, &edits).map_err(anyhow::Error::msg)?;
+        let out = doc.to_string();
+        assert!(out.starts_with(FILE), "{out}");
+        assert!(
+            out.contains(
+                "[[screen-sets]]\nscreens = [\"DEL U3423WE 7XY1234\", \"HEADLESS-2\"]\nprimary = \"HEADLESS-2\"\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("[screen-sets.outputs.\"DEL U3423WE 7XY1234\"]\nposition = [0, 0]\n"),
+            "{out}"
+        );
+        check_keys(&out, &edits).map_err(anyhow::Error::msg)?;
+        let snap = read(&out);
+        let file = snap.screen_set(&set).expect("the set");
+        assert_eq!(file.primary.as_deref(), Some("HEADLESS-2"));
+        assert_eq!(file.placed.len(), 2);
+        // A second set, then the first forgotten whole, and put back.
+        let other = set_name(&["HEADLESS-2".to_owned(), "HEADLESS-3".to_owned()]);
+        let mut doc = hocus_config::parse(&out)?;
+        write_keys(
+            &mut doc,
+            &[KeyEdit {
+                key: key(&[SCREEN_SETS, &other, "outputs", "HEADLESS-3", "scale"]),
+                value: Some("1.5".to_owned()),
+            }],
+        )
+        .map_err(anyhow::Error::msg)?;
+        assert_eq!(read(&doc.to_string()).screen_sets.len(), 2);
+        let whole = key(&[SCREEN_SETS, &set]);
+        let kept = keys_now(&doc, std::slice::from_ref(&whole));
+        assert!(
+            kept[0]
+                .value
+                .as_deref()
+                .is_some_and(|v| v.contains("primary"))
+        );
+        write_keys(
+            &mut doc,
+            &[KeyEdit {
+                key: whole,
+                value: None,
+            }],
+        )
+        .map_err(anyhow::Error::msg)?;
+        let forgotten = doc.to_string();
+        assert_eq!(read(&forgotten).screen_sets.len(), 1, "{forgotten}");
+        assert!(!forgotten.contains("U3423WE"), "{forgotten}");
+        write_keys(&mut doc, &kept).map_err(anyhow::Error::msg)?;
+        assert!(read(&doc.to_string()).screen_set(&set).is_some());
+        // Its keys taken out one by one (undone): the file as it was.
+        let mut doc = hocus_config::parse(&out)?;
+        write_keys(&mut doc, &before).map_err(anyhow::Error::msg)?;
+        assert_eq!(doc.to_string(), FILE);
         Ok(())
     }
 
