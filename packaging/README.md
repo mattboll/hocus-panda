@@ -47,6 +47,14 @@ recommends `polkitd`, whose helper (`polkit-agent-helper-1`, through its
 socket `/run/polkit/agent-helper.socket` from polkit 126, else the setuid
 program) checks the password; without polkit, no system action asks for
 one ([docs/design/polkit.md](../docs/design/polkit.md)).
+The session starts the start-up applications itself (6.15): once the bar
+shows, once per session, the XDG autostart entries of
+`~/.config/autostart` and `/etc/xdg/autostart` (the user's file of a name
+winning) that are not hidden, are for this desktop (`OnlyShowIn`,
+`NotShowIn`) and whose `TryExec` is there, with
+`XDG_CURRENT_DESKTOP=Hocuspanda`. No systemd unit or target is needed, so
+it is the same on FreeBSD; systemd's XDG autostart generator is left to
+the desktops that start its target.
 
 GDM reads the sessions when its login screen starts: after installing,
 log out (or restart GDM) and the gear under the password field lists

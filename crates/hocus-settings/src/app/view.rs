@@ -56,7 +56,11 @@ impl App {
         if let Some(preview) = self.bar_preview_layer() {
             layers.push(preview);
         }
-        if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
+        if let Some(menu) = self
+            .menu_list()
+            .or_else(|| self.sound_menu_list())
+            .or_else(|| self.bluetooth_menu_list())
+        {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .on_press(Message::CloseMenu)
@@ -98,6 +102,10 @@ impl App {
         }
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
+        }
+        // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
+        if let Some(sheet) = self.bluetooth_sheet() {
+            layers.push(sheet);
         }
         // The time zone picker (6.11).
         if let Some(picker) = self.time_picker() {
@@ -796,6 +804,7 @@ impl App {
                 }
             }
             SectionId::Sound => self.sound_card(),
+            SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
             SectionId::Appearance => w("Sombre · français", "Dark · English")
                 .get(lang)
@@ -836,6 +845,9 @@ impl App {
         }
         if id == SectionId::Bar {
             return self.bar_page(page);
+        }
+        if id == SectionId::Bluetooth {
+            return self.bluetooth_page(page);
         }
         if id == SectionId::DateTime {
             return self.time_page(page);
@@ -1755,6 +1767,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
+        "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },

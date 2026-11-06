@@ -84,6 +84,8 @@ const ROW_STEP: f64 = 38.0;
 const LIST: f64 = 152.0;
 /// A failure under its row, on two lines in French.
 const FAILURE: f64 = 2.0 * 12.5 * 1.4 + 6.0;
+/// "Réglages du Bluetooth…" at the bottom, under its divider (6.7).
+const LINK: f64 = 4.0 + 1.0 + 4.0 + 36.0;
 
 /// Where the popover's parts are, for the connected blocks (their
 /// heights) and the paired rows (each with what is under it).
@@ -124,7 +126,7 @@ impl Shape {
         } else {
             (nearby as f64 * ROW_STEP - 2.0 + extra).min(LIST)
         };
-        (self.nearby_top() + list + 14.0 + 1.0).round() as i32
+        (self.nearby_top() + list + LINK + 14.0 + 1.0).round() as i32
     }
 
     /// Paired row `i`'s middle in the popover at `rect`.
@@ -156,7 +158,7 @@ impl Shape {
 
 /// Off: the header and its line.
 fn off_height() -> i32 {
-    (HEADER_END + GAP + NOTE + 15.0).round() as i32
+    (HEADER_END + GAP + NOTE + LINK + 15.0).round() as i32
 }
 
 /// The full bar's popover, `height` tall, on a 1920 × 1080 screen.
@@ -209,9 +211,29 @@ fn start(shell: &Path, setup: Option<Setup>, wifi: bool) -> anyhow::Result<Bed> 
         .map(|setup| Bluez::start(fakes.runtime(), &fakes.address, setup))
         .transpose()?;
     let log = fakes.dir.path().join("shell.log");
+    // The Settings the popover opens: a script of the test's that says
+    // what it was given, never the real ones.
+    let bin = fakes.dir.path().join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let settings = bin.join("hocus-settings");
+    std::fs::write(
+        &settings,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\n",
+            fakes.dir.path().join("settings-args").display()
+        ),
+    )?;
+    std::fs::set_permissions(
+        &settings,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )?;
     let env = [
-        ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+        (
+            "RUST_LOG",
+            "warn,hocuspanda_shell=debug,hocus_bluetooth=debug".to_owned(),
+        ),
         ("HOCUS_BLUETOOTH_TIMEOUT", "1".to_owned()),
+        ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
     ];
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let hp = Headless::start_with_shell(
@@ -692,10 +714,6 @@ fn pairing_without_a_code_works_one_asking_a_passkey_goes_to_the_settings_one_fa
     bed.click(item)?;
     bed.popover_is(Some(rect))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    // The phone, second, is inert: "in Settings".
-    bed.click(shape.nearby_row(rect, 1))?;
-    wait(&mut bed.hp, Duration::from_millis(500))?;
-    assert_eq!(bed.times(&Call::Pair(PIXEL.to_owned())), 0);
     // The speaker asks a passkey: the agent refuses, the row is left to
     // the Settings, nothing said under it.
     bed.click(shape.nearby_row(rect, 2))?;
@@ -704,9 +722,33 @@ fn pairing_without_a_code_works_one_asking_a_passkey_goes_to_the_settings_one_fa
     // The popover's rows know it too, which a click follows.
     bed.logged(&format!("{BOSE} (code)"))?;
     assert_eq!(bed.popovers(), vec![rect]);
-    bed.click(shape.nearby_row(rect, 2))?;
-    wait(&mut bed.hp, Duration::from_millis(500))?;
+    // The phone, second, is left to the Settings: a click opens their
+    // Bluetooth page pairing it, and closes the popover (6.7).
+    // The popover may not have heard the speaker's attempt end yet, and a
+    // click while something runs is ignored: clicked again until it opens.
+    let args = bed.fakes.dir.path().join("settings-args");
+    let mut opened = false;
+    for _ in 0..5 {
+        bed.click(shape.nearby_row(rect, 1))?;
+        opened = bed.hp.dispatch_until(Duration::from_secs(2), |_| {
+            std::fs::read_to_string(&args)
+                .is_ok_and(|a| a.contains("bluetooth --pair 5C-12-AA-01-02-"))
+        })?;
+        if opened {
+            break;
+        }
+    }
+    anyhow::ensure!(
+        opened,
+        "the Settings never opened: {:?}",
+        std::fs::read_to_string(&args)
+    );
+    bed.popover_is(None)?;
+    assert_eq!(bed.times(&Call::Pair(PIXEL.to_owned())), 0);
     assert_eq!(bed.times(&Call::Pair(BOSE.to_owned())), 1);
+    bed.click(item)?;
+    bed.popover_is(Some(rect))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
     // The buds, not in pairing mode: said under their row.
     bed.click(shape.nearby_row(rect, 0))?;
     bed.asked(&Call::Pair(BUDS.to_owned()))?;
