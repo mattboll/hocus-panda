@@ -348,7 +348,10 @@ fn the_lid_closed_with_another_screen_on_is_an_unplug() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The shell, logging what it shows into `log`.
+/// The shell, logging what it shows into `log`; the applications' names
+/// from no desktop entry but their ids, whatever the machine has
+/// installed (a CI runner's `firefox.desktop` names it "Navigateur Web
+/// Firefox" in French, #731).
 fn shell_script(dir: &std::path::Path, log: &std::path::Path) -> Option<PathBuf> {
     let shell = common::shell_program()?;
     let script = dir.join("shell");
@@ -361,7 +364,7 @@ fn shell_script(dir: &std::path::Path, log: &std::path::Path) -> Option<PathBuf>
              export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
              HOME='{home}' XDG_CONFIG_HOME='{home}' XDG_CACHE_HOME='{home}' \
-             XDG_STATE_HOME='{home}' XDG_DATA_HOME='{home}' \
+             XDG_STATE_HOME='{home}' XDG_DATA_HOME='{home}' XDG_DATA_DIRS='{home}' \
              LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 ICED_BACKEND=tiny-skia \
              RUST_LOG=warn,hocuspanda_shell=debug\n\
              exec '{shell}' \"$@\" 2>>'{log}'\n",
