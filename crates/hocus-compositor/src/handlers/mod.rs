@@ -6,6 +6,8 @@ mod protocols;
 mod xdg_shell;
 mod xwayland;
 
+pub use xdg_shell::kde_server_side;
+
 use std::os::fd::OwnedFd;
 
 use smithay::{

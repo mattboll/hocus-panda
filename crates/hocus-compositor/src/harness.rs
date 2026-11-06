@@ -123,13 +123,31 @@ impl Headless {
         bus: Option<String>,
         system: Option<String>,
     ) -> anyhow::Result<Self> {
+        Self::start_all(headless, config, shell, bus, system, false)
+    }
+
+    /// With XWayland, for X11 clients: its display is
+    /// [`Headless::xdisplay`] once it is ready. Without the `Xwayland`
+    /// program, it never is.
+    pub fn start_with_xwayland(headless: HeadlessConfig) -> anyhow::Result<Self> {
+        Self::start_all(headless, Config::default(), None, None, None, true)
+    }
+
+    fn start_all(
+        headless: HeadlessConfig,
+        config: Config,
+        shell: Option<std::path::PathBuf>,
+        bus: Option<String>,
+        system: Option<String>,
+        xwayland: bool,
+    ) -> anyhow::Result<Self> {
         // A GPU only when the developer named one (#534).
         let headless = crate::test_gpu::resolve(headless)?;
         let started = crate::start(Options {
             backend: BackendKind::Headless(headless),
             runtime_dir: None,
             spawn: Vec::new(),
-            xwayland: false,
+            xwayland,
             session: false,
             config,
             shell,
@@ -144,6 +162,11 @@ impl Headless {
             time: 0,
             _shell: shell,
         })
+    }
+
+    /// XWayland's display number, once it is ready.
+    pub fn xdisplay(&self) -> Option<u32> {
+        self.app.state.xdisplay
     }
 
     /// The Wayland socket, for `WAYLAND_DISPLAY` or a client to connect to.
