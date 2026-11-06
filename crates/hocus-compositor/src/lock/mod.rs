@@ -446,6 +446,7 @@ impl State {
         }
         self.close_radial(None);
         self.radial_press = None;
+        self.drop_overview();
         self.capture_away();
         if self.ink.shows() {
             self.ink_clear();

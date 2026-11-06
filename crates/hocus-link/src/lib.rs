@@ -1671,6 +1671,9 @@ pub enum ToCompositor {
     /// compositor asks its application, as `Super+Q` does; the
     /// application decides. Written `close ID`.
     Close(u64),
+    /// The bar's "+ N autres" over its windows (#604): the overview opens
+    /// on every screen, or closes when open (8.5 A). Written `overview`.
+    Overview,
     /// The user goes to agent `id` (its row in the agents' group, 4.1):
     /// the compositor brings its window, if it has one, and a finished
     /// agent is seen. From a row (4.3), the streak runs from it to the
@@ -2637,6 +2640,7 @@ impl fmt::Display for ToCompositor {
                 Ok(())
             }
             Self::Close(id) => write!(f, "close {id}"),
+            Self::Overview => f.write_str("overview"),
             Self::WindowAction { id, action } => write!(f, "window-action {id} {}", action.name()),
             Self::SendTo {
                 id,
@@ -2874,6 +2878,7 @@ impl FromStr for ToCompositor {
                     .parse()
                     .map_err(|e| BadLine(format!("window: {e}")))?,
             )),
+            Some("overview") => Ok(Self::Overview),
             Some("close") => Ok(Self::Close(
                 word(&mut words, "window")?
                     .parse()
@@ -3403,6 +3408,7 @@ mod tests {
             },
             ToCompositor::Bring(42),
             ToCompositor::Close(42),
+            ToCompositor::Overview,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
             ToCompositor::GoToAgent {

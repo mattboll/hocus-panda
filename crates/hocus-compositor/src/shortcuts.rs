@@ -58,6 +58,8 @@ pub enum Action {
     Level(LevelKey),
     /// The launcher, on the screen under the pointer; open, it closes.
     Launcher,
+    /// The overview, on every screen; open, it closes (8.5 A).
+    Overview,
     /// The clipboard's history, on the focused window's screen; open, it
     /// closes (5.6).
     Clipboard,
@@ -257,6 +259,7 @@ shortcuts! {
     move_to_screen_right: ["Super+Alt+Right"] => Action::MoveToScreen(1),
     toggle_bar: ["Super+B"] => Action::ToggleBar,
     launcher: ["Super+Space"] => Action::Launcher,
+    overview: ["Super+W"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
     emoji: ["Super+period"] => Action::Emoji,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
@@ -403,6 +406,7 @@ impl State {
             }
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
+            Action::Overview => self.toggle_overview(),
             Action::Clipboard => self.toggle_clipboard(),
             Action::Emoji => self.toggle_emoji(),
             Action::Capture => self.open_capture(),

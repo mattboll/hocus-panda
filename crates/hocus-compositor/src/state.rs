@@ -232,6 +232,9 @@ pub struct State {
     pub radial_out: Option<crate::radial::Going>,
     pub radial_press: Option<crate::radial::Press>,
     pub radial_paint: crate::radial_draw::RadialPaint,
+    /// The overview while it shows (8.5 A), and what draws it.
+    pub overview: Option<crate::overview::Overview>,
+    pub overview_paint: crate::overview_draw::OverviewPaint,
     /// The windows' states last told the shell (#723).
     pub told_window_states: Option<hocus_link::WindowStates>,
     /// The switcher's key held down, stepping at the keyboard's repeat
@@ -462,6 +465,8 @@ impl State {
             radial_out: None,
             radial_press: None,
             radial_paint: crate::radial_draw::RadialPaint::default(),
+            overview: None,
+            overview_paint: crate::overview_draw::OverviewPaint::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

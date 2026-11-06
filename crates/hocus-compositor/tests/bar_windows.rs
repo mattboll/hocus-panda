@@ -251,6 +251,8 @@ const AT_REST: &str = "the windows are drawn at rest";
 /// What a window's menu said it shows (#723).
 const MENU: &str = "the window's menu shows it";
 const BTN_RIGHT: u32 = 0x111;
+const BTN_LEFT: u32 = 0x110;
+const KEY_W: u32 = 17;
 
 impl Bed {
     /// Waits until the shell's last line of `what` holds all of `holds`:
@@ -660,7 +662,7 @@ fn the_close_button_asks_its_window_to_close() -> anyhow::Result<()> {
 }
 
 #[test]
-fn past_three_windows_plus_n_opens_the_desktops_list() -> anyhow::Result<()> {
+fn past_three_windows_plus_n_opens_the_overview() -> anyhow::Result<()> {
     let Some(mut bed) = start(&Machine::default())? else {
         return Ok(());
     };
@@ -676,21 +678,140 @@ fn past_three_windows_plus_n_opens_the_desktops_list() -> anyhow::Result<()> {
     let group = bed.group_of(3 * LINE + MORE)?;
     assert_eq!(group.y + group.height - ROOM + GAP, tiles);
     bed.shot("five")?;
-    // "+ 2 autres": every window of the desktop, in its list.
+    // "+ 2 autres": the overview, every window of the desktop laid out
+    // (8.5 A); the bar stays in front, and takes the clicks.
     bed.click("WindowsMore")?;
-    bed.last_is(
-        "the desktop's list shows it",
-        &[
-            "Bureau 1",
-            "5 fenêtres",
-            "Notes de réunion",
-            "~/hocus-panda — fish",
-        ],
-    )?;
-    let done = bed
+    let opened = bed
         .hp
-        .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
-    anyhow::ensure!(done, "no popover drawn");
+        .dispatch_until(WAIT, |hp| hp.overview() == Some(true))?;
+    anyhow::ensure!(opened, "no overview");
+    assert_eq!(bed.hp.overview_windows().len(), 5);
+    assert_eq!(bed.hp.bar_in_front().as_deref(), Some("HEADLESS-1"));
+    bed.shot_of("overview-from-the-bar", Rect::new(0, 0, 1920, 1080))?;
+    // Again: it closes.
+    bed.click("WindowsMore")?;
+    let closed = bed.hp.dispatch_until(WAIT, |hp| hp.overview().is_none())?;
+    anyhow::ensure!(closed, "the overview stays");
+    Ok(())
+}
+
+/// The overview on two screens with the real bar (8.5 A): with
+/// `HOCUS_SHOTS`, the screens side by side as the overview opens, a
+/// terminal hosting three agents (two waiting) badged; then a window
+/// dragged over a desktop's thumbnail.
+#[test]
+fn the_overview_on_two_screens_with_the_bar_and_the_agents() -> anyhow::Result<()> {
+    let machine = Machine {
+        screens: vec![SCREEN, (2560, 1440)],
+        ..Machine::default()
+    };
+    let Some(mut bed) = start(&machine)? else {
+        return Ok(());
+    };
+    bed.hp.pointer_move(960.0, 540.0);
+    bed.open("firefox", "Docs — Mozilla Firefox")?;
+    bed.open("org.gnome.Nautilus", "Téléchargements")?;
+    bed.hp.pointer_move(1920.0 + 1280.0, 720.0);
+    bed.open("code", "overview.rs — hocus-panda — Visual Studio Code")?;
+    // The agents' terminal: this process's last window, as a terminal is
+    // its agents' ancestor.
+    bed.open("kitty", "herdr — 3 agents")?;
+    let socket = bed
+        .hp
+        .control_socket()
+        .ok_or_else(|| anyhow::anyhow!("no control socket"))?
+        .to_path_buf();
+    let pid = std::process::id();
+    for (name, state) in [
+        ("migration", "waiting"),
+        ("api-paiements", "waiting"),
+        ("site-vitrine", "working"),
+    ] {
+        use std::io::Write;
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket)?;
+        writeln!(stream, "agent command {name} {state} {pid} {name}")?;
+    }
+    let until = std::time::Instant::now() + WAIT;
+    while bed.hp.agents().len() < 3 && std::time::Instant::now() < until {
+        bed.hp.dispatch(std::time::Duration::from_millis(10))?;
+    }
+    bed.hp.pointer_move(960.0, 540.0);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_W]);
+    assert_eq!(bed.hp.overview(), Some(true));
+    assert_eq!(bed.hp.overview_windows().len(), 4);
+    assert_eq!(
+        bed.hp.overview_badges(),
+        [(Some("kitty".to_owned()), "waiting".to_owned(), 2)]
+    );
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shot_screens(&mut bed.hp, "overview-two-screens-agents")?;
+    // Firefox dragged over the second screen's third desktop.
+    let (_, (x, y, w, h)) = bed
+        .hp
+        .overview_windows()
+        .into_iter()
+        .find(|(a, _)| a.as_deref() == Some("firefox"))
+        .ok_or_else(|| anyhow::anyhow!("no firefox laid out"))?;
+    let (_, _, to) = bed
+        .hp
+        .overview_thumbs()
+        .into_iter()
+        .find(|(o, d, _)| o == "HEADLESS-2" && *d == 2)
+        .ok_or_else(|| anyhow::anyhow!("no thumbnail"))?;
+    let from = (x + w / 2.0, y + h / 3.0);
+    bed.hp.pointer_move(from.0, from.1);
+    bed.hp.button(BTN_LEFT, true);
+    for step in 1..=16 {
+        let t = f64::from(step) / 16.0;
+        bed.hp
+            .pointer_move(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+    }
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(300))?;
+    assert_eq!(
+        bed.hp.overview_drag(),
+        Some((
+            Some("firefox".to_owned()),
+            Some(("HEADLESS-2".to_owned(), 2))
+        ))
+    );
+    shot_screens(&mut bed.hp, "overview-dragging-onto-a-thumbnail")?;
+    bed.hp.button(BTN_LEFT, false);
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(300))?;
+    shot_screens(&mut bed.hp, "overview-dropped")?;
+    Ok(())
+}
+
+/// With `HOCUS_SHOTS` naming a folder: every screen side by side, as
+/// `WHAT.png`; a frame of its own drawn first (a waiting agent's panda
+/// waves on: the overview never rests).
+fn shot_screens(hp: &mut Headless, what: &str) -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
+        return Ok(());
+    };
+    hp.hold_clock();
+    hp.step(std::time::Duration::from_millis(400))?;
+    let screens = [hp.screenshot(0)?, hp.screenshot(1)?];
+    hp.release_clock();
+    let width: i32 = screens.iter().map(|s| s.0).sum();
+    let height = screens.iter().map(|s| s.1).max().unwrap_or(0);
+    let mut image =
+        image::RgbaImage::from_pixel(width as u32, height as u32, image::Rgba([14, 15, 18, 255]));
+    let mut x0 = 0;
+    for (w, h, bytes) in &screens {
+        for y in 0..*h {
+            for x in 0..*w {
+                let at = usize::try_from(y * w + x)? * 4;
+                let p = &bytes[at..at + 4];
+                image.put_pixel(
+                    (x0 + x) as u32,
+                    y as u32,
+                    image::Rgba([p[2], p[1], p[0], 255]),
+                );
+            }
+        }
+        x0 += w;
+    }
+    image.save(Path::new(&folder).join(format!("{what}.png")))?;
     Ok(())
 }
 

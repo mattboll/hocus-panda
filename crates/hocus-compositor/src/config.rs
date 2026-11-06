@@ -786,7 +786,8 @@ pub struct Touchpad {
     pub off_with_mouse: bool,
     /// Three fingers sideways change desktop (windows.md §12).
     pub swipe_desktops: bool,
-    /// Four fingers up open the launcher (6.13, not built: read, kept).
+    /// Four fingers up open the launcher, down close it (6.13); down with
+    /// no launcher open show the overview (8.5 A).
     pub swipe_launcher: bool,
 }
 

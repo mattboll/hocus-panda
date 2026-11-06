@@ -68,6 +68,8 @@ pub(crate) enum Kept {
     Lock(crate::lock::LockKey),
     /// A key while a window's radial menu is open (#723).
     Radial(crate::radial::Key),
+    /// A key while the overview is open (8.5 A).
+    Overview(crate::overview::Key),
 }
 
 /// The digit of a key of the keyboard's top row, whatever the layout puts
@@ -242,6 +244,33 @@ impl State {
                         sym, mods.shift,
                     )));
                 }
+                // The overview open (8.5 A): its keys are its own, the
+                // modifiers go on.
+                if this.overview_open() && !auth {
+                    let sym = keysym.modified_sym();
+                    if is_modifier(sym) {
+                        return FilterResult::Forward;
+                    }
+                    if state != KeyState::Pressed {
+                        return if this.kept_keys.remove(&code) {
+                            FilterResult::Intercept(Kept::Release)
+                        } else {
+                            FilterResult::Forward
+                        };
+                    }
+                    this.kept_keys.insert(code);
+                    let shortcuts = &this.config.shortcuts;
+                    let action = keysym
+                        .raw_latin_sym_or_raw_current_sym()
+                        .and_then(|key| shortcuts.action(mods, key, this.nested))
+                        .or_else(|| {
+                            digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
+                        })
+                        .map(|(action, _)| action);
+                    return FilterResult::Intercept(Kept::Overview(crate::overview::Key::of(
+                        sym, mods.shift, action,
+                    )));
+                }
                 if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key).filter(|_| !auth)
                 {
                     // Alt+Tab held: its keys are its own, the modifiers
@@ -377,6 +406,7 @@ impl State {
             Some(Kept::CancelMove) => self.cancel_move(),
             Some(Kept::Lock(key)) => self.lock_key(key),
             Some(Kept::Radial(key)) => self.radial_key(key),
+            Some(Kept::Overview(key)) => self.overview_key(key),
             Some(Kept::Release) | None => {}
         }
         let mods = keyboard.modifier_state();
@@ -544,6 +574,26 @@ impl State {
             );
             pointer.frame(self);
             self.radial_motion(location);
+            if !self.nested {
+                self.redraw = true;
+            }
+            return;
+        }
+        // The overview open (8.5 A): no client sees the pointer but over
+        // the bar.
+        if !self.auth_holds() && self.overview_takes(location) {
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
+            self.frame_cursor = None;
+            self.overview_motion(location);
             if !self.nested {
                 self.redraw = true;
             }
@@ -761,6 +811,19 @@ impl State {
                 self.kept_buttons.remove(&button);
             }
             return;
+        }
+        // The overview (8.5 A): its presses, but over the bar.
+        if !self.auth_holds() && self.overview.is_some() {
+            let at = pointer.current_location();
+            if state == ButtonState::Released && self.overview_release(button, at) {
+                self.kept_buttons.remove(&button);
+                return;
+            }
+            if state == ButtonState::Pressed && self.overview_takes(at) {
+                self.kept_buttons.insert(button);
+                self.overview_press(button, at);
+                return;
+            }
         }
         if state == ButtonState::Pressed {
             self.pointer_refocus(time);

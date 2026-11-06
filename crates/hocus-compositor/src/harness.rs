@@ -69,6 +69,13 @@ impl Drop for Headless {
     }
 }
 
+/// A window the overview lays out: its app id, its place (x, y, width,
+/// height), global.
+pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
+/// A window dragged in the overview: its app id, the thumbnail it is
+/// over (screen, desktop).
+pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
+
 /// What a test can know about a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
@@ -1510,6 +1517,97 @@ impl Headless {
             enabled: radial.enabled,
             on: radial.on,
         })
+    }
+
+    /// The overview (8.5 A): `Some(true)` open, `Some(false)` closing,
+    /// `None` gone.
+    pub fn overview(&self) -> Option<bool> {
+        self.app.state.overview.as_ref().map(|o| o.open())
+    }
+
+    /// The overview's thumbnails: each screen's and desktop's (from 0),
+    /// and its middle, global.
+    pub fn overview_thumbs(&self) -> Vec<(String, usize, (f64, f64))> {
+        self.app
+            .state
+            .overview_screens()
+            .into_iter()
+            .flat_map(|s| {
+                let name = s.output.name();
+                s.thumbs
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(d, t)| (name.clone(), d, t.centre()))
+            })
+            .collect()
+    }
+
+    /// The windows the overview lays out on the screens' shown desktops:
+    /// each one's app id and its place (x, y, width, height), global.
+    pub fn overview_windows(&self) -> Vec<OverviewWindow> {
+        let state = &self.app.state;
+        state
+            .overview_slots_all()
+            .into_iter()
+            .map(|(id, a)| {
+                let app = state
+                    .windows
+                    .get(&id)
+                    .and_then(|m| crate::windows::app_id(&m.window));
+                (app, (a.x, a.y, a.w, a.h))
+            })
+            .collect()
+    }
+
+    /// The overview's agents' badges: each window's app id, the state
+    /// its badge shows and how many agents are in it.
+    pub fn overview_badges(&self) -> Vec<(Option<String>, String, usize)> {
+        let state = &self.app.state;
+        let Some(overview) = &state.overview else {
+            return Vec::new();
+        };
+        let mut out: Vec<_> = overview
+            .badges
+            .iter()
+            .map(|(id, b)| {
+                let app = state
+                    .windows
+                    .get(id)
+                    .and_then(|m| crate::windows::app_id(&m.window));
+                (app, format!("{:?}", b.state).to_lowercase(), b.count)
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The overview's thumbnails where a panda sleeps: their screen and
+    /// desktop (from 0).
+    pub fn overview_asleep(&self) -> Vec<(String, usize)> {
+        self.app.state.overview_asleep()
+    }
+
+    /// The overview's selected window's app id, when its ring shows.
+    pub fn overview_selected(&self) -> Option<String> {
+        let state = &self.app.state;
+        let overview = state.overview.as_ref().filter(|o| o.ring)?;
+        let id = overview.selected?;
+        state
+            .windows
+            .get(&id)
+            .and_then(|m| crate::windows::app_id(&m.window))
+    }
+
+    /// The window dragged in the overview: its app id, and the thumbnail
+    /// it is over (screen, desktop).
+    pub fn overview_drag(&self) -> Option<OverviewDrag> {
+        let state = &self.app.state;
+        let drag = state.overview.as_ref()?.drag.as_ref()?;
+        let app = state
+            .windows
+            .get(&drag.window)
+            .and_then(|m| crate::windows::app_id(&m.window));
+        Some((app, drag.over.clone()))
     }
 
     /// Whether the radial menu is still drawn going.

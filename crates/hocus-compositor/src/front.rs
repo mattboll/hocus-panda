@@ -118,11 +118,13 @@ impl Pick {
 
 impl State {
     /// Whether the bar on `output` is in front of the windows.
+    /// The overview keeps it in front on every screen (8.5 A).
     pub fn bar_in_front(&self, output: &Output) -> bool {
-        matches!(
-            &self.panel.front,
-            Front::Raised { output: o } | Front::Dropping { output: o } if *o == output.name()
-        )
+        self.overview.is_some()
+            || matches!(
+                &self.panel.front,
+                Front::Raised { output: o } | Front::Dropping { output: o } if *o == output.name()
+            )
     }
 
     /// The pointer moved to `at` (global): against a bar's edge, the wait

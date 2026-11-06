@@ -479,6 +479,10 @@ impl State {
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
             ToCompositor::DeskTiles { bar, tiles } => self.desk_tiles_said(bar, tiles),
+            ToCompositor::Overview => {
+                tracing::debug!("the bar asks for the overview");
+                self.toggle_overview();
+            }
             ToCompositor::Close(id) => {
                 tracing::debug!(window = id, "the shell asks a window to close");
                 self.close_window(crate::model::WindowId(id));
