@@ -207,6 +207,25 @@ impl Look {
     }
 }
 
+impl Look {
+    /// As the overview draws it (8.5 A): at `visual`, `alpha` of it,
+    /// without its grip; lifted, with the shadow of a window moving.
+    pub(crate) fn placed(
+        mut self,
+        visual: Rectangle<f64, Logical>,
+        alpha: f32,
+        lifted: bool,
+    ) -> Self {
+        self.visual = visual;
+        self.alpha *= alpha;
+        self.grip = 0.0;
+        if lifted {
+            self.shadow = ShadowStyle::MOVING;
+        }
+        self
+    }
+}
+
 impl State {
     pub(crate) fn look(&self, id: WindowId, now: Duration) -> Option<Look> {
         let managed = self.windows.get(&id)?;
@@ -370,7 +389,7 @@ impl State {
 
     /// A window with its frame, front first: its grip, its rims, its
     /// surfaces and its shadow.
-    fn framed_window<R>(
+    pub(crate) fn framed_window<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
@@ -744,6 +763,9 @@ impl State {
         // brought it in front (#519); its popovers, its halo, the peek and
         // the bubbles stay above them.
         let front = self.bar_in_front(output);
+        // The overview (8.5 A): the windows glide into its layout, which
+        // draws them; with reduced motion they fade under it.
+        let cover = self.overview_cover(now);
         // The windows on this output, front first, where their desktop is
         // on the strip; a fullscreen one on top goes over the bars.
         let looks: Vec<(WindowId, Look)> = self
@@ -758,6 +780,12 @@ impl State {
                 let mut look = self.look(id, now)?;
                 look.visual.loc.x += offset;
                 look.alpha *= alpha;
+                if let Some(cover) = cover {
+                    look.alpha *= cover;
+                    if look.alpha <= 0.0 {
+                        return None;
+                    }
+                }
                 Some((id, look))
             })
             .filter(|(_, look)| {
@@ -769,9 +797,10 @@ impl State {
                 around.overlaps(area.to_f64())
             })
             .collect();
-        let fullscreen_on_top = looks
-            .first()
-            .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
+        let fullscreen_on_top = cover.is_none()
+            && looks
+                .first()
+                .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
         // The handle of a pair's seam, where the pair is now: right above
         // the front one of the two, so that a window over the seam covers
         // it (§8).
@@ -921,6 +950,9 @@ impl State {
                     }),
             );
         }
+        // The overview over the windows, under the bar.
+        let mut overview = self.overview_elements(renderer, output, now);
+        elements.append(&mut overview);
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.

@@ -718,6 +718,8 @@ impl State {
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
         self.radial_window_gone(id);
+        self.overview_window_gone(id);
+        self.overview_paint.forget(id);
         self.share_window_gone(id);
         self.record_window_gone(id);
         self.overlay.forget(id);
@@ -1392,6 +1394,7 @@ impl State {
         }
         moving |= self.tick_switcher(now, &mut wake);
         moving |= self.tick_radial(now);
+        moving |= self.tick_overview(now);
         moving |= self.tick_ink(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

@@ -840,6 +840,109 @@ screenshots (by hand, `HOCUS_SHOTS=DIR`, the ignored tests
 `straddling_shots` with foot and `x11_shots` with xterm): each screen, the
 two as arranged, and the seam's two sides at the same size.
 
+## 12b. The overview (8.5 A, #490)
+
+Approved 2026-11-06 (the s8b mockup, its questions 4 to 7): every
+window and desktop at a glance, and the mouse's way to move windows
+between desktops and screens, beside the bar's tiles (§6, 8.5 B).
+
+- **Opening**: `Super+W` (`[shortcuts] overview`; nested `Alt+Super+W`),
+  four fingers down on a touchpad while no launcher is open (6.13: four
+  fingers down no longer reach the application then; with a launcher
+  open they still close it), and the bar's "+ N autres" over its windows
+  (bar.md, "The windows in the bar"; until now the desktop's list).
+  Closing: the same, `Esc`, or a click on the empty background. The
+  session locking closes it at once.
+- **On every screen at once**, each with its own desktops: the wallpaper
+  dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
+  desktops as live thumbnails, in the screen's shape, a ninth of its
+  width each (smaller when they would not fit the work area), 40 px
+  apart, 48 px from the screen's top, centred over the work area; the
+  desktop shown ringed 2 px in the accent; its number under each
+  (10.5 px, `text.faint`; "2 · Mail" with a name). A thumbnail shows its
+  desktop's windows small over the screen's wallpaper, from their own
+  textures (nothing copied). Under them, the shown desktop's windows laid
+  out without overlap, in rows, in their left-to-right order, never
+  larger than they are, centred in the work area 48 px in from its sides
+  and bottom; under each, 10 px down, its application's tile and its
+  title (14 px, cut with "…"). The bar stays in front of it all and
+  keeps working.
+- **Motion**: the windows glide from their places to the layout in
+  240 ms (`cubic-bezier(0.2, 0.9, 0.25, 1)`) and back the same way as it
+  closes, the dim and the thumbnails fading with them; with reduced
+  motion it fades in and out in 120 ms, the windows at their places in
+  the layout.
+- **Pointer**: a window under the pointer gets a 2 px `#7EE0A0` rim and a
+  24 px ✕ over its top-right corner, which asks it to close (as
+  `Super+Q`; the overview stays open). A click on a window closes the
+  overview and focuses it. A click on a thumbnail shows that desktop on
+  its screen (the strip slides under the overview, which slides along)
+  and keeps the overview open; closed, the screen stays on it. No
+  client sees the pointer or the keys while it is open, but the bar.
+- **Drag** (6 px of motion): the window lifts to 42 % of its place in the
+  layout, hanging under the pointer; a thumbnail under the pointer lights
+  (`rgba(108,194,135,0.28)`, a 2 px `#7EE0A0` ring) and says "Lâcher :
+  bureau 3" / "Drop: desktop 3" under it, in front of the window, which
+  hangs under those words. Let go on a thumbnail, the window goes to
+  that desktop of that screen, at its place and size (as `Super+Shift+N`
+  sends it, or `Super+Alt+←/→` across screens); on another screen's
+  windows or background, to the desktop that screen shows; on its own
+  desktop's thumbnail or anywhere else of its own screen, it springs back
+  to its place in the layout (200 ms). The overview stays open.
+- **Keyboard**: the arrows (and `Tab`, `Shift+Tab`) move a selection ring
+  (2 px accent, 4 px out) among the windows of every screen, the first
+  press showing it on the focused window; `Enter` focuses the selected
+  window and closes; `Super+1…9` shows that desktop on the selected
+  window's screen (else the screen under the pointer); `Super+Shift+1…9`
+  sends the selected window there, the selection going on to its
+  neighbour; `Esc` closes. Other keys reach no application.
+- **Agents**: a window hosting agents (the agents' windows, bar.md 4.0)
+  carries a panda badge over its top-left corner, 10 px in: a dark pill
+  (`rgba(14,17,28,0.9)`) ringed 1.5 px in the state's colour at 70 %,
+  the panda in a halo of that colour, and how many agents are in the
+  state that needs the user most (waiting, stuck, to see, working,
+  resting): "3 t’attendent" / "3 waiting", "1 au travail" / "1 working".
+  The panda is 14 % of the window's width in the layout, 42 px at least
+  and 84 at most, the words in proportion (larger than the mockup's
+  42 px: the pandas big and visible). While one waits, the panda bobs
+  (3 px) and waves its paw on a 1.6 s loop. A desktop with no window
+  (minimised ones aside) shows a sleeping panda in its thumbnail, half
+  its height (64 px at most), eyes shut, a "z" over it, breathing
+  (3.2 s) for two breaths as the overview opens, then still. With
+  reduced motion, no panda moves.
+- **Minimised** windows are laid out after the others, at 60 %; a window
+  on all desktops (#723) is laid out, and shown in the thumbnails, on
+  every desktop of its screen.
+- **At rest** nothing draws but what clients commit: every picture (the
+  titles, the numbers, the badges, the ✕, the pandas) is drawn once on
+  the CPU for each look it takes and kept; a waiting agent's panda
+  waves on twelve pictures of its paw, so the overview never rests
+  while an agent waits, as the radial menu's panda (§10b).
+- **As built** (`crates/hocus-compositor/src/overview.rs`, its drawing
+  in `overview_draw.rs`). Measured headless
+  (`crates/hocus-compositor/tests/overview.rs`, two screens): `Super+W`
+  opens it on both, four thumbnails each, the three windows laid out
+  without overlap each on its screen, again closes it; `Esc` closes,
+  every window where it was, the focus and the desktops unchanged; a
+  click on a window focuses it and closes; a click on the second
+  thumbnail shows desktop 2 and keeps it open, the screen staying there
+  after; dragged onto the third thumbnail a window is lifted over it and
+  goes to desktop 3 at its place, the screens unchanged; onto the other
+  screen's background it goes to that screen's shown desktop, onto its
+  fourth thumbnail to its desktop 4; let go elsewhere or on its own
+  thumbnail it springs back; four fingers down open it and again close
+  it, no swipe reaching a client, four up do not; the arrows, `Enter`,
+  `Super+Shift+3`; a window hosting two waiting agents and a working one
+  badged "2 waiting", the badge following their states, the empty
+  desktops' pandas asleep; open and still, no frame drawn in half a
+  second. Unit tests: the layout (in order, never larger, no overlap,
+  rows), the thumbnails' places, the arrows' neighbours, the badges'
+  counts and words, the keys, the glide and the fade, every picture at
+  scales 1 to 2, the paw's few pictures. With the real shell
+  (`tests/bar_windows.rs`): "+ 2 autres" opens it and closes it, the bar
+  in front; two screens with the bar, the badge, a drag over a
+  thumbnail (`HOCUS_SHOTS`: their screenshots).
+
 ## 13. Shortcuts
 
 Most use `Super`, as in the user's current desktop; `Alt+Tab` and
@@ -883,6 +986,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
 | `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
+| `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
@@ -1046,3 +1150,10 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     the pointer at a step between screens slides onto the screen beyond;
     X11 applications are shown at their size on a screen at 2, enlarged
     and a little soft.
+16. Moving windows with the mouse (#490, the s8b mockup, questions 4 to
+    7): both the bar's tiles (8.5 B, first) and the overview (8.5 A);
+    the overview opens with `Super+W`, four fingers down with no launcher
+    open, and the bar's "+ N autres"; a click on a thumbnail shows that
+    desktop and keeps the overview open; windows hosting agents carry a
+    big panda badge, waving while one waits, and empty desktops a
+    sleeping panda.

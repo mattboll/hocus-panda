@@ -46,6 +46,8 @@ pub mod model;
 pub mod motion;
 mod output_spec;
 mod overlay;
+mod overview;
+mod overview_draw;
 mod panel;
 pub mod peek;
 mod popover;

@@ -74,13 +74,13 @@ const SHADOW: ShadowStyle = ShadowStyle {
     radius: DISC,
 };
 
-struct Fonts {
-    semibold: fontdue::Font,
-    bold: fontdue::Font,
-    mono: fontdue::Font,
+pub(crate) struct Fonts {
+    pub semibold: fontdue::Font,
+    pub bold: fontdue::Font,
+    pub mono: fontdue::Font,
 }
 
-fn fonts() -> Option<Fonts> {
+pub(crate) fn fonts() -> Option<Fonts> {
     let read = |bytes: &'static [u8]| {
         fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
             .map_err(|err| tracing::warn!(err, "the radial menu's font does not read"))
@@ -225,14 +225,14 @@ fn colour([r, g, b, a]: [u8; 4]) -> Color {
     Color::from_rgba8(r, g, b, a)
 }
 
-fn paint(c: [u8; 4]) -> Paint<'static> {
+pub(crate) fn paint(c: [u8; 4]) -> Paint<'static> {
     let mut p = Paint::default();
     p.set_color(colour(c));
     p.anti_alias = true;
     p
 }
 
-fn rgba(r: u8, g: u8, b: u8, a: f32) -> [u8; 4] {
+pub(crate) fn rgba(r: u8, g: u8, b: u8, a: f32) -> [u8; 4] {
     [r, g, b, (a * 255.0).round() as u8]
 }
 
@@ -260,7 +260,7 @@ fn wedge(cx: f64, cy: f64, r0: f64, r1: f64, a0: f64, a1: f64) -> Option<tiny_sk
 }
 
 /// A rounded rectangle.
-fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
+pub(crate) fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
     let r = r.min(w / 2.0).min(h / 2.0);
     // The circle's quarter as a cubic: 0.5523 of the radius.
     let k = r * (1.0 - 0.552_284_8);
@@ -278,7 +278,7 @@ fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
     pb.finish()
 }
 
-fn stroke(width: f32) -> Stroke {
+pub(crate) fn stroke(width: f32) -> Stroke {
     Stroke {
         width,
         line_cap: LineCap::Round,
@@ -355,7 +355,7 @@ fn icon(pixmap: &mut Pixmap, sector: Sector, t: Transform, ink: [u8; 4]) {
 
 /// Lays `text` in `font` at `px`: its width and its glyphs, each with its
 /// pen position.
-fn advance(font: &fontdue::Font, text: &str, px: f32) -> f32 {
+pub(crate) fn advance(font: &fontdue::Font, text: &str, px: f32) -> f32 {
     let mut width = 0.0;
     let mut previous = None;
     for c in text.chars() {
@@ -392,7 +392,7 @@ fn blend(pixmap: &mut Pixmap, x: i32, y: i32, colour: [u8; 4], coverage: u8) {
 
 /// Writes `text` in `font`, `px` high, its baseline's left at `(x, y)`
 /// (pixmap pixels); with a dark outline `outline` pixels wide first.
-fn write(
+pub(crate) fn write(
     pixmap: &mut Pixmap,
     font: &fontdue::Font,
     text: &str,
@@ -452,7 +452,7 @@ fn write(
 }
 
 /// The colour of an application's letter tile, from its id.
-fn letter_colour(app: &str) -> [u8; 4] {
+pub(crate) fn letter_colour(app: &str) -> [u8; 4] {
     const TILES: [[u8; 4]; 6] = [
         [0x4F, 0xC1, 0xC9, 0xFF],
         [0x8F, 0xB3, 0xFF, 0xFF],
@@ -466,7 +466,7 @@ fn letter_colour(app: &str) -> [u8; 4] {
 }
 
 /// The letter an application's tile shows: its id's last part's first.
-fn letter_of(app: &str) -> String {
+pub(crate) fn letter_of(app: &str) -> String {
     app.rsplit('.')
         .next()
         .and_then(|n| n.chars().next())
@@ -731,7 +731,7 @@ fn draw_panda(scale: f64) -> Option<(Vec<u8>, i32)> {
 
 /// tiny-skia's premultiplied RGBA as the renderer's ARGB8888 (B, G, R, A
 /// in memory).
-fn argb(pixmap: Pixmap) -> Vec<u8> {
+pub(crate) fn argb(pixmap: Pixmap) -> Vec<u8> {
     let mut data = pixmap.take();
     for px in data.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
@@ -742,7 +742,7 @@ fn argb(pixmap: Pixmap) -> Vec<u8> {
 impl State {
     /// Whether the menu's words are French: `[locale] language`, else the
     /// session's locale.
-    fn radial_french(&self) -> bool {
+    pub(crate) fn radial_french(&self) -> bool {
         use hocus_link::locale::Language;
         match self.config.locale.language {
             Language::French => true,

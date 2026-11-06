@@ -6,7 +6,8 @@
 //! `swipe-desktops` off, or three fingers that start vertical, reach the
 //! client whole; four fingers up open the launcher past a third of their
 //! travel, or on a flick, and it springs back short of it; four fingers
-//! down close it; it follows the fingers (its opacity and size at half
+//! down close it (with none open, they open the overview: 8.5 A,
+//! `tests/overview.rs`); it follows the fingers (its opacity and size at half
 //! their travel), and with reduced motion only fades on release; the
 //! direction is the fingers' whatever natural scrolling says;
 //! `swipe-launcher` off, live, leaves four fingers to the application.
@@ -247,9 +248,11 @@ fn springs_back_short_of_it() -> anyhow::Result<()> {
     bed.held_look()?;
     bed.hp.swipe_end(40, true);
     bed.closed()?;
-    // Down, with nothing open, is the application's.
+    // Down, with nothing open, is the overview's (8.5 A), not the
+    // application's.
     bed.hp.swipe(4, &[(0.0, 40.0); 4], EVERY);
-    assert_eq!(bed.hp.swipes_given(), (1, 4));
+    assert_eq!(bed.hp.swipes_given(), (0, 0));
+    assert_eq!(bed.hp.overview(), Some(true));
     wait(&mut bed.hp, Duration::from_millis(200))?;
     assert!(bed.hp.launcher_surfaces().is_empty());
     Ok(())
@@ -337,9 +340,12 @@ fn the_swipe_ignores_natural_scroll() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start("[touchpad]\nnatural-scroll = true\n")? else {
         return Ok(());
     };
-    // Up opens it; down is the application's.
+    // Up opens it; down is the overview's (8.5 A), down again closes it.
     bed.hp.swipe(4, &[(0.0, 40.0); 4], EVERY);
-    assert_eq!(bed.hp.swipes_given(), (1, 4));
+    assert_eq!(bed.hp.swipes_given(), (0, 0));
+    assert_eq!(bed.hp.overview(), Some(true));
+    bed.hp.swipe(4, &[(0.0, 40.0); 4], EVERY);
+    assert_eq!(bed.hp.overview(), Some(false));
     bed.up(150.0, 10, 40);
     bed.hp.swipe_end(40, false);
     bed.opened()?;
