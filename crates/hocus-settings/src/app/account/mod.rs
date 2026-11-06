@@ -392,7 +392,7 @@ impl App {
                 Task::none()
             }
             Msg::Changed(outcome) => self.account_changed(outcome),
-            Msg::Lock => self.show_row("power.lock-after"),
+            Msg::Lock => self.show_row(crate::power::LOCK_ON_IDLE),
         }
     }
 

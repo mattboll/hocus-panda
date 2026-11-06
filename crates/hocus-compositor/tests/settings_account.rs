@@ -694,7 +694,7 @@ fn the_lock_link_and_the_search_light_their_rows() -> anyhow::Result<()> {
     };
     bed.open()?;
     bed.click("link:account.lock")?;
-    bed.shows(|s| s["page"] == "power" && s["lit"] == "power.lock-after")?;
+    bed.shows(|s| s["page"] == "power" && s["lit"] == "power.lock-on-idle")?;
     bed.type_text("avatar")?;
     bed.shows(|s| s["results"].as_array().is_some_and(|r| !r.is_empty()))?;
     bed.key(KEY_ENTER)?;

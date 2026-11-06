@@ -1017,7 +1017,7 @@ name and the avatar are AccountsService's, the password the system's
 | | Identifiant: "Le nom de connexion ; il ne se change pas ici." | Martian Mono 12.5, read only | `UserName` |
 | | Type de compte: "Peut installer des logiciels et changer les réglages du système." / "Les réglages du système demandent le mot de passe d'un administrateur." | "Administrateur" / "Standard", read only | `AccountType` |
 | SÉCURITÉ | Mot de passe: "Il ouvre la session, la déverrouille et confirme les actions d'administrateur." (without `passwd`: "Le mot de passe se change avec les outils du système.", the button inert) | "Changer…" (key icon), opening the sheet | `passwd` |
-| | Verrouillage automatique: "Quand la session se verrouille d'elle-même." | link "Énergie ›", opening 6.10 with "Verrouiller après" lit | |
+| | Verrouillage automatique: "Quand la session se verrouille d'elle-même." | link "Énergie ›", opening 6.10 with "Verrouiller après l'assombrissement" lit | |
 | PLUS TARD | Comptes en ligne (globe, amber chip) | inert | |
 
 - **The popover** (400 px, under its button, its right on the button's):
