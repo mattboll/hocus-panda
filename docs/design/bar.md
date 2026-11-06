@@ -666,8 +666,12 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   joins "my devices", then its block); failed: "L'association a échoué.
   Mets l'appareil en mode association et réessaie." / "Pairing failed. Put
   the device in pairing mode and try again." under its row. One that asks
-  for a code (a phone or a computer, or one that asked the agent for one)
-  is greyed, inert, "dans les Réglages" / "in Settings" (6.7 pairs those).
+  for a code (a phone, a tablet or a computer, or one that asked the agent
+  for one) says "dans les Réglages" / "in Settings": a click starts
+  `hocus-settings bluetooth --pair ADDRESS` and closes the popover, the
+  Settings' Bluetooth page pairing it (6.7). The last row, under a
+  divider, "Réglages du Bluetooth…" / "Bluetooth settings…" (36 px, as
+  the sound's), opens that page; it is the last `Tab` stop.
   None: "Aucun nouvel appareil trouvé." / "No new device found."
   ("Recherche des appareils…" / "Searching for devices…" while the first
   pass runs). The rows around keep their order while the pointer is over
@@ -756,7 +760,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Meetings, events | calendar accounts behind `CalendarSource` adapters, each read by a worker of its own off the loop ([day.md](day.md)): Google Calendar through GNOME Online Accounts first (Day.1), a fixture's file for tests and screenshots; CalDAV and `.ics` later | the window of 2 months back to 12 ahead, cached in `$XDG_CACHE_HOME/hocuspanda/day`; the shell keeps the latest day and wakes a view only when it changes |
 | Tasks | a kanban board behind a `KanbanSource` adapter (Planka first), else the local list in `$XDG_STATE_HOME/hocuspanda/tasks.json` ([day.md](day.md)) | the tasks' column's cards in its order; ticks, unticks and additions queued per account and tried again when the source answers |
 | Network | NetworkManager | on the system bus: `WirelessEnabled`, `Connectivity` (2: a sign-in page) and `ConnectivityCheckUri`, the devices (the Wi-Fi one, a wired one, their state), the access points (SSID, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`), the active connections and the saved ones (their SSID); followed by their signals; set with `RequestScan`, `WirelessEnabled`, `ActivateConnection`, `AddAndActivateConnection`, `Update`, `Disconnect` (as built, 3.5) |
-| Bluetooth | BlueZ | on the system bus: the object manager's objects (`GetManagedObjects`, then `InterfacesAdded`, `InterfacesRemoved`), `PropertiesChanged` under `/org/bluez`; the first adapter's `Powered`, its devices' `Name`, `Alias`, `Icon` (else `Class`, else `Appearance`), `Paired`, `Connected`, `RSSI`, and `Battery1`'s `Percentage`; set with `Powered`, `StartDiscovery` and `StopDiscovery`, `Connect`, `Disconnect`, `Pair` (through the shell's `NoInputNoOutput` agent), `Trusted`, `CancelPairing` (as built, 3.6) |
+| Bluetooth | BlueZ | on the system bus: the object manager's objects (`GetManagedObjects`, then `InterfacesAdded`, `InterfacesRemoved`), `PropertiesChanged` under `/org/bluez`; the first adapter's `Powered`, its devices' `Name`, `Alias`, `Icon` (else `Class`, else `Appearance`), `Paired`, `Connected`, `RSSI`, and `Battery1`'s `Percentage`; set with `Powered`, `StartDiscovery` and `StopDiscovery`, `Connect`, `Disconnect`, `Pair` (through the shell's `NoInputNoOutput` agent), `Trusted`, `CancelPairing` (as built, 3.6); read and asked by the crate `hocus-bluetooth`, which the Settings' Bluetooth page shares (6.7) |
 | Sound | PipeWire | the sinks (their names, what they are, their own volume and mute) and the default one, as `pw-dump --monitor` streams the graph's changes; set with `wpctl` (`set-volume`, `set-mute`, `set-default`); read and set by the crate `hocus-sound`, which the Settings' Son page shares (6.5). A volume is the loudest channel's, as `wpctl` shows it; on an output whose balance is not centred, a volume is set on its channels with `pw-cli`, keeping the balance |
 | Battery, power profile | UPower, power-profiles-daemon | UPower's display device; `OnBattery` (on AC: the bolt); the first battery powering the machine among `EnumerateDevices` (`Type` 2, `PowerSupply`), its `Capacity` (the health; 0 or none: unknown); followed by `PropertiesChanged` under `/org/freedesktop/UPower`, `DeviceAdded` and `DeviceRemoved`. `org.freedesktop.UPower.PowerProfiles`: `ActiveProfile` (set by the popover), `Profiles` (those there), `PerformanceDegraded` (as built, 3.7) |
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
@@ -1361,7 +1365,7 @@ phone and keyboard slots are not part of the product.
   **Telling a code before the click**: BlueZ says nothing of the pairing
   method ahead, so a phone or a computer (its `Icon`, else its class or
   appearance) is taken to ask for one and shows "dans les Réglages",
-  inert. Any other that asks the agent for a PIN, a passkey, or a
+  left to the Settings. Any other that asks the agent for a PIN, a passkey, or a
   confirmation is refused (`org.bluez.Error.Rejected`): its pairing fails,
   and its row turns "dans les Réglages" for the rest of the session,
   without a failure message. The agent authorizes only the device the
@@ -2727,6 +2731,38 @@ maintainer's spec (issue #396).
   footer (the spec keeps no trace of a secret); the shell's own copies
   (the launcher's results, the Sources popover's command) in the history;
   the primary selection.
+
+### 6.17, the clipboard's rules (2026-11-06)
+
+What the Settings' "Captures et presse-papiers" page writes
+(`[clipboard]`, docs/design/settings.md), followed live:
+
+- **`history`**: off, the compositor reads no copy and makes no
+  capture's line; the shell shows the pinned items only, under
+  "Historique coupé · Réglages" / "History off · Settings" (first in the
+  list, Manrope 10.5 px `#A9B2C2`), and erases the others 6 s later (the
+  Settings' toast's time), if the rules still say so: turned on within
+  that time, everything shows again.
+- **`keep`**: `"session"`, `"1d"`, `"7d"` or `"30d"` (the default). A
+  shorter one hides what is older at once and erases it 6 s later, as
+  above. `"session"`: the items that are not pinned leave the disk once
+  applied (their images kept in memory), and what is copied next never
+  goes there; pinned items stay on disk, as they stay for good. 200 items
+  at most, as before.
+- **`skip-secrets`** and **`ignore`**: the compositor's checks. On, as
+  before, plus the applications whose ids `ignore` lists (case aside);
+  off, neither the marks nor the applications are looked at.
+- **The Settings' line** (`msg screens`): `{"clipboard": {"items": N,
+  "pinned": P}}`, what the shell's history shows, said as the line opens
+  and as it changes (the shell's `clipboard-count`); `clipboard-clear`
+  asks the shell to clear all but the pinned (`clipboard-clear` to it).
+- **Measured headless** (`crates/hocus-compositor/tests/clipboard.rs`):
+  off then on before the grace erases nothing; off shows its line over
+  the pinned item, reads no copy, erases the rest once the grace is over
+  (on disk too); `"session"` takes the items off the disk and writes none;
+  an ignored application's copy never kept; `skip-secrets` off keeps a
+  marked secret and KeePassXC's copy; the line's counts, and its clear
+  keeping the pinned one. Unit tests for the rules shown and applied.
 
 ### 5.11, the sign of what is shared (2026-11-03)
 

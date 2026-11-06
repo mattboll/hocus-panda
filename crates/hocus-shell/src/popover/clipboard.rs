@@ -190,6 +190,7 @@ impl Words {
         match head {
             Head::Pinned => self.pick("ÉPINGLÉS", "PINNED"),
             Head::Recent => self.pick("RÉCENTS", "RECENT"),
+            Head::Off => self.pick("Historique coupé · Réglages", "History off · Settings"),
         }
     }
 
@@ -280,6 +281,9 @@ enum Band {
 enum Head {
     Pinned,
     Recent,
+    /// The history is off (`[clipboard] history = false`, 6.17): said
+    /// first, under the search, the pinned items under it.
+    Off,
 }
 
 /// What a row's tile shows.
@@ -379,9 +383,11 @@ struct Cache {
 
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
-/// `items` laid out for `query`, at `now`, in `words`.
+/// `items` laid out for `query`, at `now`, in `words`; `off`: the history
+/// is off.
 fn lay_out(
     items: &[Item],
+    off: bool,
     query: &str,
     words: Words,
     now: &Zoned,
@@ -404,6 +410,10 @@ fn lay_out(
     let mut heads = Vec::new();
     let mut rows = Vec::new();
     let mut y = 0.0;
+    if off {
+        heads.push((Head::Off, y));
+        y += HEAD + ROW_GAP;
+    }
     for (head, pinned) in [(Head::Pinned, true), (Head::Recent, false)] {
         let mut first = true;
         for (item, app) in shown.iter().filter(|(i, _)| i.pinned == pinned) {
@@ -456,7 +466,7 @@ fn lay_out(
         }
     }
     let content = (y - ROW_GAP).max(0.0);
-    let empty = rows.is_empty().then(|| {
+    let empty = (rows.is_empty() && !(off && wanted.is_empty())).then(|| {
         if wanted.is_empty() {
             words.nothing().to_owned()
         } else {
@@ -818,9 +828,26 @@ impl Panel {
         }
     }
 
-    /// A section's label, spaced, its line centred on `middle`.
+    /// A section's label, spaced, its line centred on `middle`; the
+    /// history off, its line as it is.
     fn head(&self, f: &mut Frame, clip: Clip, head: Head, middle: f32) {
         let mut x = LEFT + HEAD_PAD;
+        if head == Head::Off {
+            clip.fill(
+                f,
+                text_in(
+                    MANROPE,
+                    text(
+                        self.words.head(head).to_owned(),
+                        Point::new(x, middle),
+                        META,
+                        DIM.get(),
+                        Alignment::Left,
+                    ),
+                ),
+            );
+            return;
+        }
         for ch in self.words.head(head).chars() {
             let letter = ch.to_string();
             let width = kit::measure(&letter, HEAD_TEXT, MANROPE_BOLD);
@@ -947,8 +974,14 @@ impl Panel {
         if !super::with(|c| c.is_open(self.id)) {
             return;
         }
-        let (version, items) = clipboard::with(|h| (h.version(), h.items().to_vec()));
         let now = crate::notifications::wall();
+        let (version, items, off) = clipboard::with(|h| {
+            (
+                h.version(),
+                h.shown(now.timestamp().as_millisecond()),
+                !h.rules().history,
+            )
+        });
         let minute = now.timestamp().as_second() / 60;
         let from = (version, state.query.clone(), minute);
         if state.from.as_ref() == Some(&from) && state.laid.is_some() {
@@ -964,6 +997,7 @@ impl Panel {
                 .retain(|key, _| items.iter().any(|i| i.key == *key));
             lay_out(
                 &items,
+                off,
                 &state.query,
                 self.words,
                 &now,
@@ -1336,6 +1370,7 @@ mod tests {
         let now = now();
         lay_out(
             &items(&now),
+            false,
             query,
             words,
             &now,
@@ -1391,6 +1426,7 @@ mod tests {
         );
         let empty = lay_out(
             &[],
+            false,
             "",
             Words::new(Lang::English),
             &now(),
@@ -1412,11 +1448,20 @@ mod tests {
             (Lang::English, "Screenshot · now", "screens"),
         ] {
             let words = Words::new(lang);
-            let laid = lay_out(&items, "", words, &now, &mut Cache::default(), &mut measure);
+            let laid = lay_out(
+                &items,
+                false,
+                "",
+                words,
+                &now,
+                &mut Cache::default(),
+                &mut measure,
+            );
             assert_eq!(laid.rows[1].key, 9);
             assert_eq!(laid.rows[1].meta, said);
             let found = lay_out(
                 &items,
+                false,
                 query,
                 words,
                 &now,
@@ -1426,6 +1471,39 @@ mod tests {
             let keys: Vec<u64> = found.rows.iter().map(|r| r.key).collect();
             assert_eq!(keys, [9]);
         }
+    }
+
+    #[test]
+    fn the_history_off_says_so_over_its_pinned_items() {
+        let now = now();
+        let words = Words::new(Lang::French);
+        let pinned: Vec<Item> = items(&now).into_iter().filter(|i| i.pinned).collect();
+        let laid = lay_out(
+            &pinned,
+            true,
+            "",
+            words,
+            &now,
+            &mut Cache::default(),
+            &mut measure,
+        );
+        let said = laid.said(words, None);
+        assert!(
+            said.starts_with("Historique coupé · Réglages: ÉPINGLÉS: [code] «ssh"),
+            "{said}"
+        );
+        // Nothing pinned: only its line.
+        let laid = lay_out(
+            &[],
+            true,
+            "",
+            words,
+            &now,
+            &mut Cache::default(),
+            &mut measure,
+        );
+        assert!(laid.empty.is_none());
+        assert_eq!(laid.heads, [(Head::Off, 0.0)]);
     }
 
     #[test]

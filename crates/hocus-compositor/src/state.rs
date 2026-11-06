@@ -213,6 +213,10 @@ pub struct State {
     pub ink: crate::ink::Ink,
     /// The screen whose strip follows three fingers on the touchpad.
     pub swiping: Option<Output>,
+    /// The touchpad's swipe, and whether the desktop takes it (6.13).
+    pub hold: crate::gestures::Hold,
+    /// Swipes given to clients so far, and their moves, for tests.
+    pub swipes_given: (u64, u64),
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
     pub switcher: Option<Switcher>,
     pub switcher_out: Option<(Switcher, Tween)>,
@@ -229,6 +233,8 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
     pub programs: Programs,
+    /// The session's start-up applications, once the bar shows (6.15).
+    pub autostart: crate::session::autostart::Autostart,
     /// The bars' places and forms (docs/design/bar.md §2, §3).
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
@@ -425,12 +431,15 @@ impl State {
             record: crate::record::Recording::default(),
             ink: crate::ink::Ink::default(),
             swiping: None,
+            hold: crate::gestures::Hold::default(),
+            swipes_given: (0, 0),
             switcher: None,
             switcher_out: None,
             overlay: Overlay::new(),
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),
+            autostart: crate::session::autostart::Autostart::default(),
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),

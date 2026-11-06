@@ -574,6 +574,12 @@ impl Headless {
         .and_then(|bytes| bytes.as_ref().map(|b| b.to_vec()))
     }
 
+    /// The clipboard's history holds `items`, `pinned` of them pinned, as
+    /// a shell would say (6.17): for tests of the Settings without one.
+    pub fn clipboard_counted(&mut self, items: u32, pinned: u32) {
+        self.app.state.clipboard_counted(items, pinned);
+    }
+
     /// The shares under way (5.11).
     pub fn shares(&self) -> Vec<crate::ShareInfo> {
         self.app.state.share.info()
@@ -653,6 +659,13 @@ impl Headless {
     /// The bytes of recorded frames copied on the loop: a budget of 0.
     pub fn record_copied_on_loop(&self) -> u64 {
         self.app.state.record.copied_on_loop()
+    }
+
+    /// Starts the start-up applications of these autostart directories
+    /// (the user's first) once the bar shows, as `--session` does those of
+    /// the XDG directories; asked before the loop runs.
+    pub fn autostart(&mut self, dirs: Vec<std::path::PathBuf>) {
+        self.app.state.autostart = crate::session::autostart::Autostart::Waiting(dirs);
     }
 
     /// Tells the shell `message`, as the compositor would.
@@ -1516,26 +1529,67 @@ impl Headless {
     /// A touchpad's swipe with `fingers`, its moves `moves` milliseconds
     /// apart, then lifted.
     pub fn swipe(&mut self, fingers: u32, moves: &[(f64, f64)], every: u32) {
+        self.swipe_begin(fingers);
+        for &(dx, dy) in moves {
+            self.swipe_move(dx, dy, every);
+        }
+        self.swipe_end(every, false);
+    }
+
+    /// `fingers` come down on the touchpad.
+    pub fn swipe_begin(&mut self, fingers: u32) {
         use crate::input::Gesture;
         self.time += 10;
         let time = self.time;
         self.app
             .state
             .gesture(Gesture::SwipeBegin { time, fingers });
-        for &(dx, dy) in moves {
-            self.time += every;
-            let time = self.time;
-            self.app.state.gesture(Gesture::SwipeUpdate {
-                time,
-                delta: (dx, dy).into(),
-            });
-        }
-        self.time += every;
+    }
+
+    /// The fingers down move by (`dx`, `dy`) (libinput's units), `after`
+    /// milliseconds after their last event.
+    pub fn swipe_move(&mut self, dx: f64, dy: f64, after: u32) {
+        use crate::input::Gesture;
+        self.time += after;
         let time = self.time;
-        self.app.state.gesture(Gesture::SwipeEnd {
+        self.app.state.gesture(Gesture::SwipeUpdate {
             time,
-            cancelled: false,
+            delta: (dx, dy).into(),
         });
+    }
+
+    /// The fingers lift, `after` milliseconds after their last event.
+    pub fn swipe_end(&mut self, after: u32, cancelled: bool) {
+        use crate::input::Gesture;
+        self.time += after;
+        let time = self.time;
+        self.app
+            .state
+            .gesture(Gesture::SwipeEnd { time, cancelled });
+    }
+
+    /// Swipes given to clients so far (the desktop took none of them), and
+    /// their moves (6.13).
+    pub fn swipes_given(&self) -> (u64, u64) {
+        self.app.state.swipes_given
+    }
+
+    /// How the launcher shows now, if it shows: its opacity and its
+    /// panel's scale (6.13).
+    pub fn launcher_look(&self) -> Option<(f32, f64)> {
+        let state = &self.app.state;
+        let now = state.now();
+        let motion = state.launcher_motion();
+        state.space.outputs().find_map(|output| {
+            let layer = state.launcher_on(output)?;
+            let look = state.panel.launchers.look(&layer, now, motion)?;
+            Some((look.alpha, look.scale))
+        })
+    }
+
+    /// Whether four fingers hold the launcher (6.13).
+    pub fn launcher_held(&self) -> bool {
+        self.app.state.panel.launchers.held()
     }
 
     /// Every window, shown or not, bottom first, and where it is.

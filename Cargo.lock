@@ -1617,6 +1617,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-bluetooth"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "hocus-cli"
 version = "0.2.0"
 dependencies = [
@@ -1640,6 +1651,7 @@ dependencies = [
  "hocus-compositor",
  "hocus-geometry",
  "hocus-link",
+ "hocus-xdg",
  "image",
  "jiff",
  "libc",
@@ -1721,6 +1733,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "hocus-agents",
+ "hocus-bluetooth",
  "hocus-config",
  "hocus-geometry",
  "hocus-link",
@@ -1750,10 +1763,12 @@ version = "0.2.0"
 dependencies = [
  "chacha20poly1305",
  "fontdue",
+ "hocus-bluetooth",
  "hocus-day",
  "hocus-link",
  "hocus-network",
  "hocus-sound",
+ "hocus-xdg",
  "iced",
  "iced_layershell",
  "image",
@@ -1779,6 +1794,14 @@ name = "hocus-sound"
 version = "0.2.0"
 dependencies = [
  "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "hocus-xdg"
+version = "0.2.0"
+dependencies = [
+ "tempfile",
  "tracing",
 ]
 

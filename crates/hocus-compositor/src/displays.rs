@@ -477,6 +477,11 @@ impl State {
                 let counts = self.desktop_counts();
                 let _ = to.send(Self::desktops_line(counts));
                 self.displays.desktops_told = Some(counts);
+                // The clipboard's history and the recording (6.17).
+                if let Some((items, pinned)) = self.clipboard.count {
+                    let _ = to.send(crate::clipboard::clipboard_count_line(items, pinned));
+                }
+                let _ = to.send(self.recording_line());
                 self.displays.sessions.push(Session { id: session, to });
             }
             FromSettings::Closed { session } => {
@@ -520,6 +525,11 @@ impl State {
             // forgotten.
             (Some("bar-auto"), Some(name), None) => {
                 self.bar_auto(name);
+                None
+            }
+            // "Effacer l'historique" (6.17).
+            (Some("clipboard-clear"), None, None) => {
+                self.clipboard_clear();
                 None
             }
             // A desktop taken out, or put back with its windows (6.14,
@@ -592,7 +602,7 @@ impl State {
     }
 
     /// `line` to the Settings' line `session`, or to all of them.
-    fn displays_send(&mut self, session: Option<u64>, line: &str) {
+    pub(crate) fn displays_send(&mut self, session: Option<u64>, line: &str) {
         self.displays.sessions.retain(|s| {
             if session.is_some_and(|id| id != s.id) {
                 return true;

@@ -49,8 +49,8 @@ venir".
   `$XDG_RUNTIME_DIR/hocus-settings-<WAYLAND_DISPLAY>`. A second launch
   hands it its section and its activation token (`XDG_ACTIVATION_TOKEN`,
   which the compositor gives the programs it starts for the user) and the
-  network `--join` names (in hexadecimal, a name may hold spaces), then
-  ends. The first opens that section and asks for the focus with the token
+  network `--join` names (in hexadecimal, a name may hold spaces) and the
+  Bluetooth device `--pair` names (its address), then ends. The first opens that section and asks for the focus with the token
   over xdg-activation, on the connection winit drew the window on (winit
   has no focus request on Wayland: `src/activate.rs`, the crate's FFI
   boundary).
@@ -292,6 +292,133 @@ application's menu, mute and slider.
 
 **The home's card** says the output in use and its volume
 ("Haut-parleurs · 62 %").
+
+## Bluetooth (6.7)
+
+Built in parts from 2026-11-05 (issue #407), from the approved mockup
+([variant A](https://claude.ai/artifact/TJuioNUbbBZY96NtB2m5Lx#bluetooth))
+and the spec in the issue's last comment. The maintainer decided on
+2026-11-05: variant A; the computer is visible to other devices only while
+the page is open (no "Visible" switch); forgetting a device asks first;
+the bar's "dans les Réglages" rows open this page and pair there. Built
+in two parts: the switch, the paired devices, the devices around and
+pairing without a code; then the "⋯" menu, the code and PIN sheets and
+the bar's hand-off.
+
+**The page**, under its title and its line ("Associer un appareil, avec ou
+sans code ; le connecter, le renommer, l'oublier."), the words, icons,
+order and battery colours of the bar's popover (bar.md §9):
+
+- **The switch's card**: a 32 px tile (green while on), "Bluetooth", its
+  line "Visible sous le nom « portable-alex » tant que cette page est
+  ouverte." (the adapter's `Alias`), the switch (`Powered`). Turned off:
+  the toast "Bluetooth coupé" with "Annuler", which joins `Ctrl+Z`.
+- **MES APPAREILS**, "4 associés" on the label's right: those connected
+  (the last connected first), then the others by name. Each row: its
+  kind's tile (green while connected), its name (`Alias`), its line
+  ("Connecté", "Connectée" for a mouse, a speaker, a gamepad or a tablet,
+  " · batterie 82 %" from `Battery1`, the battery in `#F7B98A` at 15 % or
+  less; "Pas connecté", " · se connecte seul quand il s'allume" for a
+  trusted mouse, keyboard or gamepad; "Connexion…" with a spinner), and
+  "Connecter" / "Déconnecter". A device that does not answer says the
+  popover's "Il ne répond pas. Vérifie qu'il est allumé et à portée."
+  under its row until the page is left. None: "Aucun appareil associé."
+- **AUTOUR**, "Recherche…" with a spinner on the label's line for the
+  search's first 10 s: the devices around, not paired, named, the
+  strongest first, held in place while the pointer is over them, the
+  keyboard is on them or something runs (newcomers join at the end). Each
+  row: its tile, its name, its kind ("Écouteurs", "Casque", "Enceinte",
+  "Souris", "Clavier", "Manette", "Téléphone", "Tablette", "Ordinateur",
+  else "Appareil"), " · un code sera à vérifier" for a phone, a tablet or
+  a computer, and "Associer": pair, trust, connect (the bar's); meanwhile
+  its line says "Association…" with a spinner and the other rows are
+  inert; paired, it moves to MES APPAREILS, connected. A pairing that
+  fails (or asks a code, until the sheets come) says the popover's
+  "L'association a échoué. Mets l'appareil en mode association et
+  réessaie."; one the device gave up, "L'appareil a annulé
+  l'association."; one the user cancelled says nothing. None: "Aucun
+  nouvel appareil trouvé." The note under it.
+- **The "⋯" menu** of a paired device (6.1's menu, 210 px, while
+  Bluetooth is on): "Renommer…" (the name becomes a 240 px field, selected;
+  `Enter` sets `Alias`, `Esc` lets it go, empty gives back its own name;
+  toast "Renommé : « … »." with "Annuler"), "Se connecter seul" (checked
+  when `Trusted`; toast "« … » se connecte seul." / "… ne se connecte plus
+  seul." with "Annuler"), a divider, "Oublier cet appareil" (`#F7B98A`):
+  the 400 px sheet "Oublier « … » ?", "Annuler" / "Oublier" (`#F2945B`),
+  then `RemoveDevice`, the row goes, toast "« … » oublié." without
+  "Annuler", which `Ctrl+Z` skips.
+- **The sheets of a pairing** (440 px, over a scrim), by what BlueZ asks
+  the page's agent: a number to compare (`RequestConfirmation`: the code
+  in Martian Mono 34 as two groups of three, "Il reste 57 s", "Annuler",
+  "Le code est le même"; the device's kind named: "le téléphone",
+  "l'ordinateur", "la tablette"); a code to type on the device
+  (`DisplayPasskey`: six 36 × 46 cells, those typed lit green, "3 chiffres
+  tapés sur 6", "Annuler", which cancels the pairing; `DisplayPinCode` the
+  same without the count); a PIN or a passkey to give (`RequestPinCode`,
+  `RequestPasskey`: the "Code PIN" field, its hint, "Annuler", "Associer");
+  a device pairing by itself (`RequestAuthorization`: "« … » veut
+  s'associer à cet ordinateur.", "Refuser", "Associer"). `Enter` accepts,
+  `Esc` cancels; BlueZ's `Cancel` closes the sheet. A device that starts
+  the pairing while the page shows reaches the same sheets. Only the
+  countdown draws, each second, while its sheet shows.
+- **PLUS TARD**, inert with the amber chip: "Nom de l'ordinateur" (the
+  adapter's `Alias`) and "Recevoir des fichiers".
+- **Off**: the line "Coupé. Tes appareils restent associés : ils
+  reviennent quand tu le rallumes."; MES APPAREILS at 45 % and inert;
+  AUTOUR not drawn, no search. **Blocked** (`PowerState` "off-blocked",
+  rfkill): the line "Bloqué par l'interrupteur sans fil ou le mode avion."
+  in `#F7B98A`; the switch asks BlueZ, which refuses, and it stays off.
+  **No adapter, or no BlueZ**: the info box "Aucun adaptateur Bluetooth.
+  …", nothing else.
+
+**What lives where.** Nothing of the page is in `config.toml`: BlueZ
+keeps the pairings, the names and the trust; the header keeps
+"Enregistré". Changes from elsewhere (the bar's popover, a device coming)
+show without a toast.
+
+**How it reads and asks.** The crate `hocus-bluetooth` (no smithay, no
+iced), shared with the bar, which moved its BlueZ thread there: on a
+thread of the Settings' own, it reads BlueZ's objects with
+`GetManagedObjects`, then follows `InterfacesAdded`/`Removed`,
+`PropertiesChanged` under `/org/bluez` and BlueZ's owner, nothing polled,
+and sends the window what the page shows when it changes; what the page
+asks goes to that thread, and calls that wait on a device run aside
+(`Connect` 20 s at most, `Pair` 30 s, a minute from its start once a code
+shows, then given up). While the page shows in the open window:
+`StartDiscovery`, the adapter `Pairable` and `Discoverable` (BlueZ's
+`DiscoverableTimeout` left as it is, and `Discoverable` set again when the
+timeout ends it), and the Settings' agent (`org.bluez.Agent1`,
+`KeyboardDisplay`) registered and made BlueZ's default
+(`RequestDefaultAgent`), so that a device pairing by itself reaches the
+page. The agent waits for the user's answer without holding the thread,
+and lets through only the device the page pairs, or one the user
+accepted. Leaving the page or closing the window: `StopDiscovery`,
+`Discoverable` false, `UnregisterAgent`; as the program ends it waits half
+a second at most for them. The bar's agent (`NoInputNoOutput`) stays, not
+the default. A device that never answers the question is refused once its
+minute is over. Without a system bus, the thread says so once; only what
+changed reaches the window.
+
+**From the bar.** The popover's rows "dans les Réglages" (a phone, a
+tablet, a computer, a device whose pairing asked a code) start
+`hocus-settings bluetooth --pair ADDRESS` and close the popover; the page
+opens (or comes forward, `--pair` going with the second launch) and pairs
+that device as soon as BlueZ lists it. The popover's last row, "Réglages
+du Bluetooth…", opens the page.
+
+**The search** finds "Bluetooth" (bt, sans fil), "Mes appareils" (casque,
+écouteurs, souris, clavier, enceinte, manette), "Associer un appareil"
+(appairer, jumeler, ajouter, code, pin), "Oublier un appareil", "Renommer
+un appareil", "Se connecter seul" (the paired devices' card lights) and
+"Visible" (découvrable; the switch's card), in both languages.
+
+**The keyboard**: the switch, then MES APPAREILS and AUTOUR, one `Tab`
+stop each; `↑`/`↓` move the ring, `Enter` or `Space` acts on the row's
+button; on a paired device `Shift+F10` or the menu key opens its menu,
+`F2` renames it, `Delete` asks to forget it.
+
+**The home's card** says "2 appareils connectés", "Aucun appareil
+connecté", "Coupé", or "Aucun adaptateur".
 
 ## Réseau (6.6)
 
@@ -619,8 +746,7 @@ kept, off by default; tap to click on by default.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
   côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
   to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
-  (written and read, but the four-finger launcher is 6.13's, #447: not
-  built yet).
+  (the four-finger launcher, 6.13: launcher.md).
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -1414,8 +1540,9 @@ file.
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet on the home (the Compte page sets it in AccountsService,
   6.11).
-- The home's cards say "À venir" for Écrans, Réseau and Bluetooth until
-  their tickets give their state (Son's says its output, 6.5); Énergie's says the battery (or "Sur
+- The home's cards say "À venir" for Écrans and Réseau until their
+  tickets give their state (Son's says its output, 6.5; Bluetooth's how
+  many are connected, 6.7); Énergie's says the battery (or "Sur
   secteur") and the suspend delay; Apparence's "Sombre · français".
 - The keyboard's ring is drawn on the piece's own edge, not 2 px outside
   it; the labels' 0.1 em letter spacing is not drawn (iced has none).
@@ -1445,7 +1572,11 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.7, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.13 to 6.17, Day.1).
+- Bluetooth (6.7): turning Bluetooth on through rfkill while airplane
+  mode blocks it (with the Réseau page's rfkill, 6.6). The window hidden
+  (not closed) still searches and stays visible: the Settings do not know
+  it is hidden yet.
 - Réseau: the 802.1X sheet's anonymous identity and advanced options, a
   form to type a WireGuard tunnel, a secret agent for VPNs that ask at
   each connection (the spec's "later").
@@ -1562,6 +1693,40 @@ volume keeping the balance), the meter's scale, the tone's side
 offered by its call mode, the page's settings found by their words
 (`hocus-settings`); the sound popover's height and its link's place
 (`hocus-shell`).
+
+`crates/hocus-compositor/tests/settings_bluetooth.rs` (6.7): the same
+window against a BlueZ faked on a private bus (`levels/bluez.rs`, the
+bar's), never the machine's:
+
+- `the_bluetooth_page_lists_paired_devices_and_those_around`
+- `a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect`
+- `pairing_without_a_code_moves_the_device_to_my_devices_connected`
+- `leaving_the_page_stops_the_search_and_hides_the_computer`
+- `off_blocked_and_without_adapter_say_so`
+- `the_keyboard_goes_through_the_lists`
+- `the_home_card_and_the_search_lead_to_the_page`
+- `at_rest_the_page_draws_nothing`
+- `pairing_a_phone_shows_the_code_and_confirms_it`
+- `annuler_on_a_code_refuses_it_and_says_nothing`
+- `pairing_a_keyboard_lights_the_digits_typed`
+- `a_legacy_device_asks_for_a_pin`
+- `a_phone_that_starts_the_pairing_reaches_the_page_while_it_is_open`
+- `the_device_giving_up_closes_the_sheet_and_says_so`
+- `forgetting_asks_then_removes_the_device`
+- `renaming_sets_the_alias_and_annuler_takes_it_back`
+- `connect_automatically_is_its_trust_and_annuler_takes_it_back`
+- `the_popovers_dans_les_reglages_row_opens_the_page_and_pairs` (the shell too)
+- `at_rest_with_a_sheet_closed_the_page_draws_nothing`
+- `screenshots_for_the_pull_request`,
+  `screenshots_of_the_codes_for_the_pull_request` (ignored;
+  `HOCUS_SHOTS=DIR`)
+
+Unit tests of 6.7: the kinds from icons, classes and appearances, the
+bar's row, what is shown of BlueZ's objects on, off and blocked
+(`hocus-bluetooth`); a device's words, the home's card, the page's
+settings found by their words, a second launch's `--pair`
+(`hocus-settings`); the popover's height with its link, its `Tab` order
+with the rows left to the Settings (`hocus-shell`).
 
 `crates/hocus-compositor/tests/settings_network.rs` (6.6): the real
 Settings against a NetworkManager of the test's own on a private system

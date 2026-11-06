@@ -475,8 +475,12 @@ mod tests {
     fn every_setting_of_the_page_is_found_by_its_words() {
         let found = crate::search::find("avion", Lang::French);
         assert_eq!(found[0].name, "Mode avion");
+        // The Bluetooth page's "Oublier un appareil" answers it too.
         let found = crate::search::find("oublier", Lang::French);
-        assert_eq!(found[0].name, "Réseaux enregistrés");
+        assert!(
+            found.iter().any(|f| f.name == "Réseaux enregistrés"),
+            "{found:?}"
+        );
         let found = crate::search::find("gateway", Lang::English);
         assert_eq!(found[0].name, "IP address");
         let found = crate::search::find("eduroam", Lang::French);

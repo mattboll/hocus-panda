@@ -17,6 +17,8 @@ pub struct Again {
     pub section: Option<String>,
     /// Its activation token, to take the focus with.
     pub token: Option<String>,
+    /// A Bluetooth device to pair, by its address (`--pair`).
+    pub pair: Option<String>,
     /// A network whose sheet to open (`--join SSID`, 6.6).
     pub join: Option<String>,
 }
@@ -29,9 +31,10 @@ impl Again {
             |name| name.bytes().map(|b| format!("{b:02x}")).collect(),
         );
         format!(
-            "open {} {} {join}\n",
+            "open {} {} {join} {}\n",
             self.section.as_deref().unwrap_or("-"),
-            self.token.as_deref().unwrap_or("-")
+            self.token.as_deref().unwrap_or("-"),
+            self.pair.as_deref().unwrap_or("-")
         )
     }
 
@@ -52,6 +55,7 @@ impl Again {
             section,
             token,
             join,
+            pair: word(words.next()),
         })
     }
 }
@@ -161,25 +165,36 @@ mod tests {
             section: Some("power".to_owned()),
             token: Some("hocus-12".to_owned()),
             join: None,
+            pair: None,
+        };
+        assert_eq!(Again::parse(&again.line()), Some(again));
+        let again = Again {
+            section: Some("bluetooth".to_owned()),
+            token: None,
+            join: None,
+            pair: Some("5C:12:AA:01:02:05".to_owned()),
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
         let join = Again {
             section: Some("network".to_owned()),
             token: None,
             join: Some("Café Lomi".to_owned()),
+            pair: None,
         };
         assert_eq!(Again::parse(&join.line()), Some(join));
         let bare = Again {
             section: None,
             token: None,
             join: None,
+            pair: None,
         };
-        assert_eq!(bare.line(), "open - - -\n");
-        // A line of a Settings before 6.6.
+        assert_eq!(bare.line(), "open - - - -\n");
+        // Lines of Settings before 6.6 and 6.7.
         assert_eq!(
             Again::parse("open sound -\n").and_then(|a| a.section),
             Some("sound".to_owned())
         );
+        assert_eq!(Again::parse("open sound - -\n").and_then(|a| a.pair), None);
         assert_eq!(Again::parse(&bare.line()), Some(bare));
         assert_eq!(Again::parse("close"), None);
     }
