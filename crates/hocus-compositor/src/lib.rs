@@ -51,6 +51,8 @@ pub mod peek;
 mod popover;
 mod popups;
 mod programs;
+pub mod radial;
+mod radial_draw;
 pub mod record;
 mod reload;
 mod reminders;

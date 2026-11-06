@@ -55,6 +55,7 @@ pub mod sound;
 pub mod tasks;
 pub mod tray;
 pub mod wifi;
+pub mod window_menu;
 pub mod windows;
 
 use std::{
@@ -168,6 +169,9 @@ pub enum Item {
     /// The mini form's windows' item: their popover, by a hover or a
     /// click.
     Windows,
+    /// A window's menu (#723), by the compositor's id: opened by a right
+    /// click on its line, once the compositor said what it shows.
+    WindowMenu(u64),
 }
 
 impl Item {
@@ -245,6 +249,7 @@ impl Item {
             Self::DayChoose => setup::WIDTH,
             Self::Calendar => calendar::WIDTH,
             Self::Windows => windows::WIDTH,
+            Self::WindowMenu(_) => window_menu::WIDTH,
             Self::WindowsMore => desktop::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
@@ -274,6 +279,7 @@ impl Item {
             Self::Tasks | Self::TasksMore => tasks::height(),
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
+            Self::WindowMenu(id) => window_menu::height(id),
             Self::WindowsMore => desktop::height(
                 bar,
                 u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
@@ -322,7 +328,11 @@ impl Item {
             Self::DayChoose => crate::setup::opening(),
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
-            Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows => {}
+            Self::Window(_)
+            | Self::WindowClose(_)
+            | Self::WindowsMore
+            | Self::Windows
+            | Self::WindowMenu(_) => {}
         }
     }
 
@@ -355,7 +365,8 @@ impl Item {
             | Self::Window(_)
             | Self::WindowClose(_)
             | Self::WindowsMore
-            | Self::Windows => {}
+            | Self::Windows
+            | Self::WindowMenu(_) => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -395,9 +406,14 @@ impl Item {
                 _,
             ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
-            (Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows, _) => {
-                WINDOWS_NAMESPACE
-            }
+            (
+                Self::Window(_)
+                | Self::WindowClose(_)
+                | Self::WindowsMore
+                | Self::Windows
+                | Self::WindowMenu(_),
+                _,
+            ) => WINDOWS_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -1681,7 +1697,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::TasksMore
         | Item::DayChoose
         | Item::WindowsMore
-        | Item::Windows => None,
+        | Item::Windows
+        | Item::WindowMenu(_) => None,
     }
 }
 

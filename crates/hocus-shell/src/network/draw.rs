@@ -512,7 +512,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Window(_)
                             | Item::WindowClose(_)
                             | Item::WindowsMore
-                            | Item::Windows,
+                            | Item::Windows
+                            | Item::WindowMenu(_),
                             _,
                         ) => {}
                     }

@@ -532,6 +532,7 @@ impl State {
         self.model.set_desktop(id, desktop);
         if rule.as_ref().is_some_and(|r| r.above) {
             self.model.set_above(id, true);
+            self.tell_window_states(false);
         }
         let now = self.now();
         let mut managed = Managed::new(window.clone());
@@ -712,6 +713,7 @@ impl State {
         }
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
+        self.radial_window_gone(id);
         self.share_window_gone(id);
         self.record_window_gone(id);
         self.overlay.forget(id);
@@ -725,10 +727,14 @@ impl State {
             self.moving = None;
         }
         let had_focus = self.model.focused() == Some(id);
+        let marked = self.model.is_above(id) || self.model.is_everywhere(id);
         self.model.remove(id);
         if had_focus {
             let next = self.model.focused();
             self.focus(next);
+        }
+        if marked {
+            self.tell_window_states(false);
         }
         self.redraw = true;
     }
@@ -1380,6 +1386,7 @@ impl State {
             wake(at);
         }
         moving |= self.tick_switcher(now, &mut wake);
+        moving |= self.tick_radial(now);
         moving |= self.tick_ink(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

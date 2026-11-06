@@ -329,6 +329,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + crate::going::Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        self.radial_elements(renderer, output, now, out);
         self.dots_elements(renderer, output, now, out);
         self.switcher_elements(renderer, output, now, out);
     }
