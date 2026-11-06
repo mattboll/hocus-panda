@@ -517,6 +517,14 @@ pub enum ToShell {
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go. Written `no-peek`.
     NoPeek,
+    /// A screen went, or came back, and windows moved with it (windows.md
+    /// §12): the winking panda peeks out with a blue bubble that says so,
+    /// in place of a peek out unless that is an agent's, which it never
+    /// replaces; it goes back as a peek does (`no-peek`). Written
+    /// `screens-moved gone|back built-in|external INCHES DESKTOP`, then
+    /// for each window a tab and its application's id (`-` for none);
+    /// `INCHES` 0 unknown, `DESKTOP` from 1, 0 when they are on several.
+    ScreensMoved(ScreensMoved),
     /// Whether the agents' rows show each agent's panda, or a dot of its
     /// state's colour (`[agents] pandas`, 6.16): sent as the shell
     /// connects and when the configuration changes it. Written
@@ -893,6 +901,22 @@ pub struct Peek {
     pub kind: PeekKind,
     pub since: u64,
     pub name: String,
+}
+
+/// Windows that moved with a screen ([`ToShell::ScreensMoved`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreensMoved {
+    /// The screen went (else it came back).
+    pub gone: bool,
+    /// It is the laptop's own.
+    pub built_in: bool,
+    /// Its diagonal, 0 unknown.
+    pub inches: u32,
+    /// The desktop they are on, from 1; 0 when they are on several.
+    pub desktop: usize,
+    /// Their applications' ids, the focused window's first; empty when
+    /// one says none.
+    pub apps: Vec<String>,
 }
 
 /// Why the panda peeks out: its agent waits for the user (it holds out its
@@ -1581,6 +1605,9 @@ pub enum ToCompositor {
     /// it never shows through it. Written `briefing open` or `briefing
     /// closed`.
     Briefing { open: bool },
+    /// The user clicked the panda that says screens moved
+    /// ([`ToShell::ScreensMoved`]): it goes back. Written `peek-close`.
+    PeekClose,
     /// How near the next meeting is (bar.md §6, Day.2), for the halo: in
     /// 10 min or less, in 2 min or less, or neither (none, further, in
     /// progress, or opened by the user). Written `meeting ten`, `meeting
@@ -1839,6 +1866,25 @@ impl fmt::Display for ToShell {
                 screen_name(&peek.name)
             ),
             Self::NoPeek => f.write_str("no-peek"),
+            Self::ScreensMoved(moved) => {
+                write!(
+                    f,
+                    "screens-moved {} {} {} {}",
+                    if moved.gone { "gone" } else { "back" },
+                    if moved.built_in {
+                        "built-in"
+                    } else {
+                        "external"
+                    },
+                    moved.inches,
+                    moved.desktop
+                )?;
+                for app in &moved.apps {
+                    let app = screen_name(app).replace(' ', "");
+                    write!(f, "\t{}", if app.is_empty() { "-" } else { app.as_str() })?;
+                }
+                Ok(())
+            }
             Self::AgentPandas(pandas) => {
                 write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
             }
@@ -2193,6 +2239,33 @@ impl FromStr for ToShell {
                 }))
             }
             Some("no-peek") => Ok(Self::NoPeek),
+            Some("screens-moved") => {
+                let mut parts = line.split('\t');
+                let mut words = parts.next().unwrap_or_default().split_whitespace().skip(1);
+                let gone = flag(words.next(), "gone", "back")?;
+                let built_in = flag(words.next(), "built-in", "external")?;
+                let number = |w: &str, what: &str| {
+                    w.parse::<usize>()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                let inches = number(word(&mut words, "inches")?, "inches")?;
+                let desktop = number(word(&mut words, "desktop")?, "desktop")?;
+                Ok(Self::ScreensMoved(ScreensMoved {
+                    gone,
+                    built_in,
+                    inches: u32::try_from(inches).unwrap_or(0),
+                    desktop,
+                    apps: parts
+                        .map(|a| {
+                            if a == "-" {
+                                String::new()
+                            } else {
+                                a.to_owned()
+                            }
+                        })
+                        .collect(),
+                }))
+            }
             Some("agent-rows") => Ok(Self::AgentPandas(flag(words.next(), "pandas", "dots")?)),
             Some("copied") => Ok(Self::Copied {
                 app: match word(&mut words, "application")? {
@@ -2428,6 +2501,7 @@ impl fmt::Display for ToCompositor {
             Self::Briefing { open } => {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
+            Self::PeekClose => f.write_str("peek-close"),
             Self::Meeting(near) => f.write_str(match near {
                 Some(MeetingNear::Ten) => "meeting ten",
                 Some(MeetingNear::Two) => "meeting two",
@@ -2515,6 +2589,7 @@ impl FromStr for ToCompositor {
             Some("briefing") => Ok(Self::Briefing {
                 open: flag(words.next(), "open", "closed")?,
             }),
+            Some("peek-close") => Ok(Self::PeekClose),
             Some("meeting") => match words.next() {
                 Some("ten") => Ok(Self::Meeting(Some(MeetingNear::Ten))),
                 Some("two") => Ok(Self::Meeting(Some(MeetingNear::Two))),
@@ -3074,6 +3149,7 @@ mod tests {
             ToCompositor::Bring(42),
             ToCompositor::Close(42),
             ToCompositor::GoToAgent { id: 7, row: None },
+            ToCompositor::PeekClose,
             ToCompositor::GoToAgent {
                 id: 7,
                 row: Some(Row {
@@ -3297,6 +3373,20 @@ mod tests {
                 name: "api-paiements".into(),
             }),
             ToShell::NoPeek,
+            ToShell::ScreensMoved(ScreensMoved {
+                gone: true,
+                built_in: false,
+                inches: 34,
+                desktop: 1,
+                apps: vec!["firefox".into(), "foot".into(), String::new()],
+            }),
+            ToShell::ScreensMoved(ScreensMoved {
+                gone: false,
+                built_in: true,
+                inches: 0,
+                desktop: 0,
+                apps: vec![],
+            }),
             ToShell::AgentPandas(true),
             ToShell::AgentPandas(false),
             ToShell::Launcher {
