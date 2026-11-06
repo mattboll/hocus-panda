@@ -5,6 +5,12 @@
 //! (Wayland's axis source: a wheel's notches or a finger's pixels) and a
 //! press says which button.
 //!
+//! The gestures' group (6.13) has a finger diagram on each row: a
+//! touchpad's outline, its dots moving along a dashed trail in a 1.8 s
+//! loop. They move only while the group shows, the window has the focus
+//! and motion is not reduced; otherwise they stand at the trail's middle
+//! and nothing draws.
+//!
 //! The devices come from the compositor ([`crate::devices`], off this
 //! thread). The settings are the window's as on any page
 //! ([`crate::mouse`]); this module only lays them out and keeps the test
@@ -69,6 +75,8 @@ pub struct Mouse {
     press: Option<Press>,
     /// The target's dot lit, since then; and the serial of its end.
     lit: Option<(Instant, u64)>,
+    /// The window has the keyboard's focus: the diagrams may move.
+    pub focused: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +90,8 @@ pub enum Msg {
     Unlit(u64),
     /// The Appearance page's cursor row (6.2's).
     Cursor,
+    /// The window gained or lost the focus.
+    Focused(bool),
 }
 
 impl Mouse {
@@ -138,6 +148,7 @@ impl App {
                 }
             }
             Msg::Cursor => self.go(super::Page::Section(SectionId::Appearance)),
+            Msg::Focused(focused) => self.mouse.focused = focused,
         }
         iced::Task::none()
     }
@@ -163,6 +174,22 @@ impl App {
             || model::takes(setting.id, self.mouse.devices.as_deref())
         {
             return None;
+        }
+        if setting.group == model::GESTURES {
+            return Some(self.say(match self.fingers() {
+                Some(2) => w(
+                    "Pas sur ce pavé tactile : il ne sent que deux doigts.",
+                    "Not on this touchpad: it senses only two fingers.",
+                ),
+                Some(1) => w(
+                    "Pas sur ce pavé tactile : il ne sent qu’un doigt.",
+                    "Not on this touchpad: it senses only one finger.",
+                ),
+                _ => w(
+                    "Pas sur ce pavé tactile : il ne sent que trois doigts.",
+                    "Not on this touchpad: it senses only three fingers.",
+                ),
+            }));
         }
         Some(match model::kind_of(setting.id) {
             Some(DeviceKind::Pointer) => self.say(w("Pas sur cette souris", "Not on this mouse")),
@@ -304,14 +331,40 @@ impl App {
         ));
         // Gestes: hidden with no touchpad.
         if !self.mouse.none(DeviceKind::Touchpad) {
-            page = page.push(self.mouse_group(
+            let head: Option<El<'_>> = self.fingers().map(|n| {
+                let said = if lang.fr() {
+                    format!("Sur ce pavé : jusqu’à {n} doigts")
+                } else {
+                    format!("On this touchpad: up to {n} fingers")
+                };
+                t(said, 12.0, FAINT.get()).into()
+            });
+            let group = self.mouse_group(
                 "gestures",
                 model::GESTURES.label.get(lang),
-                None,
+                head,
                 &rows_of(model::GESTURES),
                 &controls,
                 None,
-            ));
+            );
+            let note = t(
+                w(
+                    "Le geste suit toujours tes doigts, que le défilement naturel soit mis ou non. Avec les mouvements réduits, rien ne suit les doigts : le bureau change, ou le lanceur s’ouvre, au lâcher.",
+                    "The gesture always follows your fingers, whether natural scrolling is on or not. With reduced motion nothing follows the fingers: the desktop changes, or the launcher opens, on release.",
+                )
+                .get(lang),
+                12.0,
+                FAINT.get(),
+            );
+            page = page.push(
+                column![
+                    group,
+                    container(note)
+                        .padding([0, 4])
+                        .id("gestures:note".to_owned())
+                ]
+                .spacing(8),
+            );
         }
         page = page.push(self.try_area(&controls));
         container(page).id("page:mouse".to_owned()).into()
@@ -360,7 +413,9 @@ impl App {
                 for (j, setting) in rows.iter().enumerate() {
                     list = list.push(divided(j > 0, self.row(setting, controls)));
                 }
-                card_box(list.into())
+                container(card_box(list.into()))
+                    .id(format!("card:{id}"))
+                    .into()
             }
         };
         column![line, body].spacing(8).into()
@@ -700,6 +755,10 @@ impl App {
         if !self.mouse.none(DeviceKind::Touchpad) {
             groups.push(group("gestures", model::GESTURES, None));
         }
+        let gestures = serde_json::json!({
+            "fingers": self.fingers(),
+            "moving": self.gestures_moving(),
+        });
         serde_json::json!({
             "touchpad": named(DeviceKind::Touchpad),
             "mouse": named(DeviceKind::Pointer),
@@ -709,6 +768,7 @@ impl App {
             "direction": self.direction(),
             "pressed": self.pressed(),
             "lit": self.mouse.lit.is_some(),
+            "gestures": gestures,
         })
     }
 }
@@ -741,5 +801,238 @@ fn mix(from: Color, to: Color, by: f32) -> Color {
         g: from.g + (to.g - from.g) * by,
         b: from.b + (to.b - from.b) * by,
         a: from.a + (to.a - from.a) * by,
+    }
+}
+
+// --- The gestures' diagrams (6.13) ----------------------------------------------
+
+/// The diagrams' loop.
+const LOOP: Duration = Duration::from_millis(1800);
+
+/// What a row's diagram shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Gesture {
+    /// Three dots side by side, moving right to left.
+    Sideways,
+    /// Four dots in a row, moving up.
+    Up,
+    /// Two dots pinching.
+    Pinch,
+}
+
+/// A 64 × 44 touchpad with its fingers at `phase` of their loop (`None`:
+/// still, at the trail's middle), drawn `alpha` opaque.
+struct Diagram {
+    gesture: Gesture,
+    phase: Option<f32>,
+    alpha: f32,
+}
+
+impl App {
+    /// The most fingers a touchpad plugged senses, when the compositor says.
+    fn fingers(&self) -> Option<u32> {
+        self.mouse
+            .of(DeviceKind::Touchpad)
+            .iter()
+            .map(|d| d.can.fingers)
+            .max()
+            .filter(|n| *n > 0)
+    }
+
+    /// Whether the diagrams move: the gestures' card shows in the page,
+    /// the window has the focus, and motion is not reduced.
+    pub(super) fn gestures_moving(&self) -> bool {
+        if self.reduced_motion
+            || !self.mouse.focused
+            || self.page != super::Page::Section(SectionId::Mouse)
+            || self.mouse.none(DeviceKind::Touchpad)
+        {
+            return false;
+        }
+        let (Some(card), Some(page)) = (self.places.at.get("card:gestures"), self.places.page)
+        else {
+            return false;
+        };
+        card.intersects(&page.viewport)
+    }
+
+    /// A gesture's row's diagram, `ink` its row's.
+    pub(super) fn gesture_diagram(&self, id: &str, ink: f32) -> Option<El<'_>> {
+        let gesture = match id {
+            model::SWIPE_DESKTOPS => Gesture::Sideways,
+            model::SWIPE_LAUNCHER => Gesture::Up,
+            model::LEFT_TO_APPS => Gesture::Pinch,
+            _ => return None,
+        };
+        let phase = self.gestures_moving().then(|| {
+            let since = self.now.saturating_duration_since(*epoch());
+            (since.as_secs_f32() % LOOP.as_secs_f32()) / LOOP.as_secs_f32()
+        });
+        Some(
+            container(
+                iced::widget::canvas(Diagram {
+                    gesture,
+                    phase,
+                    alpha: ink,
+                })
+                .width(64)
+                .height(44),
+            )
+            .id(format!("diagram:{id}"))
+            .into(),
+        )
+    }
+
+    /// "Nouveau" beside the four-finger row's name.
+    pub(super) fn mouse_chip(&self, setting: &Setting) -> Option<El<'_>> {
+        (setting.id == model::SWIPE_LAUNCHER).then(|| self.new_chip())
+    }
+}
+
+/// The loops all start from the window's first diagram.
+fn epoch() -> &'static Instant {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    EPOCH.get_or_init(Instant::now)
+}
+
+/// CSS's `cubic-bezier(x1, y1, x2, y2)` at `t`.
+fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let at = |a: f32, b: f32, u: f32| {
+        let v = 1.0 - u;
+        3.0 * v * v * u * a + 3.0 * v * u * u * b + u * u * u
+    };
+    // The curve's parameter whose x is `t`, by bisection.
+    let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if at(x1, x2, mid) < t {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    at(y1, y2, (lo + hi) / 2.0)
+}
+
+/// The mockup's swipes' curve, applied between keyframes as CSS does.
+const SWIPE_CURVE: (f32, f32, f32, f32) = (0.3, 0.6, 0.3, 1.0);
+const EASE_IN_OUT: (f32, f32, f32, f32) = (0.42, 0.0, 0.58, 1.0);
+
+/// A swipe's dots at `phase`: their travel along the trail from `start`
+/// through `-start` (at 70 %) to `end`, and their opacity (in by 15 %,
+/// out over the last 30 %), the mockup's `side3` and `up4`.
+fn swipe_at(phase: f32, start: f32, end: f32) -> (f32, f32) {
+    let ease = |t: f32| bezier(SWIPE_CURVE, t);
+    let travel = if phase < 0.7 {
+        start + (-start - start) * ease(phase / 0.7)
+    } else {
+        -start + (end + start) * ease((phase - 0.7) / 0.3)
+    };
+    let opacity = if phase < 0.15 {
+        ease(phase / 0.15)
+    } else if phase < 0.7 {
+        1.0
+    } else {
+        1.0 - ease((phase - 0.7) / 0.3)
+    };
+    (travel, opacity)
+}
+
+impl<M> iced::widget::canvas::Program<M> for Diagram {
+    type State = ();
+
+    fn draw(
+        &self,
+        (): &(),
+        renderer: &iced::Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::{
+            Point, Size,
+            widget::canvas::{Frame, LineCap, LineDash, Path, Stroke},
+        };
+        let mut frame = Frame::new(renderer, bounds.size());
+        let a = self.alpha;
+        let pad = Path::rounded_rectangle(Point::new(0.5, 0.5), Size::new(63.0, 43.0), 7.0.into());
+        frame.fill(&pad, crate::theme::ink(rgba(255, 255, 255, 0.04 * a)));
+        frame.stroke(
+            &pad,
+            Stroke::default()
+                .with_color(crate::theme::ink(rgba(255, 255, 255, 0.22 * a)))
+                .with_width(1.0),
+        );
+        let trail = |frame: &mut Frame, from: Point, to: Point| {
+            frame.stroke(
+                &Path::line(from, to),
+                Stroke {
+                    line_cap: LineCap::Round,
+                    line_dash: LineDash {
+                        segments: &[2.0, 4.0],
+                        offset: 0,
+                    },
+                    ..Stroke::default()
+                        .with_color(crate::theme::ink(rgba(126, 224, 160, 0.35 * a)))
+                        .with_width(2.0)
+                },
+            );
+        };
+        let dot = |frame: &mut Frame, x: f32, y: f32, opacity: f32| {
+            frame.fill(
+                &Path::circle(Point::new(x, y), 4.0),
+                crate::theme::ink(rgba(0xEE, 0xF1, 0xF6, opacity * a)),
+            );
+        };
+        match self.gesture {
+            Gesture::Sideways => {
+                trail(&mut frame, Point::new(48.0, 22.0), Point::new(16.0, 22.0));
+                let (dx, o) = self.phase.map_or((0.0, 1.0), |p| swipe_at(p, 11.0, -13.0));
+                for x in [23.0, 32.0, 41.0] {
+                    dot(&mut frame, x + dx, 22.0, o);
+                }
+            }
+            Gesture::Up => {
+                trail(&mut frame, Point::new(32.0, 36.0), Point::new(32.0, 8.0));
+                let (dy, o) = self.phase.map_or((0.0, 1.0), |p| swipe_at(p, 9.0, -10.0));
+                for x in [18.5, 27.5, 36.5, 45.5] {
+                    dot(&mut frame, x, 22.0 + dy, o);
+                }
+            }
+            Gesture::Pinch => {
+                // Together at the loop's ends, apart at its middle; still,
+                // where the mockup draws them.
+                let k = self.phase.map_or(4.0 / 7.0, |p| {
+                    if p < 0.5 {
+                        bezier(EASE_IN_OUT, p * 2.0)
+                    } else {
+                        1.0 - bezier(EASE_IN_OUT, (p - 0.5) * 2.0)
+                    }
+                });
+                let (ax, ay) = (4.0 - 7.0 * k, 3.0 - 5.0 * k);
+                dot(&mut frame, 26.0 + ax, 18.0 + ay, 1.0);
+                dot(&mut frame, 38.0 - ax, 26.0 - ay, 1.0);
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_dots_come_in_travel_and_fade_out() {
+        let (x, o) = swipe_at(0.0, 11.0, -13.0);
+        assert!((x - 11.0).abs() < 1e-3 && o.abs() < 1e-3);
+        let (_, o) = swipe_at(0.15, 11.0, -13.0);
+        assert!((o - 1.0).abs() < 1e-3);
+        let (x, o) = swipe_at(0.7, 11.0, -13.0);
+        assert!((x + 11.0).abs() < 1e-3 && (o - 1.0).abs() < 1e-3);
+        let (x, o) = swipe_at(1.0, 11.0, -13.0);
+        assert!((x + 13.0).abs() < 1e-3 && o.abs() < 1e-3);
+        assert!((bezier(EASE_IN_OUT, 0.5) - 0.5).abs() < 1e-3);
     }
 }

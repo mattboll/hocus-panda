@@ -163,6 +163,7 @@ fn describe(device: &libinput::Device) -> Option<(DeviceKind, Bus, bool, Can, Op
         off_with_mouse: device
             .config_send_events_modes()
             .contains(SendEventsMode::DISABLED_ON_EXTERNAL_MOUSE),
+        fingers: device.config_tap_finger_count(),
     };
     let click_default = match device.config_click_default_method() {
         Some(ClickMethod::Clickfinger) => Some(RightClick::TwoFingers),
@@ -450,6 +451,7 @@ mod tests {
         adaptive: true,
         left_handed: true,
         off_with_mouse: true,
+        fingers: 4,
     };
 
     #[test]

@@ -70,7 +70,8 @@ while read -r path; do
     esac
 done <<< "$changed"
 
-named=$(grep -iE '^[[:space:]]*Tests:' <<< "${PR_BODY:-}" | head -n1 | cut -d: -f2- | tr ',' ' ' || true)
+# What is in parentheses (test names, notes) is left out.
+named=$(grep -iE '^[[:space:]]*Tests:' <<< "${PR_BODY:-}" | head -n1 | cut -d: -f2- | sed -E 's/\([^)]*\)//g' | tr ',' ' ' || true)
 for name in $named; do
     # A name, or a test file's path: `crates/C/tests/NAME.rs`, `NAME.rs`, in backticks.
     name=${name//\`/}

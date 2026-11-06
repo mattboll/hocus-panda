@@ -743,8 +743,8 @@ kept, off by default; tap to click on by default.
 - **SOURIS**, `[pointer]` (every other pointer): Vitesse du pointeur
   `speed`, Accélération `acceleration` (`"adaptive"`, `"flat"`),
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
-- **GESTES DU PAVÉ TACTILE** (hidden without a touchpad): Trois doigts de
-  côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
+- **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
+  Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
   to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
   (the four-finger launcher, 6.13: launcher.md).
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
@@ -791,6 +791,42 @@ Choices made here (to confirm on the machine): the dashed rims of the
 empty groups and of the target are drawn solid (iced draws no dashes);
 a USB mouse is "Souris USB" (a wireless receiver is not knowable); the
 list's lines read "Ligne N de la liste".
+
+### The gestures' group (6.13)
+
+Built 2026-11-06 (issue #447), variant A of the mockup, from the spec in
+the issue's last comment; every question answered with its
+recommendation (the launcher grows with four fingers and opens on
+release; switching desktops stays three fingers only; the gesture always
+follows the fingers). The compositor's side is launcher.md's "6.13, as
+built".
+
+- **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
+  mouse group, hidden without a touchpad. On its label line's right,
+  "Sur ce pavé : jusqu'à N doigts": the
+  largest of the touchpads' tap finger counts (libinput's
+  `config_tap_finger_count()`, said by the compositor as `fingers=N` on
+  each device's line of `hocus msg input-devices`).
+- Three rows of 68 px, each with a 64 × 44 finger diagram on its left
+  (a touchpad's outline, white 8 px dots, a dashed green trail): three
+  fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
+  four fingers up ("Quatre doigts vers le haut", `[touchpad]
+  swipe-launcher`, with its blue "Nouveau" chip), and what is left to
+  applications ("Ce qui reste aux applications", always "Toujours"), a
+  note (`Kind::Note`): not a setting,
+  never focused, never written. Under the card, the line on natural
+  scrolling and reduced motion.
+- **The diagrams** move in a 1.8 s loop (the mockup's `side3`, `up4` and
+  pinch, its curve applied between keyframes as CSS does), drawn on a
+  canvas, only while the group's card is in the page's view, the window
+  has the focus (iced's `Focused`/`Unfocused`) and motion is not reduced;
+  otherwise the dots stand at the trail's middle and nothing draws.
+- **A touchpad that senses fewer fingers**: three, the four-finger row at
+  45 %, inert, "Pas sur ce pavé tactile : il ne sent que trois doigts.";
+  two or fewer, both rows so. The value stays written for another pad.
+  A compositor that does not say the count leaves both rows as they are.
+- The search finds the three rows by « geste », « swipe », « doigts »,
+  « lanceur », « bureau », « pincer » and their keys.
 
 ## Clavier et raccourcis (6.8)
 
@@ -1127,11 +1163,88 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   the shell's own surfaces; the sample agents are drawn as the mockup's
   heads, not the pandas' pictures.
 
+## Compte (6.11)
+
+Issue #411, variant A of the mockup (`s611`), as the issue's last
+comment, approved 2026-11-05, specifies it, the pandas made larger than
+the mockup's at the maintainer's word. Section `account` (`hocus settings
+account`), SYSTÈME's second row. Nothing is written in `config.toml`: the
+name and the avatar are AccountsService's, the password the system's
+(`passwd`, PAM). The header keeps "Enregistré".
+
+| Group | Row | Control | Where |
+|---|---|---|---|
+| PROFIL | the avatar's row: the avatar (88 px circle: the picture, or the initial on the accent's gradient), the name (18/700), "Sur l'écran de verrouillage, à l'ouverture de session et dans la barre." | "Changer l'avatar…" (image icon), opening the popover | `IconFile`; `SetIconFile` |
+| | Nom affiché: "Ton nom complet, tel que le bureau te salue." | a 240 px field with a pencil; `Enter` or the keyboard leaving it saves (if changed and not empty), `Esc` puts it back | `RealName`; `SetRealName` |
+| | Identifiant: "Le nom de connexion ; il ne se change pas ici." | Martian Mono 12.5, read only | `UserName` |
+| | Type de compte: "Peut installer des logiciels et changer les réglages du système." / "Les réglages du système demandent le mot de passe d'un administrateur." | "Administrateur" / "Standard", read only | `AccountType` |
+| SÉCURITÉ | Mot de passe: "Il ouvre la session, la déverrouille et confirme les actions d'administrateur." (without `passwd`: "Le mot de passe se change avec les outils du système.", the button inert) | "Changer…" (key icon), opening the sheet | `passwd` |
+| | Verrouillage automatique: "Quand la session se verrouille d'elle-même." | link "Énergie ›", opening 6.10 with "Verrouiller après l'assombrissement" lit | |
+| PLUS TARD | Comptes en ligne (globe, amber chip) | inert | |
+
+- **The popover** (400 px, under its button, its right on the button's):
+  "LES PANDAS", the eight pandas at 76 px in a 4 × 2 grid, the current one
+  ringed 2 px with the accent; a divider; "Choisir une image…" and
+  "Retirer"; "Une image est recadrée en carré au centre ; « Retirer »
+  remet l'initiale." A panda applies at once and closes it; toast
+  "Avatar changé." with "Annuler" (`Ctrl+Z`), which sets the previous
+  picture's bytes back. "Choisir une image…" opens the portal's file
+  chooser (PNG, JPEG, WebP); the picture is cut to its centred square,
+  made 512 px at most, written as PNG in `$XDG_RUNTIME_DIR` and set
+  (AccountsService copies it; the file is removed). `←` `→` `↑` `↓` move
+  in the grid, `Enter` chooses, `Esc` or a click elsewhere closes.
+- **The pandas**: eight 512 px PNGs, the mockup's panda on eight
+  backgrounds (`crates/hocus-settings/data/avatars`, drawn by
+  `scripts/avatars/generate.py`), carried in the program and installed in
+  `share/hocuspanda/avatars/` by `packaging/install.sh`; an installed
+  panda is set by its path, else its bytes are written as a picture is.
+  The current one is known by its bytes (AccountsService keeps a copy).
+- **The sheet** (420 px): "Changer le mot de passe", its line, "Mot de
+  passe actuel", "Nouveau mot de passe", "Encore une fois" (dots, an eye),
+  under the last "Les deux sont identiques." or "Les deux ne sont pas
+  identiques." as it is typed; the hint "Le système peut refuser un mot de
+  passe trop court ou trop simple : sa raison s'affiche ici."; "Annuler"
+  and "Changer" (green once the current is filled and both new ones
+  match; "Changement…" while it runs, the fields inert). The current one
+  refused: "Ce n'est pas le mot de passe actuel. Vérifie-le et réessaie."
+  under it, its border `#F2945B`, the keyboard back in it, all of it
+  chosen; the new one refused: PAM's reason under it ("BAD PASSWORD:"
+  left out); anything else: "Le mot de passe n'a pas changé : …"; no
+  answer for 10 s: "Le système ne répond pas." Success closes it; toast
+  "Mot de passe changé." without "Annuler". Nothing of it joins `Ctrl+Z`.
+- **`passwd`** (`passwd.rs`) runs on a thread of its own, on a
+  pseudo-terminal of its own (its own session, the terminal its
+  controlling one, echo off), its prompts answered in turn: a prompt is
+  what it writes without ending its line, so the session's language does
+  not matter; what it says between the new password and the next prompt
+  is PAM's refusal; ending in an error before the new one is asked is the
+  current one refused. The three values are `Secret`s (`secret.rs`: one
+  buffer that never grows, zeroed when set again, cleared or dropped, its
+  `Debug` saying nothing, not even its length), copied once for the
+  thread, never logged; the window's log says only whether each field is
+  filled.
+- **AccountsService** (`accounts.rs`) is followed on a thread of its own,
+  started the first time the page shows: `FindUserById` of the process's
+  uid, its properties read again on its `Changed` (or
+  `PropertiesChanged`), its picture read and made round there. Only a
+  change reaches the window; at rest nothing draws. Without it, the rows
+  are empty and inert. A refusal (polkit) toasts "Le système a refusé."
+- **The search** finds "Avatar" (photo, image, panda, profil), "Nom
+  affiché" (nom, prénom), "Identifiant" (login, utilisateur), "Mot de
+  passe" (changer, sécurité, passwd), "Type de compte" (administrateur,
+  sudo), and lights their rows.
+- **Choices made here (to confirm on the machine)**: the avatar is 88 px
+  and the pandas 76 px (the mockup's 72 and 52), for the pandas to show;
+  the sheet's fields have an eye but no paste button (`Ctrl+V` pastes);
+  "Changement…" has no spinner; `Tab` in the sheet goes from field to
+  field; a picture removed toasts "Avatar retiré."; the home's greeting,
+  the bar's popover and the lock still draw what they drew (the lock
+  already reads AccountsService's picture).
+
 ## Date et heure (6.11)
 
 Issue #411, variant A of the mockup (`s611`), as the issue's last
-comment, approved 2026-11-05, specifies it; the Compte page is the
-ticket's second part. Section `date-and-time` (`hocus settings
+comment, approved 2026-11-05, specifies it. Section `date-and-time` (`hocus settings
 date-and-time`), SYSTÈME's last row. Nothing is written in
 `config.toml`: the time, the zone and the automatic time are systemd's
 timedated's; their format is 6.2's `[locale] time` and `[locale] date`,
@@ -1299,6 +1412,82 @@ row.
   ones, and its preview shows at once, without the desktop's 80 ms wait;
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
+
+## Agents (6.16)
+
+Issue #450, variant A, as its approved spec says it ("Decided
+(2026-11-05)": one menu each for the halo and the peek, a switch for the
+pandas in the rows, a menu for the reminder). Section `agents` (`hocus
+settings agents`), TRAVAIL's third row. The keys are followed live by the
+compositor (bar.md "6.16").
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LES OUTILS SUIVIS ("2 suivis · 3 agents en cours") | Claude Code, Codex, herdr | per tool: its 28 px mark, its state and line, its action | the compositor's watcher (4.0), not the file |
+| | Un autre outil | the command `hocus agent mon-agent waiting` and "Copier" | — |
+| LE HALO ("Les réunions gardent le leur") | Le halo | menu: Pour tout (beside it "attend, bloqué, fini"), Quand un agent t'attend (its button "Quand il t'attend"), Jamais | `[agents] halo` |
+| | Rappeler un agent qui t'attend | menu: Après 2, 5, 10 min, Jamais; at 45 % and inert while the halo is "Jamais" | `[agents] remind` |
+| | Aperçu | a 46 × 118 bar and "Attend · Bloqué · Fini" | — |
+| LES PANDAS ("Ils ne bougent qu'à un changement") | Le panda qui sort de la barre | its panda (58 px) on the left; menu: Quand un agent t'attend ou a fini ("Attend ou a fini"), Quand un agent t'attend, Jamais | `[agents] peek` |
+| | Les pandas dans les lignes des agents | switch; under it three agents as the bar's rows show them, their 48 px pandas or 10 px dots | `[agents] pandas` |
+| | Jamais au repos | "Toujours", static | — |
+
+- **Under the title**: "Le groupe des agents dans la barre, et sa place,
+  se règlent dans La barre ›", which opens 6.4 with its "Les agents" row
+  lit.
+- **The tools** come on the Settings' line (`agent-tools`, a JSON line
+  as the line opens and when they change: each tool and its state,
+  whether herdr is there and declined, whether Codex's hooks were
+  approved, how many agents run). States and actions are 4.0's: Branché
+  ("ses crochets sont dans ~/.claude/settings.json", "Débrancher"),
+  Branché · à approuver (Codex until one of its hooks has run), Trouvé,
+  pas branché ("Brancher"), Refusé ("avec « Ne rien brancher » le 30
+  octobre", "Brancher"), Pas sur cet ordinateur (the row at 40 %, no
+  action), herdr En marche / En marche · pas suivi / Ne tourne pas with
+  "Suivre herdr". A file that does not read (broken JSON or TOML): "… ne
+  se lit pas : il n'est pas touché." in peach, "Brancher" inert. Whether
+  a file reads and when a tool was declined are read on a thread (the
+  tool's file, `$XDG_STATE_HOME/hocuspanda/agents.toml`), as the line
+  changes and as the page opens; the Settings never write them.
+- **Brancher** opens the consent sheet (400 wide, `#1b2130`, the window
+  under it at 60 %): the mark and "Brancher Codex", what it lets the
+  desktop know, "FICHIER MODIFIÉ" and the file, "Une copie de l'original
+  est gardée…", for Codex "Codex te demandera ensuite de les approuver
+  avec /hooks."; "Annuler" and "Brancher" (it has the keyboard; `Tab` and
+  the arrows go from one to the other, `Enter` acts, `Esc` cancels).
+  Nothing is asked before its "Brancher"; then `agent-plug TOOL` on the
+  line, the watcher writes, and the row follows. Toast "Codex branché"
+  with "Annuler" (unplugs). **Débrancher** needs no consent
+  (`agent-unplug TOOL`; "Claude Code débranché", "Annuler" plugs it back
+  without asking). **Suivre herdr** off asks `agent-unfollow herdr`
+  (herdr declined, its agents go), on `agent-follow herdr`. `Ctrl+Z`
+  undoes and redoes all of them.
+- **The preview** plays the state chosen once: the wave down the bar in
+  600 ms (waiting only) as the glow fades in, then the glow stays, drawn
+  still; never with reduced motion (the glow at once). A state the halo
+  menu leaves out shows a plain bar and "Pas de halo pour ça". It writes
+  nothing; `←`/`→` move along it.
+- **The pandas** are shown larger than in the bar, and move only on a
+  change: the three sample pandas hop once (650 ms, one after the other)
+  as the page opens and as the switch turns on; the peek's panda comes up
+  (420 ms) when a choice lets it out, and sleeps at 40 % on "Jamais".
+  Nothing moves with reduced motion; at rest the window draws nothing.
+- **No tool at all**: a dashed card, "Aucun outil d'agent sur cet
+  ordinateur" and its line, then the command.
+- **The search** finds the rows by the spec's words (outils, crochets,
+  brancher, ne rien brancher, herdr, halo, lueur, vague, rappel, panda,
+  peek, bulle, commande, `hocus agent`…) and the keys (`agents.halo`,
+  `remind`, `peek`, `agents.pandas`).
+- **Choices made here (to confirm on the machine)**: Codex is "à
+  approuver" until one of its hooks (not its turn's end) has run since it
+  was plugged in, remembered in `agents.toml` (`codex-approved`); a
+  declined tool's day is remembered there too (`[declined-on]`); the
+  pandas are 48 px in the sample and 58 px for the peek (the spec's 30
+  px, larger as the maintainer asked); the sample of three rows under the
+  switch is the page's own; herdr declined and not running says "pas
+  suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
+  does not list the tools yet; "Enregistré" does not wait for the
+  watcher's answer.
 
 ## Applications (6.15)
 
@@ -1636,7 +1825,8 @@ file.
 
 - The battery's dim in `[power.battery] idle` (6.10, above).
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
-  No picture yet (AccountsService, 6.11).
+  No picture yet on the home (the Compte page sets it in AccountsService,
+  6.11).
 - The home's cards say "À venir" for Écrans and Réseau until their
   tickets give their state (Son's says its output, 6.5; Bluetooth's how
   many are connected, 6.7); Énergie's says the battery (or "Sur
@@ -1669,7 +1859,7 @@ file.
   `[shortcuts]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
   (6.3), `[panel]` and `[panel.clock]` (6.4, bar.md), through one watcher
   (`reload.rs`); each other setting's ticket adds its own.
-- The pages whose tickets are not built yet (6.11's Compte, 6.13 to 6.17, Day.1).
+- The pages whose tickets are not built yet (6.13 to 6.17, Day.1).
 - Bluetooth (6.7): turning Bluetooth on through rfkill while airplane
   mode blocks it (with the Réseau page's rfkill, 6.6). The window hidden
   (not closed) still searches and stays visible: the Settings do not know
@@ -1890,7 +2080,13 @@ with the harness's touchpad and mouse:
 - `searching_tap_finds_tap_to_click`
 - `a_touchpad_gets_tap_to_click_by_default`
 - `a_hand_edit_of_the_file_reaches_every_device`
+- `the_gestures_group_says_the_fingers_and_switches_three_fingers_off`
+- `a_three_finger_touchpad_greys_the_four_finger_row`
+- `the_diagrams_move_only_while_shown_and_focused`
+- `with_reduced_motion_the_diagrams_stand_still`
+- `searching_geste_lists_the_three_gestures_rows_first`
 - `swipe_desktops_off_keeps_three_fingers_off_the_desktops`
+- `screenshots_of_the_gestures` (ignored; `HOCUS_SHOTS=DIR`)
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_keyboard.rs` (6.8), the same bed
@@ -1905,6 +2101,25 @@ with an XKB registry of the test's own:
 - `a_layout_added_writes_the_list`
 - `numlock_is_on_as_the_session_opens`
 - `the_keyboards_layouts_and_repeat_follow_the_file`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_account.rs` (6.11, Compte), the
+same bed with AccountsService faked on a D-Bus daemon of the test's own
+(`levels/accounts.rs`), the portal's file chooser on it, and a fake
+`passwd` first on the `PATH` (never the system's: without it, the `PATH`
+holds no system folder):
+
+- `the_account_page_shows_the_name_login_type_and_avatar`
+- `choosing_a_panda_sets_the_icon_file_and_annuler_takes_it_back`
+- `a_picture_is_cropped_square_before_it_is_set`
+- `the_display_name_is_saved_on_enter`
+- `a_wrong_current_password_is_said_on_its_field`
+- `a_new_password_refused_by_the_system_shows_its_reason`
+- `the_password_is_changed_and_never_reaches_the_log`
+- `a_refusal_by_polkit_leaves_the_values_unchanged`
+- `without_passwd_the_button_is_inert`
+- `the_lock_link_and_the_search_light_their_rows`
+- `at_rest_the_page_commits_nothing`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_time.rs` (6.11, Date et heure),
@@ -1940,6 +2155,8 @@ codecs, the search's order, accents and keys, the store's edits (only the
 line, its comment kept, tables made, a value written back as it was), the
 power source from the kernel's supplies, the recent changes kept, the
 second launch's line, the ids' names; the zones' offsets, next changes
-and the picker's search, the dates and times typed; `hocus-config`'s edit
+and the picker's search, the dates and times typed; a picture cut
+square, the pandas known by their bytes, `passwd`'s reasons, the
+`Secret` never said; `hocus-config`'s edit
 through a link with its mode; the user popover's rows; the launcher
 reading the package's entry as "Réglages".

@@ -223,6 +223,8 @@ pub enum Said {
     },
     /// The applications with a window open, by their ids.
     Apps(Vec<String>),
+    /// The agents' tools (6.16).
+    AgentTools(crate::agents::Tools),
     /// The clipboard's history's items, and its pinned ones (6.17).
     Clipboard {
         items: u32,
@@ -368,6 +370,9 @@ pub fn read_line(line: &str) -> Option<Said> {
             to: at(removed, "to")?,
             windows: numbers(removed.get("windows")),
         });
+    }
+    if let Some(tools) = value.get("agent-tools") {
+        return crate::agents::Tools::read(tools).map(Said::AgentTools);
     }
     if let Some(clipboard) = value.get("clipboard") {
         let count = |key| {

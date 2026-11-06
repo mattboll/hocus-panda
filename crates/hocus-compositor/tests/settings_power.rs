@@ -696,6 +696,28 @@ fn locking_off_and_the_dim_never_change_the_screens_row() -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Waits until power-profiles-daemon was asked for `want`, in order: the
+/// page shows a mode and its toast as the ask leaves, and the ask reaches
+/// the daemon from the page's own thread a moment later.
+fn modes_set_become(bed: &mut Bed, want: &[&str]) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let set = bed
+            .system
+            .as_ref()
+            .map(System::modes_set)
+            .unwrap_or_default();
+        if set == want {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "power-profiles-daemon was asked {set:?}, not {want:?}"
+        );
+        wait(&mut bed.hp, Duration::from_millis(20))?;
+    }
+}
+
 /// The power mode: the three modes, the active one chosen; a click asks
 /// power-profiles-daemon and toasts "Mode d'énergie : Économie" with
 /// "Annuler"; `Ctrl+Z` gives the mode back. Nothing goes in the file.
@@ -713,24 +735,14 @@ fn the_power_mode_switches_with_its_toast_and_ctrl_z() -> anyhow::Result<()> {
     bed.click("mode:power-saver")?;
     let shown = bed.shows(|s| s["toast"] == "Mode d’énergie : Économie")?;
     assert_eq!(shown["toast_action"], "undo");
-    let system = bed
-        .system
-        .as_ref()
-        .map(System::modes_set)
-        .unwrap_or_default();
-    assert_eq!(system, ["power-saver"]);
+    modes_set_become(&mut bed, &["power-saver"])?;
     bed.shows(|s| s["power"]["modes"]["active"] == "power-saver")?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
     bed.shows(|s| {
         s["power"]["modes"]["active"] == "balanced"
             && s["toast"] == "Annulé : Mode d’énergie : Équilibré."
     })?;
-    let set = bed
-        .system
-        .as_ref()
-        .map(System::modes_set)
-        .unwrap_or_default();
-    assert_eq!(set, ["power-saver", "balanced"]);
+    modes_set_become(&mut bed, &["power-saver", "balanced"])?;
     assert!(!std::fs::read_to_string(bed.file())?.contains("profile"));
     // A mode the machine lacks: said, not offered; performance held back:
     // its reason.

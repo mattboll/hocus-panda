@@ -338,7 +338,7 @@ impl App {
 
     fn screens_said(&mut self, said: Said) -> iced::Task<Message> {
         // The desktops' (6.14).
-        if self.desktops_said(&said) {
+        if self.desktops_said(&said) || self.agents_heard(&said) {
             return iced::Task::none();
         }
         // The clipboard's history and the recording (6.17).
@@ -412,6 +412,7 @@ impl App {
             | Said::DesktopRemoved { .. }
             | Said::DesktopRestored { .. }
             | Said::Apps(_)
+            | Said::AgentTools(_)
             | Said::Clipboard { .. }
             | Said::Recording(_) => iced::Task::none(),
         }

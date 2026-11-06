@@ -4365,3 +4365,28 @@ the page writes, followed as the file changes, before the page itself.
   their colours, then the pandas back (`pandas_off_draws_dots_in_the_rows`).
   Unit tests for the rules, the fade of what a rule leaves out, and the
   reminder's times.
+
+### 6.16, the Agents page's line (2026-11-06)
+
+Issue #450, its second part: what the Settings' Agents page reads and asks
+(settings.md "Agents").
+
+- **The Settings' line** (`msg screens`) says the tools as one JSON line,
+  `{"agent-tools": {"tools": [{"tool", "state", "file"}…], "watched",
+  "herdr_found", "herdr_declined", "codex_approved", "running"}}`, as the
+  line opens and each time it changes (after the turn's agents are
+  flushed). It takes `agent-plug TOOL`, `agent-unplug TOOL`, `agent-follow
+  herdr` and `agent-unfollow herdr`, handed to the watcher's thread as
+  the shell's asks are.
+- **herdr unfollowed** (`Ask::UnfollowHerdr`): declined as "Ne rien
+  brancher" declines it, whether it runs or not; its agents go.
+- **Codex approved**: a report from Codex that is not a turn's end comes
+  from one of its hooks, which run only once approved in its `/hooks`;
+  the compositor asks the watcher once a session (`Ask::CodexHeard`),
+  which remembers it in `agents.toml` (`codex-approved = true`) until
+  Codex is unplugged.
+- **When a tool was declined** is remembered beside it (`[declined-on]`,
+  seconds since the epoch), forgotten when it is plugged in or followed.
+- **Tests** (`crates/hocus-compositor/tests/settings_agents.rs`, the real
+  Settings, the tools in the test's home, a fake herdr): see settings.md.
+
