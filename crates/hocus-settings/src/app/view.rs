@@ -500,6 +500,8 @@ impl App {
         .height(Length::Fill)
         .width(Length::Fill)
         .style(thin);
+        // Every wheel counted once the page has had it (#660).
+        let scrolled = super::wheels::Wheels::new(scrolled, Message::Wheeled);
         container(column![header, scrolled])
             .width(Length::Fill)
             .height(Length::Fill)

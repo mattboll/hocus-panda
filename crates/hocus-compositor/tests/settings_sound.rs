@@ -20,7 +20,9 @@
 mod common;
 #[path = "levels/fakes.rs"]
 mod fakes;
+mod settings_page;
 
+use settings_page::{Floor, Wheel};
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -299,32 +301,13 @@ impl Bed {
     /// window lags would move the page after `id` is read in view, under
     /// the click that follows.
     fn scroll_to_show(&mut self, id: &str) -> anyhow::Result<()> {
-        let window = self.window()?;
-        let mut place = self.places_with(id)?[id].clone();
-        for _ in 0..60 {
-            let n = |i: usize| place[i].as_f64().unwrap_or_default();
-            if n(1) >= 60.0 && n(1) + n(3) <= f64::from(window.height) - 10.0 {
-                return Ok(());
-            }
-            let middle = (
-                f64::from(window.x) + f64::from(window.width) * 0.6,
-                f64::from(window.y) + f64::from(window.height) / 2.0,
-            );
-            self.hp.pointer_move(middle.0 - 1.0, middle.1);
-            self.hp.pointer_move(middle.0, middle.1);
-            self.hp.wheel(if n(1) < 60.0 { -1 } else { 1 });
-            // The notch taken: `id` placed elsewhere.
-            let log = self.log.clone();
-            let mut moved = None;
-            self.hp.dispatch_until(WAIT, |_| {
-                moved = Self::last(&log, " places {")
-                    .and_then(|p| p.get(id).cloned())
-                    .filter(|p| *p != place);
-                moved.is_some()
-            })?;
-            place = moved.ok_or_else(|| anyhow::anyhow!("{id} never came into view: {place}"))?;
-        }
-        anyhow::bail!("{id} never came into view")
+        let wheel = Wheel {
+            x: 660.0,
+            notches: 1,
+            top: 60.0,
+            floor: Floor::Margin(10.0),
+        };
+        settings_page::reveal(&mut self.hp, &self.log, APP_ID, id, &wheel)
     }
 
     /// Waits until PipeWire says `done`, the compositor running.

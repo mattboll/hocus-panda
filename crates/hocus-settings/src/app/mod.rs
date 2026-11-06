@@ -27,6 +27,7 @@ mod style;
 mod time;
 mod view;
 mod wallpaper_page;
+mod wheels;
 
 use std::{
     collections::BTreeMap,
@@ -319,6 +320,8 @@ pub enum Message {
     Rescaled(f32),
     Placed(Places),
     Scrolled,
+    /// A wheel the window has taken, the page scrolled by it or not.
+    Wheeled,
     /// The mice and touchpads page's (6.12).
     Mouse(mouse::Msg),
     /// The keyboard's page and its shortcuts' (6.8).
@@ -391,6 +394,8 @@ pub struct App {
     /// What the log said last.
     said: String,
     said_places: String,
+    /// The wheels the window has taken, said with its places (`wheels`).
+    wheels: u64,
     /// The Son page: PipeWire as last heard.
     sound: sound::Sound,
     /// The wallpaper's page: its thumbnails, one's own pictures (6.3).
@@ -495,6 +500,7 @@ impl App {
             keys: keyboard_page::Keys::default(),
             said: String::new(),
             said_places: String::new(),
+            wheels: 0,
             sound,
             wallpaper: wallpaper_page::State::default(),
             bar: bar_page::State::default(),
@@ -641,7 +647,7 @@ impl App {
             task
         };
         if place {
-            Task::batch([task, places()])
+            Task::batch([task, places(self.wheels)])
         } else {
             task
         }
@@ -815,6 +821,10 @@ impl App {
             Message::Sound(msg) => self.sound_update(msg),
             Message::Screens(msg) => self.screens_update(msg),
             Message::Frame(_) | Message::Scrolled | Message::Nothing => Task::none(),
+            Message::Wheeled => {
+                self.wheels += 1;
+                Task::none()
+            }
             Message::Rescaled(scale) => {
                 self.scale = scale;
                 Task::none()
@@ -2004,8 +2014,11 @@ impl App {
         }
     }
 
+    /// Each id's place, and `wheels`: how many wheels the window had taken
+    /// when they were read, so that a test knows the page has taken its
+    /// wheel, whether it moved or not (#660).
     fn log_places(&mut self) {
-        let at: serde_json::Map<String, serde_json::Value> = self
+        let mut at: serde_json::Map<String, serde_json::Value> = self
             .places
             .at
             .iter()
@@ -2022,6 +2035,7 @@ impl App {
                 )
             })
             .collect();
+        at.insert("wheels".to_owned(), self.places.wheels.into());
         let text = serde_json::Value::Object(at).to_string();
         if text != self.said_places {
             tracing::debug!(target: "hocus_settings::places", "places {text}");
@@ -2060,9 +2074,10 @@ enum TryPart {
     Target,
 }
 
-/// The places of what the window draws, after it is laid out.
-fn places() -> Task<Message> {
-    iced::advanced::widget::operate(places::Collect::default()).map(Message::Placed)
+/// The places of what the window draws, after it is laid out, with the
+/// wheels it had taken then.
+fn places(wheels: u64) -> Task<Message> {
+    iced::advanced::widget::operate(places::Collect::after(wheels)).map(Message::Placed)
 }
 
 /// What the worker and second launches say, as messages.
