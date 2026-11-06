@@ -115,8 +115,9 @@ const RIM: theme::Ink = theme::Ink::Token(|t| t.bar_border);
 fn main() -> ExitCode {
     // Before anything could take it for its own (docs/design/lock.md).
     let handed = wayland::take_socket();
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "warn,hocuspanda_shell=info,hocus_day=info".into());
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "warn,hocuspanda_shell=info,hocus_day=info,hocus_bluetooth=info".into()
+    });
     // cosmic-text traces the text it shapes, a password shown with the eye
     // too: never, whatever RUST_LOG asks.
     let filter = match "cosmic_text::shape=off".parse() {
