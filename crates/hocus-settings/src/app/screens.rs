@@ -338,7 +338,7 @@ impl App {
 
     fn screens_said(&mut self, said: Said) -> iced::Task<Message> {
         // The desktops' (6.14).
-        if self.desktops_said(&said) {
+        if self.desktops_said(&said) || self.agents_heard(&said) {
             return iced::Task::none();
         }
         match said {
@@ -407,7 +407,8 @@ impl App {
             Said::Desktops { .. }
             | Said::DesktopRemoved { .. }
             | Said::DesktopRestored { .. }
-            | Said::Apps(_) => iced::Task::none(),
+            | Said::Apps(_)
+            | Said::AgentTools(_) => iced::Task::none(),
         }
     }
 

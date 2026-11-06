@@ -1259,6 +1259,82 @@ row.
   a rule's tile is the application's initial, not its icon; the rules'
   menus take the pointer, `Esc` closes them (no arrow keys in them).
 
+## Agents (6.16)
+
+Issue #450, variant A, as its approved spec says it ("Decided
+(2026-11-05)": one menu each for the halo and the peek, a switch for the
+pandas in the rows, a menu for the reminder). Section `agents` (`hocus
+settings agents`), TRAVAIL's third row. The keys are followed live by the
+compositor (bar.md "6.16").
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LES OUTILS SUIVIS ("2 suivis · 3 agents en cours") | Claude Code, Codex, herdr | per tool: its 28 px mark, its state and line, its action | the compositor's watcher (4.0), not the file |
+| | Un autre outil | the command `hocus agent mon-agent waiting` and "Copier" | — |
+| LE HALO ("Les réunions gardent le leur") | Le halo | menu: Pour tout (beside it "attend, bloqué, fini"), Quand un agent t'attend (its button "Quand il t'attend"), Jamais | `[agents] halo` |
+| | Rappeler un agent qui t'attend | menu: Après 2, 5, 10 min, Jamais; at 45 % and inert while the halo is "Jamais" | `[agents] remind` |
+| | Aperçu | a 46 × 118 bar and "Attend · Bloqué · Fini" | — |
+| LES PANDAS ("Ils ne bougent qu'à un changement") | Le panda qui sort de la barre | its panda (58 px) on the left; menu: Quand un agent t'attend ou a fini ("Attend ou a fini"), Quand un agent t'attend, Jamais | `[agents] peek` |
+| | Les pandas dans les lignes des agents | switch; under it three agents as the bar's rows show them, their 48 px pandas or 10 px dots | `[agents] pandas` |
+| | Jamais au repos | "Toujours", static | — |
+
+- **Under the title**: "Le groupe des agents dans la barre, et sa place,
+  se règlent dans La barre ›", which opens 6.4 with its "Les agents" row
+  lit.
+- **The tools** come on the Settings' line (`agent-tools`, a JSON line
+  as the line opens and when they change: each tool and its state,
+  whether herdr is there and declined, whether Codex's hooks were
+  approved, how many agents run). States and actions are 4.0's: Branché
+  ("ses crochets sont dans ~/.claude/settings.json", "Débrancher"),
+  Branché · à approuver (Codex until one of its hooks has run), Trouvé,
+  pas branché ("Brancher"), Refusé ("avec « Ne rien brancher » le 30
+  octobre", "Brancher"), Pas sur cet ordinateur (the row at 40 %, no
+  action), herdr En marche / En marche · pas suivi / Ne tourne pas with
+  "Suivre herdr". A file that does not read (broken JSON or TOML): "… ne
+  se lit pas : il n'est pas touché." in peach, "Brancher" inert. Whether
+  a file reads and when a tool was declined are read on a thread (the
+  tool's file, `$XDG_STATE_HOME/hocuspanda/agents.toml`), as the line
+  changes and as the page opens; the Settings never write them.
+- **Brancher** opens the consent sheet (400 wide, `#1b2130`, the window
+  under it at 60 %): the mark and "Brancher Codex", what it lets the
+  desktop know, "FICHIER MODIFIÉ" and the file, "Une copie de l'original
+  est gardée…", for Codex "Codex te demandera ensuite de les approuver
+  avec /hooks."; "Annuler" and "Brancher" (it has the keyboard; `Tab` and
+  the arrows go from one to the other, `Enter` acts, `Esc` cancels).
+  Nothing is asked before its "Brancher"; then `agent-plug TOOL` on the
+  line, the watcher writes, and the row follows. Toast "Codex branché"
+  with "Annuler" (unplugs). **Débrancher** needs no consent
+  (`agent-unplug TOOL`; "Claude Code débranché", "Annuler" plugs it back
+  without asking). **Suivre herdr** off asks `agent-unfollow herdr`
+  (herdr declined, its agents go), on `agent-follow herdr`. `Ctrl+Z`
+  undoes and redoes all of them.
+- **The preview** plays the state chosen once: the wave down the bar in
+  600 ms (waiting only) as the glow fades in, then the glow stays, drawn
+  still; never with reduced motion (the glow at once). A state the halo
+  menu leaves out shows a plain bar and "Pas de halo pour ça". It writes
+  nothing; `←`/`→` move along it.
+- **The pandas** are shown larger than in the bar, and move only on a
+  change: the three sample pandas hop once (650 ms, one after the other)
+  as the page opens and as the switch turns on; the peek's panda comes up
+  (420 ms) when a choice lets it out, and sleeps at 40 % on "Jamais".
+  Nothing moves with reduced motion; at rest the window draws nothing.
+- **No tool at all**: a dashed card, "Aucun outil d'agent sur cet
+  ordinateur" and its line, then the command.
+- **The search** finds the rows by the spec's words (outils, crochets,
+  brancher, ne rien brancher, herdr, halo, lueur, vague, rappel, panda,
+  peek, bulle, commande, `hocus agent`…) and the keys (`agents.halo`,
+  `remind`, `peek`, `agents.pandas`).
+- **Choices made here (to confirm on the machine)**: Codex is "à
+  approuver" until one of its hooks (not its turn's end) has run since it
+  was plugged in, remembered in `agents.toml` (`codex-approved`); a
+  declined tool's day is remembered there too (`[declined-on]`); the
+  pandas are 48 px in the sample and 58 px for the peek (the spec's 30
+  px, larger as the maintainer asked); the sample of three rows under the
+  switch is the page's own; herdr declined and not running says "pas
+  suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
+  does not list the tools yet; "Enregistré" does not wait for the
+  watcher's answer.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
