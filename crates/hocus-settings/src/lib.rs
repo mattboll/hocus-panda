@@ -35,6 +35,7 @@ pub mod mouse;
 pub mod network;
 pub mod portal;
 pub mod power;
+pub mod power_bus;
 pub mod renderer;
 pub mod screens;
 pub mod search;

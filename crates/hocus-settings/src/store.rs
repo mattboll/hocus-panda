@@ -153,7 +153,7 @@ pub fn read(text: &str) -> Snapshot {
             state: FileState::Reads,
             readings: slots()
                 .into_iter()
-                .filter_map(|slot| Some((slot, reading(&doc, slot.place()?))))
+                .filter_map(|slot| Some((slot, reading_or_old(&doc, slot.place()?))))
                 .collect(),
             reduced_motion: doc
                 .get("appearance")
@@ -229,6 +229,56 @@ fn theme_of(doc: &DocumentMut) -> hocus_link::theme::Choice {
             .unwrap_or_default(),
         // The wallpaper's accent is the window's to find (6.3).
         wallpaper: hocus_link::theme::AccentColours::default(),
+    }
+}
+
+/// What `doc` says at `place`, or, where it says nothing, what a file
+/// 6.1's Settings wrote says (6.10): `[power.battery] screen-off` is the
+/// battery's `idle`; `[power.*] lock-after` is `lock-on-idle`, off only
+/// when every source it names says `"never"`. The compositor reads them
+/// the same way; the window never writes them.
+fn reading_or_old(doc: &DocumentMut, place: &Place) -> Reading {
+    let read = reading(doc, place);
+    if read != Reading::Absent {
+        return read;
+    }
+    match place.key {
+        ["power", "battery", "idle"] => reading(
+            doc,
+            &Place {
+                key: &["power", "battery", "screen-off"],
+                ..place.clone()
+            },
+        ),
+        ["power", "lock-on-idle"] => {
+            let said: Vec<Reading> = ["ac", "battery"]
+                .iter()
+                .map(|source| {
+                    let key: &'static [&'static str] = if *source == "ac" {
+                        &["power", "ac", "lock-after"]
+                    } else {
+                        &["power", "battery", "lock-after"]
+                    };
+                    reading(
+                        doc,
+                        &Place {
+                            key,
+                            codec: Codec::Delay,
+                            default: Value::Seconds(Some(0)),
+                        },
+                    )
+                })
+                .filter(|r| *r != Reading::Absent)
+                .collect();
+            if said.is_empty() {
+                return Reading::Absent;
+            }
+            let never = said
+                .iter()
+                .all(|r| *r == Reading::Value(Value::Seconds(None)));
+            Reading::Value(Value::Bool(!never))
+        }
+        _ => Reading::Absent,
     }
 }
 
@@ -560,7 +610,7 @@ mod tests {
     fn values_defaults_and_values_not_understood() {
         let snap = read(FILE);
         assert_eq!(snap.state, FileState::Reads);
-        let screen = slot("power.screen-off", Source::Ac);
+        let screen = slot("power.idle", Source::Ac);
         assert_eq!(
             snap.reading(screen),
             &Reading::Value(Value::Seconds(Some(300)))
@@ -579,7 +629,7 @@ mod tests {
 
     #[test]
     fn a_change_writes_its_line_only_and_keeps_its_comment() -> anyhow::Result<()> {
-        let screen = slot("power.screen-off", Source::Ac);
+        let screen = slot("power.idle", Source::Ac);
         let out = written(FILE, screen, &Raw::Set(Value::Seconds(Some(900))))
             .map_err(anyhow::Error::msg)?;
         assert_eq!(out, FILE.replace("delay = 300 #", "delay = 900 #"));
@@ -622,6 +672,30 @@ mod tests {
             text
         );
         Ok(())
+    }
+
+    /// 6.1's keys read where 6.10's are absent: the battery's
+    /// `screen-off` is its dim; `lock-after` is `lock-on-idle`, off only
+    /// when every source says never.
+    #[test]
+    fn a_file_written_by_6_1_keeps_its_battery_screen_off_as_the_dim_delay() {
+        let old = read(
+            "[power.battery]\nscreen-off = \"2m\"\nlock-after = \"5m\"\n\
+             [power.ac]\nlock-after = \"never\"\n",
+        );
+        let dim = slot("power.idle", Source::Battery);
+        assert_eq!(old.value(dim), Some(Value::Seconds(Some(120))));
+        let lock = slot("power.lock-on-idle", Source::Ac);
+        assert_eq!(old.value(lock), Some(Value::Bool(true)));
+        let never = read(
+            "[power.battery]\nlock-after = \"never\"\n[power.ac]\nlock-after = \"never\"\n",
+        );
+        assert_eq!(never.value(lock), Some(Value::Bool(false)));
+        // 6.10's keys win.
+        let both = read("[power]\nlock-on-idle = true\n[power.battery]\nidle = \"1m\"\nscreen-off = \"2m\"\nlock-after = \"never\"\n");
+        assert_eq!(both.value(dim), Some(Value::Seconds(Some(60))));
+        assert_eq!(both.value(lock), Some(Value::Bool(true)));
+        assert_eq!(read("").value(dim), Some(Value::Seconds(Some(180))));
     }
 
     #[test]
