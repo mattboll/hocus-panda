@@ -885,6 +885,14 @@ impl Shell {
                 popover::session::open(&output);
                 Task::none()
             }
+            ToShell::WindowMenu(menu) => {
+                popover::window_menu::answer(menu);
+                Task::none()
+            }
+            ToShell::WindowStates(states) => {
+                windows::set_states(states);
+                Task::none()
+            }
         }
     }
 
@@ -1827,6 +1835,15 @@ impl Shell {
             popover::Item::Windows => canvas(popover::windows::Panel {
                 id,
                 words: windows::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
+                id,
+                window,
+                words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             })
             .width(Length::Fill)

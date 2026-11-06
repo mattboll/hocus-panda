@@ -1497,6 +1497,41 @@ impl Headless {
             .map_or(0, |o| state.strip(&o).current())
     }
 
+    /// A window's radial menu while it is open (#723): its window, its
+    /// centre, the sector lit, whether Close is armed.
+    pub fn radial(&self) -> Option<crate::radial::Seen> {
+        let state = &self.app.state;
+        let radial = state.radial.as_ref()?;
+        Some(crate::radial::Seen {
+            window: radial.window,
+            centre: radial.centre,
+            lit: radial.lit,
+            armed: radial.armed(state.now()),
+            enabled: radial.enabled,
+            on: radial.on,
+        })
+    }
+
+    /// Whether the radial menu is still drawn going.
+    pub fn radial_going(&self) -> bool {
+        self.app.state.radial_out.is_some()
+    }
+
+    /// The windows on all desktops (#723).
+    pub fn everywhere(&self) -> Vec<WindowId> {
+        self.app.state.model.everywhere().collect()
+    }
+
+    /// Whether window `id` is kept above the others.
+    pub fn above(&self, id: WindowId) -> bool {
+        self.app.state.model.is_above(id)
+    }
+
+    /// The stack, bottom first.
+    pub fn stack(&self) -> Vec<WindowId> {
+        self.app.state.model.stack().to_vec()
+    }
+
     /// Alt+Tab while held: its windows in order, the selected one, and
     /// whether its panel shows.
     pub fn switcher(&self) -> Option<(Vec<WindowId>, usize, bool)> {

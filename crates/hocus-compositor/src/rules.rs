@@ -47,5 +47,7 @@ impl crate::State {
         }
         self.restack();
         self.redraw = true;
+        // The bar marks them (#723).
+        self.tell_window_states(false);
     }
 }

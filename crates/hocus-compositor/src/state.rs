@@ -224,6 +224,14 @@ pub struct State {
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
     pub switcher: Option<Switcher>,
     pub switcher_out: Option<(Switcher, Tween)>,
+    /// A window's radial menu while it is open, and as it goes (#723);
+    /// the right press that may open it; what draws it.
+    pub radial: Option<crate::radial::Radial>,
+    pub radial_out: Option<crate::radial::Going>,
+    pub radial_press: Option<crate::radial::Press>,
+    pub radial_paint: crate::radial_draw::RadialPaint,
+    /// The windows' states last told the shell (#723).
+    pub told_window_states: Option<hocus_link::WindowStates>,
     /// The switcher's key held down, stepping at the keyboard's repeat
     /// delay and rate: its keycode and its timer (§11).
     pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
@@ -447,6 +455,11 @@ impl State {
             swipes_given: (0, 0),
             switcher: None,
             switcher_out: None,
+            radial: None,
+            radial_out: None,
+            radial_press: None,
+            radial_paint: crate::radial_draw::RadialPaint::default(),
+            told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,
             xdisplay: None,

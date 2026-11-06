@@ -444,6 +444,8 @@ impl State {
         if self.switcher.is_some() {
             self.end_switcher(false);
         }
+        self.close_radial(None);
+        self.radial_press = None;
         self.capture_away();
         if self.ink.shows() {
             self.ink_clear();
