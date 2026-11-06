@@ -17,7 +17,7 @@ before sleep").
   of 4 px or more all told (a mouse on a shaking desk moves less). Its
   length on AC is `[idle] delay` in the configuration, in seconds, from 1
   to 86400, or `"off"`; five minutes by default (7.2). On battery it is
-  `[power.battery] screen-off` (below), three minutes by default:
+  `[power.battery] idle` (below), three minutes by default:
 
   ```toml
   [idle]
@@ -164,34 +164,46 @@ curtain on screen, `system.rs` the system bus); the shell's
   over the curtain's last look: the picture the lock takes of the desktop
   as it locks (7.1) is drawn with the curtain at its end, the dim and the
   pill, so the screen never brightens between them.
-- **The screens go off** 30 s after the lock with no input
-  (`away::SCREEN_OFF_LOCKED`), whatever locked it (`Super+L`, `hocus msg
-  lock`, an ext-session-lock client): an input turns them on, still
-  locked (a key goes to the lock's field), and the 30 s start again.
+- **The screens go off** the power source's `screen-off-after` after the
+  lock with no input (30 s on AC, 10 s on battery, 6.10), whatever locked
+  it (`Super+L`, `hocus msg lock`, an ext-session-lock client): an input
+  turns them on, still locked (a key goes to the lock's field), and they
+  go off that long after it again, but never sooner than 10 s
+  (`away::SCREEN_OFF_AFTER_INPUT`: a password is typed with the screen
+  on).
 - **What holds idle off** (an inhibitor on a shown surface, a screen
   saver `Inhibit`, the focused window in full screen) holds all of it: no
   curtain, so no lock and no screen off.
 
 ### The Settings' keys
 
-The Énergie page's rows (docs/design/settings.md), read as the compositor
-starts (it does not read the file again while it runs; 6.10):
+The Énergie page's rows (docs/design/settings.md, 6.10), followed live
+(`reload.rs`): a changed delay moves only the end of the countdown under
+way, from the same activity.
 
 | Key | Means | Default |
 |---|---|---|
-| `[idle] delay` | idle on AC, seconds or `"off"` | `300` |
-| `[power.battery] screen-off` | idle on battery, `"3m"`… or `"never"` | `"3m"` |
-| `[power.ac] lock-after`, `[power.battery] lock-after` | when the session locks once idle | `"0s"` |
+| `[idle] delay` | the dim on AC, seconds or `"off"` | `300` |
+| `[power.battery] idle` | the dim on battery, `"3m"`… or `"never"` | `"3m"` |
+| `[power.ac] screen-off-after`, `[power.battery] screen-off-after` | the screens off after the lock (after the dim, locking off) | `"30s"`, `"10s"` |
+| `[power.ac] suspend-after`, `[power.battery] suspend-after` | the machine asleep after this long without activity | `"never"`, `"15m"` |
+| `[power] lock-on-idle` | the session locks as the dim ends | `true` |
+| `[power] lock-before-sleep` | the session locks before the machine sleeps | `true` |
 
-`lock-after` is `"0s"` (the spec's timeline: the curtain, then the lock,
-then the screens off 30 s after), a delay (the screens go off as the
-curtain ends, the session locks that long after), or `"never"` (the
-screens only go off; the spec's "idle while locking is off"). A curtain
-that does not end in the lock has no pill (it would say "Verrouillage
-dans 7 s"): the dim alone. A value that does not read takes its default,
-the rest of the file kept. The power source is UPower's `OnBattery`, read
+With `lock-on-idle = false` the curtain has no pill (it would say
+"Verrouillage dans 7 s"), stays dimmed once it ended, and the screens go
+off `screen-off-after` later, unlocked (`away dark`). A value that does
+not read takes its default, the rest of the file kept; a key not known
+refuses the file. 6.1's keys still read: `[power.battery] screen-off` is
+the battery's `idle` when that is absent; `[power.*] lock-after` says
+`lock-on-idle` when that is absent (`"never"` on every source it names:
+off; anything else: on, the session locking as the dim ends: 6.1's delay
+after the screens went off is gone). Both are logged as the file is read
+and never written again. The power source is UPower's `OnBattery`, read
 by the compositor itself (below), not through the shell: on AC until it
-says otherwise, and on AC without UPower.
+says otherwise, and on AC without UPower. A countdown under way when it
+changes keeps the time already spent (4 min of AC's 5 spent, unplugged:
+the battery's 3 are over, the dim comes at once).
 
 ### The curtain (variant A)
 
@@ -244,23 +256,73 @@ the lock as usual (the screens come on with it).
     starts (once `PrepareForSleep` is listened to) and again after each
     sleep: its file descriptor is held on the loop;
   - `PrepareForSleep(true|false)`, handed to the loop;
-  - UPower's `OnBattery`, read as it starts, again on `PropertiesChanged`
-    and when UPower comes back.
+  - UPower's `OnBattery` and its display device's `Percentage` (when
+    `IsPresent`), power-profiles-daemon's `ActiveProfile`, read as it
+    starts, again on a `PropertiesChanged` under `/org/freedesktop/UPower`
+    and when either comes back; only what changed goes to the loop;
+  - logind's `Inhibit("handle-lid-switch:handle-power-key", …,
+    "block")`, held for the session (6.10, below).
 - **`PrepareForSleep(true)`**: the curtain goes, the session locks at
   once (`State::lock_at_once`: no curtain, no fade, no picture of the
   desktop), and the inhibitor is closed once every screen that is on has
   presented a frame of the lock itself (`State::lock_presented`: the
   shell's surface fully in, or black without a shell; a screen off counts
   as shown, nothing of the session being on it), or 2 s after at most
-  (`away::SLEEP_WAIT`, logged).
+  (`away::SLEEP_WAIT`, logged). With `[power] lock-before-sleep = false`
+  the inhibitor is closed at once, unlocked: the screen wakes on the
+  desktop.
 - **`PrepareForSleep(false)`**: a new inhibitor; the lock's field holds
   the keyboard; the waking counts as the user's input (the screens on, the
   30 s from then).
-- **The lid**: libinput's lid switch. Closed, the laptop's own screens
-  (eDP, LVDS, DSI connectors) go off; opened, on, as the user's input.
-  The compositor never locks for the lid itself: logind sleeps (and the
-  lock comes as above), or, docked (`HandleLidSwitchDocked=ignore`, an
-  external screen there), does not, and nothing locks.
+- **The lid**: libinput's lid switch, what `[power] lid` says (6.10,
+  below); opened, the laptop's own screens (eDP, LVDS, DSI connectors)
+  on again, as the user's input.
+
+### The Énergie page's actions (6.10)
+
+`src/away/power.rs`, on the loop; logind's calls from the session menu's
+thread (`leave/logind.rs`), the rest from the system bus's (`system.rs`).
+
+- **Sleeping after a while** (`suspend-after`): counted from the same
+  activity as the dim, held off by the same holds (an inhibitor, an
+  `Inhibit`, a focused full-screen window). Reached, logind's
+  `ListInhibitors` is read: a `block` inhibitor of `idle` (a player's)
+  puts it off, the countdown starting again from then; else
+  `Suspend(false)`. Asked once until the next activity. The lock comes
+  from `PrepareForSleep`, as for any sleep.
+- **The lid**, once logind gave the inhibitor: `suspend` (logind's
+  `Suspend(false)`, the panel off), `lock` (locked, the panel off),
+  `screen-off` (the panel off, the session going on), `nothing` (the panel
+  stays on). Docked (`lid-ignored-when-docked`, on AC, a screen that is
+  not the laptop's on), only the panel goes off, whatever `lid` says.
+  Without the inhibitor (no logind, or refused) logind decides, and the
+  panel goes off as before.
+- **The power button** (`KEY_POWER`), once logind gave the inhibitor: a
+  press is taken (its release too) and does `[power] power-button`:
+  `ask` opens the session menu on the bar of the focused window's screen
+  (`session-menu OUTPUT` to the shell; nothing while locked), `suspend`
+  is the menu's "Mettre en veille" (locked first, then logind's
+  `Suspend(true)`), `power-off` asks every window to close and then calls
+  logind's `PowerOff` as the menu does after its countdown (the password
+  and the countdown first when polkit wants it), `nothing`. Without the
+  inhibitor the key goes on as any other.
+- **The automatic power saver** (`auto-saver`, `auto-saver-below`): on
+  battery, the level at or under the threshold and the profile not the
+  power saver, power-profiles-daemon's `ActiveProfile` is set to
+  `power-saver`, the profile it replaced remembered, and one notification
+  goes through the session bus's `org.freedesktop.Notifications`
+  ("Économie d'énergie activée : batterie à 20 %."). Once per discharge:
+  another profile chosen meanwhile is kept, and forgets the one replaced;
+  back on AC the replaced profile comes back if the power saver is still
+  on, and it may come on again on the next discharge.
+- `hocus msg idle` adds:
+
+  ```
+  lid open desktop          # or: closed; system (logind handles it)
+  level 82                  # the battery in percent, or: none
+  profile balanced          # power-profiles-daemon's, or: none
+  saver ready               # or: on PROFILE-REPLACED, spent
+  ```
 
 ### The screens off
 
@@ -274,16 +336,13 @@ the lock as usual (the screens come on with it).
 
 ### Choices made here (to confirm on the machine)
 
-- `lock-after` other than `"0s"`: the screens go off as the curtain ends,
-  before the lock (the Settings' "Une fois l'écran éteint"); with
-  `"0s"`, the spec's order (the lock, then the screens off 30 s after).
-- A curtain that does not end in the lock shows the dim without the pill.
-- The lock before sleep has no key of its own: the session always locks
-  before the machine sleeps.
-- The power source and the delays are read as the compositor starts
-  (UPower's changes are followed; the file's are not, until 6.10).
-- A lid closed turns the laptop's screens off even without an external
-  screen (logind sleeps then, or the user asked it not to).
+- A curtain that does not end in the lock shows the dim without the pill,
+  held at its end until the screens go off (6.10).
+- The lid is libinput's switch, not logind's `LidClosed`: the same
+  switch, read where the compositor reads its input already.
+- `lid = "nothing"` leaves the laptop's panel on.
+- After an input while locked the screens stay on 10 s at least, whatever
+  `screen-off-after` says ("Aussitôt" would turn them off at each key).
 - On the lid closed, windows stay on the laptop's screen (the several
   screens' slice moves them).
 
@@ -298,7 +357,6 @@ real shell on the CPU where the pill is drawn:
 |---|---|
 | `idle_brings_the_curtain_then_the_lock_then_the_screens_off` | The curtain at 5 min, its dim at 5 s, locked at 10 s, the screens off 30 s after; a key: on, still locked, typed in the field; off again; the password opens |
 | `what_lifts_the_curtain_is_swallowed` | A click, a move, a key lift it and reach no window; the next click does; less than 4 px does not lift it |
-| `a_lock_delay_turns_the_screens_off_first` | `lock-after = "1m"`: off at the curtain's end, locked a minute after; `"never"`: off, never locked, a move turns them on |
 | `on_battery_its_own_delay` | UPower on battery: 3 min; back on AC: 5 min |
 | `an_inhibitor_or_a_focused_fullscreen_window_holds_it_all_off` | 20 min with either: no curtain, no lock, the screens on |
 | `prepare_for_sleep_locks_and_lets_go_once_the_lock_shows` | The inhibitor held; `PrepareForSleep(true)`: locked without a curtain, the inhibitor closed once shown; the wake-up takes a new one |
@@ -306,6 +364,13 @@ real shell on the CPU where the pill is drawn:
 | `the_lid_closed_docked_on_ac_does_not_lock` | The laptop's screen off, the other on, nothing locked; opened, both on |
 | `at_rest_no_wakeup_beyond_the_idle_timer` | Nothing armed at rest but the idle countdown; a frame a tenth of a second while it dims; locked and off, nothing armed, nothing drawn |
 | `the_shell_draws_the_pill_on_the_screen_under_the_pointer` | The pill on the pointer's screen, 300 × 64, centred, at 64 %; gone once lifted |
+
+6.10's, `crates/hocus-compositor/tests/power_actions.rs` (a fake logind,
+UPower and power-profiles-daemon on a private system bus, a fake
+notifications server on a private session bus): the delays of each
+source, plugging in keeping the time spent, locking off, sleeping after a
+while (and held by a video or logind's `idle` inhibitor), the lid, the
+power button, the automatic power saver, a delay changed on disk.
 
 The screenshots of the pull request: `tests/away_shots.rs`
 (`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test away_shots

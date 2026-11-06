@@ -14,8 +14,7 @@ can ask it too (`lock now` on its line, `ToCompositor::Lock(LockAsk::Now)`),
 and so can `hocus msg lock` on the control socket (any program of the
 session; a lock is no privilege). Locked already, it changes nothing.
 `State::lock_at_once()` locks without the fade nor the picture of the
-desktop: before the machine sleeps (7.2), and when the screens have been
-off for `lock-after`.
+desktop: before the machine sleeps (7.2).
 
 Its state, `State::lock_state()`:
 

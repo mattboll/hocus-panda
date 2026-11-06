@@ -14,6 +14,7 @@ mod account;
 mod appearance_page;
 mod bar_page;
 mod desktops_page;
+mod desktops_rules;
 mod desktops_trial;
 mod keyboard_page;
 mod mouse;
@@ -617,6 +618,7 @@ impl App {
             || self.bar_moving(now)
             || self.network_moving()
             || self.trial_moving(now)
+            || self.rules_moving(now)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -717,6 +719,10 @@ impl App {
                 // The avatar's popover, the password's sheet (6.11).
                 if let Some(task) = self.account_key_first(&key) {
                     return task;
+                }
+                // A menu of the rules: `Esc` closes it.
+                if key.as_ref() == Key::Named(Named::Escape) && self.rules_escape() {
+                    return Task::none();
                 }
                 // A desktop's name: `Esc` keeps the old one, `Tab` writes.
                 if self.desktops_editing() {
@@ -903,7 +909,7 @@ impl App {
                     self.text_scale = snapshot.text_scale as f32 / 100.0;
                 }
                 let reads = snapshot.state == FileState::Reads;
-                self.snapshot = Some(snapshot);
+                self.snapshot = Some(*snapshot);
                 // The theme, the wallpaper's accent the primary screen's.
                 if reads {
                     self.wallpaper_theme();
