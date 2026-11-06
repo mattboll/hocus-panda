@@ -128,6 +128,42 @@ impl State {
     }
 }
 
+impl State {
+    /// Where floating window `id`, at `rect` in the work area `from`, goes
+    /// in another screen's work area `to` when sent there (the keys, the
+    /// radial menu, the bar, a desktop's tile): at the same share across,
+    /// shrunk to fit `to` or given its size back as a drag does.
+    pub(crate) fn carried_fitting(
+        &mut self,
+        id: WindowId,
+        rect: Rect,
+        from: Rect,
+        to: Rect,
+    ) -> Rect {
+        let Some(managed) = self.windows.get(&id) else {
+            return model::carried(rect, from, to);
+        };
+        let size = managed
+            .requested
+            .map_or((rect.width, rect.height), |s| (s.w, s.h));
+        let (min, _) = crate::windows::size_limits(&managed.window);
+        let min = (min.0.max(model::MIN_SIZE.0), min.1.max(model::MIN_SIZE.1));
+        let ((w, h), fitted) = fit(size, managed.fitted, to, min);
+        if let Some(managed) = self.windows.get_mut(&id) {
+            managed.fitted = fitted;
+        }
+        // The same centre, its new size.
+        let (cx, cy) = rect.centre();
+        let sized = Rect::new(
+            (cx - f64::from(w) / 2.0).round() as i32,
+            (cy - f64::from(h) / 2.0).round() as i32,
+            w,
+            h,
+        );
+        model::carried(sized, from, to)
+    }
+}
+
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }

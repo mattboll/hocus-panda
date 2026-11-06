@@ -554,6 +554,38 @@ fn a_window_too_big_shrinks_to_fit_and_takes_its_size_back_where_it_fits() -> an
 }
 
 #[test]
+fn a_window_sent_by_keys_shrinks_to_fit_and_takes_its_size_back() -> anyhow::Result<()> {
+    let mut hp = screens()?;
+    let small = hp.work_area_of(SHARP).context("no work area")?;
+    let large = hp.work_area_of(PLAIN).context("no work area")?;
+    let (_client, rect) = open_on_plain(&mut hp, (1500, 1000))?;
+    assert_eq!((rect.width, rect.height), (1500, 1000));
+    common::click(&mut hp, (f64::from(rect.x + 200), f64::from(rect.y + 200)))?;
+    // `Super+Alt+←`: onto the screen at 2, its work area's size.
+    common::chord(
+        &mut hp,
+        &[common::KEY_LEFTMETA, KEY_LEFTALT, common::KEY_LEFT],
+    );
+    wait_for_rect(&mut hp, APP_ID, small)?;
+    // `Super+Alt+→`: back, 1500×1000 again, inside the work area.
+    common::chord(
+        &mut hp,
+        &[common::KEY_LEFTMETA, KEY_LEFTALT, common::KEY_RIGHT],
+    );
+    let back = hp.dispatch_until(WAIT, |hp| {
+        rect_of(hp, APP_ID).is_some_and(|r| {
+            (r.width, r.height) == (1500, 1000)
+                && r.x >= large.x
+                && r.y >= large.y
+                && r.x + r.width <= large.x + large.width
+                && r.y + r.height <= large.y + large.height
+        })
+    })?;
+    assert!(back, "not its size back: {:?}", rect_of(&hp, APP_ID));
+    Ok(())
+}
+
+#[test]
 fn the_pointer_at_a_step_between_screens_slides_onto_the_screen_beyond() -> anyhow::Result<()> {
     let mut hp = screens()?;
     // On the screen at 1, below the bottom of the one at 2, going left.
