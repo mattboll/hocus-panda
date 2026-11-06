@@ -30,8 +30,8 @@ use std::{
     time::Duration,
 };
 
-use bluez::{Answer, Bluez, Call, FakeDevice, Setup};
-use common::{BTN_LEFT, KEY_DOWN, KEY_TAB, WAIT, wait};
+use bluez::{Answer, Bluez, Call, FakeDevice, Incoming, Pairing, Setup};
+use common::{BTN_LEFT, KEY_DOWN, KEY_ESC, KEY_LEFTCTRL, KEY_TAB, WAIT, chord, wait};
 use fakes::Fakes;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use serde_json::Value;
@@ -97,6 +97,7 @@ struct Bed {
     hp: Headless,
     bluez: Option<Bluez>,
     log: PathBuf,
+    shell_log: PathBuf,
     script: PathBuf,
     // Dropped after BlueZ: its connection goes before the bus.
     _fakes: Fakes,
@@ -108,12 +109,29 @@ impl Bed {
     /// not running), and the Settings' script; `None` when the Settings
     /// or `dbus-daemon` are not there.
     fn start(setup: Option<Setup>) -> anyhow::Result<Option<Self>> {
-        Self::start_on(setup, "1920x1080", 2)
+        Self::start_on(setup, "1920x1080", 2, false)
     }
 
     /// The same on a screen `output` (`WxH[@SCALE]`), the search's first
-    /// pass, a connection and a pairing given `timeout` seconds at most.
-    fn start_on(setup: Option<Setup>, output: &str, timeout: u32) -> anyhow::Result<Option<Self>> {
+    /// pass, a connection and a pairing given `timeout` seconds at most;
+    /// the shell too (`shell`), its Bluetooth on the same BlueZ, the
+    /// Settings it opens this script.
+    fn start_on(
+        setup: Option<Setup>,
+        output: &str,
+        timeout: u32,
+        shell: bool,
+    ) -> anyhow::Result<Option<Self>> {
+        let shell = match shell {
+            true => match common::shell_program() {
+                Some(shell) => Some(shell),
+                None => {
+                    eprintln!("the shell is not built: build the workspace to run this test");
+                    return Ok(None);
+                }
+            },
+            false => None,
+        };
         let Some(program) = common::settings_program() else {
             eprintln!("hocus-settings is not built: build the workspace to run this test");
             return Ok(None);
@@ -170,18 +188,40 @@ impl Bed {
         config.file = Some(file);
         config.state_dir = Some(root.join("state/hocuspanda"));
         config.appearance.reduced_motion = true;
-        let hp = Headless::start_with(
-            HeadlessConfig {
-                outputs: vec![output.parse()?],
-                renderer: RendererChoice::Pixman,
-                ..HeadlessConfig::default()
-            },
-            config,
-        )?;
+        let headless = HeadlessConfig {
+            outputs: vec![output.parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        };
+        let shell_log = root.join("shell.log");
+        let hp = match shell {
+            None => Headless::start_with(headless, config)?,
+            Some(shell) => {
+                let env = [
+                    ("HOME", at("home")),
+                    ("XDG_CONFIG_HOME", at("config")),
+                    ("XDG_CACHE_HOME", at("cache")),
+                    ("XDG_STATE_HOME", at("state")),
+                    ("XDG_DATA_HOME", at("data")),
+                    ("ICED_BACKEND", "tiny-skia".to_owned()),
+                    ("PIPEWIRE_REMOTE", "/nonexistent".to_owned()),
+                    ("PATH", format!("{}:/usr/bin:/bin", at("bin"))),
+                    ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+                ];
+                let script = fakes.shell_with(&shell, "fr_FR.UTF-8", &env, Some(&shell_log))?;
+                let mut hp = Headless::start_with_shell(headless, config, Some(script))?;
+                let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| {
+                    hp.connections_surfaces().len() == 1 && hp.connections_commits() > 0
+                })?;
+                anyhow::ensure!(drawn, "no connections: {:?}", hp.connections_surfaces());
+                hp
+            }
+        };
         Ok(Some(Self {
             hp,
             bluez,
             log,
+            shell_log,
             script,
             _fakes: fakes,
             _dir: dir,
@@ -736,6 +776,414 @@ fn at_rest_the_page_draws_nothing() -> anyhow::Result<()> {
     Ok(())
 }
 
+// --- Part 2: the menu, the sheets, the bar's hand-off ---------------------------
+
+const PHONE: &str = "Pixel 7a";
+const LEGACY: &str = "Vieille enceinte";
+const KEY_F2: u32 = 60;
+const KEY_DELETE: u32 = 111;
+const KEY_Z: u32 = 44;
+
+/// Devices around that pair with a code: a phone comparing one, a
+/// keyboard typing one, a speaker asking a PIN.
+fn with_codes() -> Setup {
+    Setup {
+        devices: mine(),
+        later: vec![
+            FakeDevice::around(PHONE, "phone", -50).pairing(Pairing::Confirm(482_913)),
+            FakeDevice::around(K380_NEW, "input-keyboard", -55).pairing(Pairing::Display {
+                passkey: 305_718,
+                typed: 3,
+            }),
+            FakeDevice::around(LEGACY, "audio-card", -60).pairing(Pairing::Pin("0000")),
+        ],
+        ..Setup::default()
+    }
+}
+
+const K380_NEW: &str = "Clavier K780";
+
+/// The key typing `c` (lower-case letters and digits).
+fn key_of(c: char) -> Option<u32> {
+    let letters = "qwertyuiop";
+    let middle = "asdfghjkl";
+    let bottom = "zxcvbnm";
+    if let Some(i) = letters.find(c) {
+        return Some(16 + i as u32);
+    }
+    if let Some(i) = middle.find(c) {
+        return Some(30 + i as u32);
+    }
+    if let Some(i) = bottom.find(c) {
+        return Some(44 + i as u32);
+    }
+    match c {
+        '0' => Some(11),
+        '1'..='9' => Some(c as u32 - '1' as u32 + 2),
+        ' ' => Some(57),
+        _ => None,
+    }
+}
+
+impl Bed {
+    fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
+        for c in text.chars() {
+            let code = key_of(c).ok_or_else(|| anyhow::anyhow!("no key for {c}"))?;
+            self.key(code)?;
+        }
+        Ok(())
+    }
+
+    /// The page open, the devices around found.
+    fn open_around(&mut self, count: usize) -> anyhow::Result<Value> {
+        self.open()?;
+        self.shows(|s| names(s, "nearby").len() == count)
+    }
+
+    /// A paired device's menu, then its item `i`.
+    fn menu_item(&mut self, name: &str, i: usize) -> anyhow::Result<()> {
+        self.click(&format!("bt:more:{name}"))?;
+        self.shows(|s| s["bluetooth"]["menu"] == name)?;
+        self.click(&format!("bt:item:{i}"))
+    }
+
+    fn shell_said(&self) -> String {
+        common::logged(&self.shell_log)
+    }
+}
+
+fn sheet(shown: &Value) -> &Value {
+    &shown["bluetooth"]["sheet"]
+}
+
+#[test]
+fn pairing_a_phone_shows_the_code_and_confirms_it() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    // The page's agent, BlueZ's default while it shows.
+    bed.asked(&Call::RegisterAgent("KeyboardDisplay".to_owned()))?;
+    bed.asked(&Call::DefaultAgent)?;
+    bed.click(&format!("bt:pair:{PHONE}"))?;
+    let shown = bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    assert_eq!(sheet(&shown)["code"], "482 913");
+    assert_eq!(sheet(&shown)["name"], PHONE);
+    assert_eq!(sheet(&shown)["ours"], true);
+    // A code shows: the pairing has a minute, not the 2 s of the others.
+    let left = sheet(&shown)["left"].as_u64().unwrap_or_default();
+    assert!((50..=60).contains(&left), "{left} s left");
+    bed.places_with("sheet")?;
+    bed.click("sheet:ok")?;
+    bed.shows(|s| sheet(s).is_null())?;
+    bed.asked(&Call::Trust(PHONE.to_owned()))?;
+    let shown = bed.shows(|s| device(s, "mine", PHONE)["connected"] == true)?;
+    assert_eq!(names(&shown, "mine")[0], PHONE);
+    Ok(())
+}
+
+#[test]
+fn annuler_on_a_code_refuses_it_and_says_nothing() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.click(&format!("bt:pair:{PHONE}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    // Esc is the sheet's Annuler.
+    bed.key(KEY_ESC)?;
+    let shown =
+        bed.shows(|s| sheet(s).is_null() && device(s, "nearby", PHONE)["line"] != "Association…")?;
+    assert!(
+        device(&shown, "nearby", PHONE)["failure"].is_null(),
+        "{shown}"
+    );
+    assert_eq!(bed.bluez().paired(PHONE), (false, false));
+    Ok(())
+}
+
+#[test]
+fn pairing_a_keyboard_lights_the_digits_typed() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.click(&format!("bt:pair:{K380_NEW}"))?;
+    let shown = bed.shows(|s| sheet(s)["kind"] == "display" && sheet(s)["typed"] == 3)?;
+    assert_eq!(sheet(&shown)["code"], "305718");
+    bed.places_with("sheet:cells")?;
+    // Annuler gives the pairing up.
+    bed.click("sheet:cancel")?;
+    bed.asked(&Call::CancelPairing(K380_NEW.to_owned()))?;
+    let shown =
+        bed.shows(|s| sheet(s).is_null() && device(s, "nearby", K380_NEW)["line"] == "Clavier")?;
+    assert!(
+        device(&shown, "nearby", K380_NEW)["failure"].is_null(),
+        "{shown}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_legacy_device_asks_for_a_pin() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.click(&format!("bt:pair:{LEGACY}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "pin")?;
+    // Its field has the keyboard: the PIN typed, Enter gives it.
+    bed.type_text("0000")?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.key(KEY_ENTER)?;
+    bed.asked(&Call::Code("0000".to_owned()))?;
+    bed.shows(|s| device(s, "mine", LEGACY)["connected"] == true)?;
+    Ok(())
+}
+
+#[test]
+fn a_phone_that_starts_the_pairing_reaches_the_page_while_it_is_open() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_on("home")?;
+    // Not shown: no agent of the page's, nobody to ask.
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(!bed.bluez().default_agent());
+    bed.click("card:bluetooth")?;
+    bed.shows(|s| names(s, "nearby").len() == 3)?;
+    bed.bluez_is("the page's agent the default", Bluez::default_agent)?;
+    // The phone asks to pair, comparing a code: the sheet, accepted.
+    bed.bluez().incoming(PHONE, Incoming::Confirm(123_456))?;
+    let shown = bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    assert_eq!(sheet(&shown)["code"], "123 456");
+    assert_eq!(sheet(&shown)["ours"], false);
+    bed.key(KEY_ENTER)?;
+    bed.asked(&Call::Incoming(PHONE.to_owned(), true))?;
+    bed.shows(|s| names(s, "mine").contains(&PHONE.to_owned()))?;
+    // Earbuds pairing by themselves: "veut s'associer", refused.
+    bed.bluez().incoming(LEGACY, Incoming::Authorize)?;
+    bed.shows(|s| sheet(s)["kind"] == "authorize")?;
+    bed.click("sheet:cancel")?;
+    bed.asked(&Call::Incoming(LEGACY.to_owned(), false))?;
+    // The sheet gone, its scrim with it: the sidebar takes the click.
+    bed.shows(|s| sheet(s).is_null())?;
+    // The page left: the agent goes.
+    bed.click("nav:home")?;
+    bed.asked(&Call::UnregisterAgent)?;
+    bed.bluez_is("no default agent", |b| !b.default_agent())?;
+    Ok(())
+}
+
+#[test]
+fn the_device_giving_up_closes_the_sheet_and_says_so() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.click(&format!("bt:pair:{PHONE}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    bed.bluez().give_up(PHONE)?;
+    let shown =
+        bed.shows(|s| sheet(s).is_null() && !device(s, "nearby", PHONE)["failure"].is_null())?;
+    assert_eq!(
+        device(&shown, "nearby", PHONE)["failure"],
+        "L’appareil a annulé l’association."
+    );
+    Ok(())
+}
+
+#[test]
+fn forgetting_asks_then_removes_the_device() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(setup()))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| names(s, "mine").len() == 4)?;
+    bed.menu_item(PIXEL, 2)?;
+    let shown = bed.shows(|s| s["bluetooth"]["forgetting"] == PIXEL)?;
+    assert!(shown["bluetooth"]["menu"].is_null());
+    bed.places_with("sheet:ok")?;
+    // Esc: nothing forgotten.
+    bed.key(KEY_ESC)?;
+    bed.shows(|s| s["bluetooth"]["forgetting"].is_null())?;
+    assert!(bed.bluez().known(PIXEL));
+    // Asked again, confirmed: the row goes, the toast has no "Annuler".
+    bed.menu_item(PIXEL, 2)?;
+    bed.shows(|s| s["bluetooth"]["forgetting"] == PIXEL)?;
+    bed.click("sheet:ok")?;
+    bed.asked(&Call::Remove(PIXEL.to_owned()))?;
+    let shown = bed.shows(|s| !names(s, "mine").contains(&PIXEL.to_owned()))?;
+    assert_eq!(shown["toast"], "« Pixel 8 » oublié.");
+    assert!(shown["toast_action"].is_null());
+    assert_eq!(shown["undo"], 0);
+    // Ctrl+Z skips it.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    assert!(!bed.bluez().known(PIXEL));
+    Ok(())
+}
+
+#[test]
+fn renaming_sets_the_alias_and_annuler_takes_it_back() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(setup()))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| names(s, "mine").len() == 4)?;
+    bed.menu_item(PIXEL, 0)?;
+    bed.shows(|s| s["bluetooth"]["renaming"] == PIXEL)?;
+    bed.places_with("bt:rename")?;
+    // The name selected: what is typed takes its place.
+    bed.type_text("tel alex")?;
+    bed.shows(|s| s["bluetooth"]["renaming"] == "tel alex")?;
+    bed.key(KEY_ENTER)?;
+    bed.asked(&Call::Alias(PIXEL.to_owned(), "tel alex".to_owned()))?;
+    let shown = bed.shows(|s| names(s, "mine").contains(&"tel alex".to_owned()))?;
+    assert_eq!(shown["toast"], "Renommé : « tel alex ».");
+    assert_eq!(shown["toast_action"], "undo");
+    bed.away()?;
+    bed.click("toast-action")?;
+    bed.asked(&Call::Alias(PIXEL.to_owned(), PIXEL.to_owned()))?;
+    let shown = bed.shows(|s| names(s, "mine").contains(&PIXEL.to_owned()))?;
+    assert_eq!(shown["toast"], "Annulé : le nom revient à « Pixel 8 ».");
+    // F2 renames the row with the keyboard; Esc lets it go.
+    let mut focus = shown["focus"].clone();
+    for _ in 0..30 {
+        bed.key(KEY_TAB)?;
+        focus = bed.shows(|s| s["focus"] != focus)?["focus"].clone();
+        if focus == "control:1" {
+            break;
+        }
+    }
+    bed.key(KEY_F2)?;
+    bed.shows(|s| s["bluetooth"]["renaming"].is_string())?;
+    bed.key(KEY_ESC)?;
+    bed.shows(|s| s["bluetooth"]["renaming"].is_null())?;
+    // Delete asks to forget it.
+    bed.key(KEY_DELETE)?;
+    bed.shows(|s| s["bluetooth"]["forgetting"].is_string())?;
+    Ok(())
+}
+
+#[test]
+fn connect_automatically_is_its_trust_and_annuler_takes_it_back() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(setup()))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| device(s, "mine", K380)["trusted"] == true)?;
+    bed.menu_item(K380, 1)?;
+    bed.asked(&Call::Distrust(K380.to_owned()))?;
+    let shown = bed.shows(|s| device(s, "mine", K380)["trusted"] == false)?;
+    assert_eq!(shown["toast"], "« Clavier K380 » ne se connecte plus seul.");
+    assert_eq!(device(&shown, "mine", K380)["line"], "Pas connecté");
+    bed.away()?;
+    bed.click("toast-action")?;
+    bed.shows(|s| device(s, "mine", K380)["trusted"] == true)?;
+    Ok(())
+}
+
+#[test]
+fn the_popovers_dans_les_reglages_row_opens_the_page_and_pairs() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_on(
+        Some(Setup {
+            later: vec![FakeDevice::around(PHONE, "phone", -50).pairing(Pairing::Confirm(482_913))],
+            ..Setup::default()
+        }),
+        "1920x1080",
+        2,
+        true,
+    )?
+    else {
+        return Ok(());
+    };
+    // The bar's Bluetooth row, once shown, opens its popover; the phone
+    // is found.
+    let log = bed.shell_log.clone();
+    let shown = bed
+        .hp
+        .dispatch_until(WAIT, |_| common::logged(&log).contains("row=Nothing"))?;
+    anyhow::ensure!(shown, "no Bluetooth row:\n{}", bed.shell_said());
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    let s = bed
+        .hp
+        .connections_surfaces()
+        .first()
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("no connections"))?;
+    let item = (
+        f64::from(s.x + s.width / 2),
+        f64::from(s.y + s.height) - 5.5 - 15.0,
+    );
+    common::click(&mut bed.hp, item)?;
+    let opened = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(opened, "no popover:\n{}", bed.shell_said());
+    let found = bed.hp.dispatch_until(WAIT, |_| {
+        common::logged(&log).contains(&format!("{PHONE} (code)"))
+    })?;
+    anyhow::ensure!(
+        found,
+        "the popover never listed the phone:\n{}",
+        bed.shell_said()
+    );
+    // Its row, by the keyboard: the switch, the phone; Enter.
+    bed.key(KEY_TAB)?;
+    bed.key(KEY_TAB)?;
+    bed.key(KEY_ENTER)?;
+    // The Settings open on Bluetooth and pair it: the code's sheet.
+    let open = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(APP_ID))
+    })?;
+    anyhow::ensure!(open, "the Settings never opened:\n{}", bed.shell_said());
+    bed.hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    let shown = bed.shows(|s| s["page"] == "bluetooth" && sheet(s)["kind"] == "confirm")?;
+    assert_eq!(sheet(&shown)["name"], PHONE);
+    assert_eq!(sheet(&shown)["ours"], true);
+    bed.click("sheet:ok")?;
+    bed.shows(|s| device(s, "mine", PHONE)["connected"] == true)?;
+    Ok(())
+}
+
+#[test]
+fn at_rest_with_a_sheet_closed_the_page_draws_nothing() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Some(with_codes()))? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.shows(|s| s["bluetooth"]["searching"] == false)?;
+    // The countdown draws each second while its sheet shows.
+    bed.click(&format!("bt:pair:{PHONE}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    bed.away()?;
+    let before = bed.hp.window_commits();
+    wait(&mut bed.hp, Duration::from_millis(2500))?;
+    assert!(bed.hp.window_commits() > before, "the countdown never drew");
+    // Closed: nothing more.
+    bed.key(KEY_ESC)?;
+    bed.shows(|s| sheet(s).is_null() && device(s, "nearby", PHONE)["line"] != "Association…")?;
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..200 {
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+        if still >= 10 {
+            break;
+        }
+    }
+    anyhow::ensure!(still >= 10, "the window never came to rest");
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    assert_eq!(bed.hp.window_commits(), last, "the window drew at rest");
+    Ok(())
+}
+
 /// The pull request's pictures, at ×2: `HOCUS_SHOTS=DIR`.
 #[test]
 #[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
@@ -780,7 +1228,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     };
     // The mockup's state: two connected, the mouse's battery low, the
     // search under way.
-    let Some(mut bed) = Bed::start_on(Some(setup()), "2880x1800@2", 20)? else {
+    let Some(mut bed) = Bed::start_on(Some(setup()), "2880x1800@2", 20, false)? else {
         return Ok(());
     };
     bed.open()?;
@@ -802,6 +1250,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         }),
         "2880x1800@2",
         2,
+        false,
     )?
     else {
         return Ok(());
@@ -825,6 +1274,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         }),
         "2880x1800@2",
         2,
+        false,
     )?
     else {
         return Ok(());
@@ -841,6 +1291,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         }),
         "2880x1800@2",
         2,
+        false,
     )?
     else {
         return Ok(());
@@ -848,5 +1299,144 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.open()?;
     bed.shows(|s| s["bluetooth"]["adapter"] == false)?;
     shoot(&mut bed, "bluetooth-no-adapter.png")?;
+    Ok(())
+}
+
+/// What is on screen in `rect` (×2), or the Settings' window, saved as
+/// `name` in `out`, once the window has settled.
+fn picture(bed: &mut Bed, out: &Path, name: &str, rect: Option<Rect>) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..30 {
+        if still >= 5 {
+            break;
+        }
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+    }
+    let rect = match rect {
+        Some(rect) => rect,
+        None => bed.window()?,
+    };
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+    let pad = 24;
+    let x = (rect.x * 2 - pad).max(0) as u32;
+    let y = (rect.y * 2 - pad).max(0) as u32;
+    let cw = ((rect.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+    let ch = ((rect.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+    let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+    let path = out.join(name);
+    image.save(&path)?;
+    eprintln!("{}", path.display());
+    Ok(())
+}
+
+/// The second pull request's pictures, at ×2: `HOCUS_SHOTS=DIR`.
+#[test]
+#[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_codes_for_the_pull_request() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start_on(Some(with_codes()), "2880x1800@2", 2, false)? else {
+        return Ok(());
+    };
+    bed.open_around(3)?;
+    bed.shows(|s| s["bluetooth"]["searching"] == false)?;
+    // A paired device's menu.
+    bed.click(&format!("bt:more:{PIXEL}"))?;
+    bed.shows(|s| s["bluetooth"]["menu"] == PIXEL)?;
+    bed.hp.pointer_move(5.0, 5.0);
+    picture(&mut bed, &out, "bluetooth-menu.png", None)?;
+    // Forgetting asks first.
+    bed.click("bt:item:2")?;
+    bed.shows(|s| s["bluetooth"]["forgetting"] == PIXEL)?;
+    bed.away()?;
+    picture(&mut bed, &out, "bluetooth-forget.png", None)?;
+    bed.key(KEY_ESC)?;
+    // Renaming: the field.
+    bed.menu_item(PIXEL, 0)?;
+    bed.shows(|s| s["bluetooth"]["renaming"] == PIXEL)?;
+    bed.type_text("tel alex")?;
+    bed.shows(|s| s["bluetooth"]["renaming"] == "tel alex")?;
+    bed.away()?;
+    picture(&mut bed, &out, "bluetooth-rename.png", None)?;
+    bed.key(KEY_ESC)?;
+    // A code to compare.
+    bed.click(&format!("bt:pair:{PHONE}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "confirm")?;
+    bed.away()?;
+    picture(&mut bed, &out, "bluetooth-code.png", None)?;
+    bed.key(KEY_ESC)?;
+    bed.shows(|s| sheet(s).is_null() && device(s, "nearby", PHONE)["line"] != "Association…")?;
+    // A code typed on a keyboard.
+    bed.click(&format!("bt:pair:{K380_NEW}"))?;
+    bed.shows(|s| sheet(s)["typed"] == 3)?;
+    bed.away()?;
+    picture(&mut bed, &out, "bluetooth-keyboard-code.png", None)?;
+    bed.click("sheet:cancel")?;
+    bed.shows(|s| sheet(s).is_null() && device(s, "nearby", K380_NEW)["line"] == "Clavier")?;
+    // A PIN.
+    bed.click(&format!("bt:pair:{LEGACY}"))?;
+    bed.shows(|s| sheet(s)["kind"] == "pin")?;
+    bed.type_text("0000")?;
+    bed.away()?;
+    picture(&mut bed, &out, "bluetooth-pin.png", None)?;
+    drop(bed);
+    // The bar's popover: the phone "dans les Réglages", the link.
+    let Some(mut bed) = Bed::start_on(
+        Some(Setup {
+            devices: vec![FakeDevice::paired(SONY, "audio-headphones", Some(82)).connected()],
+            later: vec![
+                FakeDevice::around(BUDS, "audio-headphones", -45),
+                FakeDevice::around(PHONE, "phone", -50).pairing(Pairing::Confirm(482_913)),
+            ],
+            ..Setup::default()
+        }),
+        "2880x1800@2",
+        2,
+        true,
+    )?
+    else {
+        return Ok(());
+    };
+    let log = bed.shell_log.clone();
+    bed.hp
+        .dispatch_until(WAIT, |_| common::logged(&log).contains("row=Connected"))?;
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    let s = bed
+        .hp
+        .connections_surfaces()
+        .first()
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("no connections"))?;
+    let item = (
+        f64::from(s.x + s.width / 2),
+        f64::from(s.y + s.height) - 5.5 - 15.0,
+    );
+    common::click(&mut bed.hp, item)?;
+    bed.hp.dispatch_until(WAIT, |_| {
+        common::logged(&log).contains(&format!("{PHONE} (code)"))
+    })?;
+    bed.hp.pointer_move(5.0, 5.0);
+    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    let rect = bed
+        .hp
+        .popover_surfaces()
+        .first()
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("no popover"))?;
+    picture(&mut bed, &out, "popover.png", Some(rect))?;
     Ok(())
 }

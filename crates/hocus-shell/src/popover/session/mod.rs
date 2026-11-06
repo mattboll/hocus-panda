@@ -981,12 +981,17 @@ impl Panel {
 /// starts it with an activation token, which brings an open window
 /// forward.
 pub(in crate::popover) fn open_settings(section: Option<&str>) {
+    open_settings_with(section.map(str::to_owned).into_iter().collect());
+}
+
+/// The Settings opened with `args` (`bluetooth --pair ADDRESS`).
+pub(in crate::popover) fn open_settings_with(args: Vec<String>) {
     let program = settings_program();
-    match section {
+    match args.first() {
         None => tracing::info!(program, "the Settings open from the footer"),
         Some(section) => tracing::info!(program, section, "the Settings open from a popover"),
     }
-    launch_settings(program, section.map(str::to_owned).into_iter().collect());
+    launch_settings(program, args);
 }
 
 /// The Settings on Réseau, with that network's sheet (6.6): from the

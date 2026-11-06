@@ -56,7 +56,11 @@ impl App {
         if let Some(preview) = self.bar_preview_layer() {
             layers.push(preview);
         }
-        if let Some(menu) = self.menu_list().or_else(|| self.sound_menu_list()) {
+        if let Some(menu) = self
+            .menu_list()
+            .or_else(|| self.sound_menu_list())
+            .or_else(|| self.bluetooth_menu_list())
+        {
             layers.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .on_press(Message::CloseMenu)
@@ -98,6 +102,10 @@ impl App {
         }
         if let Some(dialog) = self.screens_dialog() {
             layers.push(dialog);
+        }
+        // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
+        if let Some(sheet) = self.bluetooth_sheet() {
+            layers.push(sheet);
         }
         // The time zone picker (6.11).
         if let Some(picker) = self.time_picker() {

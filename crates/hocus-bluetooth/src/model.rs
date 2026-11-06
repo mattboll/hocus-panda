@@ -106,6 +106,8 @@ impl Kind {
 pub struct Device {
     /// Its object's path, which names it to BlueZ.
     pub path: String,
+    /// Its `Address`, which names it to people and programs.
+    pub address: String,
     /// Its `Alias`: its own name, or the one given to it.
     pub name: String,
     pub kind: Kind,
@@ -150,6 +152,10 @@ pub enum Failure {
     /// Pairing asked for a code, which the agent does not give (the bar's:
     /// left to the Settings).
     Code,
+    /// The device gave up the pairing (BlueZ's `Cancel`).
+    Cancelled,
+    /// The user cancelled it, or refused the code: said nowhere.
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +200,49 @@ pub struct Bluetooth {
     /// Around, not paired, named, the strongest first (while it is on).
     pub nearby: Vec<Device>,
     pub attempt: Option<Attempt>,
+    /// What BlueZ asks the agent now, when it asks the user (the
+    /// Settings').
+    pub request: Option<Request>,
+}
+
+/// What BlueZ asks the user through the agent, for a pairing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    /// Answered by it ([`crate::Ask::Answer`]).
+    pub id: u64,
+    pub path: String,
+    pub name: String,
+    pub kind: Kind,
+    pub asked: Asked,
+    /// When the pairing is given up, if it is.
+    pub until: Option<std::time::Instant>,
+    /// The pairing was asked here (else the device asked it).
+    pub ours: bool,
+}
+
+/// What is asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asked {
+    /// Both sides show this number: does it match? (`RequestConfirmation`)
+    Confirm(u32),
+    /// Type this code on the device (`DisplayPasskey`, with the digits
+    /// typed so far; `DisplayPinCode`, without).
+    Display { code: String, typed: Option<u16> },
+    /// A PIN to give (`RequestPinCode`).
+    Pin,
+    /// A number to give (`RequestPasskey`).
+    Passkey,
+    /// The device pairs by itself: let it? (`RequestAuthorization`)
+    Authorize,
+}
+
+/// The user's answer to a [`Request`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    Yes,
+    No,
+    Pin(String),
+    Passkey(u32),
 }
 
 /// What the bar's row says (bar.md §4.3).
