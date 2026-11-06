@@ -10,6 +10,7 @@
 //! At rest it draws nothing: motions (a toast rising, a row lit, a switch
 //! sliding, a menu opening) ask for frames only while they move.
 
+mod account;
 mod agents_page;
 mod appearance_page;
 mod applications;
@@ -234,6 +235,8 @@ enum Undo {
     Bluetooth(bluetooth::Choice),
     /// A time zone chosen (in timedated, 6.11).
     Time(time::Choice),
+    /// A display name or an avatar set (in AccountsService, 6.11).
+    Account(account::Choice),
     /// A change of the Réseau page's (in NetworkManager, rfkill).
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
@@ -351,6 +354,8 @@ pub enum Message {
     Bluetooth(bluetooth::Msg),
     /// The Date et heure page's (6.11).
     Time(time::Msg),
+    /// The Compte page's (6.11).
+    Account(account::Msg),
     /// The desktops and windows' page (6.14).
     Desktops(desktops_page::Msg),
     /// The screenshots and clipboard's page (6.17).
@@ -437,6 +442,9 @@ pub struct App {
     bluetooth: bluetooth::State,
     /// The Date et heure page: timedated as last heard (6.11).
     time: time::State,
+    /// The Compte page: AccountsService as last heard, the password's
+    /// sheet (6.11).
+    account: account::State,
     /// The desktops and windows' page: the compositor's windows, a name
     /// changed, a desktop taken out waiting for it (6.14).
     desktops: desktops_page::State,
@@ -470,6 +478,7 @@ impl App {
         let sound = sound::Sound::start(sender.clone());
         let bluetooth = bluetooth::State::start(sender.clone());
         let time = time::State::new(sender.clone());
+        let account = account::State::new(sender.clone());
         let mut network = network::State::start(&sender, start.places.state.clone());
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
@@ -553,6 +562,7 @@ impl App {
             bar: bar_page::State::default(),
             bluetooth,
             time,
+            account,
             desktops: desktops_page::State::default(),
             captures: captures_page::State::default(),
             network,
@@ -606,6 +616,10 @@ impl App {
                 _ => None,
             }),
         ];
+        // The display name's field let go (6.11).
+        if let Some(pressed) = self.account_subscription() {
+            subscriptions.push(pressed);
+        }
         // The terminal's command let go (6.15).
         if let Some(pressed) = self.apps_subscription() {
             subscriptions.push(pressed);
@@ -684,7 +698,13 @@ impl App {
         let scrolled = matches!(message, Message::Scrolled | Message::Network(_));
         let toast = self.toast.as_ref().map(|t| t.serial);
         let task = self.handle(message);
-        let task = Task::batch([task, self.bar_after(), self.time_after(), self.apps_after()]);
+        let task = Task::batch([
+            task,
+            self.bar_after(),
+            self.time_after(),
+            self.account_after(),
+            self.apps_after(),
+        ]);
         self.sound_listen();
         self.bluetooth_want();
         self.wallpaper_want();
@@ -770,6 +790,10 @@ impl App {
                 }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
+                    return task;
+                }
+                // The avatar's popover, the password's sheet (6.11).
+                if let Some(task) = self.account_key_first(&key) {
                     return task;
                 }
                 // The Applications page's menus, sheet and field (6.15).
@@ -923,6 +947,7 @@ impl App {
             Message::Bar(msg) => self.bar_update(msg),
             Message::Bluetooth(msg) => self.bluetooth_update(msg),
             Message::Time(msg) => self.time_update(msg),
+            Message::Account(msg) => self.account_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Captures(msg) => self.captures_update(msg),
             Message::Keys(msg) => {
@@ -1309,6 +1334,13 @@ impl App {
                 self.toast = None;
                 return self.time_undo(choice, false);
             }
+            Some(Undo::Account(_)) => {
+                let Some(Undo::Account(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.account_undo(choice, false);
+            }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1403,6 +1435,12 @@ impl App {
                     return Task::none();
                 };
                 return self.time_undo(choice, true);
+            }
+            Some(Undo::Account(_)) => {
+                let Some(Undo::Account(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.account_undo(choice, true);
             }
             Some(Undo::Network(_)) => {
                 let Some(Undo::Network(choice)) = self.redo.pop() else {
@@ -1705,6 +1743,13 @@ impl App {
         if section == SectionId::DateTime {
             return self.time_stops().into_iter().map(Control::Time).collect();
         }
+        if section == SectionId::Account {
+            return self
+                .account_stops()
+                .into_iter()
+                .map(Control::Account)
+                .collect();
+        }
         if section == SectionId::Apps {
             return self.apps_stops().into_iter().map(Control::Apps).collect();
         }
@@ -1981,6 +2026,7 @@ impl App {
             Control::Sound(stop) => self.sound_key(stop, named, modifiers),
             Control::Bluetooth(stop) => self.bluetooth_key(stop, named, modifiers),
             Control::Time(stop) => self.time_key(stop, named),
+            Control::Account(stop) => self.account_key(stop, named),
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
             Control::Agents(stop) => self.agents_key(stop, named),
@@ -2250,6 +2296,8 @@ enum Control {
     Bluetooth(bluetooth::Stop),
     /// The Date et heure page's own (6.11).
     Time(time::Stop),
+    /// The Compte page's own (6.11).
+    Account(account::Stop),
     /// The desktops and windows' page's own (6.14).
     Desktops(desktops_page::Stop),
     /// The screenshots and clipboard's page's own (6.17).

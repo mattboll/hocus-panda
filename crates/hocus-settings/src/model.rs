@@ -291,8 +291,8 @@ impl SectionId {
                 System,
                 w("Compte", "Account"),
                 w(
-                    "Ton nom, ton avatar et ton mot de passe.",
-                    "Your name, your picture and your password.",
+                    "Ton nom, ton avatar et ton mot de passe. Les autres comptes de l’ordinateur se gèrent avec les outils du système.",
+                    "Your name, avatar and password. The computer’s other accounts are managed with the system’s tools.",
                 ),
                 Icon::Account,
                 "6.11",
@@ -951,6 +951,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Bar => crate::bar::outside(),
         SectionId::Bluetooth => crate::bluetooth::outside(),
         SectionId::DateTime => crate::time::outside(),
+        SectionId::Account => crate::account::outside(),
         SectionId::Keyboard => crate::keyboard::outside(),
         SectionId::Network => crate::network::outside(),
         SectionId::Power => crate::power::outside(),

@@ -25,6 +25,9 @@
 //!   the shutter, and what the clipboard's history keeps (6.17).
 //! - [`time`] and [`timedate`]: the Date et heure page's zones and words,
 //!   and systemd's timedated followed and asked off the window's thread.
+//! - [`account`], [`accounts`], [`passwd`] and [`secret`]: the Compte
+//!   page's pandas and pictures, AccountsService followed and asked, the
+//!   password changed through the system's `passwd`, kept while typed.
 //! - [`agents`]: the agents' tools as the compositor says them, the halo
 //!   and the pandas' keys (6.16).
 //! - [`applications`]: the Applications page's default applications
@@ -32,6 +35,8 @@
 //!   autostart), read and written on its thread (6.15).
 //! - [`app`]: the window, drawn with iced as the shell is.
 
+pub mod account;
+pub mod accounts;
 pub mod activate;
 pub mod agents;
 pub mod app;
@@ -49,12 +54,14 @@ pub mod lang;
 pub mod model;
 pub mod mouse;
 pub mod network;
+pub mod passwd;
 pub mod portal;
 pub mod power;
 pub mod power_bus;
 pub mod renderer;
 pub mod screens;
 pub mod search;
+pub mod secret;
 pub mod single;
 pub mod sound;
 pub mod store;

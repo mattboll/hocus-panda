@@ -32,7 +32,9 @@ hocus-network = { path = "../hocus-network", version = "0.2.0" }
 # The applications, their icons, the defaults (mimeapps.list) and the
 # start-up entries, read as the launcher and the session read them (6.15).
 hocus-xdg = { path = "../hocus-xdg", version = "0.2.0" }
-# The applications' PNG icons, decoded on the page's thread (6.15).
+# The applications' PNG icons, decoded on the page's thread (6.15); the
+# avatars (6.11), a picture cut square and written as PNG (the codecs to
+# read one are hocus-link's).
 image = { version = "0.25", default-features = false, features = ["png"] }
 toml_edit = "0.25.17"
 # The shell's toolkit and its settings (tech-choices, decision 2), as an
@@ -59,8 +61,8 @@ iced = { version = "0.14", default-features = false, features = [
 # the shell does).
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 # The file's changes (inotify on its folder), on its worker; the user's id,
-# for their name.
-rustix = { version = "1.1.6", features = ["fs", "process"] }
+# for their name; `passwd`'s pseudo-terminal (6.11).
+rustix = { version = "1.1.6", features = ["fs", "process", "pty", "event", "termios"] }
 # The search ignores accents: words decomposed (NFD), their marks left out.
 unicode-normalization = "0.1.25"
 # When the last version that read was written, in the user's time zone.

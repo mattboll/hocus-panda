@@ -117,9 +117,16 @@ impl App {
         if let Some(sheet) = self.bluetooth_sheet() {
             layers.push(sheet);
         }
-        // The time zone picker (6.11).
+        // The time zone picker, the avatar's popover, the password's sheet
+        // (6.11).
         if let Some(picker) = self.time_picker() {
             layers.push(picker);
+        }
+        if let Some(popover) = self.account_popover() {
+            layers.push(popover);
+        }
+        if let Some(sheet) = self.account_sheet() {
+            layers.push(sheet);
         }
         // The Applications page's menu and sheet (6.15).
         if let Some(menu) = self.apps_menu() {
@@ -872,6 +879,9 @@ impl App {
         }
         if id == SectionId::DateTime {
             return self.time_page(page);
+        }
+        if id == SectionId::Account {
+            return self.account_page(page);
         }
         if id == SectionId::Desktops {
             return self.desktops_page(page);
@@ -1817,6 +1827,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },
         "time": if app.page == Page::Section(SectionId::DateTime) { app.time_shown() } else { serde_json::Value::Null },
+        "account": if app.page == Page::Section(SectionId::Account) { app.account_shown() } else { serde_json::Value::Null },
         "desktops": if app.page == Page::Section(SectionId::Desktops) { app.desktops_shown() } else { serde_json::Value::Null },
         "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
