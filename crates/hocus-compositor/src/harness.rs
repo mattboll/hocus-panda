@@ -195,6 +195,86 @@ impl Headless {
         self.app.backend.headless().map_or(0, |h| h.frames())
     }
 
+    /// Frames drawn so far on output `index` (in the order given).
+    pub fn frames_on(&self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless()
+            .map_or(0, |h| h.frames_on(index))
+    }
+
+    /// The frames of output `name`'s moving wallpaper so far (#433).
+    pub fn wall_ticks(&self, name: &str) -> u64 {
+        self.app
+            .state
+            .walls
+            .borrow()
+            .ticks
+            .get(name)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// The times a moving wallpaper asked the loop to wake it.
+    pub fn wall_wakes(&self) -> u64 {
+        self.app.state.walls.borrow().wakes
+    }
+
+    /// Whether output `name`'s moving wallpaper runs now.
+    pub fn wall_running(&self, name: &str) -> bool {
+        self.app.state.walls.borrow().running(name)
+    }
+
+    /// How much of output `name` the windows cover, from 0 to 1.
+    pub fn covered(&self, name: &str) -> f64 {
+        let state = &self.app.state;
+        state
+            .space
+            .outputs()
+            .find(|o| o.name() == name)
+            .map_or(0.0, |o| state.covered(o))
+    }
+
+    /// Times a pane of glass was blurred so far.
+    pub fn glass_blurs(&self) -> u64 {
+        self.app.state.panes.borrow().1
+    }
+
+    /// The windows' rains under way, opening and closing (#432).
+    pub fn rains(&self) -> usize {
+        self.app.state.rains()
+    }
+
+    /// Whether window `app_id` opens in a rain now.
+    pub fn raining(&self, app_id: &str) -> bool {
+        self.app.state.windows.values().any(|m| {
+            m.rain.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
+        })
+    }
+
+    /// The file now says `config`, as if it changed on disk: the parts
+    /// that follow it live take it.
+    pub fn reconfigure(&mut self, config: Config) {
+        let config = Config {
+            plain_background: self.app.state.config.plain_background,
+            ..config
+        };
+        self.app.state.config_changed(crate::reload::Reread {
+            config,
+            keymap: None,
+        });
+    }
+
+    /// The machine on battery or on mains power, as UPower would say.
+    pub fn set_on_battery(&mut self, battery: bool) {
+        self.app.state.away_on_battery(battery);
+    }
+
+    /// power-profiles-daemon's profile, as it would say.
+    pub fn set_power_profile(&mut self, profile: Option<&str>) {
+        self.app.state.power_profile(profile.map(str::to_owned));
+    }
+
     /// What output `index` (in the order given, of those plugged) showed
     /// last: its size in pixels, and its rows of ARGB8888 pixels (B, G, R,
     /// A in memory).

@@ -568,6 +568,14 @@ impl App {
     pub(super) fn desktops_why_not(&self, id: &str) -> Option<String> {
         let lang = self.lang;
         match id {
+            model::ANIMATION if self.reduced_motion => Some(
+                w(
+                    "Un fondu court tant que Mouvements réduits est activé.",
+                    "A short fade while Reduced motion is on.",
+                )
+                .get(lang)
+                .to_owned(),
+            ),
             model::WOBBLE if self.reduced_motion => Some(
                 w(
                     "Coupées tant que Mouvements réduits est activé.",

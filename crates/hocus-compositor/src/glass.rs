@@ -85,9 +85,10 @@ pub struct Blurred<T> {
     pub size: Size<i32, Buffer>,
 }
 
-/// Each output's glass as last blurred, kept between frames.
+/// Each output's glass as last blurred, kept between frames; and how many
+/// times a pane was blurred.
 #[derive(Default)]
-pub struct Panes(HashMap<String, Box<dyn Any>>);
+pub struct Panes(HashMap<String, Box<dyn Any>>, pub u64);
 
 impl fmt::Debug for Panes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -372,6 +373,7 @@ impl Glass for GlesRenderer {
             }
             frosted.blurred = true;
             frosted.id = Id::new();
+            panes.1 += 1;
         }
         let level = frosted.levels.first()?.clone();
         let blurred = Blurred {

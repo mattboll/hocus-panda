@@ -53,6 +53,7 @@ pub mod input;
 mod leave;
 pub mod locale;
 mod lock;
+pub mod moving;
 mod record;
 mod share;
 pub mod theme;

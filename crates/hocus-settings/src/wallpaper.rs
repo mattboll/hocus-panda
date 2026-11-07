@@ -1,6 +1,7 @@
 //! Fond d'écran / Wallpaper (6.3, issue #403, variant A, the gallery): each
 //! screen's background and the lock screen's. The keys are `[wallpaper]`
-//! (`picture`, `per-screen`, `fit`, `color`, `lock`, `lock-picture`) and
+//! (`picture`, `per-screen`, `fit`, `color`, `lock`, `lock-picture`, and
+//! for the wallpapers that move, #433, `animate` and `on-battery`) and
 //! `[outputs.NAME] wallpaper`; the compositor follows them live, the shell
 //! draws the lock from them.
 //!
@@ -21,6 +22,7 @@ use std::{
 
 use hocus_link::{
     backdrop::Backdrop,
+    moving::Moving,
     theme::AccentColours,
     wallpaper::{Fit, LockLook, Look, Picture, SWATCHES},
 };
@@ -40,6 +42,10 @@ pub const BACKGROUNDS: RowGroup = RowGroup {
     label: w("FONDS", "BACKGROUNDS"),
     per_source: false,
 };
+pub const ANIMATION: RowGroup = RowGroup {
+    label: w("ANIMATION", "ANIMATION"),
+    per_source: false,
+};
 pub const LOCK: RowGroup = RowGroup {
     label: w("ÉCRAN DE VERROUILLAGE", "LOCK SCREEN"),
     per_source: false,
@@ -54,6 +60,11 @@ pub const FIT: &str = "wallpaper.fit";
 pub const COLOR: &str = "wallpaper.color";
 pub const LOCK_ID: &str = "wallpaper.lock";
 pub const LOCK_PICTURE: &str = "wallpaper.lock-picture";
+/// The wallpapers that move (#433): their tiles, and the two rows.
+pub const MOVING: &str = "wallpaper.moving";
+pub const ANIMATE: &str = "wallpaper.animate";
+pub const ON_BATTERY: &str = "wallpaper.on-battery";
+const ON_BATTERY_WORDS: &[&str] = &["half", "still", "full"];
 
 const FITS: &[&str] = &["cover", "contain", "center"];
 const LOCKS: &[&str] = &["dimmed", "blurred", "picture"];
@@ -120,6 +131,16 @@ pub fn settings() -> &'static [Setting] {
                 &["wallpaper", "picture"],
             ),
             own(
+                MOVING,
+                BACKGROUNDS,
+                w("Fonds animés", "Animated backgrounds"),
+                (
+                    &["animé", "animés", "pluie", "étoiles", "matrix", "mouvement"],
+                    &["animated", "moving", "rain", "stars", "matrix", "starfield"],
+                ),
+                &["wallpaper", "picture"],
+            ),
+            own(
                 CHOOSE,
                 BACKGROUNDS,
                 w("Choisir une image", "Choose a picture"),
@@ -179,6 +200,58 @@ pub fn settings() -> &'static [Setting] {
                     default: Value::Text(hocus_link::wallpaper::colour_word(
                         hocus_link::wallpaper::DEFAULT_COLOR,
                     )),
+                }),
+                needs: None,
+            },
+            Setting {
+                id: ANIMATE,
+                section: SectionId::Wallpaper,
+                group: ANIMATION,
+                name: w("Animer le fond", "Animate the background"),
+                line: Some(w(
+                    "La pluie à 15 images par seconde, les étoiles à 20.",
+                    "The rain at 15 frames a second, the stars at 20.",
+                )),
+                keywords: (
+                    &["animé", "animation", "pluie", "étoiles", "mouvement"],
+                    &["animated", "animation", "rain", "stars", "moving"],
+                ),
+                kind: Kind::Switch,
+                places: Places::One(Place {
+                    key: &["wallpaper", "animate"],
+                    codec: Codec::Bool,
+                    default: Value::Bool(true),
+                }),
+                needs: None,
+            },
+            Setting {
+                id: ON_BATTERY,
+                section: SectionId::Wallpaper,
+                group: ANIMATION,
+                name: w("Sur batterie", "On battery"),
+                line: None,
+                keywords: (
+                    &["batterie", "animé"],
+                    &["battery", "power", "saving", "animated"],
+                ),
+                kind: Kind::Menu(vec![
+                    Choice {
+                        label: w("Ralentie (moitié)", "Slowed (half)"),
+                        value: Value::Word("half"),
+                    },
+                    Choice {
+                        label: w("Arrêtée", "Stopped"),
+                        value: Value::Word("still"),
+                    },
+                    Choice {
+                        label: w("Comme sur secteur", "As on mains power"),
+                        value: Value::Word("full"),
+                    },
+                ]),
+                places: Places::One(Place {
+                    key: &["wallpaper", "on-battery"],
+                    codec: Codec::Word(ON_BATTERY_WORDS),
+                    default: Value::Word("half"),
                 }),
                 needs: None,
             },
@@ -345,6 +418,10 @@ pub fn name_of(picture: &Picture, lang: Lang) -> String {
             let (fr, en) = b.names();
             if lang.fr() { fr } else { en }.to_owned()
         }
+        Picture::Moving(m) => {
+            let (fr, en) = m.names();
+            if lang.fr() { fr } else { en }.to_owned()
+        }
         Picture::Plain => w("Couleur unie", "Solid colour").get(lang).to_owned(),
         Picture::File(text) => Path::new(text)
             .file_name()
@@ -356,6 +433,7 @@ pub fn name_of(picture: &Picture, lang: Lang) -> String {
 pub fn accent_of(look: &Look) -> Option<AccentColours> {
     match look.picture {
         Picture::Builtin(b) => Some(b.accent()),
+        Picture::Moving(m) => Some(m.accent()),
         Picture::Plain => Some(AccentColours::lifted(look.color)),
         Picture::File(_) => None,
     }
@@ -658,6 +736,8 @@ pub struct Thumbs {
 
 /// The built-ins in the gallery's order.
 pub const BUILTIN_TILES: [Backdrop; 4] = Backdrop::ALL;
+/// The wallpapers that move, after them.
+pub const MOVING_TILES: [Moving; 2] = Moving::ALL;
 
 #[cfg(test)]
 mod tests {
