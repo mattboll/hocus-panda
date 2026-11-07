@@ -281,6 +281,13 @@
 # Joins the meeting whose reminder shows, else the one starting next within
 # 10 min, opening its video call (docs/design/bar.md, Day.6).
 # join = "Super+J"
+# The magnifier (docs/design/accessibility.md): a step in, turning it on at
+# its last zoom; a step out, off at 1; off. The keypad's + and - too, for
+# layouts where - shares a key with a digit (6 on AZERTY: Super and that
+# key zooms out there, it does not go to desktop 6).
+# magnifier-in = ["Super+equal", "Super+plus", "Super+KP_Add"]
+# magnifier-out = ["Super+minus", "Super+KP_Subtract"]
+# magnifier-off = "Super+Escape"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
@@ -444,6 +451,25 @@
 # Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt
 # held shows a laser. Off, they do nothing and pass to the window.
 # enabled = true
+
+# [magnifier]
+# The magnifier (docs/design/accessibility.md): the screen under the
+# pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,
+# recordings and shared screens stay as they are. Super+= zooms in a step
+# (and turns it on, at its last zoom), Super+- out (off at 1), Super+Escape
+# turns it off, Super and the wheel zoom by 10 %. On from the start, at
+# this zoom:
+# enabled = false
+# zoom = 2.0
+# How the view follows the pointer: "edge" (it moves only when the pointer
+# pushes its edge), "centre" (the pointer stays in its middle) or
+# "proportional" (it sits where the pointer sits on the screen).
+# follow-pointer = "edge"
+# The view jumps to what takes the keyboard (a window, the bar's popovers)
+# and follows an application's text caret.
+# follow-keyboard = true
+# Smoothed; off, hard pixels.
+# smooth = true
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the

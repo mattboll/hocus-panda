@@ -1403,6 +1403,7 @@ impl State {
         moving |= self.tick_radial(now);
         moving |= self.tick_overview(now);
         moving |= self.tick_ink(now, &mut wake);
+        moving |= self.tick_magnifier(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {

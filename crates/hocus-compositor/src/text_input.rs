@@ -225,15 +225,22 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
                     }
                     None => {}
                 }
+                let mut caret_moved = false;
                 if let Some(cursor) = input.pending_cursor.take()
                     && input.enabled
                 {
+                    caret_moved = input.cursor != Some(cursor);
                     input.cursor = Some(cursor);
                 }
                 let enabled = input.enabled;
+                let entered = input.entered.clone();
                 if enabled {
                     // An emoji may be waiting for it.
                     state.emoji_text_input_ready();
+                }
+                // The magnifier keeps the caret in its view (#424).
+                if caret_moved && let Some(surface) = entered {
+                    state.magnifier_caret(&surface);
                 }
             }
             // Surrounding text, its change's cause and the content's type
