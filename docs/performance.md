@@ -244,7 +244,7 @@ the glass's) and, where it draws there, on pixman.
 | Frames to close, on its screen | ≤ ⌈0.30 × refresh⌉ + 1 (19) | 19 |
 | On the other screen | 0 | 0 |
 | 100 ms after its end | 0 frames | 0 |
-| Allocations on the loop | a whole rain ≤ the standard opening's + 50; none growing frame after frame | + 31 over 22 frames (the first one makes the picture), then 63 a frame, flat (its picture is drawn again only when the window commits) |
+| Allocations on the loop | its first two frames (which make its picture) ≤ the standard opening's + 100, each after ≤ the standard's most + 10 (frame by frame: either opening's frames take 7 more or fewer as the client's commits fall in them, too much for totals); none growing frame after frame | 318 to 334 against 254 to 270, then 63 a frame (75 the last) against 58 to 71, flat (its picture is drawn again only when the window commits) |
 
 The thawing pane (#740) is held to the same budgets
 (`the_thawing_pane_costs_the_rains_frames`): 22 frames to open, 19 to
