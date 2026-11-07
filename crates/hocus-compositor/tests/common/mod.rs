@@ -412,6 +412,15 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that moves itself as an application
+    /// dragged by its own header does: pressed with the left button, at
+    /// the first motion after, it asks the compositor to move it
+    /// (`xdg_toplevel.move` with the press's serial), as GTK and Electron
+    /// do past their drag threshold.
+    Moving {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
     /// An xdg toplevel of this size without xdg-decoration that asks for
     /// the server's decorations (`server`) or draws its own through KDE's
     /// server decoration protocol, as GTK 3 clients do; it says
@@ -605,6 +614,7 @@ fn run_client(
         popup_on_press: false,
         hiding: false,
         pointing: false,
+        moving: None,
         margin: 0,
         cell: 0,
         seat: None,
@@ -683,6 +693,16 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.pointing = true;
+        }
+        Some(Shows::Moving { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.moving = Some(None);
         }
         Some(Shows::Checkered { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -996,6 +1016,9 @@ struct Client {
     hiding: bool,
     /// Says what its pointer gets ([`Shows::Pointing`]).
     pointing: bool,
+    /// Moves itself ([`Shows::Moving`]): the left press's serial, until
+    /// the motion after it asks for the move.
+    moving: Option<Option<u32>>,
     /// The shadow around the window, outside its geometry.
     margin: u32,
     /// Floating, its sizes are whole multiples of this.
@@ -1231,7 +1254,7 @@ impl SeatHandler for Client {
         capability: Capability,
     ) {
         if capability == Capability::Pointer
-            && (self.popup_on_press || self.hiding || self.pointing)
+            && (self.popup_on_press || self.hiding || self.pointing || self.moving.is_some())
         {
             let _ = self.seats.get_pointer(qh, &seat);
             self.seat = Some(seat);
@@ -1282,6 +1305,24 @@ impl PointerHandler for Client {
                 };
                 if let Some(pointed) = pointed {
                     let _ = self.events.send(Event::Pointer(pointed));
+                }
+            }
+            if let Some(pressed) = &mut self.moving {
+                match event.kind {
+                    PointerEventKind::Press {
+                        button: BTN_LEFT,
+                        serial,
+                        ..
+                    } => *pressed = Some(serial),
+                    PointerEventKind::Motion { .. } => {
+                        if let (Some(serial), Some(window), Some(seat)) =
+                            (pressed.take(), &self.window, &self.seat)
+                        {
+                            window.move_(seat, serial);
+                        }
+                    }
+                    PointerEventKind::Release { .. } => *pressed = None,
+                    _ => {}
                 }
             }
             match event.kind {

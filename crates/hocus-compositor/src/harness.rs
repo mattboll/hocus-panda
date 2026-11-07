@@ -1901,6 +1901,11 @@ impl Headless {
             .collect()
     }
 
+    /// The window a pointer's move is moving, if any.
+    pub fn moving(&self) -> Option<crate::model::WindowId> {
+        self.app.state.moving
+    }
+
     /// The moved window's share of its size as drawn now (8.5 B).
     pub fn moved_scale(&self) -> f64 {
         let state = &self.app.state;

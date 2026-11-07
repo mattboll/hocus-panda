@@ -797,6 +797,78 @@ fn a_windows_menu_opens_with_its_top_on_its_line() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A window its client moves (`xdg_toplevel.move`, as an application
+/// dragged by its own header, #729), on the maintainer's 2560 × 1600
+/// laptop: let go on the third tile, it goes to that desktop, the tile lit
+/// on the way.
+#[test]
+fn a_window_moved_by_its_client_let_go_on_a_tile_goes_to_that_desktop() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    for output in ["2560x1600@1.25", "2560x1600"] {
+        moved_by_its_client_onto_the_third_tile(&shell, output)?;
+    }
+    Ok(())
+}
+
+fn moved_by_its_client_onto_the_third_tile(
+    shell: &Path,
+    output: &'static str,
+) -> anyhow::Result<()> {
+    let mut bed = start(
+        shell,
+        Setup {
+            output,
+            ..Setup::default()
+        },
+    )?;
+    let (window, _client) = common::open_showing(
+        &mut bed.hp,
+        "test.self",
+        common::Shows::Moving {
+            app_id: "test.self",
+            size: (900, 600),
+        },
+    )?;
+    bed.settle()?;
+    bed.placed_drawn()?;
+    let mark = bed.mark();
+    let (x, y) = (f64::from(window.x + 300), f64::from(window.y + 20));
+    let to = bed.middle(2);
+    bed.hp.pointer_move(x, y);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    bed.hp.button(BTN_LEFT, true);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    for step in 1..=20 {
+        let t = f64::from(step) / 20.0;
+        bed.hp.pointer_move(x + (to.0 - x) * t, y + (to.1 - y) * t);
+        bed.hp.dispatch(Duration::from_millis(16))?;
+    }
+    anyhow::ensure!(bed.hp.moving().is_some(), "the client's move never began");
+    let over = bed.hp.dispatch_until(WAIT, |hp| hp.drop_over().is_some())?;
+    anyhow::ensure!(
+        over,
+        "never over a tile: the pointer at {to:?}, the tiles said {:?}",
+        bed.hp.desk_tile_middles()
+    );
+    assert_eq!(
+        bed.hp.drop_over(),
+        Some(("HEADLESS-1".to_owned(), "HEADLESS-1".to_owned(), 2))
+    );
+    bed.logged_after(
+        mark,
+        "a window over the tiles bar=\"HEADLESS-1\" over=Some((\"HEADLESS-1\", 2))",
+    )?;
+    bed.hp.button(BTN_LEFT, false);
+    let gone = bed.hp.dispatch_until(WAIT, |hp| hp.windows().is_empty())?;
+    anyhow::ensure!(gone, "still shown: {:?}", bed.hp.windows());
+    assert_eq!(bed.hp.desktop().0, 0);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, common::KEY_3]);
+    common::wait_for_rect(&mut bed.hp, "test.self", window)?;
+    Ok(())
+}
+
 #[test]
 fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
