@@ -90,29 +90,38 @@ pub fn lit(f: &mut Frame, button: Rectangle, open: bool, hover: bool, focused: b
     } else {
         None
     };
-    if let Some(lit) = lit {
-        f.fill(&kit::rounded(button, RADIUS), lit.get());
+    match lit {
+        Some(_) if open => f.fill(&kit::rounded(button, RADIUS), OPEN.get()),
+        Some(_) => crate::theme::hover(f, &kit::rounded(button, RADIUS), HOVER.get()),
+        None => {}
     }
     if focused {
         ring(f, button, RADIUS);
     }
 }
 
-/// A 20 px glyph centred on `button`, `alpha` opaque.
-pub fn glyph_in(f: &mut Frame, button: Rectangle, handle: svg::Handle, alpha: f32) {
+/// The footer's glyphs' colour in the theme of the moment: `INK` on dark,
+/// the theme's text on light and under high contrast.
+pub const GLYPH_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+/// The bell's amber, as the theme reads it.
+const AMBER_INK: Ink = Ink::Dark(rgb(0xF5C46E));
+
+/// A 20 px glyph centred on `button` in `ink`, `alpha` opaque.
+pub fn glyph_in(f: &mut Frame, button: Rectangle, handle: svg::Handle, ink: Ink, alpha: f32) {
     let centre = button.center();
     let rect = Rectangle::new(
         Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
         Size::new(GLYPH, GLYPH),
     );
-    f.draw_svg(rect, svg::Svg::new(handle).opacity(alpha));
+    f.draw_svg(rect, svg::Svg::new(handle).color(ink.get()).opacity(alpha));
 }
 
 /// The bell's button at `button` in frame `f`, as it `shows`, `alpha`
 /// opaque (two forms cross-fade while the bar switches).
 pub fn draw(f: &mut Frame, button: Rectangle, shows: Shows, alpha: f32) {
     lit(f, button, shows.open, shows.hover, shows.focused);
-    glyph_in(f, button, glyph(shows.dnd), alpha);
+    let ink = if shows.dnd { AMBER_INK } else { GLYPH_INK };
+    glyph_in(f, button, glyph(shows.dnd), ink, alpha);
     if shows.count == 0 {
         return;
     }
@@ -160,5 +169,37 @@ mod tests {
         let right = button.center_x() + GLYPH_BOX / 2.0 + 6.0;
         assert_eq!(button.x + button.width - right, 2.0);
         assert_eq!(button.y + 1.0 - BADGE_RING, button.y - 1.0);
+    }
+
+    #[test]
+    fn the_footers_glyphs_read_dark_on_light_and_solid_under_high_contrast() {
+        use hocus_link::theme::{Choice, Scheme};
+        let luminance = |c: iced::Color| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+        let of = |scheme, contrast| {
+            GLYPH_INK.in_theme(Choice {
+                scheme,
+                contrast,
+                ..Choice::default()
+            })
+        };
+        // Dark: the mockup's pale grey.
+        assert_eq!(of(Scheme::Dark, false), rgb(0xC9D0DC));
+        // Light, and light under high contrast: dark, as the text is.
+        assert!(
+            luminance(of(Scheme::Light, false)) < 0.3,
+            "{:?}",
+            of(Scheme::Light, false)
+        );
+        assert!(
+            luminance(of(Scheme::Light, true)) < 0.1,
+            "{:?}",
+            of(Scheme::Light, true)
+        );
+        // Dark under high contrast: near white.
+        assert!(
+            luminance(of(Scheme::Dark, true)) > 0.9,
+            "{:?}",
+            of(Scheme::Dark, true)
+        );
     }
 }

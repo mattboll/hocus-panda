@@ -811,6 +811,11 @@ impl State {
     /// The pointer moved to `at` while the capture is open: the toolbar
     /// gets it when it is over it, else the area or the window follows,
     /// and the cursor says what a press does. Whether it took it.
+    /// Whether the capture is open, choosing: it holds the pointer.
+    pub(crate) fn capture_choosing(&self) -> bool {
+        matches!(self.capture.phase, Phase::Choosing(_))
+    }
+
     pub fn capture_motion(&mut self, at: Point<f64, Logical>, time: u32) -> bool {
         let Phase::Choosing(choosing) = &self.capture.phase else {
             return false;

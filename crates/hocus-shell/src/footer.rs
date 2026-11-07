@@ -566,7 +566,7 @@ impl canvas::Program<Message> for Footer {
                         _ => {
                             bell::lit(f, button, open, hover, focused);
                             if let Some(glyph) = glyph(item) {
-                                bell::glyph_in(f, button, glyph, alpha);
+                                bell::glyph_in(f, button, glyph, bell::GLYPH_INK, alpha);
                             }
                         }
                     }

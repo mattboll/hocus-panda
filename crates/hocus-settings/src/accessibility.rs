@@ -26,6 +26,11 @@ pub const VIEW: RowGroup = RowGroup {
     label: w("VUE", "VIEW"),
     per_source: false,
 };
+/// The screen reader (#421, #734).
+pub const READER: RowGroup = RowGroup {
+    label: w("LECTEUR D’ÉCRAN", "SCREEN READER"),
+    per_source: false,
+};
 /// The bar by the keyboard (#422).
 pub const KEYBOARD: RowGroup = RowGroup {
     label: w("CLAVIER", "KEYBOARD"),
@@ -35,6 +40,8 @@ pub const KEYBOARD: RowGroup = RowGroup {
 /// High contrast, which implies reduced transparency.
 pub const HIGH_CONTRAST: &str = "appearance.high-contrast";
 pub const REDUCE_TRANSPARENCY: &str = "appearance.reduce-transparency";
+/// Orca with the session (`[accessibility] screen-reader`, #734).
+pub const SCREEN_READER: &str = "accessibility.screen-reader";
 
 /// The magnifier's zooms, in hundredths (`[magnifier] zoom`).
 const ZOOMS: [i64; 8] = [150, 200, 300, 400, 600, 800, 1200, 1600];
@@ -234,6 +241,27 @@ pub fn settings() -> &'static [Setting] {
                 needs: None,
             },
             Setting {
+                id: SCREEN_READER,
+                section: SectionId::Accessibility,
+                group: READER,
+                name: w("Lecteur d’écran", "Screen reader"),
+                line: Some(w(
+                    "Orca démarre avec la session. Super+Alt+S le lance ou l’arrête, même sur l’écran de verrouillage.",
+                    "Orca starts with the session. Super+Alt+S starts or stops it, on the lock screen too.",
+                )),
+                keywords: (
+                    &["lecteur d’écran", "orca", "aveugle", "voix", "accessibilité"],
+                    &["screen reader", "orca", "blind", "speech", "accessibility"],
+                ),
+                kind: Kind::Switch,
+                places: one(
+                    &["accessibility", "screen-reader"],
+                    Codec::Bool,
+                    Value::Bool(false),
+                ),
+                needs: None,
+            },
+            Setting {
                 id: "accessibility.focus-bar",
                 section: SectionId::Accessibility,
                 group: KEYBOARD,
@@ -286,7 +314,7 @@ mod tests {
     fn the_page_has_its_groups_in_order() {
         let mut groups: Vec<&str> = settings().iter().map(|s| s.group.label.fr).collect();
         groups.dedup();
-        assert_eq!(groups, ["LOUPE", "VUE", "CLAVIER"]);
+        assert_eq!(groups, ["LOUPE", "VUE", "LECTEUR D’ÉCRAN", "CLAVIER"]);
         let ids: Vec<&str> = settings()
             .iter()
             .filter(|s| s.group == VIEW)
@@ -313,6 +341,30 @@ mod tests {
             Some(&["appearance", "high-contrast"][..])
         );
         assert_eq!(key("magnifier.zoom"), Some(&["magnifier", "zoom"][..]));
+    }
+
+    #[test]
+    fn the_screen_reader_is_a_switch_on_its_key_off_by_default() {
+        let reader = settings()
+            .iter()
+            .find(|s| s.id == SCREEN_READER)
+            .expect("the screen reader's row");
+        assert_eq!(reader.group, READER);
+        assert!(matches!(reader.kind, Kind::Switch));
+        assert!(
+            reader
+                .line
+                .is_some_and(|l| l.fr.contains("Super+Alt+S") && l.en.contains("Super+Alt+S"))
+        );
+        let places = reader.places.all();
+        assert_eq!(places.len(), 1);
+        let place = places[0];
+        assert_eq!(place.key, &["accessibility", "screen-reader"][..]);
+        assert_eq!(place.default, Value::Bool(false));
+        // What it writes, the compositor reads (`[accessibility]
+        // screen-reader = true`).
+        let written = place.codec.write(&Value::Bool(true)).expect("written");
+        assert_eq!(place.codec.read(&written), Some(Value::Bool(true)));
     }
 
     #[test]

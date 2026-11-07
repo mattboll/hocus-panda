@@ -741,7 +741,7 @@ impl View {
         let annotate = layout.annotate;
         f.fill(&kit::rounded(annotate, BUTTON_RADIUS), GREEN_TINT.get());
         if thumb.hover == Some(Spot::Annotate) {
-            f.fill(&kit::rounded(annotate, BUTTON_RADIUS), HOVER.get());
+            crate::theme::hover(f, &kit::rounded(annotate, BUTTON_RADIUS), HOVER.get());
         }
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
@@ -755,7 +755,7 @@ impl View {
         ));
         let close = layout.close;
         if thumb.hover == Some(Spot::Close) {
-            f.fill(&kit::rounded(close, BUTTON_RADIUS), HOVER.get());
+            crate::theme::hover(f, &kit::rounded(close, BUTTON_RADIUS), HOVER.get());
         }
         cross(f, close.center(), CLOSE_SIZE * 0.6, CLOSE_COLOUR.get());
         // The countdown.

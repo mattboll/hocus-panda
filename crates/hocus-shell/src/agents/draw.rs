@@ -1099,13 +1099,17 @@ impl Group {
         let item = mini_item(layout);
         let rect = Rectangle::new(o, Size::new(MINI_ITEM, mini.height));
         let open = popover::with(|c| c.shows(&self.bar, item));
-        let lit = match (open, state.hover == Some(item)) {
-            (true, _) => Some(ROW_OPEN),
-            (false, true) => Some(ROW_HOVER),
-            (false, false) => None,
-        };
-        if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
+        match (open, state.hover == Some(item)) {
+            (true, _) => f.fill(
+                &kit::rounded(rect, MINI_RADIUS),
+                faded(ROW_OPEN.get(), alpha),
+            ),
+            (false, true) => crate::theme::hover(
+                f,
+                &kit::rounded(rect, MINI_RADIUS),
+                faded(ROW_HOVER.get(), alpha),
+            ),
+            (false, false) => {}
         }
         let now = state.now.unwrap_or_else(Instant::now);
         let (hop, rings) = state.radiating.map_or((0.0, None), |since| {
@@ -1315,13 +1319,17 @@ impl Group {
             f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(tint, alpha));
         }
         let open = popover::with(|c| c.shows(&self.bar, Item::Secretary));
-        let lit = match (open, state.hover == Some(Item::Secretary)) {
-            (true, _) => Some(ROW_OPEN),
-            (false, true) => Some(ROW_HOVER),
-            (false, false) => None,
-        };
-        if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, HEADER_RADIUS), faded(lit.get(), alpha));
+        match (open, state.hover == Some(Item::Secretary)) {
+            (true, _) => f.fill(
+                &kit::rounded(rect, HEADER_RADIUS),
+                faded(ROW_OPEN.get(), alpha),
+            ),
+            (false, true) => crate::theme::hover(
+                f,
+                &kit::rounded(rect, HEADER_RADIUS),
+                faded(ROW_HOVER.get(), alpha),
+            ),
+            (false, false) => {}
         }
         let now = state.now.unwrap_or_else(Instant::now);
         let (hop, rings) = state.radiating.map_or((0.0, None), |since| {

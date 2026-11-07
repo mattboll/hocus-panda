@@ -555,6 +555,12 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let ids = self.overview_paint.box_ids(&place);
+        // High contrast: no tints, solid rims (crate::contrast).
+        let style = BoxStyle {
+            fill: crate::contrast::ink(style.fill),
+            rim: crate::contrast::rim(style.rim),
+            ..style
+        };
         out.extend(
             box_elements(renderer, &self.textures, &ids, style, rect, scale, alpha)
                 .into_iter()

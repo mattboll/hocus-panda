@@ -650,13 +650,14 @@ impl View {
                 c.focused(&self.bar, Item::Windows),
             )
         });
-        let lit = match (open, state.hover == Some(Item::Windows)) {
-            (true, _) => Some(OPEN),
-            (false, true) => Some(HOVER),
-            (false, false) => None,
-        };
-        if let Some(lit) = lit {
-            f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
+        match (open, state.hover == Some(Item::Windows)) {
+            (true, _) => f.fill(&kit::rounded(rect, MINI_RADIUS), faded(OPEN.get(), alpha)),
+            (false, true) => crate::theme::hover(
+                f,
+                &kit::rounded(rect, MINI_RADIUS),
+                faded(HOVER.get(), alpha),
+            ),
+            (false, false) => {}
         }
         if focused {
             ring(f, rect, MINI_RADIUS);

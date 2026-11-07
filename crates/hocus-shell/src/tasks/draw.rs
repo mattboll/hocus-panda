@@ -674,7 +674,11 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
 /// The `+` at `rect`, lit under the pointer: a 14 px plus.
 pub fn plus(f: &mut Frame, rect: Rectangle, lit: bool, alpha: f32) {
     if lit {
-        f.fill(&kit::rounded(rect, ADD_RADIUS), faded(HOVER.get(), alpha));
+        crate::theme::hover(
+            f,
+            &kit::rounded(rect, ADD_RADIUS),
+            faded(HOVER.get(), alpha),
+        );
     }
     let c = rect.center();
     let unit = PLUS / 24.0;

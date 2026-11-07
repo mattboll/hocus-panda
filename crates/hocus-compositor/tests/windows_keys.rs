@@ -120,7 +120,9 @@ fn pointed_until(
                 seen.push(p);
             }
         }
-        seen.last() == Some(&last)
+        // What comes after it (a leave, the pointer's focus following what
+        // is under it once the button is up, #737) does not matter.
+        seen.contains(&last)
     })?;
     anyhow::ensure!(came, "{last:?} never came: {seen:?}");
     Ok(seen)

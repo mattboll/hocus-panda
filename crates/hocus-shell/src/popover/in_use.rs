@@ -481,7 +481,7 @@ impl Panel {
                     f.fill(&shape, MUTE_FILL.get());
                 }
                 if hover {
-                    f.fill(&shape, HOVER.get());
+                    crate::theme::hover(f, &shape, HOVER.get());
                 }
                 let edge = if uses.muted { UNMUTE_RING } else { MUTE_RING };
                 f.stroke(
@@ -503,7 +503,7 @@ impl Panel {
             Target::Pause => {
                 f.fill(&shape, REC_PAUSE.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER.get());
+                    crate::theme::hover(f, &shape, REC_HOVER.get());
                 }
                 let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
                 pause_icon(f, rect, paused);
@@ -511,7 +511,7 @@ impl Panel {
             Target::StopRecording => {
                 f.fill(&shape, REC_STOP.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER.get());
+                    crate::theme::hover(f, &shape, REC_HOVER.get());
                 }
                 word(f, self.words.stop_recording().to_owned(), Color::WHITE);
             }
