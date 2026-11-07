@@ -647,7 +647,7 @@ fn the_links_open_their_pages_with_their_row_lit() -> anyhow::Result<()> {
     for (link, page, lit) in [
         (
             "link:appearance.reduce-transparency",
-            "appearance",
+            "accessibility",
             "appearance.reduce-transparency",
         ),
         ("link:screens.primary", "screens", "screens.primary"),

@@ -597,7 +597,7 @@ impl App {
         (setting.id == model::WOBBLE && self.reduced_motion).then(|| {
             self.desktops_link(
                 REDUCED,
-                w("Apparence et langue ›", "Appearance and language ›").get(self.lang),
+                w("Accessibilité ›", "Accessibility ›").get(self.lang),
             )
         })
     }
@@ -1066,5 +1066,6 @@ impl App {
     }
 }
 
-/// Appearance's reduced motion, which the wobble's link lights.
+/// Reduced motion (on the Accessibility page), which the wobble's link
+/// lights.
 const REDUCED: &str = "appearance.reduced-motion";

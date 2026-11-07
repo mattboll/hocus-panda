@@ -174,3 +174,13 @@ transparency; 7:1 for text, 3:1 for borders and controls).
   maximised window, the bar is opaque too, whatever the setting
   ([bar.md §11](bar.md#11-accessibility)). The launcher's and the
   overview's scrims stay: they dim, they are not glass.
+
+## The Settings' page
+
+Accessibilité gathers what these issues set (settings.md, "Accessibilité"):
+LOUPE (the magnifier's rows), VUE (high contrast, reduced transparency,
+reduced motion, a link to the text's and the cursor's size), CLAVIER (the
+way into the bar). Appearance keeps a link to it. While high contrast is
+on, reduced transparency's switch shows on and inert ("Comprise dans le
+contraste élevé"); the file keeps its own value. The screen reader's group
+comes with #421.

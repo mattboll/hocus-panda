@@ -445,6 +445,17 @@ impl Switch {
             &rounded(rect, SWITCH.height / 2.0),
             mix(SWITCH_OFF.get(), ACCENT.get(), p),
         );
+        // Under high contrast, off: its edge in `text.faint` (bar.md §13).
+        if crate::theme::contrast() && p < 1.0 {
+            f.stroke(
+                &rounded(rect, SWITCH.height / 2.0),
+                canvas::Stroke {
+                    style: canvas::Style::Solid(FAINT.get().scale_alpha(1.0 - p)),
+                    width: 2.0,
+                    ..canvas::Stroke::default()
+                },
+            );
+        }
         let centre = Point::new(
             rect.x + 2.0 + (SWITCH.width - KNOB - 4.0) * p + KNOB / 2.0,
             rect.center_y(),

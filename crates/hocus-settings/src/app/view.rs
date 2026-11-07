@@ -289,7 +289,8 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            .height(30)
+            // 28 px: the 18 sections fit the window's 760 px.
+            .height(28)
             .padding([0, 10])
             .on_press(on)
             .style(flat(
@@ -1065,6 +1066,13 @@ impl App {
                 fade(DIM.get(), ink)
             };
             words = words.push(t(line, 12.5, colour));
+        } else if self.implied(setting) {
+            // High contrast holds it on (#423).
+            let said = w(
+                "Comprise dans le contraste élevé.",
+                "Included in high contrast.",
+            );
+            words = words.push(t(said.get(lang), 12.5, fade(DIM.get(), ink)));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
             words = words.push(t(why, 12.5, PEACH.get()));
@@ -1173,7 +1181,7 @@ impl App {
         }
         match &setting.kind {
             Kind::Switch => {
-                let on = value == Some(crate::model::Value::Bool(true));
+                let on = value == Some(crate::model::Value::Bool(true)) || self.implied(setting);
                 // The knob slides over 160 ms, ease-out.
                 let moved = self.knobs.get(setting.id).map_or(1.0, |since| {
                     ease_out(self.now.saturating_duration_since(*since), super::KNOB)
@@ -1184,9 +1192,13 @@ impl App {
                 } else {
                     crate::theme::Ink::Token(|t| t.switch_off).get()
                 };
+                // Under high contrast, off: the knob in the text's colour,
+                // the track ringed in `text.faint` (bar.md §13).
+                let contrast = crate::theme::now().contrast && !on;
+                let knob_colour = if contrast { TEXT.get() } else { Color::WHITE };
                 let knob = container(Space::new().width(18).height(18)).style(move |_: &Theme| {
                     container::Style {
-                        background: Some(Background::Color(fade(Color::WHITE, alpha))),
+                        background: Some(Background::Color(fade(knob_colour, alpha))),
                         border: border(9.0, 0.0, Color::TRANSPARENT),
                         shadow: Shadow {
                             color: rgba(0, 0, 0, 0.3 * alpha),
@@ -1207,6 +1219,8 @@ impl App {
                     text_color: TEXT.get(),
                     border: if focused {
                         ring(11.0)
+                    } else if contrast {
+                        border(11.0, 2.0, fade(FAINT.get(), alpha))
                     } else {
                         border(11.0, 0.0, Color::TRANSPARENT)
                     },
@@ -1783,12 +1797,16 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
             .iter()
             .map(|s| {
                 let slot = Slot::of(s, app.source);
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "id": s.id,
                     "value": app.said_value(slot),
                     "warn": app.warning(s, slot),
                     "inert": app.inert(s),
-                })
+                });
+                if app.implied(s) {
+                    row["implied"] = serde_json::Value::Bool(true);
+                }
+                row
             })
             .collect(),
         Page::Home => Vec::new(),

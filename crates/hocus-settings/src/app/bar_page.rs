@@ -760,7 +760,7 @@ impl App {
         let lang = self.lang;
         page = page.push(
             row![
-                icon(Icon::Appearance, 14.0, FAINT.get()),
+                icon(Icon::Accessibility, 14.0, FAINT.get()),
                 t(
                     w(
                         "La transparence de la barre et les mouvements réduits se règlent dans",
@@ -772,7 +772,7 @@ impl App {
                 ),
                 self.bar_link(
                     "appearance.reduce-transparency",
-                    w("Apparence et langue ›", "Appearance and language ›").get(lang),
+                    w("Accessibilité ›", "Accessibility ›").get(lang),
                     1.0
                 ),
             ]

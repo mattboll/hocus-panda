@@ -161,11 +161,16 @@ impl Bed {
 
     /// Launched on the appearance page, its window open with the keyboard.
     fn open(&mut self) -> anyhow::Result<Value> {
+        self.open_on("appearance")
+    }
+
+    /// Launched on page `page`, its window open with the keyboard.
+    fn open_on(&mut self, page: &str) -> anyhow::Result<Value> {
         self.hp.launch(hocus_link::Launch {
             id: APP_ID.to_owned(),
             terminal: false,
             dir: String::new(),
-            argv: vec![self.script.display().to_string(), "appearance".to_owned()],
+            argv: vec![self.script.display().to_string(), page.to_owned()],
         });
         let open = self.hp.dispatch_until(Duration::from_secs(20), |hp| {
             hp.windows()
@@ -173,7 +178,7 @@ impl Bed {
                 .any(|w| w.app_id.as_deref() == Some(APP_ID) && w.keyboard)
         })?;
         anyhow::ensure!(open, "the window never opened: {}", plain(&self.log));
-        self.shows(|s| s["file"] == "saved" && s["page"] == "appearance")
+        self.shows(|s| s["file"] == "saved" && s["page"] == page)
     }
 
     /// What the window shows, once `done` holds of it.
@@ -364,18 +369,11 @@ fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -
             "appearance.text-scale",
             "appearance.cursor-theme",
             "appearance.cursor-size",
-            "appearance.reduced-motion",
-            "appearance.reduce-transparency",
-            "appearance.high-contrast",
+            "appearance.accessibility",
             "locale.language",
             "locale.date",
             "locale.time",
             "appearance.bar-clock",
-            "magnifier.enabled",
-            "magnifier.zoom",
-            "magnifier.follow-pointer",
-            "magnifier.follow-keyboard",
-            "magnifier.smooth",
         ]
     );
     assert_eq!(shown["theme"], "dark");
@@ -394,6 +392,55 @@ fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -
     bed.until((BAR_LEFT + 5, 540), light)?;
     let window = bed.window()?;
     bed.until((window.x + 600, window.bottom() - 12), light)?;
+    Ok(())
+}
+
+/// The Accessibility page (#422–#424): the magnifier, the view and the
+/// keyboard's groups; high contrast written at once, the desktop drawing
+/// it, and reduced transparency shown on and inert while it is, the file
+/// keeping its own value.
+#[test]
+fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on()
+-> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let shown = bed.open_on("accessibility")?;
+    let ids: Vec<&str> = shown["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "magnifier.enabled",
+            "magnifier.zoom",
+            "magnifier.follow-pointer",
+            "magnifier.follow-keyboard",
+            "magnifier.smooth",
+            "appearance.high-contrast",
+            "appearance.reduce-transparency",
+            "appearance.reduced-motion",
+            "accessibility.text-and-cursor",
+            "accessibility.focus-bar",
+        ]
+    );
+    assert_eq!(
+        row(&shown, "appearance.reduce-transparency")["inert"],
+        false
+    );
+    bed.click("control:appearance.high-contrast")?;
+    let text = bed.written(|t| t.contains("high-contrast = true"))?;
+    assert!(!text.contains("reduce-transparency"), "{text}");
+    let shown = bed.shows(|s| row(s, "appearance.high-contrast")["value"] == "oui")?;
+    let transparency = row(&shown, "appearance.reduce-transparency");
+    assert_eq!(transparency["inert"], true, "{transparency}");
+    assert_eq!(transparency["implied"], true, "{transparency}");
+    // The bar draws it.
+    bed.shell_said("the theme theme=", &[" contrast "])?;
+    bed.until((BAR_LEFT + 5, 540), |[r, g, b]| r < 12 && g < 12 && b < 20)?;
     Ok(())
 }
 
@@ -560,5 +607,94 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.shell_said("the clock shows", &["date=\"jeu. 5 nov.\""])?;
     bed.hp.pointer_move(400.0, 1060.0);
     save(&mut bed, "page-light-12h-short.png", None)?;
+    Ok(())
+}
+
+/// The maintainer's screenshots of #422 and #423, into `HOCUS_SHOTS`: the
+/// keyboard's ring in the bar (on the agent waiting, then on the clock)
+/// and in a popover opened by `Enter`; then high contrast, dark and
+/// light: the bar with a popover, and the Accessibility page.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_keyboard_and_high_contrast() -> anyhow::Result<()> {
+    const KEY_B: u32 = 48;
+    const KEY_ENTER: u32 = 28;
+    const KEY_HOME: u32 = 102;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let save = |bed: &mut Bed, name: &str, crop: Option<(i32, i32, i32, i32)>| {
+        common::at_rest(&mut bed.hp)?;
+        wait(&mut bed.hp, Duration::from_millis(400))?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let (x0, y0, cw, ch) = crop.unwrap_or((0, 0, w, h));
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        let image = image::imageops::crop_imm(&image, x0 as u32, y0 as u32, cw as u32, ch as u32)
+            .to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        anyhow::Ok(())
+    };
+    let agents = || {
+        let agent = |id: u64, name: &str, state: &str| hocus_link::AgentShown {
+            id,
+            state: state.to_owned(),
+            since: id,
+            source: "claude-code".to_owned(),
+            window: 0,
+            name: name.to_owned(),
+            note: None,
+        };
+        hocus_link::ToShell::Agents(vec![
+            agent(1, "site-web", "waiting"),
+            agent(2, "infra", "failed"),
+            agent(3, "docs", "working"),
+            agent(4, "api", "idle"),
+        ])
+    };
+    let bar_crop = Some((1920 - 8 - 196 - 8 - 320 - 12, 0, 196 + 8 + 320 + 28, 1080));
+    let keys = |bed: &mut Bed, codes: &[u32]| {
+        common::chord(&mut bed.hp, codes);
+        wait(&mut bed.hp, Duration::from_millis(250))
+    };
+    for (theme, contrast) in [("dark", false), ("dark", true), ("light", true)] {
+        let text =
+            format!("{FILE}\n[appearance]\ntheme = \"{theme}\"\nhigh-contrast = {contrast}\n");
+        let Some(mut bed) = Bed::start(&text)? else {
+            return Ok(());
+        };
+        let tag = if contrast {
+            format!("contrast-{theme}")
+        } else {
+            format!("ring-{theme}")
+        };
+        bed.hp.tell_shell(agents());
+        bed.shell_said("the agents group shows it", &[])?;
+        wait(&mut bed.hp, Duration::from_millis(500))?;
+        // Super+B: on the agent waiting.
+        keys(&mut bed, &[common::KEY_LEFTMETA, KEY_B])?;
+        save(&mut bed, &format!("{tag}-bar-agent.png"), bar_crop)?;
+        // Home: the clock; Enter: the calendar, its first control ringed.
+        keys(&mut bed, &[KEY_HOME])?;
+        save(&mut bed, &format!("{tag}-bar-clock.png"), bar_crop)?;
+        keys(&mut bed, &[KEY_ENTER])?;
+        save(&mut bed, &format!("{tag}-popover.png"), bar_crop)?;
+        keys(&mut bed, &[common::KEY_ESC])?;
+        keys(&mut bed, &[common::KEY_ESC])?;
+        if contrast {
+            bed.open_on("accessibility")?;
+            bed.hp.pointer_move(400.0, 1060.0);
+            save(&mut bed, &format!("{tag}-settings.png"), None)?;
+        }
+    }
     Ok(())
 }
