@@ -1019,6 +1019,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `record` | `Super+Shift+R` | Records the screen with the last settings; while recording, stops ([screenshots.md](screenshots.md), 5.10) |
 | `volume-up`, `volume-down`, `mute` | the keyboard's sound keys | 5 % a press, stepping on while held; to the shell's gauges |
 | `brightness-up`, `brightness-down` | the keyboard's brightness keys | The same for the screen's brightness, down to 5 % |
+| `magnifier-in`, `magnifier-out`, `magnifier-off` | `Super+=` (`Super+plus`, keypad `+`), `Super+-` (keypad `-`), `Super+Escape` | The magnifier a step in (on at its last zoom), a step out (off at 1×), off; also on the lock screen. `Super+-` takes the key that types `-`: on AZERTY, the `6` key's place does not go to desktop 6 ([accessibility.md](accessibility.md)) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`;

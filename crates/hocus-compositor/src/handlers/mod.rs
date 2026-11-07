@@ -57,6 +57,7 @@ impl SeatHandler for State {
         set_primary_focus(&self.display_handle, seat, client);
         self.clipboard_focus_changed();
         self.emoji_focus_changed(focused);
+        self.magnifier_focus_changed(focused);
     }
 }
 delegate_seat!(State);

@@ -57,6 +57,7 @@ use crate::{
         flip::{self, Flip, Health},
         scale,
     },
+    magnifier::draw as magnifier,
     render::{BACKGROUND, OutputElement},
 };
 
@@ -124,6 +125,8 @@ struct Screen {
     powered: bool,
     /// Its connector's modes, as the kernel gives them.
     modes: Vec<smithay::reexports::drm::control::Mode>,
+    /// Its picture while the magnifier is on it (#424).
+    lens: magnifier::Lens<GlesTexture>,
 }
 
 /// Takes the seat, opens the primary GPU, lights the connected screens and
@@ -632,6 +635,7 @@ impl TtyBackend {
             pace: None,
             powered: true,
             modes: info.modes().to_vec(),
+            lens: magnifier::Lens::default(),
         })
     }
 
@@ -837,8 +841,8 @@ impl TtyBackend {
             }
         };
         let gles: &mut GlesRenderer = renderer.as_mut();
-        let elements = state.output_elements(gles, &screen.output, true);
-        let elements = clipped(&elements);
+        let shown = magnifier::screen(gles, state, &screen.output, true, &mut screen.lens);
+        let elements = clipped(&shown.elements);
         let result =
             match screen
                 .surface
@@ -847,11 +851,14 @@ impl TtyBackend {
                 Ok(result) => result,
                 Err(err) => {
                     tracing::warn!(output = screen.output.name(), ?err, "rendering failed");
+                    magnifier::after(gles, &shown);
                     return;
                 }
             };
         let empty = result.is_empty;
         let states = result.states;
+        magnifier::after(gles, &shown);
+        let states = shown.states.unwrap_or(states);
         if !empty {
             match screen.surface.queue_frame(()) {
                 Ok(()) => {
