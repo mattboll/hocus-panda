@@ -1,7 +1,7 @@
 //! The panda peeking out of the bar's edge (docs/design/bar.md §7 C, 4.5):
-//! when an agent starts waiting, or finishes, its panda (96 px) comes out
-//! from under the bar's edge, at its row's height, with a bubble saying
-//! who and why; it stays still for 8 s, then goes back in. It comes out
+//! when an agent starts waiting, or finishes, its panda (200 px, #649)
+//! comes out from under the bar's edge, at its row's height, with a bubble
+//! saying who and why; it stays 8 s, playing its mood, then goes back in. It comes out
 //! once more with a waiting agent's reminder (the halo's timer, 5 min by
 //! default, [`crate::halo`]), never for a stuck agent. A click on it goes
 //! to the agent (4.3), and it goes back at once. The latest replaces the
@@ -58,7 +58,8 @@ use crate::{
 pub const OUT: Duration = Duration::from_millis(320);
 pub const OUT_CURVE: Bezier = Bezier(0.2, 0.9, 0.25, 1.15);
 pub const FADE_IN: Duration = Duration::from_millis(260);
-/// It stays out this long, still.
+/// It stays out this long (its panda playing its mood, drawn by the
+/// shell).
 pub const STAYS: Duration = Duration::from_secs(8);
 /// The winking panda saying screens moved stays out this long.
 pub const SCREENS_STAY: Duration = Duration::from_secs(4);
@@ -68,8 +69,9 @@ pub const BACK: Duration = Duration::from_millis(260);
 pub const BACK_CURVE: Bezier = Bezier(0.5, 0.0, 0.75, 0.3);
 pub const FADE_OUT: Duration = Duration::from_millis(220);
 /// Where it is when in: this far toward the bar, logical pixels: the
-/// panda (170 px) and its 18 px from the bar, under the bar.
-pub const SLIDE: f64 = 190.0;
+/// panda (200 px) and its 18 px from the bar, under the bar (#649: the
+/// 190 px of a 170 px panda, grown alike).
+pub const SLIDE: f64 = 190.0 * 200.0 / 170.0;
 /// On the CPU, its surface is a card (no alpha): its corners' radius, the
 /// bubble's.
 pub const CARD_RADIUS: f64 = 12.0;

@@ -1,12 +1,16 @@
 //! The panda peeking out of the bar's edge (bar.md §7 C, 4.5): when the
-//! compositor says so (`peek`), the agent's panda (170 px; holding out its
-//! hat when it waits, its arms up when it finished) and its bubble ("**site-web**
-//! t'attend · à l'instant", "**api-paiements** a fini") on a layer surface
-//! of their own beside each bar, 18 px from it, at the agent's row's
-//! height. The shell draws them once; the compositor moves the surface out
-//! from under the bar and back, and says when it is back (`no-peek`): the
-//! surfaces then go, and nothing is drawn at rest. A newer peek takes the
-//! surfaces of the one out.
+//! compositor says so (`peek`), the agent's panda (200 px since #649;
+//! holding out its hat when it waits, its arms up when it finished) and its
+//! bubble ("**site-web** t'attend · à l'instant", "**api-paiements** a
+//! fini") on a layer surface of their own beside each bar, 18 px from it,
+//! at the agent's row's height. The compositor moves the surface out from
+//! under the bar and back, and says when it is back (`no-peek`): the
+//! surfaces then go, and nothing is drawn at rest. While it is out, its
+//! panda plays its mood (waiting: its hat sways, its ear rings, its "?"
+//! bobs; done: it tosses its hat), from its first frame for the 8 s it is
+//! out, then lies still; the winking one waves its hat twice. Not with
+//! reduced motion, in power saver or on the CPU: the still drawing, drawn
+//! once. A newer peek takes the surfaces of the one out.
 //!
 //! When windows move with a screen gone or back (`screens-moved`,
 //! windows.md §12), the winking panda comes out the same way with a blue
@@ -26,9 +30,10 @@
 use std::{
     collections::HashMap,
     sync::{
-        Mutex, OnceLock, PoisonError,
+        Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 use hocus_link::{EDGE, Form, PEEK_NAMESPACE, Peek, PeekKind, ScreensMoved};
@@ -44,6 +49,7 @@ use iced::{
 };
 
 use super::{Words, now_us};
+use crate::pandas::{self, Burst, Mood};
 use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
@@ -55,7 +61,12 @@ use crate::{
 
 /// The panda's box, and its gap to the bubble; the box's distance from
 /// the bar.
-pub const PANDA: f32 = 170.0;
+pub const PANDA: f32 = 200.0;
+/// How long its panda plays its mood from its first frame: the 8 s it is
+/// out (the compositor's `peek::STAYS`), settling as it goes back; the
+/// winking one waves its hat twice (two 1.1 s waves).
+const PLAYS: Duration = Duration::from_millis(7700);
+const WAVES: Duration = Duration::from_millis(2200);
 const GAP: f32 = 8.0;
 pub const FROM_BAR: f32 = 18.0;
 /// The bubble: Manrope 13 px, 8 px and 12 px in, a 1 px border, radius 12.
@@ -376,6 +387,8 @@ struct Out {
     said: Said,
     /// Its surface beside each bar, and where.
     surfaces: HashMap<String, (window::Id, Placed)>,
+    /// Its panda playing its mood, from its first frame (#649).
+    burst: Option<Burst>,
 }
 
 static OUT: Mutex<Option<Out>> = Mutex::new(None);
@@ -505,6 +518,7 @@ fn show(shown: Shown, said: Said) {
             shown,
             said,
             surfaces,
+            burst: None,
         });
     });
     effects.push(Effect::Wake(PEEK_NAMESPACE));
@@ -619,28 +633,10 @@ impl Shown {
     }
 }
 
-/// The panda in `pose`, with its drop shadow, drawn `ROOM` px larger on
-/// each side than its box (`shadow`), or plain (on the CPU).
-fn panda(pose: Pose, shadow: bool) -> &'static svg::Handle {
-    static PANDAS: OnceLock<[svg::Handle; 6]> = OnceLock::new();
-    let pandas = PANDAS.get_or_init(|| {
-        let drawings = [
-            hocus_pandas::Mood::Waiting.still(),
-            hocus_pandas::Mood::Done.still(),
-            hocus_pandas::Mood::Wink.still(),
-        ];
-        let shadowed = drawings.map(|d| svg::Handle::from_memory(shadowed(d).into_bytes()));
-        let plain = drawings.map(|d| svg::Handle::from_memory(d.as_bytes()));
-        let [a, b, c] = shadowed;
-        let [d, e, f] = plain;
-        [a, b, c, d, e, f]
-    });
-    let index = match pose {
-        Pose::Waiting => 0,
-        Pose::Done => 1,
-        Pose::Wink => 2,
-    };
-    &pandas[if shadow { index } else { index + 3 }]
+/// `mood`'s still drawing with its drop shadow, drawn [`PANDA_REACH`] px
+/// larger on each side than its box.
+fn panda(mood: Mood) -> svg::Handle {
+    pandas::drawn(mood, None, Instant::now(), Some(shadowed))
 }
 
 /// How far the panda's drawing reaches out for its shadow, px at ×1.
@@ -719,9 +715,26 @@ pub struct View {
 pub struct State {
     pointer: Option<Point>,
     hover: bool,
+    now: Option<Instant>,
 }
 
 impl View {
+    /// Its panda's burst, started as the peek first draws (#649), when the
+    /// pandas play: none drawn when they do not.
+    fn burst(&self, now: Instant) -> Option<Burst> {
+        out(|out| {
+            let out = out.as_mut()?;
+            if out.burst.is_none() && pandas::lively() && !card() {
+                let window = match out.shown {
+                    Shown::Agent(_) => PLAYS,
+                    Shown::Screens => WAVES,
+                };
+                out.burst = Some(Burst::lasting(now, window));
+            }
+            out.burst
+        })
+    }
+
     /// What it shows now, and where.
     fn shown(&self) -> Option<(Shown, Said, Placed)> {
         out(|out| {
@@ -742,8 +755,17 @@ impl<Message> canvas::Program<Message> for View {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let iced::Event::Mouse(event) = event else {
-            return None;
+        let event = match event {
+            iced::Event::Window(window::Event::RedrawRequested(now)) => {
+                state.now = Some(*now);
+                // Drawn again while its panda plays, never after.
+                return self
+                    .burst(*now)
+                    .filter(|b| b.plays(*now))
+                    .map(|_| canvas::Action::request_redraw());
+            }
+            iced::Event::Mouse(event) => event,
+            _ => return None,
         };
         let (shown, _, placed) = self.shown()?;
         state.pointer = pointer(event, bounds, cursor, state.pointer);
@@ -841,10 +863,17 @@ impl<Message> canvas::Program<Message> for View {
             ),
             Size::new(PANDA + 2.0 * reach, tall + 2.0 * reach),
         );
-        let drawing = match (card(), pose) {
-            (true, Pose::Waiting) => super::draw::panda(super::Look::Waiting).clone(),
-            (true, Pose::Done) => super::draw::panda(super::Look::ToSee).clone(),
-            (card, pose) => panda(pose, !card).clone(),
+        let mood = match pose {
+            Pose::Waiting => Mood::Waiting,
+            Pose::Done => Mood::Done,
+            Pose::Wink => Mood::Wink,
+        };
+        let now = state.now.unwrap_or_else(Instant::now);
+        let burst = out(|out| out.as_ref().and_then(|o| o.burst));
+        let drawing = match (card(), burst.filter(|b| b.plays(now))) {
+            (true, _) => pandas::still(mood),
+            (false, None) => panda(mood),
+            (false, Some(burst)) => pandas::drawn(mood, Some(burst), now, Some(shadowed)),
         };
         f.draw_svg(drawn, svg::Svg::new(drawing));
         vec![f.into_geometry()]
@@ -936,16 +965,16 @@ mod tests {
         // A 200 px bubble beside the full bar, the row's middle 171 px
         // under its top.
         let p = placed(Form::Full, 171.0, 200.0, 1, false);
-        // The panda's box: 170 px, its right 18 px from the bar, its
-        // middle the row's.
+        // The panda's box: 200 px (#649), its right 18 px from the bar,
+        // its middle the row's.
         assert_eq!(
             p.in_bar,
-            Rectangle::new(Point::new(-384.0, 86.0), Size::new(170.0, 170.0))
+            Rectangle::new(Point::new(-414.0, 71.0), Size::new(200.0, 200.0))
         );
         assert_eq!(p.panda.x + PANDA + ROOM.2, p.size.0 as f32);
         let right = p.margin.1 as f32 + ROOM.2;
         assert_eq!(right, 8.0 + 196.0 + 18.0);
-        assert_eq!(p.margin.0 as f32 + ROOM.1, 8.0 + 86.0);
+        assert_eq!(p.margin.0 as f32 + ROOM.1, 8.0 + 71.0);
         // The bubble 8 px before it, in its middle.
         assert_eq!(p.bubble.x + p.bubble.width + GAP, p.panda.x);
         assert!((p.bubble.center_y() - p.panda.center_y()).abs() < 1e-3);
@@ -953,11 +982,11 @@ mod tests {
         // Beside the mini bar, as far from it.
         let mini = placed(Form::Mini, 171.0, 200.0, 1, false);
         assert_eq!(mini.margin.1 as f32 + ROOM.2, 8.0 + 56.0 + 18.0);
-        assert_eq!(mini.in_bar.x, -56.0 - 18.0 - 170.0);
+        assert_eq!(mini.in_bar.x, -56.0 - 18.0 - 200.0);
         // On the CPU: a card, the panda's box its height, 8 px after it.
         let card = placed(Form::Full, 171.0, 200.0, 1, true);
-        assert_eq!(card.size, (386, 170));
-        assert_eq!(card.margin, (94, 8 + 196 + 18 - 8, 0, 0));
+        assert_eq!(card.size, (416, 200));
+        assert_eq!(card.margin, (79, 8 + 196 + 18 - 8, 0, 0));
         assert_eq!(card.in_bar, p.in_bar);
         // Near the bar's top, the panda stays below it.
         let high = placed(Form::Full, 20.0, 200.0, 2, false);
