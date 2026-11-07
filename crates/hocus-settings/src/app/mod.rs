@@ -1734,10 +1734,16 @@ impl App {
                 .collect();
         }
         if section == SectionId::Screens {
+            // The night light's rows after the page's own (#436).
+            let night = crate::screens::NIGHT_ROWS
+                .iter()
+                .filter_map(|id| crate::model::setting(id))
+                .map(|s| Control::Setting(Slot::of(s, self.source)));
             return self
                 .screens_controls()
                 .into_iter()
                 .map(Control::Screens)
+                .chain(night)
                 .collect();
         }
         if section == SectionId::Wallpaper {

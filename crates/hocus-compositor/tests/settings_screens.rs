@@ -10,7 +10,8 @@
 //! with "Garder" and written; a resolution tried and taken back by the
 //! compositor after 15 s on the held clock, the file untouched; the
 //! compositor following the file's screens (mode, place, scale, off, the
-//! primary screen); the search's words; at rest, no commit.
+//! primary screen); the search's words; at rest, no commit; the night
+//! light's rows writing `[night-light]`, which the compositor takes.
 //!
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), as `settings.rs` does.
@@ -225,6 +226,29 @@ impl Bed {
     fn click(&mut self, id: &str) -> anyhow::Result<()> {
         let at = self.at(id)?;
         self.click_at(at)
+    }
+
+    /// `id` scrolled into the window.
+    fn reveal(&mut self, id: &str) -> anyhow::Result<()> {
+        settings_page::reveal(
+            &mut self.hp,
+            &self.log,
+            APP_ID,
+            id,
+            &settings_page::Wheel {
+                x: 520.0,
+                notches: 2,
+                top: 56.0,
+                floor: settings_page::Floor::AboveToast(90.0),
+            },
+        )
+    }
+
+    /// A model row's menu, its choice `n`.
+    fn choose_model(&mut self, row: &str, n: usize) -> anyhow::Result<()> {
+        self.click(&format!("control:{row}"))?;
+        self.places_with(&format!("option:{n}"))?;
+        self.click(&format!("option:{n}"))
     }
 
     /// Screen `name`'s middle on the drawing, on the screen.
@@ -997,5 +1021,81 @@ fn screenshot_of_the_screen_sets() -> anyhow::Result<()> {
     bed.shows(|s| s["screens"]["menu"] == "screens.sets")?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     shot(&mut bed, "ecrans-oublier.png")?;
+    Ok(())
+}
+
+/// The night light (#436): its switch, then its start hour, written into
+/// `[night-light]`, which the compositor takes; its rows inert while it
+/// is off.
+#[test]
+fn the_night_light_rows_write_its_section() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.reveal("control:screens.night-light.temperature")?;
+    bed.click("control:screens.night-light")?;
+    let text = bed.written(|t| t.contains("[night-light]"))?;
+    assert_eq!(text, format!("{FILE}\n[night-light]\nenabled = true\n"));
+    let on = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.state().config.night_light.enabled)?;
+    anyhow::ensure!(on, "the compositor never took it");
+    // 22:00, the ninth of the evening's hours from 18:00.
+    bed.reveal("control:screens.night-light.from")?;
+    bed.choose_model("screens.night-light.from", 8)?;
+    bed.written(|t| t.contains("from = \"22:00\""))?;
+    let from = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.state().config.night_light.from == 22 * 60)?;
+    anyhow::ensure!(from, "the compositor never took the hour");
+    Ok(())
+}
+
+/// For the maintainer (`HOCUS_SHOTS=DIR`): the night light's rows, on.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshot_of_the_night_light() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let file = format!("{FILE}\n[night-light]\nenabled = true\ntemperature = 3500\n");
+    let Some(mut bed) = Bed::start_on(&file, &["2880x1800@2:340x210mm", "3440x1440:800x335mm"])?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.reveal("control:screens.night-light.temperature")?;
+    bed.hp.pointer_move(5.0, 5.0);
+    let mut last = bed.hp.window_commits();
+    let mut still = 0;
+    for _ in 0..30 {
+        if still >= 5 {
+            break;
+        }
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        let now = bed.hp.window_commits();
+        still = if now == last { still + 1 } else { 0 };
+        last = now;
+    }
+    let window = bed.window()?;
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+    let x = (window.x * 2).max(0) as u32;
+    let y = (window.y * 2).max(0) as u32;
+    let cw = ((window.width * 2) as u32).min(w as u32 - x);
+    let ch = ((window.height * 2) as u32).min(h as u32 - y);
+    let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+    let path = out.join("night-light.png");
+    image.save(&path)?;
+    eprintln!("{}", path.display());
     Ok(())
 }

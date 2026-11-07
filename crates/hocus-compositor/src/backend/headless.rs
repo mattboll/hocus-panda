@@ -76,7 +76,15 @@ pub struct HeadlessBackend {
     gles_share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
     pixman_share:
         Box<crate::share::frames::Frames<PixmanRenderer, pixman::Image<'static, 'static>>>,
+    /// The night light's temperature the outputs were last handed, and
+    /// its gamma ramps (#436): headless has no gamma to set, the tests
+    /// read what a screen would get.
+    night: Option<u32>,
+    gamma: Option<Box<[Vec<u16>; 3]>>,
 }
+
+/// The gamma ramps' size headless, a common one of display engines.
+pub const GAMMA_SIZE: usize = 256;
 
 impl std::fmt::Debug for HeadlessBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -161,6 +169,8 @@ pub fn init(
         frame_timer: None,
         gles_share: Default::default(),
         pixman_share: Default::default(),
+        night: None,
+        gamma: None,
     };
     tracing::info!(renderer = backend.renderer(), "headless backend ready");
     Ok(backend)
@@ -545,6 +555,12 @@ impl HeadlessBackend {
         }
     }
 
+    /// The gamma ramps the outputs were handed last (red, green, blue):
+    /// `None` for their own.
+    pub fn gamma(&self) -> Option<&[Vec<u16>; 3]> {
+        self.gamma.as_deref()
+    }
+
     pub fn renderer(&self) -> &'static str {
         match self.canvas {
             Canvas::Gles(_) => "gles",
@@ -619,6 +635,12 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // The night light's ramps (#436), as a screen would get them.
+        let night = state.night_light_kelvin();
+        if night != self.night {
+            self.night = night;
+            self.gamma = night.map(|k| Box::new(crate::night_light::ramp(GAMMA_SIZE, k)));
+        }
         // The desktop's last frame as it locks (7.1), before anything else
         // draws it locked.
         if state.lock.wants_freeze() {

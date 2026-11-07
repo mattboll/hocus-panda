@@ -265,6 +265,9 @@ struct Screen {
     modes: Vec<smithay::reexports::drm::control::Mode>,
     /// Its picture while the magnifier is on it (#424).
     lens: Lens,
+    /// The night light's temperature its gamma ramp was last given
+    /// (`Some(None)`: its own white); `None`: to give again (#436).
+    gamma: Option<Option<u32>>,
 }
 
 /// Takes the seat, opens the primary GPU, lights the connected screens and
@@ -882,6 +885,7 @@ impl TtyBackend {
             powered: true,
             modes: info.modes().to_vec(),
             lens,
+            gamma: None,
         })
     }
 
@@ -973,6 +977,8 @@ impl TtyBackend {
             screen.dirty = true;
             // Turned off again by `power` if it was.
             screen.powered = true;
+            // Another terminal may have set its own ramp.
+            screen.gamma = None;
         }
     }
 
@@ -1056,6 +1062,7 @@ impl TtyBackend {
                 self.relight();
             }
             self.power(state);
+            self.night_light(state.night_light_kelvin());
         }
         if !state.redraw {
             return;
@@ -1076,6 +1083,36 @@ impl TtyBackend {
             .collect();
         for crtc in ready {
             self.render(crtc, state);
+        }
+    }
+
+    /// Each lit screen's gamma ramp for the night light's temperature
+    /// (#436), when it is not what it was last given.
+    fn night_light(&mut self, kelvin: Option<u32>) {
+        let Gpu {
+            outputs, screens, ..
+        } = &mut self.gpu;
+        let drm = outputs.device();
+        for (crtc, screen) in screens.iter_mut() {
+            if !screen.powered || screen.gamma == Some(kelvin) {
+                continue;
+            }
+            match set_gamma(drm, *crtc, kelvin) {
+                Ok(()) => screen.gamma = Some(kelvin),
+                // A frame on its way: again after the next.
+                Err(err) if err.kind() == std::io::ErrorKind::ResourceBusy => {
+                    tracing::debug!(output = screen.output.name(), %err, "gamma busy");
+                }
+                Err(err) => {
+                    // Not again for this temperature.
+                    screen.gamma = Some(kelvin);
+                    tracing::warn!(
+                        output = screen.output.name(),
+                        %err,
+                        "no night light on this screen"
+                    );
+                }
+            }
         }
     }
 
@@ -1166,6 +1203,38 @@ impl TtyBackend {
         state.desktops_drawn(&output);
         if empty {
             pace(screen, crtc, state);
+        }
+    }
+}
+
+/// `crtc`'s gamma ramp for `kelvin` (`None`: straight, its own white),
+/// at the size its display engine takes (the legacy ramp, which the
+/// kernel turns into `GAMMA_LUT` for atomic drivers).
+fn set_gamma(drm: &DrmDevice, crtc: crtc::Handle, kelvin: Option<u32>) -> std::io::Result<()> {
+    let size = drm.get_crtc(crtc)?.gamma_length() as usize;
+    if size < 2 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "the screen's display engine has no gamma ramp",
+        ));
+    }
+    let [red, green, blue] =
+        crate::night_light::ramp(size, kelvin.unwrap_or(crate::night_light::NEUTRAL));
+    drm.set_gamma(crtc, &red, &green, &blue)
+}
+
+impl Drop for TtyBackend {
+    /// The screens' own white back for what shows after the session (the
+    /// display manager, a console), when the night light warmed them.
+    fn drop(&mut self) {
+        if self.active
+            && self
+                .gpu
+                .screens
+                .values()
+                .any(|s| s.gamma.is_some_and(|k| k.is_some()))
+        {
+            self.night_light(None);
         }
     }
 }

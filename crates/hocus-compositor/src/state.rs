@@ -242,6 +242,8 @@ pub struct State {
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
     pub opacity: crate::opacity::Opacity,
+    /// The night light (#436).
+    pub night: crate::night_light::Night,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -486,6 +488,7 @@ impl State {
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             magnifier: crate::magnifier::Magnifier::default(),
             opacity: crate::opacity::Opacity::default(),
+            night: crate::night_light::Night::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

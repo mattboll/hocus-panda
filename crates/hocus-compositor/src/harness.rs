@@ -1684,6 +1684,21 @@ impl Headless {
         self.app.state.model.is_above(id)
     }
 
+    /// The night light's gamma ramps the screens were handed last (red,
+    /// green, blue), `None` for their own white (#436).
+    pub fn gamma(&self) -> Option<[Vec<u16>; 3]> {
+        self.app.backend.headless()?.gamma().cloned()
+    }
+
+    /// The wall clock at `hour`:`minute` for the night light, which looks
+    /// at it again; from then on it follows only this.
+    pub fn night_light_clock(&mut self, hour: u16, minute: u16) {
+        self.app
+            .state
+            .night_light_clock(f64::from(hour * 60 + minute));
+        self.app.after_dispatch();
+    }
+
     /// Window `id`'s opacity, in percent (#735).
     pub fn opacity(&self, id: WindowId) -> u8 {
         self.app.state.opacity_of(id)

@@ -265,6 +265,10 @@ impl State {
         if self.magnifier_config_changed(&new.magnifier) {
             followed.push("[magnifier]");
         }
+        // The night light (#436): the temperature at once, its next wake.
+        if self.night_light_config_changed(&new.night_light) {
+            followed.push("[night-light]");
+        }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {
             self.config.panel.windows = new.panel.windows;

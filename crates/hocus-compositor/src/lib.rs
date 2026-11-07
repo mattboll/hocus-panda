@@ -46,6 +46,7 @@ mod magnet;
 mod magnifier;
 pub mod model;
 pub mod motion;
+mod night_light;
 mod opacity;
 mod output_spec;
 mod overlay;
@@ -95,9 +96,9 @@ pub use config::{
     Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
     Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FollowPointer,
     FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings,
-    OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings, PanelScreens,
-    PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
-    Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
+    NightLight, OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings,
+    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
+    Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
     SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
@@ -266,6 +267,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     // On from the start when `[magnifier]` says so (#424), its screens
     // known now.
     state.magnifier_start();
+    // The night light at the clock's hour (#436).
+    state.night_light_update();
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
