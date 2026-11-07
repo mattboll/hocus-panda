@@ -5,7 +5,9 @@
 //! kinds that holds the keyboard; `Tab` moves the focus along its rows;
 //! `Esc` gives the focus back to the bar's sound.
 //!
-//! Pixman here, so the shell draws on the CPU, as in CI.
+//! Pixman here, so the shell draws on the CPU, as in CI. And
+//! `Super+Alt+S` starts the screen reader, or stops it: a fake one here,
+//! as on a real session (nested, never).
 
 mod common;
 #[path = "levels/fakes.rs"]
@@ -19,7 +21,7 @@ use std::{
 };
 
 use anyhow::Context;
-use common::{KEY_ESC, KEY_TAB, WAIT, shell_program};
+use common::{KEY_ESC, KEY_LEFTALT, KEY_LEFTMETA, KEY_TAB, WAIT, chord, shell_program};
 use fakes::{FakeSink, Fakes};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
@@ -178,5 +180,55 @@ fn without_a_shell_it_says_so() -> anyhow::Result<()> {
         ..HeadlessConfig::default()
     })?;
     assert_eq!(ask(&mut hp)?, "no shell\n");
+    Ok(())
+}
+
+const KEY_S: u32 = 31;
+
+/// A process's state letter (`R`, `S`, `Z`…), if it is there.
+fn process_state(pid: u32) -> Option<char> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(')')?.1.trim_start().chars().next()
+}
+
+#[test]
+fn super_alt_s_starts_the_screen_reader_and_stops_it() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let program = dir.path().join("reader");
+    // A screen reader that says it started and waits.
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\necho \"$@\" > {}\nexec sleep 600\n",
+            dir.path().join("started").display()
+        ),
+    )?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))?;
+    let mut hp = Headless::start(HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
+    })?;
+    // Nested (not the session): nothing starts.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_S]);
+    common::wait(&mut hp, Duration::from_millis(200))?;
+    assert_eq!(hp.screen_reader(), None);
+
+    hp.allow_screen_reader(program);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_S]);
+    let pid = hp.screen_reader().context("it did not start")?;
+    let said = dir.path().join("started");
+    let started = hp.dispatch_until(WAIT, |_| said.exists())?;
+    assert!(started, "the program did not run");
+    assert_eq!(std::fs::read_to_string(&said)?.trim(), "--replace");
+
+    // Again: it is stopped, and seen gone.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_S]);
+    let gone = hp.dispatch_until(Duration::from_secs(10), |hp| hp.screen_reader().is_none())?;
+    assert!(gone, "still running");
+    assert!(
+        process_state(pid).is_none_or(|s| s == 'Z'),
+        "process {pid} still there"
+    );
     Ok(())
 }
