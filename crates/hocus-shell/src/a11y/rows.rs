@@ -22,6 +22,9 @@ pub struct Rows {
     pub order: Vec<String>,
     /// The row the ring is on.
     pub focus: Option<String>,
+    /// The rows are gone through with the arrows (a list whose selection
+    /// moves), not `Tab`.
+    pub arrows: bool,
 }
 
 static ROWS: Mutex<Option<(window::Id, Rows)>> = Mutex::new(None);
@@ -109,6 +112,19 @@ pub fn tabs(order: &[String], focus: Option<&str>, to: &str) -> Option<usize> {
     )
 }
 
+/// The arrows that take the selection from `focus` to `to` in `order`
+/// (`true`: down), the first from nothing being `Down`.
+pub fn arrows(order: &[String], focus: Option<&str>, to: &str) -> Option<(usize, bool)> {
+    let to = order.iter().position(|k| k == to)?;
+    Some(
+        match focus.and_then(|f| order.iter().position(|k| k == f)) {
+            Some(at) if to >= at => (to - at, true),
+            Some(at) => (at - to, false),
+            None => (to + 1, true),
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +138,8 @@ mod tests {
         assert_eq!(tabs(&order, Some("c"), "a"), Some(1));
         assert_eq!(tabs(&order, Some("a"), "c"), Some(2));
         assert_eq!(tabs(&order, Some("a"), "z"), None);
+        assert_eq!(arrows(&order, None, "b"), Some((2, true)));
+        assert_eq!(arrows(&order, Some("c"), "a"), Some((2, false)));
+        assert_eq!(arrows(&order, Some("b"), "c"), Some((1, true)));
     }
 }

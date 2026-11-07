@@ -494,6 +494,7 @@ impl<Message> canvas::Program<Message> for Panel {
                     .map(crate::a11y::rows::key)
                     .collect(),
                 focus: state.focus.map(crate::a11y::rows::key),
+                arrows: false,
             },
         );
         vec![frame.into_geometry()]

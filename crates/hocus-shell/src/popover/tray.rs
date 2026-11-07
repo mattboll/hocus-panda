@@ -323,6 +323,7 @@ impl Panel {
                 nodes,
                 order: rows::order(Self::targets(&root, level)),
                 focus: state.focus.map(rows::key),
+                arrows: false,
             },
         );
     }

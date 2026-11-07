@@ -430,6 +430,7 @@ impl Panel {
                 nodes,
                 order: rows::order(state.ids()),
                 focus: state.focus.map(rows::key),
+                arrows: false,
             },
         );
     }

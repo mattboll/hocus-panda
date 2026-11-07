@@ -696,6 +696,7 @@ impl Panel {
                 nodes,
                 order: rows::order(layout.targets.iter().map(|(t, _)| *t)),
                 focus: state.focus.map(rows::key),
+                arrows: false,
             },
         );
     }

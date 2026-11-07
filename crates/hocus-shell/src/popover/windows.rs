@@ -205,6 +205,7 @@ impl Panel {
                 nodes,
                 order: rows::order(items.iter().map(|(i, _)| *i)),
                 focus: state.focus.map(rows::key),
+                arrows: false,
             },
         );
     }

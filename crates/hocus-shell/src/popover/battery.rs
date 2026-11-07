@@ -402,6 +402,7 @@ impl Panel {
                 nodes,
                 order: rows::order(modes),
                 focus: state.focus.map(rows::key),
+                arrows: false,
             },
         );
     }

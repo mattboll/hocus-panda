@@ -438,6 +438,7 @@ impl Panel {
                 nodes,
                 order: rows::order(state.order()),
                 focus: state.focus.as_ref().map(rows::key),
+                arrows: false,
             },
         );
     }

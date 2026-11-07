@@ -31,7 +31,7 @@ use hocus_a11y::{Act, Asked, Bridge, Event, Rect, Window};
 use hocus_link::LevelKey;
 use iced::{Rectangle, window};
 
-pub use words::Words;
+pub use words::{Words, plain};
 
 use crate::{clock::time::Lang, popover::Item};
 
@@ -509,8 +509,23 @@ fn press_row(row: &str, act: Act) {
     let Some(rows) = rows::of(surface) else {
         return;
     };
-    let Some(tabs) = rows::tabs(&rows.order, rows.focus.as_deref(), row) else {
-        return;
+    let (steps, step) = if rows.arrows {
+        let Some((n, down)) = rows::arrows(&rows.order, rows.focus.as_deref(), row) else {
+            return;
+        };
+        (
+            n,
+            if down {
+                Named::ArrowDown
+            } else {
+                Named::ArrowUp
+            },
+        )
+    } else {
+        let Some(n) = rows::tabs(&rows.order, rows.focus.as_deref(), row) else {
+            return;
+        };
+        (n, Named::Tab)
     };
     let then = match act {
         Act::Click => Named::Enter,
@@ -519,8 +534,8 @@ fn press_row(row: &str, act: Act) {
         Act::Focus => Named::Shift,
         Act::Menu => return,
     };
-    for _ in 0..tabs {
-        crate::popover::key(&Key::Named(Named::Tab), Modifiers::empty(), None);
+    for _ in 0..steps {
+        crate::popover::key(&Key::Named(step), Modifiers::empty(), None);
     }
     if then != Named::Shift {
         crate::popover::key(&Key::Named(then), Modifiers::empty(), None);
