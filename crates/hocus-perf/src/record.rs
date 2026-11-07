@@ -372,6 +372,17 @@ impl Today {
         })
     }
 
+    /// Whether `kind`'s notification is the first today; if so, noted in
+    /// the file, so that a later session of the day sends none.
+    fn first(&mut self, kind: SignalKind, t: i64) -> bool {
+        if self.notified.contains(&kind) {
+            return false;
+        }
+        self.notified.push(kind);
+        self.write(&Line::Notified { notified: kind, t });
+        true
+    }
+
     /// Appends `line`, unless the day is full.
     fn write(&mut self, line: &Line) {
         let mut text = line.encode();
@@ -546,14 +557,9 @@ fn run(setup: Setup, mut before: Taken, stopped: &mpsc::Receiver<()>) {
         before.events.clear();
         today.write(&Line::Sample(sample.clone()));
         for kind in watch.feed(&sample) {
-            if today.notified.contains(&kind) {
+            if !today.first(kind, sample.t) {
                 continue;
             }
-            today.notified.push(kind);
-            today.write(&Line::Notified {
-                notified: kind,
-                t: sample.t,
-            });
             if let Some(signal) = watch.holding(kind) {
                 tracing::info!(?kind, "a signal of the performance");
                 raised(signal.clone());
@@ -695,17 +701,24 @@ mod tests {
     }
 
     #[test]
-    fn notified_kinds_are_remembered_for_the_day() {
+    fn a_signal_is_notified_once_a_day_per_kind() {
         let dir = tempfile::tempdir().expect("a folder");
         let date = jiff::civil::date(2026, 11, 7);
         let mut today = Today::open(dir.path(), date).expect("opened");
-        today.write(&Line::Notified {
-            notified: SignalKind::Wakeups,
-            t: 1,
-        });
+        assert!(today.first(SignalKind::Wakeups, 1));
+        assert!(!today.first(SignalKind::Wakeups, 2));
+        assert!(today.first(SignalKind::SlowMoment, 3));
         drop(today);
-        let again = Today::open(dir.path(), date).expect("opened");
-        assert_eq!(again.notified, [SignalKind::Wakeups]);
+        // A later session of the same day: none again.
+        let mut again = Today::open(dir.path(), date).expect("opened");
+        assert_eq!(
+            again.notified,
+            [SignalKind::Wakeups, SignalKind::SlowMoment]
+        );
+        assert!(!again.first(SignalKind::Wakeups, 4));
+        // Another day: one again.
+        let mut tomorrow = Today::open(dir.path(), jiff::civil::date(2026, 11, 8)).expect("opened");
+        assert!(tomorrow.first(SignalKind::Wakeups, 5));
     }
 
     #[test]
