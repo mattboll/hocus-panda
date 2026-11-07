@@ -584,7 +584,7 @@ impl View {
         let b = layout.tone_button;
         f.fill(&Path::circle(b.center(), b.width / 2.0), FIELD_FILL.get());
         if open.hover == Some(Target::ToneButton) {
-            f.fill(&Path::circle(b.center(), b.width / 2.0), HOVER.get());
+            crate::theme::hover(f, &Path::circle(b.center(), b.width / 2.0), HOVER.get());
         }
         f.stroke(
             &Path::circle(b.center(), b.width / 2.0 - 0.5),
@@ -619,7 +619,7 @@ impl View {
             if Some(*heading) == lit {
                 f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_LIT.get());
             } else if open.hover == Some(Target::Tab(i)) {
-                f.fill(&kit::rounded(*rect, TAB_RADIUS), HOVER.get());
+                crate::theme::hover(f, &kit::rounded(*rect, TAB_RADIUS), HOVER.get());
             }
             let dim = lit.is_some() && Some(*heading) != lit;
             emoji(

@@ -502,15 +502,10 @@ impl Panel {
         for i in 0..keyboard.levels() {
             let rect = segment(i, keyboard.levels());
             let chosen = i == level;
-            let fill = if chosen {
-                Some(CHOSEN)
+            if chosen {
+                f.fill(&rounded(rect, SEGMENT_RADIUS), CHOSEN.get());
             } else if state.pointer.hover == Some(Target::Level(i)) {
-                Some(SEGMENT_HOVER)
-            } else {
-                None
-            };
-            if let Some(fill) = fill {
-                f.fill(&rounded(rect, SEGMENT_RADIUS), fill.get());
+                crate::theme::hover(f, &rounded(rect, SEGMENT_RADIUS), SEGMENT_HOVER.get());
             }
             f.fill_text(kit::text_in(
                 MANROPE_SEMIBOLD,

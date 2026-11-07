@@ -424,15 +424,14 @@ impl canvas::Program<Message> for View {
                 }
                 Form::Mini => {
                     let rect = self.mark_rect(size);
-                    let lit = if open {
-                        Some(OPEN)
+                    if open {
+                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(OPEN.get(), alpha));
                     } else if still && state.hover == Some(Part::Mark) {
-                        Some(HOVER)
-                    } else {
-                        None
-                    };
-                    if let Some(lit) = lit {
-                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(lit.get(), alpha));
+                        crate::theme::hover(
+                            &mut frame,
+                            &kit::rounded(rect, MARK_RADIUS),
+                            faded(HOVER.get(), alpha),
+                        );
                     }
                     draw_mark(&mut frame, rect.center(), card.phase, alpha);
                     if focused == Some(Item::MeetingMark) {
@@ -497,7 +496,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
     let look = card.phase.look();
     f.fill(&kit::rounded(rect, RADIUS), faded(shown.fill, alpha));
     if shown.lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
+        crate::theme::hover(f, &kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
     }
     f.stroke(
         &kit::rounded(

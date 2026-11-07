@@ -970,7 +970,7 @@ Settings from the file.
 | card rim, divider | `#8E98AB`, `#6B7488` | `#4A5468`, `#6B7488` |
 | control, its rim | `#000000`, `#D0D6E0` | `#FFFFFF`, `#2E3546` |
 | switch off; chosen segment | black (its border `text.faint`); `#3A4255` | white; `#DDE1EA` |
-| hovers and fills | none | none |
+| hovers and fills | no fill: a hover is a 1 px border in `text.dim` (`theme::hover`) | the same |
 | text in the accent, the keyboard's ring | its "on dark" lifted until it reads at 7:1 on every background (green `#9DF0B9`) | its "on light" darkened to 7:1 (green about `#155C33`) |
 | `state.wait` / `stuck` / `meeting` as text | `#FFD27A` / `#FFB48A` / `#B5CCFF` | `#6B4500` / `#8A3300` / `#1C48A5` |
 | tinted rows (waiting, stuck, to see) | no tint; a 3 px bar on the row's left in the state's colour | the same |

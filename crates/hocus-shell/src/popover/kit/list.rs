@@ -124,18 +124,11 @@ pub(crate) fn reveal((top, height): (f32, f32), view: f32, scroll: f32, most: f3
 
 /// A list's row lit: the chosen one, or the one under the pointer.
 pub(crate) fn row_fill(f: &mut Frame, rect: Rectangle, chosen: bool, hovered: bool) {
-    let fill = if chosen {
-        Some(HOVER)
+    let path = Path::rounded_rectangle(rect.position(), rect.size(), ROW_RADIUS.into());
+    if chosen {
+        crate::theme::hover(f, &path, HOVER.get());
     } else if hovered {
-        Some(ROW_HOVER)
-    } else {
-        None
-    };
-    if let Some(fill) = fill {
-        f.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), ROW_RADIUS.into()),
-            fill.get(),
-        );
+        crate::theme::hover(f, &path, ROW_HOVER.get());
     }
 }
 

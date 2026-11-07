@@ -1162,7 +1162,7 @@ impl Drawn<'_> {
             return;
         };
         if self.hover(Target::Settings) {
-            f.fill(&kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
+            crate::theme::hover(f, &kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
         }
         let middle = rect.center_y();
         let tile = Rectangle::new(

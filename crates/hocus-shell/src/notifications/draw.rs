@@ -527,7 +527,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             Point::new(BORDER, BORDER),
             Size::new(WIDTH - 2.0 * BORDER, laid.button),
         );
-        f.fill(&kit::rounded(button, RADIUS - BORDER), HOVER.get());
+        crate::theme::hover(f, &kit::rounded(button, RADIUS - BORDER), HOVER.get());
     }
     let critical = note.urgency == Urgency::Critical;
     let rim = Path::rounded_rectangle(

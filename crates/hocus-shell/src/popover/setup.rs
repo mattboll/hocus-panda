@@ -1371,7 +1371,7 @@ impl Panel {
             Part::Account { rect, target, name } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
+                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1477,7 +1477,7 @@ impl Panel {
             } => {
                 let target = Some(Target::Calendar(*index));
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
+                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1562,7 +1562,7 @@ impl Panel {
             } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 8.0), ROW_HOVER.get());
+                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 8.0);
@@ -1595,7 +1595,7 @@ impl Panel {
             } => {
                 let target = Some(*target);
                 if lit(target) {
-                    f.fill(&kit::rounded(*rect, 7.0), ROW_HOVER.get());
+                    crate::theme::hover(f, &kit::rounded(*rect, 7.0), ROW_HOVER.get());
                 }
                 if focused(target) {
                     ring(f, *rect, 7.0);
@@ -1717,7 +1717,7 @@ const PALETTE_COLOURS: [Color; 8] = {
 /// keyboard.
 fn square(f: &mut Frame, rect: Rectangle, lit: bool, focused: bool) {
     if lit {
-        f.fill(&kit::rounded(rect, 7.0), ROW_HOVER.get());
+        crate::theme::hover(f, &kit::rounded(rect, 7.0), ROW_HOVER.get());
     }
     if focused {
         ring(f, rect, 7.0);

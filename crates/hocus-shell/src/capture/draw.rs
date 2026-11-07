@@ -386,7 +386,7 @@ impl View {
                                 .with_width(1.0),
                         );
                     } else if hovered {
-                        f.fill(&shape, HOVER.get());
+                        crate::theme::hover(f, &shape, HOVER.get());
                     }
                     let alpha = if on { 1.0 } else { OFF };
                     let middle = rect.center_y();
@@ -451,7 +451,7 @@ impl View {
                     );
                 }
                 Button::Pointer if bar.pointer => f.fill(&shape, CHOSEN.get()),
-                _ if hovered => f.fill(&shape, HOVER.get()),
+                _ if hovered => crate::theme::hover(f, &shape, HOVER.get()),
                 _ => {}
             }
             let middle = rect.center_y();

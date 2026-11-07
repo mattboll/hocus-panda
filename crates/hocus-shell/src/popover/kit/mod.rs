@@ -359,10 +359,15 @@ pub(crate) fn block_button(top: f32, height: f32, width: f32) -> Rectangle {
 
 /// A small button at `rect` saying `word`, lit under the pointer.
 pub(crate) fn small_button(f: &mut Frame, rect: Rectangle, word: &str, hover: bool) {
-    f.fill(
-        &rounded(rect, SMALL_RADIUS),
-        if hover { FILL_HOVER } else { FILL },
-    );
+    let path = rounded(rect, SMALL_RADIUS);
+    if hover && !crate::theme::contrast() {
+        f.fill(&path, FILL_HOVER);
+    } else {
+        f.fill(&path, FILL);
+        if hover {
+            crate::theme::hover(f, &path, FILL_HOVER);
+        }
+    }
     f.fill_text(text(
         word.to_owned(),
         rect.center(),

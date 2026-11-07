@@ -395,7 +395,7 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
         return;
     }
     if lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
+        crate::theme::hover(f, &kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
     }
     let x = rect.x + OUT;
     let middle = rect.center_y();
