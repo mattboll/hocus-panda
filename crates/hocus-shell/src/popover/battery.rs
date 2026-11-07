@@ -290,6 +290,7 @@ impl<Message> canvas::Program<Message> for Panel {
         if let Some(rect) = state.focus.and_then(|p| state.tile(p)) {
             ring(&mut frame, rect, TILE_RADIUS);
         }
+        self.say(state, layout);
         vec![frame.into_geometry()]
     }
 
@@ -359,6 +360,51 @@ impl Panel {
             .asked
             .is_some_and(|(asked, _)| state.levels.profile == Some(asked));
         kit::awaited(&mut state.asked, said, now, ASKED_FOR).map(canvas::Action::request_redraw_at)
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows).
+    fn say(&self, state: &State, layout: &Layout) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        let mut nodes = Vec::new();
+        if let Some(battery) = state.levels.battery.filter(|_| layout.battery.is_some()) {
+            nodes.push(
+                Node::new("level", Role::ProgressBar, self.words.battery_title(true))
+                    .value(format!("{}\u{a0}%", battery.shown()))
+                    .range(f64::from(battery.shown()), 0.0, 100.0, None),
+            );
+            nodes.push(rows::line(layout.state.join(" ")));
+        }
+        let modes = state.targets();
+        if layout.tiles.is_some() {
+            nodes.push(rows::line(self.words.mode_label()));
+        }
+        let chosen = state.chosen();
+        for (i, profile) in modes.iter().enumerate() {
+            if let Some(rect) = state.tile(*profile) {
+                nodes.push(
+                    rows::act(*profile, Role::RadioButton, self.words.mode(*profile), rect)
+                        .checked(chosen == Some(*profile))
+                        .set(i + 1, modes.len()),
+                );
+            }
+        }
+        for (_, lines) in layout.notes.iter().chain(layout.health.iter()) {
+            nodes.push(rows::line(lines.join(" ")));
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: state
+                    .levels
+                    .battery
+                    .map(|b| self.words.plugged(b.charge.plugged()).to_owned()),
+                nodes,
+                order: rows::order(modes),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
     }
 
     fn header(&self, f: &mut Frame, battery: Option<Battery>) {

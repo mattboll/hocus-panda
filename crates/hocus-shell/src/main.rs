@@ -26,8 +26,11 @@
 //! popover beside the bar ([`popover`]), opened from an item, and the panda
 //! peeking out of the bar's edge ([`agents::peek`]).
 
+mod a11y;
+mod actions;
 mod agents;
 mod auth;
+mod backdrop;
 mod bluetooth;
 mod capture;
 mod clipboard;
@@ -51,6 +54,7 @@ mod meeting;
 mod network;
 mod notifications;
 mod outputs;
+mod pandas;
 mod paste;
 mod pointer;
 mod popover;
@@ -138,6 +142,7 @@ fn main() -> ExitCode {
     bluetooth::start();
     launcher::start();
     emoji::start();
+    actions::start();
     // The session's polkit agent, when the shell is the session's (7.5).
     auth::start();
     notifications::start(software);
@@ -158,6 +163,8 @@ fn main() -> ExitCode {
     // The lock's avatar: the account's photo, if AccountsService has one.
     lock::avatar::start();
     tray::start();
+    // Screen readers: a thread that waits until one listens.
+    a11y::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(
@@ -440,6 +447,7 @@ impl Shell {
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
         };
         popover::with(|c| c.motion = shell.look.motion);
+        pandas::set_lively(shell.look.motion);
         agents::peek::set_software(software);
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
@@ -549,12 +557,17 @@ impl Shell {
 
     fn compositor_says(&mut self, message: ToShell) -> Task<Message> {
         match message {
-            ToShell::Look { glass, motion } => {
+            ToShell::Look {
+                glass,
+                motion,
+                lively,
+            } => {
                 self.look = Look {
                     glass: glass && !self.software,
                     motion: motion && !self.software,
                 };
                 popover::with(|c| c.motion = self.look.motion);
+                pandas::set_lively(lively && self.look.motion);
                 Task::none()
             }
             // Every surface draws again, in it: this is a message.
@@ -673,6 +686,7 @@ impl Shell {
                 popover::event(popover::Event::Outside);
                 launcher::outside();
                 emoji::outside();
+                actions::close();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -788,6 +802,14 @@ impl Shell {
                 emoji::inserted();
                 Task::none()
             }
+            ToShell::Actions(shown) => {
+                actions::toggle(shown);
+                Task::none()
+            }
+            ToShell::ActionsEnd => {
+                actions::close();
+                Task::none()
+            }
             ToShell::Capture(bar) => {
                 capture::set(bar);
                 Task::none()
@@ -864,6 +886,10 @@ impl Shell {
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
+            ToShell::A11y => {
+                a11y::dump();
+                Task::none()
+            }
             ToShell::Unlocked => {
                 let effects = lock::end();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
@@ -899,6 +925,10 @@ impl Shell {
             }
             ToShell::WindowStates(states) => {
                 windows::set_states(states);
+                Task::none()
+            }
+            ToShell::BarKeyboard(output) => {
+                popover::bar_keyboard(output.as_deref());
                 Task::none()
             }
         }
@@ -1731,6 +1761,23 @@ impl Shell {
         )
     }
 
+    /// The actions palette, if its surface is `id`.
+    fn actions_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !actions::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(actions::draw::View {
+                id,
+                words: actions::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The emoji picker, if its surface is `id`.
     fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !emoji::is_surface(id) {
@@ -2008,6 +2055,7 @@ impl Shell {
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
+                .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
@@ -2041,7 +2089,7 @@ impl Shell {
                 )),
                 border: Border {
                     color: RIM.get(),
-                    width: 1.0,
+                    width: theme::border(),
                     radius: (RADIUS as f32).into(),
                 },
                 ..container::Style::default()
@@ -2305,6 +2353,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             popover::event(popover::Event::Outside);
                             launcher::outside();
                             emoji::outside();
+                            actions::close();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
@@ -2454,6 +2503,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             emoji::inserted();
                             continue;
                         }
+                        // The actions palette: its own surface (#736).
+                        Ok(ToShell::Actions(shown)) => {
+                            actions::toggle(shown);
+                            continue;
+                        }
+                        Ok(ToShell::ActionsEnd) => {
+                            actions::close();
+                            continue;
+                        }
                         // The capture's toolbar, and its toast: their own
                         // surfaces (5.8).
                         Ok(ToShell::Capture(bar)) => {
@@ -2529,6 +2587,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::SessionMenu { output }) => {
                             popover::session::open(&output);
+                            continue;
+                        }
+                        // `Super+B` (bar.md §11): the item's surface
+                        // takes the keyboard and draws its ring.
+                        Ok(ToShell::BarKeyboard(output)) => {
+                            popover::bar_keyboard(output.as_deref());
                             continue;
                         }
                         _ => {}

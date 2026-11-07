@@ -694,6 +694,7 @@ impl<Message> canvas::Program<Message> for Panel {
             KEYS.get(),
             Alignment::Left,
         ));
+        self.tell_readers(state, laid);
         vec![frame.into_geometry()]
     }
 
@@ -711,6 +712,74 @@ impl<Message> canvas::Program<Message> for Panel {
 }
 
 impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): the search,
+    /// then each section's items, the selected one selected; the arrows
+    /// go through them.
+    fn tell_readers(&self, state: &State, laid: &Laid) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        let words = self.words;
+        let mut nodes = vec![
+            Node::new(
+                rows::key(Target::Field),
+                Role::TextField,
+                words.placeholder(),
+            )
+            .value(state.query.clone())
+            .bounds(rows::at(Laid::field())),
+            Node::new(rows::key(Target::Clear), Role::Button, words.clear())
+                .bounds(rows::at(laid.clear)),
+        ];
+        if let Some(empty) = &laid.empty {
+            nodes.push(rows::line(empty.clone()));
+        }
+        let mut rows_left = laid.rows.iter().peekable();
+        for (i, (head, _)) in laid.heads.iter().enumerate() {
+            let label = words.head(*head);
+            let mut chars = label.chars();
+            let label = chars.next().map_or_else(String::new, |c| {
+                c.to_string() + &chars.as_str().to_lowercase()
+            });
+            nodes.push(rows::line(label));
+            let next = laid.heads.get(i + 1).map(|(_, top)| *top);
+            while let Some(row) = rows_left.next_if(|r| next.is_none_or(|top| r.top < top)) {
+                let mut node = rows::act(
+                    Target::Row(row.key),
+                    Role::ListItem,
+                    row.line.clone(),
+                    Laid::rect(row, state.scroll),
+                )
+                .describe(row.meta.clone())
+                .selected(state.selected == Some(row.key));
+                if row.pinned {
+                    node = node.child(
+                        Node::new(
+                            rows::key(Target::Pin(row.key)),
+                            Role::ToggleButton,
+                            words.pin(false),
+                        )
+                        .checked(true),
+                    );
+                }
+                nodes.push(node);
+            }
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: laid
+                    .rows
+                    .iter()
+                    .map(|r| rows::key(Target::Row(r.key)))
+                    .collect(),
+                focus: state.selected.map(|k| rows::key(Target::Row(k))),
+                arrows: true,
+            },
+        );
+    }
+
     /// The background's `band`: its tint (opaque without glass), the
     /// same gradient across the three.
     fn background(&self, f: &mut Frame, size: Size, band: Band) {
@@ -769,7 +838,11 @@ impl Panel {
             ),
         ));
         if hover == Some(Target::Clear) {
-            f.fill(&kit::rounded(laid.clear, GHOST_RADIUS), GHOST_HOVER.get());
+            crate::theme::hover(
+                f,
+                &kit::rounded(laid.clear, GHOST_RADIUS),
+                GHOST_HOVER.get(),
+            );
         }
         f.fill_text(text_in(
             MANROPE_SEMIBOLD,
@@ -952,7 +1025,7 @@ impl Panel {
             (remove, hover == Some(Target::Remove(row.key))),
         ] {
             if lit {
-                f.fill(&kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
+                crate::theme::hover(f, &kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
             }
         }
         pin_glyph(f, pin.center(), row.pinned);

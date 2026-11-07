@@ -21,13 +21,16 @@
 //!
 //! The emoji picker (5.7, [`EMOJI_NAMESPACE`]) is drawn and moved as a
 //! popover, with its own corners and shadow, the mockup's: it fades in
-//! coming down [`EMOJI_RISE`] rather than sliding from the bar.
+//! coming down [`EMOJI_RISE`] rather than sliding from the bar. So is the
+//! actions palette (#736, [`ACTIONS_NAMESPACE`]): in over 140 ms coming
+//! down [`ACTIONS_DROP`], out over 100 ms; with reduced motion or a shell
+//! on the CPU it still fades, without moving.
 
 use std::time::Duration;
 
 use hocus_link::{
-    EMOJI_NAMESPACE, EMOJI_RADIUS, EMOJI_RISE, EMOJI_ZOOM, POPOVER_CLOSE, POPOVER_NAMESPACE,
-    POPOVER_OPEN, POPOVER_SHIFT, ToShell,
+    ACTIONS_NAMESPACE, ACTIONS_RADIUS, EMOJI_NAMESPACE, EMOJI_RADIUS, EMOJI_RISE, EMOJI_ZOOM,
+    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_OPEN, POPOVER_SHIFT, ToShell,
 };
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
@@ -61,6 +64,33 @@ pub const EMOJI_SHADOW: ShadowStyle = ShadowStyle {
     radius: EMOJI_RADIUS,
 };
 
+/// The actions palette's: the popovers', round its corners.
+pub const ACTIONS_SHADOW: ShadowStyle = ShadowStyle {
+    radius: ACTIONS_RADIUS,
+    ..SHADOW
+};
+
+/// What a surface moved as a popover is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// A popover of the bar's.
+    Popover,
+    /// The emoji picker.
+    Emoji,
+    /// The actions palette.
+    Actions,
+}
+
+impl Kind {
+    fn of(namespace: &str) -> Self {
+        match namespace {
+            EMOJI_NAMESPACE => Self::Emoji,
+            ACTIONS_NAMESPACE => Self::Actions,
+            _ => Self::Popover,
+        }
+    }
+}
+
 /// The popovers shown, with their motion.
 #[derive(Debug, Default)]
 pub struct Popovers {
@@ -76,8 +106,8 @@ pub struct Shown {
     closing: Option<Duration>,
     /// Its shadow's pieces.
     pub ids: FrameIds,
-    /// The emoji picker, not a popover of the bar's.
-    emoji: bool,
+    /// A popover of the bar's, the emoji picker or the palette.
+    pub kind: Kind,
 }
 
 /// How a popover is drawn at a moment: how opaque, how far toward the
@@ -87,6 +117,27 @@ pub struct Look {
     pub alpha: f32,
     pub shift: f64,
     pub rise: f64,
+}
+
+/// How the actions palette opened at `opened` (and closing since
+/// `closing`) is drawn at `now`: it fades in over 140 ms coming down 8 px
+/// (`ease-out`), and out over 100 ms (`ease-in`); without `motion`, it
+/// only fades.
+fn actions_look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool) -> Look {
+    let shown = match closing {
+        None => Tween::new(opened, hocus_link::ACTIONS_OPEN, Bezier::EASE_OUT).at(now),
+        Some(since) => 1.0 - Tween::new(since, hocus_link::ACTIONS_CLOSE, Bezier::EASE_IN).at(now),
+    }
+    .clamp(0.0, 1.0);
+    Look {
+        alpha: shown as f32,
+        shift: 0.0,
+        rise: if motion {
+            hocus_link::ACTIONS_DROP * (1.0 - shown)
+        } else {
+            0.0
+        },
+    }
 }
 
 /// How a popover opened at `opened` (and closing since `closing`) is drawn
@@ -110,27 +161,40 @@ fn look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool
 impl Shown {
     /// Its shadow.
     pub fn shadow(&self) -> ShadowStyle {
-        if self.emoji { EMOJI_SHADOW } else { SHADOW }
+        match self.kind {
+            Kind::Popover => SHADOW,
+            Kind::Emoji => EMOJI_SHADOW,
+            Kind::Actions => ACTIONS_SHADOW,
+        }
     }
 
     /// Its corners' radius.
     pub fn radius(&self) -> f64 {
-        if self.emoji {
-            EMOJI_RADIUS
-        } else {
-            hocus_link::RADIUS
+        match self.kind {
+            Kind::Popover => hocus_link::RADIUS,
+            Kind::Emoji => EMOJI_RADIUS,
+            Kind::Actions => ACTIONS_RADIUS,
         }
     }
 
     /// How far it comes down from as it opens (and goes back up to).
     pub fn reach(&self) -> f64 {
-        if self.emoji { EMOJI_RISE } else { 0.0 }
+        match self.kind {
+            Kind::Popover => 0.0,
+            Kind::Emoji => EMOJI_RISE,
+            Kind::Actions => hocus_link::ACTIONS_DROP,
+        }
     }
 
     fn moving(&self, now: Duration) -> bool {
+        let (open, close) = if self.kind == Kind::Actions {
+            (hocus_link::ACTIONS_OPEN, hocus_link::ACTIONS_CLOSE)
+        } else {
+            (POPOVER_OPEN, POPOVER_CLOSE)
+        };
         match self.closing {
-            Some(since) => now < since + POPOVER_CLOSE,
-            None => now < self.opened + POPOVER_OPEN,
+            Some(since) => now < since + close,
+            None => now < self.opened + open,
         }
     }
 }
@@ -139,19 +203,21 @@ impl Popovers {
     /// The popover `layer`, if it shows, and how.
     pub fn look(&self, layer: &LayerSurface, now: Duration, motion: bool) -> Option<Look> {
         let shown = self.shown(layer)?;
-        let look = look(shown.opened, shown.closing, now, motion);
-        Some(if shown.emoji {
-            Look {
-                alpha: look.alpha,
-                shift: 0.0,
-                rise: if motion {
-                    EMOJI_RISE * f64::from(1.0 - look.alpha)
-                } else {
-                    0.0
-                },
+        Some(match shown.kind {
+            Kind::Popover => look(shown.opened, shown.closing, now, motion),
+            Kind::Emoji => {
+                let look = look(shown.opened, shown.closing, now, motion);
+                Look {
+                    alpha: look.alpha,
+                    shift: 0.0,
+                    rise: if motion {
+                        EMOJI_RISE * f64::from(1.0 - look.alpha)
+                    } else {
+                        0.0
+                    },
+                }
             }
-        } else {
-            look
+            Kind::Actions => actions_look(shown.opened, shown.closing, now, motion),
         })
     }
 
@@ -161,7 +227,10 @@ impl Popovers {
 
     /// Whether one is still moving at `now`.
     pub fn tick(&self, now: Duration, motion: bool) -> bool {
-        motion && self.shown.iter().any(|s| s.moving(now))
+        // The palette fades in and out even without motion.
+        self.shown
+            .iter()
+            .any(|s| s.moving(now) && (motion || s.kind == Kind::Actions))
     }
 
     /// The popovers showing and not closing.
@@ -193,14 +262,14 @@ impl State {
             opened,
             closing: None,
             ids: FrameIds::default(),
-            emoji: layer.namespace() == EMOJI_NAMESPACE,
+            kind: Kind::of(layer.namespace()),
         });
         self.redraw = true;
     }
 
     /// The shell says its popovers of `namespace` close.
     pub fn popovers_closing(&mut self, namespace: &str) {
-        if namespace != POPOVER_NAMESPACE && namespace != EMOJI_NAMESPACE {
+        if Kind::of(namespace) == Kind::Popover && namespace != POPOVER_NAMESPACE {
             return;
         }
         let now = self.now();
@@ -267,7 +336,8 @@ impl State {
                 .find(|l| {
                     l.wl_surface() == &surface
                         && (l.namespace().starts_with("hocus-bar")
-                            || l.namespace() == EMOJI_NAMESPACE)
+                            || l.namespace() == EMOJI_NAMESPACE
+                            || l.namespace() == ACTIONS_NAMESPACE)
                 })
                 .cloned()
         })
@@ -307,5 +377,35 @@ mod tests {
         // Without motion: at once, both ways.
         assert_eq!(at(1000, None, 1000, false).alpha, 1.0);
         assert_eq!(at(1000, Some(2000), 2000, false).alpha, 0.0);
+    }
+
+    #[test]
+    fn the_palette_comes_down_fading_and_without_motion_only_fades() {
+        let ms = Duration::from_millis;
+        let start = actions_look(ms(1000), None, ms(1000), true);
+        assert_eq!((start.alpha, start.rise), (0.0, hocus_link::ACTIONS_DROP));
+        let mid = actions_look(ms(1000), None, ms(1070), true);
+        assert!(
+            mid.alpha > 0.5 && mid.alpha < 1.0 && mid.rise > 0.0,
+            "{mid:?}"
+        );
+        assert_eq!(
+            actions_look(ms(1000), None, ms(1140), true),
+            Look {
+                alpha: 1.0,
+                shift: 0.0,
+                rise: 0.0
+            }
+        );
+        assert_eq!(
+            actions_look(ms(1000), Some(ms(2000)), ms(2100), true).alpha,
+            0.0
+        );
+        // Reduced motion: a fade, in place.
+        let still = actions_look(ms(1000), None, ms(1070), false);
+        assert!(still.alpha > 0.5 && still.alpha < 1.0, "{still:?}");
+        assert_eq!(still.rise, 0.0);
+        let out = actions_look(ms(1000), Some(ms(2000)), ms(2050), false);
+        assert!(out.alpha > 0.0 && out.alpha < 1.0, "{out:?}");
     }
 }

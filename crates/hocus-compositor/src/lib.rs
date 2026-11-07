@@ -6,15 +6,18 @@
 //! backend, together in [`App`]); nothing else holds a reference to it.
 //! Work that could block (starting programs) runs on threads of its own.
 
+mod actions;
 mod agents;
 mod appearance;
 pub mod auth;
 pub mod away;
 mod backend;
+mod bar_keys;
 mod bubbles;
 mod capture;
 mod clipboard;
 mod config;
+mod contrast;
 mod cursor;
 mod decoration;
 mod desktop_set;
@@ -43,12 +46,16 @@ mod leave;
 mod levels;
 pub mod lock;
 mod magnet;
+mod magnifier;
 pub mod model;
 pub mod motion;
+mod night_light;
+mod opacity;
 mod output_spec;
 mod overlay;
 mod overview;
 mod overview_draw;
+mod pandas;
 mod panel;
 pub mod peek;
 mod popover;
@@ -62,6 +69,7 @@ mod reminders;
 mod render;
 mod rules;
 mod scales;
+mod screen_reader;
 mod screen_sets;
 mod screens;
 mod session;
@@ -91,11 +99,12 @@ pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
     Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
-    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
-    HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
-    Overview as OverviewSettings, PanelScreens, PeekRule, Power as PowerSettings, PowerAc,
-    PowerBattery, PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet,
-    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Windows,
+    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FollowPointer,
+    FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings,
+    NightLight, OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings,
+    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
+    Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
+    SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -120,8 +129,9 @@ pub enum BackendKind {
     /// In a window of the current session.
     Winit,
     /// The session itself, on a virtual terminal: DRM/KMS, libinput, a
-    /// seat from logind or seatd.
-    Tty,
+    /// seat from logind or seatd; drawn with GLES, or pixman when GLES
+    /// does not start (#333) or when asked.
+    Tty(RendererChoice),
     /// Nowhere: outputs are offscreen buffers.
     Headless(HeadlessConfig),
 }
@@ -181,7 +191,7 @@ impl RuntimeDir {
             return Ok(Self::Shared(dir.clone()));
         }
         match options.backend {
-            BackendKind::Winit | BackendKind::Tty => std::env::var_os("XDG_RUNTIME_DIR")
+            BackendKind::Winit | BackendKind::Tty(_) => std::env::var_os("XDG_RUNTIME_DIR")
                 .map(|dir| Self::Shared(PathBuf::from(dir)))
                 .context("XDG_RUNTIME_DIR is not set; pass --runtime-dir"),
             BackendKind::Headless(_) => Self::private(),
@@ -232,22 +242,25 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.shell.program = options.shell;
     let system_bus = match (options.system_bus.clone(), &options.backend) {
         (Some(address), _) => Some(away::system::Bus::Given(address)),
-        (None, BackendKind::Tty) => Some(away::system::Bus::System),
+        (None, BackendKind::Tty(_)) => Some(away::system::Bus::System),
         (None, _) => None,
     };
     state.shell.bus = match (options.session_bus, &options.backend) {
         (Some(address), _) => Some(shell::Bus::Given(address)),
-        (None, BackendKind::Tty) => Some(shell::Bus::Session),
+        (None, BackendKind::Tty(_)) => Some(shell::Bus::Session),
         (None, _) => None,
     };
     // On a virtual terminal the compositor is the session: its shell is
     // the session's polkit agent (7.5).
-    state.shell.auth_agent = matches!(options.backend, BackendKind::Tty);
+    state.shell.auth_agent = matches!(options.backend, BackendKind::Tty(_));
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
+    // Orca only when the compositor is the session (#734).
+    state.screen_reader.allowed = matches!(options.backend, BackendKind::Tty(_));
+    screen_reader::listen(&event_loop.handle(), &mut state)?;
     state.leave_start(match (options.system_bus, &options.backend) {
         (Some(address), _) => Some(address),
-        (None, BackendKind::Tty) => Some("system".to_owned()),
+        (None, BackendKind::Tty(_)) => Some("system".to_owned()),
         (None, _) => None,
     });
     state.start_sharing();
@@ -259,6 +272,11 @@ fn start(options: Options) -> anyhow::Result<Started> {
         reload::start(&event_loop.handle(), &file, &state.config);
     }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
+    // On from the start when `[magnifier]` says so (#424), its screens
+    // known now.
+    state.magnifier_start();
+    // The night light at the clock's hour (#436).
+    state.night_light_update();
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
@@ -377,6 +395,9 @@ impl App {
         // The screens' settings (6.9): the layout applied when it was
         // asked, then the Settings told what changed.
         state.displays_after_turn(backend);
+        // What is under the pointer, if this turn changed it without the
+        // pointer moving (#737).
+        state.pointer_after_turn();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

@@ -34,6 +34,12 @@ const LEAST: f64 = 2.0;
 /// when one is found neither at a word's start nor right after the one
 /// before it, the query not being in the text whole.
 pub fn fuzzy(text: &str, query: &str) -> Option<f64> {
+    fuzzy_at(text, query).map(|(score, _)| score)
+}
+
+/// [`fuzzy`]'s score, and where each letter of `query` was found in
+/// `text` (its characters' indices), for the actions palette's marks.
+pub fn fuzzy_at(text: &str, query: &str) -> Option<(f64, Vec<usize>)> {
     let whole: String = query.chars().filter(|c| *c != ' ').collect();
     let folded = text;
     let text: Vec<char> = text.chars().collect();
@@ -41,6 +47,7 @@ pub fn fuzzy(text: &str, query: &str) -> Option<f64> {
     let mut score = 0.0;
     let mut last: Option<usize> = None;
     let mut scattered = false;
+    let mut found_at = Vec::new();
     for wanted in query.chars().filter(|c| *c != ' ') {
         let next = (from..text.len()).find(|&k| text[k] == wanted)?;
         let follows = last.is_some_and(|l| next == l + 1);
@@ -64,12 +71,27 @@ pub fn fuzzy(text: &str, query: &str) -> Option<f64> {
         }
         score += 1.0 - (found - from).min(6) as f64 * 0.4;
         last = Some(found);
+        found_at.push(found);
         from = found + 1;
     }
     if scattered && !folded.contains(&whole) {
         return None;
     }
-    Some(score - text.len() as f64 * 0.05)
+    Some((score - text.len() as f64 * 0.05, found_at))
+}
+
+/// `text` folded as [`fold`] does, and for each of its characters the
+/// index of the character of `text` it comes from.
+pub fn fold_map(text: &str) -> (String, Vec<usize>) {
+    let mut folded = String::new();
+    let mut from = Vec::new();
+    for (i, c) in text.chars().enumerate() {
+        for f in fold(&c.to_string()).chars() {
+            folded.push(f);
+            from.push(i);
+        }
+    }
+    (folded, from)
 }
 
 /// What the search compares of an application, folded once.

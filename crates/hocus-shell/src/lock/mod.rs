@@ -115,6 +115,7 @@ pub fn set(shown: LockShown, screens: &crate::outputs::Known) -> Vec<Effect> {
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::launcher::close();
         crate::emoji::close();
+        crate::actions::close();
         crate::notifications::locked(true);
     }
     effects

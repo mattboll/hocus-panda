@@ -13,7 +13,8 @@ The maintainer decided on 2026-11-04:
   take back the last version that read; nothing is overwritten without the
   user;
 - the search finds French and English words and the file's keys;
-- 17 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets).
+- 18 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets;
+  Accessibilité came with the accessibility issues, #422 to #424).
 
 6.1 is the app's frame: the window, the sidebar, the home, the search, the
 toast with its undo, the file's reading, writing and watching, the model
@@ -65,8 +66,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 17 sections fit 760 px
-without scrolling.
+it, 720 wide at most, padded 6 40 72 32. All 18 sections fit 760 px
+without scrolling (the sidebar's rows 28 px tall since Accessibilité
+came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -642,7 +644,12 @@ its connector, size and density), its rows "Utiliser cet écran",
 the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
 (inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
 ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
-ÉCLAIRAGE NOCTURNE, "Plus tard", inert. Screens are numbered 1 for the
+ÉCLAIRAGE NOCTURNE (#436): "Éclairage nocturne" (a switch, "Des couleurs
+plus chaudes le soir, moins de lumière bleue."), "À partir de" (18:00 to
+23:30, every half hour), "Jusqu'à" (05:00 to 09:30) and "Température"
+(a slider, 2500 to 6000 K by 100, "3500 K"), the last three inert while
+it is off: the model's rows, written at once by the file's worker.
+Screens are numbered 1 for the
 built-in panel, then by connector, and named "Écran du portable", "Écran
 externe 34 pouces" (its EDID's size), or "Écran 2" when its size is not
 known.
@@ -688,6 +695,7 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Échelle | `[outputs.NAME] scale` (Automatique: taken out) |
 | Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
 | Écran principal | `[panel] output` (Automatique: taken out) |
+| Éclairage nocturne, À partir de, Jusqu'à, Température | `[night-light] enabled`, `from`, `to`, `temperature` |
 
 **With two screens or more** (#417, windows.md §12 "Sets of screens"),
 the place, the mode, the scale, VRR and the primary screen are the set
@@ -749,7 +757,8 @@ compositor does not draw one screen's picture on another; the row is
 "Plus tard", inert); **Identifier**'s overlay on the screens themselves
 (the drawing shows the numbers large for 3 s, the compositor draws
 nothing yet); a drop that would split three screens or more (only two are
-drawn against each other); the night light.
+drawn against each other); the night light from sunset to sunrise (its
+hours are the user's, windows.md §14).
 
 ## Souris et pavé tactile (6.12)
 
@@ -965,7 +974,7 @@ window is the preview.
 | TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
 | CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
 | | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
-| MOUVEMENT ET LISIBILITÉ | Mouvements réduits, Transparence réduite, Contraste élevé ("En partie") | switches | `[appearance] reduced-motion`, `reduce-transparency`, `high-contrast` |
+| MOUVEMENT ET LISIBILITÉ | Accessibilité ("Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.") | link "Accessibilité ›" | the Accessibility page's |
 | LANGUE ET FORMATS | Langue | menu "Celle du système (français)", "Français", "English" | `[locale] language = "system" \| "fr" \| "en"` |
 | | Date | menu, each choice with today's date beside it: "En toutes lettres" (jeudi 5 novembre), "Abrégée" (jeu. 5 nov.), "En chiffres" (05/11/2026), "Année d'abord" (2026-11-05) | `[locale] date = "long" \| "short" \| "numeric" \| "iso"` |
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
@@ -1008,12 +1017,15 @@ desktop following; an accent among six (bar.md §13 gives every value).
   launcher, the notifications, the lock screen, the authentication
   dialog, the capture's and the sharing's panels); reduced motion and
   reduced transparency to the bars and to what the compositor moves; high
-  contrast to the focused window's rim; the cursor's theme and size to
+  contrast (#423) with the theme (`theme SCHEME ACCENT WALLPAPER
+  contrast`: its own tables of tokens, bar.md §13 "High contrast", no
+  glass) and to the focused window's rim; the cursor's theme and size to
   the cursor (its theme's thread started again) and to the programs
   started afterwards.
 - **The Settings window** reads the same keys with the rest of the file
   and draws in them as soon as the file changes: it is its own preview.
-  Its toast stays dark in both themes.
+  Its toast stays dark in both themes. `high-contrast` too: the window
+  draws the high-contrast tokens of its theme.
 - **Applications** are told through the desktop's portal backend, which
   now serves `org.freedesktop.impl.portal.Settings` (version 2) beside
   the screen cast, on the same name (`hocuspanda.portal`;
@@ -1031,6 +1043,43 @@ desktop following; an accent among six (bar.md §13 gives every value).
 - **Choices made here**: the wallpaper's accent is the primary screen's
   wallpaper's (6.3, below; Nuit's `#7A96E0` by default); the windows' rims and grips, drawn over the wallpaper, keep
   their colours; the screen around a capture stays dimmed dark.
+
+## Accessibilité (#422, #423, #424)
+
+One page for whoever needs to see larger, see clearer or work without a
+mouse (`hocus-settings accessibility`), in PERSONNALISATION after La
+barre. Its rows were Appearance's (the motion and legibility switches)
+and the magnifier's; the keys stay where they were in the file, and
+Appearance keeps a link here.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LOUPE | Loupe | switch | `[magnifier] enabled` ([accessibility.md](accessibility.md)) |
+| | Zoom | menu "×1,5" to "×16", the keys' steps | `[magnifier] zoom` (1 to 16) |
+| | La vue suit le pointeur | menu "Au bord", "Au centre", "Proportionnellement" | `[magnifier] follow-pointer` |
+| | Suivre le clavier, Lissage | switches | `[magnifier] follow-keyboard`, `smooth` |
+| VUE | Contraste élevé ("Le thème choisi renforcé : texte à 7:1, bords pleins, sans verre ; la couleur d'accent reste. Les applications le savent.") | switch | `[appearance] high-contrast` |
+| | Transparence réduite; under high contrast, on and inert, "Comprise dans le contraste élevé." | switch | `[appearance] reduce-transparency` (the file keeps its own value) |
+| | Mouvements réduits | switch | `[appearance] reduced-motion` |
+| | Taille du texte et du curseur | link "Apparence et langue ›" | — |
+| LECTEUR D'ÉCRAN | Lecteur d'écran ("Orca démarre avec la session. Super+Alt+S le lance ou l'arrête, même sur l'écran de verrouillage.") | switch | `[accessibility] screen-reader` ([screen-reader.md](screen-reader.md)) |
+| CLAVIER | Aller dans la barre ("Super+B, puis Tab et les flèches ; Entrée ouvre, Échap revient.") | link "Clavier et raccourcis ›" | `[shortcuts] focus-bar` there |
+
+- The page is generic (rows from `crates/hocus-settings/src/
+  accessibility.rs`): a group is a `RowGroup`, its rows `Setting`s; a
+  group added later (the screen reader's, #421) is a list of rows of its
+  own, nothing else to change.
+- The links from elsewhere to these rows (the bar page's transparency,
+  the wobble's reduced motion in Bureaux et fenêtres) open this page with
+  the row lit.
+- The search finds them by their words: loupe, zoom, magnifier,
+  contraste, contrast, transparence, mouvement, clavier, super+b.
+- **Measured headless** (`crates/hocus-compositor/tests/
+  settings_appearance.rs`, `the_accessibility_page_holds_the_view_and_
+  high_contrast_holds_transparency_on`): the rows in order; high contrast
+  written at once, the bar drawing it; reduced transparency then on and
+  inert, the file without it. The model's groups and keys:
+  `accessibility::tests`.
 
 ## Fond d'écran (6.3)
 
@@ -1199,7 +1248,7 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   it: "La barre de l'écran du portable, à 55 %. Un clic sur un groupe
   allume sa ligne."
 - **The search** finds the rows by the spec's words and their keys;
-  "Forme de la barre", "Changer de forme à la main" (super+b, toggle-bar,
+  "Forme de la barre", "Changer de forme à la main" (super+shift+b, toggle-bar,
   clic, bord) and "Ordre des groupes" (ordre, monter, descendre,
   ranger; it lights Today's row) are the page's own rows.
 - **Choices made here (to confirm on the machine)**: the order's toast
@@ -1476,7 +1525,7 @@ compositor (bar.md "6.16").
 | | Rappeler un agent qui t'attend | menu: Après 2, 5, 10 min, Jamais; at 45 % and inert while the halo is "Jamais" | `[agents] remind` |
 | | Aperçu | a 46 × 118 bar and "Attend · Bloqué · Fini" | — |
 | LES PANDAS ("Ils ne bougent qu'à un changement") | Le panda qui sort de la barre | its panda (58 px) on the left; menu: Quand un agent t'attend ou a fini ("Attend ou a fini"), Quand un agent t'attend, Jamais | `[agents] peek` |
-| | Les pandas dans les lignes des agents | switch; under it three agents as the bar's rows show them, their 48 px pandas or 10 px dots | `[agents] pandas` |
+| | Les pandas dans les lignes des agents | switch; under it the five moods side by side (#649): working, waiting, done, stuck, resting, at 72 px with their word, each playing its mood 300 ms after the one before as the page opens and again under the pointer; with the switch off, their 10 px dots | `[agents] pandas` |
 | | Jamais au repos | "Toujours", static | — |
 
 - **Under the title**: "Le groupe des agents dans la barre, et sa place,
@@ -1529,9 +1578,8 @@ compositor (bar.md "6.16").
   approuver" until one of its hooks (not its turn's end) has run since it
   was plugged in, remembered in `agents.toml` (`codex-approved`); a
   declined tool's day is remembered there too (`[declined-on]`); the
-  pandas are 48 px in the sample and 58 px for the peek (the spec's 30
-  px, larger as the maintainer asked); the sample of three rows under the
-  switch is the page's own; herdr declined and not running says "pas
+  pandas are 72 px in the family (48 px in three sample rows until #649)
+  and 58 px for the peek; the family under the switch is the page's own; herdr declined and not running says "pas
   suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
   does not list the tools yet; "Enregistré" does not wait for the
   watcher's answer.
@@ -1945,7 +1993,7 @@ home and runtime directories of the test's own, no bus, no power supply;
 waits on what the window's log says, never on a time, except to check
 that nothing draws at rest.
 
-- `the_window_opens_with_its_sidebars_17_sections`
+- `the_window_opens_with_its_sidebars_18_sections`
 - `searching_veille_finds_the_suspend_delay_the_lid_and_the_button`
 - `changing_the_delay_writes_idle_delay_at_once_keeping_the_rest`
 - `annuler_and_ctrl_z_take_the_value_back`

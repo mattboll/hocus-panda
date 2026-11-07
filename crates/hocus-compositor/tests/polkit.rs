@@ -31,7 +31,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, Event, KEY_ESC, KEY_LEFTMETA, KEY_TAB, Pointed, Shows, WAIT};
+use common::{
+    BTN_LEFT, Event, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB, Pointed, Shows, WAIT,
+};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use hocus_link::AUTH_NAMESPACE;
 use zbus::{OwnedVariant, Variant, message::Header};
@@ -809,15 +811,17 @@ fn every_screen_dims_and_nothing_else_gets_the_pointer_or_the_keys() -> anyhow::
             "screen {screen}: {before} → {after}, not {dimmed}"
         );
     }
-    // Neither window sees a click nor a key, and a shortcut (Super+B, the
-    // bar's other form) does nothing.
+    // Neither window sees a click nor a key, and a shortcut (Super+Shift+B,
+    // the bar's other form) does nothing.
     while pointing.events.try_recv().is_ok() {}
     while typing.events.try_recv().is_ok() {}
     bed.hp.pointer_move(inside.0, inside.1);
     bed.hp.button(BTN_LEFT, true);
     bed.hp.button(BTN_LEFT, false);
     bed.hp.key(KEY_LEFTMETA, true);
+    bed.hp.key(KEY_LEFTSHIFT, true);
     bed.key(KEY_B);
+    bed.hp.key(KEY_LEFTSHIFT, false);
     bed.hp.key(KEY_LEFTMETA, false);
     bed.key(KEY_X);
     bed.idle(Duration::from_millis(300))?;

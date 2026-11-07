@@ -407,9 +407,7 @@ impl<Message> canvas::Program<Message> for Connections {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
         let in_bar = items
@@ -423,32 +421,35 @@ impl<Message> canvas::Program<Message> for Connections {
             .collect();
         popover::with(|c| c.set_items(&self.bar, CONNECTIONS_NAMESPACE, in_bar));
         if state.shown.is_empty() {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let radius = match self.forms.first() {
             Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
             _ => ITEM_RADIUS,
         };
-        for (item, rect) in items {
-            let (open, focused) =
-                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
-            let lit = if open {
-                Some(OPEN)
-            } else if state.hover == Some(item) {
-                Some(HOVER)
-            } else {
-                None
-            };
-            if let Some(colour) = lit {
-                frame.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour.get(),
-                );
+        // Under the signs and gauges, which are drawn in the column's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
+            for (item, rect) in items {
+                let (open, focused) =
+                    popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
+                let lit = if open {
+                    Some(OPEN)
+                } else if state.hover == Some(item) {
+                    Some(HOVER)
+                } else {
+                    None
+                };
+                if let Some(colour) = lit {
+                    f.fill(
+                        &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                        colour.get(),
+                    );
+                }
+                if focused {
+                    ring(f, rect, radius);
+                }
             }
-            if focused {
-                ring(&mut frame, rect, radius);
-            }
-        }
+        });
         let (right, left) = self.sides(size);
         let column = Rectangle::new(
             Point::new(left.max(0.0), 0.0),
@@ -520,7 +521,7 @@ impl<Message> canvas::Program<Message> for Connections {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

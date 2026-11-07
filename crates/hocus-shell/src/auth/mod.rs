@@ -248,6 +248,18 @@ pub fn with_dialog<T>(
     })
 }
 
+/// `with` on the dialog shown on its surface, with Caps Lock's state and
+/// the requests waiting (screen readers' tree, crate::a11y).
+pub fn with_shown<T>(with: impl FnOnce(&Dialog, bool, usize) -> T) -> Option<T> {
+    self::with(|auth| {
+        let (caps, waiting) = (auth.caps, auth.waiting.len());
+        auth.shown
+            .as_ref()
+            .filter(|d| d.surface.is_some())
+            .map(|d| with(d, caps, waiting))
+    })
+}
+
 /// Whether surface `id` is the dialog's, shown or fading out.
 pub fn is_surface(id: window::Id) -> bool {
     with(|auth| {
@@ -430,6 +442,7 @@ fn one_at_a_time() {
     crate::popover::event(crate::popover::Event::PressElsewhere);
     crate::launcher::close();
     crate::emoji::close();
+    crate::actions::close();
 }
 
 /// polkit cancels the request of `cookie` (its application gave up): its

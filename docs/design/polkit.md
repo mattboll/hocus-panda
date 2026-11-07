@@ -42,7 +42,7 @@ the 7.5 mockup: centred, every screen dimmed. Built since 2026-11-04: see
   desktop entry, else its name, and a generic gear.
 - **Why**: polkit's message as sent (14.5 px on 1.5 lines, wrapped), 14 px
   under the header.
-- **The account**, 16 px under: a 32 px round avatar (the user's panda on
+- **The account**, 16 px under: a 40 px round avatar (#649) (the user's panda on
   the accent's gradient `#6CC287 → #3E8FBF`), the name (14.5 px, 700) over
   "administrateur" (12.5 px, `text.faint`). With several identities, a
   "Changer" button on the right (30 px, radius 8); it unfolds a list

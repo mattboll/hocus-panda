@@ -469,7 +469,7 @@ impl View {
                         .with_width(BORDER),
                 );
             } else if chooser.hover == Some(Target::Card(card.index)) {
-                f.fill(&shape, CARD_HOVER.get());
+                crate::theme::hover(f, &shape, CARD_HOVER.get());
             }
             let thumb_radius = SHARE_THUMB_RADIUS as f32;
             f.fill(&kit::rounded(card.thumb, thumb_radius), THUMB_FILL.get());
@@ -535,7 +535,7 @@ impl View {
         // The buttons.
         let cancel = kit::rounded(layout.cancel, BUTTON_RADIUS);
         if chooser.hover == Some(Target::Cancel) {
-            f.fill(&cancel, CANCEL_HOVER.get());
+            crate::theme::hover(f, &cancel, CANCEL_HOVER.get());
         }
         f.stroke(
             &kit::rounded(

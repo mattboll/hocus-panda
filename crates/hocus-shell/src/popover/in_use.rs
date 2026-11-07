@@ -481,7 +481,7 @@ impl Panel {
                     f.fill(&shape, MUTE_FILL.get());
                 }
                 if hover {
-                    f.fill(&shape, HOVER.get());
+                    crate::theme::hover(f, &shape, HOVER.get());
                 }
                 let edge = if uses.muted { UNMUTE_RING } else { MUTE_RING };
                 f.stroke(
@@ -503,7 +503,7 @@ impl Panel {
             Target::Pause => {
                 f.fill(&shape, REC_PAUSE.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER.get());
+                    crate::theme::hover(f, &shape, REC_HOVER.get());
                 }
                 let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
                 pause_icon(f, rect, paused);
@@ -511,7 +511,7 @@ impl Panel {
             Target::StopRecording => {
                 f.fill(&shape, REC_STOP.get());
                 if hover {
-                    f.fill(&shape, REC_HOVER.get());
+                    crate::theme::hover(f, &shape, REC_HOVER.get());
                 }
                 word(f, self.words.stop_recording().to_owned(), Color::WHITE);
             }
@@ -566,6 +566,57 @@ impl Panel {
             tracing::debug!(?said, "the in-use popover shows it");
         }
         state.said = Some(said);
+        // For screen readers (crate::a11y::rows): each use's line, then the
+        // buttons.
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let mut nodes = Vec::new();
+        for (line, _) in &layout.lines {
+            if let Some(line) = self.said(&uses, *line, now) {
+                nodes.push(rows::line(format!("{}, {}", line.app, line.what)));
+            }
+        }
+        if layout.held.is_some() {
+            let held = crate::notifications::with(|c| c.stack.held_while_sharing());
+            nodes.push(rows::line(self.words.held(held)));
+        }
+        for (target, rect) in &layout.buttons {
+            let node = match target {
+                Target::Mute => rows::act(
+                    *target,
+                    Role::ToggleButton,
+                    self.words.mute(uses.muted),
+                    *rect,
+                )
+                .checked(uses.muted),
+                Target::Stop(id) => {
+                    rows::act(*target, Role::Button, self.stop_word(&uses, *id), *rect)
+                }
+                Target::Pause => {
+                    let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
+                    rows::act(
+                        *target,
+                        Role::Button,
+                        self.words.pause_recording(paused),
+                        *rect,
+                    )
+                }
+                Target::StopRecording => {
+                    rows::act(*target, Role::Button, self.words.stop_recording(), *rect)
+                }
+            };
+            nodes.push(node);
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(layout.buttons.iter().map(|(t, _)| *t)),
+                focus: state.focused.map(rows::key),
+                arrows: false,
+            },
+        );
     }
 
     fn act(target: Target) {

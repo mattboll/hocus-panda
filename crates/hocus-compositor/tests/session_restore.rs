@@ -195,6 +195,7 @@ struct Kept {
     rect: (i32, i32, i32, i32),
     above: bool,
     everywhere: bool,
+    opacity: u8,
 }
 
 fn kept(hp: &Headless, app: &str) -> Vec<Kept> {
@@ -210,6 +211,7 @@ fn kept(hp: &Headless, app: &str) -> Vec<Kept> {
             rect: (p.rect.x, p.rect.y, p.rect.width, p.rect.height),
             above: hp.above(p.id),
             everywhere: everywhere.contains(&p.id),
+            opacity: hp.opacity(p.id),
         })
         .collect();
     out.sort();
@@ -218,8 +220,8 @@ fn kept(hp: &Headless, app: &str) -> Vec<Kept> {
 
 /// Three windows of [`APP`] and one of an application without an entry,
 /// arranged on two screens: one floating on desktop 2 of the first,
-/// kept above; one maximised on the second; one floating on all
-/// desktops. Saved.
+/// kept above, at 60 % (#735); one maximised on the second; one floating
+/// on all desktops. Saved.
 fn first_session(tree: &Tree) -> anyhow::Result<Vec<Kept>> {
     let mut hp = session(tree, &two(), tree.config(), false)?;
     bar(&mut hp)?;
@@ -227,6 +229,14 @@ fn first_session(tree: &Tree) -> anyhow::Result<Vec<Kept>> {
     open(&mut hp, APP, (500, 400))?;
     let a = newest(&hp, APP)?;
     hp.place_window(a, Rect::new(120, 140, 700, 500));
+    // Super+Alt and the wheel over it: 60 %.
+    hp.pointer_move(400.0, 400.0);
+    hp.key(common::KEY_LEFTMETA, true);
+    hp.key(common::KEY_LEFTALT, true);
+    hp.wheel(4);
+    hp.key(common::KEY_LEFTALT, false);
+    hp.key(common::KEY_LEFTMETA, false);
+    anyhow::ensure!(hp.opacity(a) == 60, "{}", hp.opacity(a));
     hp.window_action(a, WindowAction::Above);
     hp.window_action(a, WindowAction::NextDesktop);
     open(&mut hp, APP, (500, 400))?;
@@ -247,6 +257,7 @@ fn first_session(tree: &Tree) -> anyhow::Result<Vec<Kept>> {
     assert!(!saved.contains("test.no-entry"), "{saved}");
     assert!(saved.contains("state = \"maximized\""), "{saved}");
     assert!(saved.contains("screen = \"HEADLESS-2\""), "{saved}");
+    assert_eq!(saved.matches("opacity = 60").count(), 1, "{saved}");
     Ok(before)
 }
 
@@ -256,7 +267,11 @@ fn the_windows_come_back_in_their_places_on_their_screens_and_desktops() -> anyh
     tree.restored_entry(APP, 3)?;
     let before = first_session(&tree)?;
     assert_eq!(before.len(), 3);
-    assert!(before.iter().any(|k| k.desktop == 1 && k.above));
+    assert!(
+        before
+            .iter()
+            .any(|k| k.desktop == 1 && k.above && k.opacity == 60)
+    );
     assert!(before.iter().any(|k| k.everywhere));
     assert!(
         before

@@ -235,9 +235,19 @@ pub struct State {
     /// A window's radial menu while it is open, and as it goes (#723);
     /// the right press that may open it; what draws it.
     pub radial: Option<crate::radial::Radial>,
+    /// The actions palette's target and what draws it (#736).
+    pub actions: crate::actions::Palette,
     pub radial_out: Option<crate::radial::Going>,
     pub radial_press: Option<crate::radial::Press>,
     pub radial_paint: crate::radial_draw::RadialPaint,
+    /// The magnifier (#424).
+    pub magnifier: crate::magnifier::Magnifier,
+    /// The windows' opacity's wheel and its pill (#735).
+    pub opacity: crate::opacity::Opacity,
+    /// The night light (#436).
+    pub night: crate::night_light::Night,
+    /// The screen reader started with the session (#734).
+    pub screen_reader: crate::screen_reader::ScreenReader,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -475,11 +485,16 @@ impl State {
             switcher: None,
             switcher_out: None,
             radial: None,
+            actions: crate::actions::Palette::default(),
             radial_out: None,
             radial_press: None,
             radial_paint: crate::radial_draw::RadialPaint::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
+            magnifier: crate::magnifier::Magnifier::default(),
+            opacity: crate::opacity::Opacity::default(),
+            night: crate::night_light::Night::default(),
+            screen_reader: crate::screen_reader::ScreenReader::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

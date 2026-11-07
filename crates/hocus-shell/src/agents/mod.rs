@@ -128,7 +128,7 @@ impl Said {
             (true, _, false) => Shows::Lines(Lines::of_at_most(
                 &self.agents,
                 now,
-                rows_that_fit(self.agents.len(), rows_room()),
+                rows_that_fit(&looks(&self.agents), rows_room()),
             )),
         }
     }
@@ -150,6 +150,12 @@ pub enum Look {
 }
 
 impl Look {
+    /// Whether its row is a card with what the agent asks or why it failed
+    /// (#649): waiting or stuck.
+    pub fn carded(self) -> bool {
+        matches!(self, Self::Waiting | Self::Stuck)
+    }
+
     /// The compositor's word for the state (bar.md §10, `hocus-link`).
     pub fn of(state: &str) -> Self {
         match state {
@@ -165,18 +171,44 @@ impl Look {
 /// The rows shown, at most.
 pub const MOST_ROWS: usize = 5;
 
-/// How many of `agents` agents' rows show in `room` px (the group's whole
-/// height): all of them, five at most, when they fit, else as many as fit
-/// over "+ N", none at the least (the header and "+ N" alone).
-pub fn rows_that_fit(agents: usize, room: f32) -> usize {
+/// A row's height: a card for a waiting or stuck agent (#649).
+pub fn row_height(look: Look) -> f32 {
+    if look.carded() { CARD } else { AGENT_ROW }
+}
+
+/// How many of the rows of `looks` (in their order) show in `room` px
+/// (the group's whole height): all of them, five at most, when they fit,
+/// else as many as fit over "+ N", none at the least (the header and
+/// "+ N" alone).
+pub fn rows_that_fit(looks: &[Look], room: f32) -> usize {
     let head = HEADER + GAP;
-    let all = agents.min(MOST_ROWS);
-    let more = if agents > all { MORE } else { 0.0 };
-    if head + all as f32 * AGENT_ROW + more <= room {
+    let all = looks.len().min(MOST_ROWS);
+    let more = if looks.len() > all { MORE } else { 0.0 };
+    let tall = |n: usize| looks[..n].iter().map(|l| row_height(*l)).sum::<f32>();
+    if head + tall(all) + more <= room {
         return MOST_ROWS;
     }
-    let fit = ((room - head - MORE) / AGENT_ROW).floor().max(0.0);
-    (fit as usize).min(MOST_ROWS)
+    (0..=all)
+        .rev()
+        .find(|&n| head + tall(n) + MORE <= room)
+        .unwrap_or(0)
+}
+
+/// `agents` in their rows' order: waiting (the longest first), stuck, to
+/// see, working, resting, in the order they came otherwise.
+fn ordered(agents: &[AgentShown]) -> Vec<(Look, &AgentShown)> {
+    let mut ordered: Vec<(Look, &AgentShown)> =
+        agents.iter().map(|a| (Look::of(&a.state), a)).collect();
+    ordered.sort_by_key(|(look, a)| {
+        let waited = if *look == Look::Waiting { a.since } else { 0 };
+        (*look, waited, a.id)
+    });
+    ordered
+}
+
+/// The looks of `agents`' rows, in their order.
+pub fn looks(agents: &[AgentShown]) -> Vec<Look> {
+    ordered(agents).into_iter().map(|(look, _)| look).collect()
 }
 
 /// The room the bar's column leaves the group's rows, as last measured
@@ -191,13 +223,13 @@ pub fn rows_room() -> f32 {
 /// agents running now show.
 pub fn set_rows_room(room: f32) -> bool {
     let before = f32::from_bits(ROWS_ROOM.swap(room.to_bits(), Ordering::Relaxed));
-    let agents = said().agents.len();
-    rows_that_fit(agents, before) != rows_that_fit(agents, room)
+    let looks = looks(&said().agents);
+    rows_that_fit(&looks, before) != rows_that_fit(&looks, room)
 }
 
 /// How many rows the agents running now show at most.
 pub fn rows_shown() -> usize {
-    rows_that_fit(said().agents.len(), rows_room())
+    rows_that_fit(&looks(&said().agents), rows_room())
 }
 
 /// The agents' rows, as the group shows them.
@@ -220,6 +252,8 @@ pub struct Line {
     pub name: String,
     /// How long it has worked, whole minutes (working only).
     pub minutes: u64,
+    /// What it asks for, or why it failed (its card says it, #649).
+    pub note: Option<Note>,
 }
 
 impl Lines {
@@ -233,12 +267,7 @@ impl Lines {
 
     /// The same, the first `most` shown.
     pub fn of_at_most(agents: &[AgentShown], now: u64, most: usize) -> Self {
-        let mut ordered: Vec<(Look, &AgentShown)> =
-            agents.iter().map(|a| (Look::of(&a.state), a)).collect();
-        ordered.sort_by_key(|(look, a)| {
-            let waited = if *look == Look::Waiting { a.since } else { 0 };
-            (*look, waited, a.id)
-        });
+        let ordered = ordered(agents);
         let hidden = &ordered[ordered.len().min(most)..];
         Self {
             total: agents.len(),
@@ -255,6 +284,7 @@ impl Lines {
                         Look::Working => now.saturating_sub(a.since) / 60_000_000,
                         _ => 0,
                     },
+                    note: a.note.clone().filter(|_| look.carded()),
                 })
                 .collect(),
         }
@@ -299,14 +329,8 @@ pub struct Entry {
 impl Brief {
     /// `agents` as the secretary sees them, in their rows' order.
     pub fn of(agents: &[AgentShown]) -> Self {
-        let mut ordered: Vec<(Look, &AgentShown)> =
-            agents.iter().map(|a| (Look::of(&a.state), a)).collect();
-        ordered.sort_by_key(|(look, a)| {
-            let waited = if *look == Look::Waiting { a.since } else { 0 };
-            (*look, waited, a.id)
-        });
         let mut brief = Self::default();
-        for (look, a) in ordered {
+        for (look, a) in ordered(agents) {
             let entry = || Entry {
                 id: a.id,
                 name: a.name.clone(),
@@ -830,11 +854,11 @@ impl Words {
 /// The group's width, inside the bar's padding.
 pub const WIDTH: f32 = 172.0;
 /// The header, the secretary (4.6, variant B): a row as wide as the
-/// agents' (6 px past the group's sides), 2 px above and under her 40 px
-/// head, radius 9; 8 px after her head, "AGENTS" 11.5 px 700 `text.dim`
-/// and the total, over her line (12 px), 1 px apart.
-pub const HEADER: f32 = 44.0;
-pub const HEAD: f32 = 40.0;
+/// agents' (6 px past the group's sides), 2 px above and under her 56 px
+/// head (#649), radius 9; 8 px after her head, "AGENTS" 11.5 px 700
+/// `text.dim` and the total, over her line (12 px), 1 px apart.
+pub const HEADER: f32 = 60.0;
+pub const HEAD: f32 = 56.0;
 pub const HEAD_TOP: f32 = 2.0;
 pub const HEAD_GAP: f32 = 8.0;
 pub const HEADER_RADIUS: f32 = 9.0;
@@ -844,7 +868,7 @@ pub const LINK: f32 = 12.0;
 pub const SAYS: f32 = 12.0;
 const SAYS_GAP: f32 = 1.0;
 /// Under the header.
-const GAP: f32 = 6.0;
+pub const GAP: f32 = 6.0;
 /// The card: 10 px in, radius 10, its parts 6 px apart.
 const CARD_PAD: f32 = 10.0;
 pub const CARD_RADIUS: f32 = 10.0;
@@ -871,18 +895,33 @@ pub const FOLLOWED: f32 = 12.0;
 /// The total, 3 px after "AGENTS" (spaced 0.08 em), Manrope 600.
 const TOTAL_GAP: f32 = 3.0;
 const LABEL_SPACING: f32 = 0.08 * LABEL;
-/// An agent's row (4.1, at real size since #497: the mockups were shown
-/// at ×1.5): 34 px, as wide as the column (6 px past the group's sides),
-/// radius 7, 6 px in; its panda 30 px, 7 px before its name (Manrope 600,
-/// 13.5 px), which ends 7 px before the word on its right (12.5 px).
-pub const AGENT_ROW: f32 = 34.0;
+/// An agent's row (4.1; bigger pandas since #649): 46 px, as wide as the
+/// column (6 px past the group's sides), radius 7, 6 px in; its panda
+/// 42 px, 7 px before its name (Manrope 600, 13.5 px), which ends 7 px
+/// before the word on its right (12.5 px).
+pub const AGENT_ROW: f32 = 46.0;
 pub const ROW_OUT: f32 = 6.0;
 pub const ROW_RADIUS: f32 = 7.0;
 pub const ROW_PAD: f32 = 6.0;
-pub const PANDA: f32 = 30.0;
+pub const PANDA: f32 = 42.0;
 pub const PANDA_GAP: f32 = 7.0;
 pub const AGENT_NAME: f32 = 13.5;
 pub const AGENT_WORD: f32 = 12.5;
+/// A waiting or stuck agent's row is a card (#649, level C of the
+/// mockup): 68 px, radius 9, its panda 60 px 2 px in, 8 px before its
+/// name (13.5 px, line 1.2) over the state's word (12 px, 700) over what
+/// it asks or why it failed (11.5 px, two lines at most, 1.25), 6 px
+/// from its right.
+pub const CARD: f32 = 68.0;
+pub const CARD_ROW_RADIUS: f32 = 9.0;
+pub const CARD_PANDA: f32 = 60.0;
+pub const CARD_IN: f32 = 2.0;
+pub const CARD_PANDA_GAP: f32 = 8.0;
+pub const CARD_NAME_LINE: f32 = 1.2;
+pub const CARD_WORD: f32 = 12.0;
+pub const CARD_NOTE: f32 = 11.5;
+pub const CARD_NOTE_LINE: f32 = 1.25;
+const CARD_NOTE_LINES: usize = 2;
 /// The line for the rest, 2 px under the rows (12.5 px, `text.faint`); the
 /// group 20 px taller with it.
 const MORE_TOP: f32 = 2.0;
@@ -924,6 +963,16 @@ pub struct Row {
     pub name: String,
     pub word: String,
     pub rect: Rectangle,
+    /// A card's lines of what the agent asks or why it failed (none: a
+    /// plain row, or a card with nothing said).
+    pub note: Vec<String>,
+}
+
+impl Row {
+    /// Whether it is a card (#649).
+    pub fn card(&self) -> bool {
+        self.look.carded()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1001,33 +1050,17 @@ pub fn layout(
                 lines.total.to_string(),
                 HEAD + HEAD_GAP + agents + TOTAL_GAP,
             ));
-            let width = WIDTH + 2.0 * ROW_OUT;
+            let mut y = top;
             out.rows = lines
                 .rows
                 .iter()
-                .enumerate()
-                .map(|(i, line)| {
-                    let word = words.word(line);
-                    let room = width
-                        - 2.0 * ROW_PAD
-                        - PANDA
-                        - 2.0 * PANDA_GAP
-                        - measure(&word, AGENT_WORD, MANROPE);
-                    Row {
-                        id: line.id,
-                        look: line.look,
-                        name: crate::popover::kit::elide(&line.name, room, |t| {
-                            measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
-                        }),
-                        word,
-                        rect: Rectangle::new(
-                            Point::new(-ROW_OUT, top + i as f32 * AGENT_ROW),
-                            Size::new(width, AGENT_ROW),
-                        ),
-                    }
+                .map(|line| {
+                    let row = row(words, line, y, &mut measure);
+                    y += row.rect.height;
+                    row
                 })
                 .collect();
-            let end = top + lines.rows.len() as f32 * AGENT_ROW;
+            let end = y;
             out.height = end;
             if lines.hidden > 0 {
                 let middle = end + MORE_TOP + MORE_TEXT * LINE / 2.0;
@@ -1103,11 +1136,72 @@ pub fn layout(
     out
 }
 
+/// `line`'s row from `y`: a plain row, or a waiting or stuck agent's
+/// card (#649).
+fn row(
+    words: &Words,
+    line: &Line,
+    y: f32,
+    measure: &mut impl FnMut(&str, f32, Font) -> f32,
+) -> Row {
+    let width = WIDTH + 2.0 * ROW_OUT;
+    let word = words.word(line);
+    let height = row_height(line.look);
+    let rect = Rectangle::new(Point::new(-ROW_OUT, y), Size::new(width, height));
+    if !line.look.carded() {
+        let room =
+            width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - measure(&word, AGENT_WORD, MANROPE);
+        return Row {
+            id: line.id,
+            look: line.look,
+            name: crate::popover::kit::elide(&line.name, room, |t| {
+                measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
+            }),
+            word,
+            rect,
+            note: Vec::new(),
+        };
+    }
+    let room = card_room();
+    let note = line.note.as_ref().map_or_else(Vec::new, |note| {
+        let said = words.note(note);
+        let mut lines = crate::popover::kit::wrap(&said, room, |t| measure(t, CARD_NOTE, MANROPE));
+        if lines.len() > CARD_NOTE_LINES {
+            let rest = lines[CARD_NOTE_LINES - 1..].join(" ");
+            lines.truncate(CARD_NOTE_LINES - 1);
+            lines.push(crate::popover::kit::elide(&rest, room, |t| {
+                measure(t, CARD_NOTE, MANROPE)
+            }));
+        }
+        lines
+    });
+    Row {
+        id: line.id,
+        look: line.look,
+        name: crate::popover::kit::elide(&line.name, room, |t| {
+            measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
+        }),
+        word,
+        rect,
+        note,
+    }
+}
+
+/// The room of a card's text, right of its panda.
+pub fn card_room() -> f32 {
+    WIDTH + 2.0 * ROW_OUT - CARD_IN - CARD_PANDA - CARD_PANDA_GAP - ROW_PAD
+}
+
 // --- The mini form's item (4.7, variant A: the secretary), at ×1 ---------------
 
-/// A button 48 px wide, radius 10, 4 px in above and 6 px under: her 40 px
-/// head, 4 px over how many work.
+/// A button 48 px wide, radius 10, 4 px in above and 6 px under: her 46 px
+/// head (#649), 4 px over how many work. Under her head, when someone
+/// waits, the panda of the agent waiting the longest (44 px, 2 px in its
+/// 48 px square on the amber tint, radius 10), 4 px from what is around.
 pub const MINI_ITEM: f32 = 48.0;
+pub const MINI_HEAD: f32 = 46.0;
+pub const MINI_PANDA: f32 = 44.0;
+pub const MINI_PANDA_IN: f32 = 2.0;
 pub const MINI_RADIUS: f32 = 10.0;
 pub const MINI_PAD_TOP: f32 = 4.0;
 const MINI_PAD_BOTTOM: f32 = 6.0;
@@ -1115,11 +1209,11 @@ const MINI_GAP: f32 = 4.0;
 /// "3" over "au travail": Manrope 600, 11 px, line height 1.25.
 pub const MINI_TEXT: f32 = 11.0;
 const MINI_LINE: f32 = 1.25;
-/// The badge, at her head's bottom right (6 px past its right, 3 px under
+/// The badge, at her head's bottom right (3 px past its right, 3 px under
 /// its bottom): 16 px high and at least as wide, 4 px in, radius 8; its
 /// number Manrope 700, 10 px; a 2 px ring in the bar's colour.
 pub const BADGE: f32 = 16.0;
-const BADGE_OUT: (f32, f32) = (6.0, 3.0);
+const BADGE_OUT: (f32, f32) = (3.0, 3.0);
 const BADGE_PAD: f32 = 4.0;
 pub const BADGE_TEXT: f32 = 10.0;
 /// Its colours: amber when one waits, else orange when one is stuck, else
@@ -1144,6 +1238,8 @@ pub struct Mini {
     pub height: f32,
     /// Her head.
     pub head: Rectangle,
+    /// The agent waiting the longest, and its panda's square (#649).
+    pub waiting: Option<(u64, Rectangle)>,
     pub badge: Option<Badge>,
     /// How many work, and its two lines' middles; none on the card, where
     /// she is alone.
@@ -1182,22 +1278,28 @@ impl Badge {
 impl Mini {
     fn head() -> Rectangle {
         Rectangle::new(
-            Point::new((MINI_ITEM - HEAD) / 2.0, MINI_PAD_TOP),
-            Size::new(HEAD, HEAD),
+            Point::new((MINI_ITEM - MINI_HEAD) / 2.0, MINI_PAD_TOP),
+            Size::new(MINI_HEAD, MINI_HEAD),
         )
     }
 
     /// Agents followed: her head, the badge with how many need the user
-    /// (none at 0), and how many work.
+    /// (none at 0), the panda of who waits the longest, and how many work.
     fn of(brief: &Brief, measure: &mut impl FnMut(&str, f32, Font) -> f32) -> Self {
         let head = Self::head();
         let needs = brief.needs();
         let (colour, _) = badge_colour(brief);
         let line = MINI_TEXT * MINI_LINE;
-        let first = head.y + head.height + MINI_GAP;
+        let mut first = head.y + head.height + MINI_GAP;
+        let waiting = brief.waiting.first().map(|entry| {
+            let square = Rectangle::new(Point::new(0.0, first), Size::new(MINI_ITEM, MINI_ITEM));
+            first += MINI_ITEM + MINI_GAP;
+            (entry.id, square)
+        });
         Self {
             height: first + 2.0 * line + MINI_PAD_BOTTOM,
             head,
+            waiting,
             badge: (needs > 0).then(|| Badge::new(needs.to_string(), colour, head, measure)),
             working: Some((
                 brief.working.len().to_string(),
@@ -1213,6 +1315,7 @@ impl Mini {
         Self {
             height: head.y + head.height + MINI_PAD_BOTTOM,
             head,
+            waiting: None,
             badge: Some(Badge::new("+".to_owned(), BADGE_GREEN, head, measure)),
             working: None,
         }
@@ -1313,9 +1416,9 @@ mod tests {
             "{}",
             card.rect.height
         );
-        // Under the secretary's 44 px and 6 px.
-        assert_eq!(card.rect.y, 50.0);
-        assert!((two.height - (50.0 + expected)).abs() < 0.01);
+        // Under the secretary's 60 px and 6 px.
+        assert_eq!(card.rect.y, 66.0);
+        assert!((two.height - (66.0 + expected)).abs() < 0.01);
         // The buttons on the card's right, 10 px in; the links on its last line.
         let row = &card.rows[1];
         assert_eq!(row.button.x + row.button.width, WIDTH - 10.0);
@@ -1354,8 +1457,8 @@ mod tests {
 
     #[test]
     fn the_rows_are_at_real_size() {
-        // #497: 34 px rows, the "+ N" line 20 px, the width unchanged;
-        // under the secretary (4.6), 44 px and 6 px.
+        // #649: 46 px rows, the "+ N" line 20 px, the width unchanged;
+        // under the secretary (4.6), 60 px and 6 px.
         let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.55;
         let words = Words::new(Lang::French);
         let agents: Vec<AgentShown> = (1..=7)
@@ -1369,22 +1472,23 @@ mod tests {
         );
         assert_eq!(laid.rows.len(), 5);
         for (i, row) in laid.rows.iter().enumerate() {
-            assert_eq!(row.rect.y, 50.0 + i as f32 * 34.0);
-            assert_eq!(row.rect.height, 34.0);
+            assert_eq!(row.rect.y, 66.0 + i as f32 * 46.0);
+            assert_eq!(row.rect.height, 46.0);
             assert_eq!(row.rect.width, WIDTH + 12.0);
+            assert!(row.note.is_empty());
         }
-        assert_eq!(laid.height, 50.0 + 5.0 * 34.0 + 20.0);
-        // Her line cut to what her head leaves.
+        assert_eq!(laid.height, 66.0 + 5.0 * 46.0 + 20.0);
+        // Her line cut to what her 56 px head leaves.
         assert_eq!(
             laid.secretary,
-            Rectangle::new(Point::new(-6.0, 0.0), Size::new(184.0, 44.0))
+            Rectangle::new(Point::new(-6.0, 0.0), Size::new(184.0, 60.0))
         );
         assert!(laid.line.ends_with('…'), "{}", laid.line);
-        assert!(measure(&laid.line, 12.0, MANROPE) <= WIDTH - 48.0 + 0.01);
+        assert!(measure(&laid.line, 12.0, MANROPE) <= WIDTH - 64.0 + 0.01);
         // The name at 13.5 px gives way to the word, at 12.5 px, and the
-        // 30 px panda.
+        // 42 px panda.
         let row = &laid.rows[0];
-        let room = WIDTH + 12.0 - 12.0 - 30.0 - 14.0 - measure(&row.word, 12.5, MANROPE);
+        let room = WIDTH + 12.0 - 12.0 - 42.0 - 14.0 - measure(&row.word, 12.5, MANROPE);
         assert!(
             row.name.starts_with("refacto-") && row.name.ends_with('…'),
             "{}",
@@ -1497,6 +1601,7 @@ mod tests {
             look: Look::Working,
             name: String::new(),
             minutes,
+            note: None,
         };
         assert_eq!(fr.word(&working(12)), "12\u{a0}min");
         assert_eq!(fr.word(&working(65)), "1\u{a0}h\u{a0}05");
@@ -1504,21 +1609,93 @@ mod tests {
 
     #[test]
     fn on_a_short_bar_the_rows_fold_into_the_rest_as_many_as_fit() {
-        // The header (44) and its 6 px, 34 px a row, 20 for "+ N".
-        let head = 44.0 + 6.0;
+        // The header (60) and its 6 px, 46 px a row, 68 a card, 20 for
+        // "+ N".
+        let head = 60.0 + 6.0;
+        let working = |n| vec![Look::Working; n];
         // Room for all: five at most, "+ N" for the rest.
-        assert_eq!(rows_that_fit(3, f32::INFINITY), MOST_ROWS);
-        assert_eq!(rows_that_fit(3, head + 3.0 * 34.0), MOST_ROWS);
-        assert_eq!(rows_that_fit(8, head + 5.0 * 34.0 + 20.0), MOST_ROWS);
+        assert_eq!(rows_that_fit(&working(3), f32::INFINITY), MOST_ROWS);
+        assert_eq!(rows_that_fit(&working(3), head + 3.0 * 46.0), MOST_ROWS);
+        assert_eq!(
+            rows_that_fit(&working(8), head + 5.0 * 46.0 + 20.0),
+            MOST_ROWS
+        );
         // Three that do not all fit: two over "+ 1".
-        assert_eq!(rows_that_fit(3, head + 3.0 * 34.0 - 1.0), 2);
-        assert_eq!(rows_that_fit(8, head + 5.0 * 34.0 + 19.0), 4);
+        assert_eq!(rows_that_fit(&working(3), head + 3.0 * 46.0 - 1.0), 2);
+        assert_eq!(rows_that_fit(&working(8), head + 5.0 * 46.0 + 19.0), 4);
         // At the least, the header and "+ N" alone.
-        assert_eq!(rows_that_fit(3, head + 20.0), 0);
-        assert_eq!(rows_that_fit(3, 0.0), 0);
+        assert_eq!(rows_that_fit(&working(3), head + 20.0), 0);
+        assert_eq!(rows_that_fit(&working(3), 0.0), 0);
+        // A waiting agent's card takes 68 px.
+        let cards = [Look::Waiting, Look::Stuck, Look::Working];
+        assert_eq!(rows_that_fit(&cards, head + 2.0 * 68.0 + 46.0), MOST_ROWS);
+        assert_eq!(rows_that_fit(&cards, head + 2.0 * 68.0 + 46.0 - 1.0), 2);
+        assert_eq!(rows_that_fit(&cards, head + 68.0 + 20.0), 1);
         let agents: Vec<AgentShown> = (1..=3).map(|i| shown(i, "working", 0, "a")).collect();
-        let lines = Lines::of_at_most(&agents, 0, rows_that_fit(3, head + 2.0 * 34.0 + 20.0));
+        let lines = Lines::of_at_most(
+            &agents,
+            0,
+            rows_that_fit(&looks(&agents), head + 2.0 * 46.0 + 20.0),
+        );
         assert_eq!((lines.rows.len(), lines.hidden), (2, 1));
+    }
+
+    #[test]
+    fn a_waiting_or_stuck_agent_is_a_card_with_what_it_asks() {
+        let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.5;
+        let words = Words::new(Lang::French);
+        let mut waiting = shown(1, "waiting", 0, "site-web");
+        waiting.note = Some(Note::allow(
+            "Bash",
+            "npm install --save-dev typescript eslint prettier",
+        ));
+        let mut stuck = shown(2, "failed", 0, "infra");
+        stuck.note = Some(Note::Says("terraform plan a échoué".into()));
+        let agents = vec![waiting, stuck, shown(3, "working", 0, "docs")];
+        let laid = layout(
+            &words,
+            &Shows::Lines(Lines::of(&agents, 0)),
+            &Brief::of(&agents),
+            measure,
+        );
+        let rows: Vec<(f32, f32, bool)> = laid
+            .rows
+            .iter()
+            .map(|r| (r.rect.y, r.rect.height, r.card()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (66.0, 68.0, true),
+                (134.0, 68.0, true),
+                (202.0, 46.0, false)
+            ]
+        );
+        // What it asks on two lines at most, cut, in the card's room.
+        let card = &laid.rows[0];
+        assert_eq!(card.note.len(), 2);
+        assert!(
+            card.note[0].starts_with("Autoriser Bash"),
+            "{:?}",
+            card.note
+        );
+        assert!(card.note[1].ends_with('…'), "{:?}", card.note);
+        for line in &card.note {
+            assert!(measure(line, CARD_NOTE, MANROPE) <= card_room() + 0.01);
+        }
+        assert_eq!(laid.rows[1].note, ["terraform plan a", "échoué"]);
+        // Nothing said: a card all the same, its name and its word.
+        let quiet = vec![shown(4, "waiting", 0, "api")];
+        let laid = layout(
+            &words,
+            &Shows::Lines(Lines::of(&quiet, 0)),
+            &Brief::of(&quiet),
+            measure,
+        );
+        assert!(laid.rows[0].card() && laid.rows[0].note.is_empty());
+        assert_eq!(laid.height, 66.0 + 68.0);
+        // The bar's width stays: the card is the rows' width.
+        assert_eq!(laid.rows[0].rect.width, WIDTH + 12.0);
     }
 
     #[test]
@@ -1541,12 +1718,13 @@ mod tests {
         let calm = mini(&agents);
         assert_eq!(calm.badge, None);
         assert_eq!(calm.working.as_ref().map(|w| w.0.as_str()), Some("1"));
-        // 4 px, her 40 px head, 4 px, two lines of 11 px at 1.25, 6 px.
-        assert!((calm.height - (4.0 + 40.0 + 4.0 + 2.0 * 13.75 + 6.0)).abs() < 0.01);
+        // 4 px, her 46 px head, 4 px, two lines of 11 px at 1.25, 6 px.
+        assert!((calm.height - (4.0 + 46.0 + 4.0 + 2.0 * 13.75 + 6.0)).abs() < 0.01);
         assert_eq!(
             calm.head,
-            Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 40.0))
+            Rectangle::new(Point::new(1.0, 4.0), Size::new(46.0, 46.0))
         );
+        assert_eq!(calm.waiting, None);
         // To see: green; stuck: orange; waiting: amber, counting all three.
         agents.push(shown(3, "done", 0, "c"));
         assert_eq!(badge(&agents), Some(("1".into(), BADGE_GREEN)));
@@ -1556,11 +1734,21 @@ mod tests {
         let three = mini(&agents);
         let b = three.badge.expect("a badge");
         assert_eq!((b.text.as_str(), b.colour), ("3", BADGE_WAITING));
-        // 16 px, its right 6 px past her head's, its bottom 3 px under it.
+        // 16 px, its right 3 px past her head's, its bottom 3 px under it.
         assert_eq!(
             b.rect,
-            Rectangle::new(Point::new(34.0, 31.0), Size::new(16.0, 16.0))
+            Rectangle::new(Point::new(34.0, 37.0), Size::new(16.0, 16.0))
         );
+        // Under her, the panda of who waits (#649): a 48 px square, 4 px
+        // apart, the item 52 px taller.
+        assert_eq!(
+            three.waiting,
+            Some((
+                5,
+                Rectangle::new(Point::new(0.0, 54.0), Size::new(48.0, 48.0))
+            ))
+        );
+        assert!((three.height - (calm.height + 52.0)).abs() < 0.01);
         // Wider with two figures, toward her head.
         agents.extend((6..=15).map(|i| shown(i, "waiting", 0, "f")));
         let wide = mini(&agents).badge.expect("a badge").rect;
@@ -1579,7 +1767,7 @@ mod tests {
             card.badge.map(|b| (b.text, b.colour)),
             Some(("+".into(), BADGE_GREEN))
         );
-        assert_eq!(card.height, 50.0);
+        assert_eq!(card.height, 56.0);
         // Hidden: no item.
         assert_eq!(
             layout(&words, &Shows::Hidden, &Brief::default(), measure).mini,

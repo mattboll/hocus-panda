@@ -32,6 +32,7 @@ use smithay::{
 use crate::{
     App, State,
     backend::{Backend, add_output, dmabuf_global, render_node_of, scale},
+    magnifier::draw::{self as magnifier, Lens, Magnify},
     output_spec::{self, OutputSpec},
     render::BACKGROUND,
 };
@@ -75,7 +76,15 @@ pub struct HeadlessBackend {
     gles_share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
     pixman_share:
         Box<crate::share::frames::Frames<PixmanRenderer, pixman::Image<'static, 'static>>>,
+    /// The night light's temperature the outputs were last handed, and
+    /// its gamma ramps (#436): headless has no gamma to set, the tests
+    /// read what a screen would get.
+    night: Option<u32>,
+    gamma: Option<Box<[Vec<u16>; 3]>>,
 }
+
+/// The gamma ramps' size headless, a common one of display engines.
+pub const GAMMA_SIZE: usize = 256;
 
 impl std::fmt::Debug for HeadlessBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -92,11 +101,11 @@ enum Canvas {
 }
 
 /// A renderer and the buffers it draws the outputs into.
-struct Outputs<R, T> {
+struct Outputs<R: Magnify, T> {
     renderer: R,
     format: Fourcc,
     /// In their names' order.
-    outputs: Vec<OutputBuffer<T>>,
+    outputs: Vec<OutputBuffer<T, R::Canvas>>,
     /// Outputs unplugged, by name, with where they were: a test plugs
     /// them back.
     unplugged: Vec<Unplugged>,
@@ -110,8 +119,10 @@ type Unplugged = (
     Option<crate::screen_sets::Identity>,
 );
 
-struct OutputBuffer<T> {
+struct OutputBuffer<T, C> {
     output: Output,
+    /// Its picture while the magnifier is on it (#424).
+    lens: Lens<C>,
     spec: OutputSpec,
     /// Who the screen is, as its EDID would say (tests give one).
     identity: Option<crate::screen_sets::Identity>,
@@ -158,6 +169,8 @@ pub fn init(
         frame_timer: None,
         gles_share: Default::default(),
         pixman_share: Default::default(),
+        night: None,
+        gamma: None,
     };
     tracing::info!(renderer = backend.renderer(), "headless backend ready");
     Ok(backend)
@@ -271,6 +284,7 @@ where
         + ExportMem
         + Offscreen<T>
         + Bind<T>
+        + Magnify
         + crate::wobble::Bend
         + crate::going::Shaders
         + crate::glass::Glass,
@@ -358,6 +372,7 @@ where
             "output"
         );
         self.outputs.push(OutputBuffer {
+            lens: Lens::default(),
             damage_tracker: OutputDamageTracker::from_output(&output),
             output,
             spec,
@@ -455,11 +470,13 @@ where
             if state.display_off(&out.output) {
                 continue;
             }
-            let elements = state.output_elements(renderer, &out.output, true);
+            let shown = magnifier::screen(renderer, state, &out.output, true, &mut out.lens);
+            let elements = &shown.elements;
             let mut framebuffer = match renderer.bind(&mut out.target) {
                 Ok(framebuffer) => framebuffer,
                 Err(err) => {
                     tracing::warn!(output = out.output.name(), %err, "could not bind");
+                    magnifier::after(renderer, &shown);
                     continue;
                 }
             };
@@ -469,12 +486,13 @@ where
                 renderer,
                 &mut framebuffer,
                 1,
-                &elements,
+                elements,
                 BACKGROUND,
             ) {
                 Ok(result) => result,
                 Err(err) => {
                     tracing::warn!(output = out.output.name(), ?err, "rendering failed");
+                    magnifier::after(renderer, &shown);
                     continue;
                 }
             };
@@ -485,11 +503,12 @@ where
                 }
             }
             let states = result.states;
+            magnifier::after(renderer, &shown);
             if drawn {
                 out.frames += 1;
                 state.presented(&out.output, state.clock.now().into(), out.frames);
             }
-            state.send_frames(&out.output, Some(&states));
+            state.send_frames(&out.output, Some(shown.states.as_ref().unwrap_or(&states)));
             state.desktops_drawn(&out.output);
             state.read_under_grips(renderer);
         }
@@ -498,7 +517,7 @@ where
 
 impl<R, T> Outputs<R, T>
 where
-    R: ExportMem + Bind<T>,
+    R: ExportMem + Bind<T> + Magnify,
     R::Error: Send + Sync + 'static,
 {
     /// What output `index` showed last: its size in pixels, and its rows of
@@ -534,6 +553,12 @@ impl HeadlessBackend {
             Canvas::Gles(c) => c.pixels(index),
             Canvas::Pixman(c) => c.pixels(index),
         }
+    }
+
+    /// The gamma ramps the outputs were handed last (red, green, blue):
+    /// `None` for their own.
+    pub fn gamma(&self) -> Option<&[Vec<u16>; 3]> {
+        self.gamma.as_deref()
     }
 
     pub fn renderer(&self) -> &'static str {
@@ -610,6 +635,12 @@ impl HeadlessBackend {
     /// Schedules the next frame when something changed: nothing wakes up
     /// at rest.
     pub fn after_dispatch(&mut self, state: &mut State) {
+        // The night light's ramps (#436), as a screen would get them.
+        let night = state.night_light_kelvin();
+        if night != self.night {
+            self.night = night;
+            self.gamma = night.map(|k| Box::new(crate::night_light::ramp(GAMMA_SIZE, k)));
+        }
         // The desktop's last frame as it locks (7.1), before anything else
         // draws it locked.
         if state.lock.wants_freeze() {

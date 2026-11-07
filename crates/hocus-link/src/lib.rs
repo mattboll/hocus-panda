@@ -44,6 +44,7 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
+pub mod actions;
 mod auth;
 pub mod backdrop;
 mod capture;
@@ -57,6 +58,11 @@ mod share;
 pub mod theme;
 pub mod wallpaper;
 mod window_menu;
+pub use actions::{
+    ACTIONS_CLOSE, ACTIONS_DIM, ACTIONS_DROP, ACTIONS_GLOW_ALPHA, ACTIONS_GLOW_WIDTH,
+    ACTIONS_NAMESPACE, ACTIONS_OPEN, ACTIONS_RADIUS, ACTIONS_RING, ACTIONS_RING_WIDTH, ACTIONS_TOP,
+    ACTIONS_WIDTH, ActionsShown, RunAction,
+};
 pub use auth::{
     AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
     AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
@@ -408,9 +414,19 @@ impl FromStr for Side {
 /// What the compositor tells the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToShell {
+    /// Says what the shell shows, for screen readers (`hocus msg a11y`,
+    /// docs/design/screen-reader.md): answered by [`ToCompositor::A11yLine`]s
+    /// and an [`ToCompositor::A11yEnd`].
+    A11y,
     /// How bars look: on glass the compositor blurs behind (else opaque),
-    /// and whether they move (else reduced motion).
-    Look { glass: bool, motion: bool },
+    /// whether they move (else reduced motion), and whether the pandas
+    /// play their moods (#649: not with reduced motion nor in power saver).
+    /// Written `look glass|opaque motion|still lively|calm`.
+    Look {
+        glass: bool,
+        motion: bool,
+        lively: bool,
+    },
     /// The theme and the accent the shell draws in (`[appearance] theme`
     /// and `accent`, #402): sent as the shell connects and when the file
     /// changes them, or the primary screen's wallpaper while the accent is
@@ -694,6 +710,18 @@ pub enum ToShell {
     /// The windows kept above the others and those on all desktops, for
     /// the marks after their titles in the bar ([`WindowStates`]).
     WindowStates(WindowStates),
+    /// `Super+B` (`[shortcuts] focus-bar`, bar.md §11): the keyboard goes
+    /// into `output`'s bar, on its waiting agent, else its stuck one, else
+    /// its clock; `None`, the bar holding it lets it go, back to the
+    /// window that had it. Written `bar-keyboard OUTPUT` or `bar-keyboard
+    /// -`.
+    BarKeyboard(Option<String>),
+    /// `Super+P` (#736, [`ActionsShown`]): the actions palette opens on
+    /// the target's screen; open, it closes.
+    Actions(ActionsShown),
+    /// The palette's target window went, or the session locks: it closes.
+    /// Written `actions-end`.
+    ActionsEnd,
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1638,6 +1666,11 @@ pub enum MeetingNear {
 pub enum ToCompositor {
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
+    /// A line of what the shell shows, for screen readers ([`ToShell::A11y`]),
+    /// its control characters made spaces.
+    A11yLine(String),
+    /// The last of them.
+    A11yEnd,
     /// The shell's surfaces of this namespace have something new to show:
     /// the compositor sends them a configure, as they are. iced draws
     /// every surface after any message of the shell's own, and the whole
@@ -1680,6 +1713,10 @@ pub enum ToCompositor {
     /// window. Written `go-to-agent ID`, or `go-to-agent ID OUTPUT X Y W
     /// H` with the row.
     GoToAgent { id: u64, row: Option<Row> },
+    /// The keyboard's ring moved in a bar (`Super+B`, bar.md §11): where
+    /// it is, so that the magnifier's view follows it. Written `ring
+    /// OUTPUT X Y W H`.
+    Ring(Row),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -1786,6 +1823,9 @@ pub enum ToCompositor {
     /// answers at once with what it shows ([`ToShell::WindowMenu`]).
     /// Written `window-menu ID`.
     WindowMenu(u64),
+    /// The palette (#736) runs an action ([`RunAction`]). Written `action
+    /// ID ARG WINDOW`.
+    Action(RunAction),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -1808,6 +1848,16 @@ pub fn screen_name(name: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     name.trim().to_owned()
+}
+
+/// A line of the screen readers' tree as a [`ToCompositor::A11yLine`]
+/// carries it: its control characters made spaces, its indent kept.
+pub fn a11y_text(line: &str) -> String {
+    line.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 /// A line that does not read.
@@ -1837,11 +1887,16 @@ fn word<'a>(words: &mut impl Iterator<Item = &'a str>, what: &str) -> Result<&'a
 impl fmt::Display for ToShell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Look { glass, motion } => write!(
+            Self::Look {
+                glass,
+                motion,
+                lively,
+            } => write!(
                 f,
-                "look {} {}",
+                "look {} {} {}",
                 if *glass { "glass" } else { "opaque" },
-                if *motion { "motion" } else { "still" }
+                if *motion { "motion" } else { "still" },
+                if *lively { "lively" } else { "calm" }
             ),
             Self::Theme(choice) => write!(f, "theme {choice}"),
             Self::Locale(locale) => write!(f, "locale {locale}"),
@@ -2008,6 +2063,8 @@ impl fmt::Display for ToShell {
                 write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
             }
             Self::Focus(output) => write!(f, "focus {output}"),
+            Self::BarKeyboard(Some(output)) => write!(f, "bar-keyboard {output}"),
+            Self::BarKeyboard(None) => f.write_str("bar-keyboard -"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
                 let app = app_word(app);
@@ -2083,6 +2140,7 @@ impl fmt::Display for ToShell {
             Self::Recorded(recorded) => recorded.write(f),
             Self::Lock(shown) => shown.write(f),
             Self::Unlocked => f.write_str("unlocked"),
+            Self::A11y => f.write_str("a11y"),
             Self::Curtain(shown) => shown.write(f),
             Self::CurtainEnd => f.write_str("curtain-end"),
             Self::LeaveCan(can) => can.write(f),
@@ -2091,6 +2149,8 @@ impl fmt::Display for ToShell {
             Self::SessionMenu { output } => write!(f, "session-menu {output}"),
             Self::WindowMenu(menu) => menu.write(f),
             Self::WindowStates(states) => states.write(f),
+            Self::Actions(shown) => shown.write(f),
+            Self::ActionsEnd => f.write_str("actions-end"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -2135,6 +2195,12 @@ impl FromStr for ToShell {
         }
         if let Some(rest) = line.strip_prefix("window-menu ") {
             return WindowMenu::read(rest).map(Self::WindowMenu);
+        }
+        if let Some(rest) = line.strip_prefix("actions ") {
+            return ActionsShown::read(rest).map(Self::Actions);
+        }
+        if line == "actions-end" {
+            return Ok(Self::ActionsEnd);
         }
         if let Some(rest) = line.strip_prefix("window-states ") {
             return WindowStates::read(rest).map(Self::WindowStates);
@@ -2332,10 +2398,20 @@ impl FromStr for ToShell {
         }
         let mut words = line.split_whitespace();
         match words.next() {
-            Some("look") => Ok(Self::Look {
-                glass: flag(words.next(), "glass", "opaque")?,
-                motion: flag(words.next(), "motion", "still")?,
-            }),
+            Some("look") => {
+                let glass = flag(words.next(), "glass", "opaque")?;
+                let motion = flag(words.next(), "motion", "still")?;
+                // Before #649 the pandas moved as the bars did.
+                let lively = match words.next() {
+                    None => motion,
+                    word => flag(word, "lively", "calm")?,
+                };
+                Ok(Self::Look {
+                    glass,
+                    motion,
+                    lively,
+                })
+            }
             Some("bar") => Ok(Self::Bar {
                 output: word(&mut words, "output")?.to_owned(),
                 form: word(&mut words, "form")?.parse()?,
@@ -2421,6 +2497,7 @@ impl FromStr for ToShell {
             Some("recording-end") => Ok(Self::RecordingEnd),
             Some("lock") => LockShown::read(&mut words).map(Self::Lock),
             Some("unlocked") => Ok(Self::Unlocked),
+            Some("a11y") => Ok(Self::A11y),
             Some("curtain") => CurtainShown::read(&mut words).map(Self::Curtain),
             Some("curtain-end") => Ok(Self::CurtainEnd),
             Some("leave-can") => LeaveCan::read(&mut words).map(Self::LeaveCan),
@@ -2429,6 +2506,11 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
+            Some("bar-keyboard") => Ok(Self::BarKeyboard(
+                Some(word(&mut words, "output")?)
+                    .filter(|o| *o != "-")
+                    .map(str::to_owned),
+            )),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let mut number = |what: &str| -> Result<i32, BadLine> {
@@ -2622,6 +2704,8 @@ impl fmt::Display for ToCompositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Software => f.write_str("software"),
+            Self::A11yLine(line) => write!(f, "a11y-line {}", a11y_text(line)),
+            Self::A11yEnd => f.write_str("a11y-end"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
             Self::NextLayout => f.write_str("next-layout"),
@@ -2648,10 +2732,16 @@ impl fmt::Display for ToCompositor {
                 desktop,
             } => write!(f, "send-to {id} {output} {desktop}"),
             Self::WindowMenu(id) => write!(f, "window-menu {id}"),
+            Self::Action(run) => run.write(f),
             Self::GoToAgent { id, row: None } => write!(f, "go-to-agent {id}"),
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
                 "go-to-agent {id} {} {} {} {} {}",
+                r.output, r.x, r.y, r.width, r.height
+            ),
+            Self::Ring(r) => write!(
+                f,
+                "ring {} {} {} {} {}",
                 r.output, r.x, r.y, r.width, r.height
             ),
             Self::Plug(tool) => write!(f, "plug {tool}"),
@@ -2719,8 +2809,17 @@ impl FromStr for ToCompositor {
         if let Some(text) = line.strip_prefix("copy ") {
             return Ok(Self::Copy(text.to_owned()));
         }
+        if let Some(text) = line.strip_prefix("a11y-line ") {
+            return Ok(Self::A11yLine(text.to_owned()));
+        }
+        if line == "a11y-line" {
+            return Ok(Self::A11yLine(String::new()));
+        }
         if let Some(rest) = line.strip_prefix("share ") {
             return ShareAsk::read(rest).map(Self::Share);
+        }
+        if let Some(rest) = line.strip_prefix("action ") {
+            return RunAction::read(rest).map(Self::Action);
         }
         if let Some(fields) = line.strip_prefix("launch\t") {
             let mut fields = fields.split('\t');
@@ -2879,6 +2978,7 @@ impl FromStr for ToCompositor {
                     .map_err(|e| BadLine(format!("window: {e}")))?,
             )),
             Some("overview") => Ok(Self::Overview),
+            Some("a11y-end") => Ok(Self::A11yEnd),
             Some("close") => Ok(Self::Close(
                 word(&mut words, "window")?
                     .parse()
@@ -2906,6 +3006,21 @@ impl FromStr for ToCompositor {
                     }
                 };
                 Ok(Self::GoToAgent { id, row })
+            }
+            Some("ring") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let mut number = |what: &str| -> Result<i32, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::Ring(Row {
+                    output,
+                    x: number("x")?,
+                    y: number("y")?,
+                    width: number("width")?,
+                    height: number("height")?,
+                }))
             }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -3180,11 +3295,18 @@ mod tests {
             ToShell::Look {
                 glass: true,
                 motion: false,
+                lively: false,
+            },
+            ToShell::Look {
+                glass: false,
+                motion: true,
+                lively: false,
             },
             ToShell::Theme(theme::Choice {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
                 wallpaper: theme::AccentColours::lifted([0x3A, 0x2A, 0x26]),
+                contrast: true,
             }),
             ToShell::Wallpaper(wallpaper::Wallpapers {
                 lock: wallpaper::LockLook::Picture,
@@ -3291,6 +3413,7 @@ mod tests {
                 output: "HDMI-A-1".into(),
             }),
             ToShell::Unlocked,
+            ToShell::A11y,
             ToShell::Curtain(CurtainShown {
                 elapsed: 0,
                 length: 10_000,
@@ -3376,7 +3499,12 @@ mod tests {
         for message in to_shell
             .into_iter()
             .chain(keys)
-            .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
+            .chain([
+                ToShell::Outside,
+                ToShell::Focus("DP-2".into()),
+                ToShell::BarKeyboard(Some("DP-2".into())),
+                ToShell::BarKeyboard(None),
+            ])
             .chain(clips())
             .chain(screens)
             .chain(layouts)
@@ -3409,8 +3537,17 @@ mod tests {
             ToCompositor::Bring(42),
             ToCompositor::Close(42),
             ToCompositor::Overview,
+            ToCompositor::A11yLine("  button \"14 h 32\" <click>".into()),
+            ToCompositor::A11yEnd,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
+            ToCompositor::Ring(Row {
+                output: "eDP-1".into(),
+                x: -190,
+                y: 14,
+                width: 172,
+                height: 77,
+            }),
             ToCompositor::GoToAgent {
                 id: 7,
                 row: Some(Row {

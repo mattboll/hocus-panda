@@ -84,6 +84,30 @@ fn digit_key(code: smithay::input::keyboard::Keycode) -> Option<Keysym> {
 }
 
 impl State {
+    /// The magnifier's shortcut that is pressed, if one is: by the key of
+    /// the layout's first level, never by the digit of the key's place, so
+    /// that `Super+minus` on AZERTY (the `6` key) zooms out rather than
+    /// going to desktop 6 (#424). Shift held, as the key types it
+    /// (`plus`).
+    pub(crate) fn magnifier_chord(
+        &self,
+        mods: &ModifiersState,
+        keysym: &smithay::input::keyboard::KeysymHandle<'_>,
+    ) -> Option<(Action, Chord)> {
+        let shortcuts = &self.config.shortcuts;
+        let magnifier = |found: Option<(Action, Chord)>| found.filter(|(a, _)| a.magnifier());
+        let raw = keysym.raw_latin_sym_or_raw_current_sym();
+        magnifier(raw.and_then(|key| shortcuts.action(mods, key, self.nested))).or_else(|| {
+            let typed = keysym.modified_sym();
+            if !mods.shift || Some(typed) == raw || typed == Keysym::NoSymbol {
+                return None;
+            }
+            let mut unshifted = *mods;
+            unshifted.shift = false;
+            magnifier(shortcuts.action(&unshifted, typed, self.nested))
+        })
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         use crate::away::{Felt, Pressed};
         // Any of the user's input, devices added and removed aside, is
@@ -221,9 +245,19 @@ impl State {
                 {
                     this.redraw = true;
                 }
+                // The magnifier's keys work whatever is open (#424): the
+                // radial menu, the overview, Alt+Tab, the capture.
+                if state == KeyState::Pressed
+                    && !this.shortcuts_inhibited()
+                    && let Some((action, chord)) = this.magnifier_chord(mods, &keysym)
+                {
+                    this.kept_keys.insert(code);
+                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
+                }
                 // The authentication dialog holds the keyboard (7.5): of
-                // the compositor's keys, only the virtual terminals' and
-                // the levels' work; everything else goes to the dialog.
+                // the compositor's keys, only the virtual terminals', the
+                // levels' and the magnifier's work; everything else goes
+                // to the dialog.
                 let auth = this.auth_holds();
                 // A window's radial menu open (#723): its keys are its
                 // own, the modifiers go on.
@@ -361,8 +395,9 @@ impl State {
                         unshifted.shift = false;
                         shortcuts.action(&unshifted, typed, this.nested)
                     });
-                let action =
-                    action.filter(|(a, _)| !inhibited && (!auth || matches!(a, Action::Level(_))));
+                let action = action.filter(|(a, _)| {
+                    !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
+                });
                 if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action, chord));
@@ -487,7 +522,10 @@ impl State {
             return;
         };
         self.pointer_placed = true;
+        // Such a device cannot push the magnifier's edge (#424).
+        self.magnifier_absolute(true);
         self.pointer_motion(location, event.time_msec());
+        self.magnifier_absolute(false);
     }
 
     /// Where an absolute motion goes: its surface spans every output.
@@ -524,6 +562,8 @@ impl State {
     /// a window's frame or its grip, no client sees it: the cursor shows
     /// what a press there does.
     pub fn pointer_motion(&mut self, location: Point<f64, Logical>, time: u32) {
+        // The magnifier's view follows (#424), locked too.
+        self.magnifier_pointer(location);
         // Locked (7.1): to the lock's surface under it, nothing else.
         if self.locked() {
             self.lock_pointer_motion(location, time);
@@ -739,6 +779,40 @@ impl State {
             .then_some(id)
     }
 
+    /// After each turn of the loop (#737): what is under the pointer may
+    /// have changed without it moving (a window raised or focused by the
+    /// keyboard, Alt+Tab, a desktop switched, a window mapped, closed or
+    /// moved, the overview or a menu closing). The pointer's focus follows
+    /// at once, with a motion at the same place: the next wheel, press or
+    /// key goes to what shows under it, not to what was there. Nothing
+    /// while something of the desktop's own holds the pointer (the radial
+    /// menu, the overview, the capture, the authentication dialog, the
+    /// share's chooser), which pointer motion handles itself, nor over the
+    /// shell's surfaces above the windows.
+    pub(crate) fn pointer_after_turn(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let at = pointer.current_location();
+        if self.radial.is_some()
+            || self.overview_takes(at)
+            || self.capture_choosing()
+            || self.auth_keeps_pointer(at)
+            || self.share_keeps_pointer(at)
+            // The shell's surfaces above the windows (the launcher, a
+            // popover, the bar) take the pointer as it moves: one coming
+            // under a still pointer does not take it (its hover would
+            // choose what the keyboard chooses).
+            || self
+                .layer_surface_under(at, crate::handlers::layer_shell::Stand::Above)
+                .is_some()
+        {
+            return;
+        }
+        let time = u32::try_from(self.now().as_millis() % u128::from(u32::MAX)).unwrap_or(0);
+        self.pointer_refocus(time);
+    }
+
     /// The pointer's focus to what is under it now, if that is no longer
     /// what has it: a surface came, went or moved under the pointer since
     /// it last moved, and a press would go to what was there, not to what
@@ -768,6 +842,10 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        // The magnifier's pill over everything (#424): its − and +.
+        if self.magnifier_button(button, state) {
+            return;
+        }
         // Locked (7.1): to the lock's surface under the pointer alone (its
         // focus), the desktop doing nothing with it.
         if self.locked() {
@@ -980,6 +1058,17 @@ impl State {
             if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
                 frame = frame.stop(axis);
             }
+        }
+        self.pointer_axis(frame);
+    }
+
+    /// A scroll, from a device or a test: `Super` held, the magnifier's
+    /// zoom (#424); `Super`+`Alt`, the opacity of the window under the
+    /// pointer (#735); else to the client under the pointer.
+    pub fn pointer_axis(&mut self, frame: AxisFrame) {
+        let vertical = frame.axis.1;
+        if self.magnifier_scroll(vertical) || self.opacity_scroll(vertical) {
+            return;
         }
         if let Some(pointer) = self.seat.get_pointer() {
             // Nothing under the authentication dialog's dim scrolls (7.5).

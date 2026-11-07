@@ -434,9 +434,11 @@ pub fn toggle(output: String, scale: u32, screen: (i32, i32), at: EmojiAt) {
     });
     let (effects, opened) = opened;
     if opened {
-        // One at a time: the bar's popover and the launcher close.
+        // One at a time: the bar's popover, the launcher and the actions
+        // palette close.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::launcher::close();
+        crate::actions::close();
     }
     crate::popover::send(effects);
 }

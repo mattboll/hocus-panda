@@ -194,7 +194,7 @@ fn encoder(job: &Job) -> anyhow::Result<Video> {
     let probed = match &mut *probed {
         Some(p) => p,
         empty => {
-            let out = Command::new(&job.ffmpeg)
+            let out = crate::programs::default_signals(&mut Command::new(&job.ffmpeg))
                 .args(["-hide_banner", "-encoders"])
                 .stdin(Stdio::null())
                 .stderr(Stdio::null())
@@ -240,7 +240,7 @@ fn encoder(job: &Job) -> anyhow::Result<Video> {
 
 /// Whether ffmpeg encodes a short black video with `codec` on `node`.
 fn vaapi_works(ffmpeg: &Path, node: &Path, codec: &str) -> bool {
-    let child = Command::new(ffmpeg)
+    let child = crate::programs::default_signals(&mut Command::new(ffmpeg))
         .args(["-hide_banner", "-nostdin", "-loglevel", "error"])
         .arg("-init_hw_device")
         .arg(format!("vaapi=va:{}", node.display()))
@@ -333,7 +333,7 @@ fn record(
         audio_late: audio::LATE,
         file: file.clone(),
     };
-    let mut child = Command::new(&job.ffmpeg)
+    let mut child = crate::programs::default_signals(&mut Command::new(&job.ffmpeg))
         .args(save::ffmpeg_args(&plan))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

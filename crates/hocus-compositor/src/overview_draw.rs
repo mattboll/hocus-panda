@@ -8,9 +8,11 @@
 //! What is not a window is a picture drawn once on the CPU (tiny-skia,
 //! the shell's fonts) for each look it takes, at the screen's scale, and
 //! kept: at rest the pictures stay, their elements' ids too, and nothing
-//! is drawn again but what clients commit. A waiting agent's panda waves
-//! on a few pictures of its paw, bobbing as they are placed; a sleeping
-//! one breathes by its place's size.
+//! is drawn again but what clients commit. The pandas are the validated
+//! drawings (#649, `crate::pandas`): as the overview opens each badge's
+//! plays its agent's mood once, a waiting one on and on, bobbing; the
+//! sleeping ones breathe twice as two "z" rise. Still with reduced motion
+//! or in power saver.
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -33,11 +35,11 @@ use crate::{
     decoration::{ACCENT, BoxStyle, Keyed, Placed, box_elements, buffer},
     model::WindowId,
     overview::{
-        AgentState, BREATH, Badge, CLOSE_BUTTON, DIM, LABEL_GAP, LABEL_LINE, LABEL_SIZE, MINIMIZED,
-        NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, WAVE, close_button,
+        AgentState, BREATHING, Badge, CLOSE_BUTTON, DIM, LABEL_GAP, LABEL_LINE, LABEL_SIZE,
+        MINIMIZED, NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, WAVE, close_button,
     },
     radial_draw::{
-        Fonts, advance, argb, fonts, letter_colour, letter_of, paint, rgba, rounded, stroke, write,
+        Fonts, advance, argb, fonts, letter_colour, letter_of, paint, rounded, stroke, write,
     },
     render::{OutputElement, OutputElements},
     switcher::Area,
@@ -87,21 +89,21 @@ const SELECTION: BoxStyle = BoxStyle {
     radius: 12_000,
 };
 const SELECTION_OUT: f64 = 4.0;
-/// The agents' badge: a panda of at least 42 px, 14 % of its window's
-/// width up to 84, its pill 8 px higher; its words in proportion.
-const PANDA: f64 = 42.0;
-const PANDA_MOST: f64 = 84.0;
-const PANDA_SHARE: f64 = 0.14;
+/// The agents' badge (#649): a panda of at least 56 px, 18 % of its
+/// window's width up to 110, its pill 8 px higher; its words 12.5 px at
+/// 56 px, growing half as fast as the panda.
+const PANDA: f64 = 56.0;
+const PANDA_MOST: f64 = 110.0;
+const PANDA_SHARE: f64 = 0.18;
 const PILL_PAD: f64 = 4.0;
 const BADGE_TEXT: f32 = 12.5;
 const BADGE_IN: f64 = 10.0;
 const BOB: f64 = 3.0;
-/// The paw's pictures over its wave's loop.
-const WAVE_STEPS: u8 = 12;
-const WAVE_ANGLE: f32 = -28.0;
-/// The sleeping panda: this share of the thumbnail's height, at most 64.
-const SLEEP_SHARE: f64 = 0.5;
-const SLEEP_MOST: f64 = 64.0;
+/// Its halo, the state's colour.
+const HALO: u8 = 56;
+/// The sleeping panda: this share of the thumbnail's height, at most 96.
+const SLEEP_SHARE: f64 = 0.75;
+const SLEEP_MOST: f64 = 96.0;
 /// The application's tile beside a title.
 const TILE: f64 = 18.0;
 const TILE_GAP: f64 = 8.0;
@@ -130,12 +132,13 @@ enum Pic {
         panda: u32,
         scale: u32,
     },
-    /// A panda in its state's colour, its paw at a step of its wave; none:
-    /// asleep.
+    /// A panda in `mood` at a frame of its burst, `side` pixels square,
+    /// on a halo of its agents' state's colour (none: asleep).
     Panda {
-        state: Option<AgentState>,
-        wave: u8,
+        mood: hocus_pandas::Mood,
+        frame: crate::pandas::Frame,
         side: u32,
+        halo: Option<AgentState>,
     },
     /// The ✕ over a window.
     Close { scale: u32 },
@@ -266,7 +269,12 @@ fn draw(fonts: &Fonts, pic: &Pic, scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
             panda,
             ..
         } => draw_pill(fonts, words, *state, f64::from(*panda), scale),
-        Pic::Panda { state, wave, side } => draw_panda(fonts, *state, *wave, *side),
+        Pic::Panda {
+            mood,
+            frame,
+            side,
+            halo,
+        } => draw_panda(*mood, *frame, *side, *halo),
         Pic::Close { .. } => draw_close(scale),
     }
 }
@@ -371,7 +379,7 @@ fn draw_pill(
     scale: f64,
 ) -> Option<(Vec<u8>, (i32, i32))> {
     let k = scale as f32;
-    let px = BADGE_TEXT * k * (panda / PANDA) as f32;
+    let px = BADGE_TEXT * k * (0.5 + 0.5 * panda / PANDA) as f32;
     let height = ((panda + 2.0 * PILL_PAD) * scale) as f32;
     let text_w = advance(&fonts.bold, words, px);
     let width = ((panda + PILL_PAD) * scale) as f32 + 6.0 * k + text_w + 14.0 * k;
@@ -450,96 +458,38 @@ fn draw_close(scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
     Some((argb(pixmap), (side as i32, side as i32)))
 }
 
-/// The panda (the mockup's, 30 units, 1 unit of room around), `side`
-/// pixels square: awake in its state's colour, its paw raised at `wave`
-/// of its loop; or asleep, its eyes shut, a "z" over it.
+/// A panda (`crate::pandas`) `side` pixels square, on a disc of its
+/// agents' state's colour (`halo`).
 fn draw_panda(
-    fonts: &Fonts,
-    state: Option<AgentState>,
-    wave: u8,
+    mood: hocus_pandas::Mood,
+    frame: crate::pandas::Frame,
     side: u32,
+    halo: Option<AgentState>,
 ) -> Option<(Vec<u8>, (i32, i32))> {
-    let mut pixmap = Pixmap::new(side.max(1), side.max(1))?;
-    let k = side as f32 / 32.0;
-    let t = Transform::from_translate(1.0, 1.0).post_scale(k, k);
-    let dark = [0x1D, 0x22, 0x30, 0xFF];
-    let white = [0xF2, 0xF4, 0xF7, 0xFF];
-    let circle = |pixmap: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]| {
-        if let Some(path) = PathBuilder::from_circle(x, y, r) {
-            pixmap.fill_path(&path, &paint(c), FillRule::Winding, t, None);
-        }
-    };
-    let ellipse =
-        |pixmap: &mut Pixmap, x: f32, y: f32, rx: f32, ry: f32, degrees: f32, c: [u8; 4]| {
-            let Some(rect) = tiny_skia::Rect::from_xywh(-rx, -ry, 2.0 * rx, 2.0 * ry) else {
-                return;
-            };
-            if let Some(path) = PathBuilder::from_oval(rect) {
-                let place = Transform::from_rotate(degrees)
-                    .post_translate(x, y)
-                    .post_concat(t);
-                pixmap.fill_path(&path, &paint(c), FillRule::Winding, place, None);
-            }
-        };
-    match state {
-        Some(state) => {
+    let mut pixels = crate::pandas::draw(mood, frame, side)?;
+    if let Some(state) = halo {
+        // The disc under the drawing: drawn alone, the drawing over it.
+        let mut pixmap = Pixmap::new(side.max(1), side.max(1))?;
+        let c = side as f32 / 2.0;
+        if let Some(path) = PathBuilder::from_circle(c, c, c) {
             let [r, g, b, _] = state.colour();
-            circle(&mut pixmap, 15.0, 16.0, 14.5, [r, g, b, 56]);
-        }
-        None => circle(&mut pixmap, 15.0, 16.0, 14.5, rgba(169, 178, 194, 0.12)),
-    }
-    circle(&mut pixmap, 8.5, 8.5, 4.2, dark);
-    circle(&mut pixmap, 21.5, 8.5, 4.2, dark);
-    circle(&mut pixmap, 15.0, 16.5, 10.5, white);
-    ellipse(&mut pixmap, 10.8, 16.0, 2.8, 3.6, -20.0, dark);
-    ellipse(&mut pixmap, 19.2, 16.0, 2.8, 3.6, 20.0, dark);
-    ellipse(&mut pixmap, 15.0, 21.0, 1.6, 1.1, 0.0, dark);
-    match state {
-        Some(state) => {
-            ellipse(&mut pixmap, 11.3, 15.4, 1.0, 1.0, 0.0, [0xFF; 4]);
-            ellipse(&mut pixmap, 18.7, 15.4, 1.0, 1.0, 0.0, [0xFF; 4]);
-            // The paw: raised and waving while its agent waits.
-            let angle = if state == AgentState::Waiting {
-                let phase = f32::from(wave) / f32::from(WAVE_STEPS);
-                WAVE_ANGLE * (0.5 - 0.5 * (phase * std::f32::consts::TAU).cos())
-            } else {
-                0.0
-            };
-            let rect = tiny_skia::Rect::from_xywh(-2.6, -3.4, 5.2, 6.8)?;
-            if let Some(path) = PathBuilder::from_oval(rect) {
-                let place = Transform::from_translate(2.2, -2.0)
-                    .post_rotate(angle)
-                    .post_translate(24.0, 22.0)
-                    .post_concat(t);
-                pixmap.fill_path(&path, &paint(dark), FillRule::Winding, place, None);
-            }
-        }
-        None => {
-            // Shut eyes: two short arcs.
-            let mut pb = PathBuilder::new();
-            pb.move_to(10.0, 16.2);
-            pb.quad_to(11.3, 17.4, 12.6, 16.2);
-            pb.move_to(17.4, 16.2);
-            pb.quad_to(18.7, 17.4, 20.0, 16.2);
-            if let Some(path) = pb.finish() {
-                pixmap.stroke_path(&path, &paint([0xFF; 4]), &stroke(0.8), t, None);
-            }
-            // Its paws under its chin, and a "z".
-            ellipse(&mut pixmap, 11.0, 25.0, 2.6, 1.8, 0.0, dark);
-            ellipse(&mut pixmap, 19.0, 25.0, 2.6, 1.8, 0.0, dark);
-            let px = 7.0 * k;
-            write(
-                &mut pixmap,
-                &fonts.bold,
-                "z",
-                px,
-                (26.0 * k, 7.0 * k),
-                [0xC9, 0xD0, 0xDC, 0xE0],
-                0.0,
+            pixmap.fill_path(
+                &path,
+                &paint([r, g, b, HALO]),
+                FillRule::Winding,
+                Transform::identity(),
+                None,
             );
         }
+        let disc = argb(pixmap);
+        for (over, under) in pixels.chunks_mut(4).zip(disc.chunks(4)) {
+            let a = u16::from(over[3]);
+            for i in 0..4 {
+                over[i] = over[i].saturating_add(((u16::from(under[i]) * (255 - a)) / 255) as u8);
+            }
+        }
     }
-    Some((argb(pixmap), (side as i32, side as i32)))
+    Some((pixels, (side as i32, side as i32)))
 }
 
 fn local(a: Area, origin: Point<f64, Logical>) -> Rectangle<f64, Logical> {
@@ -605,6 +555,12 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let ids = self.overview_paint.box_ids(&place);
+        // High contrast: no tints, solid rims (crate::contrast).
+        let style = BoxStyle {
+            fill: crate::contrast::ink(style.fill),
+            rim: crate::contrast::rim(style.rim),
+            ..style
+        };
         out.extend(
             box_elements(renderer, &self.textures, &ids, style, rect, scale, alpha)
                 .into_iter()
@@ -704,7 +660,16 @@ impl State {
             };
             let at = glide(self, *id, *rect, shown, reduced, now);
             self.overview_badge(
-                renderer, *id, *badge, at, origin, scale, alpha, french, now, &mut out,
+                renderer,
+                *id,
+                *badge,
+                at,
+                origin,
+                scale,
+                alpha,
+                french,
+                (now, overview.opened),
+                &mut out,
             );
         }
         // The rim of the window under the pointer, the keyboard's ring.
@@ -871,7 +836,7 @@ impl State {
         scale: f64,
         alpha: f32,
         french: bool,
-        now: Duration,
+        (now, opened): (Duration, Duration),
         out: &mut Vec<OutputElement<R>>,
     ) where
         R: Renderer + ImportAll + ImportMem,
@@ -879,33 +844,39 @@ impl State {
     {
         let corner =
             Point::<f64, Logical>::from((at.x + BADGE_IN - origin.x, at.y + BADGE_IN - origin.y));
-        let waiting = badge.state == AgentState::Waiting && !self.reduced_motion();
-        let (wave, bob) = if waiting {
-            let phase = (now.as_secs_f64() / WAVE.as_secs_f64()).fract();
-            let step = (phase * f64::from(WAVE_STEPS)).floor() as u8 % WAVE_STEPS;
-            (
-                step,
-                -BOB * (0.5 - 0.5 * (phase * std::f64::consts::TAU).cos()),
-            )
-        } else {
-            (0, 0.0)
+        let lively = self.pandas_lively();
+        let mood = crate::pandas::mood(badge.state);
+        let since = now.saturating_sub(opened);
+        // Its mood once as the overview opens; a waiting one's again and
+        // again, bobbing.
+        let (frame, bob) = match (lively, badge.state) {
+            (false, _) => (None, 0.0),
+            (true, AgentState::Waiting) => {
+                let lasts = hocus_pandas::lasts(mood.burst());
+                let t = Duration::from_secs_f64(since.as_secs_f64() % lasts.as_secs_f64());
+                let phase = (now.as_secs_f64() / WAVE.as_secs_f64()).fract();
+                (
+                    crate::pandas::frame(mood.burst(), t),
+                    -BOB * (0.5 - 0.5 * (phase * std::f64::consts::TAU).cos()),
+                )
+            }
+            (true, _) => (crate::pandas::frame(mood.burst(), since), 0.0),
         };
         let panda = (at.w * PANDA_SHARE).clamp(PANDA, PANDA_MOST).round();
-        let side = ((panda + 2.0 * panda / 30.0) * scale).ceil() as u32;
-        let panda_at = Point::<f64, Logical>::from((
-            corner.x + PILL_PAD - panda / 30.0,
-            corner.y + PILL_PAD - panda / 30.0 + bob,
-        ));
+        let side = (panda * scale).ceil() as u32;
+        let panda_at =
+            Point::<f64, Logical>::from((corner.x + PILL_PAD, corner.y + PILL_PAD + bob));
         self.overview_picture(
             renderer,
             Place::Panda(id),
             &Pic::Panda {
-                state: Some(badge.state),
-                wave,
+                mood,
+                frame,
                 side,
+                halo: Some(badge.state),
             },
             panda_at,
-            None,
+            Some((panda, panda)),
             scale,
             alpha,
             out,
@@ -1040,7 +1011,7 @@ impl State {
                     .map(|s| (s.buffer.clone(), s.picture))
             })
             .flatten();
-        let reduced = self.reduced_motion();
+        let lively = self.pandas_lively();
         let k = screen
             .thumbs
             .first()
@@ -1071,29 +1042,24 @@ impl State {
             // Its windows, front first.
             let here = self.thumb_windows(output, desktop);
             if here.is_empty() {
-                // Asleep: breathing a while as the overview opens.
-                let base = (rect.size.h * SLEEP_SHARE).min(SLEEP_MOST);
-                let breath = if reduced {
-                    1.0
-                } else {
-                    let t = now.saturating_sub(overview.opened).as_secs_f64();
-                    let t = t.min(crate::overview::BREATHING.as_secs_f64());
-                    1.0 + 0.04
-                        * (0.5 - 0.5 * (t * std::f64::consts::TAU / BREATH.as_secs_f64()).cos())
-                };
-                let side_px = (base * scale).ceil() as u32;
-                let size = base * breath;
+                // Asleep: two breaths as the overview opens, two "z"
+                // rising.
+                let size = (rect.size.h * SLEEP_SHARE).min(SLEEP_MOST);
+                let frame = lively
+                    .then(|| crate::pandas::frame(BREATHING, now.saturating_sub(overview.opened)))
+                    .flatten();
                 let at = Point::<f64, Logical>::from((
                     rect.loc.x + (rect.size.w - size) / 2.0,
-                    rect.loc.y + (rect.size.h - size) / 2.0 + (breath - 1.0) * 25.0,
+                    rect.loc.y + (rect.size.h - size) / 2.0,
                 ));
                 self.overview_picture(
                     renderer,
                     Place::Sleep(name.clone(), desktop),
                     &Pic::Panda {
-                        state: None,
-                        wave: 0,
-                        side: side_px,
+                        mood: hocus_pandas::Mood::Resting,
+                        frame,
+                        side: (size * scale).ceil() as u32,
+                        halo: None,
                     },
                     at,
                     Some((size, size)),
@@ -1217,14 +1183,16 @@ mod tests {
                     scale: milli(scale),
                 },
                 Pic::Panda {
-                    state: Some(AgentState::Waiting),
-                    wave: 5,
-                    side: (44.8 * scale) as u32,
+                    mood: hocus_pandas::Mood::Waiting,
+                    frame: crate::pandas::frame(hocus_pandas::BURST, Duration::from_millis(500)),
+                    side: (56.0 * scale) as u32,
+                    halo: Some(AgentState::Waiting),
                 },
                 Pic::Panda {
-                    state: None,
-                    wave: 0,
-                    side: (60.0 * scale) as u32,
+                    mood: hocus_pandas::Mood::Resting,
+                    frame: None,
+                    side: (72.0 * scale) as u32,
+                    halo: None,
                 },
                 Pic::Close {
                     scale: milli(scale),
@@ -1242,21 +1210,17 @@ mod tests {
     }
 
     #[test]
-    fn a_waving_paw_is_a_few_pictures_not_one_a_frame() {
-        let fonts = fonts().expect("the shell's fonts");
-        let side = 45;
-        let pictures: std::collections::HashSet<Vec<u8>> = (0..WAVE_STEPS)
-            .filter_map(|wave| {
-                draw_panda(&fonts, Some(AgentState::Waiting), wave, side).map(|(p, _)| p)
-            })
-            .collect();
-        assert!(pictures.len() > 4 && pictures.len() <= usize::from(WAVE_STEPS));
-        // Working, the paw stays down.
-        let still: std::collections::HashSet<Vec<u8>> = (0..WAVE_STEPS)
-            .filter_map(|wave| {
-                draw_panda(&fonts, Some(AgentState::Working), wave, side).map(|(p, _)| p)
-            })
-            .collect();
-        assert_eq!(still.len(), 1);
+    fn a_burst_is_a_picture_a_frame_then_the_still_one() {
+        let side = 56;
+        let window = hocus_pandas::BURST;
+        let at = |ms| crate::pandas::frame(window, Duration::from_millis(ms));
+        let halo = Some(AgentState::Waiting);
+        let draw = |frame| draw_panda(hocus_pandas::Mood::Waiting, frame, side, halo).map(|p| p.0);
+        // Thirty a second while it plays: the same moment, the same picture.
+        assert_eq!(at(500), at(510));
+        assert_ne!(draw(at(500)), draw(at(900)));
+        // Then none: the still picture, kept.
+        assert_eq!(at(3000), None);
+        assert_eq!(draw(None), draw(at(3000)));
     }
 }

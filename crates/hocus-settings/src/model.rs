@@ -1,4 +1,4 @@
-//! The settings' model: the 17 sections in their 5 groups, and every
+//! The settings' model: the 18 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -51,12 +51,13 @@ impl Group {
     }
 }
 
-/// The seventeen sections, in the sidebar's order.
+/// The eighteen sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
     Wallpaper,
     Bar,
+    Accessibility,
     Agenda,
     Screens,
     Sound,
@@ -89,10 +90,11 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
+        Self::Accessibility,
         Self::Agenda,
         Self::Screens,
         Self::Sound,
@@ -153,6 +155,17 @@ impl SectionId {
                 ),
                 Icon::Bar,
                 "6.4",
+            ),
+            Self::Accessibility => s(
+                "accessibility",
+                Personalisation,
+                w("Accessibilité", "Accessibility"),
+                w(
+                    "Voir plus grand, voir plus net, tout faire au clavier.",
+                    "See larger, see clearer, do everything from the keyboard.",
+                ),
+                Icon::Accessibility,
+                "A.2–A.4",
             ),
             Self::Agenda => s(
                 "agenda",
@@ -327,6 +340,7 @@ pub enum Icon {
     Appearance,
     Wallpaper,
     Bar,
+    Accessibility,
     Agenda,
     Screens,
     Sound,
@@ -366,6 +380,9 @@ impl Icon {
                 "M3.5 5 H20.5 V19 H3.5 Z M3.5 15.5 L8.5 10.5 L13 15 L15.5 12.5 L20.5 17.5"
             }
             Self::Bar => "M3.5 4.5 H20.5 V19.5 H3.5 Z M15 4.5 V19.5 M17 8 H18.5 M17 11 H18.5",
+            Self::Accessibility => {
+                "M12 6.5 A1.8 1.8 0 1 0 12 2.9 A1.8 1.8 0 1 0 12 6.5 Z M5 8.5 L12 10 L19 8.5 M12 10 V14.5 M12 14.5 L8.5 21 M12 14.5 L15.5 21"
+            }
             Self::Agenda => {
                 "M4 6 H20 V20 H4 Z M4 10 H20 M8.5 3.5 V7.5 M15.5 3.5 V7.5 M8 14 H11 M13 14 H16 M8 17 H11"
             }
@@ -925,6 +942,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Mouse => crate::mouse::settings(),
         SectionId::Keyboard => crate::keyboard::settings(),
         SectionId::Appearance => crate::appearance::settings(),
+        SectionId::Accessibility => crate::accessibility::settings(),
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
         SectionId::Desktops => crate::desktops::settings(),
@@ -994,8 +1012,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seventeen_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 17);
+    fn eighteen_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 18);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -1004,7 +1022,7 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [4, 4, 2, 4, 3],
+            [5, 4, 2, 4, 3],
             "the mockup's groups"
         );
         // Each group's sections come together, in the groups' order.
@@ -1014,6 +1032,20 @@ mod tests {
         assert_eq!(seen, Group::ALL.to_vec());
         for id in SectionId::ALL {
             assert_eq!(SectionId::from_slug(id.section().slug), Some(id));
+        }
+    }
+
+    #[test]
+    fn each_section_is_a_page_of_the_actions_palette() {
+        // The palette (#736) lists "Réglages › Son"…: the same pages, in
+        // the same order, by the same names.
+        let pages = hocus_link::actions::SETTINGS_PAGES;
+        assert_eq!(pages.len(), SectionId::ALL.len());
+        for (id, (slug, fr, en)) in SectionId::ALL.into_iter().zip(pages) {
+            let section = id.section();
+            assert_eq!(section.slug, slug);
+            assert_eq!(section.name.fr, fr, "{slug}");
+            assert_eq!(section.name.en, en, "{slug}");
         }
     }
 

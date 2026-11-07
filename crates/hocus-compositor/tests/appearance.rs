@@ -359,6 +359,88 @@ fn once_the_switch_is_drawn_nothing_commits_at_rest() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// High contrast (#423) reinforces the theme chosen: the bar's background
+/// opaque and darker (lighter on light), no glass, the shell told with
+/// the theme; switched off, the theme as it was.
+#[test]
+fn high_contrast_reinforces_the_theme_and_drops_the_glass() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(&format!(
+        "{FILE}\n[appearance]\nhigh-contrast = true\nreduce-transparency = false\n"
+    ))?
+    else {
+        return Ok(());
+    };
+    bed.themed("dark", "green")?;
+    let log = bed.log.clone();
+    let told = |text: &str| {
+        text.lines()
+            .rev()
+            .find(|l| l.contains("the theme theme="))
+            .is_some_and(|l| l.contains(" contrast "))
+    };
+    assert!(told(&plain(&log)), "the shell was not told high contrast");
+    assert!(!bed.hp.glass_on());
+    bed.until(BAR_BACKGROUND, |c| near(c, [0x05, 0x07, 0x0C]))?;
+    // A hover is a 1 px border in `text.dim` (#E2E6EE), not a fill: the
+    // clock's group under the pointer, its edges in the row of the date.
+    let row = |hp: &mut Headless| -> anyhow::Result<Vec<[u8; 3]>> {
+        (BAR_LEFT + 2..BAR_LEFT + 194)
+            .map(|x| pixel(hp, (x, DATE.1 as i32)))
+            .collect()
+    };
+    let rims = |px: &[[u8; 3]]| px.iter().filter(|p| near(**p, [0xE2, 0xE6, 0xEE])).count();
+    let before = row(&mut bed.hp)?;
+    let mut seen = before.clone();
+    for _ in 0..50 {
+        common::point(&mut bed.hp, (DATE.0, 500.0))?;
+        common::wait(&mut bed.hp, Duration::from_millis(50))?;
+        common::point(&mut bed.hp, DATE)?;
+        common::wait(&mut bed.hp, Duration::from_millis(150))?;
+        seen = row(&mut bed.hp)?;
+        if rims(&seen) >= rims(&before) + 2 {
+            break;
+        }
+    }
+    assert!(
+        rims(&seen) >= rims(&before) + 2,
+        "no hover's border: {seen:?}"
+    );
+    if let Some(dir) = std::env::var_os("HOCUS_SHOTS") {
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
+        for p in bytes.chunks(4) {
+            ppm.extend([p[2], p[1], p[0]]);
+        }
+        std::fs::write(Path::new(&dir).join("hover-dark-contrast.ppm"), ppm)?;
+    }
+    // Beside its left edge, inside, the background still: no fill.
+    let edge = seen
+        .iter()
+        .position(|p| near(*p, [0xE2, 0xE6, 0xEE]))
+        .unwrap_or_default();
+    let inside = seen.get(edge + 8).copied().unwrap_or_default();
+    assert!(near(inside, [0x05, 0x07, 0x0C]), "a fill: {inside:?}");
+    bed.hp.pointer_move(400.0, 600.0);
+    // Light, high contrast: white.
+    bed.write(&format!(
+        "{FILE}\n[appearance]\ntheme = \"light\"\nhigh-contrast = true\n"
+    ))?;
+    bed.themed("light", "green")?;
+    bed.until(BAR_BACKGROUND, |c| near(c, [0xFF, 0xFF, 0xFF]))?;
+    // Off: the light theme's own background.
+    bed.write(&format!("{FILE}\n[appearance]\ntheme = \"light\"\n"))?;
+    let off = bed.hp.dispatch_until(WAIT, |_| {
+        plain(&log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the theme theme="))
+            .is_some_and(|l| !l.contains(" contrast "))
+    })?;
+    assert!(off, "high contrast never went");
+    bed.until(BAR_BACKGROUND, |c| near(c, [0xF0, 0xF2, 0xF6]))?;
+    Ok(())
+}
+
 // --- The Settings window ------------------------------------------------------
 
 const APP_ID: &str = "hocus-settings";

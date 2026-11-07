@@ -1,7 +1,8 @@
 //! `[appearance]` and `[locale]` followed live (#402): the theme and the accent go to the
 //! shell and to the applications (the settings portal, [`portal`]); reduced
 //! motion and reduced transparency to the shell's bars and to what the
-//! compositor moves; high contrast to the focused window's rim; the
+//! compositor moves; high contrast to the theme the shell draws in (it
+//! implies reduced transparency) and to the focused window's rim; the
 //! cursor's theme and size to the cursor, and to the programs started
 //! afterwards; the language and the formats to the shell, the language to
 //! the programs started afterwards (`LANGUAGE`).
@@ -31,9 +32,21 @@ impl State {
             tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme changed");
             self.tell_shell(ToShell::Theme(choice));
         }
-        if (now.reduced_motion, now.reduce_transparency)
-            != (old.reduced_motion, old.reduce_transparency)
-        {
+        if (now.high_contrast, now.theme) != (old.high_contrast, old.theme) {
+            // What the compositor draws itself, drawn again in its colours.
+            self.radial_paint = crate::radial_draw::RadialPaint::default();
+            self.overview_paint = crate::overview_draw::OverviewPaint::default();
+            self.magnifier.paint = crate::magnifier::draw::Paint::default();
+        }
+        if (
+            now.reduced_motion,
+            now.reduce_transparency,
+            now.high_contrast,
+        ) != (
+            old.reduced_motion,
+            old.reduce_transparency,
+            old.high_contrast,
+        ) {
             self.tell_shell(self.bar_look());
         }
         if (now.cursor_theme.as_ref(), now.cursor_size)

@@ -368,11 +368,9 @@ impl canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         let Some(card) = super::snapshot() else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let parts = self.parts(size, &card);
         let items = parts
@@ -424,15 +422,14 @@ impl canvas::Program<Message> for View {
                 }
                 Form::Mini => {
                     let rect = self.mark_rect(size);
-                    let lit = if open {
-                        Some(OPEN)
+                    if open {
+                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(OPEN.get(), alpha));
                     } else if still && state.hover == Some(Part::Mark) {
-                        Some(HOVER)
-                    } else {
-                        None
-                    };
-                    if let Some(lit) = lit {
-                        frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(lit.get(), alpha));
+                        crate::theme::hover(
+                            &mut frame,
+                            &kit::rounded(rect, MARK_RADIUS),
+                            faded(HOVER.get(), alpha),
+                        );
                     }
                     draw_mark(&mut frame, rect.center(), card.phase, alpha);
                     if focused == Some(Item::MeetingMark) {
@@ -460,7 +457,7 @@ impl canvas::Program<Message> for View {
                 *kept = Some(said);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(
@@ -497,7 +494,7 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
     let look = card.phase.look();
     f.fill(&kit::rounded(rect, RADIUS), faded(shown.fill, alpha));
     if shown.lit {
-        f.fill(&kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
+        crate::theme::hover(f, &kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
     }
     f.stroke(
         &kit::rounded(

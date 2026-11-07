@@ -13,8 +13,10 @@
 //!
 //! The halo's preview plays a state once when chosen (the wave in 600 ms,
 //! the glow fading in), never with reduced motion; at rest it draws
-//! nothing. The pandas hop once when they come back (650 ms), and the
-//! peek's panda comes up when it is let out: then nothing moves.
+//! nothing. The five pandas (#649, 72 px) play their moods one after the
+//! other (300 ms apart) as the page opens and when they come back, one
+//! again when the pointer comes over it; the peek's panda comes up when it
+//! is let out: then nothing moves.
 
 use std::{
     collections::HashMap,
@@ -48,17 +50,26 @@ use crate::{
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
 const WAVE: Duration = Duration::from_millis(600);
-/// A panda's hop, and how much later each next one starts.
-const HOP: Duration = Duration::from_millis(650);
-const HOP_STAGGER: Duration = Duration::from_millis(110);
+/// Each next panda plays its mood this much later than the one before.
+const STAGGER: Duration = Duration::from_millis(300);
+/// The family, in its order: its moods and their words.
+const FAMILY: [(hocus_pandas::Mood, (&str, &str)); 5] = [
+    (hocus_pandas::Mood::Working, ("au travail", "at work")),
+    (hocus_pandas::Mood::Waiting, ("t’attend", "waiting")),
+    (hocus_pandas::Mood::Done, ("a fini", "done")),
+    (hocus_pandas::Mood::Stuck, ("bloqué", "stuck")),
+    (hocus_pandas::Mood::Resting, ("au repos", "resting")),
+];
+/// The dots in their place, with the pandas off: the rows' colours.
+const DOTS: [u32; 5] = [0x6CC287, 0xF5B44A, 0x7EE0A0, 0xF2945B, 0xA9B2C2];
 /// The peek's panda coming up.
 const RISE: Duration = Duration::from_millis(420);
 /// "Copié" stays this long.
 const COPIED: Duration = Duration::from_secs(2);
 /// The pandas' drawings' box.
 const PANDA_BOX: (f32, f32) = (126.0, 120.5);
-/// The pandas, larger than the bar's 30 px: they are shown off here.
-const PANDA: f32 = 48.0;
+/// The pandas, as large as they are shown off (#649).
+const PANDA: f32 = 72.0;
 const PEEK_PANDA: f32 = 58.0;
 
 /// The page's own messages.
@@ -76,6 +87,9 @@ pub enum Msg {
     Copy,
     /// "La barre ›".
     Link,
+    /// The pointer came over the family's panda at this place: it plays
+    /// its mood again.
+    Pet(usize),
     /// What the tools' files and the state file say.
     Files(HashMap<Tool, Facts>),
 }
@@ -125,8 +139,10 @@ pub struct State {
     played: Option<Played>,
     play: Option<Instant>,
     copied: Option<Instant>,
-    /// The pandas' hop, since then.
+    /// The family playing its moods, since then; each panda the pointer
+    /// came over, since then.
     hop: Option<Instant>,
+    petted: [Option<Instant>; 5],
     /// The peek's panda coming up, since then.
     rise: Option<Instant>,
     /// The page was last drawn shown: its pandas hop as it opens.
@@ -144,48 +160,39 @@ impl State {
     }
 }
 
-/// A panda's drawing, by its look.
-fn panda(look: Played) -> svg::Handle {
-    static PANDAS: OnceLock<[svg::Handle; 3]> = OnceLock::new();
-    PANDAS
-        .get_or_init(|| {
-            [
-                include_bytes!("../../../hocus-shell/assets/pandas/waiting.svg").as_slice(),
-                include_bytes!("../../../hocus-shell/assets/pandas/stuck.svg").as_slice(),
-                include_bytes!("../../../hocus-shell/assets/pandas/done.svg").as_slice(),
-            ]
-            .map(svg::Handle::from_memory)
-        })
-        .get(match look {
-            Played::Waiting => 0,
-            Played::Stuck => 1,
-            Played::Done => 2,
-        })
-        .cloned()
-        .unwrap_or_else(|| svg::Handle::from_memory(Vec::new()))
+/// A panda's still drawing.
+fn still(mood: hocus_pandas::Mood) -> svg::Handle {
+    static STILL: OnceLock<[svg::Handle; 6]> = OnceLock::new();
+    let drawings = STILL.get_or_init(|| {
+        hocus_pandas::Mood::ALL.map(|m| svg::Handle::from_memory(m.still().as_bytes()))
+    });
+    let at = hocus_pandas::Mood::ALL
+        .iter()
+        .position(|m| *m == mood)
+        .unwrap_or(0);
+    drawings[at].clone()
 }
 
-fn working_panda() -> svg::Handle {
-    static PANDA: OnceLock<svg::Handle> = OnceLock::new();
-    PANDA
-        .get_or_init(|| {
-            svg::Handle::from_memory(
-                include_bytes!("../../../hocus-shell/assets/pandas/working.svg").as_slice(),
-            )
-        })
-        .clone()
-}
-
-/// The hop's height at `t` of it (px, up negative), as the bar's rows'
-/// keyframes, a little higher: up 6, down, up 3, down.
-fn hop_at(t: f32) -> f32 {
-    const KEYS: [(f32, f32); 5] = [(0.0, 0.0), (0.3, -6.0), (0.6, 0.0), (0.8, -3.0), (1.0, 0.0)];
-    let t = t.clamp(0.0, 1.0);
-    KEYS.windows(2).find(|k| t <= k[1].0).map_or(0.0, |k| {
-        let p = (t - k[0].0) / (k[1].0 - k[0].0);
-        let p = 1.0 - (1.0 - p) * (1.0 - p);
-        k[0].1 + (k[1].1 - k[0].1) * p
-    })
+/// How far the family's panda `i` is into its burst at `now`, while it
+/// plays: the family started at `opened` (each 300 ms after the one
+/// before), the pointer came over it at `petted`.
+fn family_burst(
+    i: usize,
+    opened: Option<Instant>,
+    petted: Option<Instant>,
+    now: Instant,
+) -> Option<Duration> {
+    let (mood, _) = FAMILY.get(i)?;
+    let started = [
+        opened.map(|t| t + STAGGER * u32::try_from(i).unwrap_or(0)),
+        petted,
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|t| *t <= now)
+    .max()?;
+    let t = now.saturating_duration_since(started);
+    (t < hocus_pandas::lasts(mood.burst())).then_some(t)
 }
 
 impl App {
@@ -223,8 +230,20 @@ impl App {
             since.is_some_and(|s| now.saturating_duration_since(s) < d)
         };
         within(self.agents.play, WAVE + Duration::from_millis(50))
-            || within(self.agents.hop, HOP + HOP_STAGGER * 2)
+            || (0..FAMILY.len()).any(|i| self.agents_burst(i, now).is_some())
             || within(self.agents.rise, RISE)
+    }
+
+    /// How far the family's panda `i` is into its burst at `now`, while
+    /// it plays: from the page's opening (each 300 ms after the one
+    /// before), or from the pointer coming over it.
+    fn agents_burst(&self, i: usize, now: Instant) -> Option<Duration> {
+        family_burst(
+            i,
+            self.agents.hop,
+            self.agents.petted.get(i).copied().flatten(),
+            now,
+        )
     }
 
     /// The keyboard's stops, in `Tab`'s order.
@@ -307,6 +326,17 @@ impl App {
                     tool: Tool::Herdr,
                     on,
                 })
+            }
+            Msg::Pet(i) => {
+                let now = Instant::now();
+                let plays = self.agents_burst(i, now).is_some();
+                if let Some(petted) = self.agents.petted.get_mut(i)
+                    && !self.reduced_motion
+                    && !plays
+                {
+                    *petted = Some(now);
+                }
+                iced::Task::none()
             }
             Msg::Play(played) => {
                 self.agents.played = Some(played);
@@ -1096,36 +1126,6 @@ impl App {
         .into()
     }
 
-    /// A panda, `size` wide, its hop's place at the frame's time.
-    fn agents_panda<'a>(
-        &self,
-        handle: svg::Handle,
-        size: f32,
-        alpha: f32,
-        delay: Duration,
-    ) -> El<'a> {
-        let hop = self.agents.hop.map_or(0.0, |since| {
-            let t = self
-                .now
-                .saturating_duration_since(since)
-                .saturating_sub(delay);
-            if t >= HOP {
-                0.0
-            } else {
-                hop_at(t.as_secs_f32() / HOP.as_secs_f32())
-            }
-        });
-        let tall = size * PANDA_BOX.1 / PANDA_BOX.0;
-        container(svg(handle).width(size).height(tall).opacity(alpha))
-            .padding(Padding {
-                top: 6.0 + hop,
-                bottom: 6.0 - hop,
-                left: 0.0,
-                right: 0.0,
-            })
-            .into()
-    }
-
     /// The peek's row with its panda on the left, coming up when let out,
     /// asleep at 40 % when it never comes out.
     fn agents_peek_row<'a>(&'a self, row_el: El<'a>) -> El<'a> {
@@ -1137,7 +1137,7 @@ impl App {
         let tall = PEEK_PANDA * PANDA_BOX.1 / PANDA_BOX.0;
         let drop = (1.0 - rise) * 18.0;
         let head = container(
-            svg(panda(Played::Waiting))
+            svg(still(hocus_pandas::Mood::Waiting))
                 .width(PEEK_PANDA)
                 .height(tall)
                 .opacity(if off { 0.4 } else { rise.max(0.2) }),
@@ -1160,38 +1160,28 @@ impl App {
         .into()
     }
 
-    /// Under the pandas' switch: three agents as the bar's rows show them,
-    /// their pandas, or their dots.
+    /// Under the pandas' switch: the family, its five moods side by side
+    /// (#649), each a frame of its burst while it plays; their dots with
+    /// the pandas off.
     fn agents_pandas_sample(&self) -> El<'_> {
         let lang = self.lang;
         let pandas = self.agents_pandas();
-        let sample = [
-            (
-                Some(Played::Waiting),
-                "infra",
-                w("t’attend", "waiting"),
-                0xF5C46E,
-                0xF5B44A,
-            ),
-            (
-                Some(Played::Done),
-                "api",
-                w("à voir", "to see"),
-                0x7EE0A0,
-                0x7EE0A0,
-            ),
-            (None, "build", w("12 min", "12 min"), 0x8C96A8, 0x6CC287),
-        ];
+        let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
         let mut cells = row![].spacing(10);
-        for (i, (look, name, word, colour, dot)) in sample.into_iter().enumerate() {
+        for (i, ((mood, word), dot)) in FAMILY.into_iter().zip(DOTS).enumerate() {
             let face: El<'_> = if pandas {
-                let handle = look.map_or_else(working_panda, panda);
-                self.agents_panda(
-                    handle,
-                    PANDA,
-                    1.0,
-                    HOP_STAGGER * u32::try_from(i).unwrap_or(0),
-                )
+                let drawing = self
+                    .agents_burst(i, self.now)
+                    .filter(|_| !self.reduced_motion)
+                    .and_then(|t| {
+                        let t = hocus_pandas::STEP * hocus_pandas::step(t);
+                        hocus_pandas::frame(mood, mood.burst(), t)
+                    });
+                let handle = match drawing {
+                    Some(frame) => svg::Handle::from_memory(frame.into_bytes()),
+                    None => still(mood),
+                };
+                svg(handle).width(PANDA).height(tall).into()
             } else {
                 container(container(Space::new().width(10).height(10)).style(boxed(
                     rgb(dot),
@@ -1199,31 +1189,27 @@ impl App {
                     None,
                 )))
                 .width(PANDA)
-                .height(PANDA * PANDA_BOX.1 / PANDA_BOX.0 + 12.0)
+                .height(tall)
                 .center(PANDA)
                 .into()
             };
             cells = cells.push(
-                container(
-                    row![
-                        container(face).width(PANDA),
-                        column![
-                            t(name, 13.0, TEXT.get()).font(SEMIBOLD),
-                            t(word.get(lang), 12.0, rgb(colour)),
-                        ]
-                        .spacing(1),
-                    ]
-                    .spacing(10)
-                    .align_y(Alignment::Center),
+                mouse_area(
+                    container(
+                        column![face, t(w(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),]
+                            .spacing(4)
+                            .align_x(Alignment::Center),
+                    )
+                    .padding([8, 4])
+                    .width(Length::FillPortion(1))
+                    .style(boxed(
+                        crate::theme::ink(rgba(255, 255, 255, 0.03)),
+                        9.0,
+                        None,
+                    ))
+                    .id(format!("agents:sample:{i}")),
                 )
-                .padding([2, 10])
-                .width(Length::FillPortion(1))
-                .style(boxed(
-                    crate::theme::ink(rgba(255, 255, 255, 0.03)),
-                    9.0,
-                    None,
-                ))
-                .id(format!("agents:sample:{i}")),
+                .on_enter(Message::Agents(Msg::Pet(i))),
             );
         }
         container(cells)
@@ -1606,11 +1592,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_hop_goes_up_and_lands() {
-        assert_eq!(hop_at(0.0), 0.0);
-        assert!((hop_at(0.3) + 6.0).abs() < 1e-4);
-        assert!(hop_at(0.6).abs() < 1e-4);
-        assert!(hop_at(0.8) < -2.9);
-        assert_eq!(hop_at(1.0), 0.0);
+    fn the_family_plays_one_after_the_other_then_rests() {
+        let opened = Instant::now();
+        let at = |ms| opened + Duration::from_millis(ms);
+        // 300 ms apart: the third starts at 600 ms.
+        assert_eq!(family_burst(2, Some(opened), None, at(599)), None);
+        assert_eq!(
+            family_burst(2, Some(opened), None, at(700)),
+            Some(Duration::from_millis(100))
+        );
+        // Each about 2.5 s, the resting one a breath; then still.
+        assert!(family_burst(0, Some(opened), None, at(2899)).is_some());
+        assert_eq!(family_burst(0, Some(opened), None, at(2900)), None);
+        assert!(family_burst(4, Some(opened), None, at(1200 + 4299)).is_some());
+        assert_eq!(family_burst(4, Some(opened), None, at(1200 + 4300)), None);
+        // The pointer over one plays it again.
+        assert_eq!(
+            family_burst(1, Some(opened), Some(at(9000)), at(9500)),
+            Some(Duration::from_millis(500))
+        );
     }
 }

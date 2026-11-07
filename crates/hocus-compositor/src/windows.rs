@@ -76,6 +76,9 @@ pub struct Managed {
     /// Shrunk to fit the screen it was moved to: its size before, taken
     /// back on a screen where it fits (§12, #419).
     pub fitted: Option<crate::scales::Fitted>,
+    /// How opaque it is, in percent, from 20 to 100: `Super`+`Alt` and
+    /// the wheel (#735).
+    pub opacity: u8,
 }
 
 /// A resize under way, or ending.
@@ -174,6 +177,7 @@ impl Managed {
             snapped_on: None,
             came_from: None,
             fitted: None,
+            opacity: crate::opacity::FULL,
         }
     }
 
@@ -723,6 +727,7 @@ impl State {
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
         self.radial_window_gone(id);
+        self.actions_window_gone(id);
         self.overview_window_gone(id);
         self.overview_paint.forget(id);
         self.share_window_gone(id);
@@ -1403,6 +1408,8 @@ impl State {
         moving |= self.tick_radial(now);
         moving |= self.tick_overview(now);
         moving |= self.tick_ink(now, &mut wake);
+        moving |= self.tick_magnifier(now, &mut wake);
+        moving |= self.tick_opacity(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {

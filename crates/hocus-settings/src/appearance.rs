@@ -278,66 +278,24 @@ pub fn settings() -> &'static [Setting] {
                 needs: None,
             },
             Setting {
-                id: "appearance.reduced-motion",
+                id: "appearance.accessibility",
                 section: SectionId::Appearance,
                 group: MOTION,
-                name: w("Mouvements réduits", "Reduced motion"),
+                name: w("Accessibilité", "Accessibility"),
                 line: Some(w(
-                    "Les fenêtres et les bureaux se fondent au lieu de bouger ; rien n’ondule.",
-                    "Windows and desktops fade instead of moving; nothing wobbles.",
+                    "Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.",
+                    "Reduced motion, reduced transparency, high contrast and the magnifier.",
                 )),
                 keywords: (
-                    &["animation", "onduler", "mouvement"],
-                    &["animation", "motion", "wobbly", "reduce motion"],
+                    &["mouvement", "transparence", "contraste", "loupe", "accessibilité"],
+                    &["motion", "transparency", "contrast", "magnifier", "accessibility"],
                 ),
-                kind: Kind::Switch,
-                places: one(
-                    &["appearance", "reduced-motion"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
-                needs: None,
-            },
-            Setting {
-                id: "appearance.reduce-transparency",
-                section: SectionId::Appearance,
-                group: MOTION,
-                name: w("Transparence réduite", "Reduced transparency"),
-                line: Some(w(
-                    "La barre devient opaque au lieu de laisser voir le fond.",
-                    "The bar turns opaque instead of showing what is behind it.",
-                )),
-                keywords: (
-                    &["verre", "flou", "opacité", "transparence"],
-                    &["glass", "blur", "opacity", "transparency"],
-                ),
-                kind: Kind::Switch,
-                places: one(
-                    &["appearance", "reduce-transparency"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
-                needs: None,
-            },
-            Setting {
-                id: "appearance.high-contrast",
-                section: SectionId::Appearance,
-                group: MOTION,
-                name: w("Contraste élevé", "High contrast"),
-                line: Some(w(
-                    "En partie : le bord de la fenêtre active passe à 2 px ; les applications le savent.",
-                    "Partly: the focused window’s rim is 2 px; applications are told.",
-                )),
-                keywords: (
-                    &["contraste", "malvoyant", "accessibilité"],
-                    &["contrast", "low vision", "accessibility"],
-                ),
-                kind: Kind::Switch,
-                places: one(
-                    &["appearance", "high-contrast"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                kind: Kind::Link(SectionId::Accessibility),
+                places: Places::Page(Place {
+                    key: &["appearance", "accessibility"],
+                    codec: Codec::Text,
+                    default: Value::Text(String::new()),
+                }),
                 needs: None,
             },
             Setting {

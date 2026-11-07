@@ -438,9 +438,12 @@ fn a_window_hosting_waiting_agents_has_the_badge_and_empty_desktops_sleep() -> a
 fn at_rest_the_open_overview_draws_nothing() -> anyhow::Result<()> {
     let mut hp = start()?;
     opened(&mut hp)?;
-    // Past the sleeping pandas' breaths.
+    // The sleeping pandas breathe twice as it opens (#649), 8.3 s, then
+    // lie still.
     hp.hold_clock();
-    hp.step(Duration::from_secs(7))?;
+    hp.step(Duration::from_secs(4))?;
+    assert!(!hp.still(), "the sleeping pandas do not breathe");
+    hp.step(Duration::from_millis(4400))?;
     hp.step(common::STEP)?;
     assert!(hp.still(), "something still moves");
     hp.release_clock();

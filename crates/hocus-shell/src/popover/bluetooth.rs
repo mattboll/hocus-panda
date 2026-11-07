@@ -458,6 +458,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 all.push(frame_of_list.into_geometry());
             }
             drawn.focus(&mut frame);
+            drawn.tell_readers();
             all.insert(0, frame.into_geometry());
             all
         })
@@ -1035,6 +1036,107 @@ impl Drawn<'_> {
         }
     }
 
+    /// What it shows, for screen readers (crate::a11y::rows): the switch,
+    /// the connected devices with their Disconnect, my devices, those
+    /// around, the Settings' link.
+    fn tell_readers(&self) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        let words = self.words();
+        let bt = &self.state.bt;
+        let running = self.running();
+        let mut nodes = Vec::new();
+        if self.layout.switch {
+            nodes.push(
+                rows::act(
+                    Target::Switch,
+                    Role::ToggleButton,
+                    words.bluetooth(),
+                    Switch::rect(),
+                )
+                .checked(self.ui.switch.shown(bt.powered, self.now)),
+            );
+        }
+        if self.layout.note.is_some() {
+            nodes.push(rows::line(words.bluetooth_is_off()));
+        }
+        let state_of = |device: &Device| -> String {
+            match &running {
+                Some((path, action)) if *path == device.path => match action {
+                    Action::Connect => words.connecting().to_owned(),
+                    Action::Pair => words.pairing().to_owned(),
+                },
+                _ if self.ui.failure(&device.path).is_some() => self
+                    .ui
+                    .failure(&device.path)
+                    .map(|f| error_lines(f).join(" "))
+                    .unwrap_or_default(),
+                _ if device.code && !device.paired => words.in_settings().to_owned(),
+                _ => String::new(),
+            }
+        };
+        for (i, device) in bt.connected.iter().enumerate() {
+            let mut said = words.connected().to_owned();
+            if let Some(percent) = device.battery {
+                said = format!("{said}, {}", words.battery_of(percent));
+            }
+            nodes.push(rows::line(format!("{}, {said}", device.name)));
+            if let Some(rect) = self.shape(Target::Disconnect(i)) {
+                nodes.push(rows::act(
+                    Target::Disconnect(i),
+                    Role::Button,
+                    format!("{} {}", words.disconnect(), device.name),
+                    rect,
+                ));
+            }
+        }
+        if self.layout.mine.is_some() {
+            nodes.push(rows::line(words.my_devices()));
+            for (i, device) in bt.paired.iter().enumerate() {
+                let node = match self.shape(Target::Mine(i)) {
+                    Some(rect) => {
+                        rows::act(Target::Mine(i), Role::Button, device.name.clone(), rect)
+                    }
+                    None => Node::new(rows::key(Target::Mine(i)), Role::Label, device.name.clone()),
+                };
+                nodes.push(node.describe(state_of(device)));
+            }
+        }
+        if self.layout.nearby.is_some() {
+            nodes.push(rows::line(words.nearby()));
+            if bt.searching {
+                nodes.push(rows::line(words.searching_devices()));
+            }
+            for (i, device) in self.state.nearby.iter().enumerate() {
+                let node = match self.shape(Target::Near(i)) {
+                    Some(rect) => {
+                        rows::act(Target::Near(i), Role::Button, device.name.clone(), rect)
+                    }
+                    None => Node::new(rows::key(Target::Near(i)), Role::Label, device.name.clone()),
+                };
+                nodes.push(node.describe(state_of(device)));
+            }
+        }
+        if let Some(rect) = self.shape(Target::Settings) {
+            nodes.push(rows::act(
+                Target::Settings,
+                Role::Button,
+                words.bluetooth_settings(),
+                rect,
+            ));
+        }
+        rows::publish(
+            self.panel.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(targets(self.layout, bt, &self.state.nearby)),
+                focus: self.ui.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+
     /// The keyboard's ring, around what holds it.
     fn focus(&self, f: &mut Frame) {
         let Some(target) = self.ui.focus else {
@@ -1060,7 +1162,7 @@ impl Drawn<'_> {
             return;
         };
         if self.hover(Target::Settings) {
-            f.fill(&kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
+            crate::theme::hover(f, &kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
         }
         let middle = rect.center_y();
         let tile = Rectangle::new(

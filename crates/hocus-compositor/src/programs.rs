@@ -3,6 +3,10 @@
 //! ones), and the terminal of `Super+Return`. Each starts and is waited for
 //! on a thread of its own, so that neither a slow fork, a look through
 //! `PATH` nor a program's exit ever holds the loop.
+//!
+//! Every program starts with no signal blocked ([`default_signals`]): the
+//! loop blocks SIGTERM and SIGINT to read them itself, and a mask survives
+//! `exec`, so without it `kill` would do nothing to them (#733).
 
 use std::{
     ffi::OsStr,
@@ -14,6 +18,45 @@ use std::{
 /// The terminals `Super+Return` looks for in `PATH`, in this order, when the
 /// configuration names none.
 pub const TERMINALS: [&str; 4] = ["kitty", "foot", "alacritty", "xterm"];
+
+/// The signals whose disposition a program gets back at their default.
+const DEFAULT_SIGNALS: [i32; 4] = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT];
+
+/// `cmd`'s program starts as a program should: no signal blocked, and
+/// SIGTERM, SIGINT, SIGHUP and SIGQUIT at their default. The compositor's
+/// threads block SIGTERM and SIGINT (the loop reads them from a signalfd,
+/// `calloop::signals`), the mask is inherited by a child and kept across
+/// `exec`, and std leaves it so. Every program the compositor starts goes
+/// through here.
+#[allow(unsafe_code)]
+pub fn default_signals(cmd: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: the closure runs in the child between fork and exec, where
+    // only async-signal-safe calls are allowed: sigemptyset, sigprocmask
+    // and sigaction are, and it allocates nothing. The structures are
+    // plain data, zeroed then filled by those calls.
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut none: libc::sigset_t = std::mem::zeroed();
+            if libc::sigemptyset(&mut none) != 0
+                || libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut()) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            for signal in DEFAULT_SIGNALS {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = libc::SIG_DFL;
+                if libc::sigemptyset(&mut action.sa_mask) != 0
+                    || libc::sigaction(signal, &action, std::ptr::null_mut()) != 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+    cmd
+}
 
 /// What a started program is told about the compositor.
 #[derive(Debug, Clone)]
@@ -74,7 +117,8 @@ impl Env {
     /// A command connected to this compositor only.
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
         let mut cmd = Command::new(program);
-        cmd.stdin(Stdio::null())
+        default_signals(&mut cmd)
+            .stdin(Stdio::null())
             .env("XDG_RUNTIME_DIR", &self.runtime_dir)
             .env("WAYLAND_DISPLAY", self.wayland_display())
             .env("XDG_SESSION_TYPE", "wayland")
@@ -353,9 +397,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn wayland_display_is_the_sockets_name_in_the_runtime_dir() {
-        let env = |socket: &str| Env {
+    fn env(socket: &str) -> Env {
+        Env {
             runtime_dir: PathBuf::from("/run/user/1000"),
             socket: PathBuf::from(socket),
             xdisplay: Some(1),
@@ -364,7 +407,66 @@ mod tests {
             session_bus: None,
             config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
             language: None,
-        };
+        }
+    }
+
+    /// The signals `/proc` says process `pid` has blocked, once it has
+    /// exec'd `sleep`.
+    fn blocked(pid: u32) -> anyhow::Result<String> {
+        let status = format!("/proc/{pid}/status");
+        for _ in 0..500 {
+            let text = std::fs::read_to_string(&status)?;
+            if text.lines().any(|l| l == "Name:\tsleep") {
+                let line = text.lines().find(|l| l.starts_with("SigBlk:"));
+                return Ok(line.unwrap_or_default().to_owned());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        anyhow::bail!("{pid} never ran sleep")
+    }
+
+    /// A thread blocking SIGTERM and SIGINT, as the loop's do: a program
+    /// started as std does has them blocked; started through
+    /// [`default_signals`], as [`Env::command`] does for every program,
+    /// none. Not through `sh`: dash clears its mask as it starts.
+    #[test]
+    #[allow(unsafe_code)]
+    fn a_program_starts_with_no_signal_blocked() -> anyhow::Result<()> {
+        let masks = std::thread::spawn(|| -> anyhow::Result<(String, String, String)> {
+            // SAFETY: the mask of this thread alone, from plain data.
+            unsafe {
+                let mut set: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&mut set);
+                libc::sigaddset(&mut set, libc::SIGTERM);
+                libc::sigaddset(&mut set, libc::SIGINT);
+                let blocked = libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+                anyhow::ensure!(blocked == 0, "could not block");
+            }
+            let mask = |mut cmd: Command| -> anyhow::Result<String> {
+                let mut child = cmd.arg("600").stdin(Stdio::null()).spawn()?;
+                let mask = blocked(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                mask
+            };
+            let plain = mask(Command::new("sleep"))?;
+            let mut reset = Command::new("sleep");
+            default_signals(&mut reset);
+            let reset = mask(reset)?;
+            let started = mask(env("/run/user/1000/hocus-0").command("sleep"))?;
+            Ok((plain, reset, started))
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("the thread panicked"))??;
+        // SIGTERM (15) and SIGINT (2): bits 14 and 1.
+        assert_eq!(masks.0, "SigBlk:\t0000000000004002");
+        assert_eq!(masks.1, "SigBlk:\t0000000000000000");
+        assert_eq!(masks.2, "SigBlk:\t0000000000000000");
+        Ok(())
+    }
+
+    #[test]
+    fn wayland_display_is_the_sockets_name_in_the_runtime_dir() {
         // The Settings it starts write the file it read.
         let command = env("/run/user/1000/hocus-0").command("hocus-settings");
         let config = command

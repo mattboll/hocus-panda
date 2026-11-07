@@ -348,7 +348,10 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
+        // Under the events' rows, drawn in their list's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(bounds.size()), |f| {
+            kit::background(f, bounds.size(), self.glass);
+        });
         if let (Some(laid), Some(view)) = (&state.laid, &state.shown) {
             let clip = kit::Clip::new(self.software, draw::list_view(laid));
             draw::calendar(&mut frame, laid, view, state.pointer.hover, clip);
@@ -403,12 +406,118 @@ impl Panel {
             if let Some(name) = self.focused_name(&laid, &shown, &read) {
                 tracing::debug!(name, "the calendar's keyboard is on");
             }
+            self.tell_readers(&laid, &shown, &read);
             state.laid = Some(laid);
             state.shown = Some(shown.clone());
             super::refit(Item::Calendar);
         }
         let wait = read.next_change(&shown)?;
         Some(canvas::Action::request_redraw_at(Instant::now() + wait))
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows): the month and
+    /// its buttons, the day the keyboard is on, the chosen day's line and
+    /// its events, in `Tab`'s order.
+    fn tell_readers(&self, laid: &Laid, view: &View, read: &Read) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let words = read.words;
+        let mut nodes = vec![
+            rows::line(laid.title.text.clone()),
+            rows::act(
+                Stop::Previous,
+                Role::Button,
+                words.previous(),
+                laid.previous,
+            ),
+            rows::act(Stop::Next, Role::Button, words.next(), laid.next),
+            rows::act(
+                Stop::Today,
+                Role::Button,
+                words.today_button(),
+                laid.today_button,
+            ),
+        ];
+        let day = laid
+            .weeks
+            .iter()
+            .flat_map(|w| &w.days)
+            .find(|c| c.date == view.focus_day)
+            .map(|c| c.rect);
+        let count = if view.focus_day == view.selected {
+            read.agenda.events().len()
+        } else {
+            agenda(view.focus_day, &crate::notifications::wall())
+                .events()
+                .len()
+        };
+        let mut days = hocus_a11y::Node::new(
+            rows::key(Stop::Days),
+            Role::Button,
+            words.day_name(view.focus_day, count, read.today),
+        )
+        .bounds(day.and_then(rows::at))
+        .act(hocus_a11y::Act::Click);
+        if view.focus_day == view.selected {
+            days = days.selected(true);
+        }
+        nodes.push(days);
+        let mut line = laid.day_line.title.text.clone();
+        for more in [&laid.day_line.relative, &laid.day_line.count]
+            .into_iter()
+            .flatten()
+        {
+            line = format!("{line}, {}", more.text);
+        }
+        nodes.push(rows::line(line));
+        if let layout::Body::Note { text, .. } = &laid.body {
+            nodes.push(rows::line(text.clone()));
+        }
+        if let Some(rect) = laid.choose {
+            nodes.push(rows::act(
+                Stop::Choose,
+                Role::Button,
+                words.choose_calendars(),
+                rect,
+            ));
+        }
+        let rects = laid.targets();
+        for (i, row) in laid.rows().iter().enumerate() {
+            let rect = rects
+                .iter()
+                .find(|(t, _)| *t == Target::Event(i))
+                .map(|(_, r)| *r);
+            let mut node = hocus_a11y::Node::new(
+                rows::key(Stop::Event(row.id.clone())),
+                Role::Button,
+                row.title.clone(),
+            )
+            .bounds(rect.and_then(rows::at))
+            .act(hocus_a11y::Act::Click);
+            if row.past {
+                node = node.describe(if words.previous() == "Mois précédent" {
+                    "passé"
+                } else {
+                    "past"
+                });
+            }
+            nodes.push(node);
+        }
+        let order: Vec<Stop> = [Stop::Previous, Stop::Next, Stop::Today, Stop::Days]
+            .into_iter()
+            .chain(laid.choose.is_some().then_some(Stop::Choose))
+            .chain(laid.rows().iter().map(|r| Stop::Event(r.id.clone())))
+            .collect();
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(order),
+                focus: view.focus.as_ref().map(rows::key),
+                arrows: false,
+            },
+        );
     }
 
     /// What holds the keyboard, as a screen reader would say it.

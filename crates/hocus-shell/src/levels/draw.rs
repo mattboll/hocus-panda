@@ -105,8 +105,11 @@ pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
 pub(crate) const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 pub(crate) const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 pub(crate) const ACCENT: Ink = crate::theme::ACCENT;
-pub(crate) const RING: f32 = 3.0;
-pub(crate) const RING_OUT: f32 = 2.0;
+/// The keyboard's ring (bar.md §11): 2 px wide, 3 px out from what holds
+/// the keyboard; with what it rings, it never reaches further than their
+/// sum, which the items' places leave room for.
+pub(crate) const RING: f32 = 2.0;
+pub(crate) const RING_OUT: f32 = 3.0;
 
 pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -328,11 +331,9 @@ impl<Message> canvas::Program<Message> for Levels {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let Some(at) = state.at else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let right = bounds.width;
         let left = right + 2.0 - self.bar_width;
@@ -351,31 +352,34 @@ impl<Message> canvas::Program<Message> for Levels {
             .map(|(item, rect)| (*item, self.in_bar_rect(*rect, size)))
             .collect();
         popover::with(|c| c.set_items(&self.bar, hocus_link::LEVELS_NAMESPACE, in_bar));
-        for (item, rect) in items {
-            let radius = if item == Item::Keyboard {
-                crate::layouts::draw::MINI_RADIUS
-            } else {
-                radius
-            };
-            let (open, focused) =
-                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
-            let lit = if open {
-                Some(OPEN)
-            } else if state.hover == Some(item) {
-                Some(HOVER)
-            } else {
-                None
-            };
-            if let Some(colour) = lit {
-                frame.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour.get(),
-                );
+        // Under the signs and gauges, which are drawn in the column's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
+            for (item, rect) in items {
+                let radius = if item == Item::Keyboard {
+                    crate::layouts::draw::MINI_RADIUS
+                } else {
+                    radius
+                };
+                let (open, focused) =
+                    popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
+                let lit = if open {
+                    Some(OPEN)
+                } else if state.hover == Some(item) {
+                    Some(HOVER)
+                } else {
+                    None
+                };
+                if let Some(colour) = lit {
+                    f.fill(
+                        &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                        colour.get(),
+                    );
+                }
+                if focused {
+                    ring(f, rect, radius);
+                }
             }
-            if focused {
-                ring(&mut frame, rect, radius);
-            }
-        }
+        });
         let gauges = state.gauges.map(|g| g.at(at));
         let (zero, zero_bold) = state.zero.unwrap_or((VALUE * 0.6, MINI_VALUE * 0.65));
         let mut drawn = Drawn {
@@ -402,7 +406,7 @@ impl<Message> canvas::Program<Message> for Levels {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     /// A hand over the items, which a click acts on (#468).
@@ -713,19 +717,35 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
     }
 }
 
-/// The keyboard's ring around `rect`: 3 px of the accent, 2 px out.
+/// The keyboard's ring around `rect` (bar.md §11): 2 px of the accent as
+/// text, 3 px out, its radius the item's and as much again. Under high
+/// contrast, 3 px, 2 px out, the background's colour between: the same
+/// room.
 pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let out = RING_OUT + RING / 2.0;
+    let colour = crate::theme::ACCENT_TEXT.get();
+    if crate::theme::contrast() {
+        let gap = RING_OUT - 1.0;
+        let back = crate::theme::Ink::Token(|t| t.popover_opaque_bottom).get();
+        stroke_around(f, rect, radius, 0.0, gap, back);
+        stroke_around(f, rect, radius, gap, RING + 1.0, colour);
+    } else {
+        stroke_around(f, rect, radius, RING_OUT, RING, colour);
+    }
+}
+
+/// A stroke `width` wide around `rect`, `out` px from it.
+fn stroke_around(f: &mut Frame, rect: Rectangle, radius: f32, out: f32, width: f32, colour: Color) {
+    let middle = out + width / 2.0;
     let path = Path::rounded_rectangle(
-        Point::new(rect.x - out, rect.y - out),
-        Size::new(rect.width + 2.0 * out, rect.height + 2.0 * out),
-        (radius + out).into(),
+        Point::new(rect.x - middle, rect.y - middle),
+        Size::new(rect.width + 2.0 * middle, rect.height + 2.0 * middle),
+        (radius + middle).into(),
     );
     f.stroke(
         &path,
         Stroke {
-            style: Style::Solid(ACCENT.get()),
-            width: RING,
+            style: Style::Solid(colour),
+            width,
             ..Stroke::default()
         },
     );
@@ -1448,14 +1468,108 @@ mod tests {
     }
 
     fn levels(form: Form) -> Levels {
+        with_backdrop(form, None)
+    }
+
+    fn with_backdrop(form: Form, backdrop: Option<Color>) -> Levels {
         Levels {
             forms: vec![(form, 1.0)],
             bar_width: form.width() as f32,
             motion: false,
             words: Words::new(crate::clock::time::Lang::French),
-            backdrop: None,
+            backdrop,
             bar: "eDP-1".to_owned(),
         }
+    }
+
+    #[test]
+    fn the_icons_and_gauges_show_the_same_on_the_opaque_bar_as_on_glass() {
+        // Opaque (reduced transparency, high contrast, the CPU), the bar's
+        // colour drawn under the levels: their signs and gauges over it as
+        // on glass, not under it as the GPU had them.
+        use super::super::model::{Battery, Charge, Sound};
+        let all = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            brightness: Some(70.0),
+            battery: Some(Battery {
+                percent: 82.0,
+                charge: Charge::Discharging,
+                left: None,
+                health: None,
+            }),
+            ..Snapshot::default()
+        };
+        let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
+        for (form, (w, h)) in [(Form::Full, FULL_SURFACE), (Form::Mini, MINI_SURFACE)] {
+            let mut state = state(all, 0);
+            let now = state.at.expect("drawn at");
+            for (gauge, to) in state.gauges.iter_mut().zip([62.0, 70.0, 82.0]) {
+                gauge.toward(Some(to), now, false, false);
+            }
+            let drawn = crate::backdrop::tests::drawn(
+                |backdrop| with_backdrop(form, backdrop),
+                &state,
+                Size::new(w, h),
+                colour,
+            );
+            crate::backdrop::tests::assert_drawn_over(&drawn, &format!("{form:?}"));
+        }
+    }
+
+    #[test]
+    fn a_hovered_items_sign_and_gauge_show_over_its_hover() {
+        // Its hover drawn under what the column's clip draws, on both
+        // renderers (crate::backdrop::layer): what the sound's row shows
+        // opaque, unlit, is the same pixel for pixel once the row is lit,
+        // the translucent hover under it, and the row lit around it. (The
+        // GPU's order is not drawn here: the tests have only the CPU.)
+        use super::super::model::Sound;
+        let sound = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            ..Snapshot::default()
+        };
+        let (w, h) = FULL_SURFACE;
+        let size = Size::new(w as f32, h as f32);
+        let mut unlit = state(sound, 0);
+        let now = unlit.at.expect("drawn at");
+        unlit.gauges[0].toward(Some(62.0), now, false, false);
+        let program = levels(Form::Full);
+        let items = program.items(&unlit, size);
+        let [(Item::Sound, row)] = items.as_slice() else {
+            panic!("{items:?}");
+        };
+        let lit = State {
+            hover: Some(Item::Sound),
+            gauges: unlit.gauges,
+            ..state(sound, 0)
+        };
+        let surface = iced::Size::new(w, h);
+        let before = crate::backdrop::tests::pixels_of(&program, &unlit, surface);
+        let after = crate::backdrop::tests::pixels_of(&program, &lit, surface);
+        let at = |x: u32, y: u32| ((y * w + x) * 4) as usize;
+        let corner = at(row.x as u32 + 6, row.y as u32 + 2);
+        assert_ne!(after[corner..corner + 4], before[corner..corner + 4], "lit");
+        let mut opaque = 0;
+        for y in row.y as u32..(row.y + row.height) as u32 {
+            for x in row.x as u32..(row.x + row.width) as u32 {
+                let i = at(x, y);
+                if before[i + 3] == 255 {
+                    opaque += 1;
+                    assert_eq!(
+                        after[i..i + 4],
+                        before[i..i + 4],
+                        "({x}, {y}) under the hover"
+                    );
+                }
+            }
+        }
+        assert!(opaque > 50, "the sign and the gauge are drawn: {opaque}");
     }
 
     fn state(levels: Snapshot, lines: usize) -> State {

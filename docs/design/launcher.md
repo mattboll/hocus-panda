@@ -9,6 +9,8 @@ drawn ×1.5 of every size below**, as the approved mockup showed it on
 the maintainer's 2560 × 1600 screen at scale 1 (see
 [as built, 5.1b](#51b-the-launcher-larger-its-backdrop-in-the-bars-tint-2026-11-02)).
 The `:` prefix (5.7) shows emoji first: see [as built, 5.7](#57-the-emoji-row-2026-11-03).
+The actions palette (`Super+P`, [actions.md](actions.md)) shares its
+search and its rows' style, on a dropdown of its own.
 Later in the same field: files and AI; room is left for other kinds of
 results.
 

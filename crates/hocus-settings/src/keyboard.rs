@@ -1,7 +1,9 @@
 //! Clavier et raccourcis / Keyboard and shortcuts (6.8, variant A): the
 //! layouts, the keys' repeat and the special keys on the section's page;
 //! every desktop shortcut (`[shortcuts]`, the compositor's
-//! `shortcuts.rs`: 67 actions) on a sub-page of its own, with its search.
+//! `shortcuts.rs`: 73 actions) on a sub-page of its own, with its search.
+//! Each is an action of the palette's catalogue too
+//! (`hocus_link::actions`, #736): its tests check so.
 //!
 //! The compositor reads all of it again as the file changes: it rebuilds
 //! the keymap, gives clients the repeat, takes the new shortcuts.
@@ -53,7 +55,27 @@ pub const MEDIA: RowGroup = RowGroup {
 };
 
 /// The shortcuts' groups, in the sub-page's order.
-pub const SHORTCUT_GROUPS: [RowGroup; 6] = [WINDOWS, DESKTOPS, BAR, CAPTURES, SESSION, MEDIA];
+pub const MAGNIFIER: RowGroup = RowGroup {
+    label: w("LOUPE", "MAGNIFIER"),
+    per_source: false,
+};
+
+/// The screen reader's shortcut (#734).
+pub const SCREEN_READER: RowGroup = RowGroup {
+    label: w("LECTEUR D'ÉCRAN", "SCREEN READER"),
+    per_source: false,
+};
+
+pub const SHORTCUT_GROUPS: [RowGroup; 8] = [
+    WINDOWS,
+    DESKTOPS,
+    BAR,
+    CAPTURES,
+    SESSION,
+    MEDIA,
+    MAGNIFIER,
+    SCREEN_READER,
+];
 
 pub const SWITCHES: &[&str] = &[
     "",
@@ -396,10 +418,30 @@ fn actions() -> Vec<Action> {
             (&["applications", "chercher"], &["apps", "search"]),
         ),
         a(
+            "actions",
+            BAR,
+            w("Actions", "Actions"),
+            &["Super+P"],
+            (
+                &["palette", "commandes", "tout faire", "chercher une action"],
+                &["palette", "commands", "command palette", "search actions"],
+            ),
+        ),
+        a(
+            "focus-bar",
+            BAR,
+            w("Aller dans la barre", "Go to the bar"),
+            &["Super+B"],
+            (
+                &["clavier", "barre", "accessibilité", "focus"],
+                &["keyboard", "panel", "accessibility", "focus"],
+            ),
+        ),
+        a(
             "toggle-bar",
             BAR,
             w("Changer la forme de la barre", "Change the bar's form"),
-            &["Super+B"],
+            &["Super+Shift+B"],
             (&["mini", "barre"], &["panel", "bar"]),
         ),
         a(
@@ -502,6 +544,45 @@ fn actions() -> Vec<Action> {
             w("Moins de luminosité", "Brightness down"),
             &["XF86MonBrightnessDown"],
             (&["luminosité", "écran"], &["brightness"]),
+        ),
+        // The magnifier (#424).
+        a(
+            "magnifier-in",
+            MAGNIFIER,
+            w("Zoomer", "Zoom in"),
+            &["Super+equal", "Super+plus", "Super+KP_Add"],
+            (
+                &["loupe", "grossir", "agrandir", "malvoyant"],
+                &["magnifier", "magnify", "zoom", "low vision"],
+            ),
+        ),
+        a(
+            "magnifier-out",
+            MAGNIFIER,
+            w("Dézoomer", "Zoom out"),
+            &["Super+minus", "Super+KP_Subtract"],
+            (&["loupe", "réduire"], &["magnifier", "zoom"]),
+        ),
+        a(
+            "magnifier-off",
+            MAGNIFIER,
+            w("Éteindre la loupe", "Turn the magnifier off"),
+            &["Super+Escape"],
+            (&["loupe", "zoom"], &["magnifier", "zoom"]),
+        ),
+        // The screen reader (#734).
+        a(
+            "screen-reader",
+            SCREEN_READER,
+            w(
+                "Lancer ou arrêter le lecteur d'écran",
+                "Start or stop the screen reader",
+            ),
+            &["Super+Alt+S"],
+            (
+                &["lecteur d'écran", "orca", "aveugle", "voix"],
+                &["screen reader", "orca", "blind", "speech"],
+            ),
         ),
     ]);
     list
@@ -753,17 +834,19 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 67);
+        assert_eq!(all.len(), 73);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
         let count = |g| all.iter().filter(|s| s.group == g).count();
         assert_eq!(count(WINDOWS), 16);
         assert_eq!(count(DESKTOPS), 34);
-        assert_eq!(count(BAR), 6);
+        assert_eq!(count(BAR), 8);
         assert_eq!(count(CAPTURES), 4);
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);
+        assert_eq!(count(MAGNIFIER), 3);
+        assert_eq!(count(SCREEN_READER), 1);
         // The shipped file's keys, every one.
         let shipped = include_str!("../../../packaging/config.toml");
         for setting in &all {
@@ -771,6 +854,15 @@ mod tests {
             assert!(
                 shipped.contains(&format!("# {key} = ")),
                 "{key} is not in packaging/config.toml"
+            );
+        }
+        // Each one is an action of the palette's (#736), but the
+        // palette's own.
+        for setting in &all {
+            let key = setting.id.trim_start_matches("shortcuts.");
+            assert!(
+                key == "actions" || hocus_link::actions::of_shortcut(key).is_some(),
+                "{key} is not in the palette's catalogue"
             );
         }
         assert_eq!(

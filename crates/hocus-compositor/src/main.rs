@@ -38,7 +38,8 @@ struct Args {
     #[arg(long = "output", value_name = "SPEC")]
     outputs: Vec<OutputSpec>,
 
-    /// Headless renderer.
+    /// Renderer, headless and on a virtual terminal. Auto: GLES, else
+    /// pixman (on a virtual terminal, when GLES does not start on the GPU).
     #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
     renderer: RendererArg,
 
@@ -171,17 +172,18 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|| PathBuf::from(SHELL))
         })
     });
+    let renderer = match args.renderer {
+        RendererArg::Auto => RendererChoice::Auto,
+        RendererArg::Gles => RendererChoice::Gles,
+        RendererArg::Pixman => RendererChoice::Pixman,
+    };
     let options = Options {
         backend: match backend {
-            BackendArg::Tty => BackendKind::Tty,
+            BackendArg::Tty => BackendKind::Tty(renderer),
             BackendArg::Winit => BackendKind::Winit,
             BackendArg::Headless => BackendKind::Headless(HeadlessConfig {
                 outputs: args.outputs,
-                renderer: match args.renderer {
-                    RendererArg::Auto => RendererChoice::Auto,
-                    RendererArg::Gles => RendererChoice::Gles,
-                    RendererArg::Pixman => RendererChoice::Pixman,
-                },
+                renderer,
                 render_node: args.render_node,
             }),
         },

@@ -310,6 +310,11 @@ impl Stack {
         }
     }
 
+    /// The bubbles showing, from the first.
+    pub fn bubbles(&self) -> &[Bubble] {
+        &self.bubbles
+    }
+
     /// The bubble whose surface is `id`.
     pub fn bubble(&self, id: window::Id) -> Option<&Bubble> {
         self.bubbles.iter().find(|b| b.id == id)

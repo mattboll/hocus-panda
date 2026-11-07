@@ -6,6 +6,12 @@
 //! draw with these values, so that the bar, its popovers, the lock, the
 //! authentication dialog and the Settings window change together.
 //!
+//! High contrast (`[appearance] high-contrast`, #423) reinforces the theme
+//! chosen, dark or light, and keeps the accent: its own tables of tokens
+//! ([`DARK_CONTRAST`], [`LIGHT_CONTRAST`]), text at 7:1 and borders at 3:1
+//! at least, the accent as text lifted or darkened to 7:1, and the colours
+//! drawn for the dark theme read by [`on_contrast`].
+//!
 //! No toolkit here: colours are red, green, blue and an opacity, which each
 //! program turns into its own.
 
@@ -41,6 +47,14 @@ impl Scheme {
         match self {
             Self::Dark => &DARK,
             Self::Light => &LIGHT,
+        }
+    }
+
+    /// Its tokens under high contrast.
+    pub const fn contrast_tokens(self) -> &'static Tokens {
+        match self {
+            Self::Dark => &DARK_CONTRAST,
+            Self::Light => &LIGHT_CONTRAST,
         }
     }
 
@@ -287,7 +301,8 @@ impl Accent {
 }
 
 impl fmt::Display for Choice {
-    /// `SCHEME ACCENT WALLPAPER`, as `theme` on the line carries it.
+    /// `SCHEME ACCENT WALLPAPER`, then `contrast` under high contrast, as
+    /// `theme` on the line carries it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -295,14 +310,19 @@ impl fmt::Display for Choice {
             self.scheme,
             self.accent,
             self.wallpaper.word()
-        )
+        )?;
+        if self.contrast {
+            f.write_str(" contrast")?;
+        }
+        Ok(())
     }
 }
 
 impl FromStr for Choice {
     type Err = BadLine;
 
-    /// `SCHEME ACCENT [WALLPAPER]`: without the wallpaper's colours, Nuit's.
+    /// `SCHEME ACCENT [WALLPAPER] [contrast]`: without the wallpaper's
+    /// colours, Nuit's.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut words = s.split_whitespace();
         let scheme = words
@@ -313,15 +333,25 @@ impl FromStr for Choice {
             .next()
             .ok_or_else(|| BadLine("no accent".to_owned()))?
             .parse()?;
-        let wallpaper = match words.next() {
-            None => AccentColours::default(),
-            Some(word) => AccentColours::of_word(word)
-                .ok_or_else(|| BadLine(format!("the wallpaper's accent {word:?}")))?,
+        let mut next = words.next();
+        let wallpaper = match next {
+            None | Some("contrast") => AccentColours::default(),
+            Some(word) => {
+                next = words.next();
+                AccentColours::of_word(word)
+                    .ok_or_else(|| BadLine(format!("the wallpaper's accent {word:?}")))?
+            }
+        };
+        let contrast = match next {
+            None => false,
+            Some("contrast") => true,
+            Some(word) => return Err(BadLine(format!("after the theme, {word:?}"))),
         };
         Ok(Self {
             scheme,
             accent,
             wallpaper,
+            contrast,
         })
     }
 }
@@ -354,11 +384,27 @@ pub struct Choice {
     /// What `accent = "wallpaper"` is now: the primary screen's
     /// wallpaper's (6.3), Nuit's by default.
     pub wallpaper: AccentColours,
+    /// `[appearance] high-contrast`: the theme reinforced (#423).
+    pub contrast: bool,
 }
 
 impl Choice {
     pub const fn tokens(self) -> &'static Tokens {
-        self.scheme.tokens()
+        if self.contrast {
+            self.scheme.contrast_tokens()
+        } else {
+            self.scheme.tokens()
+        }
+    }
+
+    /// A colour drawn for the dark theme, as this theme reads it: itself,
+    /// [`on_light`]'s, or [`on_contrast`]'s.
+    pub fn reads(self, dark: Rgba) -> Rgba {
+        match (self.contrast, self.scheme) {
+            (false, Scheme::Dark) => dark,
+            (false, Scheme::Light) => on_light(dark),
+            (true, scheme) => on_contrast(dark, scheme),
+        }
     }
 
     pub const fn accent(self) -> AccentColours {
@@ -368,14 +414,57 @@ impl Choice {
         }
     }
 
-    /// Text in the accent, on this theme's backgrounds.
-    pub const fn accent_text(self) -> [u8; 3] {
+    /// Text in the accent, on this theme's backgrounds; under high
+    /// contrast lifted (dark) or darkened (light) until it reads at 7:1 on
+    /// every background of the theme (the keyboard's ring too).
+    pub fn accent_text(self) -> [u8; 3] {
         let colours = self.accent();
-        match self.scheme {
+        let text = match self.scheme {
             Scheme::Dark => colours.on_dark,
             Scheme::Light => colours.on_light,
+        };
+        if self.contrast {
+            to_contrast(text, self.tokens(), CONTRAST_TEXT)
+        } else {
+            text
         }
     }
+}
+
+/// Text's contrast under high contrast, and the borders' and controls'.
+pub const CONTRAST_TEXT: f64 = 7.0;
+pub const CONTRAST_BORDER: f64 = 3.0;
+
+/// The backgrounds text is read on in `tokens`' theme: the windows', the
+/// sidebars', the bars' and the popovers', the menus'.
+pub fn backgrounds(tokens: &Tokens) -> [Rgba; 6] {
+    [
+        tokens.window,
+        tokens.sidebar,
+        tokens.bar_opaque_top,
+        tokens.bar_opaque_bottom,
+        tokens.popover_opaque_bottom,
+        tokens.menu,
+    ]
+}
+
+/// `rgb`, its hue kept, lighter (on dark backgrounds) or darker until it
+/// reads at `ratio` on every background of `tokens`.
+fn to_contrast(rgb: [u8; 3], tokens: &Tokens, ratio: f64) -> [u8; 3] {
+    let worst = |c: [u8; 3]| {
+        backgrounds(tokens)
+            .iter()
+            .map(|b| contrast_rgb(c, *b))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let dark = luminance_rgb([tokens.window.r, tokens.window.g, tokens.window.b]) < 0.2;
+    let (hue, saturation, mut lightness) = hsl(rgb);
+    let mut out = rgb;
+    while worst(out) < ratio && (0.0..=1.0).contains(&lightness) {
+        lightness += if dark { 0.01 } else { -0.01 };
+        out = rgb_of(hue, saturation, lightness.clamp(0.0, 1.0));
+    }
+    out
 }
 
 /// A colour: red, green, blue, and its opacity from 0 to 1.
@@ -516,6 +605,168 @@ pub const LIGHT: Tokens = Tokens {
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
 };
+
+/// The dark theme under high contrast (#423): opaque backgrounds, white
+/// text, solid rims and dividers, 2 px borders.
+pub const DARK_CONTRAST: Tokens = Tokens {
+    window: hex(0x05070C),
+    sidebar: hex(0x000000),
+    text: hex(0xFFFFFF),
+    text2: hex(0xF4F6FA),
+    dim: hex(0xE2E6EE),
+    faint: hex(0xD0D6E0),
+    card: rgba(0, 0, 0, 0.0),
+    card_rim: hex(0x8E98AB),
+    divider: hex(0x6B7488),
+    control: hex(0x000000),
+    control_rim: hex(0xD0D6E0),
+    menu: hex(0x0A0D16),
+    switch_off: hex(0x000000),
+    segmented: hex(0x000000),
+    segment_chosen: hex(0x3A4255),
+    window_rim: rgba(255, 255, 255, 0.14),
+    high_contrast: rgba(255, 255, 255, 0.90),
+    bar_top: hex(0x05070C),
+    bar_bottom: hex(0x05070C),
+    bar_opaque_top: hex(0x05070C),
+    bar_opaque_bottom: hex(0x05070C),
+    bar_border: hex(0xAEB6C6),
+    popover_top: hex(0x0A0D16),
+    popover_bottom: hex(0x0A0D16),
+    popover_opaque_top: hex(0x0A0D16),
+    popover_opaque_bottom: hex(0x0A0D16),
+    over: hex(0xFFFFFF),
+    shadow: hex(0x000000),
+    toast: hex(0x262C3C),
+    on_accent: hex(0x0B1020),
+};
+
+/// The light theme under high contrast.
+pub const LIGHT_CONTRAST: Tokens = Tokens {
+    window: hex(0xFFFFFF),
+    sidebar: hex(0xF1F3F7),
+    text: hex(0x000000),
+    text2: hex(0x0B0F18),
+    dim: hex(0x1C2230),
+    faint: hex(0x2E3546),
+    card: hex(0xFFFFFF),
+    card_rim: hex(0x4A5468),
+    divider: hex(0x6B7488),
+    control: hex(0xFFFFFF),
+    control_rim: hex(0x2E3546),
+    menu: hex(0xFFFFFF),
+    switch_off: hex(0xFFFFFF),
+    segmented: hex(0xFFFFFF),
+    segment_chosen: hex(0xDDE1EA),
+    window_rim: rgba(20, 25, 38, 0.18),
+    high_contrast: hex(0x000000),
+    bar_top: hex(0xFFFFFF),
+    bar_bottom: hex(0xFFFFFF),
+    bar_opaque_top: hex(0xFFFFFF),
+    bar_opaque_bottom: hex(0xFFFFFF),
+    bar_border: hex(0x2E3546),
+    popover_top: hex(0xFFFFFF),
+    popover_bottom: hex(0xFFFFFF),
+    popover_opaque_top: hex(0xFFFFFF),
+    popover_opaque_bottom: hex(0xFFFFFF),
+    over: hex(0x000000),
+    shadow: hex(0x0B1020),
+    toast: hex(0x262C3C),
+    on_accent: hex(0x0B1020),
+};
+
+/// How a colour drawn for the dark theme reads under high contrast in
+/// `scheme`, for the colours the programs draw that are not one of the
+/// [`Tokens`]: the pairs below first (the texts, the backgrounds, the
+/// states as text), then by rule. A white veil faint enough to be a fill
+/// or a hover goes (high contrast has no fills: what holds the keyboard
+/// has its ring); a stronger one, a rule or a lit item, is a solid
+/// surface a step off the background; stronger still, a mark or a rim,
+/// the cards' rim. A grey becomes a text's colour, a dark background the
+/// theme's, a coloured tint goes. Other colours (the gauges, the pandas)
+/// keep theirs on dark, and read as [`on_light`] says on light.
+pub fn on_contrast(dark: Rgba, scheme: Scheme) -> Rgba {
+    let tokens = scheme.contrast_tokens();
+    let light = scheme == Scheme::Light;
+    let Rgba { r, g, b, a } = dark;
+    let (low, high) = (r.min(g).min(b), r.max(g).max(b));
+    let grey = high - low <= 0x28;
+    if !grey && a < 0.3 {
+        // A state's tint behind a row: none, its word says it.
+        return Rgba { a: 0.0, ..dark };
+    }
+    if let Some((_, on_dark, on_light)) = CONTRAST_PAIRS.iter().find(|(d, _, _)| *d == [r, g, b]) {
+        let [r, g, b] = if light { *on_light } else { *on_dark };
+        // The backgrounds are opaque.
+        let a = if [r, g, b] == [tokens.window.r, tokens.window.g, tokens.window.b] {
+            1.0
+        } else {
+            a
+        };
+        return Rgba { r, g, b, a };
+    }
+    let solid = |c: Rgba| Rgba { a: 1.0, ..c };
+    if grey && low >= 0xC8 && a < 1.0 {
+        return match a {
+            a if a <= 0.065 => Rgba { a: 0.0, ..dark },
+            a if a <= 0.16 => solid(if light { hex(0xE3E7EF) } else { hex(0x262C3C) }),
+            _ => tokens.card_rim,
+        };
+    }
+    if grey && high <= 0x40 && a > 0.0 {
+        // A dark background, or the black of a shade or a shadow.
+        if high == 0 {
+            return if light {
+                Rgba { a: a * 0.5, ..dark }
+            } else {
+                dark
+            };
+        }
+        return Rgba { a, ..tokens.window };
+    }
+    if grey {
+        return Rgba {
+            a,
+            ..if high >= 0xC8 {
+                tokens.text
+            } else {
+                tokens.dim
+            }
+        };
+    }
+    if light { on_light(dark) } else { dark }
+}
+
+/// Colours with a value of their own under high contrast, by their dark
+/// one: dark, then light.
+const CONTRAST_PAIRS: &[([u8; 3], [u8; 3], [u8; 3])] = &[
+    // text, text.2, dim, faint
+    ([0xEE, 0xF1, 0xF6], [0xFF, 0xFF, 0xFF], [0x00, 0x00, 0x00]),
+    ([0xD5, 0xDB, 0xE5], [0xF4, 0xF6, 0xFA], [0x0B, 0x0F, 0x18]),
+    ([0xA9, 0xB2, 0xC2], [0xE2, 0xE6, 0xEE], [0x1C, 0x22, 0x30]),
+    ([0x8C, 0x96, 0xA8], [0xD0, 0xD6, 0xE0], [0x2E, 0x35, 0x46]),
+    ([0x7C, 0x86, 0x98], [0xD0, 0xD6, 0xE0], [0x2E, 0x35, 0x46]),
+    ([0x6A, 0x73, 0x84], [0xD0, 0xD6, 0xE0], [0x2E, 0x35, 0x46]),
+    ([0xC9, 0xD0, 0xDC], [0xF4, 0xF6, 0xFA], [0x0B, 0x0F, 0x18]),
+    // the Settings' window, sidebar and menu
+    ([0x14, 0x19, 0x26], [0x05, 0x07, 0x0C], [0xFF, 0xFF, 0xFF]),
+    ([0x0F, 0x13, 0x1C], [0x00, 0x00, 0x00], [0xF1, 0xF3, 0xF7]),
+    ([0x1F, 0x25, 0x34], [0x0A, 0x0D, 0x16], [0xFF, 0xFF, 0xFF]),
+    // the bar's and popovers' backgrounds
+    ([22, 27, 42], [0x05, 0x07, 0x0C], [0xFF, 0xFF, 0xFF]),
+    ([14, 17, 28], [0x05, 0x07, 0x0C], [0xFF, 0xFF, 0xFF]),
+    // text and marks on an accent's fill stay dark
+    ([0x0B, 0x10, 0x20], [0x0B, 0x10, 0x20], [0x0B, 0x10, 0x20]),
+    // the states and accents as text, at 7:1
+    ([0x8F, 0xB3, 0xFF], [0xB5, 0xCC, 0xFF], [0x1C, 0x48, 0xA5]),
+    ([0x7E, 0xE0, 0xA0], [0x9D, 0xF0, 0xB9], [0x15, 0x5C, 0x33]),
+    ([0xF5, 0xB4, 0x4A], [0xFF, 0xD2, 0x7A], [0x6B, 0x45, 0x00]),
+    ([0xF5, 0xC4, 0x6E], [0xFF, 0xD2, 0x7A], [0x6B, 0x45, 0x00]),
+    ([0xF2, 0x94, 0x5B], [0xFF, 0xB4, 0x8A], [0x8A, 0x33, 0x00]),
+    ([0xF7, 0xB9, 0x8A], [0xFF, 0xB4, 0x8A], [0x8A, 0x33, 0x00]),
+    ([0xF7, 0xA7, 0x7A], [0xFF, 0xB4, 0x8A], [0x8A, 0x33, 0x00]),
+    ([0xFF, 0xE0, 0x8A], [0xFF, 0xE0, 0x8A], [0x6B, 0x45, 0x00]),
+];
 
 /// How a colour drawn for the dark theme reads on the light one, for the
 /// many colours the programs draw that are not one of the [`Tokens`]: the
@@ -672,12 +923,163 @@ mod tests {
             scheme: Scheme::Light,
             accent: Accent::Wallpaper,
             wallpaper: AccentColours::lifted([0x1D, 0x3A, 0x2E]),
+            contrast: false,
         };
         assert_eq!(choice.to_string().parse::<Choice>(), Ok(choice));
         assert_eq!(choice.accent(), choice.wallpaper);
         assert_eq!(
             "dark green".parse::<Choice>().map(|c| c.wallpaper),
             Ok(BACKDROP_ACCENT)
+        );
+    }
+
+    /// Every accent, the wallpaper's among them (a few hues of their own).
+    fn every_accent(scheme: Scheme) -> Vec<Choice> {
+        let mut all: Vec<Choice> = Accent::ALL
+            .into_iter()
+            .map(|accent| Choice {
+                scheme,
+                accent,
+                contrast: true,
+                ..Choice::default()
+            })
+            .collect();
+        for rgb in [[0x1B, 0x22, 0x33], [0xFF, 0xE0, 0x10], [0xF0, 0x30, 0x90]] {
+            all.push(Choice {
+                scheme,
+                accent: Accent::Wallpaper,
+                wallpaper: AccentColours::lifted(rgb),
+                contrast: true,
+            });
+        }
+        all
+    }
+
+    #[test]
+    fn under_high_contrast_text_reads_at_7_to_1_and_borders_at_3_to_1() {
+        for scheme in Scheme::ALL {
+            let tokens = scheme.contrast_tokens();
+            let under = backgrounds(tokens);
+            for text in [tokens.text, tokens.text2, tokens.dim, tokens.faint] {
+                for back in under {
+                    let ratio = contrast(text, back);
+                    assert!(
+                        ratio >= CONTRAST_TEXT,
+                        "{scheme}: {text:?} on {back:?}: {ratio:.2}"
+                    );
+                }
+            }
+            for edge in [
+                tokens.bar_border,
+                tokens.card_rim,
+                tokens.divider,
+                tokens.control_rim,
+            ] {
+                for back in under {
+                    let ratio = contrast(edge, back);
+                    assert!(
+                        ratio >= CONTRAST_BORDER,
+                        "{scheme}: {edge:?} on {back:?}: {ratio:.2}"
+                    );
+                }
+            }
+            // Text on a chosen segment, and on the toast (dark in both).
+            for (text, back) in [
+                (tokens.text, tokens.segment_chosen),
+                (DARK_CONTRAST.text, tokens.toast),
+            ] {
+                assert!(
+                    contrast(text, back) >= CONTRAST_TEXT,
+                    "{text:?} on {back:?}"
+                );
+            }
+            // The backgrounds are opaque: no glass under high contrast.
+            for back in [tokens.bar_top, tokens.bar_bottom, tokens.popover_top] {
+                assert_eq!(back.a, 1.0);
+            }
+            // The accent as text, and the keyboard's ring, for each accent.
+            for choice in every_accent(scheme) {
+                let [r, g, b] = choice.accent_text();
+                for back in under {
+                    let ratio = contrast(hex(u32::from_be_bytes([0, r, g, b])), back);
+                    assert!(
+                        ratio >= CONTRAST_TEXT,
+                        "{scheme} {}: {r:02x}{g:02x}{b:02x} on {back:?}: {ratio:.2}",
+                        choice.accent
+                    );
+                }
+            }
+            // The states and the texts the programs draw outside the
+            // tokens.
+            for (dark, _, _) in CONTRAST_PAIRS {
+                let read = on_contrast(
+                    hex(u32::from_be_bytes([0, dark[0], dark[1], dark[2]])),
+                    scheme,
+                );
+                let is_background = under
+                    .iter()
+                    .any(|b| [b.r, b.g, b.b] == [read.r, read.g, read.b])
+                    || [read.r, read.g, read.b] == [0x0B, 0x10, 0x20];
+                if !is_background {
+                    for back in under {
+                        let ratio = contrast(read, back);
+                        assert!(
+                            ratio >= CONTRAST_TEXT,
+                            "{scheme}: {dark:02x?} → {read:?} on {back:?}: {ratio:.2}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn under_high_contrast_the_dark_colours_read_by_rule() {
+        let veil = |a| rgba(255, 255, 255, a);
+        for scheme in Scheme::ALL {
+            let tokens = scheme.contrast_tokens();
+            // A fill or a hover goes; a rim is the cards' rim.
+            assert_eq!(on_contrast(veil(0.05), scheme).a, 0.0);
+            assert_eq!(on_contrast(veil(0.3), scheme), tokens.card_rim);
+            // The texts are the tokens'.
+            assert_eq!(on_contrast(DARK.text, scheme), tokens.text);
+            assert_eq!(on_contrast(DARK.faint, scheme), tokens.faint);
+            // A background is the theme's, opaque.
+            assert_eq!(on_contrast(rgba(22, 27, 42, 0.7), scheme), tokens.window);
+            // A state's tint goes.
+            assert_eq!(on_contrast(rgba(245, 180, 74, 0.08), scheme).a, 0.0);
+        }
+        // A gauge keeps its colour on dark.
+        assert_eq!(on_contrast(hex(0x5B8DEF), Scheme::Dark), hex(0x5B8DEF));
+        let choice = Choice {
+            contrast: true,
+            ..Choice::default()
+        };
+        assert_eq!(choice.tokens(), &DARK_CONTRAST);
+        assert_eq!(choice.reads(DARK.dim), DARK_CONTRAST.dim);
+    }
+
+    #[test]
+    fn high_contrast_rides_on_the_line() {
+        for scheme in Scheme::ALL {
+            for contrast in [false, true] {
+                let choice = Choice {
+                    scheme,
+                    accent: Accent::Teal,
+                    contrast,
+                    ..Choice::default()
+                };
+                assert_eq!(choice.to_string().parse::<Choice>(), Ok(choice));
+            }
+        }
+        assert_eq!(
+            "dark green contrast".parse::<Choice>().map(|c| c.contrast),
+            Ok(true)
+        );
+        assert!(
+            "dark green 7ee0a0,7ee0a0,7ee0a0 loud"
+                .parse::<Choice>()
+                .is_err()
         );
     }
 

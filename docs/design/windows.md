@@ -42,7 +42,49 @@ open on), agents' badges on windows (slice 3).
   with no padding keeps its first column.
 - A shadow: offset 0, 12 px down; blur 36 px; black at 35 % unfocused,
   45 % focused.
-- No transparency at any time, moving included.
+- No transparency at any time, moving included, unless the user asks
+  for it on a window (below).
+
+### A window's opacity (#735)
+
+The maintainer's idea, approved without a mockup (2026-11): `Super`+`Alt`
+and the wheel over a window make it more or less transparent.
+
+- **Steps**: 10 % a notch, wheel down more transparent, up more opaque;
+  from 100 % down to 20 %, a floor that keeps it visible. A touchpad's
+  two fingers count a notch every 15 px.
+- **Kept** per window for its life, and in the saved session (§14): it
+  comes back at the same opacity. Reduced transparency (accessibility,
+  A.3) does not block it: it is the user's own choice on that window.
+- **The pill**: while it changes, a pill in the window's middle says the
+  percentage ("70 %"), drawn as the magnifier's (accessibility.md): 32 px
+  high, dark at 94 %, a half-filled circle and the percentage in the
+  accent's light green; 2 s after the last notch it fades out in 120 ms
+  (at once with reduced motion). Never in a capture, a recording or a
+  share.
+- `Super` alone and the wheel stay the magnifier's. Holding `Super`+`Alt`
+  shows the laser ([ink.md](ink.md)): the first notch hides it until the
+  keys are let go, as a shortcut does. Over no window (the bar, the
+  desktop) or with the overview, the radial menu or Alt+Tab open, the
+  wheel does nothing.
+  `Super+Alt+S` (the screen reader, accessibility.md) is a key: the
+  wheel with `Super+Alt` leaves it alone. Reduced transparency and high
+  contrast (the Accessibility page) leave a window's own opacity as the
+  user set it.
+- Nested, `Super` is `Alt+Super` already, and `Alt+Super` and the wheel
+  is the magnifier's: no opacity wheel there.
+
+**As built.** `crates/hocus-compositor/src/opacity.rs` (the steps, the
+wheel, the pill); the window's `Look` takes its opacity, its frame and
+shadow with it, so the overview's thumbnails show it too; a capture of
+the window alone (`Alt+Print`) takes it opaque. A see-through window
+does not wobble while it moves (it is drawn rigid). The session file keeps `opacity = 60` for a window that
+is not opaque. Listed in the Settings' shortcuts sub-page, among the
+fixed ones ("Transparence d'une fenêtre", "Super + Alt + molette"), and
+in `packaging/config.toml`. Tests: `tests/window_opacity.rs` (the steps,
+the floor, the magnifier left to `Super`, the pill going, the pixels
+half see-through) and `tests/session_restore.rs` (kept across
+sessions).
 
 ## 4. Focus
 
@@ -399,8 +441,10 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 - Inert sectors (no desktop on that side, one screen only) at 25 %:
   they neither light nor pick. A switch that is on shows its icon in
   `#7EE0A0` with a 3 px dot.
-- A window hosting an agent that waits: the hub shows its panda (64 px,
-  bobbing); otherwise its application's letter tile.
+- A window hosting an agent (#649: any agent, not only a waiting one):
+  the hub shows the panda of the one that needs the user most (78 px),
+  playing its mood as the menu opens, a waiting one bobbing on; otherwise
+  its application's letter tile.
 - **Closing it**: `Esc`, a click in the hub or outside the menu, the
   window going, its screen going, the session locking.
 - **Keyboard** while open: the arrows step the lit sector that way (from
@@ -672,7 +716,7 @@ connector unplugged before or a new one.
 As built (#417; question 2, option C): when at least one window moved
 with a screen gone or back, the **winking panda** (its hat raised, never
 an agent state's pose) comes out of the bar's edge as an agent's panda
-does (bar.md §7 C: 170 px, its motion, 18 px from the bar, at the
+does (bar.md §7 C: 200 px since #649, its motion, 18 px from the bar, at the
 secretary's height), with a **blue bubble** (`rgba(16,24,44,0.95)`, a
 1 px border `#8FB3FF` at 45 %; under the pointer
 `rgba(22,32,58,0.97)`), two lines of 13 px, the first in bold
@@ -927,22 +971,24 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   the panda in a halo of that colour, and how many agents are in the
   state that needs the user most (waiting, stuck, to see, working,
   resting): "3 t’attendent" / "3 waiting", "1 au travail" / "1 working".
-  The panda is 14 % of the window's width in the layout, 42 px at least
-  and 84 at most, the words in proportion (larger than the mockup's
-  42 px: the pandas big and visible). While one waits, the panda bobs
-  (3 px) and waves its paw on a 1.6 s loop. A desktop with no window
-  (minimised ones aside) shows a sleeping panda in its thumbnail, half
-  its height (64 px at most), eyes shut, a "z" over it, breathing
-  (3.2 s) for two breaths as the overview opens, then still. With
-  reduced motion, no panda moves.
+  The panda is the validated drawing of their mood (#649), 18 % of the
+  window's width in the layout, 56 px at least and 110 at most, the words
+  growing half as fast (12.5 px at 56 px). As the overview opens each
+  badge's panda plays its mood once (about 2.5 s); a waiting one plays it
+  again and again while it waits, bobbing (3 px, 1.6 s loop). A desktop
+  with no window (minimised ones aside) shows the resting panda in its
+  thumbnail, 75 % of its height (96 px at most), breathing twice as two
+  "z" rise (8 s) as the overview opens, then still. With reduced motion
+  or in power saver, no panda moves.
 - **Minimised** windows are laid out after the others, at 60 %; a window
   on all desktops (#723) is laid out, and shown in the thumbnails, on
   every desktop of its screen.
 - **At rest** nothing draws but what clients commit: every picture (the
   titles, the numbers, the badges, the ✕, the pandas) is drawn once on
-  the CPU for each look it takes and kept; a waiting agent's panda
-  waves on twelve pictures of its paw, so the overview never rests
-  while an agent waits, as the radial menu's panda (§10b).
+  the CPU for each look it takes and kept; a panda's burst is a picture
+  per frame (30 a second, resvg), and a waiting agent's plays on, so the
+  overview never rests while an agent waits, as the radial menu's panda
+  (§10b).
 - **As built** (`crates/hocus-compositor/src/overview.rs`, its drawing
   in `overview_draw.rs`). Measured headless
   (`crates/hocus-compositor/tests/overview.rs`, two screens): `Super+W`
@@ -1009,8 +1055,10 @@ holds the keyboard; the virtual terminals' switch stays.
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
 | `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
-| `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `toggle-bar` | `Super+Shift+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `focus-bar` | `Super+B` | The keyboard into the bar of the focused window's screen; again, the next screen's bar, then back to the window ([bar.md](bar.md) §11) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
+| `actions` | `Super+P` | The actions palette: every action of the desktop, searchable, run on the focused window or its screen; again, closes it ([actions.md](actions.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
@@ -1019,6 +1067,8 @@ holds the keyboard; the virtual terminals' switch stays.
 | `record` | `Super+Shift+R` | Records the screen with the last settings; while recording, stops ([screenshots.md](screenshots.md), 5.10) |
 | `volume-up`, `volume-down`, `mute` | the keyboard's sound keys | 5 % a press, stepping on while held; to the shell's gauges |
 | `brightness-up`, `brightness-down` | the keyboard's brightness keys | The same for the screen's brightness, down to 5 % |
+| `magnifier-in`, `magnifier-out`, `magnifier-off` | `Super+=` (`Super+plus`, keypad `+`), `Super+-` (keypad `-`), `Super+Escape` | The magnifier a step in (on at its last zoom), a step out (off at 1×), off; also on the lock screen. `Super+-` takes the key that types `-`: on AZERTY, the `6` key's place does not go to desktop 6 ([accessibility.md](accessibility.md)) |
+| `screen-reader` | `Super+Alt+S` | The screen reader (Orca) started or stopped, only when the compositor is the session; also on the lock screen ([screen-reader.md](screen-reader.md)) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`;
@@ -1062,7 +1112,8 @@ the rules per application, `[[windows.rules]]` (§5);
 `[ink] enabled` turns drawing on the screen off; all followed as the
 file changes.
 
-Not configurable yet: `Super`+drag draws on the screen,
+Not configurable yet: `Super`+`Alt` and the wheel over a window change
+its opacity (§3, #735); `Super`+drag draws on the screen,
 `Super`+`Shift`+drag draws an arrow and `Super`+`Alt` held shows the
 laser (`Alt+Super` and `Alt+Super+Shift` drag nested; [ink.md](ink.md));
 `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
@@ -1088,6 +1139,76 @@ they are built.
   portal a previous session left running is restarted then (see
   [sharing](sharing.md#511b-a-portal-left-by-a-previous-session-2026-11-03)).
 
+### Drawn on the CPU when the GPU has no GLES (#333)
+
+On a real screen, the session draws with GLES on the primary GPU. Where
+EGL or GLES cannot start there (no Mesa driver for it, a broken or
+missing EGL), it no longer fails back to the display manager: it draws
+with pixman on the CPU, into dumb buffers, which every display engine
+offers, and says so once in the journal ("no GLES on the GPU (…):
+drawing with pixman on the CPU, slower and without blur").
+
+**As built.** `crates/hocus-compositor/src/backend/tty.rs`: the
+renderer, the screens' buffers and each screen's surface are GLES's or
+pixman's (`Drawing`, `Outputs`, `Surface`), chosen once as the GPU opens
+(`choose`); everything else (the magnifier, captures, screen sharing,
+the lock's last frame) runs on either, as headless already did. On
+pixman, as headless: no blur (the bar's glass is plain), no shaders'
+motions (bar.md), clients' buffers taken by shared memory and linear
+dmabufs. The dumb buffers are opaque (`XRGB8888` first): a primary
+plane may take only that (virtio-gpu's refuses `ARGB8888` there).
+`--renderer pixman` asks for it on a virtual terminal too
+(`--renderer gles`: GLES or fail); the VM's `~/.hocus-args` passes it
+(`echo --renderer pixman > ~/.hocus-args`). If pixman cannot draw
+either, the session fails as before and the display manager comes back.
+Tests: `backend::tty::tests::without_gles_the_screens_are_drawn_with_pixman`
+(GLES failing: pixman made and taken; asked for pixman: GLES never
+tried; asked for GLES: its error); in the VM (2026-11-07), the session
+with `--renderer pixman`, and with EGL made to fail
+(`__EGL_VENDOR_LIBRARY_FILENAMES` naming no vendor): the journal's one
+line, the bar, a terminal typed into; without either, GLES as before.
+
+### The night light (#436)
+
+Warmer colours in the evening, on a schedule; approved without a mockup
+(2026-11), following the Settings' look.
+
+- **When**: from `[night-light] from` to `to` (21:00 to 7:00 by
+  default), the clock's hours in the system's time zone: the schedule is
+  the user's, so it follows wall-clock time, not the monotonic clock. It
+  fades in over 30 min from `from` and out over 30 min from `to`. The
+  same hour twice: all day. Sunset to sunrise is not built.
+- **How warm**: `temperature`, 4000 K by default (1500 to 6500 in the
+  file, 2500 to 6000 in the Settings); the fade moves evenly in mireds.
+- **On and off**: `enabled` (off by default), the Settings' switch on
+  the Écrans page (settings.md); followed as the file changes, at once.
+- **How**: each screen's gamma ramp on the session's own screens (the
+  legacy ramp, which the kernel turns into `GAMMA_LUT` on atomic
+  drivers), white kept red and lowered in green and blue after a black
+  body's colour. Screenshots, recordings and shares are not warmed: the
+  ramp is the display engine's, after them.
+
+**As built.** `crates/hocus-compositor/src/night_light.rs`: the
+schedule (`strength`), the temperature (`kelvin`), the colour of white
+(`white`, the well-known fit of the black body's colour, divided by its
+value at 6500 K) and the ramp (`ramp`); the loop wakes only when the next
+change is due (every 10 s while it fades, else at the next hour of the
+schedule, at most 15 min apart so that a changed clock or time zone is
+caught), as the file changes and as the machine wakes from sleep. The
+tty backend gives each lit screen its ramp when the temperature changes,
+when a screen lights, and after another terminal showed or the machine
+slept (another may have set its own); a screen whose display engine has
+no ramp (virtio-gpu in the VM) says so once and stays as it is; as the
+session ends, the screens get their own white back. Nested, nothing (the
+host's screens are not the session's). Headless keeps the ramps it was
+handed for the tests. Tests: `night_light::tests` (the fades round
+midnight, the wake-ups, the ramps), `tests/night_light.rs` (off by
+default; 21:00 to 7:30 on a held clock; the file's temperature, hours
+and switch at once) and `tests/settings_screens.rs`
+(`the_night_light_rows_write_its_section`). Tried in the VM: the
+warning, virtio-gpu having no ramp; the real warmth is to be seen on the
+laptop.
+
 ### The last session comes back (#725)
 
 Decided with the maintainer (2026-11-06): the applications open at log
@@ -1102,8 +1223,8 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   app id, its screen by identity (§12) with that screen's size and work
   area, its desktop, where it floats (where it goes back to when it is
   snapped, maximised or fullscreen), its state, kept above, on all
-  desktops; the windows of one application in the order they opened. A
-  window waiting for a screen gone is saved where it was on that screen.
+  desktops, its opacity when it is not opaque (§3, #735); the windows of
+  one application in the order they opened. A window waiting for a screen gone is saved where it was on that screen.
   Never saved: dialogs, the Settings, the shell's own surfaces, windows
   whose application has no desktop entry.
 - **When**: 3 s after windows changed (opened, closed, moved, resized,
@@ -1223,7 +1344,7 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     serial, its connector only as a fallback; each set of screens keeps
     its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
     defaults; Écrans lists the sets known and forgets one. The peek's
-    panda is 170 px (was 96).
+    panda is 170 px (was 96); 200 px since #649, waving its hat twice.
 15. Screens of different scales (#419, the s8a mockup, questions 12 to
     15): a window straddling two scales is asked to draw at the larger,
     reduced on the other screen; a window too big for the screen it is

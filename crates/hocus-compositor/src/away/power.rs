@@ -113,8 +113,19 @@ impl State {
             );
             self.away.power.saver = Saver::Spent;
         }
+        let lively = self.pandas_lively();
         self.away.power.profile = profile;
         self.power_saver_check();
+        // The pandas lie still in power saver (#649).
+        if self.pandas_lively() != lively {
+            self.tell_shell(self.bar_look());
+        }
+    }
+
+    /// Whether the pandas play their moods (#649): not with reduced
+    /// motion, nor in power saver.
+    pub fn pandas_lively(&self) -> bool {
+        !self.reduced_motion() && self.power_profile_now() != Some(SAVER)
     }
 
     /// power-profiles-daemon's profile now, if it is there.

@@ -152,8 +152,8 @@ the real screen; nested and headless take `--output`; `panel-form`),
 `toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`, `windows`), `[recording]` (`format`), `[idle]` (`delay`,
-docs/design/idle.md) and `[appearance]` (`reduced-motion`,
-`high-contrast`, `reduce-transparency`); the shell reads `[day]` from the same file
+docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
+`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
@@ -254,6 +254,16 @@ screenshots:
 HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor --test lock_shots --run-ignored only
 ```
 
+Screen readers (docs/design/screen-reader.md, crate `hocus-a11y`): the
+shell describes what it shows on AT-SPI only on the session bus the
+compositor names, and only while an assistive technology listens. Try it
+on a dbus-daemon of your own with `at-spi-bus-launcher
+--launch-immediately` on it (`IsEnabled` set), never on the live
+session's buses; `RUST_LOG=hocus_a11y=debug` logs each window's tree,
+and `hocus msg a11y` prints it whether a reader listens or not.
+`[accessibility] screen-reader` and `Super+Alt+S` start Orca only when the
+compositor is the session (tests: `Headless::allow_screen_reader`).
+
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
 which Claude Code's and Codex's hooks run once plugged in from the bar.
@@ -264,6 +274,7 @@ It writes to the compositor's control socket, `<socket>.control`
 target/debug/hocus --socket <runtime dir>/hocus-0.control agent build working
 target/debug/hocus --socket <runtime dir>/hocus-0.control msg idle   # idle state, what holds it
 target/debug/hocus --socket <runtime dir>/hocus-0.control msg lock   # lock the session now
+target/debug/hocus --socket <runtime dir>/hocus-0.control msg a11y   # what screen readers read
 ```
 
 Idle (docs/design/idle.md): the compositor serves
@@ -286,6 +297,7 @@ The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 scripts/vm/debian.sh up        # boot it, user alex / panda
 scripts/vm/debian.sh copy      # target/debug's programs into it (says what libraries it lacks)
 scripts/vm/debian.sh ssh '~/hocus-vm session'    # the session on its tty1
+scripts/vm/debian.sh ssh 'echo --renderer pixman > ~/.hocus-args'  # its next session on the CPU
 scripts/vm/debian.sh keys e c h o ret            # its keyboard (QEMU key names)
 scripts/vm/debian.sh mouse 60 40; scripts/vm/debian.sh click
 scripts/vm/debian.sh screen shot.png             # what its screen shows

@@ -115,7 +115,8 @@ The user's choice overrides the default and is remembered per output
   The compositor takes that click itself and no client sees it: it knows
   where the pointer is even when it reached the edge in one fast move,
   with no motion over the bar before the press.
-- `Super+B` toggles the form on the output under the pointer.
+- `Super+Shift+B` (`toggle-bar`) toggles the form on the output under the
+  pointer. `Super+B` puts the keyboard into the bar (§11).
 - Held against the screen's edge over the bar for 300 ms, the pointer
   brings the bar in front of the windows over it (§2), until it leaves the
   bar's column; a click there still toggles the form.
@@ -151,7 +152,7 @@ group where it is.
 | — | In use | The sign of what uses the microphone, the camera or the screen, under the card (5.12, as built): a tile a kind in use; none when nothing is | 36 px |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
-| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
+| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
 | — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
@@ -471,19 +472,44 @@ at a time, by priority:
 
 The pandas are the validated characters (the apprentice magician family).
 They move only when something changes, then hold still; never at rest,
-never on battery saver, never with reduced motion.
+never on battery saver, never with reduced motion, never with a shell on
+the CPU (#649): then they are the still drawings, at the same sizes.
 
-- **A, a panda per state** (in the agents' rows, 30 px; 4.1): working (at
-  its laptop), waiting (holds out its hat, ear radiating), finished (arms
-  up), stuck (smoking ears), resting (asleep, at 55 %). On a change, the
-  changed agent's panda hops once (650 ms: 4 px up, down, 2 px up, down).
+**A burst, not a loop** (#649, level B, approved 2026-11-07). On a change
+(an agent's state, the opening of the surface that shows a panda, the
+pointer coming over a panda that can be clicked), a panda plays its mood:
+the pandas canvas's own animations, the parts of the drawing that already
+move there (working types and its laptop's star twinkles; waiting sways
+its held-out hat, its ear sends rings, its "?" bobs; done tosses its hat
+and its confetti twinkle; stuck's smoke rises; resting breathes and two
+"z" rise; the wink waves its hat). Each part plays whole cycles while
+they fit in 2.6 s (a resting panda: one breath, 4 s), then settles on the
+still drawing in 300 ms; nothing more is drawn until the next change.
+The pointer coming over a panda replays its burst once; leaving does not
+cut it. The drawings and their motion are `crates/hocus-pandas`; each
+moving part is a group of the still drawing that a frame transforms.
+
+- **A, a panda per state** (in the agents' rows, 42 px; 4.1, #649):
+  working (at its laptop), waiting (holds out its hat, ear radiating),
+  finished (arms up), stuck (smoking ears), resting (asleep, at 55 %). On
+  a change, the changed agent's panda hops once (650 ms: 4 px up, down,
+  2 px up, down) and plays its mood. A waiting or stuck agent's row is a
+  **card** (68 px, radius 9; level C of the #649 mockup): its panda 60 px,
+  2 px in, 8 px before its name (13.5 px) over the state's word (12 px,
+  700, the state's colour) over what it asks or why it failed (11.5 px,
+  `#C9D0DC`, two lines at most, cut with an ellipsis), tinted as the row
+  is and ringed 1 px in the state's colour at 35 % (under high contrast,
+  the bar on its left instead). The bar stays 196 px wide; the group grows
+  by its cards. A row is a card for as long as its agent waits or is
+  stuck.
 - **B, the secretary** (approved 2026-10-30, issue #389, variant B: she
   heads the agents' group): one panda with round glasses, a clipboard, and
   a pencil behind her ear (the validated drawing, `Secretaire.dc.html`).
-  The group's header is her 40 px head, then "AGENTS N" (11.5 px 700) over
-  her line (12 px, ellipsis); "Sources" moves into her briefing. Her magic
-  ear follows the moment: green when calm; amber when someone waits (it
-  radiates twice, two small hops, 1.2 s in all, only at the change);
+  The group's header is her 56 px head (#649), then "AGENTS N" (11.5 px
+  700) over her line (12 px, ellipsis); "Sources" moves into her briefing.
+  Her magic ear follows the moment: green when calm; amber when someone
+  waits (it radiates three times, two small hops, about 2.5 s in all, only
+  at the change);
   orange when an agent is stuck (no motion). Her line: "N au travail · M
   à voir" when calm (`text.dim`); only the waiting agents' names when
   someone waits ("site-web, docs", amber); only the stuck agents' names
@@ -497,17 +523,21 @@ never on battery saver, never with reduced motion.
   since when; PROCHAINE RÉUNION, with the calendar, later; NOTIFICATIONS,
   with sprint 5, later (nothing shows of either before it exists); a
   footer "N au travail · M au repos", and "Sources" (the Sources
-  popover). Each line acts like its row: it goes to the agent (§8). She
-  never opens by herself. In the mini form she is the agents' item (§5,
-  4.7), whose hover or click opens her briefing, with who works and who
-  rests at its end.
+  popover). Each line has its agent's panda (48 px, #649), which plays
+  its mood once as the briefing opens. Each line acts like its row: it
+  goes to the agent (§8). She never opens by herself. In the mini form she
+  is the agents' item (§5, 4.7; her head 46 px), whose hover or click
+  opens her briefing, with who works and who rests at its end. Under her
+  head, when someone waits, the panda of the agent waiting the longest
+  (44 px on the amber tint, in a 48 px square), playing its mood as it
+  arrives; a click on it goes to the agent. None when nobody waits.
 - **C, the peek** (approved 2026-10-30, issue #388: 8 s, and also when an
   agent finishes):
   - **When**: an agent starts waiting (its panda holding out its hat), or
     an agent finishes (its panda with arms up). Once per change, and once
     more with the 5-minute reminder of a waiting agent (§6). Never for a
     stuck agent: the orange line and glow show it.
-  - **Where**: the 170 px panda (96 px until #417) comes out of the bar's edge at the agent's
+  - **Where**: the 200 px panda (96 px until #417, 170 px until #649) comes out of the bar's edge at the agent's
     row's height, 18 px from the bar, from under the bar's surface. Beside
     it, 8 px before it, a bubble: Manrope 13 px, 8 px and 12 px in,
     `rgba(30,26,18,0.92)` (`rgba(40,32,18,0.96)` under the pointer), radius
@@ -518,8 +548,10 @@ never on battery saver, never with reduced motion.
     since when `text.faint`), "**api-paiements** a fini" / "**api-paiements**
     is done" (`#7EE0A0`).
   - **Motion**: out in 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`, from
-    190 px under the bar (150 with the 96 px panda), fading in over 260 ms (`ease-out`); still while
-    out; back into the bar after **8 s**, in 260 ms (`cubic-bezier(0.5, 0,
+    190 × 200/170 px under the bar (190 with the 170 px panda), fading in over 260 ms (`ease-out`); its
+    panda playing its mood the whole time it is out (#649: waiting, its hat
+    sways, its ear rings, its "?" bobs; done, it tosses its hat, its
+    confetti twinkle); back into the bar after **8 s**, in 260 ms (`cubic-bezier(0.5, 0,
     0.75, 0.3)`), fading out over 220 ms (`ease-in`). With reduced motion,
     or a shell on the CPU: it fades in and out in place, without sliding.
   - **A click** on it (panda or bubble) goes to the agent (§8), the streak
@@ -529,8 +561,9 @@ never on battery saver, never with reduced motion.
     windows, beside each bar, taking the pointer only where it draws, and
     gone once back.
   - **Screens moved** (#417, windows.md §12 "Saying it"): the winking
-    panda comes out the same way, with a blue bubble of two lines, for
-    4 s; an agent's peek replaces it, it never replaces an agent's.
+    panda comes out the same way (200 px), with a blue bubble of two
+    lines, for 4 s, waving its hat twice; an agent's peek replaces it, it
+    never replaces an agent's.
 
 ## 8. Going to an agent
 
@@ -812,14 +845,86 @@ polled from the loop.
 ## 11. Accessibility
 
 - Text holds 4.5:1 on the bar's darkest background (3:1 for 24 px and
-  up). Colour never says a state alone: counts, names and words come with
-  it.
-- Every item is reachable with the keyboard (`Super+B` then arrows, Tab
-  through items, Enter acts, Esc closes) and has a name for screen
-  readers.
+  up); 7:1 under high contrast (§13). Colour never says a state alone:
+  counts, names and words come with it.
+- Every item is reachable with the keyboard (below) and has a name for
+  screen readers: what each says, and what is announced on its own, in
+  screen-reader.md.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
-  transparency" is set, or behind a maximised window.
+  transparency" or high contrast is set, and only then: a maximised
+  window leaves the bar on glass (the launcher's and the overview's
+  scrims stay, they dim). Opaque, the bar's icons, gauges and check
+  boxes draw over its background as on glass (pixel tests in the
+  shell, `…_show_the_same_on_the_opaque_bar_as_on_glass`).
+
+### The whole bar by the keyboard (#422)
+
+- **Entering.** `Super+B` (`[shortcuts] focus-bar`) puts the keyboard
+  into the bar of the screen holding the focused window, else the one
+  under the pointer. The form's switch is `Super+Shift+B`
+  (`toggle-bar`). Both are listed in the Settings' Keyboard and
+  shortcuts. Whatever had the keyboard keeps the focus meanwhile: the
+  window gets the keyboard back when the bar lets it go.
+- **Where the ring lands.** On the first waiting agent's row (the rows'
+  order: the longest waiting first), else the first stuck one, else the
+  clock's group. In the mini form, on the secretary while her badge
+  shows, else the clock. An agent hidden in "+ N" is not landed on: the
+  clock.
+- **Several bars.** A second `Super+B` while a bar holds the keyboard
+  goes to the next screen's bar (the screens left to right, then top to
+  bottom); from the last one, back to the window.
+
+| Key | In the bar | In a popover |
+|---|---|---|
+| `↓` / `Tab` | the next item, top to bottom, round | the next control |
+| `↑` / `Shift+Tab` | the previous item | the previous control |
+| `←` / `→` | along a row (the desktops' tiles, the footer's buttons, the tray's icons), stopping at its ends; on the sound or the brightness, the level ∓5 % without opening | on a slider ∓5 %; a list's rows |
+| `Home` / `End` | the first item, the last | — |
+| `Enter` / `Space` | the item's click: its popover, the agent, the desktop, the next layout, the task ticked | acts |
+| `Esc` | the keyboard back to the window | closes it, the ring back on its item |
+
+- The order is the drawing's: top to bottom, and along a row left to
+  right, from one surface of the bar to the next. An item under the ring
+  that goes (an agent ending, a desktop removed) gives the ring to the
+  item now in its place, else the one before it.
+- **A popover opened by the keyboard** opens as a click's (it stays,
+  holds the keyboard) with its first control under the ring; the sound's
+  with its master slider.
+- **The ring**: 2 px in the accent's text colour, 3 px out from the item,
+  its radius the item's and as much again. Under high contrast: 3 px,
+  with 2 px of the background between it and the item (§13). The same
+  ring in every popover, the lock and the authentication dialog.
+- **The pointer**: hovering neither takes the keyboard nor moves the
+  ring; a click on an item gives it the keyboard; a click outside the
+  shell gives it back.
+- While a bar holds the keyboard, clients get no key; the desktop's own
+  shortcuts still work. That bar stands in front of the windows (as
+  when pushed, §2), so that the ring shows over a window covering it.
+- The session locking takes the keyboard from the bar: once unlocked,
+  the window has it.
+- The magnifier's view follows the ring: the shell tells the compositor
+  where it lands and moves (`ring OUTPUT X Y W H`, the bar's frame;
+  [accessibility.md](accessibility.md)).
+- **Not built**: the bar shown over a fullscreen window while it holds
+  the keyboard (a fullscreen window still covers it); a window line's
+  menu by `Menu` or `Shift+F10`.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_keys.rs`,
+  the real shell on the CPU): `Super+B` with a window focused and nobody
+  waiting puts the keyboard on the clock's surface, the window keeping
+  the focus and getting no key; `↓` takes it to the next surface,
+  `Home` back to the clock, `End` to the footer's last button; `Esc`
+  gives it back to the window, which types again. A waiting agent takes
+  the ring before a stuck one, a stuck one before the clock. `Enter` on
+  the clock opens the calendar holding the keyboard, `Esc` puts the ring
+  back on the clock, `Esc` again gives the keyboard to the window.
+  `Super+Shift+B` switches the form, `Super+B` does not; the mini form
+  lands on its clock. With two screens, `Super+B` three times: the first
+  bar, the second, the window. The shell's own tests (`popover::tests`)
+  walk every item of a full bar in order both ways and round, `Home`,
+  `End`, `←`/`→` along the tiles and the footer and on the sound, a
+  popover opened by `Enter` with its first control, `Esc` twice, and an
+  item going under the ring.
 
 ## 12. Performance
 
@@ -878,6 +983,59 @@ strong, the states as text their darker values above; the others keep
 theirs. A "neon" theme, the Matrix one and a theme by the time of day are
 for later.
 
+### High contrast (#423)
+
+`[appearance] high-contrast` reinforces the theme chosen, dark or light,
+and keeps the accent: two more tables of the same tokens
+(`hocus_link::theme::DARK_CONTRAST`, `LIGHT_CONTRAST`), told to the shell
+with the theme (`theme SCHEME ACCENT WALLPAPER contrast`) and read by the
+Settings from the file.
+
+| Token | Dark + contrast | Light + contrast |
+|---|---|---|
+| bar, popover, bubble background | `#05070C`, `#0A0D16` (opaque) | `#FFFFFF` |
+| `bar.border` (also the popovers') | 2 px `#AEB6C6` | 2 px `#2E3546` |
+| `text` / `text.2` / `text.dim` / `text.faint` | `#FFFFFF` / `#F4F6FA` / `#E2E6EE` / `#D0D6E0` | `#000000` / `#0B0F18` / `#1C2230` / `#2E3546` |
+| window / sidebar | `#05070C` / `#000000` | `#FFFFFF` / `#F1F3F7` |
+| card rim, divider | `#8E98AB`, `#6B7488` | `#4A5468`, `#6B7488` |
+| control, its rim | `#000000`, `#D0D6E0` | `#FFFFFF`, `#2E3546` |
+| switch off; chosen segment | black (its border `text.faint`); `#3A4255` | white; `#DDE1EA` |
+| hovers and fills | no fill: a hover is a 1 px border in `text.dim` (`theme::hover`) | the same |
+| text in the accent, the keyboard's ring | its "on dark" lifted until it reads at 7:1 on every background (green `#9DF0B9`) | its "on light" darkened to 7:1 (green about `#155C33`) |
+| `state.wait` / `stuck` / `meeting` as text | `#FFD27A` / `#FFB48A` / `#B5CCFF` | `#6B4500` / `#8A3300` / `#1C48A5` |
+| tinted rows (waiting, stuck, to see) | no tint; a 3 px bar on the row's left in the state's colour | the same |
+
+- Every text pair reads at **7:1** at least on every background of its
+  table, and every border or control's edge at **3:1**, for each accent
+  and a few wallpapers' (unit tests of `hocus-link`:
+  `under_high_contrast_text_reads_at_7_to_1_and_borders_at_3_to_1`).
+- **It implies reduced transparency**: no glass anywhere (`glass_on()`
+  is false); the file keeps its own `reduce-transparency`.
+- The colours drawn outside the tokens are read by rule
+  (`hocus_link::theme::on_contrast`): a white veil faint enough to be a
+  fill or a hover goes; a stronger one (a lit item, a rule) is a solid
+  surface a step off the background; stronger still (a mark, a rim) the
+  cards' rim; a grey a text's colour; a dark background the theme's; a
+  state's tint goes. The gauges, the pandas, the secretary, the desktops'
+  sketches, the wallpaper and the windows keep theirs.
+- **The keyboard's ring**: 3 px, with 2 px of the background between it
+  and its item (§11). The focused window's rim stays 2 px.
+- Applications are told as before (the portal's `contrast = 1`).
+- **What the compositor draws itself** (the radial menu, the overview's
+  words, marks and boxes, the magnifier's pill), drawn in the dark
+  theme's colours, reads each colour by the same rule
+  (`crates/hocus-compositor/src/contrast.rs`): its disc and its panels
+  the table's background, opaque; no fills or tints; rims solid, the
+  cards' rim; its words solid at 7:1 (an inert word in `text.dim`). The
+  overview, on the dimmed wallpaper (dark in either theme), reads by the
+  dark table.
+- **Measured**: the unit tests above; headless
+  (`crates/hocus-compositor/tests/appearance.rs`), the bar's background
+  `#05070C` under dark and contrast, white under light and contrast, the
+  light theme's own once it is off, the shell told `contrast`, no glass;
+  `tests/contrast.rs`, the radial menu's disc and the overview's
+  thumbnails' rims under each table.
+
 ## 14. Open questions
 
 1. ~~The secretary's pencil drawing (section 7, B).~~ Decided on the 4.6
@@ -926,8 +1084,8 @@ are later slices'.
   switch reversed midway starts from where the bar is.
 - **The form** on a screen: `[outputs.NAME] panel-form`, else `[panel]
   form`; on `auto` (the default), the form last chosen there with a click
-  or `Super+B`, else full from 1600 px left beside the full bar. A click's
-  or `Super+B`'s choice is remembered in
+  or `Super+Shift+B`, else full from 1600 px left beside the full bar. A
+  click's or `Super+Shift+B`'s choice is remembered in
   `$XDG_STATE_HOME/hocuspanda/panel.toml` when the screen's form is `auto`,
   never in `config.toml`; with `full` or `mini` set there, a switch lasts
   the session.
@@ -962,8 +1120,7 @@ are later slices'.
 - **The background.** The compositor draws the wallpaper under everything
   (6.3, settings.md): by default Nuit, the mockup's night-blue gradient
   and its glows, so that the glass has something to show.
-- **Not built yet:** the glass's opaque fallback behind a maximised window
-  (§11), the bar's keyboard access (§11), the contents' cross-fade (§3,
+- **Not built yet:** the contents' cross-fade (§3,
   nothing to fade yet), hover feedback on the edge strip (the mockup's
   green tint is the mockup's own aid), and the blur's corners, which are
   cut to whole pixels under the shell's antialiased rim.
@@ -1963,7 +2120,7 @@ the heads) are display options for later (#491).
   under it), 34 px a row and 20 px for that line; its surface follows its
   height, never its width.
 - **The pandas** are the validated drawings, one still mood each, as SVG
-  (`crates/hocus-shell/assets/pandas/`, with a note of their origin),
+  (`crates/hocus-pandas/assets/` since #649, with a note of their origin),
   drawn by iced's `svg` (resvg) at the screen's scale: sharp at ×1 and ×2.
 - **Motion**, only when something changes: the rows slide to their new
   places in 450 ms, `cubic-bezier(0.2, 0.9, 0.25, 1)`; a row going under
@@ -2308,11 +2465,17 @@ agents' group), with the maintainer's spec (§7 B; issue #389). The next
 meeting and the notifications wait for the calendar and sprint 5.
 
 - **Her drawing** is the validated one, as SVG
-  (`crates/hocus-shell/assets/pandas/secretary-*.svg`, with the pandas'
+  (`crates/hocus-pandas/assets/secretary-*.svg`, with the pandas'
   note of their origin): one file per mood, her ear and the dot on her
   clipboard in its colour (green `#7BC47F`, amber `#F5B44A`, orange
   `#F2945B`), drawn by iced's `svg` at the screen's scale, sharp at ×1 and
   ×2; 40 px in the group, 34 px in her briefing.
+- **Her pencil** (#331, redrawn 2026-11): it read as stuck into her
+  head, its end hidden under the head's outline. It now rests behind her
+  left ear, its sharpened point down by her cheek and its eraser up past
+  the ear's top, both ends clear of the head's outline; the ear hides its
+  middle. Same colours and strokes as before, the point's wood
+  `#F3D9A8` and its lead added.
 - **The header** is a row as wide as the agents' (6 px past the group's
   sides), 44 px (2 px around her head), radius 9: her head, 8 px, then
   "AGENTS" (11.5 px 700, spaced, `text.dim`) and the total (Manrope 600,
@@ -3734,9 +3897,7 @@ through do not disturb; on a shared screen the tab hides its title;
   cancel, `Super+J`, the words in both languages, the places, the
   buttons' layout. On the CPU, the screenshots of the pull request
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
-- **Not built**: the tab's keyboard (`Super+B` reaching the bar, then
-  `Tab` through its buttons): the bar has no keyboard entry yet
-  (`Super+B` switches its form); calendars "without reminders" that still
+- **Not built**: calendars "without reminders" that still
   take the card (Day.1's settings; since Day.7 a calendar not featured
   has neither); the halo on the CPU.
 
@@ -4025,7 +4186,7 @@ close within 5 s is listed as holding it back, with "Revenir à …" and
   system's on a virtual terminal only. Nested or headless without it,
   there is no logind: suspend is hidden, restart and shut down greyed, and
   the developer's machine is never asked to sleep or power off.
-- **The menu**: 280 wide, the header 40 px (the avatar 32 px: the
+- **The menu**: 280 wide, the header 40 px (the avatar 40 px since #649: the
   account's photo from AccountsService's `IconFile` as 7.1 reads it, else
   the panda on the accent's gradient; the name, Manrope 700, 16 px), then
   6 px and the rows, 44 px each, their 30 px tile (radius 8, `0.06`), its
@@ -4324,7 +4485,7 @@ writes, followed as the file changes, before the page itself.
   `[panel] screens` (bars come and go, the windows' room with them), and
   each screen's form: a screen whose form asked changed (its own, or
   `[panel] form` for one without its own) forgets the form chosen there
-  with a click or `Super+B` (`panel.toml` written again) and switches to
+  with a click or `Super+Shift+B` (`panel.toml` written again) and switches to
   what is asked now, along the switch's motion. `[panel] output` and
   `windows` were already followed.
 - **Tests** (`crates/hocus-compositor/tests/bar_live.rs`): Today and the
@@ -4350,7 +4511,7 @@ by default), on every screen, followed as the file changes.
   8 px right of it; the edge click (`bar_edge_at`) in the strip between
   the screen's left edge and the bar and on the bar's first 6 px; the
   pointer pushed against the left edge brings the bar in front after
-  300 ms, until it leaves the bar's column; on `Super+B` or the click,
+  300 ms, until it leaves the bar's column; on `Super+Shift+B` or the click,
   snapped windows take their zone and a floating window whose left edge
   touched the bar's room keeps touching it. The glass and the halo go
   where the bar is (`bar_rect`); a minimised window goes into the bar on
@@ -4385,7 +4546,7 @@ by default), on every screen, followed as the file changes.
   every screen and the bar's place
   (`on_the_left_every_screen_keeps_the_bars_room_on_its_left`); the edge
   click (`a_press_on_the_left_edge_switches_the_form_and_no_client_sees_it`);
-  `Super+B` and the windows beside the bar
+  `Super+Shift+B` and the windows beside the bar
   (`super_b_on_the_left_moves_the_windows_that_touch_the_bar`); the push
   (`pushed_against_the_left_edge_the_bar_comes_in_front_after_300_ms`);
   the side changed in the file, the windows that touch the bar moving in
@@ -4536,3 +4697,28 @@ What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
 - **Across screens on the way**: a window moved onto another screen takes
   the desktop that screen shows as its centre crosses over, not once let
   go, so that it stays in sight there.
+
+### #649, the pandas bigger and livelier (2026-11-07)
+
+- **Approved**: level B of the sprint 9 mockup, the recommended choice in
+  each place (rows as cards for who needs the user, level C there).
+- **The drawings and their motion** are `crates/hocus-pandas`: each mood's
+  still SVG, its moving parts groups of it (`<g id="ring1">`, …); a frame
+  of a burst is that drawing with those groups transformed (the CSS
+  `transform-origin` of each part as the pandas canvas sets it). The shell
+  draws frames with resvg at the screen's scale, the same moment giving the
+  same drawing (60 a second); the compositor draws a picture per frame (30
+  a second) and keeps it. A surface asks for frames only while one of its
+  pandas plays: the budgets at rest are unchanged.
+- **Whether they play**: the compositor says it with the bars' look
+  (`look GLASS MOTION lively|calm`): not with reduced motion, nor while
+  power-profiles-daemon's profile is `power-saver`; the shell also not on
+  the CPU.
+- **Sizes**: rows 46 px with 42 px pandas, cards 68 px with 60 px pandas;
+  the secretary 56 px (46 px in the mini item); the mini item's waiting
+  panda 44 px; the briefing's 48 px; the peek and the wink 200 px; the
+  lock's corner 132 and 108 px, its pill's panda 34 px; the idle curtain's
+  64 px (its pill 300 × 80); the empty notification history's 140 px;
+  Settings › Agents' five moods 72 px; avatars 40 px, still.
+- **Screen readers**: the pandas stay decoration, no node; the mini
+  item's waiting panda is a button named as the agent's row is.

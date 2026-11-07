@@ -515,9 +515,7 @@ impl canvas::Program<Message> for Footer {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         // Where they are in the bar, for the keyboard going through the
         // bar's items (the bar's height read first: not under the same
         // lock).
@@ -566,14 +564,14 @@ impl canvas::Program<Message> for Footer {
                         _ => {
                             bell::lit(f, button, open, hover, focused);
                             if let Some(glyph) = glyph(item) {
-                                bell::glyph_in(f, button, glyph, alpha);
+                                bell::glyph_in(f, button, glyph, bell::GLYPH_INK, alpha);
                             }
                         }
                     }
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(
@@ -593,6 +591,27 @@ impl canvas::Program<Message> for Footer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_buttons_show_the_same_on_the_opaque_bar_as_on_glass() {
+        let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
+        for form in [Form::Full, Form::Mini] {
+            let ((w, h), _) = placement(form, false);
+            let drawn = crate::backdrop::tests::drawn(
+                |backdrop| Footer {
+                    bar: "eDP-1".to_owned(),
+                    forms: vec![(form, 1.0)],
+                    bar_width: form.width() as f32,
+                    words: Words::new(Lang::French),
+                    backdrop,
+                },
+                &State::default(),
+                Size::new(w, h),
+                colour,
+            );
+            crate::backdrop::tests::assert_drawn_over(&drawn, &format!("{form:?}"));
+        }
+    }
 
     fn rects(form: Form) -> Vec<Rectangle> {
         let ((w, h), bottom) = placement(form, false);

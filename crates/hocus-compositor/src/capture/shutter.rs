@@ -33,6 +33,7 @@ impl Player {
             SoundPrograms::Path | SoundPrograms::None => PathBuf::from(name),
         };
         let mut command = Command::new(program);
+        crate::programs::default_signals(&mut command);
         if let Some(remote) = &self.remote {
             command.env("PIPEWIRE_REMOTE", remote);
         }

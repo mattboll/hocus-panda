@@ -1145,10 +1145,14 @@ fn the_rows_say_each_agent_in_order_with_its_colour() -> anyhow::Result<()> {
         .into_iter()
         .map(|name| bed.row(name))
         .collect::<anyhow::Result<_>>()?;
+    // 46 px rows; the waiting and the stuck one 68 px cards (#649).
+    let apart: Vec<f64> = rows.windows(2).map(|p| p[1].1 - p[0].1).collect();
     assert!(
-        rows.windows(2)
-            .all(|p| (p[1].1 - p[0].1 - 34.0).abs() < 0.6),
-        "34 px apart: {rows:?}"
+        apart
+            .iter()
+            .zip([68.0, 57.0, 46.0, 46.0])
+            .all(|(a, e)| (a - e).abs() < 0.6),
+        "apart: {rows:?}"
     );
     bed.settle()?;
     // Each row's tint, 3 px into it (left of its panda), against the
@@ -1202,12 +1206,12 @@ fn more_than_five_agents_fold_into_a_line() -> anyhow::Result<()> {
             "· w5 0\u{a0}min · +\u{a0}2 au repos",
         ],
     )?;
-    // Under the secretary, five rows and the line: 50 + 5 × 34 + 20, and
+    // Under the secretary, five rows and the line: 66 + 5 × 46 + 20, and
     // the ring's room.
     let tall = bed.hp.dispatch_until(WAIT, |hp| {
         hp.agents_surfaces()
             .first()
-            .is_some_and(|(_, r)| r.height == 50 + 5 * 34 + 20 + 10)
+            .is_some_and(|(_, r)| r.height == 66 + 5 * 46 + 20 + 10)
     })?;
     anyhow::ensure!(tall, "{:?}", bed.surface());
     // One of them works now: not all the hidden ones rest.
@@ -1340,8 +1344,9 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 }
 
 /// On a GPU: a change slides the rows and hops the changed agent's panda,
-/// for 650 ms, then nothing moves; with reduced motion, it changes at
-/// once. Skipped without a render node named in `HOCUS_TEST_GPU`.
+/// which plays its mood about 2.5 s (#649), then nothing moves; with
+/// reduced motion, it changes at once and its panda is still. Skipped
+/// without a render node named in `HOCUS_TEST_GPU`.
 #[test]
 fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
@@ -1374,22 +1379,22 @@ fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
         // (stuck, not waiting: the secretary holds still, 4.6).
         let from = bed.mark();
         bed.hocus(&["agent", "c", "failed"], None)?;
-        let commits = bed.commits_for(Duration::from_secs(2))?;
+        let commits = bed.commits_for(Duration::from_secs(5))?;
         bed.logged_after(from, &["shows=AGENTS 3 · c bloqué · a 0\u{a0}min"])?;
         let (frames, span) = motion_of(&commits);
         if moves {
-            bed.logged_after(from, &["the agents' rows move"])?;
-            assert!(frames >= 10, "{frames} frames of motion: {commits:?}");
+            bed.logged_after(from, &["the agents' rows move", "a panda plays its mood"])?;
+            assert!(frames >= 30, "{frames} frames of motion: {commits:?}");
             assert!(
-                (Duration::from_millis(500)..Duration::from_millis(900)).contains(&span),
+                (Duration::from_millis(2400)..Duration::from_millis(3100)).contains(&span),
                 "{span:?}: {commits:?}"
             );
         } else {
             assert_eq!(frames, 0, "{commits:?}");
         }
-        // Then it rests.
+        // Then it rests: no frame after 3 s, none over the next 2 s.
         let last = commits.last().copied().unwrap_or_default();
-        assert!(last < Duration::from_millis(1200), "{commits:?}");
+        assert!(last < Duration::from_millis(3300), "{commits:?}");
     }
     Ok(())
 }
@@ -2846,16 +2851,18 @@ impl Bed {
             (45.0, 14.0, 24.0)
         };
         let (x, y) = (f64::from(surface.x), f64::from(surface.y));
+        // The panda's box, 200 px (#649).
+        let side = 200.0;
         let panda = (
-            x + f64::from(surface.width) - right - 170.0,
+            x + f64::from(surface.width) - right - side,
             y + top,
-            170.0,
-            170.0,
+            side,
+            side,
         );
         let bubble_height = 13.0 * 1.366 + 18.0;
         let bubble = (
             x + left,
-            y + top + (170.0 - bubble_height) / 2.0,
+            y + top + (side - bubble_height) / 2.0,
             panda.0 - 8.0 - x - left,
             bubble_height,
         );
@@ -2900,7 +2907,7 @@ fn peek_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
 /// The full bar's left edge on the test's 1920 px screen.
 const BAR_LEFT: f64 = 1920.0 - 8.0 - 196.0;
 
-/// An agent starting to wait: its panda (170 px) comes out of the bar's
+/// An agent starting to wait: its panda (200 px) comes out of the bar's
 /// edge at its row, 18 px from the bar, with its bubble; on a GPU sliding
 /// out from under the bar in some 320 ms with a slight overshoot, fading
 /// in; then still, and back after 8 s on the clock; then its surfaces go
@@ -3700,26 +3707,31 @@ fn nothing_commits_at_rest_with_her_briefing_open() -> anyhow::Result<()> {
 
 /// The mini bar's right edge, inside, on the test's 1920 px screen; the
 /// item's top under the bar's (12 px, the clock's 41.8 px, 14 px) and its
-/// height with how many work (4 + 40 + 4 + 2 × 13.75 + 6 px).
+/// height with how many work (4 + 46 + 4 + 2 × 13.75 + 6 px); with someone
+/// waiting, their panda's 48 px square and 4 px more (#649).
 const MINI_RIGHT: f64 = 1920.0 - 8.0;
 const MINI_TOP: f64 = 68.0;
-const MINI_HEIGHT: f64 = 81.5;
+const MINI_HEIGHT: f64 = 87.5;
+const MINI_WAITING: f64 = 52.0;
 
 impl Bed {
     /// The mini item's top left, global, from where the shell logged it.
     fn mini_item(&mut self, item: &str) -> anyhow::Result<(f64, f64)> {
         let (x, y) = self.item(item)?;
-        Ok((x - 24.0, y - MINI_HEIGHT / 2.0))
+        let waits = self.hp.agents_peek().iter().any(|a| a.state == "waiting");
+        let tall = MINI_HEIGHT + if waits { MINI_WAITING } else { 0.0 };
+        Ok((x - 24.0, y - tall / 2.0))
     }
 
     /// The colours of her ear, and of the badge 3 px in from its left at
-    /// its middle (with one figure: 16 px, its right 6 px past her head's).
+    /// its middle (with one figure: 16 px, its right 3 px past her head's).
     fn mini_colours(&mut self) -> anyhow::Result<([i32; 3], [i32; 3])> {
         let (x, y) = self.mini_item("Secretary")?;
-        // Her ear, (85, 33) of her drawing's 120, on her 40 px head 4 px
-        // in.
-        let ear = pixel(&mut self.hp, (x + 4.0 + 85.0 / 3.0, y + 4.0 + 11.0))?;
-        let badge = pixel(&mut self.hp, (x + 34.0 + 3.0, y + 4.0 + 40.0 + 3.0 - 8.0))?;
+        // Her ear, (85, 33) of her drawing's 120, on her 46 px head 1 px
+        // in, 4 px down.
+        let k = 46.0 / 120.0;
+        let ear = pixel(&mut self.hp, (x + 1.0 + 85.0 * k, y + 4.0 + 33.0 * k))?;
+        let badge = pixel(&mut self.hp, (x + 34.0 + 3.0, y + 4.0 + 46.0 + 3.0 - 8.0))?;
         Ok((ear, badge))
     }
 
@@ -3831,7 +3843,7 @@ fn the_mini_item_says_how_many_work_without_a_badge_at_zero() -> anyhow::Result<
     bed.settle()?;
     // Where the badge would be, the bar's own colour: as left of her head.
     let (x, y) = bed.mini_item("Secretary")?;
-    let plain = pixel(&mut bed.hp, (x + 1.0, y + 39.0))?;
+    let plain = pixel(&mut bed.hp, (x, y + 45.0))?;
     let (_, badge) = bed.mini_colours()?;
     assert!(
         badge.iter().zip(plain).all(|(a, b)| (a - b).abs() <= 3),
@@ -3894,6 +3906,44 @@ fn hovering_or_clicking_the_mini_item_opens_her_briefing_with_who_works_and_rest
     Ok(())
 }
 
+/// Under her head in the mini form, the panda of the agent waiting the
+/// longest (#649), none when nobody waits; a click on it goes to the
+/// agent: its window on another desktop, with the keyboard.
+#[test]
+fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<()> {
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    // Nobody waits: her alone, the item as tall as without a panda.
+    let id = bed.id_of("build")?;
+    assert!(bed.item(&format!("Agent({id})")).is_err());
+    assert_eq!(bed.surface().height, (MINI_HEIGHT + 10.0).ceil() as i32);
+    bed.agent_is("build", "waiting")?;
+    let (x, y) = bed.item(&format!("Agent({id})"))?;
+    let (_, top) = bed.mini_item("Secretary")?;
+    // Its 48 px square under her head, 4 px apart, in the item's middle.
+    assert!((x - (MINI_RIGHT - 28.0)).abs() < 0.6, "{x}");
+    assert!(
+        (y - (top + 4.0 + 46.0 + 4.0 + 24.0)).abs() < 0.6,
+        "{y} under {top}"
+    );
+    assert_eq!(
+        bed.surface().height,
+        (MINI_HEIGHT + MINI_WAITING + 10.0).ceil() as i32
+    );
+    bed.click((x, y))?;
+    let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
+    anyhow::ensure!(there, "{:?}", bed.hp.desktop());
+    bed.keyboard_goes_to("test.terminal")?;
+    Ok(())
+}
+
 /// A line of the mini form's briefing, a working agent's, goes to it: its
 /// window on another desktop, with the keyboard.
 #[test]
@@ -3951,10 +4001,10 @@ fn the_mini_item_hides_and_proposes_to_plug_in_as_the_group_does() -> anyhow::Re
     };
     bed.logged("mini=badge + green")?;
     bed.settle()?;
-    // She alone: 4 + 40 + 6 px.
+    // She alone: 4 + 46 + 6 px.
     let (x, y) = bed.item("Sources")?;
-    assert!((y - (8.0 + MINI_TOP + 25.0)).abs() < 0.6, "{y}");
-    assert_eq!(bed.surface().height, 60);
+    assert!((y - (8.0 + MINI_TOP + 28.0)).abs() < 0.6, "{y}");
+    assert_eq!(bed.surface().height, 66);
     let from = bed.mark();
     bed.click((x, y))?;
     let shown = bed.hp.dispatch_until(WAIT, |hp| {
@@ -4047,11 +4097,12 @@ fn the_halo_and_the_peek_work_in_the_mini_form() -> anyhow::Result<()> {
         (panda.0 + panda.2 - (MINI_RIGHT - 56.0 - 18.0)).abs() < 0.5,
         "{panda:?}"
     );
-    // Her head's middle: 4 px into the item, 20 px down her head.
-    assert!(
-        (middle_of(panda).1 - (8.0 + MINI_TOP + 24.0)).abs() <= 1.0,
-        "{panda:?}"
-    );
+    // At her head's middle (4 px into the item, 23 px down her head),
+    // unless that would take its 200 px above the bar's top: there, its
+    // top at the bar's.
+    let head = 8.0 + MINI_TOP + 27.0;
+    let top = (head - 100.0).max(8.0);
+    assert!((panda.1 - top).abs() <= 1.0, "{panda:?}");
     bed.logged("said=build t'attend · à l'instant")?;
     Ok(())
 }
@@ -4080,5 +4131,92 @@ fn nothing_commits_at_rest_in_the_mini_form() -> anyhow::Result<()> {
     }
     wait(&mut bed.hp, Duration::from_secs(2))?;
     assert_eq!(before, bed.counts());
+    Ok(())
+}
+
+// --- #649: the pandas' screenshots ------------------------------------------------
+
+/// The bar's right side, `width` px wide, as `DIR/NAME.png`, and the
+/// agents' group three times as large as `DIR/NAME-group.png`.
+fn pandas_shot(bed: &mut Bed, folder: &Path, name: &str, width: i32) -> anyhow::Result<()> {
+    bed.settle()?;
+    let (screen, height, bytes) = bed.hp.screenshot(0)?;
+    let pixel = |x: i32, y: i32| {
+        let at = usize::try_from(y * screen + x).unwrap_or(0) * 4;
+        bytes
+            .get(at..at + 4)
+            .map_or(image::Rgba([0, 0, 0, 255]), |p| {
+                image::Rgba([p[2], p[1], p[0], 255])
+            })
+    };
+    let w = width.min(screen);
+    image::RgbaImage::from_fn(w as u32, height as u32, |x, y| {
+        pixel(screen - w + x as i32, y as i32)
+    })
+    .save(folder.join(format!("{name}.png")))?;
+    let group = bed.surface();
+    image::RgbaImage::from_fn(group.width as u32 * 3, group.height as u32 * 3, |x, y| {
+        pixel(group.x + x as i32 / 3, group.y + y as i32 / 3)
+    })
+    .save(folder.join(format!("{name}-group.png")))?;
+    Ok(())
+}
+
+/// The pull request's screenshots (#649), into `HOCUS_SHOTS`: the bar
+/// with a waiting agent's card and a stuck one's, the peek out beside it,
+/// and the mini bar with the waiting agent's panda.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_pandas() -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&folder)?;
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    // Their reports as the agents' socket reads them, each its own, with
+    // what it asks or why it failed.
+    let agents = |bed: &mut Bed| -> anyhow::Result<()> {
+        let socket = bed
+            .hp
+            .control_socket()
+            .ok_or_else(|| anyhow::anyhow!("no control socket"))?
+            .to_path_buf();
+        for (name, state, note) in [
+            ("api-paiements", "working", ""),
+            ("docs", "working", ""),
+            ("notes", "idle", ""),
+            ("migration", "done", ""),
+            ("infra", "failed", "\tsays terraform plan a échoué"),
+            ("site-web", "waiting", "\tallow Bash npm install"),
+        ] {
+            let mut stream = std::os::unix::net::UnixStream::connect(&socket)?;
+            writeln!(stream, "agent command {name} {state} - {name}{note}")?;
+            drop(stream);
+            bed.agent_becomes(name, Some(state))?;
+        }
+        Ok(())
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    agents(&mut bed)?;
+    bed.peek_surface()?;
+    bed.peek_out_still()?;
+    pandas_shot(&mut bed, &folder, "bar-peek", 900)?;
+    let back = bed
+        .hp
+        .dispatch_until(Duration::from_secs(15), |hp| hp.peek_surfaces().is_empty())?;
+    anyhow::ensure!(back, "the peek stays out");
+    pandas_shot(&mut bed, &folder, "bar", 420)?;
+    drop(bed);
+    let Some(mut bed) = mini_bed(Machine::default())? else {
+        return Ok(());
+    };
+    agents(&mut bed)?;
+    let back = bed
+        .hp
+        .dispatch_until(Duration::from_secs(15), |hp| hp.peek_surfaces().is_empty())?;
+    anyhow::ensure!(back, "the peek stays out");
+    pandas_shot(&mut bed, &folder, "mini", 260)?;
     Ok(())
 }

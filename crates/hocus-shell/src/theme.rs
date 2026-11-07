@@ -18,6 +18,7 @@ static NOW: RwLock<Choice> = RwLock::new(Choice {
     scheme: Scheme::Dark,
     accent: Accent::Green,
     wallpaper: hocus_link::theme::BACKDROP_ACCENT,
+    contrast: false,
 });
 
 /// The theme from now on; whether it changed.
@@ -36,6 +37,39 @@ pub fn now() -> Choice {
 /// Whether the shell draws on light backgrounds.
 pub fn light() -> bool {
     now().scheme == Scheme::Light
+}
+
+/// Whether high contrast reinforces the theme (#423): borders 2 px, the
+/// keyboard's ring 3 px with the background between it and its item.
+pub fn contrast() -> bool {
+    now().contrast
+}
+
+/// The bar's, the popovers' and the bubbles' border: 1 px, 2 px under high
+/// contrast (bar.md §13). Drawn inside their edge: their room does not
+/// change.
+pub fn border() -> f32 {
+    if contrast() { 2.0 } else { 1.0 }
+}
+
+/// A hover over `path`: its fill; under high contrast, which has no fills,
+/// a 1 px border in `text.dim` instead (bar.md §13).
+pub fn hover(
+    f: &mut iced::widget::canvas::Frame,
+    path: &iced::widget::canvas::Path,
+    fill: impl Into<iced::widget::canvas::Fill>,
+) {
+    if contrast() {
+        let dim = color(now().scheme.contrast_tokens().dim);
+        f.stroke(
+            path,
+            iced::widget::canvas::Stroke::default()
+                .with_color(dim)
+                .with_width(1.0),
+        );
+    } else {
+        f.fill(path, fill);
+    }
 }
 
 pub fn color(c: Rgba) -> Color {
@@ -78,9 +112,9 @@ impl Ink {
     pub fn in_theme(self, choice: Choice) -> Color {
         match self {
             Self::Token(token) => color(token(choice.tokens())),
-            Self::Dark(c) => match choice.scheme {
-                Scheme::Dark => c,
-                Scheme::Light => color(hocus_link::theme::on_light(rgba(c))),
+            Self::Dark(c) => match (choice.scheme, choice.contrast) {
+                (Scheme::Dark, false) => c,
+                _ => color(choice.reads(rgba(c))),
             },
             Self::Accent(alpha) => {
                 let [r, g, b] = choice.accent().base;

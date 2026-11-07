@@ -441,6 +441,7 @@ impl State {
     /// and the strokes go.
     fn lock_closes_everything(&mut self) {
         self.end_popup_grab();
+        self.bar_keyboard_away();
         if self.switcher.is_some() {
             self.end_switcher(false);
         }
@@ -695,6 +696,8 @@ impl State {
                 | T::Meeting(_)
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
+                | T::A11yLine(_)
+                | T::A11yEnd
         )
     }
 
@@ -808,10 +811,12 @@ impl State {
             return Some(FilterResult::Intercept(Kept::Vt(vt)));
         }
         let shortcuts = &self.config.shortcuts;
+        // The levels' keys and the magnifier's (#424) work locked.
         let level = keysym
             .raw_latin_sym_or_raw_current_sym()
             .and_then(|key| shortcuts.action(mods, key, self.nested))
-            .filter(|(action, _)| matches!(action, crate::Action::Level(_)));
+            .filter(|(action, _)| matches!(action, crate::Action::Level(_)))
+            .or_else(|| self.magnifier_chord(mods, keysym));
         if let Some((action, chord)) = level {
             self.kept_keys.insert(code);
             return Some(FilterResult::Intercept(Kept::Shortcut(action, chord)));

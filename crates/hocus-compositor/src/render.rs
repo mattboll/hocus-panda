@@ -96,6 +96,8 @@ render_elements! {
     Ink = crate::ink::InkElement<R>,
     /// A half of the lock opening (7.1).
     Part = Keyed<RelocateRenderElement<CropRenderElement<WaylandSurfaceRenderElement<R>>>>,
+    /// The screen's picture seen through the magnifier's view (#424).
+    Zoom = crate::magnifier::draw::ZoomElement<<R as RendererSuper>::TextureId>,
 }
 
 /// What an output's elements are drawn for.
@@ -254,6 +256,8 @@ impl State {
                 visual.size = visual.size.upscale(k);
             }
         }
+        // Its own opacity (#735), the frame and the shadow with it.
+        alpha *= f32::from(managed.opacity) / 100.0;
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
         // A client drawing its own shadow (a floating GTK window) keeps it:
@@ -536,6 +540,13 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.grabber.ready(renderer);
+        // What the compositor draws itself, in high contrast if it is on.
+        crate::contrast::set(
+            self.config
+                .appearance
+                .high_contrast
+                .then_some(self.config.appearance.theme),
+        );
         let now = self.now();
         self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();
@@ -633,6 +644,7 @@ impl State {
                         | hocus_link::PEEK_NAMESPACE
                         | hocus_link::LAUNCHER_NAMESPACE
                         | hocus_link::LAUNCHER_TOAST_NAMESPACE
+                        | hocus_link::ACTIONS_NAMESPACE
                         | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
                         | hocus_link::SHARE_CHOOSER_NAMESPACE
                         | hocus_link::AUTH_NAMESPACE
@@ -748,6 +760,10 @@ impl State {
         self.ink_elements(renderer, output, now, &mut elements);
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
+        // A window's opacity changing: its percentage (#735).
+        if purpose.screen() {
+            self.opacity_elements(renderer, output, &mut elements);
+        }
         // The launcher's toast over the launcher fading out; never in a
         // capture.
         if purpose.screen() {
@@ -758,6 +774,16 @@ impl State {
         let launcher = self
             .launcher_elements(renderer, output, now, &mut elements)
             .map(|alpha| (elements.len(), alpha));
+        // The actions palette (#736) under it: the target window, its
+        // ring and the dim go right after it, once the windows are drawn.
+        let palette = if purpose.screen() {
+            self.palette_elements(renderer, output, now, &mut elements)
+                .map(|(window, alpha)| (elements.len(), window, alpha))
+        } else {
+            None
+        };
+        let palette_target = palette.and_then(|(_, window, _)| window);
+        let mut target = Vec::new();
         layers(renderer, Layer::Overlay, Pick::All, &mut elements);
         // The bar's own surfaces go under the windows unless the pointer
         // brought it in front (#519); its popovers, its halo, the peek and
@@ -846,10 +872,52 @@ impl State {
                 let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
                 windows.extend(self.window_ring(renderer, *id, &output.name(), visual, scale, now));
             }
+            // The palette's target over its dim, ringed.
+            let out = if palette_target == Some(*id) {
+                &mut target
+            } else {
+                &mut windows
+            };
             match self.bent_window(renderer, *id, look, origin, scale) {
-                Some(bent) => windows.push(OutputElements::Bent(bent)),
-                None => self.framed_window(renderer, *id, look, origin, scale, &mut windows),
+                Some(bent) => out.push(OutputElements::Bent(bent)),
+                None => self.framed_window(renderer, *id, look, origin, scale, out),
             }
+            if palette_target == Some(*id)
+                && let Some((_, _, alpha)) = palette
+            {
+                let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
+                let radius = if self.model.mode(*id) == Mode::Fullscreen {
+                    0.0
+                } else {
+                    decoration::RADIUS
+                };
+                let mut ring = Vec::new();
+                for ((style, around), ids) in State::actions_ring(visual, radius)
+                    .into_iter()
+                    .zip([&self.actions.glow, &self.actions.ring])
+                {
+                    ring.extend(
+                        decoration::box_elements(
+                            renderer,
+                            &self.textures,
+                            ids,
+                            style,
+                            around,
+                            scale,
+                            alpha,
+                        )
+                        .into_iter()
+                        .map(OutputElements::Frame),
+                    );
+                }
+                // Front first: the ring, then the glow under it.
+                ring.reverse();
+                target.splice(0..0, ring);
+            }
+        }
+        if let Some((at, _, alpha)) = palette {
+            let dim = self.actions_dim(output, alpha).map(OutputElements::Solid);
+            elements.splice(at..at, target.into_iter().chain(dim));
         }
         if fullscreen_on_top {
             elements.append(&mut windows);
@@ -951,7 +1019,12 @@ impl State {
             );
         }
         // The overview over the windows, under the bar.
+        // Its words and marks sit on the dimmed wallpaper, dark in either
+        // theme: under high contrast, the dark table's.
+        let contrast = crate::contrast::now();
+        crate::contrast::set(contrast.map(|_| hocus_link::theme::Scheme::Dark));
         let mut overview = self.overview_elements(renderer, output, now);
+        crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing
@@ -1092,6 +1165,64 @@ impl State {
             }
         }
         Some(look.alpha)
+    }
+
+    /// The actions palette on `output` at `now` (#736), front first: its
+    /// surface where its motion has it, cut to its corners on the CPU, and
+    /// its shadow. Its target window, when it is on this screen, and how
+    /// opaque it is, when it shows.
+    fn palette_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        now: Duration,
+        out: &mut Vec<OutputElement<R>>,
+    ) -> Option<(Option<WindowId>, f32)>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let (window, alpha) = self.actions_backdrop(output, now)?;
+        let layer = self.actions_on(output)?;
+        let look = self
+            .panel
+            .popovers
+            .look(&layer, now, self.popover_motion())?;
+        let shown = self.panel.popovers.shown(&layer)?;
+        let mut geometry = layer_map_for_output(output).layer_geometry(&layer)?;
+        geometry.loc.y -= look.rise.round() as i32;
+        let scale = output.current_scale().fractional_scale();
+        let loc = geometry.loc.to_physical_precise_round(scale);
+        let surfaces: Vec<WaylandSurfaceRenderElement<R>> = AsRenderElements::<R>::render_elements(
+            &layer,
+            renderer,
+            loc,
+            Scale::from(scale),
+            alpha,
+        );
+        if self.shell.software {
+            let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
+            let radius = (hocus_link::actions::ACTIONS_RADIUS * scale).round() as i32;
+            out.extend(surfaces.into_iter().map(|e| {
+                OutputElements::Bar(Rounded::new(e, own, radius, Outside::Cropped, scale))
+            }));
+        } else {
+            out.extend(surfaces.into_iter().map(OutputElements::Surface));
+        }
+        out.extend(
+            shadow_elements(
+                renderer,
+                &self.textures,
+                &shown.ids,
+                shown.shadow(),
+                geometry.to_f64(),
+                scale,
+                alpha,
+            )
+            .into_iter()
+            .map(OutputElements::Shadow),
+        );
+        Some((window, alpha))
     }
 
     /// The launcher's toasts on `output` at `now` (5.2), where their motion
@@ -1380,7 +1511,8 @@ impl State {
                 continue;
             };
             let rise = shown.reach();
-            if look.alpha <= 0.0 {
+            // The palette is nearly opaque: no glass under it.
+            if look.alpha <= 0.0 || shown.kind == crate::popover::Kind::Actions {
                 continue;
             }
             let reach = crate::glass::REACH;

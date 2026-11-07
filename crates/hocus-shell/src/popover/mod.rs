@@ -562,6 +562,17 @@ pub enum Event {
     ItemStep {
         back: bool,
     },
+    /// `Home` (`last`: `End`) on the item holding the keyboard: to the
+    /// bar's first item, or its last.
+    ItemEdge {
+        last: bool,
+    },
+    /// `←` or `→` (`right`) on the item holding the keyboard: along its
+    /// row (the desktops' tiles, the footer, the tray); on a level, its
+    /// value ∓5 % without opening it.
+    ItemSide {
+        right: bool,
+    },
     /// `Esc` on the item holding the keyboard.
     ItemRelease,
     /// `bar` changed form, or went.
@@ -613,6 +624,9 @@ pub enum Effect {
     },
     /// The compositor fades it out (`closing`).
     Closing,
+    /// Popover `id`, opened by the keyboard, puts its first control under
+    /// the ring (as `Tab` would).
+    FirstControl(window::Id),
     Remove(window::Id),
     /// The surfaces of this namespace show something new.
     Wake(&'static str),
@@ -621,8 +635,17 @@ pub enum Effect {
         id: window::Id,
         takes: bool,
     },
+    /// The compositor is told where the keyboard's ring is on `bar` (its
+    /// frame), for the magnifier.
+    Ring {
+        bar: String,
+        rect: Rectangle,
+    },
     /// The compositor is asked for the next keyboard layout.
     NextLayout,
+    /// A level steps, as its key on the keyboard does (`←`/`→` on the
+    /// sound's or the brightness's item).
+    Level(hocus_link::LevelKey),
     /// The compositor is asked for a desktop of `bar`'s screen.
     Desktop {
         bar: String,
@@ -687,6 +710,15 @@ pub enum Effect {
         id: window::Id,
         output: String,
         size: (u32, u32),
+    },
+    /// The actions palette's surface on `output` (#736): `size`, its
+    /// margins from the screen's top left corner (top, right, bottom,
+    /// left), holding the keyboard.
+    Actions {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
     },
     /// The emoji picker's surface on `output` (5.7): `size`, its margins
     /// from the screen's top left corner (top, right, bottom, left),
@@ -1003,6 +1035,24 @@ impl Controller {
         mut items: Vec<(Item, Rectangle)>,
     ) {
         items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
+        // The item under the ring went (an agent ended, a desktop was
+        // removed): the ring goes to the item now in its place, else the
+        // one before it, on the same surface.
+        if let Some((b, item, at)) = &mut self.focused
+            && b == bar
+            && self
+                .bars
+                .get(bar)
+                .is_some_and(|p| item.namespace(p.form) == namespace)
+            && !items.iter().any(|(i, _)| i == item)
+            && let Some(&(next, rect)) = items
+                .iter()
+                .find(|(_, r)| r.y >= at.y)
+                .or_else(|| items.last())
+        {
+            tracing::debug!(gone = ?item, item = ?next, "the keyboard on an item");
+            (*item, *at) = (next, rect);
+        }
         self.items.insert((bar.to_owned(), namespace), items);
     }
 
@@ -1037,6 +1087,38 @@ impl Controller {
             Phase::Open(open) => Some((&open.bar, open.item)),
             _ => None,
         }
+    }
+
+    /// The open popover's surface, if one is open.
+    pub fn open_surface(&self) -> Option<window::Id> {
+        match &self.phase {
+            Phase::Open(open) => Some(open.surface),
+            _ => None,
+        }
+    }
+
+    /// The item holding the keyboard (after `Esc` in its popover), and its
+    /// bar.
+    pub fn focused_on(&self) -> Option<(&str, Item)> {
+        self.focused
+            .as_ref()
+            .map(|(bar, item, _)| (bar.as_str(), *item))
+    }
+
+    /// What bar `bar`'s surfaces show, each with its surface's namespace
+    /// and where it is in the bar's frame, from the top (screen readers'
+    /// tree, crate::a11y).
+    pub fn items_of(&self, bar: &str) -> Vec<(&'static str, Item, Rectangle)> {
+        let mut items: Vec<(&'static str, Item, Rectangle)> = self
+            .items
+            .iter()
+            .filter(|((b, _), _)| b == bar)
+            .flat_map(|((_, namespace), items)| {
+                items.iter().map(|(item, rect)| (*namespace, *item, *rect))
+            })
+            .collect();
+        items.sort_by(|a, b| a.2.y.total_cmp(&b.2.y).then(a.2.x.total_cmp(&b.2.x)));
+        items
     }
 
     /// The form of the bar whose popover `id` is open.
@@ -1202,10 +1284,16 @@ impl Controller {
                 Some((bar, item, from)) => {
                     self.unfocus(&mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
+                    // Opened by the keyboard: its first control holds it.
+                    if let Phase::Open(open) = &self.phase {
+                        effects.push(Effect::FirstControl(open.surface));
+                    }
                 }
                 None => {}
             },
             Event::ItemStep { back } => self.step(back, &mut effects),
+            Event::ItemEdge { last } => self.edge(last, &mut effects),
+            Event::ItemSide { right } => self.side(right, &mut effects),
             Event::ItemRelease => self.unfocus(&mut effects),
             Event::Chosen => self.close(now, &mut effects),
             Event::Replace(item) => {
@@ -1498,6 +1586,45 @@ impl Controller {
         effects
     }
 
+    /// The actions palette (#736) opens `item`'s popover on `output`'s bar
+    /// (else the first), as a click on it does: beside its item, else
+    /// beside `near` (the Sources beside the secretary).
+    pub fn open_asked(
+        &mut self,
+        output: &str,
+        item: Item,
+        near: Option<Item>,
+        now: Instant,
+    ) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        let Some(bar) = self.bar_for(output) else {
+            return effects;
+        };
+        let items = self.bar_items(&bar);
+        let from = items
+            .iter()
+            .find(|(i, _)| *i == item)
+            .or_else(|| items.iter().find(|(i, _)| Some(*i) == near))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                let height = self.bar_height(&bar);
+                Rectangle::new(Point::new(-50.0, height / 2.0), Size::new(40.0, 34.0))
+            });
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, item, from, Opened::Click, &mut effects);
+        effects
+    }
+
+    /// The bar a popover for `output` opens on: its own, else the first.
+    pub fn bar_for(&self, output: &str) -> Option<String> {
+        if self.bars.contains_key(output) {
+            Some(output.to_owned())
+        } else {
+            self.bars.keys().min().cloned()
+        }
+    }
+
     /// Whether the popover `id` holds the keyboard: opened by a click (or
     /// a shortcut), or clicked in.
     pub fn holds_keyboard(&self, id: window::Id) -> bool {
@@ -1579,29 +1706,122 @@ impl Controller {
         }
     }
 
-    /// The keyboard from the item holding it to the next item of the bar
-    /// (the previous, `back`), from its top to its bottom and round: the
-    /// next item's surface takes the keyboard when it is another (the
-    /// desktops' tiles, above the connections, are reached so).
-    fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
-        let Some((bar, item, _)) = self.focused.clone() else {
-            return;
-        };
-        let Some(place) = self.bars.get(&bar).copied() else {
-            return;
-        };
+    /// The items of bar `bar`, in the drawing's order: top to bottom, and
+    /// along a row left to right.
+    fn bar_items(&self, bar: &str) -> Vec<(Item, Rectangle)> {
         let mut items: Vec<(Item, Rectangle)> = self
             .items
             .iter()
-            .filter(|((b, _), _)| *b == bar)
+            .filter(|((b, _), _)| b == bar)
             .flat_map(|(_, items)| items.iter().copied())
             .collect();
         items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
-        let order: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
-        if !order.contains(&item) {
+        items
+    }
+
+    /// The keyboard from the item holding it to the next item of the bar
+    /// (the previous, `back`), from its top to its bottom and round: the
+    /// next item's surface takes the keyboard when it is another (the
+    /// desktops' tiles, above the connections, are reached so). An item
+    /// gone meanwhile (an agent that ended) steps from where it was.
+    fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
+        let Some((bar, item, at)) = self.focused.clone() else {
             return;
+        };
+        let items = self.bar_items(&bar);
+        let order: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
+        let next = if order.contains(&item) {
+            kit::step(&order, Some(item), back)
+        } else {
+            // From where it was: the first item under it, or the last
+            // over it, round the ends.
+            let after = items.iter().position(|(_, r)| r.y >= at.y);
+            match (after, back) {
+                (Some(i), false) => order.get(i).copied(),
+                (Some(i), true) => i
+                    .checked_sub(1)
+                    .and_then(|i| order.get(i))
+                    .or(order.last())
+                    .copied(),
+                (None, false) => order.first().copied(),
+                (None, true) => order.last().copied(),
+            }
+        };
+        if let Some(next) = next {
+            self.focus_on(&bar, item, next, &items, effects);
         }
-        let Some(next) = kit::step(&order, Some(item), back) else {
+    }
+
+    /// `Home` or `End` (`last`): the bar's first item, or its last.
+    fn edge(&mut self, last: bool, effects: &mut Vec<Effect>) {
+        let Some((bar, item, _)) = self.focused.clone() else {
+            return;
+        };
+        let items = self.bar_items(&bar);
+        let to = if last { items.last() } else { items.first() };
+        if let Some(&(next, _)) = to {
+            self.focus_on(&bar, item, next, &items, effects);
+        }
+    }
+
+    /// `←` or `→` (`right`): a level's value by 5 %; else the item beside
+    /// along the same row (the desktops' tiles, the footer's buttons, the
+    /// tray's icons), stopping at its ends.
+    fn side(&mut self, right: bool, effects: &mut Vec<Effect>) {
+        use hocus_link::LevelKey;
+        let Some((bar, item, at)) = self.focused.clone() else {
+            return;
+        };
+        match item {
+            Item::Sound => {
+                effects.push(Effect::Level(if right {
+                    LevelKey::VolumeUp
+                } else {
+                    LevelKey::VolumeDown
+                }));
+                return;
+            }
+            Item::Brightness => {
+                effects.push(Effect::Level(if right {
+                    LevelKey::BrightnessUp
+                } else {
+                    LevelKey::BrightnessDown
+                }));
+                return;
+            }
+            _ => {}
+        }
+        let items = self.bar_items(&bar);
+        let middle = at.center_y();
+        let mut row: Vec<&(Item, Rectangle)> = items
+            .iter()
+            .filter(|(_, r)| r.y <= middle && middle <= r.y + r.height)
+            .collect();
+        row.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+        let Some(here) = row.iter().position(|(i, _)| *i == item) else {
+            return;
+        };
+        let next = if right {
+            row.get(here + 1)
+        } else {
+            here.checked_sub(1).and_then(|i| row.get(i))
+        };
+        if let Some(&&(next, _)) = next {
+            self.focus_on(&bar, item, next, &items, effects);
+        }
+    }
+
+    /// The keyboard from `item` to `next` of bar `bar` (among `items`):
+    /// `next`'s surface takes it when it is another; both draw again.
+    fn focus_on(
+        &mut self,
+        bar: &str,
+        item: Item,
+        next: Item,
+        items: &[(Item, Rectangle)],
+        effects: &mut Vec<Effect>,
+    ) {
+        let Some(place) = self.bars.get(bar).copied() else {
             return;
         };
         let Some(&(_, rect)) = items.iter().find(|(i, _)| *i == next) else {
@@ -1614,8 +1834,62 @@ impl Controller {
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
         tracing::debug!(item = ?next, "the keyboard on an item");
-        self.focused = Some((bar, next, rect));
+        self.focused = Some((bar.to_owned(), next, rect));
         effects.push(Effect::Wake(next.namespace(place.form)));
+        effects.push(Effect::Ring {
+            bar: bar.to_owned(),
+            rect,
+        });
+    }
+
+    /// `Super+B` (bar.md §11): the keyboard into bar `bar`, on the first
+    /// of `wanted` it shows (the agents waiting, then those stuck), else
+    /// on its clock's group, else on its first item. What was open
+    /// closes, and an item of another bar lets the keyboard go.
+    pub fn enter(&mut self, bar: &str, wanted: &[Item], now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if matches!(self.phase, Phase::Hovering { .. }) {
+            self.phase = Phase::Closed;
+        }
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        let Some(place) = self.bars.get(bar).copied() else {
+            return effects;
+        };
+        let items = self.bar_items(bar);
+        let find = |want: Item| items.iter().find(|(i, _)| *i == want);
+        let pick = wanted
+            .iter()
+            .find_map(|w| find(*w))
+            .or_else(|| find(Item::Calendar))
+            .or_else(|| items.first());
+        let Some(&(item, rect)) = pick else {
+            tracing::debug!(bar, "no item in the bar to take the keyboard");
+            return effects;
+        };
+        tracing::debug!(bar, ?item, "the keyboard into the bar");
+        effects.push(Effect::Keyboard(
+            item.surface(&place),
+            KeyboardInteractivity::Exclusive,
+        ));
+        self.focused = Some((bar.to_owned(), item, rect));
+        effects.push(Effect::Wake(item.namespace(place.form)));
+        effects.push(Effect::Ring {
+            bar: bar.to_owned(),
+            rect,
+        });
+        effects
+    }
+
+    /// The bar holding the keyboard lets it go (`Super+B` past the last
+    /// bar, the session locking): its popover closes, its item lets go.
+    pub fn leave(&mut self, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        self.unfocus(&mut effects);
+        if matches!(&self.phase, Phase::Open(open) if open.how == Opened::Click) {
+            self.close(now, &mut effects);
+        }
+        effects
     }
 }
 
@@ -1872,7 +2146,10 @@ pub fn key(
     text: Option<&str>,
 ) -> bool {
     use iced::keyboard::{Key, key::Named};
-    if crate::launcher::key(key, modifiers, text) || crate::emoji::key(key, modifiers, text) {
+    if crate::launcher::key(key, modifiers, text)
+        || crate::emoji::key(key, modifiers, text)
+        || crate::actions::key(key, modifiers, text)
+    {
         return true;
     }
     let (menu, focused) = with(|c| {
@@ -1895,7 +2172,8 @@ pub fn key(
     }
     // The item holding the keyboard: Enter or Space opens its popover
     // again (the layout's goes to the next layout), Esc lets the keyboard
-    // go, Tab and the arrows go through its surface's items.
+    // go, Tab, the arrows, Home and End go through the bar's items (left
+    // and right along a row, or a level's value).
     match key {
         Key::Named(Named::Enter | Named::Space) => event(Event::ItemActivate),
         Key::Named(Named::Escape) => event(Event::ItemRelease),
@@ -1904,6 +2182,10 @@ pub fn key(
         }),
         Key::Named(Named::ArrowDown) => event(Event::ItemStep { back: false }),
         Key::Named(Named::ArrowUp) => event(Event::ItemStep { back: true }),
+        Key::Named(Named::Home) => event(Event::ItemEdge { last: false }),
+        Key::Named(Named::End) => event(Event::ItemEdge { last: true }),
+        Key::Named(Named::ArrowLeft) => event(Event::ItemSide { right: false }),
+        Key::Named(Named::ArrowRight) => event(Event::ItemSide { right: true }),
         _ => return false,
     }
     true
@@ -2052,6 +2334,56 @@ pub fn send(effects: Vec<Effect>) {
     }
 }
 
+/// `Super+B` (bar.md §11, [`ToShell::BarKeyboard`]): the keyboard into
+/// `output`'s bar, on the agent waiting longest, else the first stuck,
+/// else (in the mini form) the secretary while her badge shows, else the
+/// clock; `None`, the bar holding it lets it go.
+///
+/// [`ToShell::BarKeyboard`]: hocus_link::ToShell::BarKeyboard
+pub fn bar_keyboard(output: Option<&str>) {
+    let now = Instant::now();
+    let effects = match output {
+        Some(bar) => {
+            let brief = crate::agents::Brief::of(&crate::agents::said().agents);
+            let mini = with(|c| c.bars.get(bar).map(|p| p.form)) == Some(Form::Mini);
+            let mut wanted: Vec<Item> = brief
+                .waiting
+                .iter()
+                .chain(&brief.stuck)
+                .map(|e| Item::Agent(e.id))
+                .collect();
+            if mini && brief.needs() > 0 {
+                wanted.push(Item::Secretary);
+            }
+            with(|c| c.enter(bar, &wanted, now))
+        }
+        None => with(|c| c.leave(now)),
+    };
+    send(effects);
+}
+
+/// The actions palette (#736) opens `item`'s popover on `output`'s bar.
+pub fn open_asked(output: &str, item: Item, near: Option<Item>) {
+    let effects = with(|c| c.open_asked(output, item, near, Instant::now()));
+    send(effects);
+}
+
+/// The bar a popover for `output` opens on (its name; `output` when the
+/// shell has no bar yet).
+pub fn bar_for(output: &str) -> String {
+    with(|c| c.bar_for(output)).unwrap_or_else(|| output.to_owned())
+}
+
+/// The Settings open on their page `slug` (the actions palette, #736).
+pub(crate) fn open_settings_page(slug: &str) {
+    session::open_settings(Some(slug));
+}
+
+/// The Settings open searching for `query` (the actions palette, #736).
+pub(crate) fn open_settings_searching(query: &str) {
+    session::open_settings_with(vec!["--search".to_owned(), query.to_owned()]);
+}
+
 /// The notifications' history opens on `output`'s bar (5.11's summary).
 pub fn open_history(output: &str) {
     let effects = with(|c| c.open_history(output, Instant::now()));
@@ -2130,6 +2462,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 deadline,
                 crate::launcher::deadline(),
                 crate::emoji::deadline(),
+                crate::actions::deadline(),
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
                 crate::tasks::deadline(),
@@ -2150,6 +2483,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
                             due.extend(crate::emoji::tick(now));
+                            due.extend(crate::actions::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
                             due.extend(crate::tasks::tick(now));
@@ -2232,6 +2566,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()));
             Vec::new()
         }
+        Effect::FirstControl(id) => {
+            kit::opened_by_keyboard(id);
+            Vec::new()
+        }
         Effect::Remove(id) => {
             crate::side::gone(id);
             vec![Message::RemoveWindow(id)]
@@ -2257,6 +2595,22 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::NextLayout => {
             tell(ToCompositor::NextLayout);
+            Vec::new()
+        }
+        Effect::Ring { bar, rect } => {
+            if bar != crate::ALONE {
+                tell(ToCompositor::Ring(hocus_link::Row {
+                    output: bar,
+                    x: rect.x.round() as i32,
+                    y: rect.y.round() as i32,
+                    width: rect.width.round() as i32,
+                    height: rect.height.round() as i32,
+                }));
+            }
+            Vec::new()
+        }
+        Effect::Level(key) => {
+            crate::levels::key(key);
             Vec::new()
         }
         Effect::Desktop { bar, to } => {
@@ -2429,6 +2783,31 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             },
             id,
         }],
+        Effect::Actions {
+            id,
+            output,
+            size,
+            margin,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                // Its margins from the screen's corner, whatever other
+                // surfaces keep.
+                exclusive_zone: Some(-1),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::ACTIONS_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
         Effect::Tell(message) => {
             tell(message);
             Vec::new()
@@ -2589,6 +2968,14 @@ mod tests {
     use super::*;
 
     const BAR: &str = "HDMI-A-1";
+
+    /// `effects` but the ring's place told for the magnifier.
+    fn no_ring(effects: Vec<Effect>) -> Vec<Effect> {
+        effects
+            .into_iter()
+            .filter(|e| !matches!(e, Effect::Ring { .. }))
+            .collect()
+    }
     const MS: fn(u64) -> Duration = Duration::from_millis;
 
     fn controller(form: Form) -> (Controller, window::Id) {
@@ -3099,7 +3486,7 @@ mod tests {
         c.handle(press(), t);
         c.handle(Event::Escape, t);
         assert!(c.focused(BAR, Item::Sound));
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert_eq!(effects, vec![Effect::Wake(LEVELS_NAMESPACE)]);
         assert!(c.focused(BAR, Item::Battery));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3370,7 +3757,7 @@ mod tests {
             t,
         );
         c.handle(Event::Escape, t);
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::Meeting));
         assert!(effects.contains(&Effect::Keyboard(card, KeyboardInteractivity::Exclusive)));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3418,7 +3805,7 @@ mod tests {
         assert!(!Item::TodayLine(0).hovers(Form::Full));
         // From the card (it had the keyboard), down Today's rows and round.
         c.focused = Some((BAR.to_owned(), Item::Meeting, card));
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::TodayLine(0)));
         assert!(effects.contains(&Effect::Keyboard(today, KeyboardInteractivity::Exclusive)));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3490,7 +3877,7 @@ mod tests {
         );
         c.handle(Event::Escape, t);
         assert!(c.focused(BAR, Item::Wifi));
-        let effects = c.handle(Event::ItemStep { back: true }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: true }, t));
         assert_eq!(
             effects,
             vec![
@@ -3503,7 +3890,7 @@ mod tests {
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 5 }));
         // Up again, along the row: the same surface.
         assert_eq!(
-            c.handle(Event::ItemStep { back: true }, t),
+            no_ring(c.handle(Event::ItemStep { back: true }, t)),
             vec![Effect::Wake(DESKTOPS_NAMESPACE)]
         );
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
@@ -3515,7 +3902,7 @@ mod tests {
             c.handle(Event::ItemStep { back: true }, t);
         }
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
-        let effects = c.handle(Event::ItemStep { back: true }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: true }, t));
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
         assert!(c.focused(BAR, Item::Sound));
         // Esc lets it go from there.
@@ -3555,5 +3942,262 @@ mod tests {
             assert!(open.rect.y + open.rect.height <= HEIGHT, "{:?}", open.rect);
         }
         assert_eq!(tops, [120.0, 500.0, HEIGHT - height]);
+    }
+
+    /// A full bar for `Super+B` (bar.md §11): its clock's group on the bar's
+    /// own surface, three agents' rows, the desktops' tiles in a row, the
+    /// sound and the brightness, the footer's four buttons in a row.
+    fn keyboard_bar(form: Form) -> (Controller, [window::Id; 5]) {
+        let mut c = Controller::default();
+        let ids = [(); 5].map(|()| window::Id::unique());
+        let [surface, levels, connections, desktops, agents] = ids;
+        c.place(BAR, form, surface, (levels, connections, desktops, agents));
+        let footer = window::Id::unique();
+        c.set_footer(BAR, footer);
+        c.motion = false;
+        let at = |x: f32, y: f32, w: f32, h: f32| Rectangle::new(Point::new(x, y), Size::new(w, h));
+        c.set_items(
+            BAR,
+            CLOCK_NAMESPACE,
+            vec![(Item::Calendar, at(-184.0, 14.0, 172.0, 77.0))],
+        );
+        if form == Form::Full {
+            c.set_items(
+                BAR,
+                AGENTS_NAMESPACE,
+                vec![
+                    (Item::Secretary, at(-190.0, 300.0, 184.0, 40.0)),
+                    (Item::Agent(7), at(-190.0, 344.0, 184.0, 30.0)),
+                    (Item::Agent(8), at(-190.0, 378.0, 184.0, 30.0)),
+                    (Item::Agent(9), at(-190.0, 412.0, 184.0, 30.0)),
+                ],
+            );
+        } else {
+            c.set_items(
+                BAR,
+                AGENTS_NAMESPACE,
+                vec![(Item::Secretary, at(-50.0, 300.0, 44.0, 44.0))],
+            );
+        }
+        c.set_items(
+            BAR,
+            DESKTOPS_NAMESPACE,
+            (0..3)
+                .map(|i| {
+                    let x = -185.0 + 44.0 * f32::from(i);
+                    (Item::Desktop { row: 0, index: i }, at(x, 700.0, 38.0, 30.0))
+                })
+                .collect(),
+        );
+        c.set_items(
+            BAR,
+            LEVELS_NAMESPACE,
+            vec![
+                (Item::Sound, at(-190.0, 900.0, 184.0, 30.0)),
+                (Item::Brightness, at(-190.0, 934.0, 184.0, 30.0)),
+            ],
+        );
+        c.set_items(
+            BAR,
+            FOOTER_NAMESPACE,
+            [Item::Clipboard, Item::Notifications, Item::Menu, Item::User]
+                .into_iter()
+                .enumerate()
+                .map(|(i, item)| (item, at(-190.0 + 46.0 * i as f32, 1020.0, 40.0, 34.0)))
+                .collect(),
+        );
+        (c, ids)
+    }
+
+    #[test]
+    fn super_b_lands_on_the_waiting_agent_else_the_stuck_one_else_the_clock() {
+        let t = Instant::now();
+        let (mut c, [surface, _, _, _, agents]) = keyboard_bar(Form::Full);
+        // Agent 8 waits, 9 is stuck: the ring on 8, the agents' surface
+        // holding the keyboard.
+        let effects = no_ring(c.enter(BAR, &[Item::Agent(8), Item::Agent(9)], t));
+        assert_eq!(
+            effects,
+            vec![
+                Effect::Keyboard(agents, KeyboardInteractivity::Exclusive),
+                Effect::Wake(AGENTS_NAMESPACE),
+            ]
+        );
+        assert!(c.focused(BAR, Item::Agent(8)));
+        // Only a stuck one: on it.
+        c.enter(BAR, &[Item::Agent(9)], t);
+        assert!(c.focused(BAR, Item::Agent(9)));
+        // Nobody waits nor is stuck: on the clock, the bar's own surface
+        // taking the keyboard, the agents' letting it go.
+        let effects = no_ring(c.enter(BAR, &[], t));
+        assert_eq!(
+            effects,
+            vec![
+                Effect::Keyboard(agents, KeyboardInteractivity::None),
+                Effect::Wake(AGENTS_NAMESPACE),
+                Effect::Keyboard(surface, KeyboardInteractivity::Exclusive),
+                Effect::Wake(CLOCK_NAMESPACE),
+            ]
+        );
+        assert!(c.focused(BAR, Item::Calendar));
+        // An agent asked for that the bar does not show (hidden in "+ N"):
+        // the clock.
+        c.enter(BAR, &[Item::Agent(42)], t);
+        assert!(c.focused(BAR, Item::Calendar));
+        // A bar unknown: nothing.
+        assert!(
+            c.enter("DP-9", &[], t)
+                .iter()
+                .all(|e| !matches!(e, Effect::Keyboard(_, KeyboardInteractivity::Exclusive)))
+        );
+    }
+
+    #[test]
+    fn in_the_mini_form_super_b_lands_on_the_secretary_while_her_badge_shows() {
+        let t = Instant::now();
+        let (mut c, _) = keyboard_bar(Form::Mini);
+        c.enter(BAR, &[Item::Agent(8), Item::Secretary], t);
+        assert!(c.focused(BAR, Item::Secretary));
+        c.enter(BAR, &[], t);
+        assert!(c.focused(BAR, Item::Calendar));
+    }
+
+    #[test]
+    fn the_keys_walk_every_item_in_the_drawn_order_and_round() {
+        let t = Instant::now();
+        let (mut c, _) = keyboard_bar(Form::Full);
+        c.enter(BAR, &[], t);
+        let order = [
+            Item::Calendar,
+            Item::Secretary,
+            Item::Agent(7),
+            Item::Agent(8),
+            Item::Agent(9),
+            Item::Desktop { row: 0, index: 0 },
+            Item::Desktop { row: 0, index: 1 },
+            Item::Desktop { row: 0, index: 2 },
+            Item::Sound,
+            Item::Brightness,
+            Item::Clipboard,
+            Item::Notifications,
+            Item::Menu,
+            Item::User,
+        ];
+        // Down (or Tab) visits each once, then round to the clock.
+        for item in order.iter().skip(1).chain([&Item::Calendar]) {
+            c.handle(Event::ItemStep { back: false }, t);
+            assert!(c.focused(BAR, *item), "{item:?}");
+        }
+        // Up the reverse.
+        for item in order.iter().rev() {
+            c.handle(Event::ItemStep { back: true }, t);
+            assert!(c.focused(BAR, *item), "{item:?}");
+        }
+        // End, Home.
+        c.handle(Event::ItemEdge { last: true }, t);
+        assert!(c.focused(BAR, Item::User));
+        c.handle(Event::ItemEdge { last: false }, t);
+        assert!(c.focused(BAR, Item::Calendar));
+    }
+
+    #[test]
+    fn left_and_right_go_along_a_row_and_step_a_level() {
+        let t = Instant::now();
+        let (mut c, _) = keyboard_bar(Form::Full);
+        c.enter(BAR, &[], t);
+        for _ in 0..6 {
+            c.handle(Event::ItemStep { back: false }, t);
+        }
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 1 }));
+        // Along the tiles, stopping at their ends.
+        assert_eq!(
+            no_ring(c.handle(Event::ItemSide { right: true }, t)),
+            vec![Effect::Wake(DESKTOPS_NAMESPACE)]
+        );
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 2 }));
+        assert!(no_ring(c.handle(Event::ItemSide { right: true }, t)).is_empty());
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 2 }));
+        c.handle(Event::ItemSide { right: false }, t);
+        c.handle(Event::ItemSide { right: false }, t);
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
+        // Enter switches desktop, the ring stays.
+        let go = c.handle(Event::ItemActivate, t);
+        assert!(matches!(go[..], [Effect::Desktop { .. }]), "{go:?}");
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
+        // On the sound: its level by 5 %, nothing opening.
+        c.handle(Event::ItemStep { back: false }, t);
+        c.handle(Event::ItemStep { back: false }, t);
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Sound));
+        assert_eq!(
+            no_ring(c.handle(Event::ItemSide { right: true }, t)),
+            vec![Effect::Level(hocus_link::LevelKey::VolumeUp)]
+        );
+        assert_eq!(
+            no_ring(c.handle(Event::ItemSide { right: false }, t)),
+            vec![Effect::Level(hocus_link::LevelKey::VolumeDown)]
+        );
+        assert_eq!(c.open_item(), None);
+        // The footer's row.
+        c.handle(Event::ItemEdge { last: true }, t);
+        c.handle(Event::ItemSide { right: false }, t);
+        assert!(c.focused(BAR, Item::Menu));
+    }
+
+    #[test]
+    fn enter_opens_with_the_first_control_and_esc_steps_back() {
+        let t = Instant::now();
+        let (mut c, [_, levels, _, _, agents]) = keyboard_bar(Form::Full);
+        c.enter(BAR, &[Item::Agent(7)], t);
+        // To the sound, then Enter: its popover opens as a click's, its
+        // first control under the ring.
+        for _ in 0..6 {
+            c.handle(Event::ItemStep { back: false }, t);
+        }
+        assert!(c.focused(BAR, Item::Sound));
+        let effects = c.handle(Event::ItemActivate, t);
+        let (id, keyboard) = opened(&effects).expect("open");
+        assert_eq!(keyboard, KeyboardInteractivity::Exclusive);
+        assert!(effects.contains(&Effect::FirstControl(id)), "{effects:?}");
+        assert_eq!(c.open_item(), Some(Item::Sound));
+        // Esc: closed, the ring back on the sound, its surface holding the
+        // keyboard.
+        let effects = c.handle(Event::Escape, t);
+        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
+        assert!(c.focused(BAR, Item::Sound));
+        assert_eq!(c.open_item(), None);
+        // Esc again: the keyboard goes back.
+        let effects = c.handle(Event::ItemRelease, t);
+        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::None)));
+        assert!(!c.focused(BAR, Item::Sound));
+        // `Super+B` past the last bar, with a popover open: it closes, the
+        // item lets go.
+        c.enter(BAR, &[Item::Agent(7)], t);
+        c.handle(Event::ItemActivate, t);
+        let effects = c.leave(t);
+        assert!(effects.contains(&Effect::Remove(id)) || c.open_item().is_none());
+        assert_eq!(c.open_item(), None);
+        assert!(!c.focused(BAR, Item::Agent(7)));
+        let _ = agents;
+    }
+
+    #[test]
+    fn an_item_gone_under_the_ring_steps_from_where_it_was() {
+        let t = Instant::now();
+        let (mut c, _) = keyboard_bar(Form::Full);
+        c.enter(BAR, &[Item::Agent(8)], t);
+        // Agent 8 ends: its row goes.
+        let at = |y: f32| Rectangle::new(Point::new(-190.0, y), Size::new(184.0, 30.0));
+        c.set_items(
+            BAR,
+            AGENTS_NAMESPACE,
+            vec![(Item::Agent(7), at(344.0)), (Item::Agent(9), at(378.0))],
+        );
+        assert!(c.focused(BAR, Item::Agent(9)));
+        // The whole group goes but one row: the ring on it.
+        c.set_items(BAR, AGENTS_NAMESPACE, vec![(Item::Agent(7), at(344.0))]);
+        assert!(c.focused(BAR, Item::Agent(7)));
+        c.handle(Event::ItemStep { back: false }, t);
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
     }
 }

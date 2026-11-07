@@ -583,6 +583,39 @@ impl Headless {
         self.layer_rects(hocus_link::LAUNCHER_NAMESPACE)
     }
 
+    /// Commits of the actions palette's surfaces so far (#736).
+    pub fn actions_commits(&self) -> u64 {
+        self.app.state.panel.actions_commits
+    }
+
+    /// The actions palette's surfaces as the shell placed them: their
+    /// screen, and where they are (global).
+    pub fn actions_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::ACTIONS_NAMESPACE)
+    }
+
+    /// The palette's target window and its screen, from `Super+P` until
+    /// its surface goes.
+    pub fn actions_target(&self) -> Option<(Option<u64>, String)> {
+        self.app
+            .state
+            .actions
+            .target
+            .as_ref()
+            .map(|(w, o)| (w.map(|w| w.0), o.clone()))
+    }
+
+    /// How far the palette shows on screen `output` at the compositor's
+    /// time (0 to 1), its target window ringed above the dim; `None`
+    /// when it does not show there.
+    pub fn actions_backdrop(&self, output: &str) -> Option<(Option<u64>, f32)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        state
+            .actions_backdrop(output, state.now())
+            .map(|(w, alpha)| (w.map(|w| w.0), alpha))
+    }
+
     /// The launcher's toasts as the shell placed them (5.2): their screen,
     /// and where they are (global).
     pub fn launcher_toast_surfaces(&self) -> Vec<(String, Rect)> {
@@ -748,6 +781,18 @@ impl Headless {
         self.app.state.configure(id, rect);
     }
 
+    /// The screen reader may start, as on a real session, its program
+    /// `program` instead of Orca (#734).
+    pub fn allow_screen_reader(&mut self, program: std::path::PathBuf) {
+        self.app.state.screen_reader.allowed = true;
+        self.app.state.screen_reader.program = Some(program);
+    }
+
+    /// The screen reader's process, while it runs.
+    pub fn screen_reader(&self) -> Option<u32> {
+        self.app.state.screen_reader.running()
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);
@@ -835,6 +880,17 @@ impl Headless {
                 .find(|l| l.wl_surface() == &surface)
                 .map(|l| l.namespace().to_owned())
         })
+    }
+
+    /// Whether the compositor blurs behind the bars.
+    pub fn glass_on(&self) -> bool {
+        self.app.state.glass_on()
+    }
+
+    /// The screen whose bar holds the keyboard (an item of it, or its
+    /// popover), if one does (`Super+B`, bar.md §11).
+    pub fn bar_keyboard(&self) -> Option<String> {
+        self.app.state.bar_holding_keyboard()
     }
 
     /// What output `index` (in the order given) drew over since the last
@@ -1480,11 +1536,7 @@ impl Headless {
         if let Some(v120) = v120 {
             frame = frame.v120(Axis::Vertical, v120);
         }
-        let state = &mut self.app.state;
-        if let Some(pointer) = state.seat.get_pointer() {
-            pointer.axis(state, frame);
-            pointer.frame(state);
-        }
+        self.app.state.pointer_axis(frame);
     }
 
     /// A key by its evdev code.
@@ -1688,6 +1740,31 @@ impl Headless {
         self.app.state.model.is_above(id)
     }
 
+    /// The night light's gamma ramps the screens were handed last (red,
+    /// green, blue), `None` for their own white (#436).
+    pub fn gamma(&self) -> Option<[Vec<u16>; 3]> {
+        self.app.backend.headless()?.gamma().cloned()
+    }
+
+    /// The wall clock at `hour`:`minute` for the night light, which looks
+    /// at it again; from then on it follows only this.
+    pub fn night_light_clock(&mut self, hour: u16, minute: u16) {
+        self.app
+            .state
+            .night_light_clock(f64::from(hour * 60 + minute));
+        self.app.after_dispatch();
+    }
+
+    /// Window `id`'s opacity, in percent (#735).
+    pub fn opacity(&self, id: WindowId) -> u8 {
+        self.app.state.opacity_of(id)
+    }
+
+    /// The window whose opacity's pill shows, and its percentage.
+    pub fn opacity_pill(&self) -> Option<(WindowId, u8)> {
+        self.app.state.opacity_pill()
+    }
+
     /// The stack, bottom first.
     pub fn stack(&self) -> Vec<WindowId> {
         self.app.state.model.stack().to_vec()
@@ -1864,6 +1941,11 @@ impl Headless {
         let state = &self.app.state;
         let output = state.space.outputs().find(|o| o.name() == name)?;
         state.work_area(output)
+    }
+
+    /// What `hocus msg outputs` says, as one line of JSON.
+    pub fn outputs_said(&self) -> String {
+        self.app.state.displays_json().to_string()
     }
 
     /// Where the pointer is, global.

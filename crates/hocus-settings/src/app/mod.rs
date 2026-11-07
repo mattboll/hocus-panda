@@ -117,6 +117,8 @@ pub struct Start {
     pub pair: Option<String>,
     /// A network whose sheet opens once it is around (`--join`, 6.6).
     pub join: Option<String>,
+    /// What the search shows (`--search`, the actions palette, #736).
+    pub search: Option<String>,
     pub user: String,
     /// Where second launches knock, taken once by the window.
     pub listener: std::sync::Arc<Mutex<Option<std::os::unix::net::UnixListener>>>,
@@ -556,7 +558,14 @@ impl App {
         if start.section == Some(SectionId::Sound) {
             app.light = Some(("sound.output", Instant::now()));
         }
-        (app, window::latest().map(Message::Window))
+        let mut first = window::latest().map(Message::Window);
+        if let Some(query) = start.search {
+            tracing::info!("the Settings open searching");
+            app.focus = Focus::Search;
+            app.search(query);
+            first = Task::batch([first, operation::focus(SEARCH)]);
+        }
+        (app, first)
     }
 
     pub fn title(&self) -> String {
@@ -1673,6 +1682,15 @@ impl App {
                 self.light = Some(("sound.output", Instant::now()));
             }
         }
+        // From the actions palette's last row (#736): what the search
+        // finds.
+        let searched = if let Some(query) = again.search {
+            self.focus = Focus::Search;
+            self.search(query);
+            operation::focus(SEARCH)
+        } else {
+            Task::none()
+        };
         // From the Wi-Fi popover's "dans les Réglages": that network's
         // sheet (6.6).
         let join = if let Some(name) = again.join {
@@ -1681,6 +1699,7 @@ impl App {
         } else {
             Task::none()
         };
+        let join = Task::batch([join, searched]);
         let (Some(id), Some(token)) = (self.window, again.token) else {
             return join;
         };
@@ -1734,10 +1753,16 @@ impl App {
                 .collect();
         }
         if section == SectionId::Screens {
+            // The night light's rows after the page's own (#436).
+            let night = crate::screens::NIGHT_ROWS
+                .iter()
+                .filter_map(|id| crate::model::setting(id))
+                .map(|s| Control::Setting(Slot::of(s, self.source)));
             return self
                 .screens_controls()
                 .into_iter()
                 .map(Control::Screens)
+                .chain(night)
                 .collect();
         }
         if section == SectionId::Wallpaper {
@@ -2151,10 +2176,21 @@ impl App {
         Task::none()
     }
 
+    /// Whether `setting` is held on by another: reduced transparency
+    /// while high contrast is on (#423). Its switch shows on and takes no
+    /// click; the file keeps its own value.
+    pub(super) fn implied(&self, setting: &Setting) -> bool {
+        setting.id == crate::accessibility::REDUCE_TRANSPARENCY
+            && crate::model::setting(crate::accessibility::HIGH_CONTRAST).is_some_and(|contrast| {
+                self.value(Slot::of(contrast, self.source)) == Some(Value::Bool(true))
+            })
+    }
+
     /// Whether `setting`'s control does not apply now: the file does not
-    /// read, or the switch it needs is off.
+    /// read, the switch it needs is off, or another holds it on.
     fn inert(&self, setting: &Setting) -> bool {
         if !self.writable()
+            || self.implied(setting)
             || self.unavailable(setting).is_some()
             || self.desktops_inert(setting)
             || self.power_inert(setting)

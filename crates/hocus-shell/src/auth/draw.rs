@@ -49,10 +49,10 @@ const TITLE_GAP: f32 = 2.0;
 const MESSAGE_GAP: f32 = 14.0;
 const MESSAGE: f32 = 14.5;
 const MESSAGE_LINE: f32 = 1.5;
-/// The account, 16 px under: a 32 px avatar, 10 px before the name
-/// (14.5 px 700) over "administrateur" (12.5 px).
+/// The account, 16 px under: a 40 px avatar (#649), 10 px before the
+/// name (14.5 px 700) over "administrateur" (12.5 px).
 const ACCOUNT_GAP: f32 = 16.0;
-const AVATAR: f32 = 32.0;
+const AVATAR: f32 = 40.0;
 const AVATAR_GAP: f32 = 10.0;
 const NAME: f32 = 14.5;
 const ROLE: f32 = 12.5;
@@ -738,9 +738,10 @@ fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
         );
         return;
     }
-    // The mockup's 24 px panda, of a 30 px box.
-    let k = 24.0 / 30.0;
-    let o = Point::new(centre.x - 12.0, centre.y - 12.0);
+    // The mockup's panda, 24 px of a 32 px avatar, of a 30 px box.
+    let face = AVATAR * 24.0 / 32.0;
+    let k = face / 30.0;
+    let o = Point::new(centre.x - face / 2.0, centre.y - face / 2.0);
     let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
     f.fill(&Path::circle(p(8.5, 8.5), 4.2 * k), PANDA_DARK.get());
     f.fill(&Path::circle(p(21.5, 8.5), 4.2 * k), PANDA_DARK.get());

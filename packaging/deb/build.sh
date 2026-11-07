@@ -110,8 +110,8 @@ Description: Wayland desktop for developers who work with AI agents
  Display managers offer it as the "Hocuspanda" session.
  .
  This early version holds the compositor, its session, the base of its
- bar and its Settings; Super+Return opens a terminal, Super+B switches the
- bar's form and Super+Shift+E logs out.
+ bar and its Settings; Super+Return opens a terminal, Super+B takes the
+ keyboard into the bar and Super+Shift+E logs out.
 CONTROL
 
 mkdir -p "$out"

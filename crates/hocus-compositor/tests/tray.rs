@@ -32,7 +32,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BTN_LEFT, ClientHandle, Command as Do, KEY_LEFTMETA, Shows, WAIT, chord, wait};
+use common::{
+    BTN_LEFT, ClientHandle, Command as Do, KEY_LEFTMETA, KEY_LEFTSHIFT, Shows, WAIT, chord, wait,
+};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{
     Array, Dict, OwnedObjectPath, OwnedVariant, Signature, Structure, Variant, names::BusName,
@@ -639,7 +641,7 @@ fn an_item_registers_and_its_icon_shows_in_both_forms() -> anyhow::Result<()> {
     })?;
     assert!(taller, "{:?}", bed.hp.levels_surfaces());
     // The mini form: a column, the icon in it.
-    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = bed.hp.dispatch_until(WAIT, |hp| {
         hp.layer_rects(hocus_link::TRAY_NAMESPACE)
             .first()

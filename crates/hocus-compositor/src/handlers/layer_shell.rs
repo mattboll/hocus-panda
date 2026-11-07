@@ -142,6 +142,7 @@ impl State {
     pub(crate) fn layer_gone(&mut self, layer: &LayerSurface) {
         self.popover_gone(layer);
         self.launcher_gone(layer);
+        self.actions_gone(layer);
         self.capture_toolbar_gone(layer);
         self.share_chooser_gone(layer);
         self.auth_gone(layer);
@@ -185,6 +186,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.popover_committed(&layer);
             }
             hocus_link::EMOJI_NAMESPACE => state.popover_committed(&layer),
+            hocus_link::ACTIONS_NAMESPACE => {
+                state.panel.actions_commits += 1;
+                state.popover_committed(&layer);
+            }
             hocus_link::PEEK_NAMESPACE => {
                 state.panel.peek_commits += 1;
                 state.peek_committed(&layer);
@@ -312,6 +317,8 @@ impl State {
                 let focus = KeyboardFocus::Wayland(layer.wl_surface().clone());
                 if keyboard.current_focus().as_ref() != Some(&focus) {
                     keyboard.set_focus(self, Some(focus), serial);
+                    // A bar holding the keyboard stands in front.
+                    self.redraw = true;
                 }
             }
             None => {
@@ -330,6 +337,7 @@ impl State {
                 if !kept {
                     let focused = self.model.focused();
                     self.focus(focused);
+                    self.redraw = true;
                 }
             }
         }

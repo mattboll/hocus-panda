@@ -12,8 +12,8 @@
 //!   `"all"` puts one on every screen.
 //! - **Which form:** `[outputs.NAME] panel-form`, else `[panel] form`; on
 //!   `auto` (the default), the form last chosen there with a click or
-//!   `Super+B` (remembered in `$XDG_STATE_HOME/hocuspanda/panel.toml`, never
-//!   in the configuration), else full when the screen's logical width
+//!   `Super+Shift+B` (remembered in `$XDG_STATE_HOME/hocuspanda/panel.toml`,
+//!   never in the configuration), else full when the screen's logical width
 //!   without the full bar is at least 1600 px.
 //! - **The switch:** 240 ms along the windows' spring. The compositor and
 //!   the shell compute the bar's width from the same start on the same
@@ -96,7 +96,7 @@ impl Bar {
 pub struct Panel {
     /// The screens with a bar, by name.
     pub bars: BTreeMap<String, Bar>,
-    /// The forms chosen with a click or `Super+B`, this session or
+    /// The forms chosen with a click or `Super+Shift+B`, this session or
     /// remembered from the last ones, by screen name.
     chosen: BTreeMap<String, Form>,
     /// The screen the rule took when none was named and no built-in panel
@@ -142,6 +142,8 @@ pub struct Panel {
     pub launchers: crate::launcher::Launchers,
     /// Commits of the launcher's surfaces, for tests.
     pub launcher_commits: u64,
+    /// Commits of the actions palette's surfaces, for tests (#736).
+    pub actions_commits: u64,
     /// The other screens' names, as last told to the shell.
     screens: Option<Vec<String>>,
     /// Where the bars stand to the windows: under them, or one brought in
@@ -186,7 +188,7 @@ impl Panel {
         panel
     }
 
-    /// The form chosen on screen `name` with a click or `Super+B`.
+    /// The form chosen on screen `name` with a click or `Super+Shift+B`.
     pub fn chosen(&self, name: &str) -> Option<Form> {
         self.chosen.get(name).copied()
     }
@@ -590,7 +592,7 @@ impl State {
     }
 
     /// The bar on screen `name` takes its other form (a click on its edge,
-    /// `Super+B`); the windows beside it follow.
+    /// `Super+Shift+B`); the windows beside it follow.
     pub fn toggle_bar(&mut self, name: &str) {
         let Some(form) = self.panel.bars.get(name).map(|b| b.form.other()) else {
             return;
@@ -721,7 +723,7 @@ impl State {
         };
         let text = match toml::to_string(&remembered) {
             Ok(text) => format!(
-                "# The bar's form on each screen, as last chosen with a click or Super+B.\n\
+                "# The bar's form on each screen, as last chosen with a click or Super+Shift+B.\n\
                  # Written by Hocuspanda; [panel] form in config.toml wins over it.\n{text}"
             ),
             Err(err) => {

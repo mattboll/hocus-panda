@@ -1,6 +1,7 @@
-//! `hocus-settings [SECTION] [--pair ADDRESS]`: the Settings' window, on
-//! its section (`power`), or brought forward on it when it is open
-//! already; `--pair` pairs a Bluetooth device on its page.
+//! `hocus-settings [SECTION] [--pair ADDRESS] [--search QUERY]`: the
+//! Settings' window, on its section (`power`), or brought forward on it
+//! when it is open already; `--pair` pairs a Bluetooth device on its page;
+//! `--search` shows what the search finds (the actions palette, #736).
 
 use std::{borrow::Cow, path::PathBuf, process::ExitCode};
 
@@ -28,7 +29,7 @@ fn main() -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         let slugs: Vec<&str> = SectionId::ALL.iter().map(|s| s.section().slug).collect();
         println!(
-            "hocus-settings [SECTION] [--join SSID] [--pair ADDRESS]\n\nSections: {}\n--join: the Réseau page opens that network's sheet.\n--pair: the Bluetooth page pairs that device.",
+            "hocus-settings [SECTION] [--join SSID] [--pair ADDRESS] [--search QUERY]\n\nSections: {}\n--join: the Réseau page opens that network's sheet.\n--pair: the Bluetooth page pairs that device.\n--search: the search shows what it finds for QUERY.",
             slugs.join(", ")
         );
         return ExitCode::SUCCESS;
@@ -51,6 +52,13 @@ fn main() -> ExitCode {
     if arg.is_some() && section.is_none() {
         tracing::warn!(section = arg, "no such section: the home opens");
     }
+    // `--search QUERY`: the search, typed (the actions palette, #736).
+    let search = args
+        .iter()
+        .position(|a| a == "--search")
+        .and_then(|at| args.get(at + 1))
+        .filter(|q| !q.trim().is_empty())
+        .cloned();
     // `--pair ADDRESS`: a Bluetooth device to pair (the bar's popover).
     let pair = std::env::args()
         .skip_while(|a| a != "--pair")
@@ -63,6 +71,7 @@ fn main() -> ExitCode {
             .ok()
             .filter(|t| !t.is_empty()),
         join: join.clone(),
+        search: search.clone(),
     };
     let listener = match single::start(&again) {
         Start::Told => return ExitCode::SUCCESS,
@@ -88,6 +97,7 @@ fn main() -> ExitCode {
         section,
         join,
         pair,
+        search,
         user: user_name(),
         listener: std::sync::Arc::new(std::sync::Mutex::new(listener)),
     };

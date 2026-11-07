@@ -674,7 +674,11 @@ pub fn tick_box(f: &mut Frame, button: Rectangle, ticked: bool, lit: bool, alpha
 /// The `+` at `rect`, lit under the pointer: a 14 px plus.
 pub fn plus(f: &mut Frame, rect: Rectangle, lit: bool, alpha: f32) {
     if lit {
-        f.fill(&kit::rounded(rect, ADD_RADIUS), faded(HOVER.get(), alpha));
+        crate::theme::hover(
+            f,
+            &kit::rounded(rect, ADD_RADIUS),
+            faded(HOVER.get(), alpha),
+        );
     }
     let c = rect.center();
     let unit = PLUS / 24.0;
@@ -737,18 +741,21 @@ pub fn field(
     words: Words,
     alpha: f32,
 ) {
-    f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL.get(), alpha));
-    let inset = 0.5;
-    let rim = Rectangle::new(
-        Point::new(rect.x + inset, rect.y + inset),
-        Size::new(rect.width - 1.0, rect.height - 1.0),
-    );
-    f.stroke(
-        &kit::rounded(rim, radius - inset),
-        Stroke::default()
-            .with_color(faded(FIELD_BORDER.get(), alpha))
-            .with_width(1.0),
-    );
+    // Under the caret, drawn in the text's clip.
+    crate::backdrop::layer(f, rect, |f| {
+        f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL.get(), alpha));
+        let inset = 0.5;
+        let rim = Rectangle::new(
+            Point::new(rect.x + inset, rect.y + inset),
+            Size::new(rect.width - 1.0, rect.height - 1.0),
+        );
+        f.stroke(
+            &kit::rounded(rim, radius - inset),
+            Stroke::default()
+                .with_color(faded(FIELD_BORDER.get(), alpha))
+                .with_width(1.0),
+        );
+    });
     let room = rect.width - 2.0 * pad;
     let left = rect.x + pad;
     let middle = rect.center_y();
@@ -1357,7 +1364,7 @@ impl canvas::Program<Message> for Group {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(backdrop) = self.backdrop {
+        let colour = self.backdrop.map(|backdrop| {
             // At the group's (or the item's) middle, where the column has it
             // now, on the bar as tall as it is.
             let (top, tall) = match self.alone() {
@@ -1365,9 +1372,9 @@ impl canvas::Program<Message> for Group {
                 _ => (full_top(&self.bar), height(&self.bar, Form::Full)),
             };
             let bar = popover::with(|c| c.bar_height(&self.bar));
-            let colour = backdrop.at(top + tall / 2.0, bar);
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+            backdrop.at(top + tall / 2.0, bar)
+        });
+        let under = crate::backdrop::under(renderer, bounds.size(), colour);
         let size = bounds.size();
         let laid = &state.laid;
         let in_bar: Vec<(Item, Rectangle)> = self
@@ -1378,7 +1385,7 @@ impl canvas::Program<Message> for Group {
         log_items(&in_bar);
         popover::with(|c| c.set_items(&self.bar, TASKS_NAMESPACE, in_bar));
         if laid.height <= 0.0 {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         // The bar's inside, as wide as it is while it switches.
         let left = (size.width + 2.0 - self.bar_width).max(0.0);
@@ -1394,7 +1401,7 @@ impl canvas::Program<Message> for Group {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(
@@ -1455,6 +1462,29 @@ mod tests {
             |t, size| t.chars().count() as f32 * size * 0.5,
             None,
         )
+    }
+
+    #[test]
+    fn the_check_boxes_show_the_same_on_the_opaque_bar_as_on_glass() {
+        let lines: Vec<Line> = (0..3).map(|i| line(&i.to_string(), Look::Open)).collect();
+        let state = State {
+            laid: laid(lines, false),
+            ..State::default()
+        };
+        let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
+        let drawn = crate::backdrop::tests::drawn(
+            |backdrop| Group {
+                forms: vec![(Form::Full, 1.0)],
+                bar_width: Form::Full.width() as f32,
+                words: Words::new(crate::clock::time::Lang::French),
+                backdrop: backdrop.map(|c| crate::agents::draw::Backdrop { top: c, bottom: c }),
+                bar: "eDP-1".to_owned(),
+            },
+            &state,
+            Size::new(Form::Full.width().unsigned_abs(), 120),
+            colour,
+        );
+        crate::backdrop::tests::assert_drawn_over(&drawn, "tasks");
     }
 
     #[test]

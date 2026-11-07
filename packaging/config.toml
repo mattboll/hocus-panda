@@ -75,7 +75,7 @@
 # output = ""
 # The bar's form: "full" (196 px), "mini" (56 px), or "auto": full on a
 # screen at least 1796 px wide (logical), mini otherwise, or as last chosen
-# there with a click on the bar's outer edge or Super+B (remembered in
+# there with a click on the bar's outer edge or Super+Shift+B (remembered in
 # ~/.local/state/hocuspanda/panel.toml). A screen may have its own, as
 # panel-form in its [outputs.NAME] section ("auto" there too): the
 # Settings write each screen's, and a form chosen there forgets the one
@@ -242,10 +242,19 @@
 # move-to-screen-left = "Super+Alt+Left"
 # move-to-screen-right = "Super+Alt+Right"
 # The bar's other form, on the screen under the pointer.
-# toggle-bar = "Super+B"
+# toggle-bar = "Super+Shift+B"
+# The keyboard into the bar of the focused window's screen, on the agent
+# waiting, else the one stuck, else the clock: Tab and the arrows walk its
+# items, Enter opens one, Esc goes back a step. Again, the next screen's
+# bar, then back to the window (docs/design/bar.md §11).
+# focus-bar = "Super+B"
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
 # launcher = "Super+Space"
+# The actions palette: every action of the desktop in a list dropping from
+# the top of the focused window's screen, searchable; Enter runs one on
+# that window, or its screen. Again, it closes (docs/design/actions.md).
+# actions = "Super+P"
 # The overview: every screen's desktops and windows at once; again, it
 # closes (docs/design/windows.md §12b).
 # overview = "Super+W"
@@ -281,9 +290,22 @@
 # Joins the meeting whose reminder shows, else the one starting next within
 # 10 min, opening its video call (docs/design/bar.md, Day.6).
 # join = "Super+J"
+# The magnifier (docs/design/accessibility.md): a step in, turning it on at
+# its last zoom; a step out, off at 1; off. The keypad's + and - too, for
+# layouts where - shares a key with a digit (6 on AZERTY: Super and that
+# key zooms out there, it does not go to desktop 6).
+# magnifier-in = ["Super+equal", "Super+plus", "Super+KP_Add"]
+# magnifier-out = ["Super+minus", "Super+KP_Subtract"]
+# magnifier-off = "Super+Escape"
+# Starts the screen reader (Orca), or stops it; on the lock screen too
+# (docs/design/screen-reader.md).
+# screen-reader = "Super+Alt+S"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
-# resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
+# resizes it; Super+Alt and the wheel over a window make it more or less
+# transparent, by 10 % down to 20 % (kept while it is open, and in the
+# session restored); Ctrl+Alt+F1 to F12 switch to another virtual
+# terminal.
 
 # [capture]
 # Written by the Settings' Captures et presse-papiers page, every key
@@ -444,6 +466,44 @@
 # Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt
 # held shows a laser. Off, they do nothing and pass to the window.
 # enabled = true
+
+# [magnifier]
+# The magnifier (docs/design/accessibility.md): the screen under the
+# pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,
+# recordings and shared screens stay as they are. Super+= zooms in a step
+# (and turns it on, at its last zoom), Super+- out (off at 1), Super+Escape
+# turns it off, Super and the wheel zoom by 10 %. On from the start, at
+# this zoom:
+# enabled = false
+# zoom = 2.0
+# How the view follows the pointer: "edge" (it moves only when the pointer
+# pushes its edge), "centre" (the pointer stays in its middle) or
+# "proportional" (it sits where the pointer sits on the screen).
+# follow-pointer = "edge"
+# The view jumps to what takes the keyboard (a window, the bar's popovers)
+# and follows an application's text caret.
+# follow-keyboard = true
+# Smoothed; off, hard pixels.
+# smooth = true
+
+# [night-light]
+# Warmer colours in the evening (docs/design/windows.md §14): the screens'
+# white made warmer, from `from` to `to` (the clock's hours), fading in
+# over 30 min from `from` and out over 30 min from `to`. The same hour
+# twice: all day. On a screen the session drives itself (not in a window
+# of another session).
+# enabled = false
+# The temperature at night, in kelvin, from 1500 (very warm) to 6500 (the
+# screen's own white).
+# temperature = 4000
+# from = "21:00"
+# to = "07:00"
+
+# [accessibility]
+# The screen reader (Orca) starts with the session; it reads the bar, its
+# popovers, the notifications, the lock screen and the password dialog
+# (docs/design/screen-reader.md). Super+Alt+S starts or stops it anyway.
+# screen-reader = false
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the

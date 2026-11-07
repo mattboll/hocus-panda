@@ -691,6 +691,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 geometry.extend(field);
             }
             drawn.focus(&mut frame);
+            drawn.tell_readers();
             let mut all = vec![frame.into_geometry()];
             all.extend(geometry);
             all
@@ -1137,6 +1138,155 @@ struct Drawn<'a> {
 }
 
 impl Drawn<'_> {
+    /// What it shows, for screen readers (crate::a11y::rows): the switch,
+    /// the network in use with Disconnect and the sign-in page, the
+    /// networks around, an unfolded row's password (never its value), the
+    /// Settings' link.
+    fn tell_readers(&self) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        use hocus_network::model::Security;
+        let words = self.words();
+        let network = &self.state.network;
+        let fr = words.wifi_settings().starts_with("Réglages");
+        let mut nodes = Vec::new();
+        let shape = |t: Target| self.shape(t);
+        if self.layout.switch
+            && let Some(rect) = shape(Target::Switch)
+        {
+            nodes.push(
+                rows::act(Target::Switch, Role::ToggleButton, words.wifi(), rect)
+                    .checked(self.ui.switch.shown(network.enabled, self.now)),
+            );
+        }
+        if let Some(current) = &network.current {
+            nodes.push(rows::line(format!(
+                "{}, {}",
+                current.name,
+                words.connected()
+            )));
+            if let Some(rect) = shape(Target::Disconnect) {
+                nodes.push(rows::act(
+                    Target::Disconnect,
+                    Role::Button,
+                    format!("{} {}", words.disconnect(), current.name),
+                    rect,
+                ));
+            }
+        }
+        if self.layout.portal.is_some() {
+            nodes.push(rows::line(words.sign_in_waits()));
+            if let Some(rect) = shape(Target::Portal) {
+                nodes.push(rows::act(
+                    Target::Portal,
+                    Role::Button,
+                    words.open_sign_in(),
+                    rect,
+                ));
+            }
+        }
+        if self.layout.list().is_some() {
+            nodes.push(rows::line(words.networks()));
+        }
+        let busy = network.connecting_to();
+        for (i, row) in self.state.rows.iter().enumerate() {
+            let mut said = Vec::new();
+            if busy == Some(row.ssid.as_slice()) {
+                said.push(words.connecting().to_owned());
+            }
+            match row.security {
+                Security::Open => {}
+                Security::Psk { .. } | Security::Wep => said.push(
+                    if fr {
+                        "protégé par mot de passe"
+                    } else {
+                        "secured"
+                    }
+                    .to_owned(),
+                ),
+                Security::Enterprise => said.push(words.in_settings().to_owned()),
+            }
+            if row.saved {
+                said.push(words.saved().to_owned());
+            }
+            let signal = match (row.bars(), fr) {
+                (0 | 1, true) => "signal faible",
+                (2, true) => "signal moyen",
+                (3, true) => "bon signal",
+                (_, true) => "signal fort",
+                (0 | 1, false) => "weak signal",
+                (2, false) => "fair signal",
+                (3, false) => "good signal",
+                (_, false) => "strong signal",
+            };
+            said.push(signal.to_owned());
+            if self.ui.failed.as_deref() == Some(row.ssid.as_slice()) {
+                said.push(words.could_not_connect().to_owned());
+            }
+            let node = match shape(Target::Row(i)) {
+                Some(rect) => rows::act(Target::Row(i), Role::Button, row.name.clone(), rect),
+                None => Node::new(rows::key(Target::Row(i)), Role::Label, row.name.clone()),
+            };
+            nodes.push(node.describe(said.join(", ")));
+            if self.layout.unfolded.is_some_and(|(u, _)| u == i) {
+                let mut field = Node::new(
+                    rows::key(Target::Field),
+                    Role::PasswordField,
+                    words.password(),
+                )
+                .bounds(shape(Target::Field).and_then(rows::at))
+                .act(hocus_a11y::Act::Focus);
+                if let Some(error) = self.ui.error {
+                    field = field.describe(error_lines(error).join(" "));
+                }
+                nodes.push(field);
+                if let Some(rect) = shape(Target::Eye) {
+                    let eye = if fr {
+                        "Afficher le mot de passe"
+                    } else {
+                        "Show the password"
+                    };
+                    nodes.push(
+                        rows::act(Target::Eye, Role::ToggleButton, eye, rect)
+                            .checked(self.ui.shown),
+                    );
+                }
+                if let Some(rect) = shape(Target::Cancel) {
+                    nodes.push(rows::act(
+                        Target::Cancel,
+                        Role::Button,
+                        words.cancel(),
+                        rect,
+                    ));
+                }
+                if let Some(rect) = shape(Target::Join) {
+                    nodes.push(
+                        rows::act(Target::Join, Role::Button, words.join(), rect)
+                            .disabled(!self.ui.password.complete()),
+                    );
+                }
+            }
+        }
+        if let Some(rect) = shape(Target::Settings) {
+            nodes.push(rows::act(
+                Target::Settings,
+                Role::Button,
+                words.wifi_settings(),
+                rect,
+            ));
+        }
+        rows::publish(
+            self.panel.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(targets(self.layout, self.ui, &self.state.rows, network)),
+                focus: self.ui.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+
     fn words(&self) -> Words {
         self.panel.words
     }
@@ -1268,7 +1418,7 @@ impl Drawn<'_> {
             return;
         };
         if self.hover(Target::Settings) {
-            f.fill(&rounded(rect, LINK_RADIUS), LINK_HOVER);
+            crate::theme::hover(f, &rounded(rect, LINK_RADIUS), LINK_HOVER);
         }
         let middle = rect.center_y();
         let tile = Rectangle::new(

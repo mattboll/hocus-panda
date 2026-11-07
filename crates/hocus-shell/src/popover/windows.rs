@@ -140,6 +140,7 @@ impl<Message> canvas::Program<Message> for Panel {
             };
             ring(f, rect, radius);
         }
+        self.say(state);
         vec![frame.into_geometry()]
     }
 
@@ -154,6 +155,61 @@ impl<Message> canvas::Program<Message> for Panel {
 }
 
 impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): a line per
+    /// window, its ✕ in it, then "+ N".
+    fn say(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let items = state.items();
+        let rect = |item: Item| items.iter().find(|(i, _)| *i == item).map(|(_, r)| *r);
+        let mut nodes = Vec::new();
+        for row in &state.rows {
+            match row {
+                Row::Window(line) => {
+                    let Some(at) = rect(Item::Window(line.id)) else {
+                        continue;
+                    };
+                    let mut node = rows::act(
+                        Item::Window(line.id),
+                        Role::ListItem,
+                        self.words.name(line),
+                        at,
+                    )
+                    .selected(line.focused);
+                    if let Some(close) = rect(Item::WindowClose(line.id)) {
+                        node = node.child(rows::act(
+                            Item::WindowClose(line.id),
+                            Role::Button,
+                            self.words.close(&line.title),
+                            close,
+                        ));
+                    }
+                    nodes.push(node);
+                }
+                Row::More(n) => {
+                    if let Some(at) = rect(Item::WindowsMore) {
+                        nodes.push(rows::act(
+                            Item::WindowsMore,
+                            Role::Button,
+                            self.words.more(*n),
+                            at,
+                        ));
+                    }
+                }
+            }
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(items.iter().map(|(i, _)| *i)),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+
     /// What it shows, read afresh (closing, what it showed).
     fn refresh<Message>(
         &self,

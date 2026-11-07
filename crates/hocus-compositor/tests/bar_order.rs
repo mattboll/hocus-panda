@@ -501,7 +501,7 @@ fn the_full_form_goes_card_today_to_do_then_the_agents_14_px_apart() -> anyhow::
             AGENTS_NAMESPACE,
         ],
         &[],
-        Some(&[44, 18 + 2 * 20, 18 + 3 * 22 + 20, 44 + 6 + 2 * 34]),
+        Some(&[44, 18 + 2 * 20, 18 + 3 * 22 + 20, 60 + 6 + 2 * 46]),
     )?;
     bed.logged(&["the tasks' group shows it", "more=+ 2 autres"])?;
     // The spacer under the agents' group: the desktops further down.
@@ -655,16 +655,17 @@ fn the_peek_comes_out_beside_its_agents_row_under_to_do() -> anyhow::Result<()> 
     bed.agent_is("api", "waiting")?;
     // Waiting first: its row heads the group, under its header.
     let agents = groups[3];
-    let row = agents.top + 44 + 6 + 17;
+    // Its header 60 px, a waiting agent's card 68 (#649).
+    let row = agents.top + 60 + 6 + 34;
     bed.row_middle_at("api", row)?;
     let shown = bed.hp.dispatch_until(WAIT, |hp| {
         hp.peek_commits() > 0 && hp.peek_surfaces().len() == 1 && hp.peek().is_some()
     })?;
     anyhow::ensure!(shown, "no peek: {:?}", bed.hp.peek_surfaces());
-    // On the CPU a card, its 170 px panda's middle on the row's, beside the
+    // On the CPU a card, its 200 px panda's middle on the row's, beside the
     // bar.
     let peek = bed.hp.peek_surfaces()[0].1;
-    assert_eq!(peek.y + 85, row, "{peek:?}");
+    assert_eq!(peek.y + 100, row, "{peek:?}");
     assert!(peek.x + peek.width <= FULL_X, "{peek:?}");
     bed.shot("peek")?;
     Ok(())
@@ -712,9 +713,10 @@ fn her_briefing_opens_beside_the_agents_group_under_to_do() -> anyhow::Result<()
 fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() -> anyhow::Result<()>
 {
     let day = format!("{MEETING}{AFTER}{TASKS}");
-    // Room for the agents and To do's three lines, not for Today.
+    // Room for the agents and To do's three lines, not for Today (the
+    // agents' header and rows 52 px taller since #649).
     let Some(mut bed) = start(&Machine {
-        screen: (1920, 590),
+        screen: (1920, 642),
         day: &day,
         ..Machine::default()
     })?
@@ -730,7 +732,7 @@ fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() ->
         FULL_X,
         &[MEETING_NAMESPACE, TASKS_NAMESPACE, AGENTS_NAMESPACE],
         &[TODAY_NAMESPACE],
-        Some(&[44, 18 + 3 * 22 + 20, 44 + 6 + 3 * 34]),
+        Some(&[44, 18 + 3 * 22 + 20, 60 + 6 + 3 * 46]),
     )?;
     let desktops = common::drawn(&mut bed.hp, DESKTOPS_NAMESPACE)?[0].1;
     let under = desktops.y + ROOM;
@@ -738,7 +740,7 @@ fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() ->
     drop(bed);
     // Shorter: To do's lines go into "+ N" first, then the agents' rows.
     let Some(mut bed) = start(&Machine {
-        screen: (1920, 470),
+        screen: (1920, 497),
         day: &day,
         ..Machine::default()
     })?
@@ -761,7 +763,7 @@ fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() ->
     let folded = |hp: &Headless| {
         column_is(hp, FULL_TOP, FULL_X, shown, &[TODAY_NAMESPACE]).is_ok_and(|g| {
             let h = g[2].bottom - g[2].top;
-            g[1].bottom - g[1].top == 18 + 20 && h < 44 + 6 + 3 * 34 && (h - 44 - 6 - 20) % 34 == 0
+            g[1].bottom - g[1].top == 18 + 20 && h < 60 + 6 + 3 * 46 && (h - 60 - 6 - 20) % 46 == 0
         })
     };
     let done = bed.hp.dispatch_until(WAIT, |hp| folded(hp))?;
@@ -771,11 +773,11 @@ fn on_a_short_screen_today_gives_way_then_to_dos_lines_then_the_agents_rows() ->
     let under = desktops.y + ROOM;
     let agents = groups[2];
     // As many rows as fit over "+ N": one more would not.
-    let rows = (agents.bottom - agents.top - 44 - 6 - 20) / 34;
+    let rows = (agents.bottom - agents.top - 60 - 6 - 20) / 46;
     assert!(rows < 3, "{line}");
     assert!(agents.bottom + GAP <= under, "{agents:?} over {under}");
     assert!(
-        agents.bottom + GAP + 34 > under,
+        agents.bottom + GAP + 46 > under,
         "room left: {agents:?} over {under}"
     );
     assert_eq!(groups[1].bottom - groups[1].top, 18 + 20);
