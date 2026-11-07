@@ -880,9 +880,10 @@ where
     }
     let (rgba, ids) = match kind {
         RimKind::Plain => (RIM, &ids.rim),
-        RimKind::Accent => (ACCENT, &ids.accent),
-        RimKind::Pulse => (ACCENT, &ids.pulse),
-        RimKind::Ring => (ACCENT, &ids.ring),
+        // The theme's accent in Givre and Matrix (`crate::contrast`).
+        RimKind::Accent => (crate::contrast::ink(ACCENT), &ids.accent),
+        RimKind::Pulse => (crate::contrast::ink(ACCENT), &ids.pulse),
+        RimKind::Ring => (crate::contrast::ink(ACCENT), &ids.ring),
     };
     let piece = Piece::Rim(rgba, (width * 1000.0).round() as u32);
     let (texture, corner) = textures.get(piece, scale);
