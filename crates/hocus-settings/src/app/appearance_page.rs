@@ -11,15 +11,15 @@ use iced::{
 };
 
 use super::{
-    App, Doing, Message,
+    App, Doing, KeysSaid, Message,
     style::*,
     view::{El, t},
 };
 use crate::{
-    appearance::{self, Before, CURSOR_SIZES, Proposed, today_as},
+    appearance::{self, Before, CURSOR_SIZES, Said, today_as},
     lang::{Lang, w},
-    model::{Choice, SectionId, Setting, Value},
-    store::{Raw, Slot},
+    model::{Choice, Kind, SectionId, Setting, Value},
+    store::{KeyEdit, Reading, Slot},
     theme::Ink,
 };
 
@@ -41,10 +41,23 @@ impl App {
         }
     }
 
-    /// Choosing a theme that changes more than itself (#431, #740): those
-    /// changes written with it as one batch, one toast saying them all,
-    /// whose "Annuler" (or `Ctrl+Z`) takes them all back. `None`: a plain
-    /// change, as any other setting's.
+    /// The word the file says at `setting`'s slot; `None` where it says
+    /// nothing (or what it says is not understood).
+    fn word_at(&self, setting: &'static str) -> Option<String> {
+        match self.reading(Slot {
+            setting,
+            source: None,
+        }) {
+            Reading::Value(Value::Word(word)) => Some(word.to_owned()),
+            _ => None,
+        }
+    }
+
+    /// Choosing a theme that changes more than itself (#431, #740): the
+    /// theme and what it changes (its accent, its windows' motion, its
+    /// wallpaper; or, leaving it, what they were) written together, one
+    /// toast saying them all, whose "Annuler" (or `Ctrl+Z`) takes them all
+    /// back. `false`: a plain change, as any other setting's.
     pub(super) fn theme_chose(&mut self, slot: Slot, value: &Value) -> bool {
         let (appearance::THEME_ID, Value::Word(word)) = (slot.setting, value) else {
             return false;
@@ -53,59 +66,50 @@ impl App {
             return false;
         };
         let from = self.scheme_now();
-        let accent_slot = Slot {
-            setting: appearance::ACCENT_ID,
-            source: None,
-        };
-        let accent = match self.value(accent_slot) {
-            Some(Value::Word(word)) => Accent::of(word),
-            _ => None,
+        let now = Said {
+            accent: self.word_at(appearance::ACCENT_ID),
+            animation: self.word_at(crate::desktops::ANIMATION),
+            picture: self
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.wallpaper.picture.clone()),
         };
         let state = hocus_config::state_dir();
         let before = Before::read(state.as_deref());
-        let (proposed, remember) = appearance::theme_proposes(from, to, accent, &before);
+        let (proposed, remember) = appearance::theme_proposes(from, to, &now, &before);
         if proposed.is_empty() || !self.writable() {
             return false;
         }
         remember.write(state.as_deref());
-        self.serial += 1;
-        let batch = self.serial;
+        let lang = self.lang;
         let mut said = vec![self.said_change(slot, value)];
-        for change in proposed {
-            let (setting, raw, shown) = match change {
-                Proposed::Set(setting, word) => {
-                    (setting, Raw::Set(Value::Word(word)), Value::Word(word))
-                }
-                Proposed::Remove(setting) => {
-                    let default = crate::model::setting(setting).map_or(Value::Word(""), |s| {
-                        s.places.of(crate::model::Source::Ac).default.clone()
-                    });
-                    (setting, Raw::Remove, default)
-                }
-            };
-            let slot = Slot {
-                setting,
-                source: None,
-            };
-            said.push(self.said_change(slot, &shown));
-            // Its toast is the theme's: one for all.
-            self.ask(
-                slot,
-                raw,
-                Doing::New,
-                None,
-                Some(batch),
-                Some(String::new()),
-            );
+        let mut edits = vec![KeyEdit {
+            key: vec!["appearance".into(), "theme".into()],
+            value: Some(format!("\"{}\"", to.word())),
+        }];
+        for (key, word) in proposed {
+            said.push(self.said_key(key, word.as_deref()));
+            edits.push(KeyEdit {
+                key: key.iter().map(|k| (*k).to_owned()).collect(),
+                value: word.map(|w| format!("\"{w}\"")),
+            });
         }
-        self.ask(
-            slot,
-            Raw::Set(value.clone()),
-            Doing::New,
-            None,
-            Some(batch),
-            Some(said.join(" · ")),
-        );
+        let theme_name = slot.setting().map_or("", |s| s.name.get(lang));
+        let then = self.said_value(slot);
+        let done = said.join(" · ");
+        let keys_said = KeysSaid {
+            undone: match lang {
+                Lang::French => format!("Annulé : {theme_name} revient à {then}."),
+                Lang::English => format!("Undone: {theme_name} is back to {then}."),
+            },
+            redone: match lang {
+                Lang::French => format!("Rétabli : {done}."),
+                Lang::English => format!("Redone: {done}."),
+            },
+            done,
+            row: appearance::THEME_ID,
+        };
+        self.ask_keys(edits, keys_said, Doing::New, None);
         true
     }
 
@@ -120,6 +124,49 @@ impl App {
             Lang::French => format!("{name} : {now}"),
             Lang::English => format!("{name}: {now}"),
         }
+    }
+
+    /// What a theme's toast says of `key` set to `word` (`None`: its
+    /// default): "Couleur d'accent : Vert phosphore", "Fond d'écran : Pluie".
+    fn said_key(&self, key: [&str; 2], word: Option<&str>) -> String {
+        let lang = self.lang;
+        if key == appearance::PICTURE_KEY {
+            let picture = word
+                .and_then(|w| hocus_link::wallpaper::Picture::of(w).ok())
+                .unwrap_or_default();
+            let name = crate::wallpaper::name_of(&picture, lang);
+            return match lang {
+                Lang::French => format!("Fond d’écran : {name}"),
+                Lang::English => format!("Wallpaper: {name}"),
+            };
+        }
+        let id = if key == appearance::ACCENT_KEY {
+            appearance::ACCENT_ID
+        } else {
+            crate::desktops::ANIMATION
+        };
+        let Some(setting) = crate::model::setting(id) else {
+            return String::new();
+        };
+        let default = setting.places.of(crate::model::Source::Ac).default.clone();
+        // The word as one of the setting's own (they are `'static`).
+        let value = word
+            .and_then(|w| match &setting.kind {
+                Kind::Segmented(choices) | Kind::Menu(choices) => choices
+                    .iter()
+                    .find(|c| matches!(c.value, Value::Word(v) if v == w))
+                    .map(|c| c.value.clone()),
+                Kind::Swatches => Accent::of(w).map(|a| Value::Word(a.word())),
+                _ => None,
+            })
+            .unwrap_or(default);
+        self.said_change(
+            Slot {
+                setting: id,
+                source: None,
+            },
+            &value,
+        )
     }
 
     /// The accents the swatches offer now (a themed theme's own first).

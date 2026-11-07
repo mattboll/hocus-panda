@@ -39,7 +39,7 @@ const LANGUAGE: RowGroup = RowGroup {
     per_source: false,
 };
 
-const SCHEMES: &[&str] = &["dark", "light", "frost"];
+const SCHEMES: &[&str] = &["dark", "light", "frost", "matrix"];
 const ACCENTS: &[&str] = &[
     "green",
     "blue",
@@ -48,6 +48,7 @@ const ACCENTS: &[&str] = &[
     "teal",
     "wallpaper",
     "ice",
+    "phosphor",
 ];
 const LANGUAGES: &[&str] = &["system", "fr", "en"];
 const DATES: &[&str] = &["long", "short", "numeric", "iso"];
@@ -74,13 +75,53 @@ fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
 pub const THEME_ID: &str = "appearance.theme";
 pub const ACCENT_ID: &str = "appearance.accent";
 
-/// What a themed theme set when it was chosen, to give back when it is
-/// left (#740): kept in `$XDG_STATE_HOME/hocuspanda/theme-before`, one
-/// `key = "word"` line each.
+/// The keys a theme's choice may change besides the theme (#431, #740):
+/// the accent, the windows' motion and the wallpaper.
+pub const ACCENT_KEY: [&str; 2] = ["appearance", "accent"];
+pub const ANIMATION_KEY: [&str; 2] = ["windows", "animation"];
+pub const PICTURE_KEY: [&str; 2] = ["wallpaper", "picture"];
+
+/// A key a theme changes, and its word there (`None`: its line taken
+/// out).
+pub type KeyWord = ([&'static str; 2], Option<String>);
+
+/// What the file says now at the keys a theme may change: each word, or
+/// `None` where the file says nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Said {
+    pub accent: Option<String>,
+    pub animation: Option<String>,
+    pub picture: Option<String>,
+}
+
+impl Said {
+    fn get(&self, key: [&str; 2]) -> &Option<String> {
+        match key {
+            ACCENT_KEY => &self.accent,
+            ANIMATION_KEY => &self.animation,
+            _ => &self.picture,
+        }
+    }
+
+    fn get_mut(&mut self, key: [&str; 2]) -> &mut Option<String> {
+        match key {
+            ACCENT_KEY => &mut self.accent,
+            ANIMATION_KEY => &mut self.animation,
+            _ => &mut self.picture,
+        }
+    }
+
+    const KEYS: [[&str; 2]; 3] = [ACCENT_KEY, ANIMATION_KEY, PICTURE_KEY];
+}
+
+/// What a themed theme changed when it was chosen, to give back when it
+/// is left: kept in `$XDG_STATE_HOME/hocuspanda/theme-before`, one line a
+/// key it changed, `section.key = "word"`, or `section.key =` where the
+/// file said nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Before {
-    /// The accent before the theme's own; `None`: the file named none.
-    pub accent: Option<Accent>,
+    /// The keys changed, and what the file said there before.
+    pub keys: Vec<KeyWord>,
 }
 
 impl Before {
@@ -95,10 +136,12 @@ impl Before {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
             };
+            let Some(key) = Said::KEYS.into_iter().find(|k| k.join(".") == key.trim()) else {
+                continue;
+            };
             let value = value.trim().trim_matches('"');
-            if key.trim() == "accent" {
-                before.accent = Accent::of(value);
-            }
+            let value = (!value.is_empty()).then(|| value.to_owned());
+            before.keys.push((key, value));
         }
         before
     }
@@ -107,69 +150,102 @@ impl Before {
         let Some(state) = state else {
             return;
         };
-        let text = match self.accent {
-            Some(accent) => format!("accent = \"{accent}\"\n"),
-            None => String::new(),
-        };
+        let text: String = self
+            .keys
+            .iter()
+            .map(|(key, value)| match value {
+                Some(word) => format!("{} = \"{word}\"\n", key.join(".")),
+                None => format!("{} =\n", key.join(".")),
+            })
+            .collect();
         if let Err(err) = hocus_config::replace(&state.join(Self::FILE), text.as_bytes(), None) {
             tracing::warn!(%err, "could not keep what the theme changed");
         }
     }
 }
 
-/// A setting a theme's choice writes besides the theme itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Proposed {
-    /// `setting` set to this word.
-    Set(&'static str, &'static str),
-    /// `setting`'s line taken out: its default applies.
-    Remove(&'static str),
+/// What a themed theme sets: its accent, its windows' motion, and the
+/// wallpaper it proposes (written only over a built-in one).
+fn theme_sets(scheme: Scheme) -> Vec<([&'static str; 2], &'static str)> {
+    match scheme {
+        Scheme::Frost => vec![
+            (ACCENT_KEY, "ice"),
+            (ANIMATION_KEY, "frost"),
+            (PICTURE_KEY, "aurora"),
+        ],
+        Scheme::Matrix => vec![
+            (ACCENT_KEY, "phosphor"),
+            (ANIMATION_KEY, "rain"),
+            (PICTURE_KEY, "rain"),
+        ],
+        Scheme::Dark | Scheme::Light => Vec::new(),
+    }
+}
+
+/// Whether `picture` is one the desktop ships (or none): a picture of
+/// one's own is never replaced by a theme's.
+fn built_in(picture: Option<&str>) -> bool {
+    picture.is_none_or(|p| {
+        p == "plain"
+            || hocus_link::backdrop::Backdrop::of(p).is_some()
+            || hocus_link::moving::Moving::of(p).is_some()
+    })
 }
 
 /// What choosing theme `to` over `from` changes besides the theme (the
-/// hook of #431 and #740), `accent` the accent now, `before` what the
-/// themed theme left had changed; and what to remember for leaving `to`.
+/// hook of #431 and #740), `now` what the file says, `before` what the
+/// themed theme left had changed: the keys to write (a word, or `None`
+/// to take the line out), and what to remember for leaving `to`.
 ///
-/// Entering Givre sets its accent, the ice blue, remembering the one
-/// before; leaving it gives that one back, unless another was chosen
-/// meanwhile. Givre's window animation (`[windows] open-close = "frost"`)
-/// and its proposed wallpaper (`[wallpaper] picture = "aurora"`, only over
-/// a built-in) come here once they exist, with the values they replace.
+/// Leaving a themed theme gives back each key it changed that still holds
+/// its value (another chosen meanwhile stays). Entering one sets its
+/// accent and its windows' motion, and its wallpaper over a built-in one,
+/// remembering what each replaced. Called whenever the theme changes in
+/// the window.
 pub fn theme_proposes(
     from: Scheme,
     to: Scheme,
-    accent: Option<Accent>,
+    now: &Said,
     before: &Before,
-) -> (Vec<Proposed>, Before) {
-    let mut proposed = Vec::new();
-    let mut remember = before.clone();
+) -> (Vec<KeyWord>, Before) {
+    let mut values = now.clone();
+    let mut remember = Before::default();
     if from == to {
-        return (proposed, remember);
+        return (Vec::new(), before.clone());
     }
-    if from.themed() && accent == Some(theme_accent(from)) {
-        proposed.push(match before.accent {
-            Some(accent) => Proposed::Set(ACCENT_ID, accent.word()),
-            None => Proposed::Remove(ACCENT_ID),
-        });
-        remember.accent = None;
-    }
-    if to.themed() {
-        let own = theme_accent(to);
-        if accent != Some(own) {
-            proposed.push(Proposed::Set(ACCENT_ID, own.word()));
-            // What was there before any themed theme.
-            if !from.themed() {
-                remember.accent = accent;
+    if from.themed() {
+        for (key, set) in theme_sets(from) {
+            if values.get(key).as_deref() != Some(set) {
+                continue;
+            }
+            if let Some((_, was)) = before.keys.iter().find(|(k, _)| *k == key) {
+                *values.get_mut(key) = was.clone();
             }
         }
     }
-    (proposed, remember)
+    for (key, set) in theme_sets(to) {
+        if key == PICTURE_KEY && !built_in(values.picture.as_deref()) {
+            continue;
+        }
+        if values.get(key).as_deref() == Some(set) {
+            continue;
+        }
+        remember.keys.push((key, values.get(key).clone()));
+        *values.get_mut(key) = Some(set.to_owned());
+    }
+    let edits = Said::KEYS
+        .into_iter()
+        .filter(|key| values.get(*key) != now.get(*key))
+        .map(|key| (key, values.get(key).clone()))
+        .collect();
+    (edits, remember)
 }
 
 /// A themed theme's own accent.
 pub const fn theme_accent(scheme: Scheme) -> Accent {
     match scheme {
         Scheme::Frost => Accent::Ice,
+        Scheme::Matrix => Accent::Phosphor,
         _ => Accent::Green,
     }
 }
@@ -183,7 +259,7 @@ pub fn accents_shown(scheme: Scheme, chosen: Accent) -> Vec<Accent> {
         shown.push(own);
     }
     for accent in Accent::ALL {
-        let themed = accent == Accent::Ice;
+        let themed = matches!(accent, Accent::Ice | Accent::Phosphor);
         if !shown.contains(&accent) && (!themed || accent == chosen) {
             shown.push(accent);
         }
@@ -299,18 +375,18 @@ pub fn settings() -> &'static [Setting] {
                 group: THEME,
                 name: w("Thème", "Theme"),
                 line: Some(w(
-                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi. Givre garde les Réglages et les applications sombres.",
-                    "The bar, menus, launcher and Settings; applications are told too. Frost keeps the Settings and applications dark.",
+                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi. Givre et Matrix gardent les Réglages et les applications sombres.",
+                    "The bar, menus, launcher and Settings; applications are told too. Frost and Matrix keep the Settings and applications dark.",
                 )),
                 keywords: (
-                    &["sombre", "clair", "nuit", "mode sombre", "thème", "givre", "glacé"],
-                    &["dark", "light", "night", "dark mode", "theme", "frost", "ice"],
+                    &["sombre", "clair", "nuit", "mode sombre", "thème", "givre", "glacé", "matrix", "phosphore"],
+                    &["dark", "light", "night", "dark mode", "theme", "frost", "ice", "matrix", "phosphor"],
                 ),
-                // Matrix joins them once its tokens exist (#431).
                 kind: Kind::Segmented(vec![
                     word("Sombre", "Dark", "dark"),
                     word("Clair", "Light", "light"),
                     word("Givre", "Frost", "frost"),
+                    word("Matrix", "Matrix", "matrix"),
                 ]),
                 places: one(
                     &["appearance", "theme"],
@@ -611,41 +687,134 @@ pub fn today_as(format: &str, today: jiff::civil::Date, lang: Lang) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn choosing_givre_sets_its_accent_and_leaving_it_gives_the_old_one_back() {
-        let none = Before::default();
-        // Entering Givre: the ice blue, the violet remembered.
-        let (proposed, kept) =
-            theme_proposes(Scheme::Dark, Scheme::Frost, Some(Accent::Violet), &none);
-        assert_eq!(proposed, vec![Proposed::Set(ACCENT_ID, "ice")]);
-        assert_eq!(kept.accent, Some(Accent::Violet));
-        // Leaving it with the ice blue still chosen: the violet again.
-        let (proposed, kept) =
-            theme_proposes(Scheme::Frost, Scheme::Light, Some(Accent::Ice), &kept);
-        assert_eq!(proposed, vec![Proposed::Set(ACCENT_ID, "violet")]);
-        assert_eq!(kept, Before::default());
-        // A file that named no accent: its line taken out again.
-        let (_, kept) = theme_proposes(Scheme::Dark, Scheme::Frost, None, &none);
-        let (proposed, _) = theme_proposes(Scheme::Frost, Scheme::Dark, Some(Accent::Ice), &kept);
-        assert_eq!(proposed, vec![Proposed::Remove(ACCENT_ID)]);
-        // Another accent chosen while in Givre stays.
-        let (proposed, _) = theme_proposes(Scheme::Frost, Scheme::Dark, Some(Accent::Rose), &kept);
-        assert!(proposed.is_empty());
-        // Between the plain themes, nothing more than the theme.
-        let (proposed, _) = theme_proposes(Scheme::Dark, Scheme::Light, Some(Accent::Teal), &none);
-        assert!(proposed.is_empty());
-        // Already in the ice blue: nothing to set, nothing remembered.
-        let (proposed, kept) =
-            theme_proposes(Scheme::Dark, Scheme::Frost, Some(Accent::Ice), &none);
-        assert!(proposed.is_empty());
-        assert_eq!(kept.accent, None);
+    fn said(accent: Option<&str>, animation: Option<&str>, picture: Option<&str>) -> Said {
+        Said {
+            accent: accent.map(str::to_owned),
+            animation: animation.map(str::to_owned),
+            picture: picture.map(str::to_owned),
+        }
+    }
+
+    fn set(key: [&'static str; 2], word: &str) -> ([&'static str; 2], Option<String>) {
+        (key, Some(word.to_owned()))
     }
 
     #[test]
-    fn what_givre_changed_is_kept_across_launches() {
+    fn choosing_givre_sets_its_accent_motion_and_aurora_and_leaving_gives_them_back() {
+        let none = Before::default();
+        // Entering Givre: the ice blue, its motion and the aurora, what
+        // they replace kept.
+        let now = said(Some("violet"), None, Some("mist"));
+        let (edits, kept) = theme_proposes(Scheme::Dark, Scheme::Frost, &now, &none);
+        assert_eq!(
+            edits,
+            [
+                set(ACCENT_KEY, "ice"),
+                set(ANIMATION_KEY, "frost"),
+                set(PICTURE_KEY, "aurora"),
+            ]
+        );
+        assert_eq!(
+            kept.keys,
+            [
+                (ACCENT_KEY, Some("violet".to_owned())),
+                (ANIMATION_KEY, None),
+                (PICTURE_KEY, Some("mist".to_owned())),
+            ]
+        );
+        // Leaving it as it set them: the violet and the mist again, the
+        // motion's line taken out.
+        let now = said(Some("ice"), Some("frost"), Some("aurora"));
+        let (edits, kept) = theme_proposes(Scheme::Frost, Scheme::Light, &now, &kept);
+        assert_eq!(
+            edits,
+            [
+                set(ACCENT_KEY, "violet"),
+                (ANIMATION_KEY, None),
+                set(PICTURE_KEY, "mist"),
+            ]
+        );
+        assert_eq!(kept, Before::default());
+        // Another accent chosen while in Givre stays.
+        let (_, kept) = theme_proposes(Scheme::Dark, Scheme::Frost, &said(None, None, None), &none);
+        let now = said(Some("rose"), Some("frost"), Some("aurora"));
+        let (edits, _) = theme_proposes(Scheme::Frost, Scheme::Dark, &now, &kept);
+        assert_eq!(edits, [(ANIMATION_KEY, None), (PICTURE_KEY, None)]);
+        // Between the plain themes, nothing more than the theme.
+        let now = said(Some("teal"), Some("rain"), None);
+        let (edits, _) = theme_proposes(Scheme::Dark, Scheme::Light, &now, &none);
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn choosing_matrix_sets_the_rain_over_a_built_in_wallpaper_only() {
+        let none = Before::default();
+        let now = said(None, None, Some("forest"));
+        let (edits, kept) = theme_proposes(Scheme::Dark, Scheme::Matrix, &now, &none);
+        assert_eq!(
+            edits,
+            [
+                set(ACCENT_KEY, "phosphor"),
+                set(ANIMATION_KEY, "rain"),
+                set(PICTURE_KEY, "rain"),
+            ]
+        );
+        // Back to dark: all three as they were.
+        let now = said(Some("phosphor"), Some("rain"), Some("rain"));
+        let (edits, _) = theme_proposes(Scheme::Matrix, Scheme::Dark, &now, &kept);
+        assert_eq!(
+            edits,
+            [
+                (ACCENT_KEY, None),
+                (ANIMATION_KEY, None),
+                set(PICTURE_KEY, "forest")
+            ]
+        );
+        // A picture of one's own stays, and is not remembered.
+        let now = said(Some("blue"), None, Some("~/Images/lac.jpg"));
+        let (edits, kept) = theme_proposes(Scheme::Light, Scheme::Matrix, &now, &none);
+        assert_eq!(
+            edits,
+            [set(ACCENT_KEY, "phosphor"), set(ANIMATION_KEY, "rain")]
+        );
+        assert!(kept.keys.iter().all(|(k, _)| *k != PICTURE_KEY));
+        // Givre to Matrix: Givre's undone, Matrix's set, what was before
+        // Givre remembered for leaving Matrix.
+        let (_, kept) = theme_proposes(
+            Scheme::Dark,
+            Scheme::Frost,
+            &said(Some("violet"), None, None),
+            &none,
+        );
+        let now = said(Some("ice"), Some("frost"), Some("aurora"));
+        let (edits, kept) = theme_proposes(Scheme::Frost, Scheme::Matrix, &now, &kept);
+        assert_eq!(
+            edits,
+            [
+                set(ACCENT_KEY, "phosphor"),
+                set(ANIMATION_KEY, "rain"),
+                set(PICTURE_KEY, "rain"),
+            ]
+        );
+        assert_eq!(
+            kept.keys,
+            [
+                (ACCENT_KEY, Some("violet".to_owned())),
+                (ANIMATION_KEY, None),
+                (PICTURE_KEY, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_a_theme_changed_is_kept_across_launches() {
         let dir = tempfile::tempdir().expect("a folder");
         let before = Before {
-            accent: Some(Accent::Teal),
+            keys: vec![
+                (ACCENT_KEY, Some("teal".to_owned())),
+                (ANIMATION_KEY, None),
+                (PICTURE_KEY, Some("dawn".to_owned())),
+            ],
         };
         before.write(Some(dir.path()));
         assert_eq!(Before::read(Some(dir.path())), before);
@@ -664,7 +833,12 @@ mod tests {
             panic!("a segmented control");
         };
         let words: Vec<&str> = choices.iter().map(|c| c.label.get(Lang::French)).collect();
-        assert_eq!(words, ["Sombre", "Clair", "Givre"]);
+        assert_eq!(words, ["Sombre", "Clair", "Givre", "Matrix"]);
+        assert_eq!(
+            accents_shown(Scheme::Matrix, Accent::Phosphor)[0],
+            Accent::Phosphor
+        );
+        assert!(!accents_shown(Scheme::Matrix, Accent::Phosphor).contains(&Accent::Ice));
         assert_eq!(accents_shown(Scheme::Dark, Accent::Green).len(), 6);
         assert!(!accents_shown(Scheme::Dark, Accent::Green).contains(&Accent::Ice));
         assert_eq!(accents_shown(Scheme::Frost, Accent::Ice)[0], Accent::Ice);
