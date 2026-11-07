@@ -885,13 +885,14 @@ impl<Message> canvas::Program<Message> for Group {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(backdrop) = self.backdrop {
+        let colour = self.backdrop.map(|backdrop| {
             // At the group's (or the mini item's) middle, where it is now.
             let form = self.alone().unwrap_or(Form::Full);
             let middle = top(&self.bar, form) + height(form) / 2.0;
             let bar = popover::with(|c| c.bar_height(&self.bar));
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), backdrop.at(middle, bar));
-        }
+            backdrop.at(middle, bar)
+        });
+        let under = crate::backdrop::under(renderer, bounds.size(), colour);
         let size = bounds.size();
         let items = self.items(size);
         let in_bar: Vec<(Item, Rectangle)> = items
@@ -906,7 +907,7 @@ impl<Message> canvas::Program<Message> for Group {
         log_items(&in_bar);
         popover::with(|c| c.set_items(&self.bar, AGENTS_NAMESPACE, in_bar));
         let Some(layout) = layout().filter(|l| l.height > 0.0) else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let origin = self.origin(size);
         for &(form, alpha) in &self.forms {
@@ -932,7 +933,7 @@ impl<Message> canvas::Program<Message> for Group {
                 ring(&mut frame, rect, radius);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

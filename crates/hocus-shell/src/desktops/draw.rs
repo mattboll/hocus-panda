@@ -625,9 +625,7 @@ impl<Message> canvas::Program<Message> for Tiles {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
         let in_bar = items
@@ -643,7 +641,7 @@ impl<Message> canvas::Program<Message> for Tiles {
         // While the bar switches forms there are none to let a window go on.
         tell_tiles(&self.bar, &items, &state.shown);
         if !state.any() {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let (right, left) = self.sides(size);
         let column = Rectangle::new(
@@ -722,7 +720,7 @@ impl<Message> canvas::Program<Message> for Tiles {
                 ring(&mut frame, rect, radius);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

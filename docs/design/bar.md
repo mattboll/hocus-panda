@@ -852,13 +852,11 @@ polled from the loop.
   screen-reader.md.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
-  transparency" or high contrast is set, or behind a maximised window:
-  a screen whose current desktop shows a maximised window (not
-  minimised) has its bar opaque and no blur behind it, until the window
-  is restored, minimised, closed or the desktop changes (`opaque-bars`,
-  told to the shell as it changes; the launcher's and the overview's
-  scrims stay, they dim). Measured headless (`appearance.rs`,
-  `behind_a_maximised_window_the_bar_is_opaque`).
+  transparency" or high contrast is set, and only then: a maximised
+  window leaves the bar on glass (the launcher's and the overview's
+  scrims stay, they dim). Opaque, the bar's icons, gauges and check
+  boxes draw over its background as on glass (pixel tests in the
+  shell, `…_show_the_same_on_the_opaque_bar_as_on_glass`).
 
 ### The whole bar by the keyboard (#422)
 

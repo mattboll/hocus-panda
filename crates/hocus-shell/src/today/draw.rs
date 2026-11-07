@@ -268,13 +268,11 @@ impl canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         let (rows, top) = super::shown(&self.bar);
         let alpha = self.alpha();
         if rows.is_empty() || alpha <= 0.0 {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let still = self.forms.len() == 1;
         let items: Vec<(Item, Rectangle)> = rows
@@ -372,7 +370,7 @@ impl canvas::Program<Message> for View {
                 *kept = Some(said);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

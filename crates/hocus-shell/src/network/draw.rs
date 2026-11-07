@@ -407,9 +407,7 @@ impl<Message> canvas::Program<Message> for Connections {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
         let in_bar = items
@@ -423,7 +421,7 @@ impl<Message> canvas::Program<Message> for Connections {
             .collect();
         popover::with(|c| c.set_items(&self.bar, CONNECTIONS_NAMESPACE, in_bar));
         if state.shown.is_empty() {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let radius = match self.forms.first() {
             Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
@@ -520,7 +518,7 @@ impl<Message> canvas::Program<Message> for Connections {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

@@ -720,11 +720,12 @@ impl<Message> canvas::Program<Message> for View {
         let shown = &state.shown;
         // Nothing to show: nothing drawn, the bar seen through.
         let empty = shown.rows.is_empty() && shown.item.is_none();
-        if let Some(backdrop) = self.backdrop.filter(|_| !empty) {
+        let colour = self.backdrop.filter(|_| !empty).map(|backdrop| {
             let bar = popover::with(|c| c.bar_height(&self.bar));
             let middle = shown.surface_top + size.height / 2.0;
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop.at(middle, bar));
-        }
+            backdrop.at(middle, bar)
+        });
+        let under = crate::backdrop::under(renderer, size, colour);
         let items = self.items(size, shown);
         let in_bar: Vec<(Item, Rectangle)> = items
             .iter()
@@ -747,7 +748,7 @@ impl<Message> canvas::Program<Message> for View {
             }
         });
         self.say(state, &in_bar);
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

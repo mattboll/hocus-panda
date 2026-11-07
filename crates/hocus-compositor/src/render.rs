@@ -1433,8 +1433,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
-        // Behind a maximised window, the bar is opaque (bar.md §11).
-        if !self.glass_on() || self.bar_opaque(&output.name()) {
+        if !self.glass_on() {
             return None;
         }
         // Only under a bar the shell shows: no glass without its tint.

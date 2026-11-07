@@ -584,16 +584,14 @@ impl canvas::Program<Message> for Tray {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         let Some((bar, place)) = self.place() else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let shown = super::shown();
         let n = shown.len();
         if n != place.n {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let in_bar: Vec<(Item, Rectangle)> = self
             .cells(&shown, size)
@@ -658,7 +656,7 @@ impl canvas::Program<Message> for Tray {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

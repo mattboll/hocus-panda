@@ -184,8 +184,7 @@ transparency; 7:1 for text, 3:1 for borders and controls).
   magnifier's pill, which the compositor draws.
 - **Reduced transparency** (`[appearance] reduce-transparency`, or high
   contrast): no blur, and the opaque colours of the bar, its popovers, the
-  bubbles, the reminder, the capture's and the sharing's panels. Behind a
-  maximised window, the bar is opaque too, whatever the setting
+  bubbles, the reminder, the capture's and the sharing's panels
   ([bar.md §11](bar.md#11-accessibility)). The launcher's and the
   overview's scrims stay: they dim, they are not glass.
 

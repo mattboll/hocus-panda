@@ -443,9 +443,7 @@ impl canvas::Program<Message> for Sign {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         let uses = super::snapshot();
         let kinds = uses.kinds();
         if let Some(rect) = self.item(size, &kinds) {
@@ -455,7 +453,7 @@ impl canvas::Program<Message> for Sign {
             });
         }
         if kinds.is_empty() {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         }
         let now = state.drawn.unwrap_or_else(Instant::now);
         let t = uses
@@ -526,7 +524,7 @@ impl canvas::Program<Message> for Sign {
                 *kept = Some(said);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(

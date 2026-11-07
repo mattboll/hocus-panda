@@ -331,11 +331,9 @@ impl<Message> canvas::Program<Message> for Levels {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let Some(at) = state.at else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let right = bounds.width;
         let left = right + 2.0 - self.bar_width;
@@ -405,7 +403,7 @@ impl<Message> canvas::Program<Message> for Levels {
                 }
             }
         });
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     /// A hand over the items, which a click acts on (#468).
@@ -1467,13 +1465,54 @@ mod tests {
     }
 
     fn levels(form: Form) -> Levels {
+        with_backdrop(form, None)
+    }
+
+    fn with_backdrop(form: Form, backdrop: Option<Color>) -> Levels {
         Levels {
             forms: vec![(form, 1.0)],
             bar_width: form.width() as f32,
             motion: false,
             words: Words::new(crate::clock::time::Lang::French),
-            backdrop: None,
+            backdrop,
             bar: "eDP-1".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_icons_and_gauges_show_the_same_on_the_opaque_bar_as_on_glass() {
+        // Opaque (reduced transparency, high contrast, the CPU), the bar's
+        // colour drawn under the levels: their signs and gauges over it as
+        // on glass, not under it as the GPU had them.
+        use super::super::model::{Battery, Charge, Sound};
+        let all = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            brightness: Some(70.0),
+            battery: Some(Battery {
+                percent: 82.0,
+                charge: Charge::Discharging,
+                left: None,
+                health: None,
+            }),
+            ..Snapshot::default()
+        };
+        let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
+        for (form, (w, h)) in [(Form::Full, FULL_SURFACE), (Form::Mini, MINI_SURFACE)] {
+            let mut state = state(all, 0);
+            let now = state.at.expect("drawn at");
+            for (gauge, to) in state.gauges.iter_mut().zip([62.0, 70.0, 82.0]) {
+                gauge.toward(Some(to), now, false, false);
+            }
+            let drawn = crate::backdrop::tests::drawn(
+                |backdrop| with_backdrop(form, backdrop),
+                &state,
+                Size::new(w, h),
+                colour,
+            );
+            crate::backdrop::tests::assert_drawn_over(&drawn, &format!("{form:?}"));
         }
     }
 
