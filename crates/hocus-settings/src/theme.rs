@@ -6,6 +6,9 @@
 //! The window's colours are [`Ink`]s, as the shell's are: a token of
 //! [`hocus_link::theme::Tokens`], the accent, or a colour drawn for the
 //! dark theme that the light one reads by [`hocus_link::theme::on_light`].
+//!
+//! A themed theme (Givre, #740) is the shell's look only: the window keeps
+//! the dark tokens and takes its accent ([`Choice::in_windows`]).
 
 use std::sync::{PoisonError, RwLock};
 
@@ -44,7 +47,7 @@ pub fn contrast() -> bool {
 }
 
 pub fn tokens() -> &'static Tokens {
-    now().tokens()
+    now().in_windows().tokens()
 }
 
 pub fn color(c: Rgba) -> Color {
@@ -82,6 +85,7 @@ impl Ink {
     }
 
     pub fn in_theme(self, choice: Choice) -> Color {
+        let choice = choice.in_windows();
         match self {
             Self::Token(token) => color(token(choice.tokens())),
             Self::Dark(c) => match (choice.scheme, choice.contrast) {
@@ -153,6 +157,21 @@ mod tests {
         assert_eq!(
             Ink::AccentText.in_theme(light),
             Color::from_rgb8(0x2F, 0x5F, 0xC4)
+        );
+        // Givre's window is the dark one, in its accent.
+        let frost = Choice {
+            scheme: Scheme::Frost,
+            accent: Accent::Ice,
+            ..Choice::default()
+        };
+        assert_eq!(text.in_theme(frost), Color::from_rgb8(0xEE, 0xF1, 0xF6));
+        assert_eq!(
+            Ink::Token(|t| t.window).in_theme(frost),
+            Color::from_rgb8(0x14, 0x19, 0x26)
+        );
+        assert_eq!(
+            Ink::Accent(1.0).in_theme(frost),
+            Color::from_rgb8(0x7F, 0xD8, 0xFF)
         );
         // A white veil reads as the ink, a little stronger.
         let veil = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08)).in_theme(light);

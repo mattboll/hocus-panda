@@ -854,6 +854,9 @@ impl App {
             }
             Message::Choose(slot, value) => {
                 self.menu = None;
+                if self.theme_chose(slot, &value) {
+                    return Task::none();
+                }
                 self.bar_chose(slot, &value);
                 self.agents_chose(slot, &value);
                 let say = self.desktops_toast(slot, &value);
@@ -2090,7 +2093,8 @@ impl App {
                         self.step_choice(slot, &values, named == Named::ArrowRight)
                     }
                     (Kind::Swatches, Named::ArrowLeft | Named::ArrowRight) => {
-                        let values: Vec<Value> = hocus_link::theme::Accent::ALL
+                        let values: Vec<Value> = self
+                            .accents_shown()
                             .iter()
                             .map(|a| Value::Word(a.word()))
                             .collect();
