@@ -816,7 +816,8 @@ polled from the loop.
   it.
 - Every item is reachable with the keyboard (`Super+B` then arrows, Tab
   through items, Enter acts, Esc closes) and has a name for screen
-  readers.
+  readers: what each says, and what is announced on its own, in
+  screen-reader.md.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
   transparency" is set, or behind a maximised window.
