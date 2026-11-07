@@ -593,6 +593,10 @@ impl Panel {
     /// What the popover shows, read afresh; the names made to fit when
     /// they changed.
     fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
+        // Opened by the keyboard: the master slider holds it (bar.md §11).
+        if kit::first_control(self.id) {
+            state.focus = Some(Target::Slider);
+        }
         for pressed in kit::keys(self.id) {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }

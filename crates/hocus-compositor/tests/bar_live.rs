@@ -21,7 +21,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use common::{KEY_LEFTMETA, WAIT, chord};
+use common::{KEY_LEFTMETA, KEY_LEFTSHIFT, WAIT, chord};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect,
@@ -544,7 +544,7 @@ fn a_form_written_for_a_screen_switches_its_bar_and_forgets_the_click() -> anyho
     assert_eq!(forms(&hp), [("HEADLESS-1".to_owned(), BarForm::Full)]);
     // A click's choice, remembered in automatic.
     hp.pointer_move(400.0, 400.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let done = hp.dispatch_until(WAIT, |_| {
         std::fs::read_to_string(&remembered).is_ok_and(|t| t.contains("HEADLESS-1 = \"mini\""))
     })?;

@@ -543,8 +543,8 @@ pub fn outside() -> &'static [Outside] {
             BY_HAND,
             FORM.label,
             w("Changer de forme à la main", "Change form by hand"),
-            &["super+b", "toggle-bar", "clic", "bord", "raccourci"],
-            &["super+b", "toggle-bar", "click", "edge", "shortcut"],
+            &["super+shift+b", "toggle-bar", "clic", "bord", "raccourci"],
+            &["super+shift+b", "toggle-bar", "click", "edge", "shortcut"],
         ),
         o(
             ORDER,

@@ -115,7 +115,8 @@ The user's choice overrides the default and is remembered per output
   The compositor takes that click itself and no client sees it: it knows
   where the pointer is even when it reached the edge in one fast move,
   with no motion over the bar before the press.
-- `Super+B` toggles the form on the output under the pointer.
+- `Super+Shift+B` (`toggle-bar`) toggles the form on the output under the
+  pointer. `Super+B` puts the keyboard into the bar (§11).
 - Held against the screen's edge over the bar for 300 ms, the pointer
   brings the bar in front of the windows over it (§2), until it leaves the
   bar's column; a click there still toggles the form.
@@ -812,14 +813,78 @@ polled from the loop.
 ## 11. Accessibility
 
 - Text holds 4.5:1 on the bar's darkest background (3:1 for 24 px and
-  up). Colour never says a state alone: counts, names and words come with
-  it.
-- Every item is reachable with the keyboard (`Super+B` then arrows, Tab
-  through items, Enter acts, Esc closes) and has a name for screen
-  readers.
+  up); 7:1 under high contrast (§13). Colour never says a state alone:
+  counts, names and words come with it.
+- Every item is reachable with the keyboard (below) and has a name for
+  screen readers.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
-  transparency" is set, or behind a maximised window.
+  transparency" or high contrast is set, or behind a maximised window.
+
+### The whole bar by the keyboard (#422)
+
+- **Entering.** `Super+B` (`[shortcuts] focus-bar`) puts the keyboard
+  into the bar of the screen holding the focused window, else the one
+  under the pointer. The form's switch is `Super+Shift+B`
+  (`toggle-bar`). Both are listed in the Settings' Keyboard and
+  shortcuts. Whatever had the keyboard keeps the focus meanwhile: the
+  window gets the keyboard back when the bar lets it go.
+- **Where the ring lands.** On the first waiting agent's row (the rows'
+  order: the longest waiting first), else the first stuck one, else the
+  clock's group. In the mini form, on the secretary while her badge
+  shows, else the clock. An agent hidden in "+ N" is not landed on: the
+  clock.
+- **Several bars.** A second `Super+B` while a bar holds the keyboard
+  goes to the next screen's bar (the screens left to right, then top to
+  bottom); from the last one, back to the window.
+
+| Key | In the bar | In a popover |
+|---|---|---|
+| `↓` / `Tab` | the next item, top to bottom, round | the next control |
+| `↑` / `Shift+Tab` | the previous item | the previous control |
+| `←` / `→` | along a row (the desktops' tiles, the footer's buttons, the tray's icons), stopping at its ends; on the sound or the brightness, the level ∓5 % without opening | on a slider ∓5 %; a list's rows |
+| `Home` / `End` | the first item, the last | — |
+| `Enter` / `Space` | the item's click: its popover, the agent, the desktop, the next layout, the task ticked | acts |
+| `Esc` | the keyboard back to the window | closes it, the ring back on its item |
+
+- The order is the drawing's: top to bottom, and along a row left to
+  right, from one surface of the bar to the next. An item under the ring
+  that goes (an agent ending, a desktop removed) gives the ring to the
+  item now in its place, else the one before it.
+- **A popover opened by the keyboard** opens as a click's (it stays,
+  holds the keyboard) with its first control under the ring; the sound's
+  with its master slider.
+- **The ring**: 2 px in the accent's text colour, 3 px out from the item,
+  its radius the item's and as much again. Under high contrast: 3 px,
+  with 2 px of the background between it and the item (§13). The same
+  ring in every popover, the lock and the authentication dialog.
+- **The pointer**: hovering neither takes the keyboard nor moves the
+  ring; a click on an item gives it the keyboard; a click outside the
+  shell gives it back.
+- While a bar holds the keyboard, clients get no key; the desktop's own
+  shortcuts still work. That bar stands in front of the windows (as
+  when pushed, §2), so that the ring shows over a window covering it.
+- The session locking takes the keyboard from the bar: once unlocked,
+  the window has it.
+- **Not built**: the bar shown over a fullscreen window while it holds
+  the keyboard (a fullscreen window still covers it); a window line's
+  menu by `Menu` or `Shift+F10`.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_keys.rs`,
+  the real shell on the CPU): `Super+B` with a window focused and nobody
+  waiting puts the keyboard on the clock's surface, the window keeping
+  the focus and getting no key; `↓` takes it to the next surface,
+  `Home` back to the clock, `End` to the footer's last button; `Esc`
+  gives it back to the window, which types again. A waiting agent takes
+  the ring before a stuck one, a stuck one before the clock. `Enter` on
+  the clock opens the calendar holding the keyboard, `Esc` puts the ring
+  back on the clock, `Esc` again gives the keyboard to the window.
+  `Super+Shift+B` switches the form, `Super+B` does not; the mini form
+  lands on its clock. With two screens, `Super+B` three times: the first
+  bar, the second, the window. The shell's own tests (`popover::tests`)
+  walk every item of a full bar in order both ways and round, `Home`,
+  `End`, `←`/`→` along the tiles and the footer and on the sound, a
+  popover opened by `Enter` with its first control, `Esc` twice, and an
+  item going under the ring.
 
 ## 12. Performance
 
@@ -926,8 +991,8 @@ are later slices'.
   switch reversed midway starts from where the bar is.
 - **The form** on a screen: `[outputs.NAME] panel-form`, else `[panel]
   form`; on `auto` (the default), the form last chosen there with a click
-  or `Super+B`, else full from 1600 px left beside the full bar. A click's
-  or `Super+B`'s choice is remembered in
+  or `Super+Shift+B`, else full from 1600 px left beside the full bar. A
+  click's or `Super+Shift+B`'s choice is remembered in
   `$XDG_STATE_HOME/hocuspanda/panel.toml` when the screen's form is `auto`,
   never in `config.toml`; with `full` or `mini` set there, a switch lasts
   the session.
@@ -963,7 +1028,7 @@ are later slices'.
   (6.3, settings.md): by default Nuit, the mockup's night-blue gradient
   and its glows, so that the glass has something to show.
 - **Not built yet:** the glass's opaque fallback behind a maximised window
-  (§11), the bar's keyboard access (§11), the contents' cross-fade (§3,
+  (§11), the contents' cross-fade (§3,
   nothing to fade yet), hover feedback on the edge strip (the mockup's
   green tint is the mockup's own aid), and the blur's corners, which are
   cut to whole pixels under the shell's antialiased rim.
@@ -3734,9 +3799,7 @@ through do not disturb; on a shared screen the tab hides its title;
   cancel, `Super+J`, the words in both languages, the places, the
   buttons' layout. On the CPU, the screenshots of the pull request
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
-- **Not built**: the tab's keyboard (`Super+B` reaching the bar, then
-  `Tab` through its buttons): the bar has no keyboard entry yet
-  (`Super+B` switches its form); calendars "without reminders" that still
+- **Not built**: calendars "without reminders" that still
   take the card (Day.1's settings; since Day.7 a calendar not featured
   has neither); the halo on the CPU.
 
@@ -4324,7 +4387,7 @@ writes, followed as the file changes, before the page itself.
   `[panel] screens` (bars come and go, the windows' room with them), and
   each screen's form: a screen whose form asked changed (its own, or
   `[panel] form` for one without its own) forgets the form chosen there
-  with a click or `Super+B` (`panel.toml` written again) and switches to
+  with a click or `Super+Shift+B` (`panel.toml` written again) and switches to
   what is asked now, along the switch's motion. `[panel] output` and
   `windows` were already followed.
 - **Tests** (`crates/hocus-compositor/tests/bar_live.rs`): Today and the
@@ -4350,7 +4413,7 @@ by default), on every screen, followed as the file changes.
   8 px right of it; the edge click (`bar_edge_at`) in the strip between
   the screen's left edge and the bar and on the bar's first 6 px; the
   pointer pushed against the left edge brings the bar in front after
-  300 ms, until it leaves the bar's column; on `Super+B` or the click,
+  300 ms, until it leaves the bar's column; on `Super+Shift+B` or the click,
   snapped windows take their zone and a floating window whose left edge
   touched the bar's room keeps touching it. The glass and the halo go
   where the bar is (`bar_rect`); a minimised window goes into the bar on
@@ -4385,7 +4448,7 @@ by default), on every screen, followed as the file changes.
   every screen and the bar's place
   (`on_the_left_every_screen_keeps_the_bars_room_on_its_left`); the edge
   click (`a_press_on_the_left_edge_switches_the_form_and_no_client_sees_it`);
-  `Super+B` and the windows beside the bar
+  `Super+Shift+B` and the windows beside the bar
   (`super_b_on_the_left_moves_the_windows_that_touch_the_bar`); the push
   (`pushed_against_the_left_edge_the_bar_comes_in_front_after_300_ms`);
   the side changed in the file, the windows that touch the bar moving in

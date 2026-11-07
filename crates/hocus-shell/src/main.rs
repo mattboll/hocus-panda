@@ -901,6 +901,10 @@ impl Shell {
                 windows::set_states(states);
                 Task::none()
             }
+            ToShell::BarKeyboard(output) => {
+                popover::bar_keyboard(output.as_deref());
+                Task::none()
+            }
         }
     }
 
@@ -2529,6 +2533,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::SessionMenu { output }) => {
                             popover::session::open(&output);
+                            continue;
+                        }
+                        // `Super+B` (bar.md §11): the item's surface
+                        // takes the keyboard and draws its ring.
+                        Ok(ToShell::BarKeyboard(output)) => {
+                            popover::bar_keyboard(output.as_deref());
                             continue;
                         }
                         _ => {}

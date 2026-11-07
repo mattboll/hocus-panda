@@ -837,6 +837,12 @@ impl Headless {
         })
     }
 
+    /// The screen whose bar holds the keyboard (an item of it, or its
+    /// popover), if one does (`Super+B`, bar.md §11).
+    pub fn bar_keyboard(&self) -> Option<String> {
+        self.app.state.bar_holding_keyboard()
+    }
+
     /// What output `index` (in the order given) drew over since the last
     /// call, as one rectangle of its pixels; `None`: nothing.
     pub fn take_damage(&mut self, index: usize) -> Option<Rect> {

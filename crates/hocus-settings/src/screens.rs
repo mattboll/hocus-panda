@@ -69,7 +69,7 @@ pub struct Screen {
     pub number: usize,
     /// Its bar's form now (`"full"`, `"mini"`), none without a bar (6.4).
     pub bar: Option<&'static str>,
-    /// The form chosen there with a click or Super+B, remembered.
+    /// The form chosen there with a click or Super+Shift+B, remembered.
     pub bar_chosen: Option<&'static str>,
 }
 

@@ -694,6 +694,12 @@ pub enum ToShell {
     /// The windows kept above the others and those on all desktops, for
     /// the marks after their titles in the bar ([`WindowStates`]).
     WindowStates(WindowStates),
+    /// `Super+B` (`[shortcuts] focus-bar`, bar.md §11): the keyboard goes
+    /// into `output`'s bar, on its waiting agent, else its stuck one, else
+    /// its clock; `None`, the bar holding it lets it go, back to the
+    /// window that had it. Written `bar-keyboard OUTPUT` or `bar-keyboard
+    /// -`.
+    BarKeyboard(Option<String>),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -2008,6 +2014,8 @@ impl fmt::Display for ToShell {
                 write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
             }
             Self::Focus(output) => write!(f, "focus {output}"),
+            Self::BarKeyboard(Some(output)) => write!(f, "bar-keyboard {output}"),
+            Self::BarKeyboard(None) => f.write_str("bar-keyboard -"),
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
                 let app = app_word(app);
@@ -2429,6 +2437,11 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
+            Some("bar-keyboard") => Ok(Self::BarKeyboard(
+                Some(word(&mut words, "output")?)
+                    .filter(|o| *o != "-")
+                    .map(str::to_owned),
+            )),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let mut number = |what: &str| -> Result<i32, BadLine> {
@@ -3376,7 +3389,12 @@ mod tests {
         for message in to_shell
             .into_iter()
             .chain(keys)
-            .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
+            .chain([
+                ToShell::Outside,
+                ToShell::Focus("DP-2".into()),
+                ToShell::BarKeyboard(Some("DP-2".into())),
+                ToShell::BarKeyboard(None),
+            ])
             .chain(clips())
             .chain(screens)
             .chain(layouts)

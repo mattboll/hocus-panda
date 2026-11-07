@@ -27,7 +27,9 @@ use iced::{
 };
 
 pub(crate) use app::app_tile;
-pub(crate) use input::{Input, Pointer, awaited, cycle, input, keys, step};
+pub(crate) use input::{
+    Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
+};
 pub(crate) use list::{
     Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching, stack,
 };

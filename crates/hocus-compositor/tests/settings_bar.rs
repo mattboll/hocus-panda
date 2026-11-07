@@ -22,7 +22,7 @@ use std::{
     time::Duration,
 };
 
-use common::{BTN_LEFT, KEY_LEFTCTRL, KEY_LEFTMETA, WAIT, chord, wait};
+use common::{BTN_LEFT, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTSHIFT, WAIT, chord, wait};
 use hocus_compositor::{BarForm, Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use serde_json::Value;
 
@@ -391,9 +391,9 @@ fn back_to_the_form_of_its_width_forgets_the_click() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
-    // Super+B on the laptop's screen: mini, remembered in automatic.
+    // Super+Shift+B on the laptop's screen: mini, remembered in automatic.
     bed.hp.pointer_move(1280.0, 800.0);
-    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     bed.bar_is(BarForm::Mini)?;
     let state = bed.dir.path().join("state/hocuspanda/panel.toml");
     let kept = bed.hp.dispatch_until(WAIT, |_| {

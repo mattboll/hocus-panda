@@ -1075,7 +1075,7 @@ impl PanelSide {
 #[serde(rename_all = "kebab-case")]
 pub enum FormChoice {
     /// Full on a screen wide enough (bar.md §3), or as last chosen with a
-    /// click or `Super+B`.
+    /// click or `Super+Shift+B`.
     #[default]
     Auto,
     Full,

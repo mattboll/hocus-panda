@@ -1199,7 +1199,7 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   it: "La barre de l'écran du portable, à 55 %. Un clic sur un groupe
   allume sa ligne."
 - **The search** finds the rows by the spec's words and their keys;
-  "Forme de la barre", "Changer de forme à la main" (super+b, toggle-bar,
+  "Forme de la barre", "Changer de forme à la main" (super+shift+b, toggle-bar,
   clic, bord) and "Ordre des groupes" (ordre, monter, descendre,
   ranger; it lights Today's row) are the page's own rows.
 - **Choices made here (to confirm on the machine)**: the order's toast

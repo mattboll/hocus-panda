@@ -48,10 +48,49 @@ pub(crate) fn input<'a, T>(
     }
 }
 
+/// The popover opened by the keyboard (`Enter` on its item, bar.md §11),
+/// whose first control is yet to take the ring.
+static FIRST: std::sync::Mutex<Option<window::Id>> = std::sync::Mutex::new(None);
+
+/// Popover `id` was opened by the keyboard: its first control takes the
+/// ring as it next draws.
+pub(crate) fn opened_by_keyboard(id: window::Id) {
+    *FIRST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(id);
+}
+
+/// Whether popover `id` was opened by the keyboard and its first control
+/// is yet to take the ring: told once. A popover whose first control is
+/// not the first in its `Tab` order (the sound's slider) asks before
+/// [`keys`].
+pub(crate) fn first_control(id: window::Id) -> bool {
+    let mut first = FIRST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *first == Some(id) {
+        *first = None;
+        true
+    } else {
+        false
+    }
+}
+
 /// The keys for popover `id` that reached another of the shell's surfaces
-/// (see `popover::key`), while it is open.
+/// (see `popover::key`), while it is open; opened by the keyboard, a `Tab`
+/// first, so that its first control holds the ring.
 pub(crate) fn keys(id: window::Id) -> Vec<Pressed> {
-    let keys = crate::popover::take_keys();
+    let mut keys = crate::popover::take_keys();
+    if first_control(id) {
+        keys.insert(
+            0,
+            Pressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Tab),
+                modifiers: keyboard::Modifiers::empty(),
+                text: None,
+            },
+        );
+    }
     if !keys.is_empty() && crate::popover::with(|c| c.is_open(id)) {
         keys
     } else {

@@ -105,8 +105,11 @@ pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
 pub(crate) const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 pub(crate) const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 pub(crate) const ACCENT: Ink = crate::theme::ACCENT;
-pub(crate) const RING: f32 = 3.0;
-pub(crate) const RING_OUT: f32 = 2.0;
+/// The keyboard's ring (bar.md §11): 2 px wide, 3 px out from what holds
+/// the keyboard; with what it rings, it never reaches further than their
+/// sum, which the items' places leave room for.
+pub(crate) const RING: f32 = 2.0;
+pub(crate) const RING_OUT: f32 = 3.0;
 
 pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -713,19 +716,32 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
     }
 }
 
-/// The keyboard's ring around `rect`: 3 px of the accent, 2 px out.
+/// The keyboard's ring around `rect` (bar.md §11): 2 px of the accent as
+/// text, 3 px out, its radius the item's and as much again.
 pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let out = RING_OUT + RING / 2.0;
+    stroke_around(
+        f,
+        rect,
+        radius,
+        RING_OUT,
+        RING,
+        crate::theme::ACCENT_TEXT.get(),
+    );
+}
+
+/// A stroke `width` wide around `rect`, `out` px from it.
+fn stroke_around(f: &mut Frame, rect: Rectangle, radius: f32, out: f32, width: f32, colour: Color) {
+    let middle = out + width / 2.0;
     let path = Path::rounded_rectangle(
-        Point::new(rect.x - out, rect.y - out),
-        Size::new(rect.width + 2.0 * out, rect.height + 2.0 * out),
-        (radius + out).into(),
+        Point::new(rect.x - middle, rect.y - middle),
+        Size::new(rect.width + 2.0 * middle, rect.height + 2.0 * middle),
+        (radius + middle).into(),
     );
     f.stroke(
         &path,
         Stroke {
-            style: Style::Solid(ACCENT.get()),
-            width: RING,
+            style: Style::Solid(colour),
+            width,
             ..Stroke::default()
         },
     );
