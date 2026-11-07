@@ -238,7 +238,10 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
     let reports = sender.clone();
     std::thread::Builder::new()
         .name("agents' reports".to_owned())
-        .spawn(move || listen(&listener, &reports))
+        .spawn({
+            let perf = state.perf.counters.clone();
+            move || listen(&listener, &reports, &perf)
+        })
         .context("could not start the agents' reports' thread")?;
     tracing::info!(control = %path.display(), "agents' control socket");
     state.agents.socket = Some(path);
@@ -266,7 +269,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
 
 /// Takes the reporting connections, one at a time: each is a few lines,
 /// read for a second at most.
-fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
+fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus_perf::Counters) {
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(stream) => stream,
@@ -285,6 +288,15 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>) {
             let Ok(line) = line else {
                 break;
             };
+            // The Settings' page, for the day's performance (#655): noted
+            // here, the loop never told.
+            if let Some((pid, page)) = hocus_perf::record::settings_said(&line) {
+                perf.settings(pid);
+                if !page.is_empty() {
+                    perf.event(hocus_perf::EventKind::SettingsPage, page);
+                }
+                continue;
+            }
             if line.trim_end() == "msg screens" {
                 // The Settings' line stays open, on threads of its own.
                 let sender = sender.clone();

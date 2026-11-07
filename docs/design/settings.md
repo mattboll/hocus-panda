@@ -14,7 +14,8 @@ The maintainer decided on 2026-11-04:
   user;
 - the search finds French and English words and the file's keys;
 - 18 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets;
-  Accessibilité came with the accessibility issues, #422 to #424).
+  Accessibilité came with the accessibility issues, #422 to #424);
+  Performances (#655) made them 19.
 
 6.1 is the app's frame: the window, the sidebar, the home, the search, the
 toast with its undo, the file's reading, writing and watching, the model
@@ -66,9 +67,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 18 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 19 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came).
+came, 27 px since Performances came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -1807,6 +1808,45 @@ row.
   applications' icons; Super+V's "Historique coupé · Réglages" is a line,
   not a link.
 
+## Performances (#655)
+
+Issue #655, as the sprint's approved mockup and spec specify it (the
+recommended options): a day of the desktop's CPU and memory, as the
+compositor's recorder wrote it (docs/performance.md, "A day's view").
+Section `performance` (`hocus settings performance`), SYSTÈME's last row;
+a signal's notification opens it. `hocus perf day` reads the same files
+with the same report (`hocus_perf::report`).
+
+| Group (its note) | What | Where |
+|---|---|---|
+| (the day) | "‹", "Aujourd'hui, samedi 7 novembre" ("Hier, …", or the date), "session 08:30 → 18:30", "›"; "Jour \| 7 jours" on the right. ‹ › step through the days kept, inert at either end | the files' names |
+| (tiles, two by two) | CPU (the compositor's and the shell's average, in percent of one core, its CPU time, each one's); Mémoire (at the end, at the start, the peak and when, each one's); Images (the frames, those drawn while locked, the wakeups at rest a second); Mouvements (a moving wallpaper's running time, the frames of the desktop's motions, the power on battery or "sur secteur : puissance non mesurée") | the report's totals |
+| SIGNAUX ("2 aujourd'hui") | each signal in orange, "⚠ 15:10–15:25 : des images sans que rien ne bouge", what it measured and its rule, "Copier le rapport" (the signal, then the day as `hocus perf day` says it, to the clipboard; "Copié" for 2 s); then "✓ Rien d'autre" (or "✓ Aucun signal") with the kinds under their thresholds | the report's signals |
+| LA JOURNÉE ("une échelle par bande") | one canvas, five bands on one time axis, each with its own scale, never two: CPU stacked (the compositor blue, the shell green, a bucket's highest sample fainter above its average, the 10 % threshold dashed orange), the peaks numbered over their bars (orange for a signal's); the resident memory in two lines, a memory only growing dashed orange with "shell : ne fait que monter ⚠"; the frames a second in grey bars; what was happening (a tick per slice with events, the notable ones written: a screen, Réglages, verrouillé, fond animé, many windows); the machine's power on battery, "sur secteur : non mesurée" where on AC. Locked hatched grey through every band, a moving wallpaper hatched green over the CPU and the events. The hours under it | the day's samples in 160 slices |
+| LES PICS | a row per peak: its number (orange for a signal's), when (Martian Mono), what was happening (bold) and a line ("29 images/s · en usage · 2 autres événements"), its CPU and its length; a signal's row tinted orange, a moving wallpaper's green | the report's peaks |
+| ENREGISTREMENT | Mesurer la journée (a switch) | `[perf] record` |
+| | Les fichiers: "~/.local/state/hocuspanda/perf · 14 jours · moins de 1 Mo par jour", "Ouvrir le dossier ›" (`xdg-open`) | |
+
+- **"7 jours"**: the seven days up to the one shown, a row each: its
+  date, a bar of its average CPU (the week's highest full), its CPU, its
+  memory at the end, its signals ("⚠ 2 signaux"); a day recorded opens
+  on a click, one not recorded says "—".
+- **Read off the window's thread**: the day (and its week) is read on a
+  thread of the page's own the first time the page shows it and when the
+  day changes; nothing is read or drawn at rest. A day being recorded is
+  read again when the page opens.
+- **The page told**: the window tells the compositor its page as it
+  changes, with its process, on the control socket (`perf settings PID
+  NAME`, off its thread): the page's name is an event of the day, and the
+  Settings' CPU and memory are measured while they run.
+- **Choices made here (to confirm on the machine)**: the tiles are two by
+  two (the page is 720 px wide; the mockup's 1340 px window had them in a
+  row); the fourth tile is "Mouvements" (a moving wallpaper's time, the
+  motions' frames, the power) until the Matrix rain says its own time;
+  the chart has no hover (the peaks' table says what each number was);
+  the CPU's bars are the slice's average with its highest sample fainter
+  above it, so that a 40 s peak shows its height.
+
 ## Saving
 
 - **At once**, with no "Apply": a switch, a menu's choice, a segmented
@@ -2294,6 +2334,15 @@ the same bed with timedated faked on a D-Bus daemon of the test's own
 - `without_timedated_the_page_says_so`
 - `the_format_link_and_the_search_light_their_rows`
 - `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_perf.rs` (#655, Performances),
+the same bed with the compositor recording every 200 ms; the page's logic
+(the day read, the tiles, the chart's slices, the day picker) is tested in
+`hocus_settings::perf`, its look on screenshots of an invented day
+(`hocus_perf::fixture`):
+
+- `the_page_opened_is_in_the_day_and_the_settings_are_measured`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_applications.rs` (6.15), the same

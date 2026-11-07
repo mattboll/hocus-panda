@@ -343,6 +343,13 @@
 # skip-secrets = true
 # ignore = []
 
+# [perf]
+# The day's CPU and memory of the compositor and the shell, sampled every
+# 10 s on a thread of their own, kept 14 days in
+# ~/.local/state/hocuspanda/perf (Settings > Performances, and
+# `hocus perf day`). Followed live.
+# record = true
+
 # [agents]
 # How the bar calls you for the agents (Claude Code, Codex, herdr, and
 # what says its state with `hocus agent`), followed live. Which of their

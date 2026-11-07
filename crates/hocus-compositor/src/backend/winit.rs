@@ -183,6 +183,7 @@ impl WinitBackend {
     }
 
     fn render(&mut self, state: &mut State) {
+        let started = std::time::Instant::now();
         state.redraw = false;
         self.show_host_cursor(state);
         let age = self.backend.buffer_age().unwrap_or(0);
@@ -226,6 +227,7 @@ impl WinitBackend {
             }
         }
         state.send_frames(&self.output, shown.states.as_ref());
+        state.perf_scene(&self.output, started.elapsed());
         state.desktops_drawn(&self.output);
         state.read_under_grips(self.backend.renderer());
     }

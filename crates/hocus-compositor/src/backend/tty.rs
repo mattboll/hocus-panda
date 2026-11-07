@@ -1127,6 +1127,7 @@ impl TtyBackend {
         if !screen.powered {
             return;
         }
+        let started = std::time::Instant::now();
         let output = screen.output.clone();
         // What the frame did: drawn (or nothing to draw), and what its
         // elements' states were; `None` when it failed.
@@ -1200,6 +1201,7 @@ impl TtyBackend {
             }
         }
         state.send_frames(&output, Some(&states));
+        state.perf_scene(&output, started.elapsed());
         state.desktops_drawn(&output);
         if empty {
             pace(screen, crtc, state);

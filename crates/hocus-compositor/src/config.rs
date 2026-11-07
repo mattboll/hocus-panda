@@ -61,6 +61,8 @@ pub struct Config {
     pub agents: Agents,
     pub idle: Idle,
     pub power: Power,
+    /// A day's CPU and memory, recorded (#655, docs/performance.md).
+    pub perf: Perf,
     /// Every mouse, trackball and trackpoint (6.12).
     pub pointer: Pointer,
     /// Every touchpad (6.12).
@@ -217,6 +219,27 @@ impl CaptureFormat {
         match self {
             Self::Png => "png",
             Self::Jpeg => "jpg",
+        }
+    }
+}
+
+/// The day's performance, `[perf]` (#655, docs/performance.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Perf {
+    /// The compositor's and the shell's CPU and memory sampled every
+    /// 10 s on a thread of their own, kept 14 days in the state folder.
+    pub record: bool,
+    /// How often, when not every 10 s (tests). Not part of the file.
+    #[serde(skip)]
+    pub interval: Option<std::time::Duration>,
+}
+
+impl Default for Perf {
+    fn default() -> Self {
+        Self {
+            record: true,
+            interval: None,
         }
     }
 }

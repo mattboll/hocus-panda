@@ -289,8 +289,8 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            // 28 px: the 18 sections fit the window's 760 px.
-            .height(28)
+            // 27 px: the 19 sections fit the window's 760 px.
+            .height(27)
             .padding([0, 10])
             .on_press(on)
             .style(flat(
@@ -917,6 +917,9 @@ impl App {
         }
         if id == SectionId::Agents {
             return self.agents_page(page);
+        }
+        if id == SectionId::Performance {
+            return self.perf_page(page);
         }
         let settings = settings_of(id);
         if settings.is_empty() {
@@ -1720,7 +1723,7 @@ fn when(at: i64, lang: Lang) -> String {
 }
 
 /// `~/.config/hocuspanda/config.toml`.
-fn tilde(path: &std::path::Path) -> String {
+pub(super) fn tilde(path: &std::path::Path) -> String {
     let shown = path.display().to_string();
     match std::env::var("HOME") {
         Ok(home) if !home.is_empty() && shown.starts_with(&format!("{home}/")) => {
@@ -1880,6 +1883,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "applications": if app.page == Page::Section(SectionId::Apps) { app.apps_shown() } else { serde_json::Value::Null },
         "network": if app.page == Page::Section(SectionId::Network) { app.network_shown() } else { serde_json::Value::Null },
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
+        "perf": if app.page == Page::Section(SectionId::Performance) { app.perf_shown() } else { serde_json::Value::Null },
         "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
