@@ -1100,9 +1100,10 @@ page).
 | Group | What | Key |
 |---|---|---|
 | APERÇU | segmented "Tous les écrans \| Chaque écran"; the screens side by side, bottoms aligned, each with its background and the bar's strip on the primary, "Écran du portable · Nuit" under it; with "Chaque écran" a click chooses the screen the gallery applies to (green ring) | `[wallpaper] per-screen = false` |
-| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
+| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Pluie and Étoiles ("animé", #433), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "rain" \| "stars" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
 | | Remplissage (a picture of one's own): "Couvrir l’écran", "L’image entière", "Centrer, sans agrandir" | `[wallpaper] fit = "cover" \| "contain" \| "center"` |
 | | Couleur unie (the plain background, or around a picture not covering): six 24 px swatches, Nuit, Ardoise (default), Bleu profond, Sapin, Terre, Graphite | `[wallpaper] color = "#1b2233"` |
+| ANIMATION (#433) | Animer le fond, "La pluie à 15 images par seconde, les étoiles à 20.": switch; Sur batterie: menu "Ralentie (moitié)" (default), "Arrêtée", "Comme sur secteur"; then the line of when it stops by itself (a fullscreen window, the background more than 90 % covered, the screen locked or off, the power saver, reduced motion, 2 min without input; still under the bar) | `[wallpaper] animate = true`, `on-battery = "half" \| "still" \| "full"` |
 | ÉCRAN DE VERROUILLAGE | the lock's drawing (its source, the veil, the clock), a radio list: "Le fond du bureau, assombri" (default), "… flouté", "Une autre image"; then "Image du verrouillage", a list of the same backgrounds and "Choisir une image…" | `[wallpaper] lock = "dimmed" \| "blurred" \| "picture"`, `lock-picture` |
 
 - **Writing**: a tile, the scope and the lock's picture are keys the page
@@ -1141,10 +1142,11 @@ page).
   `Space`/`Enter` choose; `Delete` removes one's own), the fit's menu, the
   swatches (`←`/`→`), the lock's choices (arrows), the lock's picture
   (`Space` opens its list).
-- **The search** finds "Fond du bureau", "Fonds fournis", "Choisir une
-  image", "Un fond par écran", "Remplissage", "Couleur unie", "Écran de
-  verrouillage" and "Image du verrouillage" by the spec's nearby words
-  and their keys.
+- **The search** finds "Fond du bureau", "Fonds fournis", "Fonds animés"
+  ("animé", "pluie", "étoiles"), "Choisir une image", "Un fond par
+  écran", "Remplissage", "Couleur unie", "Animer le fond", "Sur batterie"
+  ("batterie"), "Écran de verrouillage" and "Image du verrouillage" by the
+  spec's nearby words and their keys.
 - **The accent "wallpaper"** is the primary screen's wallpaper's: Nuit's
   `#7A96E0`, Brume's, Aube's and Forêt's main glow's hue, the plain
   colour's, a picture's strongest hue, each lifted to the accents'
@@ -1167,6 +1169,33 @@ meanwhile (a screen's first frame draws a built-in at once, as before).
 The shell draws the lock's on a thread of its own from `wallpaper` on the
 line (each screen's picture, the lock's, the fit and the colour), the
 window its thumbnails on the page's thread. At rest nothing is drawn.
+
+**The wallpapers that move (#433).** Rain (cells of 14 × 22 logical px,
+each column's head `#CCFFCC` moving one cell per frame, its tail
+`#00F060` fading out in 6 steps, a glyph changing now and then, over
+`#02040A` to `#050B1C`) and Stars (three planes, about 900 stars drifting
+towards the viewer, the nearest some 6 px a second, twinkling, over a
+night-blue haze), in every theme; the rain's colours are tokens a theme
+sets (`hocus_link::moving::rain_colours`, phosphor green in every theme
+for now). The compositor draws them with GLES shaders straight into the
+screen's frame (`src/matrix.rs`, `src/moving.rs`), from their time alone;
+rain 15 frames a second, stars 20, half (and so half the pace) on
+battery, each a timer on the loop for the next frame due, never a frame
+queued per tick. Each screen decides alone: a moving wallpaper stops,
+its last frame staying and going on from there, under a fullscreen
+window, covered at 90 % or more by the windows shown, locked, off, under
+the idle curtain, 2 minutes after the last input (until the next), in
+power-profiles-daemon's power saver, with reduced motion, `animate =
+false`, and on battery with `on-battery = "still"`. The glass (the
+bar's, the popovers', the launcher's) blurs a still picture of the
+wallpaper, the moment it started, drawn by a second element of it: the
+panes are blurred once, never again at the wallpaper's frames. Without
+GLES (pixman), and in the lock (the shell's), the Settings' tiles and the
+preview, the still picture (`hocus_link::moving::still`, the same recipe
+at a fixed moment) is drawn once on a thread, at the screen's pixels, as a
+picture of one's own. The glyphs are the desktop's own drawings (46
+half-width katakana, the digits and 8 signs on 5 × 7 dots, drawn
+mirrored), one 64 × 64 atlas of 16 KB whatever the scale.
 
 **The compositor follows the file**: `[wallpaper]` and `[outputs.NAME]
 wallpaper` through `reload.rs`; a screen's `wallpaper` is not part of its
@@ -1420,6 +1449,7 @@ row.
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
+| | Ouvrir et fermer (#432) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the standard motion until its own is designed) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
 | VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
@@ -1448,7 +1478,8 @@ row.
 - **Not now**: with `[appearance] reduced-motion`, the wobble's row is at
   45 %, inert, its line in amber "Coupées tant que Mouvements réduits est
   activé." with "Apparence et langue ›" (6.2's row lit); its key keeps its
-  value. With `move-modifier = "super"` the ink's row is at 45 %, "Super +
+  value. "Ouvrir et fermer" too: "Un fondu court tant que Mouvements
+  réduits est activé."  With `move-modifier = "super"` the ink's row is at 45 %, "Super +
   glisser déplace les fenêtres : l'encre ne se lance plus. Choisis Alt
   pour la retrouver.", and choosing Super says so in its toast
   ("Déplacer : Super + glisser · l'encre ne se lance plus").

@@ -42,6 +42,15 @@ use crate::{App, State};
 pub struct Key {
     pub look: Look,
     pub size: (i32, i32),
+    /// The screen's scale in thousandths: a moving wallpaper's still
+    /// picture draws its cells at their logical size.
+    pub scale: u32,
+}
+
+impl Key {
+    fn scale(&self) -> f64 {
+        f64::from(self.scale.max(1)) / 1000.0
+    }
 }
 
 /// A background drawn for a screen.
@@ -121,7 +130,7 @@ fn draw(taken: &Receiver<Job>, sender: &channel::Sender<Drawn>) {
             last.push(job);
         }
         for Job { output, key } in last {
-            let rendered = hocus_link::wallpaper::render(&key.look, key.size);
+            let rendered = hocus_link::wallpaper::render_at(&key.look, key.size, key.scale());
             if sender
                 .send(Drawn {
                     output,
@@ -165,7 +174,9 @@ impl Backgrounds {
             return;
         }
         let first = !self.shown.contains_key(output);
-        let builtin = !matches!(key.look.picture, Picture::File(_));
+        // A still picture of a moving one is drawn at the screen's pixels:
+        // on the thread, as a picture is.
+        let builtin = matches!(key.look.picture, Picture::Builtin(_) | Picture::Plain);
         if (first && builtin) || self.jobs.is_none() {
             let look = if builtin {
                 key.look.clone()
@@ -359,6 +370,7 @@ impl State {
         let look = self.wallpaper_look(&primary);
         let accent = match look.picture {
             Picture::Builtin(builtin) => builtin.accent(),
+            Picture::Moving(moving) => moving.accent(),
             Picture::Plain => AccentColours::lifted(look.color),
             Picture::File(_) => return,
         };

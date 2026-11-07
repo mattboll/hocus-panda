@@ -158,6 +158,8 @@ pub struct State {
     /// Windows' pictures taken as their surfaces went.
     pub pictures: HashMap<WindowId, Snapshot>,
     pub leaving: Vec<Leaving>,
+    /// The windows' rains so far, for their seeds (#432).
+    pub rain_seeds: u32,
     /// Where a dragged window would snap, and the one fading out.
     pub preview: Option<Preview>,
     pub preview_out: Option<(Rect, Tween)>,
@@ -295,6 +297,8 @@ pub struct State {
     pub panes: std::cell::RefCell<crate::glass::Panes>,
     /// The screens' wallpapers (6.3), drawn on a thread of their own.
     pub backgrounds: std::cell::RefCell<crate::wallpaper::Backgrounds>,
+    /// The screens' wallpapers that move (#433).
+    pub walls: std::cell::RefCell<crate::moving::Walls>,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
     /// Keys whose press was a shortcut: their release is kept from the
@@ -447,6 +451,7 @@ impl State {
             grabber: Grabber::default(),
             pictures: HashMap::new(),
             leaving: Vec::new(),
+            rain_seeds: 0,
             preview: None,
             preview_out: None,
             switcher_repeat: None,
@@ -516,6 +521,7 @@ impl State {
             blur: false,
             panes: std::cell::RefCell::default(),
             backgrounds: std::cell::RefCell::default(),
+            walls: std::cell::RefCell::default(),
             session: None,
             kept_keys: HashSet::new(),
             layout_codes,

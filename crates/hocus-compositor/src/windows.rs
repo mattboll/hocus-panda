@@ -40,6 +40,8 @@ pub struct Managed {
     pub ids: FrameIds,
     /// Opening: from 94 % and transparent.
     pub opening: Option<Tween>,
+    /// Opening in a rain instead (#432).
+    pub rain: Option<crate::rain::Rain>,
     /// Whether it shows as focused, and since when it changes to that.
     pub focused: bool,
     pub focus_change: Option<Tween>,
@@ -163,6 +165,7 @@ impl Managed {
             window,
             ids: FrameIds::default(),
             opening: None,
+            rain: None,
             focused: false,
             focus_change: None,
             pulse: None,
@@ -204,6 +207,8 @@ pub struct Leaving {
     pub to: Rectangle<f64, Logical>,
     pub tween: Tween,
     pub fade: Tween,
+    /// Leaving in a rain (#432): drawn where it was, through the rain.
+    pub rain: Option<crate::rain::Rain>,
 }
 
 /// Where a dragged window would snap, and since when the pointer is there.
@@ -552,7 +557,11 @@ impl State {
         } else {
             motion::OPEN
         };
-        managed.opening = Some(Tween::new(now, duration, Bezier::SPRING));
+        // In a rain (#432), or as standard.
+        managed.rain = self.rain_on_map((size.w, size.h), now);
+        if managed.rain.is_none() {
+            managed.opening = Some(Tween::new(now, duration, Bezier::SPRING));
+        }
         if !takes_focus && !elsewhere {
             managed.pulse = Some((
                 Tween::new(now, motion::PULSE, Bezier::LINEAR),
@@ -802,8 +811,11 @@ impl State {
         let Some(from) = self.visual_rect(id, now) else {
             return;
         };
+        let rain = (!minimizing)
+            .then(|| self.rain_on_close(id, (from.size.w, from.size.h), now))
+            .flatten();
         let reduced = self.reduced_motion();
-        let to = if reduced {
+        let to = if reduced || rain.is_some() {
             from
         } else if minimizing {
             self.bar_place(id).unwrap_or(from)
@@ -818,13 +830,17 @@ impl State {
             (false, true) => (motion::MINIMIZE, Bezier::EASE_IN),
             (false, false) => (motion::CLOSE, Bezier::EASE_IN),
         };
-        let tween = Tween::new(now, duration, curve);
+        let tween = match &rain {
+            Some(rain) => Tween::new(now, rain.duration(), Bezier::LINEAR),
+            None => Tween::new(now, duration, curve),
+        };
         self.leaving.push(Leaving {
             picture,
             from,
             to,
             tween,
             fade: tween,
+            rain,
         });
         self.redraw = true;
     }
@@ -1338,6 +1354,8 @@ impl State {
         };
         // Locked (7.1): the lock's own motion alone; nothing else is drawn.
         if let Some(moving) = self.lock_tick(now) {
+            // The wallpapers that move stop (#433).
+            self.tick_walls(&mut |_| {});
             self.judge_still(moving, as_of_frame);
             return;
         }
@@ -1345,6 +1363,13 @@ impl State {
         let mut next: Option<Duration> = None;
         let mut wake = |at: Duration| next = Some(next.map_or(at, |n: Duration| n.min(at)));
         for managed in self.windows.values_mut() {
+            if let Some(rain) = &managed.rain {
+                if rain.done(now) {
+                    managed.rain = None;
+                } else {
+                    moving = true;
+                }
+            }
             for tween in [&mut managed.opening, &mut managed.focus_change] {
                 if let Some(t) = tween {
                     if t.done(now) {
@@ -1416,6 +1441,8 @@ impl State {
         moving |= self.tick_ink(now, &mut wake);
         moving |= self.tick_magnifier(now, &mut wake);
         moving |= self.tick_opacity(now, &mut wake);
+        // The wallpapers that move, at their own pace (#433).
+        self.tick_walls(&mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {

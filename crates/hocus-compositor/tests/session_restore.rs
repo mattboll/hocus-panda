@@ -280,16 +280,22 @@ fn the_windows_come_back_in_their_places_on_their_screens_and_desktops() -> anyh
                 && k.mode == format!("{:?}", Mode::Snapped(Zone::Maximized)))
     );
 
-    let mut hp = session(&tree, &two(), tree.config(), false)?;
+    // The windows rain as they open (#432), but not those coming back.
+    let mut config = tree.config();
+    config.windows.animation = hocus_compositor::WindowAnimation::Rain;
+    let mut hp = session(&tree, &two(), config, false)?;
     // Nothing starts before the bar shows.
     wait(&mut hp, Duration::from_millis(300))?;
     assert!(hp.placements().is_empty());
     assert!(hp.session_restoring());
     bar(&mut hp)?;
+    let rains = std::cell::Cell::new(0);
     let back = hp.dispatch_until(WAIT, |hp| {
+        rains.set(rains.get().max(hp.rains()));
         !hp.session_restoring() && kept(hp, APP).len() == 3
     })?;
     anyhow::ensure!(back, "not back: {:?}", hp.placements());
+    assert_eq!(rains.get(), 0, "none of them rained");
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(kept(&hp, APP), before);
     assert!(hp.session_not_back().is_empty());

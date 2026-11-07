@@ -316,6 +316,30 @@ mod tests {
     }
 
     #[test]
+    fn the_moving_wallpapers_and_the_rain_are_found() {
+        let ids = |q| -> Vec<String> {
+            find(q, Lang::French)
+                .iter()
+                .map(|f| f.target.id())
+                .collect()
+        };
+        for q in ["animé", "pluie", "étoiles"] {
+            assert!(
+                ids(q).iter().any(|id| id == "wallpaper.moving"),
+                "{q}: {:?}",
+                ids(q)
+            );
+        }
+        assert!(
+            ids("batterie")
+                .iter()
+                .any(|id| id == "wallpaper.on-battery")
+        );
+        assert!(ids("pluie").iter().any(|id| id == "windows.animation"));
+        assert!(ids("animer").iter().any(|id| id == "wallpaper.animate"));
+    }
+
+    #[test]
     fn english_words_and_the_files_keys_find_too() {
         assert_eq!(names("sleep", Lang::French)[0], "Mettre en veille après");
         assert_eq!(

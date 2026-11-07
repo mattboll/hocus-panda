@@ -64,6 +64,15 @@ impl CompositorHandler for State {
                 window.on_commit();
                 self.window_commits += 1;
                 self.perf.counters.app_commit();
+                // Raining (#432): its picture is drawn again.
+                if let Some(rain) = self
+                    .windows
+                    .values()
+                    .filter(|m| m.window == window)
+                    .find_map(|m| m.rain.as_ref())
+                {
+                    rain.stale.set(true);
+                }
             }
         }
         xdg_shell::handle_commit(self, surface);

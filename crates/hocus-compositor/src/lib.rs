@@ -47,8 +47,10 @@ mod levels;
 pub mod lock;
 mod magnet;
 mod magnifier;
+mod matrix;
 pub mod model;
 pub mod motion;
+mod moving;
 mod night_light;
 mod opacity;
 mod output_spec;
@@ -64,6 +66,7 @@ mod popups;
 mod programs;
 pub mod radial;
 mod radial_draw;
+mod rain;
 pub mod record;
 mod reload;
 mod reminders;
@@ -99,13 +102,15 @@ pub use backend::headless::{HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
-    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FollowPointer,
-    FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings,
-    NightLight, OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings,
-    PanelScreens, PeekRule, Perf as PerfSettings, Power as PowerSettings, PowerAc, PowerBattery,
-    PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings,
-    SetScreen, SoundPrograms, SystemKeyboard, Windows,
+    Agents as AgentsSettings, AltTab, Animation as WindowAnimation, Appearance,
+    Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings, Config,
+    Delay as PowerDelay, Desktops, DragKey, FollowPointer, FormChoice, HaloRule,
+    Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings, NightLight,
+    OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, OutputSettings,
+    Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
+    Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
+    Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
+    SystemKeyboard, Wallpaper as WallpaperSettings, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
