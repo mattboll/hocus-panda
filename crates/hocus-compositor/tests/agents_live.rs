@@ -486,11 +486,14 @@ fn pandas_off_draws_dots_in_the_rows() -> anyhow::Result<()> {
     bed.logged_after(0, &["rows=dots", "the agents' rows show them"])?;
     bed.agent_is("build", "working")?;
     bed.agent_is("infra", "waiting")?;
-    // The panda's place: 6 px into the row, 30 px wide; the row's middle
-    // is 92 px in from its left.
-    let dot = |(x, y): (f64, f64)| (x - 92.0 + 6.0 + 15.0, y);
+    // The panda's place: 6 px into the row, 42 px wide; a waiting agent's
+    // card's 2 px in, 60 px wide (#649); the row's middle is 92 px in from
+    // its left.
     let rows = bed.rows(&["infra", "build"])?;
-    let (infra, build) = (dot(rows[0]), dot(rows[1]));
+    let (infra, build) = (
+        (rows[0].0 - 92.0 + 2.0 + 30.0, rows[0].1),
+        (rows[1].0 - 92.0 + 6.0 + 21.0, rows[1].1),
+    );
     bed.pixel_becomes(infra, 0xF5B44A, true)?;
     bed.pixel_becomes(build, 0x6CC287, true)?;
     let from = bed.mark();

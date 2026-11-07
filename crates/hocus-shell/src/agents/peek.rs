@@ -415,14 +415,24 @@ fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
 fn middle(bar: &str, id: Option<u64>, form: Form) -> f32 {
     let top = super::draw::top(bar, form);
     if form == Form::Mini {
-        return top + super::MINI_PAD_TOP + super::HEAD / 2.0;
+        return top + super::MINI_PAD_TOP + super::MINI_HEAD / 2.0;
     }
+    // Its row's middle, under the rows above it (cards among them, #649).
     let row = match super::said().shows(now_us()) {
-        super::Shows::Lines(lines) => lines.rows.iter().position(|r| Some(r.id) == id),
+        super::Shows::Lines(lines) => {
+            let at = lines.rows.iter().position(|r| Some(r.id) == id);
+            at.map(|i| {
+                let above: f32 = lines.rows[..i]
+                    .iter()
+                    .map(|r| super::row_height(r.look))
+                    .sum();
+                above + super::row_height(lines.rows[i].look) / 2.0
+            })
+        }
         _ => None,
     };
     match row {
-        Some(i) => top + super::HEADER + super::GAP + (i as f32 + 0.5) * super::AGENT_ROW,
+        Some(middle) => top + super::HEADER + super::GAP + middle,
         None => top + super::HEADER / 2.0,
     }
 }
