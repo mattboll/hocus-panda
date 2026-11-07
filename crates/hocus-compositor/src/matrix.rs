@@ -369,7 +369,8 @@ void main() {
 }
 ";
 
-/// Givre's aurora (#740): `hocus_link::moving::aurora` and its stars.
+/// Givre's aurora (#740): `hocus_link::moving::aurora` and its stars, in
+/// the same words.
 const WALL_AURORA: &str = "
 uniform vec2 screen;
 uniform float time;
@@ -381,21 +382,34 @@ uniform vec3 veil1;
 uniform vec3 veil2;
 uniform vec3 star;
 
+// `hocus_link::moving::noise`: smooth value noise along `x`.
+float noise(float x, float seed) {
+    float i = floor(x);
+    float f = x - i;
+    return mix(h(vec2(i, seed)), h(vec2(i + 1.0, seed)), f * f * (3.0 - 2.0 * f));
+}
+
 void main() {
     vec2 uv = v_px / screen;
     vec3 colour = mix(top, bottom, uv.y);
     float x = uv.x * screen.x / screen.y;
     for (int i = 0; i < 3; i++) {
         float f = float(i);
-        float centre = 0.30 + 0.12 * f
-            + 0.06 * sin(x * 1.7 + time * 0.13 * (1.0 + f * 0.4) + f * 2.1)
-            + 0.035 * sin(x * 4.3 - time * 0.21 + f * 1.3);
+        float xs = x + time * 0.012 * (1.0 + 0.5 * f);
+        float centre = 0.28 + 0.13 * f
+            + 0.05 * sin(xs * 1.3 + time * 0.11 + f * 2.1)
+            + 0.07 * (noise(xs * 2.2 + time * 0.03, 11.0 + f) - 0.5);
         float d = uv.y - centre;
-        float rays = 0.55 + 0.45 * sin(x * 38.0 + sin(x * 3.0 + time * 0.3) * 4.0 + f * 5.0);
-        float curtain = d > 0.0 ? exp(-d * d / 0.0018) : exp(-d * d / 0.03) * rays;
-        float shimmer = 0.75 + 0.25 * sin(time * 0.7 + x * 2.0 + f);
+        float folds = 0.25 + 0.75 * (0.6 * noise(xs * 9.0 + time * 0.08, 21.0 + f)
+            + 0.4 * noise(xs * 23.0 - time * 0.05, 31.0 + f));
+        float rise = 0.08 + 0.16 * noise(xs * 4.0 + time * 0.04, 41.0 + f);
+        float above = exp(-d * d / (rise * rise)) * folds;
+        float below = exp(-d * d / 0.0045) * (0.6 + 0.4 * folds);
+        float curtain = mix(above, below, smoothstep(-0.03, 0.03, d));
+        float shimmer = 0.8 + 0.2 * sin(time * 0.5 + xs * 1.5 + f);
         vec3 veil = i == 0 ? veil0 : (i == 1 ? veil1 : veil2);
-        colour += veil * curtain * shimmer * 0.55;
+        float weight = i == 0 ? 0.42 : (i == 1 ? 0.72 : 0.36);
+        colour += veil * curtain * shimmer * weight;
     }
     colour = min(colour, vec3(1.0));
     float size = 24.0 * scale;

@@ -604,3 +604,150 @@ fn the_days_record_says_when_it_moves_and_stops() -> anyhow::Result<()> {
     assert!(still_said, "{:?}", said(dir.path()));
     Ok(())
 }
+
+/// The still copy of a moving wallpaper only feeds the glass: beside the
+/// bar, in its gap to the screen's edges and outside its rounded corners,
+/// the screen shows the moving wallpaper exactly as a screen without a bar
+/// does at the same moment; under the bar, the glass's blur of the still
+/// copy. Each wallpaper, two compositors stepped alike.
+#[test]
+fn the_still_copy_only_feeds_the_glass() -> anyhow::Result<()> {
+    for picture in ["rain", "stars", "aurora"] {
+        let mut config = moving(picture);
+        config.panel.form = hocus_compositor::FormChoice::Full;
+        let Some(mut barred) = gles(config.clone(), &[(1280, 800)])? else {
+            return Ok(());
+        };
+        let Some(mut bare) = gles(config, &[(1280, 800)])? else {
+            return Ok(());
+        };
+        barred.hold_clock();
+        bare.hold_clock();
+        std::mem::forget(common::client(barred.socket(), Some(Shows::ClearBar))?);
+        let drawn = barred.dispatch_until(common::WAIT, |hp| {
+            hp.bar_surfaces().first().is_some_and(|(_, r)| r.width > 0)
+        })?;
+        anyhow::ensure!(drawn, "no bar surface");
+        let bar = barred.bar_surfaces()[0].1;
+        for _ in 0..90 {
+            barred.step(STEP)?;
+            bare.step(STEP)?;
+        }
+        assert!(barred.glass_on(), "{picture}");
+        let (a, b) = (barred.screenshot(0)?, bare.screenshot(0)?);
+        let at = |shot: &(i32, i32, Vec<u8>), x: i32, y: i32| {
+            let i = ((y * shot.0 + x) * 4) as usize;
+            [shot.2[i], shot.2[i + 1], shot.2[i + 2]]
+        };
+        let (right, bottom) = (bar.x + bar.width, bar.y + bar.height);
+        let mut beside = Vec::new();
+        // Left of the bar, every fourth pixel.
+        for y in (0..800).step_by(4) {
+            for x in (0..bar.x - 1).step_by(4) {
+                beside.push((x, y));
+            }
+        }
+        // Its gaps: to the right edge, above and below it.
+        for y in (0..800).step_by(2) {
+            for x in right + 1..1280 {
+                beside.push((x, y));
+            }
+        }
+        for x in (bar.x..right).step_by(2) {
+            for y in (0..bar.y - 1).chain(bottom + 1..800) {
+                beside.push((x, y));
+            }
+        }
+        // Outside its rounded corners.
+        for (x, y) in [
+            (bar.x, bar.y),
+            (right - 1, bar.y),
+            (bar.x, bottom - 1),
+            (right - 1, bottom - 1),
+        ] {
+            beside.push((x, y));
+        }
+        let differ: Vec<_> = beside
+            .iter()
+            .filter(|(x, y)| at(&a, *x, *y) != at(&b, *x, *y))
+            .take(5)
+            .collect();
+        assert!(differ.is_empty(), "{picture}, bar {bar:?}: {differ:?}");
+        // Under the bar: the glass, not the moving wallpaper.
+        let under = (bar.y + 40..bottom - 40)
+            .step_by(4)
+            .flat_map(|y| (bar.x + 20..right - 20).step_by(4).map(move |x| (x, y)))
+            .filter(|(x, y)| at(&a, *x, *y) != at(&b, *x, *y))
+            .count();
+        assert!(
+            under > 100,
+            "{picture}: the glass shows ({under} pixels differ)"
+        );
+    }
+    Ok(())
+}
+
+/// The aurora for the maintainer, written to `$HOCUS_SHOTS`: without a
+/// bar, a second apart; under the bar's glass (a clear surface stands for
+/// the shell's bar, so the glass shows alone); its still picture. Run by
+/// hand (`--run-ignored only`).
+#[test]
+#[ignore = "screenshots, by hand"]
+fn shots_of_the_aurora() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let save = |hp: &mut Headless, name: &str| -> anyhow::Result<()> {
+        let (w, h, px) = hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        image.save(out.join(format!("{name}.png")))?;
+        Ok(())
+    };
+    let mut config = moving("aurora");
+    config.panel.form = hocus_compositor::FormChoice::Full;
+    let mut hp = Headless::start_with(sized(common::gles(), &[(1440, 900)]), config.clone())?;
+    anyhow::ensure!(hp.renderer() == "gles", "no GLES here");
+    hp.hold_clock();
+    hp.step(STEP)?;
+    save(&mut hp, "aurora-v2-a")?;
+    for _ in 0..60 {
+        hp.step(STEP)?;
+    }
+    save(&mut hp, "aurora-v2-b")?;
+    for _ in 0..600 {
+        hp.step(Duration::from_millis(50))?;
+    }
+    save(&mut hp, "aurora-v2-c-30s-later")?;
+    std::mem::forget(common::client(hp.socket(), Some(Shows::ClearBar))?);
+    hp.dispatch_until(common::WAIT, |hp| {
+        hp.bar_surfaces().first().is_some_and(|(_, r)| r.width > 0)
+    })?;
+    hp.step(STEP)?;
+    save(&mut hp, "aurora-v2-under-the-glass")?;
+    let mut still = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(1440, 900)],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )?;
+    still.dispatch_until(common::WAIT, |hp| {
+        hp.state()
+            .backgrounds
+            .borrow()
+            .shown
+            .values()
+            .any(|s| s.picture == (1440, 900))
+    })?;
+    common::at_rest(&mut still)?;
+    save(&mut still, "aurora-v2-still")
+}
