@@ -705,6 +705,49 @@ impl Headless {
         self.app.state.autostart = crate::session::autostart::Autostart::Waiting(dirs);
     }
 
+    /// The session is saved in the configuration's state directory, and
+    /// the last one saved there put back once the bar shows, as
+    /// `--session` does (windows.md §14); asked before the loop runs.
+    pub fn restore_session(&mut self) {
+        self.app.state.session_begin();
+    }
+
+    /// Saves the session now, and waits until it is written.
+    pub fn save_session(&mut self) -> anyhow::Result<()> {
+        self.app.state.session_save();
+        anyhow::ensure!(
+            self.app.state.session_flush(Duration::from_secs(10)),
+            "the session was not written"
+        );
+        Ok(())
+    }
+
+    /// The session ends, as the compositor's does: saved and written.
+    pub fn end_session(&mut self) {
+        self.app.state.session_end();
+    }
+
+    /// Whether the last session is still coming back.
+    pub fn session_restoring(&self) -> bool {
+        self.app.state.session_restoring()
+    }
+
+    /// The last session's applications that did not come back, by name.
+    pub fn session_not_back(&self) -> Vec<String> {
+        self.app.state.session_not_back().to_vec()
+    }
+
+    /// Runs `action` on window `id`, as its radial menu does (#723).
+    pub fn window_action(&mut self, id: WindowId, action: hocus_link::WindowAction) {
+        self.app.state.run_window_action(id, action);
+    }
+
+    /// Puts floating window `id` at `rect` (global), as a drag and a
+    /// resize would.
+    pub fn place_window(&mut self, id: WindowId, rect: Rect) {
+        self.app.state.configure(id, rect);
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);
@@ -993,6 +1036,12 @@ impl Headless {
     /// The lid closes, or opens (a laptop's switch).
     pub fn lid(&mut self, closed: bool) {
         self.app.state.lid(closed);
+    }
+
+    /// The session back from another terminal, as the tty backend says
+    /// it (what it does beyond the screens).
+    pub fn session_back(&mut self) {
+        self.app.state.session_back();
     }
 
     /// Output `name` is a laptop's own screen: the lid closes over it.

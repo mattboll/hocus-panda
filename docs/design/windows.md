@@ -1078,6 +1078,62 @@ they are built.
   portal a previous session left running is restarted then (see
   [sharing](sharing.md#511b-a-portal-left-by-a-previous-session-2026-11-03)).
 
+### The last session comes back (#725)
+
+Decided with the maintainer (2026-11-06): the applications open at log
+out come back at log in by themselves, without a prompt; a setting turns
+it off (`[session] restore`, on by default; the Settings' Applications
+page, "Rouvrir les applications de la dernière session", settings.md).
+
+- **What is saved**, in `$XDG_STATE_HOME/hocuspanda/session` (TOML), for
+  each window: its application's desktop entry (found from its app id:
+  the entry of that id, else the one whose `StartupWMClass` it is, else
+  the one whose id ends with it, `org.mozilla.firefox` for `firefox`), its
+  app id, its screen by identity (§12) with that screen's size and work
+  area, its desktop, where it floats (where it goes back to when it is
+  snapped, maximised or fullscreen), its state, kept above, on all
+  desktops; the windows of one application in the order they opened. A
+  window waiting for a screen gone is saved where it was on that screen.
+  Never saved: dialogs, the Settings, the shell's own surfaces, windows
+  whose application has no desktop entry.
+- **When**: 3 s after windows changed (opened, closed, moved, resized,
+  sent elsewhere, their state), and as the session ends; log out, restart
+  and shut down save it before they ask the windows to close, and
+  nothing after (cancelled, saving goes on). So a crash or a power cut
+  keeps a recent session. The snapshot is the model's data, taken on the
+  loop; a thread of its own finds the desktop entries and writes the file
+  when it changed, through a temporary file. At rest nothing is woken.
+- **At log in** (`--session`), once the bar shows, with the start-up
+  applications (6.15): each saved application starts once, as the
+  launcher starts it (its entry read again, its `Exec` without a shell,
+  its `Path`, its terminal); not one the autostart starts (the same entry
+  id or the same program), whose windows still go back. Each window that
+  maps takes the first saved place of its application (by app id) still
+  waiting, before its first frame where it can (its size in its first
+  configure): its screen, desktop, place, state, kept above, on all
+  desktops; it opens there without pulsing. Its screen not there: it goes
+  to the screen it opened on, on the same-numbered desktop, at the same
+  share of the work area, in its state, and waits for its screen as a
+  window of a screen unplugged does (§12): it goes back when that screen
+  comes. 30 s after the applications started, the places not taken are
+  dropped.
+- **An application that does not come back** (no longer installed, its
+  program would not run, it ended in error before a window, or no window
+  in 30 s) is skipped, its places dropped; the others come back. Once
+  every application came back or failed, one notification (5.3) names
+  those that did not: "Slack et Signal n’ont pas pu être rouvertes." /
+  "Slack and Signal could not be reopened."
+- Until they come back, the saved windows waiting stay in what is saved:
+  a log out meanwhile loses none.
+- Headless and nested, nothing is saved or restored; tests ask for it
+  (`Headless::restore_session`).
+- **Ported from the first build** (`v0-first-build`, #31): the file of
+  windows, one start per application, matching by app id in order, the
+  save some seconds after a change and at the end with a short wait. Not
+  ported: its card asking what to put back (decided: no prompt), its boot
+  screen, its matching by title (titles change), and its commands taken
+  from the processes (the desktop entry is what starts an application).
+
 ## 15. Performance
 
 - At rest: no frame drawn on an output where nothing changes.

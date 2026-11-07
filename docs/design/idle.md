@@ -256,8 +256,9 @@ the lock as usual (the screens come on with it).
     starts (once `PrepareForSleep` is listened to) and again after each
     sleep: its file descriptor is held on the loop;
   - `PrepareForSleep(true|false)`, handed to the loop;
-  - UPower's `OnBattery` and its display device's `Percentage` (when
-    `IsPresent`), power-profiles-daemon's `ActiveProfile`, read as it
+  - UPower's `OnBattery`, `LidIsClosed` and its display device's
+    `Percentage` (when `IsPresent`), power-profiles-daemon's
+    `ActiveProfile`, read as it
     starts, again on a `PropertiesChanged` under `/org/freedesktop/UPower`
     and when either comes back; only what changed goes to the loop;
   - logind's `Inhibit("handle-lid-switch:handle-power-key", …,
@@ -276,7 +277,17 @@ the lock as usual (the screens come on with it).
   30 s from then).
 - **The lid**: libinput's lid switch, what `[power] lid` says (6.10,
   below); opened, the laptop's own screens (eDP, LVDS, DSI connectors)
-  on again, as the user's input.
+  on again, as the user's input. A lid opened while the machine sleeps
+  may never come as an event (#730), so at `PrepareForSleep(false)` and
+  back from another terminal the lid is read again off the loop: UPower's
+  `LidIsClosed`, and on the machine's bus ACPI's
+  `/proc/acpi/button/lid/*/state`; open if either says so. Until the
+  answer, and for good if neither can say, the laptop's screen is lit
+  when no other screen is on: never the only screen black on a state
+  from before the sleep. Read closed, the panel goes off again as the
+  lid wants, nothing more (no sleep again, no lock). UPower saying the
+  lid opened is taken at any time, as the switch's event; its closing is
+  left to libinput's event.
 
 ### The Énergie page's actions (6.10)
 
@@ -370,7 +381,11 @@ UPower and power-profiles-daemon on a private system bus, a fake
 notifications server on a private session bus): the delays of each
 source, plugging in keeping the time spent, locking off, sleeping after a
 while (and held by a video or logind's `idle` inhibitor), the lid, the
-power button, the automatic power saver, a delay changed on disk.
+power button, the automatic power saver, a delay changed on disk; the lid
+read again after a sleep (opened while asleep without a signal: the
+panel on; still closed: off again, no new sleep, until UPower says it
+opened; unknown: the only screen lit) and back from another terminal
+(`Headless::session_back`; docked, the laptop's screen stays off).
 
 The screenshots of the pull request: `tests/away_shots.rs`
 (`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test away_shots

@@ -34,8 +34,10 @@ pub enum Autostart {
 impl crate::State {
     /// A commit of the shell's bar `layer`: its first frame (or another
     /// bar's, later) starts the start-up applications, the first time.
+    /// The last session's applications start then too, before the
+    /// start-up ones, which they tell apart (windows.md §14).
     pub(crate) fn bar_committed(&mut self, layer: &LayerSurface) {
-        if !matches!(self.autostart, Autostart::Waiting(_)) {
+        if !matches!(self.autostart, Autostart::Waiting(_)) && !self.session_waits() {
             return;
         }
         let drawn = with_renderer_surface_state(layer.wl_surface(), |s| s.buffer().is_some())
@@ -43,6 +45,11 @@ impl crate::State {
         if !drawn {
             return;
         }
+        let dirs = match &self.autostart {
+            Autostart::Waiting(dirs) => dirs.clone(),
+            Autostart::Off | Autostart::Started => Vec::new(),
+        };
+        self.session_restore_start(dirs);
         let Autostart::Waiting(dirs) = std::mem::replace(&mut self.autostart, Autostart::Started)
         else {
             return;

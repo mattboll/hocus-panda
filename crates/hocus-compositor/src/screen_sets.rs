@@ -195,7 +195,7 @@ impl State {
     }
 
     /// The connector of the screen plugged now as `key`.
-    fn connector_of(&self, key: &str) -> Option<String> {
+    pub(crate) fn connector_of(&self, key: &str) -> Option<String> {
         self.displays
             .outputs
             .iter()

@@ -95,7 +95,7 @@ pub use config::{
     HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
     Overview as OverviewSettings, PanelScreens, PeekRule, Power as PowerSettings, PowerAc,
     PowerBattery, PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet,
-    SetScreen, SoundPrograms, SystemKeyboard, Windows,
+    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -262,6 +262,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
+        // Saved from now on; the last one put back once the bar shows.
+        state.session_begin();
     }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
@@ -298,6 +300,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop
         .run(None, &mut app, App::after_dispatch)
         .context("the event loop failed")?;
+    // The session as it ends, for the next log in (windows.md §14).
+    app.state.session_end();
     remove_sockets(&app.state);
     let ending = app.state.ending;
     drop(app);

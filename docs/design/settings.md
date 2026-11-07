@@ -1552,7 +1552,8 @@ tes fichiers, et celles qui démarrent avec la session."
 | | Terminal | menu: Automatique, the terminals, Autre commande… | `[programs] terminal` |
 | | Vidéos | menu | `video/mp4`, `video/webm`, `video/x-matroska`, `video/quicktime`, `video/x-msvideo`, `video/mpeg`, `video/ogg` |
 | | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
-| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | Rouvrir les applications de la dernière session | a switch | `[session] restore` |
+| | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
 
 - **Reading**: a thread of the page's own (`src/applications.rs`),
   started the first time the page shows, reads the desktop entries as
@@ -1620,6 +1621,13 @@ tes fichiers, et celles qui démarrent avec la session."
   the card at 45 %, with no switch ("Prévue pour GNOME.").
 - **The session** starts them (the compositor, `--session` only): see
   [packaging/README.md](../../packaging/README.md).
+- **Rouvrir les applications de la dernière session** ("Celles ouvertes
+  à la déconnexion reviennent, chaque fenêtre à sa place."), the card's
+  first row: a switch, `[session] restore`, on by default; the
+  compositor reads it at the next log in ([windows.md
+  §14](windows.md#the-last-session-comes-back-725)). Searched as session,
+  rouvrir, restaurer, dernière session, fenêtres, déconnexion (reopen,
+  restore, last session, log out).
 - **Keyboard**: the menus open with `Space`, `Enter` or `Alt+↓`, `↑`/`↓`
   move, `Enter` chooses, `Esc` closes; a switch's ✕ comes after it in the
   `Tab` order, and `Delete` on a user's row's switch removes it.

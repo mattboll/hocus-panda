@@ -385,6 +385,12 @@
 # and xterm found in PATH.
 # terminal = ""
 
+# [session]
+# At log in, the applications open at the last log out start again, each
+# window back in its place: its screen, desktop, place and state. The
+# session is kept in $XDG_STATE_HOME/hocuspanda/session.
+# restore = true
+
 # [desktops]
 # Desktops on each screen, from 1 to 9. Each screen switches its own.
 # Followed as the file changes: more are added after the last, empty;

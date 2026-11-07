@@ -5,10 +5,12 @@
 //! (`packaging/hocuspanda-session`) takes them back when it ends. A
 //! desktop portal a previous session left running is restarted then
 //! ([`portals`]). Once the bar shows, the session's start-up applications
-//! start ([`autostart`]).
+//! start ([`autostart`]), and the last session's applications come back,
+//! each window in its place ([`restore`]).
 
 pub mod autostart;
 pub mod portals;
+pub mod restore;
 
 use std::process::Output;
 
