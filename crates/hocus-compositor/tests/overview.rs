@@ -579,3 +579,20 @@ fn the_corner_acts_only_where_the_pointer_stops_and_when_on() -> anyhow::Result<
     open_now(&mut hp)?;
     Ok(())
 }
+
+/// The session starting with the pointer at a screen's top-left corner,
+/// as a headless one does at 0, 0 (#727): no entry, nothing opens, even as
+/// the desktop moves it in place; once it has gone away and come back, the
+/// corner acts.
+#[test]
+fn the_pointer_starting_in_the_corner_opens_nothing() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    hp.pointer_move(0.0, 0.0);
+    hp.pointer_move(3.0, 2.0);
+    hp.pointer_move(0.0, 0.0);
+    wait(&mut hp, Duration::from_millis(400))?;
+    assert_eq!(hp.overview(), None);
+    into_the_corner(&mut hp);
+    open_now(&mut hp)?;
+    Ok(())
+}

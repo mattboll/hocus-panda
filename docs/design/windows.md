@@ -812,6 +812,14 @@ s8a mockup, questions 12 to 15):
   layout's outer edges still stop it. This is a mouse's or a touchpad's
   motion; an absolute one (a tablet, a virtual machine's pointer) goes
   where it points.
+- **Where the pointer starts**: the display manager's place is not
+  handed over, so the session starts with the pointer in the primary
+  screen's middle, never in a screen's corner (where the overview's hot
+  corner is): as the screens light up it goes there, until the user first
+  moves it. Whenever the screens change with the pointer outside all of
+  them, it goes there too. A headless compositor keeps it where its tests
+  put it, from 0, 0; its hot corner only acts once the pointer has been
+  away (§12b).
 - **X11 applications** (question 15, A): XWayland's windows draw at 1;
   on a screen at 2 they are shown at their logical size, enlarged, a
   little soft. Their geometry is the same logical size on every screen.
@@ -860,7 +868,9 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   screen's top-left corner (its first logical pixel, where the pointer
   stops pushed up and left) opens the overview, or closes it, as
   `Super+W`. Once per entry: it acts again only after the pointer has
-  gone 8 px away. Not on a screen whose bar stands on the left (its
+  gone 8 px away; at the session's start it acts only once the pointer
+  has been 8 px away (a pointer resting there, as at 0, 0, is no entry),
+  and never while a capture is open. Not on a screen whose bar stands on the left (its
   corner is the bar's), nor where another screen touches the corner (the
   pointer goes on there), nor while a button is held (a window dragged),
   over a fullscreen window or the launcher, nor locked. The corner draws

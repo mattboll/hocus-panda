@@ -60,6 +60,7 @@ fn letter(c: char) -> Option<u32> {
         'p' => 25,
         'r' => 19,
         's' => 31,
+        't' => 20,
         'u' => 22,
         _ => return None,
     })
@@ -609,7 +610,9 @@ fn searching_super_b_ordre_and_secondes_finds_their_rows() -> anyhow::Result<()>
     for (word, found, lit) in [
         ("ordre", "Ordre des groupes", "bar.order"),
         ("secondes", "Les secondes", "bar.seconds"),
-        ("gauche", "Côté de l’écran", "bar.side"),
+        // "gauche" finds eight rows before it now (the overview's "Coin en
+        // haut à gauche", #727): its own name.
+        ("cote", "Côté de l’écran", "bar.side"),
         ("bord", "Changer de forme à la main", "bar.by-hand"),
     ] {
         chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);

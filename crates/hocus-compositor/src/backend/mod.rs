@@ -143,5 +143,6 @@ pub fn add_output(state: &mut State, output: &Output, position: (i32, i32)) {
     state.space.map_output(output, position);
     state.display_added(output);
     state.panel_refresh();
+    state.pointer_onto_primary();
     state.redraw = true;
 }
