@@ -75,7 +75,7 @@
 # output = ""
 # The bar's form: "full" (196 px), "mini" (56 px), or "auto": full on a
 # screen at least 1796 px wide (logical), mini otherwise, or as last chosen
-# there with a click on the bar's outer edge or Super+B (remembered in
+# there with a click on the bar's outer edge or Super+Shift+B (remembered in
 # ~/.local/state/hocuspanda/panel.toml). A screen may have its own, as
 # panel-form in its [outputs.NAME] section ("auto" there too): the
 # Settings write each screen's, and a form chosen there forgets the one
@@ -242,7 +242,12 @@
 # move-to-screen-left = "Super+Alt+Left"
 # move-to-screen-right = "Super+Alt+Right"
 # The bar's other form, on the screen under the pointer.
-# toggle-bar = "Super+B"
+# toggle-bar = "Super+Shift+B"
+# The keyboard into the bar of the focused window's screen, on the agent
+# waiting, else the one stuck, else the clock: Tab and the arrows walk its
+# items, Enter opens one, Esc goes back a step. Again, the next screen's
+# bar, then back to the window (docs/design/bar.md §11).
+# focus-bar = "Super+B"
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
 # launcher = "Super+Space"

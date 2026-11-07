@@ -564,16 +564,27 @@ fn dot(look: Look) -> Color {
     }
 }
 
-/// A row's tint and its word's colour.
+/// A row's tint and its word's colour. Under high contrast, no tint: the
+/// word in the state's colour at 7:1, and a bar on the row's left
+/// ([`CONTRAST_BAR`]).
 fn colours(look: Look) -> (Color, Color) {
-    match look {
+    let (word, tint) = match look {
         Look::Waiting => WAITING,
         Look::Stuck => STUCK,
         Look::ToSee => TO_SEE,
         Look::Working => (FAINT.get(), Color::TRANSPARENT),
         Look::Resting => (RESTING.get(), Color::TRANSPARENT),
+    };
+    if crate::theme::contrast() && tint.a > 0.0 {
+        return (Ink::Dark(word).get(), Color::TRANSPARENT);
     }
+    (word, tint)
 }
+
+/// Under high contrast, the bar on the left of a row that concerns the
+/// user (waiting, stuck, to see), in its state's colour, in place of its
+/// tint: 3 px wide (bar.md §13).
+const CONTRAST_BAR: f32 = 3.0;
 
 /// The panda for `look`: the validated drawings, one still mood each.
 pub(super) fn panda(look: Look) -> &'static svg::Handle {
@@ -1278,6 +1289,12 @@ impl Group {
             let rect = Rectangle::new(Point::new(o.x + row.rect.x, o.y + y), row.rect.size());
             if tint.a > 0.0 {
                 f.fill(&kit::rounded(rect, ROW_RADIUS), faded(tint, shown));
+            }
+            if crate::theme::contrast()
+                && matches!(row.look, Look::Waiting | Look::Stuck | Look::ToSee)
+            {
+                let bar = Rectangle::new(rect.position(), Size::new(CONTRAST_BAR, rect.height));
+                f.fill(&kit::rounded(bar, CONTRAST_BAR / 2.0), faded(word, shown));
             }
             if state.hover == Some(Item::Agent(row.id)) {
                 f.fill(

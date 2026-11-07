@@ -498,6 +498,7 @@ impl State {
             } => self.send_to_asked(id, &output, desktop),
             ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
+            ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
                 None => tracing::warn!(tool, "the shell plugs in a tool that is not one"),
@@ -572,9 +573,13 @@ impl State {
     }
 
     /// Whether the compositor blurs behind the bars: it can, transparency
-    /// is not reduced, and the shell draws on a GPU.
+    /// is not reduced (high contrast reduces it too, #423), and the shell
+    /// draws on a GPU.
     pub fn glass_on(&self) -> bool {
-        self.blur && !self.config.appearance.reduce_transparency && !self.shell.software
+        self.blur
+            && !self.config.appearance.reduce_transparency
+            && !self.config.appearance.high_contrast
+            && !self.shell.software
     }
 
     /// Tells the shell, if it is there; a shell that does not read loses

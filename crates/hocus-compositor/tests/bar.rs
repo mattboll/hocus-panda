@@ -6,7 +6,10 @@ mod common;
 
 use std::{path::PathBuf, time::Duration};
 
-use common::{BTN_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, rect_of, shell_program, wait};
+use common::{
+    BTN_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, WAIT, chord, open, rect_of, shell_program,
+    wait,
+};
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect,
 };
@@ -95,7 +98,7 @@ fn super_b_switches_the_form_and_the_windows_beside_it_follow() -> anyhow::Resul
     let half = (2560 - 8 - 196 - 8 - 8 - 8) / 2;
     common::wait_for_rect(&mut hp, "right", Rect::new(8 + half + 8, 8, half, 1584))?;
     hp.pointer_move(1000.0, 800.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Mini));
     let area = Rect::new(8, 8, 2560 - 8 - 56 - 8 - 8, 1584);
     assert_eq!(hp.work_area(), Some(area));
@@ -107,7 +110,7 @@ fn super_b_switches_the_form_and_the_windows_beside_it_follow() -> anyhow::Resul
     let settled = hp.dispatch_until(WAIT, |hp| hp.bars()[0].2 == 56.0)?;
     assert!(settled, "{:?}", hp.bars());
     // Again: back to full.
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     assert_eq!(bar(&hp).map(|b| b.1), Some(BarForm::Full));
     assert_eq!(hp.work_area().map(|a| a.right()), Some(2560 - 8 - 196 - 8));
     Ok(())
@@ -117,7 +120,7 @@ fn super_b_switches_the_form_and_the_windows_beside_it_follow() -> anyhow::Resul
 fn with_reduced_motion_the_form_changes_at_once() -> anyhow::Result<()> {
     let mut hp = start(&["2560x1600@1"], reduced())?;
     hp.pointer_move(1000.0, 800.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     assert_eq!(hp.bars()[0].2, 56.0);
     Ok(())
 }
@@ -230,7 +233,7 @@ fn a_chosen_form_is_remembered_for_the_next_session() -> anyhow::Result<()> {
     config.state_dir = Some(state.path().join("hocuspanda"));
     let mut hp = start(&["2560x1600@1"], config.clone())?;
     hp.pointer_move(1000.0, 800.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let file = state.path().join("hocuspanda/panel.toml");
     let written = hp.dispatch_until(WAIT, |_| {
         std::fs::read_to_string(&file).is_ok_and(|t| t.contains("mini"))
@@ -365,7 +368,7 @@ fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
     assert!(light(&mut hp, full)? > 200, "no time drawn");
     // The mini form's clock, in its narrower place.
     hp.pointer_move(1000.0, 500.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = Rect::new(1920 - 8 - 1 - 54, 8 + 12, 54, 46);
     let placed = hp.dispatch_until(WAIT, |hp| {
         hp.clock_surfaces() == vec![("HEADLESS-1".to_owned(), mini)]

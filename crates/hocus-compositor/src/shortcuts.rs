@@ -56,6 +56,10 @@ pub enum Action {
     MoveToScreen(i32),
     /// The bar's other form, on the screen under the pointer.
     ToggleBar,
+    /// The keyboard into the bar of the focused window's screen (else the
+    /// pointer's); held by a bar already, into the next screen's, then
+    /// back to the window (bar.md §11).
+    FocusBar,
     /// Volume, mute or brightness: to the shell, which keeps them.
     Level(LevelKey),
     /// The launcher, on the screen under the pointer; open, it closes.
@@ -275,7 +279,8 @@ shortcuts! {
     take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
     move_to_screen_left: ["Super+Alt+Left"] => Action::MoveToScreen(-1),
     move_to_screen_right: ["Super+Alt+Right"] => Action::MoveToScreen(1),
-    toggle_bar: ["Super+B"] => Action::ToggleBar,
+    toggle_bar: ["Super+Shift+B"] => Action::ToggleBar,
+    focus_bar: ["Super+B"] => Action::FocusBar,
     launcher: ["Super+Space"] => Action::Launcher,
     overview: ["Super+W"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
@@ -427,6 +432,7 @@ impl State {
                     self.toggle_bar(&output.name());
                 }
             }
+            Action::FocusBar => self.focus_bar(),
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
             Action::Overview => self.toggle_overview(),

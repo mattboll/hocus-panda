@@ -760,7 +760,7 @@ impl App {
         let lang = self.lang;
         page = page.push(
             row![
-                icon(Icon::Appearance, 14.0, FAINT.get()),
+                icon(Icon::Accessibility, 14.0, FAINT.get()),
                 t(
                     w(
                         "La transparence de la barre et les mouvements réduits se règlent dans",
@@ -772,7 +772,7 @@ impl App {
                 ),
                 self.bar_link(
                     "appearance.reduce-transparency",
-                    w("Apparence et langue ›", "Appearance and language ›").get(lang),
+                    w("Accessibilité ›", "Accessibility ›").get(lang),
                     1.0
                 ),
             ]
@@ -1105,7 +1105,7 @@ impl App {
             .and_then(|s| self.value(s))
         {
             Some(Value::List(list)) => list,
-            _ => vec!["Super+B".to_owned()],
+            _ => vec!["Super+Shift+B".to_owned()],
         };
         let said = if chords.is_empty() {
             w("aucun", "none").get(lang).to_owned()
@@ -1125,11 +1125,11 @@ impl App {
             .font(SEMIBOLD),
             t(
                 w(
-                    "Un clic sur le bord extérieur de la barre, ou Super+B. En automatique, l’écran retient ton choix.",
-                    "A click on the bar’s outer edge, or Super+B. In automatic, the screen remembers your choice.",
+                    "Un clic sur le bord extérieur de la barre, ou SHORTCUT. En automatique, l’écran retient ton choix.",
+                    "A click on the bar’s outer edge, or SHORTCUT. In automatic, the screen remembers your choice.",
                 )
                 .get(lang)
-                .replace("Super+B", &said),
+                .replace("SHORTCUT", &said),
                 12.5,
                 DIM.get()
             ),

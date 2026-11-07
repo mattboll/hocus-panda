@@ -118,13 +118,18 @@ impl Pick {
 
 impl State {
     /// Whether the bar on `output` is in front of the windows.
-    /// The overview keeps it in front on every screen (8.5 A).
+    /// The overview keeps it in front on every screen (8.5 A); a bar holding
+    /// the keyboard stands in front while it does (`Super+B`, bar.md §11),
+    /// so that its ring shows over a window covering it.
     pub fn bar_in_front(&self, output: &Output) -> bool {
         self.overview.is_some()
             || matches!(
                 &self.panel.front,
                 Front::Raised { output: o } | Front::Dropping { output: o } if *o == output.name()
             )
+            || self
+                .bar_holding_keyboard()
+                .is_some_and(|o| o == output.name())
     }
 
     /// The pointer moved to `at` (global): against a bar's edge, the wait

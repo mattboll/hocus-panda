@@ -2151,10 +2151,21 @@ impl App {
         Task::none()
     }
 
+    /// Whether `setting` is held on by another: reduced transparency
+    /// while high contrast is on (#423). Its switch shows on and takes no
+    /// click; the file keeps its own value.
+    pub(super) fn implied(&self, setting: &Setting) -> bool {
+        setting.id == crate::accessibility::REDUCE_TRANSPARENCY
+            && crate::model::setting(crate::accessibility::HIGH_CONTRAST).is_some_and(|contrast| {
+                self.value(Slot::of(contrast, self.source)) == Some(Value::Bool(true))
+            })
+    }
+
     /// Whether `setting`'s control does not apply now: the file does not
-    /// read, or the switch it needs is off.
+    /// read, the switch it needs is off, or another holds it on.
     fn inert(&self, setting: &Setting) -> bool {
         if !self.writable()
+            || self.implied(setting)
             || self.unavailable(setting).is_some()
             || self.desktops_inert(setting)
             || self.power_inert(setting)

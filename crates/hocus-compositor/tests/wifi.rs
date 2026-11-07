@@ -529,7 +529,7 @@ fn the_row_shows_the_network_and_its_signal_in_both_forms() -> anyhow::Result<()
     assert_eq!(bed.hp.connections_commits(), drawn, "drawn for nothing");
 
     // The mini form: a 44 × 38 button above the gauge.
-    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = bed.hp.dispatch_until(WAIT, |hp| {
         hp.connections_surfaces()
             .first()
@@ -1043,7 +1043,7 @@ fn in_the_mini_form_hovering_the_button_opens_it() -> anyhow::Result<()> {
         ..Setup::default()
     };
     let mut bed = start(&shell, setup, false)?;
-    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = bed.hp.dispatch_until(WAIT, |hp| {
         hp.connections_surfaces()
             .first()

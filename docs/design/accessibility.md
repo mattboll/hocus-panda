@@ -138,9 +138,10 @@ nothing moving, none (counted by the tests).
   their text fields has the keyboard). The caret through AT-SPI (the
   accessibility bus's `object:text-caret-moved`), for applications without
   text-input, is not built: the compositor has no AT-SPI client yet.
-- The keyboard's ring in the bar (A.2, `Super+B`) is not followed yet: the
-  shell does not tell the compositor where the ring is. The compositor's
-  side is ready (`State::magnifier_show` with a rectangle); the view
+- The keyboard's ring in the bar (`Super+B`, bar.md §11) is followed:
+  each time it lands or moves, the shell tells the compositor where it is
+  (`ring OUTPUT X Y W H`, in the bar's frame) and the view shows it, as a
+  focus (`bar_keys.rs`, `the_magnifiers_view_follows_the_ring`); the view
   jumps to a popover as it takes the keyboard.
 - Nested, the host draws the cursor: it is not magnified there.
 - The zoom the keys leave is the session's: the next session starts from
@@ -152,3 +153,40 @@ the pixels at 2× and 8× with pixman and with GLES on Mesa's software
 device, the edge, centre and proportional, the focus and the caret, a
 click, AZERTY, the file, no frame at rest), and the unit tests of
 `magnifier` (the view's rules) and `shortcuts` (the default keys).
+
+## The whole bar by the keyboard (#422)
+
+Status: approved 2026-11 with the mockup's recommended options (`Super+B`
+enters the bar, the form's switch moving to `Super+Shift+B`; the ring on
+the waiting agent, else the stuck one, else the clock; a second `Super+B`
+to the next screen's bar, then back to the window). The behaviour, the
+keys, the ring and what is built are in [bar.md §11](bar.md#11-accessibility).
+
+## High contrast and reduced transparency (#423)
+
+Status: approved 2026-11 with the mockup's recommended options (a
+reinforcement of the theme chosen, keeping the accent; it implies reduced
+transparency; 7:1 for text, 3:1 for borders and controls).
+
+- **High contrast** (`[appearance] high-contrast`): the tokens, the rules
+  for the other colours, the ring and what is built are in
+  [bar.md §13, "High contrast"](bar.md#high-contrast-423). The bar, its
+  popovers, the bubbles, the lock screen, the authentication dialog and
+  the Settings draw it; the radial menu and the overview, drawn by the
+  compositor in their own colours, do not yet.
+- **Reduced transparency** (`[appearance] reduce-transparency`, or high
+  contrast): no blur, and the opaque colours of the bar, its popovers, the
+  bubbles, the reminder, the capture's and the sharing's panels. Behind a
+  maximised window, the bar is opaque too, whatever the setting
+  ([bar.md §11](bar.md#11-accessibility)). The launcher's and the
+  overview's scrims stay: they dim, they are not glass.
+
+## The Settings' page
+
+Accessibilité gathers what these issues set (settings.md, "Accessibilité"):
+LOUPE (the magnifier's rows), VUE (high contrast, reduced transparency,
+reduced motion, a link to the text's and the cursor's size), CLAVIER (the
+way into the bar). Appearance keeps a link to it. While high contrast is
+on, reduced transparency's switch shows on and inert ("Comprise dans le
+contraste élevé"); the file keeps its own value. The screen reader's group
+comes with #421.

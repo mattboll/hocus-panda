@@ -27,7 +27,9 @@ use iced::{
 };
 
 pub(crate) use app::app_tile;
-pub(crate) use input::{Input, Pointer, awaited, cycle, input, keys, step};
+pub(crate) use input::{
+    Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
+};
 pub(crate) use list::{
     Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching, stack,
 };
@@ -136,16 +138,17 @@ pub(crate) fn background(f: &mut Frame, size: Size, glass: bool) {
         .add_stop(0.0, top.get())
         .add_stop(1.0, bottom.get());
     f.fill(&shape, canvas::Fill::from(tint));
+    let border = crate::theme::border();
     let rim = Path::rounded_rectangle(
-        Point::new(BORDER / 2.0, BORDER / 2.0),
-        Size::new(size.width - BORDER, size.height - BORDER),
-        (radius - BORDER / 2.0).into(),
+        Point::new(border / 2.0, border / 2.0),
+        Size::new(size.width - border, size.height - border),
+        (radius - border / 2.0).into(),
     );
     f.stroke(
         &rim,
         canvas::Stroke {
             style: canvas::Style::Solid(RIM.get()),
-            width: BORDER,
+            width: border,
             ..canvas::Stroke::default()
         },
     );
@@ -442,6 +445,17 @@ impl Switch {
             &rounded(rect, SWITCH.height / 2.0),
             mix(SWITCH_OFF.get(), ACCENT.get(), p),
         );
+        // Under high contrast, off: its edge in `text.faint` (bar.md §13).
+        if crate::theme::contrast() && p < 1.0 {
+            f.stroke(
+                &rounded(rect, SWITCH.height / 2.0),
+                canvas::Stroke {
+                    style: canvas::Style::Solid(FAINT.get().scale_alpha(1.0 - p)),
+                    width: 2.0,
+                    ..canvas::Stroke::default()
+                },
+            );
+        }
         let centre = Point::new(
             rect.x + 2.0 + (SWITCH.width - KNOB - 4.0) * p + KNOB / 2.0,
             rect.center_y(),

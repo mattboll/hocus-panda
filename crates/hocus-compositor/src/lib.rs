@@ -11,6 +11,7 @@ mod appearance;
 pub mod auth;
 pub mod away;
 mod backend;
+mod bar_keys;
 mod bubbles;
 mod capture;
 mod clipboard;
@@ -369,6 +370,8 @@ impl App {
         state.flush_bubbles_screen();
         // The screens a fullscreen window covers, when they changed.
         state.flush_fullscreen();
+        // The bars opaque behind a maximised window, when they changed.
+        state.flush_opaque_bars();
         // Whether something holds idleness off, when that changed.
         state.flush_idle();
         // The lock (7.1): an external locker's unlock judged, the screens

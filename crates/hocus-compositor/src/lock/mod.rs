@@ -441,6 +441,7 @@ impl State {
     /// and the strokes go.
     fn lock_closes_everything(&mut self) {
         self.end_popup_grab();
+        self.bar_keyboard_away();
         if self.switcher.is_some() {
             self.end_switcher(false);
         }

@@ -1077,7 +1077,7 @@ impl PanelSide {
 #[serde(rename_all = "kebab-case")]
 pub enum FormChoice {
     /// Full on a screen wide enough (bar.md §3), or as last chosen with a
-    /// click or `Super+B`.
+    /// click or `Super+Shift+B`.
     #[default]
     Auto,
     Full,
@@ -1101,7 +1101,10 @@ impl FormChoice {
 pub struct Appearance {
     /// Windows fade instead of moving, and do not wobble.
     pub reduced_motion: bool,
-    /// The focused window's rim is 2 px wide instead of 1.
+    /// The theme reinforced (#423): the shell, the Settings, the lock and
+    /// the authentication dialog draw its high-contrast tokens, with no
+    /// glass (it implies `reduce-transparency`); the focused window's rim
+    /// is 2 px wide instead of 1; applications are told (`contrast`).
     pub high_contrast: bool,
     /// The Xcursor theme; else `XCURSOR_THEME`'s, else `default`.
     pub cursor_theme: Option<String>,
@@ -1272,6 +1275,7 @@ impl Appearance {
             } else {
                 hocus_link::theme::AccentColours::default()
             },
+            contrast: self.high_contrast,
         }
     }
 }

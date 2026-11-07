@@ -402,10 +402,20 @@ fn actions() -> Vec<Action> {
             (&["applications", "chercher"], &["apps", "search"]),
         ),
         a(
+            "focus-bar",
+            BAR,
+            w("Aller dans la barre", "Go to the bar"),
+            &["Super+B"],
+            (
+                &["clavier", "barre", "accessibilité", "focus"],
+                &["keyboard", "panel", "accessibility", "focus"],
+            ),
+        ),
+        a(
             "toggle-bar",
             BAR,
             w("Changer la forme de la barre", "Change the bar's form"),
-            &["Super+B"],
+            &["Super+Shift+B"],
             (&["mini", "barre"], &["panel", "bar"]),
         ),
         a(
@@ -784,14 +794,14 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 70);
+        assert_eq!(all.len(), 71);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
         let count = |g| all.iter().filter(|s| s.group == g).count();
         assert_eq!(count(WINDOWS), 16);
         assert_eq!(count(DESKTOPS), 34);
-        assert_eq!(count(BAR), 6);
+        assert_eq!(count(BAR), 7);
         assert_eq!(count(CAPTURES), 4);
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);

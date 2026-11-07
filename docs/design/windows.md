@@ -1009,7 +1009,8 @@ holds the keyboard; the virtual terminals' switch stays.
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
 | `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
-| `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `toggle-bar` | `Super+Shift+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `focus-bar` | `Super+B` | The keyboard into the bar of the focused window's screen; again, the next screen's bar, then back to the window ([bar.md](bar.md) §11) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |

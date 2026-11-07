@@ -13,7 +13,8 @@ The maintainer decided on 2026-11-04:
   take back the last version that read; nothing is overwritten without the
   user;
 - the search finds French and English words and the file's keys;
-- 17 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets).
+- 18 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets;
+  Accessibilité came with the accessibility issues, #422 to #424).
 
 6.1 is the app's frame: the window, the sidebar, the home, the search, the
 toast with its undo, the file's reading, writing and watching, the model
@@ -65,8 +66,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 17 sections fit 760 px
-without scrolling.
+it, 720 wide at most, padded 6 40 72 32. All 18 sections fit 760 px
+without scrolling (the sidebar's rows 28 px tall since Accessibilité
+came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -965,15 +967,11 @@ window is the preview.
 | TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
 | CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
 | | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
-| MOUVEMENT ET LISIBILITÉ | Mouvements réduits, Transparence réduite, Contraste élevé ("En partie") | switches | `[appearance] reduced-motion`, `reduce-transparency`, `high-contrast` |
+| MOUVEMENT ET LISIBILITÉ | Accessibilité ("Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.") | link "Accessibilité ›" | the Accessibility page's |
 | LANGUE ET FORMATS | Langue | menu "Celle du système (français)", "Français", "English" | `[locale] language = "system" \| "fr" \| "en"` |
 | | Date | menu, each choice with today's date beside it: "En toutes lettres" (jeudi 5 novembre), "Abrégée" (jeu. 5 nov.), "En chiffres" (05/11/2026), "Année d'abord" (2026-11-05) | `[locale] date = "long" \| "short" \| "numeric" \| "iso"` |
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
 | | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
-| LOUPE (until the Accessibilité page, which takes it) | Loupe | switch | `[magnifier] enabled` ([accessibility.md](accessibility.md)) |
-| | Zoom | menu "×1,5" to "×16", the keys' steps | `[magnifier] zoom` (1 to 16) |
-| | La vue suit le pointeur | menu "Au bord", "Au centre", "Proportionnellement" | `[magnifier] follow-pointer = "edge" \| "centre" \| "proportional"` |
-| | Suivre le clavier, Lissage | switches | `[magnifier] follow-keyboard`, `smooth` |
 
 - **The keyboard**: 6.1's; the segmented controls and the swatches move
   and choose with `←` and `→`; the link opens with `Enter`.
@@ -1012,12 +1010,15 @@ desktop following; an accent among six (bar.md §13 gives every value).
   launcher, the notifications, the lock screen, the authentication
   dialog, the capture's and the sharing's panels); reduced motion and
   reduced transparency to the bars and to what the compositor moves; high
-  contrast to the focused window's rim; the cursor's theme and size to
+  contrast (#423) with the theme (`theme SCHEME ACCENT WALLPAPER
+  contrast`: its own tables of tokens, bar.md §13 "High contrast", no
+  glass) and to the focused window's rim; the cursor's theme and size to
   the cursor (its theme's thread started again) and to the programs
   started afterwards.
 - **The Settings window** reads the same keys with the rest of the file
   and draws in them as soon as the file changes: it is its own preview.
-  Its toast stays dark in both themes.
+  Its toast stays dark in both themes. `high-contrast` too: the window
+  draws the high-contrast tokens of its theme.
 - **Applications** are told through the desktop's portal backend, which
   now serves `org.freedesktop.impl.portal.Settings` (version 2) beside
   the screen cast, on the same name (`hocuspanda.portal`;
@@ -1035,6 +1036,43 @@ desktop following; an accent among six (bar.md §13 gives every value).
 - **Choices made here**: the wallpaper's accent is the primary screen's
   wallpaper's (6.3, below; Nuit's `#7A96E0` by default); the windows' rims and grips, drawn over the wallpaper, keep
   their colours; the screen around a capture stays dimmed dark.
+
+## Accessibilité (#422, #423, #424)
+
+One page for whoever needs to see larger, see clearer or work without a
+mouse (`hocus-settings accessibility`), in PERSONNALISATION after La
+barre. Its rows were Appearance's (the motion and legibility switches)
+and the magnifier's; the keys stay where they were in the file, and
+Appearance keeps a link here.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LOUPE | Loupe | switch | `[magnifier] enabled` ([accessibility.md](accessibility.md)) |
+| | Zoom | menu "×1,5" to "×16", the keys' steps | `[magnifier] zoom` (1 to 16) |
+| | La vue suit le pointeur | menu "Au bord", "Au centre", "Proportionnellement" | `[magnifier] follow-pointer` |
+| | Suivre le clavier, Lissage | switches | `[magnifier] follow-keyboard`, `smooth` |
+| VUE | Contraste élevé ("Le thème choisi renforcé : texte à 7:1, bords pleins, sans verre ; la couleur d'accent reste. Les applications le savent.") | switch | `[appearance] high-contrast` |
+| | Transparence réduite; under high contrast, on and inert, "Comprise dans le contraste élevé." | switch | `[appearance] reduce-transparency` (the file keeps its own value) |
+| | Mouvements réduits | switch | `[appearance] reduced-motion` |
+| | Taille du texte et du curseur | link "Apparence et langue ›" | — |
+| CLAVIER | Aller dans la barre ("Super+B, puis Tab et les flèches ; Entrée ouvre, Échap revient.") | link "Clavier et raccourcis ›" | `[shortcuts] focus-bar` there |
+
+- The page is generic (rows from `crates/hocus-settings/src/
+  accessibility.rs`): a group is a `RowGroup`, its rows `Setting`s; a
+  group added later (the screen reader's, #421) is a list of rows of its
+  own, nothing else to change.
+- The links from elsewhere to these rows (the bar page's transparency,
+  the wobble's reduced motion in Bureaux et fenêtres) open this page with
+  the row lit.
+- The search finds them by their words: loupe, zoom, magnifier,
+  contraste, contrast, transparence, mouvement, clavier, super+b.
+- **Not built**: the screen reader's group (LECTEUR D'ÉCRAN, #421).
+- **Measured headless** (`crates/hocus-compositor/tests/
+  settings_appearance.rs`, `the_accessibility_page_holds_the_view_and_
+  high_contrast_holds_transparency_on`): the rows in order; high contrast
+  written at once, the bar drawing it; reduced transparency then on and
+  inert, the file without it. The model's groups and keys:
+  `accessibility::tests`.
 
 ## Fond d'écran (6.3)
 
@@ -1203,7 +1241,7 @@ is followed live (bar.md "6.4, the bar followed live"). Section `bar`
   it: "La barre de l'écran du portable, à 55 %. Un clic sur un groupe
   allume sa ligne."
 - **The search** finds the rows by the spec's words and their keys;
-  "Forme de la barre", "Changer de forme à la main" (super+b, toggle-bar,
+  "Forme de la barre", "Changer de forme à la main" (super+shift+b, toggle-bar,
   clic, bord) and "Ordre des groupes" (ordre, monter, descendre,
   ranger; it lights Today's row) are the page's own rows.
 - **Choices made here (to confirm on the machine)**: the order's toast
@@ -1949,7 +1987,7 @@ home and runtime directories of the test's own, no bus, no power supply;
 waits on what the window's log says, never on a time, except to check
 that nothing draws at rest.
 
-- `the_window_opens_with_its_sidebars_17_sections`
+- `the_window_opens_with_its_sidebars_18_sections`
 - `searching_veille_finds_the_suspend_delay_the_lid_and_the_button`
 - `changing_the_delay_writes_idle_delay_at_once_keeping_the_rest`
 - `annuler_and_ctrl_z_take_the_value_back`

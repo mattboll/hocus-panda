@@ -694,6 +694,18 @@ pub enum ToShell {
     /// The windows kept above the others and those on all desktops, for
     /// the marks after their titles in the bar ([`WindowStates`]).
     WindowStates(WindowStates),
+    /// `Super+B` (`[shortcuts] focus-bar`, bar.md §11): the keyboard goes
+    /// into `output`'s bar, on its waiting agent, else its stuck one, else
+    /// its clock; `None`, the bar holding it lets it go, back to the
+    /// window that had it. Written `bar-keyboard OUTPUT` or `bar-keyboard
+    /// -`.
+    BarKeyboard(Option<String>),
+    /// The screens whose bar draws its opaque background, a maximised
+    /// window showing on their current desktop (bar.md §11): the
+    /// compositor draws no glass behind them. Sent as the shell connects
+    /// and when they change. Written `opaque-bars`, then each screen's
+    /// name after a tab.
+    OpaqueBars(Vec<String>),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1680,6 +1692,10 @@ pub enum ToCompositor {
     /// window. Written `go-to-agent ID`, or `go-to-agent ID OUTPUT X Y W
     /// H` with the row.
     GoToAgent { id: u64, row: Option<Row> },
+    /// The keyboard's ring moved in a bar (`Super+B`, bar.md §11): where
+    /// it is, so that the magnifier's view follows it. Written `ring
+    /// OUTPUT X Y W H`.
+    Ring(Row),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -2008,6 +2024,15 @@ impl fmt::Display for ToShell {
                 write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
             }
             Self::Focus(output) => write!(f, "focus {output}"),
+            Self::BarKeyboard(Some(output)) => write!(f, "bar-keyboard {output}"),
+            Self::BarKeyboard(None) => f.write_str("bar-keyboard -"),
+            Self::OpaqueBars(screens) => {
+                f.write_str("opaque-bars")?;
+                for screen in screens {
+                    write!(f, "\t{screen}")?;
+                }
+                Ok(())
+            }
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
                 let app = app_word(app);
@@ -2189,6 +2214,17 @@ impl FromStr for ToShell {
             && (names.is_empty() || names.starts_with('\t'))
         {
             return Ok(Self::SharedScreens(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
+        if let Some(names) = line.strip_prefix("opaque-bars")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::OpaqueBars(
                 names
                     .split('\t')
                     .filter(|n| !n.is_empty())
@@ -2429,6 +2465,11 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
+            Some("bar-keyboard") => Ok(Self::BarKeyboard(
+                Some(word(&mut words, "output")?)
+                    .filter(|o| *o != "-")
+                    .map(str::to_owned),
+            )),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let mut number = |what: &str| -> Result<i32, BadLine> {
@@ -2652,6 +2693,11 @@ impl fmt::Display for ToCompositor {
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
                 "go-to-agent {id} {} {} {} {} {}",
+                r.output, r.x, r.y, r.width, r.height
+            ),
+            Self::Ring(r) => write!(
+                f,
+                "ring {} {} {} {} {}",
                 r.output, r.x, r.y, r.width, r.height
             ),
             Self::Plug(tool) => write!(f, "plug {tool}"),
@@ -2906,6 +2952,21 @@ impl FromStr for ToCompositor {
                     }
                 };
                 Ok(Self::GoToAgent { id, row })
+            }
+            Some("ring") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let mut number = |what: &str| -> Result<i32, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::Ring(Row {
+                    output,
+                    x: number("x")?,
+                    y: number("y")?,
+                    width: number("width")?,
+                    height: number("height")?,
+                }))
             }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -3185,6 +3246,7 @@ mod tests {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
                 wallpaper: theme::AccentColours::lifted([0x3A, 0x2A, 0x26]),
+                contrast: true,
             }),
             ToShell::Wallpaper(wallpaper::Wallpapers {
                 lock: wallpaper::LockLook::Picture,
@@ -3225,6 +3287,8 @@ mod tests {
             ToShell::Join,
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
+            ToShell::OpaqueBars(vec!["eDP-1".to_owned()]),
+            ToShell::OpaqueBars(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
             ToShell::SharedScreens(Vec::new()),
             ToShell::Day(DayAsk::Calendar {
@@ -3376,7 +3440,12 @@ mod tests {
         for message in to_shell
             .into_iter()
             .chain(keys)
-            .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
+            .chain([
+                ToShell::Outside,
+                ToShell::Focus("DP-2".into()),
+                ToShell::BarKeyboard(Some("DP-2".into())),
+                ToShell::BarKeyboard(None),
+            ])
             .chain(clips())
             .chain(screens)
             .chain(layouts)
@@ -3411,6 +3480,13 @@ mod tests {
             ToCompositor::Overview,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
+            ToCompositor::Ring(Row {
+                output: "eDP-1".into(),
+                x: -190,
+                y: 14,
+                width: 172,
+                height: 77,
+            }),
             ToCompositor::GoToAgent {
                 id: 7,
                 row: Some(Row {
@@ -3533,6 +3609,7 @@ mod tests {
             "day slept",
             "day slept soon",
             "fullscreenHDMI-A-1",
+            "opaque-barseDP-1",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }
