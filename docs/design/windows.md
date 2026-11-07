@@ -1054,6 +1054,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `toggle-bar` | `Super+Shift+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
 | `focus-bar` | `Super+B` | The keyboard into the bar of the focused window's screen; again, the next screen's bar, then back to the window ([bar.md](bar.md) §11) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
+| `actions` | `Super+P` | The actions palette: every action of the desktop, searchable, run on the focused window or its screen; again, closes it ([actions.md](actions.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
