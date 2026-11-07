@@ -4,22 +4,22 @@
 //! rows, their saving and their search are the window's as on any page
 //! ([`crate::appearance`]); the window itself is the page's preview.
 
-use hocus_link::theme::Accent;
+use hocus_link::theme::{Accent, Scheme};
 use iced::{
     Alignment, Background, Color, Point, Rectangle, Renderer, Shadow, Theme, Vector, mouse,
     widget::{Space, button, canvas, container, row},
 };
 
 use super::{
-    App, Message,
+    App, Doing, Message,
     style::*,
     view::{El, t},
 };
 use crate::{
-    appearance::{CURSOR_SIZES, today_as},
+    appearance::{self, Before, CURSOR_SIZES, Proposed, today_as},
     lang::{Lang, w},
     model::{Choice, SectionId, Setting, Value},
-    store::Slot,
+    store::{Raw, Slot},
     theme::Ink,
 };
 
@@ -30,6 +30,110 @@ const SWATCH: f32 = 24.0;
 const SWATCH_GAP: f32 = 1.0;
 
 impl App {
+    /// The theme chosen now, as the file says it.
+    fn scheme_now(&self) -> Scheme {
+        match self.value(Slot {
+            setting: appearance::THEME_ID,
+            source: None,
+        }) {
+            Some(Value::Word(word)) => Scheme::of(word).unwrap_or_default(),
+            _ => Scheme::default(),
+        }
+    }
+
+    /// Choosing a theme that changes more than itself (#431, #740): those
+    /// changes written with it as one batch, one toast saying them all,
+    /// whose "Annuler" (or `Ctrl+Z`) takes them all back. `None`: a plain
+    /// change, as any other setting's.
+    pub(super) fn theme_chose(&mut self, slot: Slot, value: &Value) -> bool {
+        let (appearance::THEME_ID, Value::Word(word)) = (slot.setting, value) else {
+            return false;
+        };
+        let Some(to) = Scheme::of(word) else {
+            return false;
+        };
+        let from = self.scheme_now();
+        let accent_slot = Slot {
+            setting: appearance::ACCENT_ID,
+            source: None,
+        };
+        let accent = match self.value(accent_slot) {
+            Some(Value::Word(word)) => Accent::of(word),
+            _ => None,
+        };
+        let state = hocus_config::state_dir();
+        let before = Before::read(state.as_deref());
+        let (proposed, remember) = appearance::theme_proposes(from, to, accent, &before);
+        if proposed.is_empty() || !self.writable() {
+            return false;
+        }
+        remember.write(state.as_deref());
+        self.serial += 1;
+        let batch = self.serial;
+        let mut said = vec![self.said_change(slot, value)];
+        for change in proposed {
+            let (setting, raw, shown) = match change {
+                Proposed::Set(setting, word) => {
+                    (setting, Raw::Set(Value::Word(word)), Value::Word(word))
+                }
+                Proposed::Remove(setting) => {
+                    let default = crate::model::setting(setting).map_or(Value::Word(""), |s| {
+                        s.places.of(crate::model::Source::Ac).default.clone()
+                    });
+                    (setting, Raw::Remove, default)
+                }
+            };
+            let slot = Slot {
+                setting,
+                source: None,
+            };
+            said.push(self.said_change(slot, &shown));
+            // Its toast is the theme's: one for all.
+            self.ask(
+                slot,
+                raw,
+                Doing::New,
+                None,
+                Some(batch),
+                Some(String::new()),
+            );
+        }
+        self.ask(
+            slot,
+            Raw::Set(value.clone()),
+            Doing::New,
+            None,
+            Some(batch),
+            Some(said.join(" · ")),
+        );
+        true
+    }
+
+    /// "Thème : Givre", as a theme's toast says each of its changes.
+    fn said_change(&self, slot: Slot, value: &Value) -> String {
+        let Some(setting) = slot.setting() else {
+            return String::new();
+        };
+        let name = setting.name.get(self.lang);
+        let now = setting.say(value, self.lang);
+        match self.lang {
+            Lang::French => format!("{name} : {now}"),
+            Lang::English => format!("{name}: {now}"),
+        }
+    }
+
+    /// The accents the swatches offer now (a themed theme's own first).
+    pub(super) fn accents_shown(&self) -> Vec<Accent> {
+        let chosen = crate::appearance::accent_of(
+            self.value(Slot {
+                setting: appearance::ACCENT_ID,
+                source: None,
+            })
+            .as_ref(),
+        );
+        appearance::accents_shown(self.scheme_now(), chosen)
+    }
+
     /// A segmented control: its choices side by side, the current one lit;
     /// a value of the file that is none of them shows as one more (the
     /// cursor's size at 40: "40").
@@ -120,7 +224,7 @@ impl App {
         let alpha = if inert { INERT } else { 1.0 };
         let chosen = crate::appearance::accent_of(self.value(slot).as_ref());
         let mut swatches = row![].spacing(SWATCH_GAP).align_y(Alignment::Center);
-        for accent in Accent::ALL {
+        for accent in self.accents_shown() {
             let [r, g, b] = accent.colours().base;
             let fill = Color::from_rgb8(r, g, b);
             let on = accent == chosen;

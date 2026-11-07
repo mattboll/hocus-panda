@@ -970,8 +970,8 @@ window is the preview.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
-| THÈME ET COULEUR | Thème | segmented "Sombre \| Clair" | `[appearance] theme = "dark" \| "light"` |
-| | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper"` |
+| THÈME ET COULEUR | Thème | segmented "Sombre \| Clair \| Givre" (Matrix joins once its tokens exist, #431) | `[appearance] theme = "dark" \| "light" \| "frost"` |
+| | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, Givre's ice blue first while Givre is chosen (or while it is the accent), the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper" \| "ice"` |
 | TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
 | CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
 | | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
@@ -1008,9 +1008,9 @@ window is the preview.
 Issue #402, decided 2026-11-05: dark and light themes in v1, the whole
 desktop following; an accent among six (bar.md §13 gives every value).
 
-- **The keys**: `[appearance] theme = "dark" | "light"` and `accent =
-  "green" | "blue" | "violet" | "rose" | "teal" | "wallpaper"`; a word not
-  understood refuses the file, as any key's.
+- **The keys**: `[appearance] theme = "dark" | "light" | "frost"` and
+  `accent = "green" | "blue" | "violet" | "rose" | "teal" | "wallpaper" |
+  "ice"`; a word not understood refuses the file, as any key's.
 - **Live**: `[appearance]` is followed as the file changes, through the
   compositor's one watcher (`reload.rs`, `appearance/mod.rs`): the theme
   and the accent go to the shell (`theme SCHEME ACCENT` on the line),
@@ -1044,6 +1044,19 @@ desktop following; an accent among six (bar.md §13 gives every value).
 - **Choices made here**: the wallpaper's accent is the primary screen's
   wallpaper's (6.3, below; Nuit's `#7A96E0` by default); the windows' rims and grips, drawn over the wallpaper, keep
   their colours; the screen around a capture stays dimmed dark.
+- **Givre** (#740, bar.md §13 "Givre"): a theme of the shell's own; the
+  window keeps the dark look, only its accent changes. Choosing it is
+  one change of several keys (`theme_proposes` in `appearance.rs`, called
+  whenever the theme's segment changes): `theme = "frost"` and `accent =
+  "ice"`, the accent before kept in `$XDG_STATE_HOME/hocuspanda/
+  theme-before`; one toast says them all ("Thème : Givre · Couleur
+  d'accent : Bleu glacé") and its "Annuler" (or `Ctrl+Z`) takes them all
+  back. Leaving Givre while its accent is still the ice blue gives the
+  accent before back (its line taken out when there was none); another
+  accent chosen meanwhile stays. The same function will set Givre's window
+  animation (`[windows] open-close = "frost"`) and propose its wallpaper
+  (`[wallpaper] picture = "aurora"`, over a built-in only), remembering
+  what they replace, once those exist (#740's second part).
 
 ## Accessibilité (#422, #423, #424)
 

@@ -122,7 +122,7 @@ const GLASS_TOP: Ink = Ink::Dark(rgba(26, 31, 48, 0.97));
 const GLASS_BOTTOM: Ink = Ink::Dark(rgba(16, 19, 30, 0.98));
 const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x1A1F30));
 const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x10131E));
-const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
+const RIM: Ink = Ink::Rim(rgba(255, 255, 255, 0.12));
 const FIELD_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.05));
 const FIELD_RIM: Ink = Ink::Accent(0.45);
 const PROMPT_INK: Ink = Ink::Dark(rgb(0xA9B2C2));
@@ -741,7 +741,7 @@ impl View {
                         Point::new(tile.center_x() - PANDA / 2.0, tile.center_y() - PANDA / 2.0),
                         Size::new(PANDA, PANDA),
                     );
-                    f.draw_svg(p, svg::Svg::new(panda(state).clone()).opacity(alpha));
+                    f.draw_svg(p, svg::Svg::new(panda(state)).opacity(alpha));
                     x += TILE;
                 }
             },
@@ -1298,20 +1298,9 @@ fn glyph_svg(d: &str, width: f32) -> svg::Handle {
         .clone()
 }
 
-/// An agent's panda for its state.
-fn panda(state: &str) -> &'static svg::Handle {
-    static PANDAS: OnceLock<[svg::Handle; 5]> = OnceLock::new();
-    let pandas = PANDAS.get_or_init(|| {
-        [
-            hocus_pandas::Mood::Waiting.still().as_bytes(),
-            hocus_pandas::Mood::Stuck.still().as_bytes(),
-            hocus_pandas::Mood::Done.still().as_bytes(),
-            hocus_pandas::Mood::Working.still().as_bytes(),
-            hocus_pandas::Mood::Resting.still().as_bytes(),
-        ]
-        .map(svg::Handle::from_memory)
-    });
-    &pandas[crate::agents::Look::of(state) as usize]
+/// An agent's panda for its state, in the theme's dress.
+fn panda(state: &str) -> svg::Handle {
+    crate::pandas::still(crate::pandas::mood(crate::agents::Look::of(state)))
 }
 
 /// `query`'s end that fits `room`: what was typed last shows.

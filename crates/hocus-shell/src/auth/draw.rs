@@ -130,7 +130,7 @@ const GLASS: (Ink, Ink) = (
     Ink::Dark(Color::from_rgba8(14, 17, 28, 0.97)),
 );
 const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
-const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const RIM: Ink = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10));
 const BADGE_FILL: Ink = Ink::Dark(rgb(0x0B1020));
 const BADGE_RING_COLOUR: Ink = Ink::Dark(rgb(0x161B2A));
 const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));

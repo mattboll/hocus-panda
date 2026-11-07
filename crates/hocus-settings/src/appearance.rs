@@ -11,7 +11,7 @@
 
 use std::{path::PathBuf, sync::OnceLock};
 
-use hocus_link::theme::Accent;
+use hocus_link::theme::{Accent, Scheme};
 
 use crate::{
     lang::{Lang, w},
@@ -39,8 +39,16 @@ const LANGUAGE: RowGroup = RowGroup {
     per_source: false,
 };
 
-const SCHEMES: &[&str] = &["dark", "light"];
-const ACCENTS: &[&str] = &["green", "blue", "violet", "rose", "teal", "wallpaper"];
+const SCHEMES: &[&str] = &["dark", "light", "frost"];
+const ACCENTS: &[&str] = &[
+    "green",
+    "blue",
+    "violet",
+    "rose",
+    "teal",
+    "wallpaper",
+    "ice",
+];
 const LANGUAGES: &[&str] = &["system", "fr", "en"];
 const DATES: &[&str] = &["long", "short", "numeric", "iso"];
 const TIMES: &[&str] = &["24h", "12h"];
@@ -60,6 +68,127 @@ fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
         codec,
         default,
     })
+}
+
+/// The theme's setting, and the accent's.
+pub const THEME_ID: &str = "appearance.theme";
+pub const ACCENT_ID: &str = "appearance.accent";
+
+/// What a themed theme set when it was chosen, to give back when it is
+/// left (#740): kept in `$XDG_STATE_HOME/hocuspanda/theme-before`, one
+/// `key = "word"` line each.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Before {
+    /// The accent before the theme's own; `None`: the file named none.
+    pub accent: Option<Accent>,
+}
+
+impl Before {
+    const FILE: &str = "theme-before";
+
+    pub fn read(state: Option<&std::path::Path>) -> Self {
+        let text = state
+            .and_then(|s| std::fs::read_to_string(s.join(Self::FILE)).ok())
+            .unwrap_or_default();
+        let mut before = Self::default();
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim().trim_matches('"');
+            if key.trim() == "accent" {
+                before.accent = Accent::of(value);
+            }
+        }
+        before
+    }
+
+    pub fn write(&self, state: Option<&std::path::Path>) {
+        let Some(state) = state else {
+            return;
+        };
+        let text = match self.accent {
+            Some(accent) => format!("accent = \"{accent}\"\n"),
+            None => String::new(),
+        };
+        if let Err(err) = hocus_config::replace(&state.join(Self::FILE), text.as_bytes(), None) {
+            tracing::warn!(%err, "could not keep what the theme changed");
+        }
+    }
+}
+
+/// A setting a theme's choice writes besides the theme itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Proposed {
+    /// `setting` set to this word.
+    Set(&'static str, &'static str),
+    /// `setting`'s line taken out: its default applies.
+    Remove(&'static str),
+}
+
+/// What choosing theme `to` over `from` changes besides the theme (the
+/// hook of #431 and #740), `accent` the accent now, `before` what the
+/// themed theme left had changed; and what to remember for leaving `to`.
+///
+/// Entering Givre sets its accent, the ice blue, remembering the one
+/// before; leaving it gives that one back, unless another was chosen
+/// meanwhile. Givre's window animation (`[windows] open-close = "frost"`)
+/// and its proposed wallpaper (`[wallpaper] picture = "aurora"`, only over
+/// a built-in) come here once they exist, with the values they replace.
+pub fn theme_proposes(
+    from: Scheme,
+    to: Scheme,
+    accent: Option<Accent>,
+    before: &Before,
+) -> (Vec<Proposed>, Before) {
+    let mut proposed = Vec::new();
+    let mut remember = before.clone();
+    if from == to {
+        return (proposed, remember);
+    }
+    if from.themed() && accent == Some(theme_accent(from)) {
+        proposed.push(match before.accent {
+            Some(accent) => Proposed::Set(ACCENT_ID, accent.word()),
+            None => Proposed::Remove(ACCENT_ID),
+        });
+        remember.accent = None;
+    }
+    if to.themed() {
+        let own = theme_accent(to);
+        if accent != Some(own) {
+            proposed.push(Proposed::Set(ACCENT_ID, own.word()));
+            // What was there before any themed theme.
+            if !from.themed() {
+                remember.accent = accent;
+            }
+        }
+    }
+    (proposed, remember)
+}
+
+/// A themed theme's own accent.
+pub const fn theme_accent(scheme: Scheme) -> Accent {
+    match scheme {
+        Scheme::Frost => Accent::Ice,
+        _ => Accent::Green,
+    }
+}
+
+/// The accents' swatches in `scheme`, `chosen` the accent now: the six,
+/// and a themed theme's own first while it is chosen (or its accent is).
+pub fn accents_shown(scheme: Scheme, chosen: Accent) -> Vec<Accent> {
+    let own = scheme.themed().then(|| theme_accent(scheme));
+    let mut shown: Vec<Accent> = Vec::new();
+    if let Some(own) = own {
+        shown.push(own);
+    }
+    for accent in Accent::ALL {
+        let themed = accent == Accent::Ice;
+        if !shown.contains(&accent) && (!themed || accent == chosen) {
+            shown.push(accent);
+        }
+    }
+    shown
 }
 
 /// The accent the file names, the default's when it names none.
@@ -170,16 +299,18 @@ pub fn settings() -> &'static [Setting] {
                 group: THEME,
                 name: w("Thème", "Theme"),
                 line: Some(w(
-                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi.",
-                    "The bar, menus, launcher and Settings; applications are told too.",
+                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi. Givre garde les Réglages et les applications sombres.",
+                    "The bar, menus, launcher and Settings; applications are told too. Frost keeps the Settings and applications dark.",
                 )),
                 keywords: (
-                    &["sombre", "clair", "nuit", "mode sombre", "thème"],
-                    &["dark", "light", "night", "dark mode", "theme"],
+                    &["sombre", "clair", "nuit", "mode sombre", "thème", "givre", "glacé"],
+                    &["dark", "light", "night", "dark mode", "theme", "frost", "ice"],
                 ),
+                // Matrix joins them once its tokens exist (#431).
                 kind: Kind::Segmented(vec![
                     word("Sombre", "Dark", "dark"),
                     word("Clair", "Light", "light"),
+                    word("Givre", "Frost", "frost"),
                 ]),
                 places: one(
                     &["appearance", "theme"],
@@ -479,6 +610,68 @@ pub fn today_as(format: &str, today: jiff::civil::Date, lang: Lang) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn choosing_givre_sets_its_accent_and_leaving_it_gives_the_old_one_back() {
+        let none = Before::default();
+        // Entering Givre: the ice blue, the violet remembered.
+        let (proposed, kept) =
+            theme_proposes(Scheme::Dark, Scheme::Frost, Some(Accent::Violet), &none);
+        assert_eq!(proposed, vec![Proposed::Set(ACCENT_ID, "ice")]);
+        assert_eq!(kept.accent, Some(Accent::Violet));
+        // Leaving it with the ice blue still chosen: the violet again.
+        let (proposed, kept) =
+            theme_proposes(Scheme::Frost, Scheme::Light, Some(Accent::Ice), &kept);
+        assert_eq!(proposed, vec![Proposed::Set(ACCENT_ID, "violet")]);
+        assert_eq!(kept, Before::default());
+        // A file that named no accent: its line taken out again.
+        let (_, kept) = theme_proposes(Scheme::Dark, Scheme::Frost, None, &none);
+        let (proposed, _) = theme_proposes(Scheme::Frost, Scheme::Dark, Some(Accent::Ice), &kept);
+        assert_eq!(proposed, vec![Proposed::Remove(ACCENT_ID)]);
+        // Another accent chosen while in Givre stays.
+        let (proposed, _) = theme_proposes(Scheme::Frost, Scheme::Dark, Some(Accent::Rose), &kept);
+        assert!(proposed.is_empty());
+        // Between the plain themes, nothing more than the theme.
+        let (proposed, _) = theme_proposes(Scheme::Dark, Scheme::Light, Some(Accent::Teal), &none);
+        assert!(proposed.is_empty());
+        // Already in the ice blue: nothing to set, nothing remembered.
+        let (proposed, kept) =
+            theme_proposes(Scheme::Dark, Scheme::Frost, Some(Accent::Ice), &none);
+        assert!(proposed.is_empty());
+        assert_eq!(kept.accent, None);
+    }
+
+    #[test]
+    fn what_givre_changed_is_kept_across_launches() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let before = Before {
+            accent: Some(Accent::Teal),
+        };
+        before.write(Some(dir.path()));
+        assert_eq!(Before::read(Some(dir.path())), before);
+        Before::default().write(Some(dir.path()));
+        assert_eq!(Before::read(Some(dir.path())), Before::default());
+        assert_eq!(Before::read(None), Before::default());
+    }
+
+    #[test]
+    fn the_theme_offers_givre_and_its_swatch_shows_with_it() {
+        let theme = settings()
+            .iter()
+            .find(|s| s.id == THEME_ID)
+            .expect("the theme's row");
+        let Kind::Segmented(choices) = &theme.kind else {
+            panic!("a segmented control");
+        };
+        let words: Vec<&str> = choices.iter().map(|c| c.label.get(Lang::French)).collect();
+        assert_eq!(words, ["Sombre", "Clair", "Givre"]);
+        assert_eq!(accents_shown(Scheme::Dark, Accent::Green).len(), 6);
+        assert!(!accents_shown(Scheme::Dark, Accent::Green).contains(&Accent::Ice));
+        assert_eq!(accents_shown(Scheme::Frost, Accent::Ice)[0], Accent::Ice);
+        assert_eq!(accents_shown(Scheme::Frost, Accent::Ice).len(), 7);
+        // Kept in the plain themes while it is the accent.
+        assert!(accents_shown(Scheme::Dark, Accent::Ice).contains(&Accent::Ice));
+    }
 
     #[test]
     fn the_page_has_its_five_groups_in_order() {

@@ -19,6 +19,9 @@
 //! drawing in 300 ms, and nothing more is drawn. [`frame`] gives the
 //! drawing at a moment of a burst, none once it is over: the places that
 //! draw pandas keep drawing frames only while it gives one.
+//!
+//! A theme may dress them ([`Dress`], #740): Givre's ice visor, a layer
+//! over the still drawing and over each frame alike.
 
 use std::time::Duration;
 
@@ -174,6 +177,64 @@ impl Secretary {
             Self::Stuck => include_str!("../assets/secretary-stuck.svg"),
         }
     }
+}
+
+/// How the pandas are dressed for the theme (#740): as drawn, or Givre's
+/// ice visor. A dress is a layer over the drawing, laid on its still
+/// drawing as on each frame of its motion: the moving parts move as they
+/// do, under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Dress {
+    #[default]
+    Plain,
+    /// Givre's: a translucent ice visor over the eyes, with a highlight,
+    /// pushed up on the forehead when the panda sleeps; the pandas' green
+    /// in Givre's ice blue.
+    Visor,
+}
+
+/// The pandas' green, and Givre's ice blue that takes its place.
+const GREEN: &str = "#7BC47F";
+const ICE: &str = "#7FD8FF";
+
+impl Dress {
+    /// `drawing` (a still drawing or a frame of `mood`) in this dress.
+    pub fn wear(self, drawing: &str, mood: Mood) -> String {
+        match self {
+            Self::Plain => drawing.to_owned(),
+            Self::Visor => {
+                let drawing = drawing.replace(GREEN, ICE);
+                let Some(end) = drawing.rfind("</svg>") else {
+                    return drawing;
+                };
+                let mut dressed = String::with_capacity(drawing.len() + 512);
+                dressed.push_str(&drawing[..end]);
+                dressed.push_str(&visor(mood == Mood::Resting));
+                dressed.push_str(&drawing[end..]);
+                dressed
+            }
+        }
+    }
+}
+
+/// The ice visor, across the eyes (`up`: on the forehead, asleep): a
+/// translucent band with an icy rim, a highlight, the accent's tick.
+fn visor(up: bool) -> String {
+    let lift = if up {
+        " transform=\"translate(0 -19)\""
+    } else {
+        ""
+    };
+    format!(
+        "<g id=\"visor\"{lift}>\
+         <path d=\"M35.5 45.5 Q60 37.5 84.5 45.5 L83 57.5 Q60 51.5 37 57.5 Z\" \
+         fill=\"{ICE}\" fill-opacity=\"0.42\" stroke=\"#CFF3FF\" stroke-width=\"1.5\" \
+         stroke-linejoin=\"round\" />\
+         <path d=\"M41 47.5 Q52 43.6 62 44.2\" fill=\"none\" stroke=\"#FFFFFF\" \
+         stroke-width=\"1.6\" stroke-linecap=\"round\" opacity=\"0.8\" />\
+         <path d=\"M80 49 L83.5 49\" stroke=\"{ICE}\" stroke-width=\"2\" \
+         stroke-linecap=\"round\" /></g>"
+    )
 }
 
 /// How long a burst of `window` draws frames: its window, then the settle.
@@ -678,6 +739,91 @@ mod tests {
             let mid = frame(mood, mood.burst(), MS(650)).expect("a frame");
             assert_ne!(draw(&mid), draw(mood.still()), "{}", mood.name());
         }
+    }
+
+    fn pixels(svg: &str) -> Vec<u8> {
+        let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).expect("svg");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(126, 121).expect("pixmap");
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_translate(3.0, 3.5),
+            &mut pixmap.as_mut(),
+        );
+        pixmap.take()
+    }
+
+    /// The pixel at `(x, y)` of the drawing's units, as red, green, blue.
+    fn at(pixels: &[u8], (x, y): (usize, usize)) -> [u8; 3] {
+        let i = ((y + 3) * 126 + x + 3) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2]]
+    }
+
+    #[test]
+    fn givre_dresses_every_mood_in_its_ice_visor() {
+        for mood in Mood::ALL {
+            let plain = mood.still();
+            assert_eq!(Dress::Plain.wear(plain, mood), plain);
+            let dressed = Dress::Visor.wear(plain, mood);
+            assert_eq!(dressed.matches("<g id=\"visor\"").count(), 1);
+            assert!(!dressed.contains(GREEN), "{}", mood.name());
+            assert!(dressed.trim_end().ends_with("</g></svg>"));
+            // Over the eyes, or on the forehead asleep.
+            let shown = pixels(&dressed);
+            let eye = at(&shown, (48, 51));
+            let forehead = at(&shown, (48, 33));
+            let icy = |[r, g, b]: [u8; 3]| b > r + 10 && g > r;
+            if mood == Mood::Resting {
+                assert!(icy(forehead), "{}: {forehead:?}", mood.name());
+            } else {
+                assert!(icy(eye), "{}: {eye:?}", mood.name());
+                assert_ne!(at(&pixels(plain), (48, 51)), eye);
+            }
+            // Its moving parts move as they did, under the visor.
+            for part in mood.parts() {
+                let group = format!("<g id=\"{}\">", part.id);
+                assert_eq!(dressed.matches(&group).count(), 1, "{}", part.id);
+            }
+            let mid = frame(mood, mood.burst(), MS(650)).expect("a frame");
+            let worn = Dress::Visor.wear(&mid, mood);
+            assert!(resvg::usvg::Tree::from_str(&worn, &resvg::usvg::Options::default()).is_ok());
+            assert_ne!(pixels(&worn), shown, "{}", mood.name());
+        }
+    }
+
+    /// The pandas in Givre's visor, every mood, as PNG files in the folder
+    /// `HOCUS_SHOTS` names, for the maintainer.
+    #[test]
+    #[ignore = "writes screenshots: run with HOCUS_SHOTS set"]
+    fn screenshots_of_the_visor() {
+        let Some(dir) = std::env::var_os("HOCUS_SHOTS") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).expect("the folder");
+        let scale = 3.0;
+        let (w, h) = ((VIEW_BOX.0 * scale) as u32, (VIEW_BOX.1 * scale) as u32);
+        let mut sheet =
+            resvg::tiny_skia::Pixmap::new(w * Mood::ALL.len() as u32, h * 2).expect("pixmap");
+        sheet.fill(resvg::tiny_skia::Color::from_rgba8(8, 16, 31, 255));
+        for (i, mood) in Mood::ALL.into_iter().enumerate() {
+            for (row, dress) in [Dress::Plain, Dress::Visor].into_iter().enumerate() {
+                let svg = dress.wear(mood.still(), mood);
+                let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
+                    .expect("svg");
+                let at = resvg::tiny_skia::Transform::from_row(
+                    scale,
+                    0.0,
+                    0.0,
+                    scale,
+                    (i as u32 * w) as f32 + 3.0 * scale,
+                    (row as u32 * h) as f32 + 3.5 * scale,
+                );
+                resvg::render(&tree, at, &mut sheet.as_mut());
+            }
+        }
+        sheet
+            .save_png(dir.join("pandas-visor.png"))
+            .expect("the file");
     }
 
     #[test]

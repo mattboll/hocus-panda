@@ -521,14 +521,17 @@
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the
-# authentication dialog and the Settings draw in: "dark" or "light".
-# Applications are told too, through the desktop portal's
-# org.freedesktop.appearance color-scheme (GTK 4, libadwaita, Qt 6.5 and
-# browsers follow it).
+# authentication dialog and the Settings draw in: "dark" or "light"; or
+# "frost" (Givre), icy blue on night-blue glass for the bar, its menus,
+# the notifications, the launcher and the lock screen, the Settings and
+# applications staying dark. Applications are told too, through the
+# desktop portal's org.freedesktop.appearance color-scheme (GTK 4,
+# libadwaita, Qt 6.5 and browsers follow it).
 # theme = "dark"
 # What is chosen, on or focused (switches, the selection, the keyboard's
-# ring): "green" (the pandas'), "blue", "violet", "rose", "teal", or
-# "wallpaper" (its dominant hue). Applications are told it as the portal's
+# ring): "green" (the pandas'), "blue", "violet", "rose", "teal",
+# "wallpaper" (its dominant hue), or "ice" (Givre's, which choosing Givre
+# in the Settings sets). Applications are told it as the portal's
 # accent-color.
 # accent = "green"
 # How much larger the Settings window draws its text and pieces, from

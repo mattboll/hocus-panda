@@ -8,6 +8,10 @@
 //! accent, or a colour drawn for the dark theme that the light one reads
 //! by [`hocus_link::theme::on_light`]. Colours that are the same in both
 //! (the agents' states, the gauges, the pandas) stay plain `Color`s.
+//!
+//! Givre (#740) adds marks of its own, drawn only in it ([`frost`]): the
+//! viewfinder corners of the bar, its popovers and the bubbles
+//! ([`corner_marks`]), the clocks' glow ([`glow`]) and the pandas' visor.
 
 use std::sync::{PoisonError, RwLock};
 
@@ -37,6 +41,107 @@ pub fn now() -> Choice {
 /// Whether the shell draws on light backgrounds.
 pub fn light() -> bool {
     now().scheme == Scheme::Light
+}
+
+/// Whether the shell draws Givre's own marks: Givre, without high
+/// contrast (which wins over the look).
+pub fn frost() -> bool {
+    let choice = now();
+    choice.scheme.themed() && !choice.contrast
+}
+
+/// Which of a surface's corners take Givre's marks: the bar all four, a
+/// popover or a bubble the top left and bottom right (the mockup's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corners {
+    Four,
+    Diagonal,
+}
+
+/// Givre's viewfinder corner marks in `rect`: 10 px arms, 1.5 px thick,
+/// 5 px in, `#BFEFFF` at 75 %. Nothing in another theme.
+pub fn corner_marks(f: &mut iced::widget::canvas::Frame, rect: iced::Rectangle, which: Corners) {
+    use iced::{
+        Point,
+        widget::canvas::{Path, Stroke},
+    };
+    if !frost() {
+        return;
+    }
+    const IN: f32 = 5.0;
+    const ARM: f32 = 10.0;
+    const WIDTH: f32 = 1.5;
+    let near = IN + WIDTH / 2.0;
+    let (left, top) = (rect.x + near, rect.y + near);
+    let (right, bottom) = (rect.x + rect.width - near, rect.y + rect.height - near);
+    let reach = ARM - WIDTH / 2.0;
+    // Each corner: its point, and which way its arms go.
+    let mut marks = vec![(left, top, 1.0, 1.0), (right, bottom, -1.0, -1.0)];
+    if which == Corners::Four {
+        marks.push((right, top, -1.0, 1.0));
+        marks.push((left, bottom, 1.0, -1.0));
+    }
+    let colour = color(hocus_link::theme::FROST_CORNER);
+    for (x, y, dx, dy) in marks {
+        let path = Path::new(|p| {
+            p.move_to(Point::new(x, y + dy * reach));
+            p.line_to(Point::new(x, y));
+            p.line_to(Point::new(x + dx * reach, y));
+        });
+        f.stroke(
+            &path,
+            Stroke::default().with_color(colour).with_width(WIDTH),
+        );
+    }
+}
+
+/// The bar's column's four corner marks in Givre, over its glass: a
+/// canvas that draws nothing in another theme.
+#[derive(Debug, Clone, Copy)]
+pub struct BarMarks;
+
+impl<Message> iced::widget::canvas::Program<Message> for BarMarks {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        if !frost() {
+            return Vec::new();
+        }
+        let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
+        corner_marks(
+            &mut frame,
+            iced::Rectangle::new(iced::Point::ORIGIN, bounds.size()),
+            Corners::Four,
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Givre's glow behind a clock's digits (`0 0 14px #7FD8FF` at 35 %): the
+/// digit drawn again around itself, faint, by `draw` (an offset and the
+/// glow's colour for that copy), before the digit itself. Nothing in
+/// another theme.
+pub fn glow(mut draw: impl FnMut(iced::Vector, Color)) {
+    if !frost() {
+        return;
+    }
+    let glow = hocus_link::theme::FROST_GLOW;
+    for (radius, alpha) in [(2.5_f32, 0.07_f32), (5.5, 0.035)] {
+        for k in 0..8 {
+            let angle = k as f32 * std::f32::consts::FRAC_PI_4;
+            draw(
+                iced::Vector::new(radius * angle.cos(), radius * angle.sin()),
+                Color::from_rgba8(glow.r, glow.g, glow.b, alpha),
+            );
+        }
+    }
 }
 
 /// Whether high contrast reinforces the theme (#423): borders 2 px, the
@@ -93,6 +198,9 @@ pub enum Ink {
     Token(fn(&Tokens) -> Rgba),
     /// Drawn for the dark theme; the light one reads it by rule.
     Dark(Color),
+    /// A surface's rim drawn for the dark theme (a faint white): in Givre
+    /// its icy hairline, `bar.border`.
+    Rim(Color),
     /// The accent's base, at this opacity.
     Accent(f32),
     /// Text in the accent.
@@ -115,6 +223,10 @@ impl Ink {
             Self::Dark(c) => match (choice.scheme, choice.contrast) {
                 (Scheme::Dark, false) => c,
                 _ => color(choice.reads(rgba(c))),
+            },
+            Self::Rim(c) => match (choice.scheme, choice.contrast) {
+                (Scheme::Frost, false) => color(choice.tokens().bar_border),
+                _ => Self::Dark(c).in_theme(choice),
             },
             Self::Accent(alpha) => {
                 let [r, g, b] = choice.accent().base;
@@ -194,5 +306,36 @@ mod tests {
         let veil = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08)).in_theme(light);
         assert_eq!(veil.into_rgba8()[..3], [0x14, 0x19, 0x26]);
         assert!((veil.a - 0.1).abs() < 0.01, "{veil:?}");
+        // Givre: icy texts and night-blue backgrounds, the rims its
+        // hairline, the accent and the states as they are.
+        let frost = Choice {
+            scheme: Scheme::Frost,
+            accent: Accent::Ice,
+            ..Choice::default()
+        };
+        assert_eq!(TEXT.in_theme(frost), Color::from_rgb8(0xEA, 0xF6, 0xFF));
+        assert_eq!(
+            Ink::Dark(Color::from_rgb8(0xA9, 0xB2, 0xC2)).in_theme(frost),
+            Color::from_rgb8(0x93, 0xAE, 0xC8)
+        );
+        assert_eq!(ACCENT.in_theme(frost), Color::from_rgb8(0x7F, 0xD8, 0xFF));
+        let rim = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10));
+        assert_eq!(rim.in_theme(frost).into_rgba8()[..3], [190, 232, 255]);
+        assert_eq!(rim.in_theme(dark), Color::from_rgba8(255, 255, 255, 0.10));
+        let wait = Ink::Dark(Color::from_rgb8(0xFF, 0xC2, 0x3D));
+        assert_eq!(wait.in_theme(frost), Color::from_rgb8(0xFF, 0xC2, 0x3D));
+        // High contrast wins over Givre.
+        let contrast = Choice {
+            contrast: true,
+            ..frost
+        };
+        assert_eq!(TEXT.in_theme(contrast), Color::from_rgb8(0xFF, 0xFF, 0xFF));
+        assert_eq!(
+            rim.in_theme(contrast),
+            Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10)).in_theme(Choice {
+                contrast: true,
+                ..dark
+            })
+        );
     }
 }

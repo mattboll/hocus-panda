@@ -1143,11 +1143,12 @@ pub struct Appearance {
     pub reduce_transparency: bool,
     /// `"dark"` or `"light"`: the shell, the Settings, the lock and the
     /// authentication dialog draw in it, and applications are told
-    /// (#402).
+    /// (#402); `"frost"` (Givre, #740): the shell's surfaces only, the
+    /// Settings and applications dark.
     #[serde(deserialize_with = "scheme")]
     pub theme: hocus_link::theme::Scheme,
-    /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"` or
-    /// `"wallpaper"`: what is chosen, on or focused.
+    /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"`, `"wallpaper"`
+    /// or `"ice"` (Givre's): what is chosen, on or focused.
     #[serde(deserialize_with = "accent")]
     pub accent: hocus_link::theme::Accent,
     /// The Settings' text, from 80 to 150 %: written as `1.2`, held in
@@ -2568,12 +2569,26 @@ mod tests {
             toml::from_str("[appearance]\ntheme = \"light\"\naccent = \"teal\"\n")?;
         assert_eq!(config.appearance.theme, Scheme::Light);
         assert_eq!(config.appearance.accent, Accent::Teal);
+        // Givre (#740), with its ice blue.
+        let config: Config = toml::from_str("[appearance]\ntheme = \"frost\"\naccent = \"ice\"\n")?;
+        assert_eq!(config.appearance.theme, Scheme::Frost);
+        assert_eq!(config.appearance.accent, Accent::Ice);
+        let choice = config.appearance.theme_choice(Default::default());
+        assert_eq!(
+            choice.to_string().parse::<hocus_link::theme::Choice>(),
+            Ok(choice)
+        );
         let config: Config = toml::from_str("")?;
         assert_eq!(
             config.appearance.theme_choice(Default::default()),
             Default::default()
         );
-        for bad in ["theme = \"neon\"", "accent = \"amber\"", "theme = 1"] {
+        for bad in [
+            "theme = \"neon\"",
+            "theme = \"givre\"",
+            "accent = \"amber\"",
+            "theme = 1",
+        ] {
             let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }

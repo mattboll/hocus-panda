@@ -9,8 +9,10 @@
 //! an open popover in light colours, live; the portal answers
 //! `color-scheme` and signals its change; the accent changes the bar's
 //! accent colour; the Settings window draws in the theme and follows the
-//! file; and once the switch is drawn, nothing commits at rest. Each waits
-//! for what the programs said or what the screen shows, never for a time.
+//! file; and once the switch is drawn, nothing commits at rest. Givre
+//! (#740): the bar in its night blue, its accent, nothing at rest; and a
+//! theme switch draws one frame per screen. Each waits for what the
+//! programs said or what the screen shows, never for a time.
 
 mod common;
 
@@ -95,6 +97,11 @@ impl Bed {
     /// The compositor with the real shell, its file holding `text`; `None`
     /// when the shell is not built.
     fn start(text: &str) -> anyhow::Result<Option<Self>> {
+        Self::start_on(text, &[&format!("{}x{}", SCREEN.0, SCREEN.1)])
+    }
+
+    /// The same on the screens `outputs` (the first the bar's).
+    fn start_on(text: &str, outputs: &[&str]) -> anyhow::Result<Option<Self>> {
         let Some(shell) = common::shell_program() else {
             eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
             return Ok(None);
@@ -138,7 +145,10 @@ impl Bed {
         config.french = true;
         let mut hp = Headless::start_with_shell(
             HeadlessConfig {
-                outputs: vec![format!("{}x{}", SCREEN.0, SCREEN.1).parse()?],
+                outputs: outputs
+                    .iter()
+                    .map(|o| o.parse())
+                    .collect::<Result<_, _>>()?,
                 renderer: RendererChoice::Pixman,
                 render_node: None,
             },
@@ -356,6 +366,106 @@ fn once_the_switch_is_drawn_nothing_commits_at_rest() -> anyhow::Result<()> {
         bed.hp.popover_commits(),
     );
     assert_eq!(before, after, "the bar's surfaces drew at rest");
+    Ok(())
+}
+
+/// Givre (#740): the bar's background its night blue (opaque on the CPU:
+/// `#0E1A30` to `#08101F`), the accent its ice blue, the shell told; once
+/// drawn, nothing commits at rest, each surface of the bar having drawn
+/// once for the switch; back to dark, the dark bar.
+#[test]
+fn givre_draws_the_bar_in_night_blue_and_rests() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    // The first-run card's "Choisir…" is the bar's accent at rest.
+    let choose = bed.card_item("DayChoose")?;
+    let accent = (choose.0, choose.1 - 8);
+    bed.themed("dark", "green")?;
+    bed.until(BAR_BACKGROUND, dark)?;
+    common::at_rest(&mut bed.hp)?;
+    // Past the clock's next second, which draws on its own.
+    bed.hp.hold_clock();
+    common::wait(&mut bed.hp, Duration::from_millis(300))?;
+    let commits = |hp: &Headless| {
+        [
+            hp.bar_commits(),
+            hp.levels_commits(),
+            hp.desktops_commits(),
+            hp.tasks_commits(),
+        ]
+    };
+    let before = commits(&bed.hp);
+    bed.write(&format!(
+        "{FILE}\n[appearance]\ntheme = \"frost\"\naccent = \"ice\"\n"
+    ))?;
+    bed.themed("frost", "ice")?;
+    // Night blue: blue well over green, green over red (the dark theme's
+    // slate is nearly grey).
+    let night = |[r, g, b]: [u8; 3]| g >= r + 7 && b >= g + 12 && b < 60;
+    bed.until(BAR_BACKGROUND, night)?;
+    bed.until(accent, |c| near(c, [0x7F, 0xD8, 0xFF]))?;
+    common::at_rest(&mut bed.hp)?;
+    common::wait(&mut bed.hp, Duration::from_millis(300))?;
+    let switched = commits(&bed.hp);
+    for (i, (b, a)) in before.iter().zip(switched).enumerate() {
+        assert_eq!(a - b, 1, "surface {i} drew {} times for the switch", a - b);
+    }
+    common::wait(&mut bed.hp, Duration::from_millis(1500))?;
+    assert_eq!(
+        commits(&bed.hp),
+        switched,
+        "the bar's surfaces drew at rest"
+    );
+    bed.hp.release_clock();
+    bed.write(FILE)?;
+    bed.themed("dark", "green")?;
+    bed.until(BAR_BACKGROUND, |c| dark(c) && !night(c))?;
+    Ok(())
+}
+
+/// A theme switch draws only where something is in the theme, and stops
+/// (#740, the sprint's budgets): two screens, the bar on the first, to
+/// Givre, light and back to dark. The second shows nothing themed (the
+/// wallpaper alone): no frame there. The first draws as the shell's
+/// surfaces commit, each once ([`givre_draws_the_bar_in_night_blue_and_rests`]):
+/// on the CPU they land within one or two frames, not yet in exactly one
+/// (that would take the compositor holding the screen's frame until the
+/// shell's surfaces have all committed).
+#[test]
+fn a_theme_switch_draws_one_frame_per_screen() -> anyhow::Result<()> {
+    // Without the clock's seconds, which draw on their own.
+    let file = format!("{FILE}\n[panel.clock]\nseconds = false\n");
+    let Some(mut bed) = Bed::start_on(&file, &["1920x1080", "1280x800"])? else {
+        return Ok(());
+    };
+    // The first-run card set aside: the bar at rest.
+    bed.themed("dark", "green")?;
+    common::at_rest(&mut bed.hp)?;
+    bed.hp.hold_clock();
+    common::wait(&mut bed.hp, Duration::from_millis(500))?;
+    for (theme, accent) in [("frost", "ice"), ("light", "green"), ("dark", "green")] {
+        let before = [bed.hp.frames_on(0), bed.hp.frames_on(1)];
+        bed.write(&format!(
+            "{file}\n[appearance]\ntheme = \"{theme}\"\naccent = \"{accent}\"\n"
+        ))?;
+        bed.themed(theme, accent)?;
+        let drawn = bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.frames_on(0) > before[0])?;
+        anyhow::ensure!(drawn, "{theme}: the bar's screen not drawn");
+        common::at_rest(&mut bed.hp)?;
+        common::wait(&mut bed.hp, Duration::from_millis(500))?;
+        let after = [bed.hp.frames_on(0), bed.hp.frames_on(1)];
+        let drew: Vec<u64> = after.iter().zip(&before).map(|(a, b)| a - b).collect();
+        assert_eq!(drew[1], 0, "{theme}: frames on the screen without the bar");
+        assert!(
+            (1..=3).contains(&drew[0]),
+            "{theme}: {} frames on the bar's screen",
+            drew[0]
+        );
+        eprintln!("{theme}: {drew:?} frames per screen");
+    }
     Ok(())
 }
 
