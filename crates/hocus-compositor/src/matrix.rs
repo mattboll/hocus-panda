@@ -114,6 +114,7 @@ pub trait Matrix: Renderer + Sized {
         frame: &mut Self::Frame<'_, '_>,
         rain: &RainElement,
         dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), Self::Error>;
 
     /// Whether this renderer draws moving wallpapers.
@@ -143,6 +144,7 @@ impl Matrix for PixmanRenderer {
         _frame: &mut Self::Frame<'_, '_>,
         _rain: &RainElement,
         _dst: Rectangle<i32, Physical>,
+        _damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -692,10 +694,16 @@ fn rgb(c: [u8; 3]) -> [f32; 3] {
     c.map(|v| f32::from(v) / 255.0)
 }
 
-/// Draws `program` over `rects` (in `geometry`'s space, physical), the
-/// frame's projection placing `geometry` at `dst`; each vertex's `local`
-/// is its place in `geometry`'s space less `origin`. The textures are
-/// bound and the uniforms set by `set` first.
+/// Draws `program` over `rects` (physical, from the element's corner
+/// `origin` in `geometry`'s space), the frame's projection placing
+/// `geometry` at `dst`; each vertex's `local` is its place from that
+/// corner. The textures are bound and the uniforms set by `set` first.
+///
+/// Every rectangle is drawn as it is, never their bounds: the damage
+/// tracker redraws what is over an element only where it is damaged, so
+/// an opaque wallpaper drawn over the bounds of a few scattered rectangles
+/// (the desktops' dots at the top, a row of the bar) would cover the bar
+/// between them until its next frame (the bar vanishing).
 ///
 /// # Safety
 ///
@@ -710,31 +718,11 @@ unsafe fn quads(
     origin: Point<i32, Physical>,
     set: impl FnOnce(&ffi::Gles2),
 ) {
-    // At most this many rectangles drawn apart; more, their bounds.
-    const MOST: usize = 8;
-    let mut vertices = [0f32; MOST * 6 * 4];
-    let bounds;
-    let rects = if rects.len() > MOST {
-        bounds = rects
-            .iter()
-            .copied()
-            .reduce(|a, b| a.merge(b))
-            .unwrap_or_default();
-        std::slice::from_ref(&bounds)
-    } else {
-        rects
-    };
-    let mut n = 0;
-    for r in rects {
-        let (x0, y0) = (r.loc.x as f32, r.loc.y as f32);
-        let (x1, y1) = (x0 + r.size.w as f32, y0 + r.size.h as f32);
-        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y0), (x1, y1), (x0, y1)] {
-            let (lx, ly) = (x - origin.x as f32, y - origin.y as f32);
-            vertices[n * 4..n * 4 + 4].copy_from_slice(&[x, y, lx, ly]);
-            n += 1;
-        }
-    }
-    // SAFETY: the context is current; the vertices outlive the draw call,
+    // This many rectangles to a draw call, as many calls as it takes: the
+    // vertices on the stack, nothing allocated per frame.
+    const BATCH: usize = 8;
+    let mut vertices = [0f32; BATCH * 6 * 4];
+    // SAFETY: the context is current; the vertices outlive each draw call,
     // and every attribute enabled here is disabled again, as smithay's own
     // draws expect.
     unsafe {
@@ -750,23 +738,26 @@ unsafe fn quads(
             gl.VertexAttribDivisor(pos, 0);
             gl.VertexAttribDivisor(local, 0);
         }
-        gl.VertexAttribPointer(
-            pos,
-            2,
-            ffi::FLOAT,
-            ffi::FALSE,
-            stride,
-            vertices.as_ptr() as *const _,
-        );
-        gl.VertexAttribPointer(
-            local,
-            2,
-            ffi::FLOAT,
-            ffi::FALSE,
-            stride,
-            vertices.as_ptr().add(2) as *const _,
-        );
-        gl.DrawArrays(ffi::TRIANGLES, 0, n as ffi::types::GLsizei);
+        for batch in rects.chunks(BATCH) {
+            let n = corners(batch, origin, &mut vertices);
+            gl.VertexAttribPointer(
+                pos,
+                2,
+                ffi::FLOAT,
+                ffi::FALSE,
+                stride,
+                vertices.as_ptr() as *const _,
+            );
+            gl.VertexAttribPointer(
+                local,
+                2,
+                ffi::FLOAT,
+                ffi::FALSE,
+                stride,
+                vertices.as_ptr().add(2) as *const _,
+            );
+            gl.DrawArrays(ffi::TRIANGLES, 0, n as ffi::types::GLsizei);
+        }
         gl.DisableVertexAttribArray(pos);
         gl.DisableVertexAttribArray(local);
         gl.ActiveTexture(ffi::TEXTURE1);
@@ -774,6 +765,28 @@ unsafe fn quads(
         gl.ActiveTexture(ffi::TEXTURE0);
         gl.BindTexture(ffi::TEXTURE_2D, 0);
     }
+}
+
+/// The two triangles of each of `rects` (from the element's corner
+/// `origin`) into `vertices`, four floats each: its place in the
+/// element's geometry's space, and from its corner. How many vertices.
+fn corners(
+    rects: &[Rectangle<i32, Physical>],
+    origin: Point<i32, Physical>,
+    vertices: &mut [f32],
+) -> usize {
+    let mut n = 0;
+    for r in rects {
+        let (x0, y0) = (r.loc.x as f32, r.loc.y as f32);
+        let (x1, y1) = (x0 + r.size.w as f32, y0 + r.size.h as f32);
+        for (lx, ly) in [(x0, y0), (x1, y0), (x0, y1), (x1, y0), (x1, y1), (x0, y1)] {
+            if let Some(v) = vertices.get_mut(n * 4..n * 4 + 4) {
+                v.copy_from_slice(&[lx + origin.x as f32, ly + origin.y as f32, lx, ly]);
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 /// Binds `texture` to unit `unit` with nearest (`sharp`) or linear
@@ -862,6 +875,7 @@ impl Matrix for GlesRenderer {
         frame: &mut GlesFrame<'_, '_>,
         rain: &RainElement,
         dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         let Some(texture) = rain.texture.downcast_ref::<GlesTexture>() else {
             return Ok(());
@@ -881,7 +895,6 @@ impl Matrix for GlesRenderer {
         let frost = look.style == crate::rain::Style::Frost;
         let p = if frost { &glyphs.frost } else { &glyphs.rain };
         let size = rain.geometry.size;
-        let whole = [rain.geometry];
         frame.with_context(|gl| {
             #[allow(unsafe_code)]
             // SAFETY: the frame's context is current.
@@ -891,7 +904,7 @@ impl Matrix for GlesRenderer {
                     p,
                     &matrix,
                     instancing,
-                    &whole,
+                    damage,
                     rain.geometry.loc,
                     |gl| {
                         bind(gl, 1, atlas, true);
@@ -945,23 +958,9 @@ impl Matrix for GlesRenderer {
         let atlas = glyphs.atlas.tex_id();
         let look = wall.look;
         let screen = wall.geometry.size;
-        // The damage is the element's own, from its corner; at most eight
-        // apart, else their bounds.
-        let mut moved = [Rectangle::<i32, Physical>::default(); 8];
-        let rects: &[Rectangle<i32, Physical>] = if damage.len() <= moved.len() {
-            for (to, d) in moved.iter_mut().zip(damage) {
-                *to = Rectangle::new(d.loc + wall.geometry.loc, d.size);
-            }
-            &moved[..damage.len()]
-        } else {
-            let bounds = damage
-                .iter()
-                .copied()
-                .reduce(|a, b| a.merge(b))
-                .unwrap_or_default();
-            moved[0] = Rectangle::new(bounds.loc + wall.geometry.loc, bounds.size);
-            &moved[..1]
-        };
+        // The damage is the element's own, from its corner: each of its
+        // rectangles drawn, nothing outside them.
+        let rects = damage;
         let colours = look.colours;
         frame.with_context(|gl| {
             #[allow(unsafe_code)]
@@ -1088,10 +1087,10 @@ impl<R: Matrix> RenderElement<R> for RainElement {
         frame: &mut R::Frame<'_, '_>,
         _src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
-        _damage: &[Rectangle<i32, Physical>],
+        damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        R::draw_rain(frame, self, dst)
+        R::draw_rain(frame, self, dst, damage)
     }
 }
 
@@ -1156,6 +1155,26 @@ impl<R: Matrix> RenderElement<R> for WallElement {
 
 #[cfg(test)]
 mod tests {
+    use smithay::utils::{Physical, Point, Rectangle};
+
+    /// Each damaged place its own two triangles, from the element's
+    /// corner: never the bounds of scattered places.
+    #[test]
+    fn each_damaged_place_is_drawn_apart() {
+        let r = |x, y, w, h| Rectangle::<i32, Physical>::new((x, y).into(), (w, h).into());
+        let corner = Point::<i32, Physical>::from((100, 50));
+        let mut vertices = [0f32; 2 * 6 * 4];
+        let n = super::corners(&[r(0, 0, 10, 5), r(500, 300, 4, 4)], corner, &mut vertices);
+        assert_eq!(n, 12);
+        let xs: Vec<f32> = vertices.chunks(4).map(|v| v[2]).collect();
+        // Nothing between the two places.
+        assert!(xs[..6].iter().all(|x| *x <= 10.0), "{xs:?}");
+        assert!(xs[6..].iter().all(|x| *x >= 500.0), "{xs:?}");
+        // Placed from the corner, and where it is in the element.
+        assert_eq!(&vertices[..4], &[100.0, 50.0, 0.0, 0.0]);
+        assert_eq!(&vertices[24..28], &[600.0, 350.0, 500.0, 300.0]);
+    }
+
     #[test]
     fn the_shaders_hash_as_the_still_pictures_do() {
         // The same words: what the CPU's still picture draws is what the

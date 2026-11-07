@@ -272,4 +272,7 @@ The glass never blurs a moving wallpaper's frames: what is behind a pane
 is drawn with a second element of the wallpaper, a still copy whose
 commit changes only when it is taken again (as a surface with glass
 appears, and every 2 minutes while it moves); the screen shows the moving
-one, which replaces it once the panes are done.
+one, which replaces it once the panes are done. Between its frames it is
+drawn again only in the places that changed over it, each apart (eight
+to a draw call, nothing allocated), never their bounds: the damage
+tracker draws again what is over it only where it is damaged.
