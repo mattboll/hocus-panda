@@ -257,7 +257,7 @@ close, none elsewhere, none 100 ms after.
 | Visible 60 s: frames on its screen | rain ≤ 902, stars ≤ 1 202, aurora ≤ 602; on battery ≤ 482 / 602 / 302 | 900, 1 200, 600; 450, 600, 300 |
 | Covered (≥ 90 %) 60 s | 0 frames, 0 of its own, 0 wakes | 0, 0, 0 |
 | Another screen covered | 0 frames there | 0 |
-| The bar's glass over it, 60 s | 0 blurs after the first | 0 |
+| The bar's glass over it | ≤ 1 blur in 60 s, ≤ 5 in 10 min (its still copy taken again every 2 min), at least 1 in 10 min | 0 in 60 s, 3 in 10 min |
 | Allocations a frame, over a turn of the loop at rest | ≤ 30 at most, the last minutes' mean no higher than the first's | 24 to 25 at most, 14 on average, flat (one timer for the wallpapers, set again by itself, never inserted per frame) |
 | Reduced motion, power saver, `animate = false`, battery "still", locked, fullscreen, 2 min without input | no frame of its own | none |
 | Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
@@ -268,7 +268,8 @@ moving_wallpaper --run-ignored only timings` (a frame at 3440 × 1440, beside
 a still one), and the shots for the pull request
 (`HOCUS_SHOTS=DIR … --run-ignored only shots`).
 
-The glass never blurs a moving wallpaper again: what is behind a pane is
-drawn with a second element of the wallpaper, still at the moment it
-started, whose commit never changes; the screen shows the moving one,
-which replaces it once the panes are done.
+The glass never blurs a moving wallpaper's frames: what is behind a pane
+is drawn with a second element of the wallpaper, a still copy whose
+commit changes only when it is taken again (as a surface with glass
+appears, and every 2 minutes while it moves); the screen shows the moving
+one, which replaces it once the panes are done.

@@ -382,10 +382,12 @@ fn each_screen_decides_alone() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The bar's glass over a moving wallpaper blurs a still picture of it:
-/// once, then never again for its frames.
+/// The bar's glass over a moving wallpaper blurs a still copy of it, taken
+/// as the bar comes and again every 2 minutes while it moves: at most one
+/// blur in a minute, five in ten, and at least one more in ten, so that the
+/// glass never drifts far from what moves beside it.
 #[test]
-fn the_glass_over_it_is_blurred_once() -> anyhow::Result<()> {
+fn the_glass_over_it_is_blurred_every_two_minutes_at_most() -> anyhow::Result<()> {
     let mut config = moving("rain");
     config.panel.form = hocus_compositor::FormChoice::Full;
     let Some(mut hp) = gles(config, &[(1280, 800)])? else {
@@ -409,7 +411,19 @@ fn the_glass_over_it_is_blurred_once() -> anyhow::Result<()> {
     }
     let drawn = hp.frames_on(0) - before;
     assert!(drawn >= 850, "it ran: {drawn}");
-    assert_eq!(hp.glass_blurs(), blurs, "no blur again in 60 s");
+    let minute = hp.glass_blurs() - blurs;
+    assert!(minute <= 1, "{minute} blurs in 60 s");
+    // Nine minutes more, a frame of its own at a time; a move of the
+    // pointer each minute, or it rests after 2 min without input.
+    for k in 0..9 * 60 * 15 / 4 {
+        if k % 225 == 0 {
+            hp.pointer_move(100.0 + f64::from(k % 7), 100.0);
+        }
+        hp.step(Duration::from_millis(267))?;
+    }
+    let ten = hp.glass_blurs() - blurs;
+    eprintln!("the glass blurred {minute} times in 60 s, {ten} in 10 min");
+    assert!((1..=5).contains(&ten), "{ten} blurs in 10 min");
     Ok(())
 }
 

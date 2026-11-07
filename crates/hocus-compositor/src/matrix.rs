@@ -400,8 +400,7 @@ void main() {
             + 0.05 * sin(xs * 1.3 + time * 0.11 + f * 2.1)
             + 0.07 * (noise(xs * 2.2 + time * 0.03, 11.0 + f) - 0.5);
         float d = uv.y - centre;
-        float folds = 0.25 + 0.75 * (0.6 * noise(xs * 9.0 + time * 0.08, 21.0 + f)
-            + 0.4 * noise(xs * 23.0 - time * 0.05, 31.0 + f));
+        float folds = 0.25 + 0.75 * noise(xs * 11.0 + time * 0.08, 21.0 + f);
         float rise = 0.08 + 0.16 * noise(xs * 4.0 + time * 0.04, 41.0 + f);
         float above = exp(-d * d / (rise * rise)) * folds;
         float below = exp(-d * d / 0.0045) * (0.6 + 0.4 * folds);

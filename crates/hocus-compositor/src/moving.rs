@@ -14,8 +14,9 @@
 //!
 //! The glass (the bar's, the popovers', the launcher's) never sees it
 //! move: what is behind a pane is drawn with a second element of the
-//! wallpaper, still at the moment it started, so the panes' blur is done
-//! once and not again at each of its frames.
+//! wallpaper, a still copy taken as it starts, as a surface with glass
+//! appears and every 2 minutes while it moves ([`STILL_REFRESH`]): the
+//! panes are blurred then, not at each of its frames.
 
 use std::{collections::HashMap, time::Duration};
 
@@ -38,6 +39,28 @@ use crate::{
 pub const RESTS_AFTER: Duration = Duration::from_secs(120);
 /// Covered this much or more, it stops.
 pub const COVERED: f64 = 0.9;
+/// The glass's still copy of a moving wallpaper is taken again this often
+/// while it moves (one blur of each pane each time), so that what the
+/// glass shows never drifts far from what moves beside it; and when a
+/// surface with glass appears.
+pub const STILL_REFRESH: Duration = Duration::from_secs(120);
+
+/// The surfaces of `output` that have glass behind them: the bar, its
+/// popovers, the emoji picker, the launcher.
+fn glassy(output: &Output) -> usize {
+    smithay::desktop::layer_map_for_output(output)
+        .layers()
+        .filter(|l| {
+            matches!(
+                l.namespace(),
+                hocus_link::NAMESPACE
+                    | hocus_link::POPOVER_NAMESPACE
+                    | hocus_link::EMOJI_NAMESPACE
+                    | hocus_link::LAUNCHER_NAMESPACE
+            )
+        })
+        .count()
+}
 
 /// A screen's moving wallpaper.
 #[derive(Debug)]
@@ -48,9 +71,14 @@ pub struct Wall {
     ticks: u64,
     id: Id,
     commit: CommitCounter,
-    /// The still one behind the glass.
+    /// The still one behind the glass: the frame it shows, its commit
+    /// (a new one each time it is taken again), when it was taken, and the
+    /// surfaces with glass over the screen then.
     still_id: Id,
     still_tick: u64,
+    still_commit: CommitCounter,
+    still_at: Option<Duration>,
+    glassy: usize,
     /// When its next frame is due, while it runs.
     next: Option<Duration>,
     /// Whether the day's recorder was told it moves.
@@ -67,6 +95,9 @@ impl Wall {
             commit: CommitCounter::default(),
             still_id: Id::new(),
             still_tick: u64::from(STILL_TICK),
+            still_commit: CommitCounter::default(),
+            still_at: None,
+            glassy: 0,
             next: None,
             said_moving: false,
         }
@@ -208,11 +239,25 @@ impl State {
         let mut fastest: Option<Duration> = None;
         for output in outputs {
             let pace = self.wall_pace(&output, now);
+            let glass = glassy(&output);
             let name = output.name();
             let walls = self.walls.get_mut();
             let Some(wall) = walls.by_output.get_mut(&name) else {
                 continue;
             };
+            // The glass's still copy taken again: a surface with glass came
+            // (it is blurred from what shows now), or it moved for 2 min.
+            let taken = *wall.still_at.get_or_insert(now);
+            let old = pace.is_some() && now.saturating_sub(taken) >= STILL_REFRESH;
+            if (glass > wall.glassy || old) && wall.still_tick != wall.ticks {
+                wall.still_tick = wall.ticks;
+                wall.still_commit.increment();
+                wall.still_at = Some(now);
+                self.redraw = true;
+            } else if old {
+                wall.still_at = Some(now);
+            }
+            wall.glassy = glass;
             if pace.is_some() != wall.said_moving {
                 wall.said_moving = pace.is_some();
                 let kind = if pace.is_some() {
@@ -307,7 +352,7 @@ impl State {
             WallElement::new(wall.id.clone(), wall.commit, size, look(wall.ticks)),
             WallElement::new(
                 wall.still_id.clone(),
-                CommitCounter::default(),
+                wall.still_commit,
                 size,
                 look(wall.still_tick),
             ),
