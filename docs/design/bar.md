@@ -816,7 +816,8 @@ polled from the loop.
   up); 7:1 under high contrast (§13). Colour never says a state alone:
   counts, names and words come with it.
 - Every item is reachable with the keyboard (below) and has a name for
-  screen readers.
+  screen readers: what each says, and what is announced on its own, in
+  screen-reader.md.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
   transparency" or high contrast is set, or behind a maximised window:

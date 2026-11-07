@@ -26,6 +26,7 @@
 //! popover beside the bar ([`popover`]), opened from an item, and the panda
 //! peeking out of the bar's edge ([`agents::peek`]).
 
+mod a11y;
 mod agents;
 mod auth;
 mod bluetooth;
@@ -158,6 +159,8 @@ fn main() -> ExitCode {
     // The lock's avatar: the account's photo, if AccountsService has one.
     lock::avatar::start();
     tray::start();
+    // Screen readers: a thread that waits until one listens.
+    a11y::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
     if link.is_none() {
         tracing::warn!(

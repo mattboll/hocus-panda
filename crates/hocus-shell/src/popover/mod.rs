@@ -1080,6 +1080,38 @@ impl Controller {
         }
     }
 
+    /// The open popover's surface, if one is open.
+    pub fn open_surface(&self) -> Option<window::Id> {
+        match &self.phase {
+            Phase::Open(open) => Some(open.surface),
+            _ => None,
+        }
+    }
+
+    /// The item holding the keyboard (after `Esc` in its popover), and its
+    /// bar.
+    pub fn focused_on(&self) -> Option<(&str, Item)> {
+        self.focused
+            .as_ref()
+            .map(|(bar, item, _)| (bar.as_str(), *item))
+    }
+
+    /// What bar `bar`'s surfaces show, each with its surface's namespace
+    /// and where it is in the bar's frame, from the top (screen readers'
+    /// tree, crate::a11y).
+    pub fn items_of(&self, bar: &str) -> Vec<(&'static str, Item, Rectangle)> {
+        let mut items: Vec<(&'static str, Item, Rectangle)> = self
+            .items
+            .iter()
+            .filter(|((b, _), _)| b == bar)
+            .flat_map(|((_, namespace), items)| {
+                items.iter().map(|(item, rect)| (*namespace, *item, *rect))
+            })
+            .collect();
+        items.sort_by(|a, b| a.2.y.total_cmp(&b.2.y).then(a.2.x.total_cmp(&b.2.x)));
+        items
+    }
+
     /// The form of the bar whose popover `id` is open.
     pub fn form_of(&self, id: window::Id) -> Option<Form> {
         match &self.phase {

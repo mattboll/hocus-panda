@@ -271,6 +271,117 @@ fn listed(mixer: &Mixer) -> (Vec<App>, usize) {
     (apps, more)
 }
 
+// --- For screen readers ---------------------------------------------------------
+
+/// What holds the keyboard, as the popover last drew it.
+static FOCUSED: Mutex<Option<Target>> = Mutex::new(None);
+
+/// The popover's rows for screen readers (crate::a11y), in the keyboard's
+/// order: the mute button, the volume, the outputs, the microphone's, the
+/// applications', the Settings' link; and the key of the one holding the
+/// keyboard.
+pub fn a11y(words: crate::a11y::Words) -> (Vec<hocus_a11y::Node>, Option<String>) {
+    let mixer = levels::sound::mixer();
+    let (apps, _) = listed(&mixer);
+    let focus = *FOCUSED.lock().unwrap_or_else(PoisonError::into_inner);
+    (
+        a11y_rows(&mixer, &apps, words),
+        focus.map(|t| format!("{t:?}")),
+    )
+}
+
+/// The rows for `mixer`, `apps` listed.
+fn a11y_rows(mixer: &Mixer, apps: &[App], words: crate::a11y::Words) -> Vec<hocus_a11y::Node> {
+    use hocus_a11y::{Act, Node, Rect, Role};
+    let layout = Layout::of(mixer, apps.len());
+    let at = |target: Target| {
+        let r = target.shape(layout).0;
+        Some(Rect::new(r.x, r.y, r.width, r.height))
+    };
+    let key = |target: Target| format!("{target:?}");
+    let slider = |target: Target, name: &str, sound: Option<Sound>| {
+        let node = Node::new(key(target), Role::Slider, name)
+            .bounds(at(target))
+            .act(Act::Increment)
+            .act(Act::Decrement);
+        match sound {
+            Some(sound) => node
+                .value(if sound.muted {
+                    format!("{}, {}", words.percent(sound.volume), words.muted())
+                } else {
+                    words.percent(sound.volume)
+                })
+                .range(f64::from(sound.volume), 0.0, 100.0, Some(f64::from(STEP))),
+            None => node.disabled(true),
+        }
+    };
+    let toggle = |target: Target, name: String, muted: bool| {
+        Node::new(key(target), Role::ToggleButton, name)
+            .checked(muted)
+            .bounds(at(target))
+            .act(Act::Click)
+    };
+    let radio = |target: Target, sink: &Sink, i: usize, n: usize| {
+        Node::new(key(target), Role::RadioButton, sink.description.clone())
+            .checked(sink.default)
+            .set(i + 1, n)
+            .bounds(at(target))
+            .act(Act::Click)
+    };
+    let master = mixer.sinks.iter().find(|s| s.default).and_then(|s| s.sound);
+    let mut rows = vec![
+        toggle(
+            Target::Mute,
+            words.mute().to_owned(),
+            master.is_some_and(|s| s.muted),
+        ),
+        slider(Target::Slider, words.volume(), master),
+    ];
+    let outputs = mixer.sinks.len();
+    for (i, sink) in mixer.sinks.iter().enumerate() {
+        rows.push(radio(Target::Output(i), sink, i, outputs));
+    }
+    let mics = mixer.sources.len();
+    if mics > 0 {
+        let mic = mixer
+            .sources
+            .iter()
+            .find(|s| s.default)
+            .and_then(|s| s.sound);
+        rows.push(toggle(
+            Target::MicMute,
+            words.mute_microphone().to_owned(),
+            mic.is_some_and(|s| s.muted),
+        ));
+        rows.push(slider(Target::MicSlider, words.microphone(), mic));
+    }
+    if mics > 1 {
+        for (i, source) in mixer.sources.iter().enumerate() {
+            rows.push(radio(Target::Mic(i), source, i, mics));
+        }
+    }
+    for (i, app) in apps.iter().enumerate() {
+        let muted = app.sound.is_some_and(|s| s.muted);
+        rows.push(toggle(Target::Tile(i), words.mute_app(&app.name), muted));
+        rows.push(slider(Target::AppSlider(i), &app.name, app.sound));
+    }
+    rows.push(
+        Node::new(key(Target::Settings), Role::Button, words.sound_settings())
+            .bounds(at(Target::Settings))
+            .act(Act::Click),
+    );
+    rows
+}
+
+/// The popover's subtitle: the default output's name.
+pub fn a11y_subtitle() -> Option<String> {
+    levels::sound::mixer()
+        .sinks
+        .iter()
+        .find(|s| s.default)
+        .map(|s| s.description.clone())
+}
+
 /// The sound's popover on its surface.
 #[derive(Debug, Clone)]
 pub struct Panel {
@@ -383,6 +494,7 @@ impl<Message> canvas::Program<Message> for Panel {
             let (rect, radius) = target.shape(layout);
             ring(&mut frame, rect, radius);
         }
+        *FOCUSED.lock().unwrap_or_else(PoisonError::into_inner) = state.focus;
         vec![frame.into_geometry()]
     }
 
@@ -1207,6 +1319,56 @@ fn microphone(f: &mut Frame, at: Point, muted: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn screen_readers_read_its_rows_by_their_kinds() {
+        let sink = |id: u32, description: &str, default: bool| Sink {
+            id,
+            serial: None,
+            name: format!("sink{id}"),
+            description: description.to_owned(),
+            kind: Kind::Speaker,
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            channels: vec![0.5, 0.5],
+            positions: Vec::new(),
+            default,
+            device: None,
+            bus: None,
+            form_factor: None,
+        };
+        let mut mixer = Mixer::new();
+        mixer.sinks = vec![sink(1, "Haut-parleurs", true), sink(2, "Casque", false)];
+        let rows = a11y_rows(&mixer, &[], crate::a11y::Words { fr: true });
+        let said: Vec<String> = rows
+            .iter()
+            .map(|r| {
+                format!(
+                    "{} {} {:?} {:?} {:?}",
+                    r.role.word(),
+                    r.name,
+                    r.value,
+                    r.checked,
+                    r.set
+                )
+            })
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "toggle button Couper le son None Some(false) None",
+                "slider Volume Some(\"62\\u{a0}%\") None None",
+                "radio button Haut-parleurs None Some(true) Some((1, 2))",
+                "radio button Casque None Some(false) Some((2, 2))",
+                "button Réglages du son… None None None",
+            ]
+        );
+        // Each where the keyboard's ring goes.
+        assert!(rows.iter().all(|r| r.bounds.is_some()));
+        assert_eq!(rows[1].key, "Slider");
+    }
+
     use super::*;
 
     fn layout(outputs: usize, microphones: usize, listed: usize) -> Layout {
