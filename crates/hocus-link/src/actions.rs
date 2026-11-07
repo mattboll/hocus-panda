@@ -261,7 +261,7 @@ use Glyph as G;
 
 /// A page of the Settings: its slug, its names. The Settings check that
 /// this is their list of sections.
-pub const SETTINGS_PAGES: [(&str, &str, &str); 18] = [
+pub const SETTINGS_PAGES: [(&str, &str, &str); 19] = [
     (
         "appearance",
         "Apparence et langue",
@@ -292,6 +292,7 @@ pub const SETTINGS_PAGES: [(&str, &str, &str); 18] = [
     ("power", "Énergie", "Power"),
     ("account", "Compte", "Account"),
     ("date-and-time", "Date et heure", "Date and time"),
+    ("performance", "Performances", "Performance"),
 ];
 
 macro_rules! settings_pages {
@@ -311,7 +312,7 @@ macro_rules! settings_pages {
 }
 
 /// The Settings' pages as actions, in [`SETTINGS_PAGES`]' order.
-const PAGES: [Def; 18] = settings_pages! {
+const PAGES: [Def; 19] = settings_pages! {
     "appearance", "Apparence et langue", "Appearance and language";
     "wallpaper", "Fond d’écran", "Wallpaper";
     "bar", "La barre", "The bar";
@@ -330,6 +331,7 @@ const PAGES: [Def; 18] = settings_pages! {
     "power", "Énergie", "Power";
     "account", "Compte", "Account";
     "date-and-time", "Date et heure", "Date and time";
+    "performance", "Performances", "Performance";
 };
 
 const SNAP: &[&str] = &["ancrer", "côte à côte", "snap", "tile"];

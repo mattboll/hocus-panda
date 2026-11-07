@@ -123,7 +123,7 @@ enum Command {
     Settings {
         /// The section: appearance, wallpaper, bar, agenda, screens, sound,
         /// keyboard, mouse, network, bluetooth, desktops, applications,
-        /// agents, captures, power, account, date-and-time.
+        /// agents, captures, power, account, date-and-time, performance.
         section: Option<String>,
         /// On network: the Wi-Fi network whose sheet opens (6.6).
         #[arg(long)]

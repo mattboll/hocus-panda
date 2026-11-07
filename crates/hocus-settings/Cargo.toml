@@ -20,6 +20,9 @@ hocus-config = { path = "../hocus-config", version = "1.0.0" }
 hocus-agents = { path = "../hocus-agents", version = "1.0.0" }
 hocus-link = { path = "../hocus-link", version = "1.0.0" }
 hocus-pandas = { path = "../hocus-pandas", version = "1.0.0" }
+# The Performances page: the days the compositor recorded, their peaks and
+# signals (#655).
+hocus-perf = { path = "../hocus-perf", version = "1.0.0" }
 # The trial area's windows move, stick and snap with the compositor's own
 # geometry (6.14).
 hocus-geometry = { path = "../hocus-geometry", version = "1.0.0" }

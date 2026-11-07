@@ -12,16 +12,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, RendererChoice};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OutputSpec, PerfSettings, RendererChoice,
+};
 use hocus_perf::{Day, EventKind, files};
 
 const EVERY: Duration = Duration::from_millis(50);
 
 fn start(state: &Path, record: bool) -> anyhow::Result<Headless> {
-    let mut config = Config::default();
-    config.state_dir = Some(state.to_owned());
-    config.perf.record = record;
-    config.perf.interval = Some(EVERY);
+    let config = Config {
+        state_dir: Some(state.to_owned()),
+        perf: PerfSettings {
+            record,
+            interval: Some(EVERY),
+        },
+        ..Config::default()
+    };
     Headless::start_with(
         HeadlessConfig {
             renderer: RendererChoice::Pixman,

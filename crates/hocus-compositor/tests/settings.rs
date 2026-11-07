@@ -4,7 +4,7 @@
 //! power supplies, buses or GPU (it draws with tiny-skia).
 //!
 //! One test per point of the issue: the window opens with its sidebar's
-//! 18 sections; searching "veille" finds "Mettre en veille après", the lid
+//! 19 sections; searching "veille" finds "Mettre en veille après", the lid
 //! and the power button, and opening a result lights its row; changing the
 //! delay writes `[idle] delay` at once, the file's other sections and
 //! comments kept; "Annuler" and `Ctrl+Z` take it back; a hand edit of the
@@ -338,7 +338,7 @@ fn kept(before: &str, after: &str, but: &[&str]) -> bool {
 }
 
 #[test]
-fn the_window_opens_with_its_sidebars_18_sections() -> anyhow::Result<()> {
+fn the_window_opens_with_its_sidebars_19_sections() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -348,12 +348,12 @@ fn the_window_opens_with_its_sidebars_18_sections() -> anyhow::Result<()> {
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    assert_eq!(sections.len(), 18, "{sections:?}");
+    assert_eq!(sections.len(), 19, "{sections:?}");
     assert_eq!(sections[0], "Apparence et langue");
     assert_eq!(sections[3], "Accessibilité");
     assert_eq!(sections[15], "Énergie");
     // Each drawn in the sidebar, in that order, under the home's row.
-    let places = bed.places_with("nav:date-and-time")?;
+    let places = bed.places_with("nav:performance")?;
     let y = |id: &str| places[id][1].as_f64().unwrap_or(-1.0);
     let slugs = [
         "home",
@@ -375,6 +375,7 @@ fn the_window_opens_with_its_sidebars_18_sections() -> anyhow::Result<()> {
         "power",
         "account",
         "date-and-time",
+        "performance",
     ];
     for pair in slugs.windows(2) {
         let (a, b) = (
@@ -384,7 +385,7 @@ fn the_window_opens_with_its_sidebars_18_sections() -> anyhow::Result<()> {
         assert!(a >= 0.0 && b > a, "{} at {a}, {} at {b}", pair[0], pair[1]);
     }
     // All of them in the window's 760 px, without scrolling.
-    assert!(y("nav:date-and-time") + 30.0 <= 760.0, "{places}");
+    assert!(y("nav:performance") + 30.0 <= 760.0, "{places}");
     let window = bed.window()?;
     assert_eq!((window.width, window.height), (1100, 760));
     // The home: six cards, Énergie's from the file.
