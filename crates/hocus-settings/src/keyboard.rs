@@ -58,8 +58,22 @@ pub const MAGNIFIER: RowGroup = RowGroup {
     per_source: false,
 };
 
-pub const SHORTCUT_GROUPS: [RowGroup; 7] =
-    [WINDOWS, DESKTOPS, BAR, CAPTURES, SESSION, MEDIA, MAGNIFIER];
+/// The screen reader's shortcut (#734).
+pub const SCREEN_READER: RowGroup = RowGroup {
+    label: w("LECTEUR D'ÉCRAN", "SCREEN READER"),
+    per_source: false,
+};
+
+pub const SHORTCUT_GROUPS: [RowGroup; 8] = [
+    WINDOWS,
+    DESKTOPS,
+    BAR,
+    CAPTURES,
+    SESSION,
+    MEDIA,
+    MAGNIFIER,
+    SCREEN_READER,
+];
 
 pub const SWITCHES: &[&str] = &[
     "",
@@ -534,6 +548,20 @@ fn actions() -> Vec<Action> {
             &["Super+Escape"],
             (&["loupe", "zoom"], &["magnifier", "zoom"]),
         ),
+        // The screen reader (#734).
+        a(
+            "screen-reader",
+            SCREEN_READER,
+            w(
+                "Lancer ou arrêter le lecteur d'écran",
+                "Start or stop the screen reader",
+            ),
+            &["Super+Alt+S"],
+            (
+                &["lecteur d'écran", "orca", "aveugle", "voix"],
+                &["screen reader", "orca", "blind", "speech"],
+            ),
+        ),
     ]);
     list
 }
@@ -784,7 +812,7 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 70);
+        assert_eq!(all.len(), 71);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
@@ -796,6 +824,7 @@ mod tests {
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);
         assert_eq!(count(MAGNIFIER), 3);
+        assert_eq!(count(SCREEN_READER), 1);
         // The shipped file's keys, every one.
         let shipped = include_str!("../../../packaging/config.toml");
         for setting in &all {
