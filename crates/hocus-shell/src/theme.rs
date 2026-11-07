@@ -52,6 +52,26 @@ pub fn border() -> f32 {
     if contrast() { 2.0 } else { 1.0 }
 }
 
+/// A hover over `path`: its fill; under high contrast, which has no fills,
+/// a 1 px border in `text.dim` instead (bar.md §13).
+pub fn hover(
+    f: &mut iced::widget::canvas::Frame,
+    path: &iced::widget::canvas::Path,
+    fill: impl Into<iced::widget::canvas::Fill>,
+) {
+    if contrast() {
+        let dim = color(now().scheme.contrast_tokens().dim);
+        f.stroke(
+            path,
+            iced::widget::canvas::Stroke::default()
+                .with_color(dim)
+                .with_width(1.0),
+        );
+    } else {
+        f.fill(path, fill);
+    }
+}
+
 pub fn color(c: Rgba) -> Color {
     Color::from_rgba8(c.r, c.g, c.b, c.a)
 }

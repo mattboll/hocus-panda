@@ -424,6 +424,7 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
             "appearance.reduce-transparency",
             "appearance.reduced-motion",
             "accessibility.text-and-cursor",
+            "accessibility.screen-reader",
             "accessibility.focus-bar",
         ]
     );
@@ -441,6 +442,12 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
     // The bar draws it.
     bed.shell_said("the theme theme=", &[" contrast "])?;
     bed.until((BAR_LEFT + 5, 540), |[r, g, b]| r < 12 && g < 12 && b < 20)?;
+    // The screen reader's switch writes its key (#734); nested, the
+    // compositor starts nothing.
+    bed.click("control:accessibility.screen-reader")?;
+    let text = bed.written(|t| t.contains("screen-reader = true"))?;
+    assert!(text.contains("[accessibility]"), "{text}");
+    bed.shows(|s| row(s, "accessibility.screen-reader")["value"] == "oui")?;
     Ok(())
 }
 

@@ -10,12 +10,13 @@ What a screen reader reads of the bar, its popovers, the bubbles, the
 lock and the password dialog, and what it hears on its own: in
 [screen-reader.md](screen-reader.md).
 
-The Accessibilité page's row for it (#734): "Lecteur d'écran" / "Screen
-reader", a switch on `[accessibility] screen-reader` (Orca starts with the
-session; off by default), under it "Super+Alt+S le lance ou l'arrête,
-même sur l'écran de verrouillage." / "Super+Alt+S starts or stops it, on
-the lock screen too.". Turned on in the Settings, Orca starts at once
-(the compositor follows the file).
+The Accessibilité page's row for it (#734), in its own group LECTEUR
+D'ÉCRAN: "Lecteur d'écran" / "Screen reader", a switch on
+`[accessibility] screen-reader` (Orca starts with the session; off by
+default), under it "Super+Alt+S le lance ou l'arrête, même sur l'écran
+de verrouillage." / "Super+Alt+S starts or stops it, on the lock screen
+too.". Turned on in the Settings, Orca starts at once (the compositor
+follows the file).
 
 ## The magnifier (#424)
 
@@ -179,8 +180,8 @@ transparency; 7:1 for text, 3:1 for borders and controls).
   for the other colours, the ring and what is built are in
   [bar.md §13, "High contrast"](bar.md#high-contrast-423). The bar, its
   popovers, the bubbles, the lock screen, the authentication dialog and
-  the Settings draw it; the radial menu and the overview, drawn by the
-  compositor in their own colours, do not yet.
+  the Settings draw it; so do the radial menu, the overview and the
+  magnifier's pill, which the compositor draws.
 - **Reduced transparency** (`[appearance] reduce-transparency`, or high
   contrast): no blur, and the opaque colours of the bar, its popovers, the
   bubbles, the reminder, the capture's and the sharing's panels. Behind a
@@ -195,5 +196,5 @@ LOUPE (the magnifier's rows), VUE (high contrast, reduced transparency,
 reduced motion, a link to the text's and the cursor's size), CLAVIER (the
 way into the bar). Appearance keeps a link to it. While high contrast is
 on, reduced transparency's switch shows on and inert ("Comprise dans le
-contraste élevé"); the file keeps its own value. The screen reader's group
-comes with #421.
+contraste élevé"); the file keeps its own value. LECTEUR D'ÉCRAN holds the
+screen reader's switch (#734).

@@ -393,7 +393,7 @@ impl<Message> canvas::Program<Message> for Panel {
         // The title, spaced, or the way back.
         let title = title_rect();
         if lit(Target::Back) {
-            f.fill(&kit::rounded(title, ROW_RADIUS), ROW_HOVER.get());
+            crate::theme::hover(f, &kit::rounded(title, ROW_RADIUS), ROW_HOVER.get());
         }
         if state.focus == Some(Target::Back) {
             ring(f, title, ROW_RADIUS);
@@ -431,7 +431,7 @@ impl<Message> canvas::Program<Message> for Panel {
             }
             let target = Target::Row(entry.id);
             if entry.acts() && lit(target) {
-                f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
+                crate::theme::hover(f, &kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
             }
             if state.focus == Some(target) {
                 ring(f, rect, ROW_RADIUS);

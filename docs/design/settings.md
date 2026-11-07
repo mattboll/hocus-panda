@@ -1062,6 +1062,7 @@ Appearance keeps a link here.
 | | Transparence réduite; under high contrast, on and inert, "Comprise dans le contraste élevé." | switch | `[appearance] reduce-transparency` (the file keeps its own value) |
 | | Mouvements réduits | switch | `[appearance] reduced-motion` |
 | | Taille du texte et du curseur | link "Apparence et langue ›" | — |
+| LECTEUR D'ÉCRAN | Lecteur d'écran ("Orca démarre avec la session. Super+Alt+S le lance ou l'arrête, même sur l'écran de verrouillage.") | switch | `[accessibility] screen-reader` ([screen-reader.md](screen-reader.md)) |
 | CLAVIER | Aller dans la barre ("Super+B, puis Tab et les flèches ; Entrée ouvre, Échap revient.") | link "Clavier et raccourcis ›" | `[shortcuts] focus-bar` there |
 
 - The page is generic (rows from `crates/hocus-settings/src/
@@ -1073,7 +1074,6 @@ Appearance keeps a link here.
   the row lit.
 - The search finds them by their words: loupe, zoom, magnifier,
   contraste, contrast, transparence, mouvement, clavier, super+b.
-- **Not built**: the screen reader's group (LECTEUR D'ÉCRAN, #421).
 - **Measured headless** (`crates/hocus-compositor/tests/
   settings_appearance.rs`, `the_accessibility_page_holds_the_view_and_
   high_contrast_holds_transparency_on`): the rows in order; high contrast

@@ -1097,7 +1097,7 @@ impl Panel {
         kit::rule(f, layout.link_rule());
         let (rect, radius) = Target::Settings.shape(layout);
         if state.pointer.hover == Some(Target::Settings) {
-            f.fill(&rounded(rect, radius), LINK_HOVER);
+            crate::theme::hover(f, &rounded(rect, radius), LINK_HOVER);
         }
         let middle = rect.center_y();
         let tile = Rectangle::new(

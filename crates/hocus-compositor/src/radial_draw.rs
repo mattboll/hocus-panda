@@ -221,7 +221,10 @@ pub fn hub_words(radial: &Radial, armed: bool, french: bool, names: &[String]) -
     }
 }
 
-fn colour([r, g, b, a]: [u8; 4]) -> Color {
+/// A colour drawn for the dark theme, as it reads now (high contrast,
+/// `crate::contrast`).
+fn colour(c: [u8; 4]) -> Color {
+    let [r, g, b, a] = crate::contrast::ink(c);
     Color::from_rgba8(r, g, b, a)
 }
 
@@ -401,6 +404,12 @@ pub(crate) fn write(
     ink: [u8; 4],
     outline: f32,
 ) {
+    // Under high contrast, text is never faded: an inert word reads in
+    // `text.dim`, solid, at 7:1.
+    let ink = match (crate::contrast::now(), crate::contrast::ink(ink)) {
+        (Some(_), [r, g, b, a]) if a > 0 => [r, g, b, 255],
+        (_, ink) => ink,
+    };
     let mut glyphs = Vec::new();
     let mut pen = x;
     let mut previous = None;
@@ -417,7 +426,7 @@ pub(crate) fn write(
     }
     if outline > 0.0 {
         let reach = outline.ceil() as i32;
-        let outline_ink = OUTLINE;
+        let outline_ink = crate::contrast::ink(OUTLINE);
         for (gx, gy, width, coverage) in &glyphs {
             for (row, line) in coverage.chunks((*width).max(1)).enumerate() {
                 for (col, &a) in line.iter().enumerate() {

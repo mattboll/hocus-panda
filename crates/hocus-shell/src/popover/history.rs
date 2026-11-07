@@ -1041,7 +1041,7 @@ impl Panel {
         if let Some((rect, _)) = laid.clear {
             let lit = hover == Some(Target::Clear);
             if lit {
-                f.fill(&kit::rounded(rect, GHOST_RADIUS), GHOST_HOVER.get());
+                crate::theme::hover(f, &kit::rounded(rect, GHOST_RADIUS), GHOST_HOVER.get());
             }
             f.fill_text(text_in(
                 MANROPE_SEMIBOLD,

@@ -583,7 +583,7 @@ impl View {
                         .with_width(1.0),
                 );
             } else if e.hover == Some(Target::Tool(*tool)) {
-                f.fill(&shape, HOVER.get());
+                crate::theme::hover(f, &shape, HOVER.get());
             }
             let icon = Rectangle::new(
                 Point::new(rect.x + TOOL_PAD * z, rect.center_y() - ICON * z / 2.0),
@@ -625,7 +625,7 @@ impl View {
         }
         let undo = layout.undo;
         if e.hover == Some(Target::Undo) {
-            f.fill(&kit::rounded(undo, radius), HOVER.get());
+            crate::theme::hover(f, &kit::rounded(undo, radius), HOVER.get());
         }
         let icon = Rectangle::new(
             Point::new(
@@ -712,7 +712,7 @@ impl View {
             ),
         ] {
             if e.hover == Some(target) {
-                f.fill(&kit::rounded(rect, radius), HOVER.get());
+                crate::theme::hover(f, &kit::rounded(rect, radius), HOVER.get());
             }
             f.stroke(
                 &kit::rounded(inset(rect, 0.5), radius - 0.5),
