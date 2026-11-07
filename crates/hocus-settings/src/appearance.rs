@@ -38,6 +38,14 @@ const LANGUAGE: RowGroup = RowGroup {
     label: w("LANGUE ET FORMATS", "LANGUAGE AND FORMATS"),
     per_source: false,
 };
+/// The magnifier's rows (#424): here until the Accessibilité page.
+const MAGNIFIER: RowGroup = RowGroup {
+    label: w("LOUPE", "MAGNIFIER"),
+    per_source: false,
+};
+/// The magnifier's zooms, in hundredths (`[magnifier] zoom`).
+const ZOOMS: [i64; 8] = [150, 200, 300, 400, 600, 800, 1200, 1600];
+const FOLLOWS: &[&str] = &["edge", "centre", "proportional"];
 
 const SCHEMES: &[&str] = &["dark", "light"];
 const ACCENTS: &[&str] = &["green", "blue", "violet", "rose", "teal", "wallpaper"];
@@ -433,8 +441,117 @@ pub fn settings() -> &'static [Setting] {
                 }),
                 needs: None,
             },
+            Setting {
+                id: "magnifier.enabled",
+                section: SectionId::Appearance,
+                group: MAGNIFIER,
+                name: w("Loupe", "Magnifier"),
+                line: Some(w(
+                    "L’écran sous le pointeur grossi ; Super+= et Super+- changent le zoom, Super+Échap l’éteint.",
+                    "The screen under the pointer magnified; Super+= and Super+- change the zoom, Super+Esc turns it off.",
+                )),
+                keywords: (
+                    &["loupe", "zoom", "grossir", "agrandir", "malvoyant", "accessibilité"],
+                    &["magnifier", "zoom", "magnify", "low vision", "accessibility"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["magnifier", "enabled"], Codec::Bool, Value::Bool(false)),
+                needs: None,
+            },
+            Setting {
+                id: "magnifier.zoom",
+                section: SectionId::Appearance,
+                group: MAGNIFIER,
+                name: w("Zoom", "Zoom"),
+                line: Some(w(
+                    "Celui où elle s’allume ; Super et la molette l’ajustent par 10 %.",
+                    "The one it turns on at; Super and the wheel adjust it by 10 %.",
+                )),
+                keywords: (&["loupe", "grossissement"], &["magnifier", "magnification"]),
+                kind: Kind::Menu(ZOOMS.iter().map(|&z| zoom(z)).collect()),
+                places: one(
+                    &["magnifier", "zoom"],
+                    Codec::Hundredths { min: 100, max: 1600 },
+                    Value::Int(200),
+                ),
+                needs: None,
+            },
+            Setting {
+                id: "magnifier.follow-pointer",
+                section: SectionId::Appearance,
+                group: MAGNIFIER,
+                name: w("La vue suit le pointeur", "The view follows the pointer"),
+                line: Some(w(
+                    "Au bord : elle ne bouge que quand le pointeur la pousse.",
+                    "At the edge: it moves only when the pointer pushes it.",
+                )),
+                keywords: (&["loupe", "souris"], &["magnifier", "mouse", "tracking"]),
+                kind: Kind::Menu(vec![
+                    word("Au bord", "At the edge", "edge"),
+                    word("Au centre", "Centred", "centre"),
+                    word("Proportionnellement", "Proportionally", "proportional"),
+                ]),
+                places: one(
+                    &["magnifier", "follow-pointer"],
+                    Codec::Word(FOLLOWS),
+                    Value::Word("edge"),
+                ),
+                needs: None,
+            },
+            Setting {
+                id: "magnifier.follow-keyboard",
+                section: SectionId::Appearance,
+                group: MAGNIFIER,
+                name: w("Suivre le clavier", "Follow the keyboard"),
+                line: Some(w(
+                    "La vue saute à ce qui prend le clavier et suit le curseur de texte.",
+                    "The view jumps to what takes the keyboard and follows the text caret.",
+                )),
+                keywords: (&["loupe", "focus", "curseur"], &["magnifier", "focus", "caret"]),
+                kind: Kind::Switch,
+                places: one(
+                    &["magnifier", "follow-keyboard"],
+                    Codec::Bool,
+                    Value::Bool(true),
+                ),
+                needs: None,
+            },
+            Setting {
+                id: "magnifier.smooth",
+                section: SectionId::Appearance,
+                group: MAGNIFIER,
+                name: w("Lissage", "Smoothing"),
+                line: Some(w(
+                    "Sans : des pixels nets.",
+                    "Without: hard pixels.",
+                )),
+                keywords: (&["loupe", "flou", "pixels"], &["magnifier", "smooth", "pixels"]),
+                kind: Kind::Switch,
+                places: one(&["magnifier", "smooth"], Codec::Bool, Value::Bool(true)),
+                needs: None,
+            },
         ]
     })
+}
+
+/// A zoom of the magnifier's menu, in hundredths: "×1,5", "×8".
+fn zoom(hundredths: i64) -> Choice {
+    let label = |sep: &str| {
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        if hundredths % 100 == 0 {
+            leak(format!("×{}", hundredths / 100))
+        } else {
+            leak(format!(
+                "×{}{sep}{}",
+                hundredths / 100,
+                hundredths % 100 / 10
+            ))
+        }
+    };
+    Choice {
+        label: w(label(","), label(".")),
+        value: Value::Int(hundredths),
+    }
 }
 
 /// Today as `[locale] date` writes it, for the date's menu: "jeudi 5
@@ -523,7 +640,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_page_has_its_five_groups_in_order() {
+    fn the_page_has_its_six_groups_in_order() {
         let mut groups: Vec<&str> = settings().iter().map(|s| s.group.label.fr).collect();
         groups.dedup();
         assert_eq!(
@@ -533,9 +650,28 @@ mod tests {
                 "TEXTE",
                 "CURSEUR",
                 "MOUVEMENT ET LISIBILITÉ",
-                "LANGUE ET FORMATS"
+                "LANGUE ET FORMATS",
+                "LOUPE"
             ]
         );
+    }
+
+    #[test]
+    fn the_magnifiers_zoom_reads_and_writes_as_the_compositor_takes_it() {
+        let zoom = settings()
+            .iter()
+            .find(|s| s.id == "magnifier.zoom")
+            .expect("the zoom's row");
+        let Kind::Menu(choices) = &zoom.kind else {
+            panic!("a menu");
+        };
+        assert_eq!(choices[0].label.fr, "×1,5");
+        assert_eq!(choices[0].label.en, "×1.5");
+        assert_eq!(choices[7].label.en, "×16");
+        for place in zoom.places.all() {
+            assert!(place.codec.write(&Value::Int(150)).is_some());
+            assert!(place.codec.write(&place.default).is_some());
+        }
     }
 
     #[test]

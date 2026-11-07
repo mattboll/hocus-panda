@@ -21,6 +21,7 @@ use crate::{
     App, State,
     backend::{Backend, add_output, dmabuf_global, render_node_of, scale},
     cursor::Shown,
+    magnifier::draw as magnifier,
     render::BACKGROUND,
 };
 
@@ -38,6 +39,8 @@ pub struct WinitBackend {
     host_cursor: Option<CursorIcon>,
     /// Screen sharing's frames (5.11).
     share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
+    /// The window's picture while the magnifier is on (#424).
+    lens: magnifier::Lens<GlesTexture>,
 }
 
 impl std::fmt::Debug for WinitBackend {
@@ -100,6 +103,7 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         presented: 0,
         host_cursor: Some(CursorIcon::Default),
         share: Default::default(),
+        lens: magnifier::Lens::default(),
     })
 }
 
@@ -182,8 +186,14 @@ impl WinitBackend {
         state.redraw = false;
         self.show_host_cursor(state);
         let age = self.backend.buffer_age().unwrap_or(0);
+        let shown = magnifier::screen(
+            self.backend.renderer(),
+            state,
+            &self.output,
+            false,
+            &mut self.lens,
+        );
         let damage = {
-            let elements = state.output_elements(self.backend.renderer(), &self.output, false);
             let (renderer, mut framebuffer) = match self.backend.bind() {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -195,16 +205,17 @@ impl WinitBackend {
                 renderer,
                 &mut framebuffer,
                 age,
-                &elements,
+                &shown.elements,
                 BACKGROUND,
             ) {
                 Ok(result) => result.damage.cloned(),
                 Err(err) => {
                     tracing::warn!(?err, "rendering failed");
-                    return;
+                    None
                 }
             }
         };
+        magnifier::after(self.backend.renderer(), &shown);
         if let Some(damage) = damage {
             match self.backend.submit(Some(&damage)) {
                 Ok(()) => {
@@ -214,7 +225,7 @@ impl WinitBackend {
                 Err(err) => tracing::warn!(%err, "could not present the frame"),
             }
         }
-        state.send_frames(&self.output, None);
+        state.send_frames(&self.output, shown.states.as_ref());
         state.desktops_drawn(&self.output);
         state.read_under_grips(self.backend.renderer());
     }

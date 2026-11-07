@@ -537,6 +537,123 @@ impl State {
     }
 }
 
+impl State {
+    /// The cursor on a screen at `scale` magnified `zoom` times (#424),
+    /// whose view is `view` (global): where the pointer shows in it, at
+    /// its size times the zoom. A shape is the theme's image at the
+    /// magnifier's step above the zoom (few sizes are asked of the
+    /// theme's thread), drawn down to its size; a client's own surface is
+    /// stretched.
+    pub(crate) fn magnified_cursor_elements<R>(
+        &self,
+        renderer: &mut R,
+        view: Rectangle<f64, Logical>,
+        scale: f64,
+        zoom: f64,
+    ) -> Vec<crate::render::OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + crate::wobble::Bend + crate::going::Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        use smithay::backend::renderer::element::utils::RescaleRenderElement;
+
+        use crate::render::OutputElements;
+        let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
+            return Vec::new();
+        };
+        let size = f64::from(self.cursor_images.choice.size);
+        // Where the hotspot shows, in the screen's pixels.
+        let at = (pointer - view.loc).to_physical(scale * zoom);
+        let step = crate::magnifier::STEPS
+            .iter()
+            .copied()
+            .find(|s| *s >= zoom - 1e-6)
+            .unwrap_or(crate::magnifier::MAX);
+        let element = match self.shown_cursor() {
+            Shown::Hidden => return Vec::new(),
+            Shown::Surface(surface) => {
+                let hotspot = with_states(surface, |states| {
+                    states
+                        .data_map
+                        .get::<CursorImageSurfaceData>()
+                        .and_then(|data| data.lock().ok().map(|d| d.hotspot))
+                        .unwrap_or_default()
+                });
+                let loc: Point<i32, Physical> =
+                    (at - hotspot.to_f64().to_physical(scale * zoom)).to_i32_round();
+                return render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+                    renderer,
+                    surface,
+                    loc,
+                    scale,
+                    1.0,
+                    Kind::Cursor,
+                )
+                .into_iter()
+                .map(|e| OutputElements::Scaled(RescaleRenderElement::from_element(e, loc, zoom)))
+                .collect();
+            }
+            Shown::Named(icon) => {
+                let pixels = (size * scale * step).round().max(1.0) as u32;
+                match self
+                    .cursor_images
+                    .themed(icon, pixels, scale * step, self.now())
+                {
+                    Some(placed) => {
+                        // The image's pixels drawn this much larger.
+                        let k = zoom / step;
+                        let hotspot = Point::<f64, Physical>::from((
+                            f64::from(placed.hotspot.0) * k,
+                            f64::from(placed.hotspot.1) * k,
+                        ));
+                        let (w, h) = placed.canvas;
+                        let all = Rectangle::from_size(Size::from((f64::from(w), f64::from(h))));
+                        let logical = Size::from((
+                            (f64::from(w) * k / scale).round() as i32,
+                            (f64::from(h) * k / scale).round() as i32,
+                        ));
+                        MemoryRenderBufferRenderElement::from_buffer(
+                            renderer,
+                            at - hotspot,
+                            &placed.buffer,
+                            None,
+                            Some(all),
+                            Some(logical),
+                            Kind::Cursor,
+                        )
+                    }
+                    None => {
+                        let shape = Shape::of(icon);
+                        let unit = size / f64::from(drawn::SIZE);
+                        let (buffer, px) = self
+                            .cursor_images
+                            .drawn
+                            .at_scale(shape, scale * step * unit);
+                        let (x, y) = shape.hotspot();
+                        let hotspot = Point::<f64, Logical>::from((x * unit, y * unit))
+                            .to_physical(scale * zoom);
+                        let all = Rectangle::from_size(Size::from((f64::from(px), f64::from(px))));
+                        let side = (size * zoom).round() as i32;
+                        MemoryRenderBufferRenderElement::from_buffer(
+                            renderer,
+                            at - hotspot,
+                            &buffer,
+                            None,
+                            Some(all),
+                            Some(Size::from((side, side))),
+                            Kind::Cursor,
+                        )
+                    }
+                }
+            }
+        };
+        element
+            .inspect_err(|err| tracing::warn!(?err, "could not draw the magnified cursor"))
+            .map(|element| vec![OutputElements::Cursor(CursorElement::Arrow(element))])
+            .unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

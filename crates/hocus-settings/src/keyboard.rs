@@ -53,7 +53,13 @@ pub const MEDIA: RowGroup = RowGroup {
 };
 
 /// The shortcuts' groups, in the sub-page's order.
-pub const SHORTCUT_GROUPS: [RowGroup; 6] = [WINDOWS, DESKTOPS, BAR, CAPTURES, SESSION, MEDIA];
+pub const MAGNIFIER: RowGroup = RowGroup {
+    label: w("LOUPE", "MAGNIFIER"),
+    per_source: false,
+};
+
+pub const SHORTCUT_GROUPS: [RowGroup; 7] =
+    [WINDOWS, DESKTOPS, BAR, CAPTURES, SESSION, MEDIA, MAGNIFIER];
 
 pub const SWITCHES: &[&str] = &[
     "",
@@ -513,6 +519,31 @@ fn actions() -> Vec<Action> {
             &["XF86MonBrightnessDown"],
             (&["luminosité", "écran"], &["brightness"]),
         ),
+        // The magnifier (#424).
+        a(
+            "magnifier-in",
+            MAGNIFIER,
+            w("Zoomer", "Zoom in"),
+            &["Super+equal", "Super+plus", "Super+KP_Add"],
+            (
+                &["loupe", "grossir", "agrandir", "malvoyant"],
+                &["magnifier", "magnify", "zoom", "low vision"],
+            ),
+        ),
+        a(
+            "magnifier-out",
+            MAGNIFIER,
+            w("Dézoomer", "Zoom out"),
+            &["Super+minus", "Super+KP_Subtract"],
+            (&["loupe", "réduire"], &["magnifier", "zoom"]),
+        ),
+        a(
+            "magnifier-off",
+            MAGNIFIER,
+            w("Éteindre la loupe", "Turn the magnifier off"),
+            &["Super+Escape"],
+            (&["loupe", "zoom"], &["magnifier", "zoom"]),
+        ),
     ]);
     list
 }
@@ -763,7 +794,7 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 68);
+        assert_eq!(all.len(), 71);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
@@ -774,6 +805,7 @@ mod tests {
         assert_eq!(count(CAPTURES), 4);
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);
+        assert_eq!(count(MAGNIFIER), 3);
         // The shipped file's keys, every one.
         let shipped = include_str!("../../../packaging/config.toml");
         for setting in &all {

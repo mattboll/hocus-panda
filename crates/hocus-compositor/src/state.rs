@@ -238,6 +238,8 @@ pub struct State {
     pub radial_out: Option<crate::radial::Going>,
     pub radial_press: Option<crate::radial::Press>,
     pub radial_paint: crate::radial_draw::RadialPaint,
+    /// The magnifier (#424).
+    pub magnifier: crate::magnifier::Magnifier,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -480,6 +482,7 @@ impl State {
             radial_paint: crate::radial_draw::RadialPaint::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
+            magnifier: crate::magnifier::Magnifier::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

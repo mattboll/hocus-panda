@@ -1497,11 +1497,7 @@ impl Headless {
         if let Some(v120) = v120 {
             frame = frame.v120(Axis::Vertical, v120);
         }
-        let state = &mut self.app.state;
-        if let Some(pointer) = state.seat.get_pointer() {
-            pointer.axis(state, frame);
-            pointer.frame(state);
-        }
+        self.app.state.pointer_axis(frame);
     }
 
     /// A key by its evdev code.
@@ -1881,6 +1877,11 @@ impl Headless {
         let state = &self.app.state;
         let output = state.space.outputs().find(|o| o.name() == name)?;
         state.work_area(output)
+    }
+
+    /// What `hocus msg outputs` says, as one line of JSON.
+    pub fn outputs_said(&self) -> String {
+        self.app.state.displays_json().to_string()
     }
 
     /// Where the pointer is, global.

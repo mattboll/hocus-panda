@@ -152,8 +152,8 @@ the real screen; nested and headless take `--output`; `panel-form`),
 `toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`, `windows`), `[recording]` (`format`), `[idle]` (`delay`,
-docs/design/idle.md) and `[appearance]` (`reduced-motion`,
-`high-contrast`, `reduce-transparency`); the shell reads `[day]` from the same file
+docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
+`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd

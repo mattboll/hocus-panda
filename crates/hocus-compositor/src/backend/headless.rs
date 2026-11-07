@@ -32,6 +32,7 @@ use smithay::{
 use crate::{
     App, State,
     backend::{Backend, add_output, dmabuf_global, render_node_of, scale},
+    magnifier::draw::{self as magnifier, Lens, Magnify},
     output_spec::{self, OutputSpec},
     render::BACKGROUND,
 };
@@ -92,11 +93,11 @@ enum Canvas {
 }
 
 /// A renderer and the buffers it draws the outputs into.
-struct Outputs<R, T> {
+struct Outputs<R: Magnify, T> {
     renderer: R,
     format: Fourcc,
     /// In their names' order.
-    outputs: Vec<OutputBuffer<T>>,
+    outputs: Vec<OutputBuffer<T, R::Canvas>>,
     /// Outputs unplugged, by name, with where they were: a test plugs
     /// them back.
     unplugged: Vec<Unplugged>,
@@ -110,8 +111,10 @@ type Unplugged = (
     Option<crate::screen_sets::Identity>,
 );
 
-struct OutputBuffer<T> {
+struct OutputBuffer<T, C> {
     output: Output,
+    /// Its picture while the magnifier is on it (#424).
+    lens: Lens<C>,
     spec: OutputSpec,
     /// Who the screen is, as its EDID would say (tests give one).
     identity: Option<crate::screen_sets::Identity>,
@@ -271,6 +274,7 @@ where
         + ExportMem
         + Offscreen<T>
         + Bind<T>
+        + Magnify
         + crate::wobble::Bend
         + crate::going::Shaders
         + crate::glass::Glass,
@@ -358,6 +362,7 @@ where
             "output"
         );
         self.outputs.push(OutputBuffer {
+            lens: Lens::default(),
             damage_tracker: OutputDamageTracker::from_output(&output),
             output,
             spec,
@@ -455,11 +460,13 @@ where
             if state.display_off(&out.output) {
                 continue;
             }
-            let elements = state.output_elements(renderer, &out.output, true);
+            let shown = magnifier::screen(renderer, state, &out.output, true, &mut out.lens);
+            let elements = &shown.elements;
             let mut framebuffer = match renderer.bind(&mut out.target) {
                 Ok(framebuffer) => framebuffer,
                 Err(err) => {
                     tracing::warn!(output = out.output.name(), %err, "could not bind");
+                    magnifier::after(renderer, &shown);
                     continue;
                 }
             };
@@ -469,12 +476,13 @@ where
                 renderer,
                 &mut framebuffer,
                 1,
-                &elements,
+                elements,
                 BACKGROUND,
             ) {
                 Ok(result) => result,
                 Err(err) => {
                     tracing::warn!(output = out.output.name(), ?err, "rendering failed");
+                    magnifier::after(renderer, &shown);
                     continue;
                 }
             };
@@ -485,11 +493,12 @@ where
                 }
             }
             let states = result.states;
+            magnifier::after(renderer, &shown);
             if drawn {
                 out.frames += 1;
                 state.presented(&out.output, state.clock.now().into(), out.frames);
             }
-            state.send_frames(&out.output, Some(&states));
+            state.send_frames(&out.output, Some(shown.states.as_ref().unwrap_or(&states)));
             state.desktops_drawn(&out.output);
             state.read_under_grips(renderer);
         }
@@ -498,7 +507,7 @@ where
 
 impl<R, T> Outputs<R, T>
 where
-    R: ExportMem + Bind<T>,
+    R: ExportMem + Bind<T> + Magnify,
     R::Error: Send + Sync + 'static,
 {
     /// What output `index` showed last: its size in pixels, and its rows of

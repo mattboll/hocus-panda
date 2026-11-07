@@ -43,6 +43,8 @@ pub struct Config {
     pub ink: Ink,
     /// The overview's ways in (docs/design/windows.md §12b).
     pub overview: Overview,
+    /// The magnifier (docs/design/accessibility.md, #424).
+    pub magnifier: Magnifier,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -1515,6 +1517,60 @@ pub struct Overview {
 impl Default for Overview {
     fn default() -> Self {
         Self { hot_corner: true }
+    }
+}
+
+/// The magnifier, `[magnifier]` (docs/design/accessibility.md, #424).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Magnifier {
+    /// On: the screen under the pointer magnified, at `zoom`.
+    pub enabled: bool,
+    /// From 1 to 16: what `enabled` turns it on at.
+    #[serde(deserialize_with = "zoom")]
+    pub zoom: f64,
+    /// How the view follows the pointer.
+    pub follow_pointer: FollowPointer,
+    /// The view jumps to what takes the keyboard, and to the text caret.
+    pub follow_keyboard: bool,
+    /// Smoothed (linear filtering); off, hard pixels.
+    pub smooth: bool,
+}
+
+impl Default for Magnifier {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zoom: 2.0,
+            follow_pointer: FollowPointer::Edge,
+            follow_keyboard: true,
+            smooth: true,
+        }
+    }
+}
+
+/// How the magnifier's view follows the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FollowPointer {
+    /// It moves only when the pointer pushes its edge, by as much.
+    #[default]
+    Edge,
+    /// The pointer stays in its middle.
+    #[serde(alias = "center")]
+    Centre,
+    /// It sits where the pointer sits on the screen.
+    Proportional,
+}
+
+fn zoom<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    let zoom = f64::deserialize(deserializer)?;
+    if (1.0..=16.0).contains(&zoom) {
+        Ok(zoom)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "magnifier zoom {zoom}: from 1 to 16"
+        )))
     }
 }
 

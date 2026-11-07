@@ -371,6 +371,11 @@ fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -
             "locale.date",
             "locale.time",
             "appearance.bar-clock",
+            "magnifier.enabled",
+            "magnifier.zoom",
+            "magnifier.follow-pointer",
+            "magnifier.follow-keyboard",
+            "magnifier.smooth",
         ]
     );
     assert_eq!(shown["theme"], "dark");

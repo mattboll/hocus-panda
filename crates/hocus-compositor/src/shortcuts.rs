@@ -37,7 +37,9 @@ pub enum Action {
     /// Focuses the window on that side.
     FocusToward(i32, i32),
     /// Alt+Tab, or Alt+Shift+Tab (§11).
-    SwitchWindows { backward: bool },
+    SwitchWindows {
+        backward: bool,
+    },
     /// The desktop on that side, of the screen under the pointer (§12).
     DesktopBy(i32),
     /// That desktop (from 0).
@@ -80,6 +82,22 @@ pub enum Action {
     /// The meeting whose reminder shows, else the one starting next within
     /// 10 min, joined (Day.6).
     Join,
+    /// The magnifier a step in, turning it on; a step out, off at 1×; off
+    /// (#424, `crate::magnifier`).
+    MagnifierIn,
+    MagnifierOut,
+    MagnifierOff,
+}
+
+impl Action {
+    /// The magnifier's: they work on the lock screen and in the
+    /// authentication dialog too.
+    pub fn magnifier(self) -> bool {
+        matches!(
+            self,
+            Self::MagnifierIn | Self::MagnifierOut | Self::MagnifierOff
+        )
+    }
 }
 
 /// What `Shift+Print` and `Alt+Print` capture at once.
@@ -277,6 +295,11 @@ shortcuts! {
     capture_window: ["Alt+Print"] => Action::CaptureNow(CaptureNow::Window),
     record: ["Super+Shift+R"] => Action::Record,
     join: ["Super+J"] => Action::Join,
+    // `plus`: Shift and the `=` key; the keypad's for keyboards where `-`
+    // shares a key with a digit (`6` on AZERTY, which `Super+minus` takes).
+    magnifier_in: ["Super+equal", "Super+plus", "Super+KP_Add"] => Action::MagnifierIn,
+    magnifier_out: ["Super+minus", "Super+KP_Subtract"] => Action::MagnifierOut,
+    magnifier_off: ["Super+Escape"] => Action::MagnifierOff,
 }
 
 impl Shortcuts {
@@ -419,6 +442,9 @@ impl State {
             Action::CaptureNow(what) => self.capture_now(what),
             Action::Record => self.record_shortcut(),
             Action::Join => self.join_shortcut(),
+            Action::MagnifierIn => self.magnifier_step(true),
+            Action::MagnifierOut => self.magnifier_step(false),
+            Action::MagnifierOff => self.magnifier_off(),
         }
     }
 
@@ -612,6 +638,18 @@ mod tests {
             action(mods(true, false, false, false), Keysym::XF86_AudioMute),
             None
         );
+        // The magnifier's (#424): `=`, `plus` (Shift held, as the key
+        // types it), the keypad's, `-`, Escape.
+        let logo = mods(true, false, false, false);
+        for key in [Keysym::equal, Keysym::plus, Keysym::KP_Add] {
+            assert_eq!(action(logo, key), Some(Action::MagnifierIn), "{key:?}");
+        }
+        for key in [Keysym::minus, Keysym::KP_Subtract] {
+            assert_eq!(action(logo, key), Some(Action::MagnifierOut), "{key:?}");
+        }
+        assert_eq!(action(logo, Keysym::Escape), Some(Action::MagnifierOff));
+        assert_eq!(action(none, Keysym::Escape), None);
+        assert!(Action::MagnifierOut.magnifier() && !Action::Desktop(5).magnifier());
     }
 
     #[test]
