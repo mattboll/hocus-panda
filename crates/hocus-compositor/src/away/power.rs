@@ -128,6 +128,12 @@ impl State {
         !self.reduced_motion() && self.power_profile_now() != Some(SAVER)
     }
 
+    /// Whether power-profiles-daemon's power saver is on: what moves for
+    /// show stops (#432, #433).
+    pub fn power_saving(&self) -> bool {
+        self.power_profile_now() == Some(SAVER)
+    }
+
     /// power-profiles-daemon's profile now, if it is there.
     pub fn power_profile_now(&self) -> Option<&str> {
         self.away.power.profile.as_deref()

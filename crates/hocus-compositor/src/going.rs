@@ -215,7 +215,8 @@ impl State {
 
 /// Renderers that can draw the compositor's own shaders, the streak and
 /// the halo (4.4); the CPU's draws neither.
-pub trait Shaders: Renderer + Sized {
+/// Every renderer drawing the shaders draws the glyphs' too ([`crate::matrix`]).
+pub trait Shaders: Renderer + Sized + crate::matrix::Matrix {
     /// The streak's element on an output whose top left is `origin`
     /// (global, logical) at `scale`. `None`: not drawn.
     fn streak_element(
