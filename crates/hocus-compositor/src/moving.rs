@@ -53,8 +53,8 @@ pub struct Wall {
     still_tick: u64,
     /// When its next frame is due, while it runs.
     next: Option<Duration>,
-    /// The last frame it asked the loop to wake it for.
-    asked: Option<Duration>,
+    /// Whether the day's recorder was told it moves.
+    said_moving: bool,
 }
 
 impl Wall {
@@ -68,7 +68,7 @@ impl Wall {
             still_id: Id::new(),
             still_tick: u64::from(STILL_TICK),
             next: None,
-            asked: None,
+            said_moving: false,
         }
     }
 }
@@ -79,8 +79,11 @@ pub struct Walls {
     by_output: HashMap<String, Wall>,
     /// Frames of moving wallpapers so far, by screen.
     pub ticks: HashMap<String, u64>,
-    /// Times a moving wallpaper asked the loop to wake it.
+    /// Times the moving wallpapers' timer woke the loop.
     pub wakes: u64,
+    /// The fastest running one's pace, and the timer waking them.
+    pace: Option<Duration>,
+    timer: Option<calloop::RegistrationToken>,
 }
 
 impl Walls {
@@ -191,11 +194,18 @@ impl State {
         })
     }
 
-    /// The wallpapers' frames due at `now`: each running one moves on a
-    /// frame when it is due, and asks to be woken for the next.
-    pub(crate) fn tick_walls(&mut self, wake: &mut impl FnMut(Duration)) {
+    /// The wallpapers' frames due now: each running one moves on a frame
+    /// when it is due. One timer on the loop wakes them while any runs,
+    /// set again by itself at the fastest's pace (never a new one per
+    /// frame); the day's recorder hears when one starts or stops moving.
+    pub(crate) fn tick_walls(&mut self) {
         let now = self.now();
+        if self.walls.get_mut().by_output.is_empty() {
+            self.walls.get_mut().pace = None;
+            return;
+        }
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        let mut fastest: Option<Duration> = None;
         for output in outputs {
             let pace = self.wall_pace(&output, now);
             let name = output.name();
@@ -203,10 +213,21 @@ impl State {
             let Some(wall) = walls.by_output.get_mut(&name) else {
                 continue;
             };
+            if pace.is_some() != wall.said_moving {
+                wall.said_moving = pace.is_some();
+                let kind = if pace.is_some() {
+                    hocus_perf::EventKind::WallpaperMoving
+                } else {
+                    hocus_perf::EventKind::WallpaperStill
+                };
+                tracing::debug!(output = name, moving = pace.is_some(), "the wallpaper");
+                self.perf.event(kind, wall.moving.word());
+            }
             let Some(pace) = pace else {
                 wall.next = None;
                 continue;
             };
+            fastest = Some(fastest.map_or(pace, |f| f.min(pace)));
             // Going on from where it stopped, a frame from now.
             let due = *wall.next.get_or_insert(now + pace);
             if now >= due {
@@ -219,15 +240,34 @@ impl State {
                 *walls.ticks.entry(name).or_default() += 1;
                 self.redraw = true;
             }
-            let walls = self.walls.get_mut();
-            if let Some(wall) = walls.by_output.get_mut(&output.name())
-                && let Some(next) = wall.next
-            {
-                if wall.asked != Some(next) {
-                    wall.asked = Some(next);
-                    walls.wakes += 1;
-                }
-                wake(next);
+        }
+        let walls = self.walls.get_mut();
+        walls.pace = fastest;
+        if let Some(pace) = fastest
+            && walls.timer.is_none()
+        {
+            let timer = calloop::timer::Timer::from_duration(pace);
+            let inserted = self
+                .loop_handle
+                .insert_source(timer, |_, _, app| app.state.wall_timer_fired());
+            match inserted {
+                Ok(token) => self.walls.get_mut().timer = Some(token),
+                Err(err) => tracing::warn!(%err.error, "no timer for the moving wallpaper"),
+            }
+        }
+    }
+
+    /// The wallpapers' timer: a frame is drawn, and it comes again at the
+    /// fastest's pace while one runs.
+    fn wall_timer_fired(&mut self) -> calloop::timer::TimeoutAction {
+        let walls = self.walls.get_mut();
+        walls.wakes += 1;
+        self.redraw = true;
+        match walls.pace {
+            Some(pace) => calloop::timer::TimeoutAction::ToDuration(pace),
+            None => {
+                walls.timer = None;
+                calloop::timer::TimeoutAction::Drop
             }
         }
     }

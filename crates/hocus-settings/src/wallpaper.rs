@@ -135,8 +135,26 @@ pub fn settings() -> &'static [Setting] {
                 BACKGROUNDS,
                 w("Fonds animés", "Animated backgrounds"),
                 (
-                    &["animé", "animés", "pluie", "étoiles", "matrix", "mouvement"],
-                    &["animated", "moving", "rain", "stars", "matrix", "starfield"],
+                    &[
+                        "animé",
+                        "animés",
+                        "pluie",
+                        "étoiles",
+                        "aurore",
+                        "matrix",
+                        "givre",
+                        "mouvement",
+                    ],
+                    &[
+                        "animated",
+                        "moving",
+                        "rain",
+                        "stars",
+                        "aurora",
+                        "matrix",
+                        "frost",
+                        "starfield",
+                    ],
                 ),
                 &["wallpaper", "picture"],
             ),
@@ -209,8 +227,8 @@ pub fn settings() -> &'static [Setting] {
                 group: ANIMATION,
                 name: w("Animer le fond", "Animate the background"),
                 line: Some(w(
-                    "La pluie à 15 images par seconde, les étoiles à 20.",
-                    "The rain at 15 frames a second, the stars at 20.",
+                    "La pluie à 15 images par seconde, les étoiles à 20, l’aurore à 10.",
+                    "The rain at 15 frames a second, the stars at 20, the aurora at 10.",
                 )),
                 keywords: (
                     &["animé", "animation", "pluie", "étoiles", "mouvement"],
@@ -737,7 +755,7 @@ pub struct Thumbs {
 /// The built-ins in the gallery's order.
 pub const BUILTIN_TILES: [Backdrop; 4] = Backdrop::ALL;
 /// The wallpapers that move, after them.
-pub const MOVING_TILES: [Moving; 2] = Moving::ALL;
+pub const MOVING_TILES: [Moving; 3] = Moving::ALL;
 
 #[cfg(test)]
 mod tests {

@@ -60,6 +60,12 @@ fn allocations<T>(run: impl FnOnce() -> T) -> (T, u64) {
 
 const STEP: Duration = Duration::from_micros(16_667);
 
+fn frosting() -> Config {
+    let mut config = Config::default();
+    config.windows.animation = WindowAnimation::Frost;
+    config
+}
+
 fn raining() -> Config {
     let mut config = Config::default();
     config.windows.animation = WindowAnimation::Rain;
@@ -254,12 +260,10 @@ fn three_rain_at_once_small_windows_and_reduced_motion_do_not() -> anyhow::Resul
     hp.reconfigure(Config::default());
     let (_, _plain) = open_with(&mut hp, "test.plain", (400, 300), false)?;
     assert!(!hp.raining("test.plain"));
-    // Frost: the standard motion until it is designed.
-    let mut frost = Config::default();
-    frost.windows.animation = WindowAnimation::Frost;
-    hp.reconfigure(frost);
+    // Frost: Givre's frost line, the same rules (#740).
+    hp.reconfigure(frosting());
     let (_, _frost) = open_with(&mut hp, "test.frost", (400, 300), false)?;
-    assert!(!hp.raining("test.frost"));
+    assert!(hp.raining("test.frost"));
     Ok(())
 }
 
@@ -281,9 +285,18 @@ fn frames_over(hp: &mut Headless, steps: usize) -> anyhow::Result<((u64, u64), u
 
 #[test]
 fn a_rain_costs_its_frames_on_its_screen_alone() -> anyhow::Result<()> {
+    costs(raining())
+}
+
+#[test]
+fn the_frost_line_costs_the_rains_frames() -> anyhow::Result<()> {
+    costs(frosting())
+}
+
+fn costs(config: Config) -> anyhow::Result<()> {
     for renderer in [common::gles(), pixman()] {
-        let mut hp = Headless::start_with(on(renderer, 2), raining())?;
-        let machine = hp.renderer();
+        let mut hp = Headless::start_with(on(renderer, 2), config.clone())?;
+        let machine = format!("{} {:?}", hp.renderer(), config.windows.animation);
         common::at_rest(&mut hp)?;
         hp.pointer_move(400.0, 300.0);
         common::at_rest(&mut hp)?;
@@ -344,7 +357,7 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
     let (standard, rain) = (total(&costs[0]), total(&costs[1]));
     eprintln!("a whole opening: standard {standard}, rain {rain} allocations");
     assert!(
-        rain <= standard + 50 + 22 * 4,
+        rain <= standard + 50,
         "the rain's own: {}",
         rain.saturating_sub(standard)
     );
@@ -389,11 +402,21 @@ fn save(
 #[test]
 #[ignore = "screenshots, by hand"]
 fn shots_of_the_rain() -> anyhow::Result<()> {
+    shots(raining(), "rain")
+}
+
+/// The frost line's frames (#740), as the rain's.
+#[test]
+#[ignore = "screenshots, by hand"]
+fn shots_of_the_frost_line() -> anyhow::Result<()> {
+    shots(frosting(), "frost")
+}
+
+fn shots(mut config: Config, name: &str) -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let mut config = raining();
     config.wallpaper.picture = hocus_link::wallpaper::Picture::of("night").unwrap_or_default();
     let mut hp = Headless::start_with(
         HeadlessConfig {
@@ -419,10 +442,10 @@ fn shots_of_the_rain() -> anyhow::Result<()> {
         (rect.height + 60) as u32,
     ));
     hp.step(Duration::ZERO)?;
-    save(&mut hp, &out, "rain-open-000ms", crop)?;
+    save(&mut hp, &out, &format!("{name}-open-000ms"), crop)?;
     for at in [90, 180, 270, 360] {
         hp.step(Duration::from_millis(90))?;
-        save(&mut hp, &out, &format!("rain-open-{at:03}ms"), crop)?;
+        save(&mut hp, &out, &format!("{name}-open-{at:03}ms"), crop)?;
     }
     for _ in 0..12 {
         hp.step(STEP)?;
@@ -430,10 +453,106 @@ fn shots_of_the_rain() -> anyhow::Result<()> {
     let _ = client.commands.send(common::Command::Close);
     hp.dispatch_until(common::WAIT, |hp| hp.rains() == 1)?;
     hp.step(Duration::ZERO)?;
-    save(&mut hp, &out, "rain-close-000ms", crop)?;
+    save(&mut hp, &out, &format!("{name}-close-000ms"), crop)?;
     for at in [75, 150, 225] {
         hp.step(Duration::from_millis(75))?;
-        save(&mut hp, &out, &format!("rain-close-{at:03}ms"), crop)?;
+        save(&mut hp, &out, &format!("{name}-close-{at:03}ms"), crop)?;
     }
     Ok(())
+}
+
+/// How many sampled pixels near the frame of `rect` (2 px out to 2 px in)
+/// show the frost line's ice, and how many of those just outside its
+/// corners its marks.
+fn ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> (usize, usize) {
+    let icy = |x: i32, y: i32| {
+        let i = ((y * shot.0 + x) * 4) as usize;
+        let p = &shot.2[i..i + 4];
+        let (b, g, r) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
+        b > 180 && g > 170 && r > 120
+    };
+    let mut line = 0;
+    for x in (rect.x + 20..rect.x + rect.width - 20).step_by(4) {
+        line += usize::from((-1..=1).any(|d| icy(x, rect.y + d)));
+    }
+    let mut marks = 0;
+    for (cx, cy) in [
+        (rect.x - 4, rect.y - 4),
+        (rect.x + rect.width + 3, rect.y - 4),
+    ] {
+        for d in 2..8 {
+            let dx = if cx < rect.x { d } else { -d };
+            marks += usize::from(icy(cx + dx, cy) || icy(cx + dx, cy + 1));
+        }
+    }
+    (line, marks)
+}
+
+#[test]
+fn the_frost_line_traces_the_frame_then_the_pane_clears() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
+    let gles = hp.renderer() == "gles";
+    common::at_rest(&mut hp)?;
+    hp.hold_clock();
+    let (rect, client) = open_with(&mut hp, "test.frost", (600, 400), false)?;
+    assert!(hp.raining("test.frost"));
+    let mut seen = Vec::new();
+    for at in [0u64, 90, 180, 270, 360] {
+        if at > 0 {
+            hp.step(Duration::from_millis(90))?;
+        } else {
+            hp.step(Duration::ZERO)?;
+        }
+        let shot = hp.screenshot(0)?;
+        seen.push((
+            at,
+            shown(&shot, rect).0,
+            ice(&shot, rect),
+            shown_as(&shot, rect, true).0,
+        ));
+    }
+    eprintln!("{}: {seen:?}", hp.renderer());
+    if gles {
+        // Nothing at first; at 90 ms the marks and the line round the
+        // top, the window under its frost (not yet itself); whole and
+        // untinted at 360 ms, no line left.
+        assert!(seen[0].1 < 0.01 && seen[0].2.0 == 0, "{seen:?}");
+        assert!(
+            seen[1].2.0 > 50 && seen[1].2.1 > 0,
+            "line and marks: {seen:?}"
+        );
+        assert!(
+            seen[1].1 < 0.01 && seen[1].3 > 0.5,
+            "seen through frost at 90 ms: {seen:?}"
+        );
+        assert!(seen[4].1 > 0.99 && seen[4].2 == (0, 0), "{seen:?}");
+    } else {
+        assert!(seen[0].1 < 0.01 && seen[4].1 > 0.99, "{seen:?}");
+    }
+    // Closing: shown at 0, gone at 300 ms.
+    let _ = client.commands.send(common::Command::Close);
+    hp.dispatch_until(common::WAIT, |hp| hp.rains() == 1)?;
+    hp.step(Duration::ZERO)?;
+    let first = shown(&hp.screenshot(0)?, rect).0;
+    for _ in 0..18 {
+        hp.step(STEP)?;
+    }
+    let last = shown(&hp.screenshot(0)?, rect).0;
+    let (line, marks) = ice(&hp.screenshot(0)?, rect);
+    assert!(first > 0.95, "{first}");
+    assert!(
+        last < 0.01 && (line, marks) == (0, 0),
+        "{last} {line} {marks}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_glyphs_are_8_by_12_at_least() {
+    let ((x0, y0), (x1, y1)) = {
+        let (lo, hi) = hocus_link::moving::GLYPH_BOX;
+        ((lo[0], lo[1]), (hi[0], hi[1]))
+    };
+    let (w, h) = hocus_link::moving::WINDOW_CELL;
+    assert!((x1 - x0) * w >= 8.0 && (y1 - y0) * h >= 12.0);
 }

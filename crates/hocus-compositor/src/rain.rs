@@ -14,6 +14,10 @@
 //! picture. Input goes to the window from its first frame: the rain is
 //! only how it is drawn. On pixman the window fades over the same time
 //! instead, so the frames counted are the same.
+//!
+//! Givre's frost line (#740, `animation = "frost"`) is the same motion
+//! drawn otherwise: corner marks, a line tracing the frame, a frosted pane
+//! clearing; the same times, rules and fallbacks ([`Style`]).
 
 use std::{
     cell::{Cell, RefCell},
@@ -31,6 +35,15 @@ pub const AT_ONCE: usize = 3;
 /// A window smaller than this either way opens as standard.
 pub const SMALLEST: i32 = 200;
 
+/// How a window's motion is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Columns of glyphs (#432).
+    Rain,
+    /// The frost line (#740).
+    Frost,
+}
+
 /// Which way a rain goes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Fall {
@@ -46,6 +59,7 @@ pub enum Fall {
 pub struct Rain {
     pub start: Duration,
     pub fall: Fall,
+    pub style: Style,
     pub seed: f32,
     pub id: Id,
     /// The window's picture, the renderer's.
@@ -58,10 +72,11 @@ pub struct Rain {
 }
 
 impl Rain {
-    pub fn new(start: Duration, fall: Fall, seed: f32) -> Self {
+    pub fn new(start: Duration, fall: Fall, style: Style, seed: f32) -> Self {
         Self {
             start,
             fall,
+            style,
             seed,
             id: Id::new(),
             picture: RefCell::new(None),
@@ -122,11 +137,14 @@ impl Rain {
 }
 
 impl State {
-    /// Whether windows rain now as they open and close.
-    fn rain_chosen(&self) -> bool {
-        self.config.windows.animation == Animation::Rain
-            && !self.reduced_motion()
-            && !self.power_saving()
+    /// How windows open and close now, when not as standard.
+    fn rain_chosen(&self) -> Option<Style> {
+        let style = match self.config.windows.animation {
+            Animation::Standard => return None,
+            Animation::Rain => Style::Rain,
+            Animation::Frost => Style::Frost,
+        };
+        (!self.reduced_motion() && !self.power_saving()).then_some(style)
     }
 
     /// The rains under way, opening and closing.
@@ -142,14 +160,14 @@ impl State {
 
     /// Window `id` of size `size` maps at `now`: its rain, if it rains.
     pub(crate) fn rain_on_map(&mut self, size: (i32, i32), now: Duration) -> Option<Rain> {
-        let rains = self.rain_chosen()
-            && size.0 > SMALLEST
+        let style = self.rain_chosen()?;
+        let rains = size.0 > SMALLEST
             && size.1 > SMALLEST
             && !self.session_restoring()
             && self.rains() < AT_ONCE;
         rains.then(|| {
             let seed = self.rain_seed();
-            Rain::new(now, Fall::Open, seed)
+            Rain::new(now, Fall::Open, style, seed)
         })
     }
 
@@ -168,15 +186,14 @@ impl State {
             .filter(|r| !r.done(now));
         if let Some(opening) = opening {
             let (t, _) = opening.shader_time(now);
-            return Some(Rain::new(now, Fall::Back(t), opening.seed));
+            return Some(Rain::new(now, Fall::Back(t), opening.style, opening.seed));
         }
-        let rains = self.rain_chosen()
-            && size.0 > f64::from(SMALLEST)
-            && size.1 > f64::from(SMALLEST)
-            && self.rains() < AT_ONCE;
+        let style = self.rain_chosen()?;
+        let rains =
+            size.0 > f64::from(SMALLEST) && size.1 > f64::from(SMALLEST) && self.rains() < AT_ONCE;
         rains.then(|| {
             let seed = self.rain_seed();
-            Rain::new(now, Fall::Close, seed)
+            Rain::new(now, Fall::Close, style, seed)
         })
     }
 }
@@ -191,12 +208,12 @@ mod tests {
 
     #[test]
     fn a_rain_closed_while_opening_goes_back_from_where_it_was() {
-        let open = Rain::new(ms(1000), Fall::Open, 1.0);
+        let open = Rain::new(ms(1000), Fall::Open, Style::Rain, 1.0);
         assert_eq!(open.shader_time(ms(1000)), (0.0, false));
         assert!((open.fade(ms(1180)) - 0.5).abs() < 1e-3);
         assert!(open.done(ms(1360)));
         let (t, _) = open.shader_time(ms(1100));
-        let back = Rain::new(ms(1100), Fall::Back(t), 1.0);
+        let back = Rain::new(ms(1100), Fall::Back(t), Style::Rain, 1.0);
         // Never more shown than when it closed, nothing left at its end.
         let mut last = back.shader_time(ms(1100)).0;
         for k in 0..=10 {
@@ -206,7 +223,7 @@ mod tests {
         }
         assert_eq!(back.shader_time(ms(1200)).0, 0.0);
         assert!(back.done(ms(1201)));
-        let close = Rain::new(ms(0), Fall::Close, 1.0);
+        let close = Rain::new(ms(0), Fall::Close, Style::Rain, 1.0);
         assert_eq!(close.fade(ms(0)), 1.0);
         assert_eq!(close.fade(ms(300)), 0.0);
     }
