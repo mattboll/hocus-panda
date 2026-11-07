@@ -44,6 +44,7 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
+pub mod actions;
 mod auth;
 pub mod backdrop;
 mod capture;
@@ -57,6 +58,11 @@ mod share;
 pub mod theme;
 pub mod wallpaper;
 mod window_menu;
+pub use actions::{
+    ACTIONS_CLOSE, ACTIONS_DIM, ACTIONS_DROP, ACTIONS_GLOW_ALPHA, ACTIONS_GLOW_WIDTH,
+    ACTIONS_NAMESPACE, ACTIONS_OPEN, ACTIONS_RADIUS, ACTIONS_RING, ACTIONS_RING_WIDTH, ACTIONS_TOP,
+    ACTIONS_WIDTH, ActionsShown, RunAction,
+};
 pub use auth::{
     AUTH_AGENT_ENV, AUTH_DIM, AUTH_DIM_ALPHA, AUTH_DIM_IN, AUTH_FROM, AUTH_IN, AUTH_NAMESPACE,
     AUTH_NEXT, AUTH_OUT, AUTH_RADIUS, AUTH_TOP, AUTH_WIDTH, AuthAsk, AuthAt,
@@ -710,6 +716,12 @@ pub enum ToShell {
     /// and when they change. Written `opaque-bars`, then each screen's
     /// name after a tab.
     OpaqueBars(Vec<String>),
+    /// `Super+P` (#736, [`ActionsShown`]): the actions palette opens on
+    /// the target's screen; open, it closes.
+    Actions(ActionsShown),
+    /// The palette's target window went, or the session locks: it closes.
+    /// Written `actions-end`.
+    ActionsEnd,
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1811,6 +1823,9 @@ pub enum ToCompositor {
     /// answers at once with what it shows ([`ToShell::WindowMenu`]).
     /// Written `window-menu ID`.
     WindowMenu(u64),
+    /// The palette (#736) runs an action ([`RunAction`]). Written `action
+    /// ID ARG WINDOW`.
+    Action(RunAction),
 }
 
 /// Where something the user clicked is on a bar: its screen's name and
@@ -2136,6 +2151,8 @@ impl fmt::Display for ToShell {
             Self::SessionMenu { output } => write!(f, "session-menu {output}"),
             Self::WindowMenu(menu) => menu.write(f),
             Self::WindowStates(states) => states.write(f),
+            Self::Actions(shown) => shown.write(f),
+            Self::ActionsEnd => f.write_str("actions-end"),
             Self::Day(ask) => match ask {
                 DayAsk::Add(title) => write!(f, "day add {}", one_line(title)),
                 DayAsk::Tick(id) => write!(f, "day tick {}", one_line(id)),
@@ -2180,6 +2197,12 @@ impl FromStr for ToShell {
         }
         if let Some(rest) = line.strip_prefix("window-menu ") {
             return WindowMenu::read(rest).map(Self::WindowMenu);
+        }
+        if let Some(rest) = line.strip_prefix("actions ") {
+            return ActionsShown::read(rest).map(Self::Actions);
+        }
+        if line == "actions-end" {
+            return Ok(Self::ActionsEnd);
         }
         if let Some(rest) = line.strip_prefix("window-states ") {
             return WindowStates::read(rest).map(Self::WindowStates);
@@ -2712,6 +2735,7 @@ impl fmt::Display for ToCompositor {
                 desktop,
             } => write!(f, "send-to {id} {output} {desktop}"),
             Self::WindowMenu(id) => write!(f, "window-menu {id}"),
+            Self::Action(run) => run.write(f),
             Self::GoToAgent { id, row: None } => write!(f, "go-to-agent {id}"),
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
@@ -2796,6 +2820,9 @@ impl FromStr for ToCompositor {
         }
         if let Some(rest) = line.strip_prefix("share ") {
             return ShareAsk::read(rest).map(Self::Share);
+        }
+        if let Some(rest) = line.strip_prefix("action ") {
+            return RunAction::read(rest).map(Self::Action);
         }
         if let Some(fields) = line.strip_prefix("launch\t") {
             let mut fields = fields.split('\t');

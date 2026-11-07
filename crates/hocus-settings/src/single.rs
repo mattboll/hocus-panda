@@ -21,20 +21,39 @@ pub struct Again {
     pub pair: Option<String>,
     /// A network whose sheet to open (`--join SSID`, 6.6).
     pub join: Option<String>,
+    /// What to search for (`--search QUERY`, the actions palette's last
+    /// row, #736).
+    pub search: Option<String>,
+}
+
+/// A text with spaces as one word, in hexadecimal.
+fn hex(text: Option<&str>) -> String {
+    text.map_or_else(
+        || "-".to_owned(),
+        |text| text.bytes().map(|b| format!("{b:02x}")).collect(),
+    )
+}
+
+/// A word written by [`hex`] read back.
+fn unhex(hex: &str) -> Option<String> {
+    let bytes: Option<Vec<u8>> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect();
+    String::from_utf8(bytes?).ok()
 }
 
 impl Again {
     fn line(&self) -> String {
-        // The network's name may hold spaces: in hexadecimal.
-        let join: String = self.join.as_deref().map_or_else(
-            || "-".to_owned(),
-            |name| name.bytes().map(|b| format!("{b:02x}")).collect(),
-        );
+        // The network's name and the search may hold spaces: in
+        // hexadecimal.
         format!(
-            "open {} {} {join} {}\n",
+            "open {} {} {} {} {}\n",
             self.section.as_deref().unwrap_or("-"),
             self.token.as_deref().unwrap_or("-"),
-            self.pair.as_deref().unwrap_or("-")
+            hex(self.join.as_deref()),
+            self.pair.as_deref().unwrap_or("-"),
+            hex(self.search.as_deref()),
         )
     }
 
@@ -44,18 +63,15 @@ impl Again {
         let word = |w: Option<&str>| w.filter(|w| *w != "-").map(str::to_owned);
         let section = word(words.next());
         let token = word(words.next());
-        let join = word(words.next()).and_then(|hex| {
-            let bytes: Option<Vec<u8>> = (0..hex.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
-                .collect();
-            String::from_utf8(bytes?).ok()
-        });
+        let join = word(words.next()).and_then(|hex| unhex(&hex));
+        let pair = word(words.next());
+        let search = word(words.next()).and_then(|hex| unhex(&hex));
         Some(Self {
             section,
             token,
             join,
-            pair: word(words.next()),
+            pair,
+            search,
         })
     }
 }
@@ -166,6 +182,7 @@ mod tests {
             token: Some("hocus-12".to_owned()),
             join: None,
             pair: None,
+            search: None,
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
         let again = Again {
@@ -173,6 +190,7 @@ mod tests {
             token: None,
             join: None,
             pair: Some("5C:12:AA:01:02:05".to_owned()),
+            search: None,
         };
         assert_eq!(Again::parse(&again.line()), Some(again));
         let join = Again {
@@ -180,6 +198,7 @@ mod tests {
             token: None,
             join: Some("Café Lomi".to_owned()),
             pair: None,
+            search: None,
         };
         assert_eq!(Again::parse(&join.line()), Some(join));
         let bare = Again {
@@ -187,8 +206,14 @@ mod tests {
             token: None,
             join: None,
             pair: None,
+            search: None,
         };
-        assert_eq!(bare.line(), "open - - - -\n");
+        assert_eq!(bare.line(), "open - - - - -\n");
+        let search = Again {
+            search: Some("mode sombre".to_owned()),
+            ..bare.clone()
+        };
+        assert_eq!(Again::parse(&search.line()), Some(search));
         // Lines of Settings before 6.6 and 6.7.
         assert_eq!(
             Again::parse("open sound -\n").and_then(|a| a.section),

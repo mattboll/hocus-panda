@@ -142,6 +142,8 @@ pub struct Panel {
     pub launchers: crate::launcher::Launchers,
     /// Commits of the launcher's surfaces, for tests.
     pub launcher_commits: u64,
+    /// Commits of the actions palette's surfaces, for tests (#736).
+    pub actions_commits: u64,
     /// The other screens' names, as last told to the shell.
     screens: Option<Vec<String>>,
     /// Where the bars stand to the windows: under them, or one brought in

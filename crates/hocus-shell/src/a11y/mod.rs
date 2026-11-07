@@ -182,6 +182,8 @@ enum Target {
         surface: window::Id,
         target: crate::auth::Target,
     },
+    /// A row of the actions palette, by its key (#736).
+    Palette(String),
 }
 
 /// The thread's state: the announcer, the last announcement, and what each
@@ -254,6 +256,17 @@ impl Said {
             windows.push(window);
         }
         windows.extend(self.popover(words));
+        if let Some(palette) = crate::actions::a11y() {
+            for node in palette.all() {
+                if node.key.starts_with("row:") {
+                    self.targets.insert(
+                        (palette.key.clone(), node.key.clone()),
+                        Target::Palette(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(palette);
+        }
         windows.extend(self.bubbles(words));
         windows.extend(self.auth(words));
         windows
@@ -475,6 +488,7 @@ impl Said {
                 });
             }
             (Target::Row(row), act) => press_row(row, act),
+            (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
             (Target::Bubble { serial, action }, Act::Click) => {
                 crate::notifications::input(match action {
                     Some(key) => crate::notifications::Input::Action {

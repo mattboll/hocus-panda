@@ -117,6 +117,8 @@ pub struct Start {
     pub pair: Option<String>,
     /// A network whose sheet opens once it is around (`--join`, 6.6).
     pub join: Option<String>,
+    /// What the search shows (`--search`, the actions palette, #736).
+    pub search: Option<String>,
     pub user: String,
     /// Where second launches knock, taken once by the window.
     pub listener: std::sync::Arc<Mutex<Option<std::os::unix::net::UnixListener>>>,
@@ -556,7 +558,14 @@ impl App {
         if start.section == Some(SectionId::Sound) {
             app.light = Some(("sound.output", Instant::now()));
         }
-        (app, window::latest().map(Message::Window))
+        let mut first = window::latest().map(Message::Window);
+        if let Some(query) = start.search {
+            tracing::info!("the Settings open searching");
+            app.focus = Focus::Search;
+            app.search(query);
+            first = Task::batch([first, operation::focus(SEARCH)]);
+        }
+        (app, first)
     }
 
     pub fn title(&self) -> String {
@@ -1673,6 +1682,15 @@ impl App {
                 self.light = Some(("sound.output", Instant::now()));
             }
         }
+        // From the actions palette's last row (#736): what the search
+        // finds.
+        let searched = if let Some(query) = again.search {
+            self.focus = Focus::Search;
+            self.search(query);
+            operation::focus(SEARCH)
+        } else {
+            Task::none()
+        };
         // From the Wi-Fi popover's "dans les Réglages": that network's
         // sheet (6.6).
         let join = if let Some(name) = again.join {
@@ -1681,6 +1699,7 @@ impl App {
         } else {
             Task::none()
         };
+        let join = Task::batch([join, searched]);
         let (Some(id), Some(token)) = (self.window, again.token) else {
             return join;
         };

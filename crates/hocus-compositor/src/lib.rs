@@ -6,6 +6,7 @@
 //! backend, together in [`App`]); nothing else holds a reference to it.
 //! Work that could block (starting programs) runs on threads of its own.
 
+mod actions;
 mod agents;
 mod appearance;
 pub mod auth;

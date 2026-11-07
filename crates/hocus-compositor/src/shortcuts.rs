@@ -90,6 +90,9 @@ pub enum Action {
     /// The screen reader started, or stopped (#734,
     /// `crate::screen_reader`).
     ScreenReader,
+    /// The actions palette, for the focused window; open, it closes
+    /// (#736, `crate::actions`).
+    Actions,
 }
 
 impl Action {
@@ -126,6 +129,23 @@ pub struct Chord {
 }
 
 impl Chord {
+    /// As the file writes it: `Super+Ctrl+Alt+Shift+KEY`, the key by its
+    /// XKB name.
+    pub fn written(&self) -> String {
+        let mut parts: Vec<String> = [
+            (self.logo, "Super"),
+            (self.ctrl, "Ctrl"),
+            (self.alt, "Alt"),
+            (self.shift, "Shift"),
+        ]
+        .iter()
+        .filter(|(held, _)| *held)
+        .map(|(_, name)| (*name).to_owned())
+        .collect();
+        parts.push(xkb::keysym_get_name(self.key));
+        parts.join("+")
+    }
+
     /// Whether this chord is what is pressed: exactly these modifiers (and
     /// `Alt` with `Super` when nested), and the key.
     pub fn matches(&self, mods: &ModifiersState, key: Keysym, nested: bool) -> bool {
@@ -219,6 +239,15 @@ macro_rules! shortcuts {
         }
 
         impl Shortcuts {
+            /// Each key of the file and its chords as the file writes
+            /// them (`Super+Shift+3`), in the file's order.
+            pub fn written(&self) -> Vec<(String, Vec<String>)> {
+                vec![$((
+                    stringify!($field).replace('_', "-"),
+                    self.$field.iter().map(Chord::written).collect(),
+                ),)*]
+            }
+
             /// Every shortcut and its action, in the file's order.
             pub fn all(&self) -> Vec<(Chord, Action)> {
                 let mut all = Vec::new();
@@ -285,6 +314,7 @@ shortcuts! {
     toggle_bar: ["Super+Shift+B"] => Action::ToggleBar,
     focus_bar: ["Super+B"] => Action::FocusBar,
     launcher: ["Super+Space"] => Action::Launcher,
+    actions: ["Super+P"] => Action::Actions,
     overview: ["Super+W"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
     emoji: ["Super+period"] => Action::Emoji,
@@ -450,6 +480,7 @@ impl State {
             Action::MagnifierOut => self.magnifier_step(false),
             Action::MagnifierOff => self.magnifier_off(),
             Action::ScreenReader => self.toggle_screen_reader(),
+            Action::Actions => self.toggle_actions(),
         }
     }
 

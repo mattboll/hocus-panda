@@ -235,6 +235,8 @@ pub struct State {
     /// A window's radial menu while it is open, and as it goes (#723);
     /// the right press that may open it; what draws it.
     pub radial: Option<crate::radial::Radial>,
+    /// The actions palette's target and what draws it (#736).
+    pub actions: crate::actions::Palette,
     pub radial_out: Option<crate::radial::Going>,
     pub radial_press: Option<crate::radial::Press>,
     pub radial_paint: crate::radial_draw::RadialPaint,
@@ -483,6 +485,7 @@ impl State {
             switcher: None,
             switcher_out: None,
             radial: None,
+            actions: crate::actions::Palette::default(),
             radial_out: None,
             radial_press: None,
             radial_paint: crate::radial_draw::RadialPaint::default(),

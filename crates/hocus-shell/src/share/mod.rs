@@ -356,6 +356,7 @@ pub fn set(choose: ShareChoose) {
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::launcher::close();
         crate::emoji::close();
+        crate::actions::close();
     }
     crate::popover::send(effects);
 }

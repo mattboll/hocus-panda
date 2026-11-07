@@ -1036,6 +1036,20 @@ mod tests {
     }
 
     #[test]
+    fn each_section_is_a_page_of_the_actions_palette() {
+        // The palette (#736) lists "Réglages › Son"…: the same pages, in
+        // the same order, by the same names.
+        let pages = hocus_link::actions::SETTINGS_PAGES;
+        assert_eq!(pages.len(), SectionId::ALL.len());
+        for (id, (slug, fr, en)) in SectionId::ALL.into_iter().zip(pages) {
+            let section = id.section();
+            assert_eq!(section.slug, slug);
+            assert_eq!(section.name.fr, fr, "{slug}");
+            assert_eq!(section.name.en, en, "{slug}");
+        }
+    }
+
+    #[test]
     fn delays_read_and_write_both_ways() {
         assert_eq!(parse_delay("5m"), Some(Some(300)));
         assert_eq!(parse_delay("1h"), Some(Some(3600)));

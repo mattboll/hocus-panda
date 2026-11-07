@@ -516,6 +516,7 @@ impl State {
                 desktop,
             } => self.send_to_asked(id, &output, desktop),
             ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
+            ToCompositor::Action(run) => self.action_asked(run),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
