@@ -182,6 +182,8 @@ pub struct Node {
     /// Checked, ticked or pressed; `None` when it cannot be.
     pub checked: Option<bool>,
     pub selected: Option<bool>,
+    /// What it opens shows (a popover beside an item).
+    pub expanded: Option<bool>,
     pub disabled: bool,
     /// Its place among its kind, from 1: "2 sur 4".
     pub set: Option<(usize, usize)>,
@@ -203,6 +205,7 @@ impl Node {
             range: None,
             checked: None,
             selected: None,
+            expanded: None,
             disabled: false,
             set: None,
             bounds: None,
@@ -240,6 +243,11 @@ impl Node {
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = Some(selected);
+        self
+    }
+
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
         self
     }
 
@@ -291,6 +299,10 @@ impl Node {
     fn kit(&self, children: Vec<NodeId>) -> accesskit::Node {
         let mut node = accesskit::Node::new(self.role.kit());
         node.set_label(self.name.clone());
+        // A label's name is its value, to AccessKit.
+        if self.role == Role::Label && self.value.is_none() {
+            node.set_value(self.name.clone());
+        }
         if let Some(description) = &self.description {
             node.set_description(description.clone());
         }
@@ -313,6 +325,9 @@ impl Node {
         }
         if let Some(selected) = self.selected {
             node.set_selected(selected);
+        }
+        if let Some(expanded) = self.expanded {
+            node.set_expanded(expanded);
         }
         if self.disabled {
             node.set_disabled();
@@ -340,14 +355,14 @@ impl Node {
     fn dump(&self, depth: usize, out: &mut String) {
         let _ = write!(
             out,
-            "{:indent$}{} {:?}",
+            "{:indent$}{} \"{}\"",
             "",
             self.role.word(),
             self.name,
             indent = depth * 2
         );
         if let Some(value) = &self.value {
-            let _ = write!(out, " = {value:?}");
+            let _ = write!(out, " = \"{value}\"");
         }
         if let Some(range) = self.range {
             let _ = write!(out, " ({} in {}..{}", range.value, range.min, range.max);
@@ -357,7 +372,7 @@ impl Node {
             out.push(')');
         }
         if let Some(description) = &self.description {
-            let _ = write!(out, " — {description:?}");
+            let _ = write!(out, " — \"{description}\"");
         }
         let mut states = Vec::new();
         match self.checked {
@@ -369,6 +384,9 @@ impl Node {
         }
         if self.selected == Some(true) {
             states.push("selected");
+        }
+        if self.expanded == Some(true) {
+            states.push("expanded");
         }
         if self.disabled {
             states.push("disabled");
@@ -501,6 +519,24 @@ impl Window {
         id
     }
 
+    /// The same without its polite nodes (see `Bridge::show`).
+    pub(crate) fn quiet(&self) -> Self {
+        fn quiet(nodes: &[Node]) -> Vec<Node> {
+            nodes
+                .iter()
+                .filter(|n| !n.polite)
+                .map(|n| Node {
+                    children: quiet(&n.children),
+                    ..n.clone()
+                })
+                .collect()
+        }
+        Self {
+            nodes: quiet(&self.nodes),
+            ..self.clone()
+        }
+    }
+
     /// The keys of its nodes by their AccessKit ids, as [`Self::update`]
     /// gives them: what a screen reader's action names.
     pub(crate) fn keys(&self) -> Vec<(NodeId, String)> {
@@ -521,7 +557,7 @@ impl Window {
     /// The tree as text, one node a line: role, name, value, states, place
     /// among its kind, bounds and actions; the focused node marked.
     pub fn dump(&self) -> String {
-        let mut out = format!("window {:?}", self.name);
+        let mut out = format!("window \"{}\"", self.name);
         if self.active {
             out.push_str(" [active]");
         }

@@ -64,12 +64,19 @@ struct Held {
     /// What was last handed over, so that only a change is.
     last: Option<Window>,
     active: bool,
+    /// Its first tree went over: what comes now is an update, whose new
+    /// polite nodes are said (those of a first tree are not).
+    primed: bool,
 }
 
 /// The shell's windows, each with its adapter.
 pub struct Bridge {
     tell: Tell,
     windows: BTreeMap<String, Held>,
+    /// An adapter given no tree, ever: it hears an assistive technology
+    /// start while the shell shows no window yet (or keeps none), and
+    /// stays out of AT-SPI's tree.
+    _probe: accesskit_unix::Adapter,
 }
 
 impl std::fmt::Debug for Bridge {
@@ -84,9 +91,20 @@ impl Bridge {
     /// `tell` is called on AccessKit's thread: it should only send the
     /// event on to the shell's loop.
     pub fn new(tell: impl Fn(Event) + Send + Sync + 'static) -> Self {
+        let tell: Tell = Arc::new(tell);
+        let probe = accesskit_unix::Adapter::new(
+            Activation { tell: tell.clone() },
+            Actions {
+                tell: tell.clone(),
+                window: String::new(),
+                keys: Keys::default(),
+            },
+            Deactivation { tell: tell.clone() },
+        );
         Self {
-            tell: Arc::new(tell),
+            tell,
             windows: BTreeMap::new(),
+            _probe: probe,
         }
     }
 
@@ -117,11 +135,25 @@ impl Bridge {
                     keys.clear();
                     keys.extend(window.keys());
                 }
+                // A window's first tree says nothing on its own: it goes
+                // without its polite nodes, which come in an update at once.
+                let first = (!held.primed).then(|| window.quiet());
+                let mut applied = false;
                 held.adapter.update_if_active(|| {
+                    applied = true;
                     BUILT.fetch_add(1, Ordering::Relaxed);
-                    let update: TreeUpdate = window.update();
+                    let update: TreeUpdate = first.as_ref().unwrap_or(&window).update();
                     update
                 });
+                if applied && let Some(first) = first {
+                    held.primed = true;
+                    if first != window {
+                        held.adapter.update_if_active(|| {
+                            BUILT.fetch_add(1, Ordering::Relaxed);
+                            window.update()
+                        });
+                    }
+                }
                 tracing::debug!(window = %window.key, tree = %window.dump(), "the accessibility tree");
             }
             if held.active != window.active {
@@ -137,6 +169,7 @@ impl Bridge {
     pub fn forget(&mut self) {
         for held in self.windows.values_mut() {
             held.last = None;
+            held.primed = false;
         }
     }
 
@@ -160,6 +193,7 @@ impl Bridge {
             keys,
             last: None,
             active: false,
+            primed: false,
         }
     }
 }
