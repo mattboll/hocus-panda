@@ -150,9 +150,9 @@ fn panda(look: Played) -> svg::Handle {
     PANDAS
         .get_or_init(|| {
             [
-                include_bytes!("../../../hocus-shell/assets/pandas/waiting.svg").as_slice(),
-                include_bytes!("../../../hocus-shell/assets/pandas/stuck.svg").as_slice(),
-                include_bytes!("../../../hocus-shell/assets/pandas/done.svg").as_slice(),
+                hocus_pandas::Mood::Waiting.still().as_bytes(),
+                hocus_pandas::Mood::Stuck.still().as_bytes(),
+                hocus_pandas::Mood::Done.still().as_bytes(),
             ]
             .map(svg::Handle::from_memory)
         })
@@ -169,9 +169,7 @@ fn working_panda() -> svg::Handle {
     static PANDA: OnceLock<svg::Handle> = OnceLock::new();
     PANDA
         .get_or_init(|| {
-            svg::Handle::from_memory(
-                include_bytes!("../../../hocus-shell/assets/pandas/working.svg").as_slice(),
-            )
+            svg::Handle::from_memory(hocus_pandas::Mood::Working.still().as_bytes())
         })
         .clone()
 }

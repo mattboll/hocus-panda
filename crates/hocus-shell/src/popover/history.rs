@@ -1679,7 +1679,7 @@ fn panda() -> svg::Handle {
     static PANDA: std::sync::OnceLock<svg::Handle> = std::sync::OnceLock::new();
     PANDA
         .get_or_init(|| {
-            svg::Handle::from_memory(include_bytes!("../../assets/pandas/resting.svg").as_slice())
+            svg::Handle::from_memory(hocus_pandas::Mood::Resting.still().as_bytes())
         })
         .clone()
 }

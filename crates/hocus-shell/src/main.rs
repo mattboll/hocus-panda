@@ -52,6 +52,7 @@ mod meeting;
 mod network;
 mod notifications;
 mod outputs;
+mod pandas;
 mod paste;
 mod pointer;
 mod popover;
@@ -455,6 +456,7 @@ impl Shell {
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
         };
         popover::with(|c| c.motion = shell.look.motion);
+        pandas::set_lively(shell.look.motion);
         agents::peek::set_software(software);
         // Alone: one full bar where the compositor puts it.
         let task = if socket.is_none() {
@@ -564,12 +566,17 @@ impl Shell {
 
     fn compositor_says(&mut self, message: ToShell) -> Task<Message> {
         match message {
-            ToShell::Look { glass, motion } => {
+            ToShell::Look {
+                glass,
+                motion,
+                lively,
+            } => {
                 self.look = Look {
                     glass: glass && !self.software,
                     motion: motion && !self.software,
                 };
                 popover::with(|c| c.motion = self.look.motion);
+                pandas::set_lively(lively && self.look.motion);
                 Task::none()
             }
             // Every surface draws again, in it: this is a message.

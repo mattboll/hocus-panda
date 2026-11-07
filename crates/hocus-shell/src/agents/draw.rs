@@ -591,11 +591,11 @@ pub(super) fn panda(look: Look) -> &'static svg::Handle {
     static PANDAS: OnceLock<[svg::Handle; 5]> = OnceLock::new();
     let pandas = PANDAS.get_or_init(|| {
         [
-            include_bytes!("../../assets/pandas/waiting.svg").as_slice(),
-            include_bytes!("../../assets/pandas/stuck.svg").as_slice(),
-            include_bytes!("../../assets/pandas/done.svg").as_slice(),
-            include_bytes!("../../assets/pandas/working.svg").as_slice(),
-            include_bytes!("../../assets/pandas/resting.svg").as_slice(),
+            hocus_pandas::Mood::Waiting.still().as_bytes(),
+            hocus_pandas::Mood::Stuck.still().as_bytes(),
+            hocus_pandas::Mood::Done.still().as_bytes(),
+            hocus_pandas::Mood::Working.still().as_bytes(),
+            hocus_pandas::Mood::Resting.still().as_bytes(),
         ]
         .map(svg::Handle::from_memory)
     });
@@ -608,9 +608,9 @@ pub fn secretary(mood: Mood) -> &'static svg::Handle {
     static SECRETARY: OnceLock<[svg::Handle; 3]> = OnceLock::new();
     let drawings = SECRETARY.get_or_init(|| {
         [
-            include_bytes!("../../assets/pandas/secretary-calm.svg").as_slice(),
-            include_bytes!("../../assets/pandas/secretary-waiting.svg").as_slice(),
-            include_bytes!("../../assets/pandas/secretary-stuck.svg").as_slice(),
+            hocus_pandas::Secretary::Calm.still().as_bytes(),
+            hocus_pandas::Secretary::Waiting.still().as_bytes(),
+            hocus_pandas::Secretary::Stuck.still().as_bytes(),
         ]
         .map(svg::Handle::from_memory)
     });

@@ -625,9 +625,9 @@ fn panda(pose: Pose, shadow: bool) -> &'static svg::Handle {
     static PANDAS: OnceLock<[svg::Handle; 6]> = OnceLock::new();
     let pandas = PANDAS.get_or_init(|| {
         let drawings = [
-            include_str!("../../assets/pandas/waiting.svg"),
-            include_str!("../../assets/pandas/done.svg"),
-            include_str!("../../assets/pandas/wink.svg"),
+            hocus_pandas::Mood::Waiting.still(),
+            hocus_pandas::Mood::Done.still(),
+            hocus_pandas::Mood::Wink.still(),
         ];
         let shadowed = drawings.map(|d| svg::Handle::from_memory(shadowed(d).into_bytes()));
         let plain = drawings.map(|d| svg::Handle::from_memory(d.as_bytes()));
@@ -1055,7 +1055,7 @@ mod tests {
 
     #[test]
     fn the_pandas_shadow_is_round_their_drawing() {
-        let drawing = include_str!("../../assets/pandas/waiting.svg");
+        let drawing = hocus_pandas::Mood::Waiting.still();
         let shadowed = shadowed(drawing);
         assert!(shadowed.contains("feDropShadow"), "{shadowed}");
         assert!(shadowed.contains("<g filter=\"url(#shadow)\">"));
