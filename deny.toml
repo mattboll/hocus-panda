@@ -43,6 +43,13 @@ ignore = [
     # text with it, through iced's `svg` (resvg), which draws the sound
     # popover's applications' icons. Revisit on every iced update.
     { id = "RUSTSEC-2026-0206", reason = "transitive through iced's resvg" },
+    # zvariant, zvariant_derive and zbus_names are unmaintained (no known
+    # vulnerability): merged into zbus 6, which the workspace uses, while
+    # accesskit_unix (the screen readers' tree, hocus-a11y) is still on
+    # zbus 5. Revisit on every accesskit_unix release.
+    { id = "RUSTSEC-2026-0370", reason = "transitive through accesskit_unix's zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "transitive through accesskit_unix's zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "transitive through accesskit_unix's zbus 5" },
 ]
 
 [bans]
