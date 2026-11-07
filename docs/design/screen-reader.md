@@ -129,9 +129,9 @@ rest: a popover draws only while it is open and changes.
   runs in). Changing the key in the file starts or stops it.
 - Stopped by its own process id: `SIGTERM`, then `SIGKILL` if it is still
   there 2 s later.
-- The Settings' Accessibilité page (A.2/A.3) gets its row: "Lecteur
-  d'écran", a switch on `[accessibility] screen-reader`
-  ([accessibility.md](accessibility.md)). The Keyboard page lists the
+- The Settings' Accessibilité page has its row, in a group of its own,
+  LECTEUR D'ÉCRAN: "Lecteur d'écran", a switch on `[accessibility]
+  screen-reader` ([settings.md](settings.md)). The Keyboard page lists the
   shortcut in a group of its own, "LECTEUR D'ÉCRAN".
 
 ## `hocus msg a11y`

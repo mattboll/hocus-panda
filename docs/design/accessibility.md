@@ -10,12 +10,13 @@ What a screen reader reads of the bar, its popovers, the bubbles, the
 lock and the password dialog, and what it hears on its own: in
 [screen-reader.md](screen-reader.md).
 
-The Accessibilité page's row for it (#734): "Lecteur d'écran" / "Screen
-reader", a switch on `[accessibility] screen-reader` (Orca starts with the
-session; off by default), under it "Super+Alt+S le lance ou l'arrête,
-même sur l'écran de verrouillage." / "Super+Alt+S starts or stops it, on
-the lock screen too.". Turned on in the Settings, Orca starts at once
-(the compositor follows the file).
+The Accessibilité page's row for it (#734), in its own group LECTEUR
+D'ÉCRAN: "Lecteur d'écran" / "Screen reader", a switch on
+`[accessibility] screen-reader` (Orca starts with the session; off by
+default), under it "Super+Alt+S le lance ou l'arrête, même sur l'écran
+de verrouillage." / "Super+Alt+S starts or stops it, on the lock screen
+too.". Turned on in the Settings, Orca starts at once (the compositor
+follows the file).
 
 ## The magnifier (#424)
 
@@ -195,5 +196,5 @@ LOUPE (the magnifier's rows), VUE (high contrast, reduced transparency,
 reduced motion, a link to the text's and the cursor's size), CLAVIER (the
 way into the bar). Appearance keeps a link to it. While high contrast is
 on, reduced transparency's switch shows on and inert ("Comprise dans le
-contraste élevé"); the file keeps its own value. The screen reader's group
-comes with #421.
+contraste élevé"); the file keeps its own value. LECTEUR D'ÉCRAN holds the
+screen reader's switch (#734).
