@@ -179,8 +179,8 @@ impl Secretary {
     }
 }
 
-/// How the pandas are dressed for the theme (#740): as drawn, or Givre's
-/// ice visor. A dress is a layer over the drawing, laid on its still
+/// How the pandas are dressed for the theme (#740, #431): as drawn,
+/// Givre's ice visor or Matrix's glasses. A dress is a layer over the drawing, laid on its still
 /// drawing as on each frame of its motion: the moving parts move as they
 /// do, under it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -191,30 +191,64 @@ pub enum Dress {
     /// pushed up on the forehead when the panda sleeps; the pandas' green
     /// in Givre's ice blue.
     Visor,
+    /// Matrix's: Neo's black glasses with green rims (smaller, on the
+    /// forehead, when the panda sleeps); the pandas' green in the
+    /// phosphor green.
+    Glasses,
 }
 
 /// The pandas' green, and Givre's ice blue that takes its place.
 const GREEN: &str = "#7BC47F";
 const ICE: &str = "#7FD8FF";
+/// Matrix's phosphor green, and the glasses' glint.
+const PHOSPHOR: &str = "#00F060";
+const GLINT: &str = "#9CFFB5";
 
 impl Dress {
     /// `drawing` (a still drawing or a frame of `mood`) in this dress.
     pub fn wear(self, drawing: &str, mood: Mood) -> String {
         match self {
             Self::Plain => drawing.to_owned(),
-            Self::Visor => {
-                let drawing = drawing.replace(GREEN, ICE);
-                let Some(end) = drawing.rfind("</svg>") else {
-                    return drawing;
-                };
-                let mut dressed = String::with_capacity(drawing.len() + 512);
-                dressed.push_str(&drawing[..end]);
-                dressed.push_str(&visor(mood == Mood::Resting));
-                dressed.push_str(&drawing[end..]);
-                dressed
-            }
+            Self::Visor => layered(&drawing.replace(GREEN, ICE), &visor(mood == Mood::Resting)),
+            Self::Glasses => layered(
+                &drawing.replace(GREEN, PHOSPHOR),
+                &glasses(mood == Mood::Resting),
+            ),
         }
     }
+}
+
+/// `layer` over `drawing`, before its end.
+fn layered(drawing: &str, layer: &str) -> String {
+    let Some(end) = drawing.rfind("</svg>") else {
+        return drawing.to_owned();
+    };
+    let mut dressed = String::with_capacity(drawing.len() + layer.len());
+    dressed.push_str(&drawing[..end]);
+    dressed.push_str(layer);
+    dressed.push_str(&drawing[end..]);
+    dressed
+}
+
+/// Neo's glasses over the eyes (`up`: smaller, on the forehead, asleep):
+/// two black lenses rimmed in green, their bridge, a glint on each.
+fn glasses(up: bool) -> String {
+    let lift = if up {
+        " transform=\"translate(60 31) scale(0.72) translate(-60 -52)\""
+    } else {
+        ""
+    };
+    format!(
+        "<g id=\"glasses\"{lift}>\
+         <path d=\"M38.5 49.5 Q48 45.5 57 49.5 Q57 57.5 48 58.3 Q39 57.6 38.5 49.5 Z\" \
+         fill=\"#010604\" stroke=\"{PHOSPHOR}\" stroke-width=\"1.4\" />\
+         <path d=\"M63 49.5 Q72 45.5 81.5 49.5 Q81 57.6 72 58.3 Q63 57.5 63 49.5 Z\" \
+         fill=\"#010604\" stroke=\"{PHOSPHOR}\" stroke-width=\"1.4\" />\
+         <path d=\"M57 50.2 Q60 48.2 63 50.2\" fill=\"none\" stroke=\"{PHOSPHOR}\" \
+         stroke-width=\"1.4\" />\
+         <path d=\"M42 51.3 L46.5 49.6 M66.5 51.3 L71 49.6\" stroke=\"{GLINT}\" \
+         stroke-width=\"1.3\" stroke-linecap=\"round\" opacity=\"0.85\" /></g>"
+    )
 }
 
 /// The ice visor, across the eyes (`up`: on the forehead, asleep): a
@@ -790,8 +824,38 @@ mod tests {
         }
     }
 
-    /// The pandas in Givre's visor, every mood, as PNG files in the folder
-    /// `HOCUS_SHOTS` names, for the maintainer.
+    #[test]
+    fn matrix_dresses_every_mood_in_neos_glasses() {
+        for mood in Mood::ALL {
+            let dressed = Dress::Glasses.wear(mood.still(), mood);
+            assert_eq!(dressed.matches("<g id=\"glasses\"").count(), 1);
+            assert!(!dressed.contains(GREEN), "{}", mood.name());
+            let shown = pixels(&dressed);
+            // A lens: black over the eye, or on the forehead asleep.
+            let lens = if mood == Mood::Resting {
+                (53, 35)
+            } else {
+                (48, 55)
+            };
+            let [r, g, b] = at(&shown, lens);
+            assert!(
+                r < 40 && g < 40 && b < 40,
+                "{}: {:?}",
+                mood.name(),
+                [r, g, b]
+            );
+            for part in mood.parts() {
+                let group = format!("<g id=\"{}\">", part.id);
+                assert_eq!(dressed.matches(&group).count(), 1, "{}", part.id);
+            }
+            let mid = frame(mood, mood.burst(), MS(650)).expect("a frame");
+            let worn = Dress::Glasses.wear(&mid, mood);
+            assert!(resvg::usvg::Tree::from_str(&worn, &resvg::usvg::Options::default()).is_ok());
+        }
+    }
+
+    /// The pandas plain, in Givre's visor and in Matrix's glasses, every
+    /// mood, as one PNG file in the folder `HOCUS_SHOTS` names.
     #[test]
     #[ignore = "writes screenshots: run with HOCUS_SHOTS set"]
     fn screenshots_of_the_visor() {
@@ -803,10 +867,13 @@ mod tests {
         let scale = 3.0;
         let (w, h) = ((VIEW_BOX.0 * scale) as u32, (VIEW_BOX.1 * scale) as u32);
         let mut sheet =
-            resvg::tiny_skia::Pixmap::new(w * Mood::ALL.len() as u32, h * 2).expect("pixmap");
+            resvg::tiny_skia::Pixmap::new(w * Mood::ALL.len() as u32, h * 3).expect("pixmap");
         sheet.fill(resvg::tiny_skia::Color::from_rgba8(8, 16, 31, 255));
         for (i, mood) in Mood::ALL.into_iter().enumerate() {
-            for (row, dress) in [Dress::Plain, Dress::Visor].into_iter().enumerate() {
+            for (row, dress) in [Dress::Plain, Dress::Visor, Dress::Glasses]
+                .into_iter()
+                .enumerate()
+            {
                 let svg = dress.wear(mood.still(), mood);
                 let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
                     .expect("svg");
@@ -822,7 +889,7 @@ mod tests {
             }
         }
         sheet
-            .save_png(dir.join("pandas-visor.png"))
+            .save_png(dir.join("pandas-dressed.png"))
             .expect("the file");
     }
 
