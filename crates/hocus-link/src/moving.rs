@@ -23,16 +23,20 @@ pub enum Moving {
     /// Three planes of stars drifting towards the viewer over a night-blue
     /// haze.
     Stars,
+    /// Three slow veils, cyan, ice blue and violet, waving over a night
+    /// sky with a few stars: Givre's (#740).
+    Aurora,
 }
 
 impl Moving {
-    pub const ALL: [Self; 2] = [Self::Rain, Self::Stars];
+    pub const ALL: [Self; 3] = [Self::Rain, Self::Stars, Self::Aurora];
 
     /// Its word in the file.
     pub const fn word(self) -> &'static str {
         match self {
             Self::Rain => "rain",
             Self::Stars => "stars",
+            Self::Aurora => "aurora",
         }
     }
 
@@ -45,6 +49,7 @@ impl Moving {
         match self {
             Self::Rain => ("Pluie", "Rain"),
             Self::Stars => ("Étoiles", "Stars"),
+            Self::Aurora => ("Aurore", "Aurora"),
         }
     }
 
@@ -53,6 +58,7 @@ impl Moving {
         match self {
             Self::Rain => RAIN_FPS,
             Self::Stars => STARS_FPS,
+            Self::Aurora => AURORA_FPS,
         }
     }
 
@@ -61,6 +67,7 @@ impl Moving {
         match self {
             Self::Rain => AccentColours::lifted(PHOSPHOR.tail),
             Self::Stars => AccentColours::lifted([0x7F, 0x9C, 0xE8]),
+            Self::Aurora => AccentColours::lifted(FROST.tint),
         }
     }
 }
@@ -69,10 +76,13 @@ impl Moving {
 pub const RAIN_FPS: u32 = 15;
 /// The stars drift slowly: 20 frames a second are enough.
 pub const STARS_FPS: u32 = 20;
+/// The aurora's veils wave slowly: 10 frames a second.
+pub const AURORA_FPS: u32 = 10;
 /// A cell of the wallpaper's rain, logical pixels.
 pub const RAIN_CELL: (f64, f64) = (14.0, 22.0);
-/// A cell of a window's rain, logical pixels: its columns are 10 px wide.
-pub const WINDOW_CELL: (f64, f64) = (10.0, 15.0);
+/// A cell of a window's rain, logical pixels: its columns are 12 px wide,
+/// its glyphs about 9 × 13 (at least 8 × 12 at every scale).
+pub const WINDOW_CELL: (f64, f64) = (12.0, 18.0);
 /// The tail fades out in this many steps.
 pub const TAIL_STEPS: f64 = 6.0;
 /// The moment the still picture shows: the rain's frame at this tick (its
@@ -104,6 +114,33 @@ pub const PHOSPHOR: RainColours = RainColours {
 pub const fn rain_colours(_scheme: crate::theme::Scheme) -> RainColours {
     PHOSPHOR
 }
+
+/// The frost line's colours (#740), tokens a theme sets: the line
+/// tracing a window's frame, its four corner marks, the pane's icy tint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrostColours {
+    pub line: [u8; 3],
+    pub corner: [u8; 3],
+    pub tint: [u8; 3],
+}
+
+/// Givre's ice.
+pub const FROST: FrostColours = FrostColours {
+    line: [0xEA, 0xF6, 0xFF],
+    corner: [0xBF, 0xEF, 0xFF],
+    tint: [0x7F, 0xD8, 0xFF],
+};
+
+/// The frost line's colours in `scheme`: Givre's ice in every theme until
+/// a theme gives its own.
+pub const fn frost_colours(_scheme: crate::theme::Scheme) -> FrostColours {
+    FROST
+}
+
+/// The aurora's sky, from its top to its bottom, and its three veils.
+pub const AURORA_TOP: [u8; 3] = [0x02, 0x04, 0x0C];
+pub const AURORA_BOTTOM: [u8; 3] = [0x0A, 0x16, 0x30];
+pub const AURORA_VEILS: [[u8; 3]; 3] = [[0x4F, 0xF0, 0xD8], [0x7F, 0xD8, 0xFF], [0x9C, 0x7B, 0xFF]];
 
 /// The stars' colours: the haze's two blues, the stars' white.
 pub const STARS_TOP: [u8; 3] = [0x03, 0x06, 0x12];
@@ -289,7 +326,7 @@ pub fn rain_glyph(column: f64, row: f64, tick: f64, head: bool) -> usize {
 
 /// Where a glyph's dots are in its cell, as fractions of the cell: the
 /// box the 5 × 7 dots fill.
-pub const GLYPH_BOX: ([f64; 2], [f64; 2]) = ([0.16, 0.18], [0.84, 0.82]);
+pub const GLYPH_BOX: ([f64; 2], [f64; 2]) = ([0.12, 0.14], [0.88, 0.86]);
 
 fn mix(a: [u8; 3], b: [u8; 3], t: f64) -> [f64; 3] {
     std::array::from_fn(|i| f64::from(a[i]) + (f64::from(b[i]) - f64::from(a[i])) * t)
@@ -301,6 +338,7 @@ pub fn still(moving: Moving, size: (i32, i32), scale: f64) -> Vec<u8> {
     match moving {
         Moving::Rain => still_rain(size, scale, PHOSPHOR),
         Moving::Stars => still_stars(size, scale),
+        Moving::Aurora => still_aurora(size, scale),
     }
 }
 
@@ -434,7 +472,7 @@ fn still_stars((w, h): (i32, i32), scale: f64) -> Vec<u8> {
             pixels.extend_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
         }
     }
-    let time = f64::from(STILL_TICK);
+    let time = f64::from(STILL_TICK) / f64::from(STARS_FPS);
     let scale = scale.max(0.5);
     // Each plane's cells, found from the screen's corners at its depth.
     for plane in 0..STAR_PLANES {
@@ -461,6 +499,73 @@ fn still_stars((w, h): (i32, i32), scale: f64) -> Vec<u8> {
                     bright.clamp(0.0, 1.0),
                 );
             }
+        }
+    }
+    pixels
+}
+
+/// The aurora at (`u`, `v`), fractions of the screen (`aspect` its width
+/// over its height), at `time` seconds: the sky and its three veils, each
+/// a curtain bright at its lower edge, its rays rising above it, waving.
+/// The shader says the same.
+pub fn aurora(u: f64, v: f64, aspect: f64, time: f64) -> [f64; 3] {
+    let mut colour = mix(AURORA_TOP, AURORA_BOTTOM, v).map(|c| c / 255.0);
+    let x = u * aspect;
+    for (i, veil) in AURORA_VEILS.iter().enumerate() {
+        let f = i as f64;
+        let centre = 0.30
+            + 0.12 * f
+            + 0.06 * (x * 1.7 + time * 0.13 * (1.0 + f * 0.4) + f * 2.1).sin()
+            + 0.035 * (x * 4.3 - time * 0.21 + f * 1.3).sin();
+        let d = v - centre;
+        let rays = 0.55 + 0.45 * (x * 38.0 + (x * 3.0 + time * 0.3).sin() * 4.0 + f * 5.0).sin();
+        let curtain = if d > 0.0 {
+            (-d * d / 0.0018).exp()
+        } else {
+            (-d * d / 0.03).exp() * rays
+        };
+        let shimmer = 0.75 + 0.25 * (time * 0.7 + x * 2.0 + f).sin();
+        let a = curtain * shimmer * 0.55;
+        for (c, v) in colour.iter_mut().zip(veil) {
+            *c += f64::from(*v) / 255.0 * a;
+        }
+    }
+    colour.map(|c| c.min(1.0) * 255.0)
+}
+
+/// A star of the aurora's sky at physical pixel (`x`, `y`) on a screen at
+/// `scale`, `time` seconds in: how much of it covers the pixel.
+pub fn aurora_star(x: f64, y: f64, scale: f64, time: f64) -> f64 {
+    let size = 24.0 * scale;
+    let (cx, cy) = ((x / size).floor(), (y / size).floor());
+    if hash(cx, cy) < 0.92 {
+        return 0.0;
+    }
+    let (sx, sy) = (
+        (cx + 0.2 + 0.6 * hash(cx + 1.7, cy)) * size,
+        (cy + 0.2 + 0.6 * hash(cx, cy + 2.3)) * size,
+    );
+    let d = ((x - sx).powi(2) + (y - sy).powi(2)).sqrt();
+    let core = (0.9 * scale - d + 0.5).clamp(0.0, 1.0);
+    let twinkle = 0.7 + 0.3 * (time * 1.3 + std::f64::consts::TAU * hash(cx + 4.1, cy)).sin();
+    core * (0.4 + 0.6 * hash(cx, cy + 7.7)) * twinkle
+}
+
+fn still_aurora((w, h): (i32, i32), scale: f64) -> Vec<u8> {
+    let (w, h) = (w.max(1) as usize, h.max(1) as usize);
+    let aspect = w as f64 / h as f64;
+    let time = f64::from(STILL_TICK) / f64::from(AURORA_FPS);
+    let scale = scale.max(0.5);
+    let mut pixels = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = ((x as f64 + 0.5) / w as f64, (y as f64 + 0.5) / h as f64);
+            let mut c = aurora(u, v, aspect, time);
+            let star = aurora_star(x as f64, y as f64, scale, time);
+            for (c, s) in c.iter_mut().zip(STAR) {
+                *c += (f64::from(s) - *c) * star;
+            }
+            pixels.extend_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
         }
     }
     pixels

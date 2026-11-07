@@ -1355,7 +1355,7 @@ impl State {
         // Locked (7.1): the lock's own motion alone; nothing else is drawn.
         if let Some(moving) = self.lock_tick(now) {
             // The wallpapers that move stop (#433).
-            self.tick_walls(&mut |_| {});
+            self.tick_walls();
             self.judge_still(moving, as_of_frame);
             return;
         }
@@ -1442,7 +1442,7 @@ impl State {
         moving |= self.tick_magnifier(now, &mut wake);
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
-        self.tick_walls(&mut wake);
+        self.tick_walls();
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();
         if let Some(preview) = &self.preview {

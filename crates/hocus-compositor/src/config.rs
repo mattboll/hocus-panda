@@ -1179,7 +1179,7 @@ pub struct Wallpaper {
     /// The lock's own picture, with `lock = "picture"`.
     #[serde(deserialize_with = "picture")]
     pub lock_picture: hocus_link::wallpaper::Picture,
-    /// A wallpaper that moves ("rain", "stars") moves; else its still
+    /// A wallpaper that moves ("rain", "stars", "aurora") moves; else its still
     /// picture (#433).
     pub animate: bool,
     /// On battery a moving wallpaper goes at half its frames, stays
@@ -1535,7 +1535,8 @@ pub enum Animation {
     Standard,
     /// Columns of glyphs falling through the window (#432).
     Rain,
-    /// Givre's own, designed later: the standard motion until then.
+    /// Givre's frost line (#740): corner marks, a line tracing the frame,
+    /// a frosted pane clearing.
     Frost,
 }
 

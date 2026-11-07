@@ -563,8 +563,15 @@ impl State {
         // Its picture drawn again only when the window or its frame
         // changed: most frames draw the rain alone.
         let size = picture.buffer_size();
+        // Its rim drawn as it ends: its focus changing under the motion
+        // does not draw the picture again.
+        let focus = if self.windows.get(&id).is_some_and(|m| m.focused) {
+            1.0
+        } else {
+            0.0
+        };
         let redraw = rain.stale.get()
-            || rain.drawn_focus.get() != look.focus
+            || rain.drawn_focus.get() != focus
             || rain
                 .picture
                 .borrow()
@@ -574,9 +581,10 @@ impl State {
         if redraw {
             let mut solid = look.clone();
             solid.alpha = 1.0;
+            solid.focus = focus;
             self.framed_window(renderer, id, &solid, picture_origin, scale, &mut parts);
             rain.stale.set(false);
-            rain.drawn_focus.set(look.focus);
+            rain.drawn_focus.set(focus);
         }
         let shader = self.rain_look(rain, now, &picture, look.alpha);
         renderer.rain(rain, redraw, &picture, &parts, shader)
@@ -606,6 +614,9 @@ impl State {
                 (picture.window.size.w * scale) as f32,
                 (picture.window.size.h * scale) as f32,
             ],
+            style: rain.style,
+            frost: hocus_link::moving::frost_colours(self.config.appearance.theme),
+            scale: scale as f32,
         }
     }
 
@@ -1105,11 +1116,19 @@ impl State {
                 continue;
             }
             let local = Rectangle::new(rect.loc - origin, rect.size);
-            // Through its rain (#432), its last frame drawn once.
+            // Through its rain (#432), its last frame drawn once; a margin
+            // around it for the frost line's marks (#740).
             if let Some(rain) = &leaving.rain {
+                let margin = match rain.style {
+                    crate::rain::Style::Rain => 0.0,
+                    crate::rain::Style::Frost => 8.0,
+                };
                 let picture = Picture {
                     window: local,
-                    extent: Rectangle::from_size(local.size),
+                    extent: Rectangle::new(
+                        (-margin, -margin).into(),
+                        (local.size.w + 2.0 * margin, local.size.h + 2.0 * margin).into(),
+                    ),
                     scale,
                 };
                 let first = rain
@@ -1119,12 +1138,16 @@ impl State {
                     .is_none_or(|(s, _)| *s != picture.buffer_size());
                 let mut parts = Vec::new();
                 if first {
-                    let clip = Rectangle::from_size(local.size.to_physical_precise_round(scale));
+                    let at = Point::<f64, Logical>::from((margin, margin));
+                    let clip = Rectangle::new(
+                        at.to_physical_precise_round(scale),
+                        local.size.to_physical_precise_round(scale),
+                    );
                     let radius = (decoration::RADIUS * scale).round() as i32;
                     parts.extend(
                         leaving
                             .picture
-                            .stretched(renderer, Rectangle::from_size(local.size), scale, 1.0)
+                            .stretched(renderer, Rectangle::new(at, local.size), scale, 1.0)
                             .into_iter()
                             .map(|e| Rounded::new(e, clip, radius, Outside::Shown, scale)),
                     );

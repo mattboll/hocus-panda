@@ -60,7 +60,7 @@ impl Picture {
             return Ok(Self::File(text.to_owned()));
         }
         Err(format!(
-            "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, plain or a picture's path"
+            "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain or a picture's path"
         ))
     }
 

@@ -12,7 +12,7 @@
 
 use std::{any::Any, rc::Rc};
 
-use hocus_link::moving::{Moving, RainColours};
+use hocus_link::moving::{FrostColours, Moving, RainColours};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -53,6 +53,11 @@ pub struct RainLook {
     pub alpha: f32,
     /// The window in its picture, physical pixels: x, y, width, height.
     pub window: [f32; 4],
+    /// The rain, or Givre's frost line (#740), and the frost's colours.
+    pub style: crate::rain::Style,
+    pub frost: FrostColours,
+    /// Physical pixels a logical one.
+    pub scale: f32,
 }
 
 /// A moving wallpaper drawn on a screen.
@@ -183,8 +188,8 @@ float h(vec2 p) {
 // pixels large: 5 x 7 dots in the cell's middle, each a little smaller
 // than its pitch, its edge soft over a pixel.
 float glyph(float g, vec2 uv, vec2 px) {
-    vec2 lo = vec2(0.16, 0.18);
-    vec2 hi = vec2(0.84, 0.82);
+    vec2 lo = vec2(0.12, 0.14);
+    vec2 hi = vec2(0.88, 0.86);
     vec2 b = (uv - lo) / (hi - lo);
     if (b.x < 0.0 || b.y < 0.0 || b.x >= 1.0 || b.y >= 1.0) {
         return 0.0;
@@ -259,6 +264,149 @@ void main() {
         base = base * (1.0 - a) + vec4(colour, 1.0) * a;
     }
     gl_FragColor = base * alpha;
+}
+";
+
+/// Givre's frost line (#740). Opening, 360 ms: four corner marks appear
+/// (0 to 40 ms), a 1.6 px line traces the frame from its top left corner
+/// (0 to 150 ms, ease-out), the window shows under a frosted pane (an icy
+/// tint, the window seen through frost, crystal strokes) that clears from
+/// 110 to 360 ms, the line and the marks fading at its end. Closing,
+/// 300 ms: the pane frosts over (0 to 150 ms), the window fades (120 to
+/// 300 ms), the line retracts around the frame (150 to 300 ms). Lengths
+/// in logical pixels (`px` physical ones each).
+const FROST: &str = "
+uniform sampler2D tex;
+uniform vec2 size;
+uniform vec4 win;
+uniform float t;
+uniform float closing;
+uniform float seed;
+uniform vec3 line;
+uniform vec3 corner;
+uniform vec3 tint;
+uniform float alpha;
+uniform float px;
+
+float ease_out(float x) {
+    x = clamp(x, 0.0, 1.0);
+    return 1.0 - (1.0 - x) * (1.0 - x);
+}
+
+// A crystal's stroke in each cell of 18 px, at its own angle, in some.
+float crystals(vec2 p) {
+    vec2 c = floor(p / 18.0);
+    vec2 q = p / 18.0 - c - 0.5;
+    float angle = h(c + seed) * 6.2831853;
+    vec2 d = vec2(cos(angle), sin(angle));
+    float along = abs(dot(q, d));
+    float across = abs(dot(q, vec2(-d.y, d.x)));
+    float len = 0.25 + 0.2 * h(c + 3.1);
+    float stroke = (1.0 - smoothstep(0.0, 0.04, across)) * (1.0 - smoothstep(len, len + 0.05, along));
+    return stroke * step(0.35, h(c + 7.7));
+}
+
+void main() {
+    float trace;
+    float lit;
+    float marks;
+    float pane;
+    float shown;
+    if (closing > 0.5) {
+        pane = smoothstep(0.0, 0.15, t);
+        shown = 1.0 - smoothstep(0.12, 0.30, t);
+        trace = 1.0 - ease_out((t - 0.15) / 0.15);
+        lit = 1.0;
+        marks = 1.0 - smoothstep(0.20, 0.30, t);
+    } else {
+        marks = smoothstep(0.0, 0.04, t) * (1.0 - smoothstep(0.30, 0.36, t));
+        trace = ease_out(t / 0.15);
+        lit = 1.0 - smoothstep(0.25, 0.36, t);
+        pane = 1.0 - smoothstep(0.11, 0.36, t);
+        shown = smoothstep(0.0, 0.11, t);
+    }
+    vec4 c = texture2D(tex, v_px / size);
+    vec2 l = (v_px - win.xy) / px;
+    vec2 w = win.zw / px;
+    vec4 base = c * shown;
+    if (l.x >= 0.0 && l.y >= 0.0 && l.x < w.x && l.y < w.y) {
+        // The window through frost: a few taps around, the icy tint, the
+        // crystals.
+        float r = 6.0 * px * pane;
+        vec2 o = (vec2(h(l * 0.37 + seed), h(l * 0.53 + seed + 1.0)) - 0.5) * 2.0 * r;
+        vec4 frosted = (c + texture2D(tex, (v_px + o) / size)
+            + texture2D(tex, (v_px + vec2(r, -0.5 * r)) / size)
+            + texture2D(tex, (v_px + vec2(-0.7 * r, r)) / size)) * 0.25;
+        vec4 seen = mix(c, frosted, pane);
+        seen.rgb = mix(seen.rgb, tint * seen.a, 0.42 * pane);
+        seen.rgb += line * crystals(l) * 0.55 * pane * seen.a;
+        base = seen * shown;
+    }
+    // The line on the frame, as far round as it is traced.
+    vec2 q = abs(l - w * 0.5) - w * 0.5;
+    float dist = abs(length(max(q, 0.0)) + min(max(q.x, q.y), 0.0));
+    float top = abs(l.y);
+    float right = abs(w.x - l.x);
+    float bottom = abs(w.y - l.y);
+    float left = abs(l.x);
+    float near = min(min(top, right), min(bottom, left));
+    float s = near == top ? l.x
+        : near == right ? w.x + l.y
+        : near == bottom ? w.x + w.y + (w.x - l.x)
+        : 2.0 * w.x + w.y + (w.y - l.y);
+    float round_ = s / (2.0 * (w.x + w.y));
+    float traced = 1.0 - smoothstep(trace - 0.004, trace, round_);
+    float a = (1.0 - smoothstep(0.8, 0.8 + 1.0 / px, dist)) * traced * lit * step(0.0005, trace);
+    base = base * (1.0 - a) + vec4(line, 1.0) * a;
+    // The four corner marks, 10 px long, 4 px out.
+    vec2 g = l + 4.0;
+    vec2 k = min(g, w + 8.0 - g);
+    float mark = (k.x >= 0.0 && k.y >= 0.0
+        && ((k.x < 1.6 && k.y < 10.0) || (k.y < 1.6 && k.x < 10.0))) ? 1.0 : 0.0;
+    float m = mark * marks * 0.75;
+    base = base * (1.0 - m) + vec4(corner, 1.0) * m;
+    gl_FragColor = base * alpha;
+}
+";
+
+/// Givre's aurora (#740): `hocus_link::moving::aurora` and its stars.
+const WALL_AURORA: &str = "
+uniform vec2 screen;
+uniform float time;
+uniform float scale;
+uniform vec3 top;
+uniform vec3 bottom;
+uniform vec3 veil0;
+uniform vec3 veil1;
+uniform vec3 veil2;
+uniform vec3 star;
+
+void main() {
+    vec2 uv = v_px / screen;
+    vec3 colour = mix(top, bottom, uv.y);
+    float x = uv.x * screen.x / screen.y;
+    for (int i = 0; i < 3; i++) {
+        float f = float(i);
+        float centre = 0.30 + 0.12 * f
+            + 0.06 * sin(x * 1.7 + time * 0.13 * (1.0 + f * 0.4) + f * 2.1)
+            + 0.035 * sin(x * 4.3 - time * 0.21 + f * 1.3);
+        float d = uv.y - centre;
+        float rays = 0.55 + 0.45 * sin(x * 38.0 + sin(x * 3.0 + time * 0.3) * 4.0 + f * 5.0);
+        float curtain = d > 0.0 ? exp(-d * d / 0.0018) : exp(-d * d / 0.03) * rays;
+        float shimmer = 0.75 + 0.25 * sin(time * 0.7 + x * 2.0 + f);
+        vec3 veil = i == 0 ? veil0 : (i == 1 ? veil1 : veil2);
+        colour += veil * curtain * shimmer * 0.55;
+    }
+    colour = min(colour, vec3(1.0));
+    float size = 24.0 * scale;
+    vec2 c = floor(v_px / size);
+    if (h(c) >= 0.92) {
+        vec2 s = (c + vec2(0.2 + 0.6 * h(vec2(c.x + 1.7, c.y)), 0.2 + 0.6 * h(vec2(c.x, c.y + 2.3)))) * size;
+        float core = clamp(0.9 * scale - length(v_px - s) + 0.5, 0.0, 1.0);
+        float twinkle = 0.7 + 0.3 * sin(time * 1.3 + 6.2831853 * h(vec2(c.x + 4.1, c.y)));
+        colour = mix(colour, star, core * (0.4 + 0.6 * h(vec2(c.x, c.y + 7.7))) * twinkle);
+    }
+    gl_FragColor = vec4(colour, 1.0);
 }
 ";
 
@@ -386,6 +534,8 @@ struct Glyphs {
     rain: Program,
     wall_rain: Program,
     stars: Program,
+    frost: Program,
+    aurora: Program,
     atlas: GlesTexture,
 }
 
@@ -488,6 +638,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Glyphs, String> {
         .map_err(|e| e.to_string())?;
     let source = |body: &str| format!("{COMMON}{body}");
     let (rain, wall, stars) = (source(RAIN), source(WALL_RAIN), source(WALL_STARS));
+    let (frost, aurora) = (source(FROST), source(WALL_AURORA));
     #[allow(unsafe_code)]
     // SAFETY: `with_context` makes the renderer's context current.
     let programs = renderer
@@ -517,6 +668,22 @@ fn make(renderer: &mut GlesRenderer) -> Result<Glyphs, String> {
                         "haze",
                     ],
                 )?,
+                compile(
+                    gl,
+                    &frost,
+                    &[
+                        "matrix", "glyphs", "tex", "size", "win", "t", "closing", "seed", "line",
+                        "corner", "tint", "alpha", "px",
+                    ],
+                )?,
+                compile(
+                    gl,
+                    &aurora,
+                    &[
+                        "matrix", "glyphs", "screen", "time", "scale", "top", "bottom", "veil0",
+                        "veil1", "veil2", "star",
+                    ],
+                )?,
             ))
         })
         .map_err(|e| e.to_string())??;
@@ -524,6 +691,8 @@ fn make(renderer: &mut GlesRenderer) -> Result<Glyphs, String> {
         rain: programs.0,
         wall_rain: programs.1,
         stars: programs.2,
+        frost: programs.3,
+        aurora: programs.4,
         atlas,
     })
 }
@@ -718,7 +887,8 @@ impl Matrix for GlesRenderer {
         let instancing = frame.capabilities().contains(&Capability::Instancing);
         let (tex, atlas) = (texture.tex_id(), glyphs.atlas.tex_id());
         let look = rain.look;
-        let p = &glyphs.rain;
+        let frost = look.style == crate::rain::Style::Frost;
+        let p = if frost { &glyphs.frost } else { &glyphs.rain };
         let size = rain.geometry.size;
         let whole = [rain.geometry];
         frame.with_context(|gl| {
@@ -744,11 +914,18 @@ impl Matrix for GlesRenderer {
                         gl.Uniform1f(p.at("t"), look.time);
                         gl.Uniform1f(p.at("closing"), if look.closing { 1.0 } else { 0.0 });
                         gl.Uniform1f(p.at("seed"), look.seed);
-                        let [r, g, b] = rgb(look.colours.head);
-                        gl.Uniform3f(p.at("head"), r, g, b);
-                        let [r, g, b] = rgb(look.colours.tail);
-                        gl.Uniform3f(p.at("tail"), r, g, b);
                         gl.Uniform1f(p.at("alpha"), look.alpha);
+                        gl.Uniform1f(p.at("px"), look.scale);
+                        for (name, c) in [
+                            ("head", look.colours.head),
+                            ("tail", look.colours.tail),
+                            ("line", look.frost.line),
+                            ("corner", look.frost.corner),
+                            ("tint", look.frost.tint),
+                        ] {
+                            let [r, g, b] = rgb(c);
+                            gl.Uniform3f(p.at(name), r, g, b);
+                        }
                     },
                 );
             }
@@ -835,6 +1012,28 @@ impl Matrix for GlesRenderer {
                                 ("top", STARS_TOP),
                                 ("bottom", STARS_BOTTOM),
                                 ("haze", STARS_HAZE),
+                            ] {
+                                let [r, g, b] = rgb(c);
+                                gl.Uniform3f(p.at(name), r, g, b);
+                            }
+                        });
+                    }
+                    Moving::Aurora => {
+                        use hocus_link::moving::{
+                            AURORA_BOTTOM, AURORA_FPS, AURORA_TOP, AURORA_VEILS, STAR,
+                        };
+                        let p = &glyphs.aurora;
+                        quads(gl, p, &matrix, instancing, rects, wall.geometry.loc, |gl| {
+                            gl.Uniform2f(p.at("screen"), screen.w as f32, screen.h as f32);
+                            gl.Uniform1f(p.at("time"), look.tick / AURORA_FPS as f32);
+                            gl.Uniform1f(p.at("scale"), look.scale);
+                            for (name, c) in [
+                                ("top", AURORA_TOP),
+                                ("bottom", AURORA_BOTTOM),
+                                ("veil0", AURORA_VEILS[0]),
+                                ("veil1", AURORA_VEILS[1]),
+                                ("veil2", AURORA_VEILS[2]),
+                                ("star", STAR),
                             ] {
                                 let [r, g, b] = rgb(c);
                                 gl.Uniform3f(p.at(name), r, g, b);

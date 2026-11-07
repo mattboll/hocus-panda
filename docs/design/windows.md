@@ -139,13 +139,14 @@ sessions).
 - Reduced motion: opening and closing fade in 120 ms, without scaling.
 - **How they open and close** is a choice, `[windows] animation` (the
   Settings' "Ouvrir et fermer"): `"standard"` (above), `"rain"`, or
-  `"frost"` (Givre's own, the standard motion until it is designed); each
+  `"frost"` (Givre's frost line, below); each
   theme with a look of its own brings its own, and any can be chosen in
   any theme.
 - **The rain** (#432): an application's window or dialog larger than
   200 × 200 px (never a popup, menu, tooltip, layer surface or the
-  shell's own surfaces) opens in 360 ms: columns of glyphs (10 px wide,
-  cells of 10 × 15 at scale 1) fall through its rectangle, each column
+  shell's own surfaces) opens in 360 ms: columns of glyphs (12 px wide,
+  cells of 12 × 18 logical px, each glyph about 9 × 13 at every scale,
+  #740) fall through its rectangle, each column
   starting within the first 110 ms and falling in 170 to 250 ms
   (ease-out); behind each head the window shows, under the tail of
   glyphs; a green veil (30 % at most) fades out from 240 to 360 ms. It
@@ -164,8 +165,23 @@ sessions).
   hidden at 0 ms, 28 % shown at 90 ms, 90 % at 180 ms, whole and
   untinted at 360 ms; 22 frames to open (at most ⌈0.36 × refresh⌉ + 1 =
   23) and 19 to close (at most ⌈0.30 × refresh⌉ + 1), all on its screen,
-  none on another, none 100 ms after; fewer allocations on the loop
-  than the standard opening (71 a frame against 80), none growing.
+  none on another, none 100 ms after; 31 allocations on the loop more
+  than the standard opening over the whole rain, none growing.
+- **The frost line** (#740, Givre's): the same windows, times, rules and
+  fallbacks as the rain, drawn otherwise. Opening, 360 ms: four corner
+  marks (10 px, `#BFEFFF` at 75 %, 4 px out from the corners) appear in
+  40 ms; a 1.6 px `#EAF6FF` line traces the frame from its top left
+  corner, clockwise, in 150 ms (ease-out); the window shows from under a
+  frosted pane (the window seen through frost, an icy `#7FD8FF` tint,
+  crystal strokes) that clears from 110 to 360 ms, the line and the marks
+  fading at its end. Closing, 300 ms: the pane frosts over (0 to 150 ms),
+  the window fades (120 to 300 ms), the line retracts round the frame (150
+  to 300 ms). Its colours are the theme's frost tokens
+  (`hocus_link::moving::frost_colours`). Measured headless
+  (`tests/rain.rs`): nothing at 0 ms; at 90 ms the marks and the traced
+  line, the window under its frost; whole and untinted, no line, at
+  360 ms; gone at 300 ms closing; 22 frames to open and 19 to close at
+  60 Hz, as the rain.
 - **Rules per application** (`[[windows.rules]]`, 6.14; the Settings'
   "Bureaux et fenêtres"), in the file's order, the first of an
   application's applying (its `app-id`, whatever the case): a window of

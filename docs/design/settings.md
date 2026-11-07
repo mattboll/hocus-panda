@@ -1113,10 +1113,10 @@ page).
 | Group | What | Key |
 |---|---|---|
 | APERÇU | segmented "Tous les écrans \| Chaque écran"; the screens side by side, bottoms aligned, each with its background and the bar's strip on the primary, "Écran du portable · Nuit" under it; with "Chaque écran" a click chooses the screen the gallery applies to (green ring) | `[wallpaper] per-screen = false` |
-| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Pluie and Étoiles ("animé", #433), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "rain" \| "stars" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
+| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Pluie, Étoiles and Aurore ("animé", #433, #740), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "rain" \| "stars" \| "aurora" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
 | | Remplissage (a picture of one's own): "Couvrir l’écran", "L’image entière", "Centrer, sans agrandir" | `[wallpaper] fit = "cover" \| "contain" \| "center"` |
 | | Couleur unie (the plain background, or around a picture not covering): six 24 px swatches, Nuit, Ardoise (default), Bleu profond, Sapin, Terre, Graphite | `[wallpaper] color = "#1b2233"` |
-| ANIMATION (#433) | Animer le fond, "La pluie à 15 images par seconde, les étoiles à 20.": switch; Sur batterie: menu "Ralentie (moitié)" (default), "Arrêtée", "Comme sur secteur"; then the line of when it stops by itself (a fullscreen window, the background more than 90 % covered, the screen locked or off, the power saver, reduced motion, 2 min without input; still under the bar) | `[wallpaper] animate = true`, `on-battery = "half" \| "still" \| "full"` |
+| ANIMATION (#433) | Animer le fond, "La pluie à 15 images par seconde, les étoiles à 20, l’aurore à 10.": switch; Sur batterie: menu "Ralentie (moitié)" (default), "Arrêtée", "Comme sur secteur"; then the line of when it stops by itself (a fullscreen window, the background more than 90 % covered, the screen locked or off, the power saver, reduced motion, 2 min without input; still under the bar) | `[wallpaper] animate = true`, `on-battery = "half" \| "still" \| "full"` |
 | ÉCRAN DE VERROUILLAGE | the lock's drawing (its source, the veil, the clock), a radio list: "Le fond du bureau, assombri" (default), "… flouté", "Une autre image"; then "Image du verrouillage", a list of the same backgrounds and "Choisir une image…" | `[wallpaper] lock = "dimmed" \| "blurred" \| "picture"`, `lock-picture` |
 
 - **Writing**: a tile, the scope and the lock's picture are keys the page
@@ -1188,13 +1188,18 @@ each column's head `#CCFFCC` moving one cell per frame, its tail
 `#00F060` fading out in 6 steps, a glyph changing now and then, over
 `#02040A` to `#050B1C`) and Stars (three planes, about 900 stars drifting
 towards the viewer, the nearest some 6 px a second, twinkling, over a
-night-blue haze), in every theme; the rain's colours are tokens a theme
+night-blue haze) and Aurore (#740, Givre's: three slow veils, cyan, ice
+blue and violet, curtains bright at their lower edge with rays rising
+above, waving over a night sky with a few stars; 10 frames a second), in
+every theme; the rain's colours are tokens a theme
 sets (`hocus_link::moving::rain_colours`, phosphor green in every theme
 for now). The compositor draws them with GLES shaders straight into the
 screen's frame (`src/matrix.rs`, `src/moving.rs`), from their time alone;
-rain 15 frames a second, stars 20, half (and so half the pace) on
-battery, each a timer on the loop for the next frame due, never a frame
-queued per tick. Each screen decides alone: a moving wallpaper stops,
+rain 15 frames a second, stars 20, aurora 10, half (and so half the
+pace) on battery, woken by one timer on the loop that sets itself again
+at the running ones' fastest pace and goes when none runs, never a frame
+queued per tick. The day's record (#655) is told when one starts moving
+and when it stops (`WallpaperMoving`, `WallpaperStill`, with its word). Each screen decides alone: a moving wallpaper stops,
 its last frame staying and going on from there, under a fullscreen
 window, covered at 90 % or more by the windows shown, locked, off, under
 the idle curtain, 2 minutes after the last input (until the next), in
@@ -1462,7 +1467,7 @@ row.
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
-| | Ouvrir et fermer (#432) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the standard motion until its own is designed) | `[windows] animation = "standard" \| "rain" \| "frost"` |
+| | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the frost line) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
 | VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |

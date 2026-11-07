@@ -97,7 +97,7 @@ fn frames(hp: &mut Headless, steps: u32) -> anyhow::Result<u64> {
 
 #[test]
 fn the_rain_and_the_stars_run_at_their_own_pace() -> anyhow::Result<()> {
-    for (picture, fps) in [("rain", 15u64), ("stars", 20)] {
+    for (picture, fps) in [("rain", 15u64), ("stars", 20), ("aurora", 10)] {
         let Some(mut hp) = gles(moving(picture), &[(640, 400)])? else {
             return Ok(());
         };
@@ -127,14 +127,14 @@ fn the_rain_and_the_stars_run_at_their_own_pace() -> anyhow::Result<()> {
 }
 
 /// Frames and the wallpaper's own frames and wakes over 60 s of the held
-/// clock, stepped by `step`; and the most allocations of a step that drew
-/// the wallpaper over `rest`, those of a step that drew nothing, early in
-/// the minute and late.
+/// clock, stepped by `step`; and the allocations of a step that drew the
+/// wallpaper over `rest`, those of a step that drew nothing: the most of
+/// any, and their means in the minute's second tenth and its last two.
 struct Minute {
     frames: u64,
     ticks: u64,
     wakes: u64,
-    over_rest: (u64, u64),
+    over_rest: (u64, f64, f64),
 }
 
 fn a_minute(hp: &mut Headless, step: Duration, rest: u64) -> anyhow::Result<Minute> {
@@ -150,20 +150,22 @@ fn a_minute(hp: &mut Headless, step: Duration, rest: u64) -> anyhow::Result<Minu
             drawing.push((k, n));
         }
     }
-    let most = |from: u32, to: u32| {
-        drawing
+    let over = |n: &u64| n.saturating_sub(rest);
+    let most = drawing.iter().map(|(_, n)| over(n)).max().unwrap_or(0);
+    let mean = |from: u32, to: u32| {
+        let picked: Vec<u64> = drawing
             .iter()
             .filter(|(k, _)| (from..to).contains(k))
-            .map(|(_, n)| n.saturating_sub(rest))
-            .max()
-            .unwrap_or(0)
+            .map(|(_, n)| over(n))
+            .collect();
+        picked.iter().sum::<u64>() as f64 / picked.len().max(1) as f64
     };
     let tenth = steps / 10;
     Ok(Minute {
         frames: hp.frames_on(0) - frames,
         ticks: hp.wall_ticks(OUTPUT) - ticks,
         wakes: hp.wall_wakes() - wakes,
-        over_rest: (most(tenth, 2 * tenth), most(8 * tenth, steps)),
+        over_rest: (most, mean(tenth, 2 * tenth), mean(8 * tenth, steps)),
     })
 }
 
@@ -176,7 +178,11 @@ fn a_minute_of(picture: &str, battery: bool, most: u64) -> anyhow::Result<()> {
     };
     hp.set_on_battery(battery);
     hp.hold_clock();
-    let fps: u32 = if picture == "rain" { 15 } else { 20 };
+    let fps: u32 = match picture {
+        "rain" => 15,
+        "aurora" => 10,
+        _ => 20,
+    };
     let step = Duration::from_secs(1) / if battery { fps } else { 2 * fps };
     // A turn at rest: the same steps, the wallpaper still.
     let mut still = moving(picture);
@@ -208,7 +214,7 @@ fn a_minute_of(picture: &str, battery: bool, most: u64) -> anyhow::Result<()> {
     assert!(minute.frames >= most * 9 / 10, "it ran: {}", minute.frames);
     assert!(minute.over_rest.0 <= 30, "{:?}", minute.over_rest);
     assert!(
-        minute.over_rest.1 <= minute.over_rest.0 + 2,
+        minute.over_rest.2 <= minute.over_rest.1 + 1.0,
         "{:?}",
         minute.over_rest
     );
@@ -228,6 +234,16 @@ fn a_minute_of_stars_costs_1202_frames_at_most() -> anyhow::Result<()> {
 #[test]
 fn a_minute_of_rain_on_battery_costs_482_frames_at_most() -> anyhow::Result<()> {
     a_minute_of("rain", true, 482)
+}
+
+#[test]
+fn a_minute_of_aurora_costs_602_frames_at_most() -> anyhow::Result<()> {
+    a_minute_of("aurora", false, 602)
+}
+
+#[test]
+fn a_minute_of_aurora_on_battery_costs_302_frames_at_most() -> anyhow::Result<()> {
+    a_minute_of("aurora", true, 302)
 }
 
 #[test]
@@ -400,7 +416,7 @@ fn the_glass_over_it_is_blurred_once() -> anyhow::Result<()> {
 /// On pixman: the still picture, drawn once, and nothing after.
 #[test]
 fn without_gles_the_still_picture_is_drawn_once() -> anyhow::Result<()> {
-    for picture in ["rain", "stars"] {
+    for picture in ["rain", "stars", "aurora"] {
         let mut hp = Headless::start_with(
             HeadlessConfig {
                 outputs: vec![OutputSpec::new(640, 400)],
@@ -467,7 +483,7 @@ fn shots_of_the_wallpapers() -> anyhow::Result<()> {
         eprintln!("{}", file.display());
         Ok(())
     };
-    for picture in ["rain", "stars"] {
+    for picture in ["rain", "stars", "aurora"] {
         let mut config = moving(picture);
         config.panel.form = hocus_compositor::FormChoice::Full;
         let mut hp = Headless::start_with(sized(common::gles(), &[(1440, 900)]), config.clone())?;
@@ -512,12 +528,12 @@ fn shots_of_the_wallpapers() -> anyhow::Result<()> {
 #[test]
 #[ignore = "timings, by hand"]
 fn timings_of_the_wallpapers() -> anyhow::Result<()> {
-    for picture in ["rain", "stars"] {
+    for picture in ["rain", "stars", "aurora"] {
         let Some(mut hp) = gles(moving(picture), &[(3440, 1440)])? else {
             return Ok(());
         };
         hp.hold_clock();
-        let fps: u32 = if picture == "rain" { 15 } else { 20 };
+        let fps = hocus_link::moving::Moving::of(picture).map_or(10, |m| m.fps());
         let step = Duration::from_secs(1) / fps;
         // Each frame read back, so that the GPU's work is in it.
         let time = |hp: &mut Headless, frames: u32| -> anyhow::Result<Duration> {
@@ -547,5 +563,44 @@ fn timings_of_the_wallpapers() -> anyhow::Result<()> {
             moving_frame.saturating_sub(still_frame).as_secs_f64() * 1e3,
         );
     }
+    Ok(())
+}
+
+/// The day's recorder (#655) hears when a moving wallpaper starts moving
+/// and stops: written with the next sample.
+#[test]
+fn the_days_record_says_when_it_moves_and_stops() -> anyhow::Result<()> {
+    use hocus_perf::{Day, EventKind, files};
+    let dir = tempfile::tempdir()?;
+    let config = Config {
+        state_dir: Some(dir.path().to_owned()),
+        perf: hocus_compositor::PerfSettings {
+            record: true,
+            interval: Some(Duration::from_millis(50)),
+        },
+        ..moving("aurora")
+    };
+    let Some(mut hp) = gles(config, &[(320, 200)])? else {
+        return Ok(());
+    };
+    let said = |dir: &std::path::Path| -> Vec<(EventKind, String)> {
+        let dir = files::dir_in(dir);
+        files::days(&dir)
+            .into_iter()
+            .filter_map(|date| Day::read(&dir, date).ok())
+            .flat_map(|day| day.samples)
+            .flat_map(|s| s.e)
+            .map(|e| (e.kind, e.what))
+            .collect()
+    };
+    let moving_said = hp.dispatch_until(common::WAIT, |_| {
+        said(dir.path()).contains(&(EventKind::WallpaperMoving, "aurora".to_owned()))
+    })?;
+    assert!(moving_said, "{:?}", said(dir.path()));
+    hp.set_power_profile(Some("power-saver"));
+    let still_said = hp.dispatch_until(common::WAIT, |_| {
+        said(dir.path()).contains(&(EventKind::WallpaperStill, "aurora".to_owned()))
+    })?;
+    assert!(still_said, "{:?}", said(dir.path()));
     Ok(())
 }
