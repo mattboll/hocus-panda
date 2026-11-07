@@ -1198,10 +1198,11 @@ towards the viewer, the nearest some 6 px a second, twinkling, over a
 night-blue haze) and Aurore (#740, Givre's: three veils, cyan, the
 brightest ice blue and violet, drifting slowly sideways over a night sky
 with a few stars, each fading softly below its wandering line and rising
-above it in folds of uneven width and height, from smooth noise rather
-than a regular pattern; 10 frames a second), in every theme; the rain's colours are tokens a theme
-sets (`hocus_link::moving::rain_colours`, phosphor green in every theme
-for now). The compositor draws them with GLES shaders straight into the
+above it in folds of uneven width and height, from one octave of smooth
+noise rather than a regular pattern; 10 frames a second), in every theme;
+the rain's colours are tokens a theme sets
+(`hocus_link::moving::rain_colours`, phosphor green in every theme for
+now). The compositor draws them with GLES shaders straight into the
 screen's frame (`src/matrix.rs`, `src/moving.rs`), from their time alone;
 rain 15 frames a second, stars 20, aurora 10, half (and so half the
 pace) on battery, woken by one timer on the loop that sets itself again
@@ -1213,9 +1214,12 @@ window, covered at 90 % or more by the windows shown, locked, off, under
 the idle curtain, 2 minutes after the last input (until the next), in
 power-profiles-daemon's power saver, with reduced motion, `animate =
 false`, and on battery with `on-battery = "still"`. The glass (the
-bar's, the popovers', the launcher's) blurs a still picture of the
-wallpaper, the moment it started, drawn by a second element of it: the
-panes are blurred once, never again at the wallpaper's frames. That still
+bar's, the popovers', the launcher's) blurs a still copy of the
+wallpaper drawn by a second element of it, never the wallpaper's frames:
+the copy is taken as the wallpaper starts, again when a surface with glass
+appears (the bar, a popover, the launcher, the emoji picker) and every
+2 minutes while it moves, one blur of each pane each time, so that the
+glass never drifts far from what moves beside it. That still
 copy only ever shows through the glass: beside a bar, in its gaps and
 outside its rounded corners, and with no bar, the screen shows the moving
 wallpaper (`tests/moving_wallpaper.rs`,
