@@ -838,7 +838,11 @@ impl Panel {
             ),
         ));
         if hover == Some(Target::Clear) {
-            f.fill(&kit::rounded(laid.clear, GHOST_RADIUS), GHOST_HOVER.get());
+            crate::theme::hover(
+                f,
+                &kit::rounded(laid.clear, GHOST_RADIUS),
+                GHOST_HOVER.get(),
+            );
         }
         f.fill_text(text_in(
             MANROPE_SEMIBOLD,
@@ -1021,7 +1025,7 @@ impl Panel {
             (remove, hover == Some(Target::Remove(row.key))),
         ] {
             if lit {
-                f.fill(&kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
+                crate::theme::hover(f, &kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
             }
         }
         pin_glyph(f, pin.center(), row.pinned);

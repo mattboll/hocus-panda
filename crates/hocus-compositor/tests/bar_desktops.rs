@@ -483,8 +483,9 @@ impl Bed {
 }
 
 /// The accent, `#6CC287`, more or less blended.
+/// The accent's green: the ring's is its "on dark" text (`#7EE0A0`).
 fn green([r, g, b]: [u8; 3]) -> bool {
-    g > 140 && r < 130 && b < 160 && g > r + 40
+    g > 140 && r < 130 && b <= 170 && g > r + 40
 }
 
 /// What the shell logged, without its colours.
@@ -1021,7 +1022,7 @@ fn the_keyboard_reaches_the_tiles_where_enter_and_space_go_there() -> anyhow::Re
     bed.settle()?;
     // Its ring, around the tile.
     let t = bed.tile(3);
-    let under = Rect::new(t.x + 8, t.y + t.height + 2, t.width - 16, 2);
+    let under = Rect::new(t.x + 8, t.y + t.height + 1, t.width - 16, 5);
     bed.shows("the ring", |bed| Ok(bed.count(under, green)? > 10))?;
     // Enter: there; Shift+Tab, then Space: the third.
     bed.press(KEY_ENTER);

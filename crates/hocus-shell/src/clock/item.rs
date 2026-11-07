@@ -166,15 +166,10 @@ pub fn draw(clock: &Clock, state: &State, frame: &mut Frame, size: Size) {
         return;
     };
     let look = state.item.look;
-    let fill = if look.open {
-        Some(OPEN)
+    if look.open {
+        frame.fill(&kit::rounded(rect, RADIUS), OPEN.get());
     } else if look.hover {
-        Some(HOVER)
-    } else {
-        None
-    };
-    if let Some(fill) = fill {
-        frame.fill(&kit::rounded(rect, RADIUS), fill.get());
+        crate::theme::hover(frame, &kit::rounded(rect, RADIUS), HOVER.get());
     }
     if look.focused {
         let inset = RING / 2.0;

@@ -524,7 +524,10 @@ fn one_layout_no_row_and_no_click_taken() -> anyhow::Result<()> {
     assert_eq!(bed.hp.layout(), 0);
     assert!(!plain(&bed.log).contains("the layout's row shows it layout=Some"));
     // The mini form: no button, the levels' surface as it was.
-    chord(&mut bed.hp, &[common::KEY_LEFTMETA, 48]);
+    chord(
+        &mut bed.hp,
+        &[common::KEY_LEFTMETA, common::KEY_LEFTSHIFT, 48],
+    );
     let mini = bed.hp.dispatch_until(WAIT, |hp| {
         hp.levels_surfaces()
             .first()
@@ -653,7 +656,7 @@ fn the_keyboard_reaches_the_row_where_enter_and_space_go_to_the_next() -> anyhow
     );
     // The ring around the layout's row: the accent's green under it.
     let row = bed.row_rect();
-    let ring = bed.pixels(Rect::new(row.x + 40, row.y + row.height + 1, 40, 2))?;
+    let ring = bed.pixels(Rect::new(row.x + 40, row.y + row.height + 3, 40, 2))?;
     let green = ring
         .as_chunks::<4>()
         .0

@@ -970,7 +970,7 @@ Settings from the file.
 | card rim, divider | `#8E98AB`, `#6B7488` | `#4A5468`, `#6B7488` |
 | control, its rim | `#000000`, `#D0D6E0` | `#FFFFFF`, `#2E3546` |
 | switch off; chosen segment | black (its border `text.faint`); `#3A4255` | white; `#DDE1EA` |
-| hovers and fills | none | none |
+| hovers and fills | no fill: a hover is a 1 px border in `text.dim` (`theme::hover`) | the same |
 | text in the accent, the keyboard's ring | its "on dark" lifted until it reads at 7:1 on every background (green `#9DF0B9`) | its "on light" darkened to 7:1 (green about `#155C33`) |
 | `state.wait` / `stuck` / `meeting` as text | `#FFD27A` / `#FFB48A` / `#B5CCFF` | `#6B4500` / `#8A3300` / `#1C48A5` |
 | tinted rows (waiting, stuck, to see) | no tint; a 3 px bar on the row's left in the state's colour | the same |
@@ -991,13 +991,20 @@ Settings from the file.
 - **The keyboard's ring**: 3 px, with 2 px of the background between it
   and its item (§11). The focused window's rim stays 2 px.
 - Applications are told as before (the portal's `contrast = 1`).
-- **Not built**: the radial menu and the overview, drawn by the
-  compositor in their own colours, do not follow it; the hovers' 1 px
-  border in `text.dim` (hovers draw nothing under high contrast).
+- **What the compositor draws itself** (the radial menu, the overview's
+  words, marks and boxes, the magnifier's pill), drawn in the dark
+  theme's colours, reads each colour by the same rule
+  (`crates/hocus-compositor/src/contrast.rs`): its disc and its panels
+  the table's background, opaque; no fills or tints; rims solid, the
+  cards' rim; its words solid at 7:1 (an inert word in `text.dim`). The
+  overview, on the dimmed wallpaper (dark in either theme), reads by the
+  dark table.
 - **Measured**: the unit tests above; headless
   (`crates/hocus-compositor/tests/appearance.rs`), the bar's background
   `#05070C` under dark and contrast, white under light and contrast, the
-  light theme's own once it is off, the shell told `contrast`, no glass.
+  light theme's own once it is off, the shell told `contrast`, no glass;
+  `tests/contrast.rs`, the radial menu's disc and the overview's
+  thumbnails' rims under each table.
 
 ## 14. Open questions
 

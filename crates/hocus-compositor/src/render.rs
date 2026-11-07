@@ -538,6 +538,13 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.grabber.ready(renderer);
+        // What the compositor draws itself, in high contrast if it is on.
+        crate::contrast::set(
+            self.config
+                .appearance
+                .high_contrast
+                .then_some(self.config.appearance.theme),
+        );
         let now = self.now();
         self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();
@@ -953,7 +960,12 @@ impl State {
             );
         }
         // The overview over the windows, under the bar.
+        // Its words and marks sit on the dimmed wallpaper, dark in either
+        // theme: under high contrast, the dark table's.
+        let contrast = crate::contrast::now();
+        crate::contrast::set(contrast.map(|_| hocus_link::theme::Scheme::Dark));
         let mut overview = self.overview_elements(renderer, output, now);
+        crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing
