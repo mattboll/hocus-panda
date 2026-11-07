@@ -354,12 +354,25 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
         costs.push(per_frame);
     }
     let total = |c: &[u64]| c.iter().sum::<u64>();
-    let (standard, rain) = (total(&costs[0]), total(&costs[1]));
-    eprintln!("a whole opening: standard {standard}, rain {rain} allocations");
+    let (standard, rain) = (&costs[0], &costs[1]);
+    eprintln!(
+        "a whole opening: standard {}, rain {} allocations",
+        total(standard),
+        total(rain)
+    );
+    // Frame by frame, not their totals: either opening's frames take 7
+    // allocations more or fewer as the client's commits fall in them or
+    // not, which over 22 frames is as much as the rain's own. Its first
+    // two frames make its picture; then each as the standard's most.
+    let first = |c: &[u64]| c[..2].iter().sum::<u64>();
     assert!(
-        rain <= standard + 50,
-        "the rain's own: {}",
-        rain.saturating_sub(standard)
+        first(rain) <= first(standard) + 100,
+        "the rain's picture: {rain:?} against {standard:?}"
+    );
+    let most = standard[2..].iter().max().copied().unwrap_or(0);
+    assert!(
+        rain[2..].iter().all(|n| *n <= most + 10),
+        "the rain's frames: {rain:?} against {standard:?}"
     );
     // Nothing grows frame after frame: the last frames as the first ones.
     let rain = &costs[1];
