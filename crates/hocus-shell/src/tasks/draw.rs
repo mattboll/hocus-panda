@@ -741,18 +741,21 @@ pub fn field(
     words: Words,
     alpha: f32,
 ) {
-    f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL.get(), alpha));
-    let inset = 0.5;
-    let rim = Rectangle::new(
-        Point::new(rect.x + inset, rect.y + inset),
-        Size::new(rect.width - 1.0, rect.height - 1.0),
-    );
-    f.stroke(
-        &kit::rounded(rim, radius - inset),
-        Stroke::default()
-            .with_color(faded(FIELD_BORDER.get(), alpha))
-            .with_width(1.0),
-    );
+    // Under the caret, drawn in the text's clip.
+    crate::backdrop::layer(f, rect, |f| {
+        f.fill(&kit::rounded(rect, radius), faded(FIELD_FILL.get(), alpha));
+        let inset = 0.5;
+        let rim = Rectangle::new(
+            Point::new(rect.x + inset, rect.y + inset),
+            Size::new(rect.width - 1.0, rect.height - 1.0),
+        );
+        f.stroke(
+            &kit::rounded(rim, radius - inset),
+            Stroke::default()
+                .with_color(faded(FIELD_BORDER.get(), alpha))
+                .with_width(1.0),
+        );
+    });
     let room = rect.width - 2.0 * pad;
     let left = rect.x + pad;
     let middle = rect.center_y();

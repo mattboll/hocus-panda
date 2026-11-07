@@ -9,11 +9,22 @@
 //! shape drawn in a clip: icons, gauges, check boxes; only text and
 //! images, which come after shapes, showed on it. The CPU's renderer keeps
 //! the order things are drawn in, so its bars never showed it.
+//!
+//! The same goes for any shape drawn on a frame before a clip it would be
+//! under (an item's hover, its ring, a field's fill): it is drawn in a
+//! clip of its own ([`layer`]), and clips keep their order on both
+//! renderers.
 
 use iced::{
-    Color, Point, Renderer, Size,
+    Color, Point, Rectangle, Renderer, Size,
     widget::canvas::{Frame, Geometry},
 };
+
+/// `draw` in a clip of its own, `region`: on the GPU too it stays under
+/// the clips drawn after it on `frame`, as it does on the CPU.
+pub fn layer<R>(frame: &mut Frame, region: Rectangle, draw: impl FnOnce(&mut Frame) -> R) -> R {
+    frame.with_clip(region, draw)
+}
 
 /// The backdrop's geometry, `size` filled with `colour`, if there is one.
 pub fn under(renderer: &Renderer, size: Size, colour: Option<Color>) -> Option<Geometry> {
@@ -66,6 +77,24 @@ pub mod tests {
             renderer.draw_geometry(geometry);
         }
         renderer.screenshot(size, 1.0, Color::TRANSPARENT)
+    }
+
+    /// What `program` draws on a transparent surface of `size`, RGBA.
+    pub fn pixels_of<P: Program<crate::Message>>(
+        program: &P,
+        state: &P::State,
+        size: Size<u32>,
+    ) -> Vec<u8> {
+        let mut renderer = renderer();
+        let bounds = Rectangle::with_size(Size::new(size.width as f32, size.height as f32));
+        let drawn = program.draw(
+            state,
+            &renderer,
+            &Theme::Dark,
+            bounds,
+            mouse::Cursor::Unavailable,
+        );
+        pixels(&mut renderer, size, drawn)
     }
 
     /// The pixels `program` draws on a surface of `size`, made with
