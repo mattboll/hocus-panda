@@ -251,6 +251,10 @@
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
 # launcher = "Super+Space"
+# The actions palette: every action of the desktop in a list dropping from
+# the top of the focused window's screen, searchable; Enter runs one on
+# that window, or its screen. Again, it closes (docs/design/actions.md).
+# actions = "Super+P"
 # The overview: every screen's desktops and windows at once; again, it
 # closes (docs/design/windows.md §12b).
 # overview = "Super+W"

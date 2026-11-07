@@ -27,6 +27,7 @@
 //! peeking out of the bar's edge ([`agents::peek`]).
 
 mod a11y;
+mod actions;
 mod agents;
 mod auth;
 mod bluetooth;
@@ -139,6 +140,7 @@ fn main() -> ExitCode {
     bluetooth::start();
     launcher::start();
     emoji::start();
+    actions::start();
     // The session's polkit agent, when the shell is the session's (7.5).
     auth::start();
     notifications::start(software);
@@ -688,6 +690,7 @@ impl Shell {
                 popover::event(popover::Event::Outside);
                 launcher::outside();
                 emoji::outside();
+                actions::close();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -801,6 +804,14 @@ impl Shell {
             }
             ToShell::EmojiInserted => {
                 emoji::inserted();
+                Task::none()
+            }
+            ToShell::Actions(shown) => {
+                actions::toggle(shown);
+                Task::none()
+            }
+            ToShell::ActionsEnd => {
+                actions::close();
                 Task::none()
             }
             ToShell::Capture(bar) => {
@@ -1759,6 +1770,23 @@ impl Shell {
         )
     }
 
+    /// The actions palette, if its surface is `id`.
+    fn actions_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !actions::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(actions::draw::View {
+                id,
+                words: actions::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The emoji picker, if its surface is `id`.
     fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !emoji::is_surface(id) {
@@ -2036,6 +2064,7 @@ impl Shell {
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
+                .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
@@ -2333,6 +2362,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             popover::event(popover::Event::Outside);
                             launcher::outside();
                             emoji::outside();
+                            actions::close();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
@@ -2480,6 +2510,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::EmojiInserted) => {
                             emoji::inserted();
+                            continue;
+                        }
+                        // The actions palette: its own surface (#736).
+                        Ok(ToShell::Actions(shown)) => {
+                            actions::toggle(shown);
+                            continue;
+                        }
+                        Ok(ToShell::ActionsEnd) => {
+                            actions::close();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own

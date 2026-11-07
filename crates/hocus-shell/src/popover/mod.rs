@@ -711,6 +711,15 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// The actions palette's surface on `output` (#736): `size`, its
+    /// margins from the screen's top left corner (top, right, bottom,
+    /// left), holding the keyboard.
+    Actions {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
+    },
     /// The emoji picker's surface on `output` (5.7): `size`, its margins
     /// from the screen's top left corner (top, right, bottom, left),
     /// holding the keyboard.
@@ -1577,6 +1586,45 @@ impl Controller {
         effects
     }
 
+    /// The actions palette (#736) opens `item`'s popover on `output`'s bar
+    /// (else the first), as a click on it does: beside its item, else
+    /// beside `near` (the Sources beside the secretary).
+    pub fn open_asked(
+        &mut self,
+        output: &str,
+        item: Item,
+        near: Option<Item>,
+        now: Instant,
+    ) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        let Some(bar) = self.bar_for(output) else {
+            return effects;
+        };
+        let items = self.bar_items(&bar);
+        let from = items
+            .iter()
+            .find(|(i, _)| *i == item)
+            .or_else(|| items.iter().find(|(i, _)| Some(*i) == near))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                let height = self.bar_height(&bar);
+                Rectangle::new(Point::new(-50.0, height / 2.0), Size::new(40.0, 34.0))
+            });
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, item, from, Opened::Click, &mut effects);
+        effects
+    }
+
+    /// The bar a popover for `output` opens on: its own, else the first.
+    pub fn bar_for(&self, output: &str) -> Option<String> {
+        if self.bars.contains_key(output) {
+            Some(output.to_owned())
+        } else {
+            self.bars.keys().min().cloned()
+        }
+    }
+
     /// Whether the popover `id` holds the keyboard: opened by a click (or
     /// a shortcut), or clicked in.
     pub fn holds_keyboard(&self, id: window::Id) -> bool {
@@ -2098,7 +2146,10 @@ pub fn key(
     text: Option<&str>,
 ) -> bool {
     use iced::keyboard::{Key, key::Named};
-    if crate::launcher::key(key, modifiers, text) || crate::emoji::key(key, modifiers, text) {
+    if crate::launcher::key(key, modifiers, text)
+        || crate::emoji::key(key, modifiers, text)
+        || crate::actions::key(key, modifiers, text)
+    {
         return true;
     }
     let (menu, focused) = with(|c| {
@@ -2311,6 +2362,28 @@ pub fn bar_keyboard(output: Option<&str>) {
     send(effects);
 }
 
+/// The actions palette (#736) opens `item`'s popover on `output`'s bar.
+pub fn open_asked(output: &str, item: Item, near: Option<Item>) {
+    let effects = with(|c| c.open_asked(output, item, near, Instant::now()));
+    send(effects);
+}
+
+/// The bar a popover for `output` opens on (its name; `output` when the
+/// shell has no bar yet).
+pub fn bar_for(output: &str) -> String {
+    with(|c| c.bar_for(output)).unwrap_or_else(|| output.to_owned())
+}
+
+/// The Settings open on their page `slug` (the actions palette, #736).
+pub(crate) fn open_settings_page(slug: &str) {
+    session::open_settings(Some(slug));
+}
+
+/// The Settings open searching for `query` (the actions palette, #736).
+pub(crate) fn open_settings_searching(query: &str) {
+    session::open_settings_with(vec!["--search".to_owned(), query.to_owned()]);
+}
+
 /// The notifications' history opens on `output`'s bar (5.11's summary).
 pub fn open_history(output: &str) {
     let effects = with(|c| c.open_history(output, Instant::now()));
@@ -2389,6 +2462,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 deadline,
                 crate::launcher::deadline(),
                 crate::emoji::deadline(),
+                crate::actions::deadline(),
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
                 crate::tasks::deadline(),
@@ -2409,6 +2483,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
                             due.extend(crate::emoji::tick(now));
+                            due.extend(crate::actions::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
                             due.extend(crate::tasks::tick(now));
@@ -2705,6 +2780,31 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 },
                 events_transparent: false,
                 namespace: Some(hocus_link::EMOJI_NAMESPACE.to_owned()),
+            },
+            id,
+        }],
+        Effect::Actions {
+            id,
+            output,
+            size,
+            margin,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                // Its margins from the screen's corner, whatever other
+                // surfaces keep.
+                exclusive_zone: Some(-1),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(hocus_link::ACTIONS_NAMESPACE.to_owned()),
             },
             id,
         }],

@@ -727,6 +727,7 @@ impl State {
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
         self.radial_window_gone(id);
+        self.actions_window_gone(id);
         self.overview_window_gone(id);
         self.overview_paint.forget(id);
         self.share_window_gone(id);

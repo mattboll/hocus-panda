@@ -1915,6 +1915,7 @@ dependencies = [
  "fontdue",
  "hocus-agents",
  "hocus-compositor",
+ "hocus-config",
  "hocus-geometry",
  "hocus-link",
  "hocus-xdg",

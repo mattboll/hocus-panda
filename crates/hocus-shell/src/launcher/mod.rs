@@ -535,9 +535,31 @@ pub fn toggle(output: String, scale: u32) {
     if let Some((names, scale)) = wanted {
         // One popover at a time, and not under the launcher.
         crate::popover::event(crate::popover::Event::PressElsewhere);
+        crate::actions::close();
         icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
     }
     crate::popover::send(effects);
+}
+
+/// The actions palette's "Chercher « … » dans le lanceur" (#736): it opens
+/// on `output`, `query` typed in its field.
+pub fn open_with(output: String, scale: u32, query: &str) {
+    if !with(|l| matches!(l.phase, Phase::Open(_))) {
+        toggle(output, scale);
+    }
+    let wanted = with(|l| match &mut l.phase {
+        Phase::Open(open) => {
+            open.query = query.chars().take(QUERY_MOST).collect();
+            open.regrid(words());
+            tracing::debug!(query = open.query, "the launcher opens searching");
+            Some((icon_names(open), open.scale))
+        }
+        Phase::Closed => None,
+    });
+    if let Some((names, scale)) = wanted {
+        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        wake();
+    }
 }
 
 /// A press on none of the shell's surfaces (another screen's): it closes.

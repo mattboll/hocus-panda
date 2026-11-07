@@ -151,6 +151,14 @@ impl State {
         }
     }
 
+    /// Whether logind allows suspending, or `action` (`None`: suspend).
+    pub(crate) fn leave_allowed(&self, action: Option<LeaveAction>) -> bool {
+        match action {
+            Some(action) => self.leave.can.of(action).allowed(),
+            None => self.leave.can.suspend.allowed(),
+        }
+    }
+
     /// What the shell asks of the session menu.
     pub(crate) fn leave_asked(&mut self, ask: LeaveAsk) {
         tracing::debug!(?ask, phase = ?self.leave.phase, "the session menu");

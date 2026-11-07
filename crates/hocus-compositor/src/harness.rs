@@ -583,6 +583,39 @@ impl Headless {
         self.layer_rects(hocus_link::LAUNCHER_NAMESPACE)
     }
 
+    /// Commits of the actions palette's surfaces so far (#736).
+    pub fn actions_commits(&self) -> u64 {
+        self.app.state.panel.actions_commits
+    }
+
+    /// The actions palette's surfaces as the shell placed them: their
+    /// screen, and where they are (global).
+    pub fn actions_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::ACTIONS_NAMESPACE)
+    }
+
+    /// The palette's target window and its screen, from `Super+P` until
+    /// its surface goes.
+    pub fn actions_target(&self) -> Option<(Option<u64>, String)> {
+        self.app
+            .state
+            .actions
+            .target
+            .as_ref()
+            .map(|(w, o)| (w.map(|w| w.0), o.clone()))
+    }
+
+    /// How far the palette shows on screen `output` at the compositor's
+    /// time (0 to 1), its target window ringed above the dim; `None`
+    /// when it does not show there.
+    pub fn actions_backdrop(&self, output: &str) -> Option<(Option<u64>, f32)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        state
+            .actions_backdrop(output, state.now())
+            .map(|(w, alpha)| (w.map(|w| w.0), alpha))
+    }
+
     /// The launcher's toasts as the shell placed them (5.2): their screen,
     /// and where they are (global).
     pub fn launcher_toast_surfaces(&self) -> Vec<(String, Rect)> {

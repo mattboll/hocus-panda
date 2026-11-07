@@ -1084,12 +1084,12 @@ impl Panel {
 /// closes: the program in `PATH`, else beside the shell's. The compositor
 /// starts it with an activation token, which brings an open window
 /// forward.
-pub(in crate::popover) fn open_settings(section: Option<&str>) {
+pub(crate) fn open_settings(section: Option<&str>) {
     open_settings_with(section.map(str::to_owned).into_iter().collect());
 }
 
 /// The Settings opened with `args` (`bluetooth --pair ADDRESS`).
-pub(in crate::popover) fn open_settings_with(args: Vec<String>) {
+pub(crate) fn open_settings_with(args: Vec<String>) {
     let program = settings_program();
     match args.first() {
         None => tracing::info!(program, "the Settings open from the footer"),
