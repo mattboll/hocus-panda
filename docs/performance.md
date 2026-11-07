@@ -129,3 +129,43 @@ decoded once per change (`Backgrounds::decodes`) and its source dropped
 once scaled. Memory: one RGBA buffer per screen at its size for a picture
 (16.4 MB for 2560 × 1600, 19.8 MB for 3440 × 1440); a built-in or the
 plain colour a sixteenth of that (a quarter of the pixels each way).
+
+## What moves for show: the window rain and the moving wallpapers (#432, #433)
+
+Counts gate, times are reported. Each motion is counted on the held
+clock, on GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU`
+names: without either, the tests that only GLES draws are skipped, as
+the glass's) and, where it draws there, on pixman.
+
+**A window's rain** (`tests/rain.rs`, 60 Hz):
+
+| Budget | Gate | Measured (2026-11-07, llvmpipe and pixman) |
+|---|---|---|
+| Frames to open, on its screen | ≤ ⌈0.36 × refresh⌉ + 1 (23) | 22 |
+| Frames to close, on its screen | ≤ ⌈0.30 × refresh⌉ + 1 (19) | 19 |
+| On the other screen | 0 | 0 |
+| 100 ms after its end | 0 frames | 0 |
+| Allocations on the loop | a whole rain ≤ the standard opening's + 50; none growing frame after frame | 71 a frame against the standard's 80 (its picture is drawn again only when the window commits) |
+
+**A moving wallpaper** (`tests/moving_wallpaper.rs`):
+
+| Budget | Gate | Measured |
+|---|---|---|
+| Visible 60 s: frames on its screen | rain ≤ 902, stars ≤ 1 202; on battery ≤ 482 / 602 | 900, 1 200; 450, 600 |
+| Covered (≥ 90 %) 60 s | 0 frames, 0 of its own, 0 wakes | 0, 0, 0 |
+| Another screen covered | 0 frames there | 0 |
+| The bar's glass over it, 60 s | 0 blurs after the first | 0 |
+| Allocations a frame, over a turn of the loop at rest | ≤ 30, none growing over the minute | 29 to 30 (most are smithay's drawing of a frame and the loop's timer) |
+| Reduced motion, power saver, `animate = false`, battery "still", locked, fullscreen, 2 min without input | no frame of its own | none |
+| Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
+| Memory | the atlas ≤ 256 KB a scale; no screen-sized buffer more | 16 KB for every scale; on GLES the wallpaper thread's still picture is not even drawn (the shader draws into the screen's frame) |
+
+Reported, not gated: `cargo nextest run -p hocus-compositor --test
+moving_wallpaper --run-ignored only timings` (a frame at 3440 × 1440, beside
+a still one), and the shots for the pull request
+(`HOCUS_SHOTS=DIR … --run-ignored only shots`).
+
+The glass never blurs a moving wallpaper again: what is behind a pane is
+drawn with a second element of the wallpaper, still at the moment it
+started, whose commit never changes; the screen shows the moving one,
+which replaces it once the panes are done.
