@@ -9,8 +9,8 @@
 //! nor on the CPU) and the compositor says they may (not in power saver):
 //! [`lively`]. Otherwise they are the still drawings, at their sizes.
 //!
-//! In Givre they wear its ice visor ([`hocus_pandas::Dress`], #740), still
-//! or moving alike.
+//! In Givre they wear its ice visor, in Matrix Neo's glasses
+//! ([`hocus_pandas::Dress`], #740, #431), still or moving alike.
 
 use std::{
     sync::{
@@ -80,6 +80,8 @@ impl Burst {
 pub fn dress() -> Dress {
     if crate::theme::frost() {
         Dress::Visor
+    } else if crate::theme::matrix() {
+        Dress::Glasses
     } else {
         Dress::Plain
     }
@@ -87,13 +89,14 @@ pub fn dress() -> Dress {
 
 /// `mood`'s still drawing, in the theme's dress.
 pub fn still(mood: Mood) -> svg::Handle {
-    static STILL: OnceLock<[[svg::Handle; 6]; 2]> = OnceLock::new();
+    const DRESSES: [Dress; 3] = [Dress::Plain, Dress::Visor, Dress::Glasses];
+    static STILL: OnceLock<[[svg::Handle; 6]; 3]> = OnceLock::new();
     let dresses = STILL.get_or_init(|| {
-        [Dress::Plain, Dress::Visor].map(|dress| {
+        DRESSES.map(|dress| {
             Mood::ALL.map(|m| svg::Handle::from_memory(dress.wear(m.still(), m).into_bytes()))
         })
     });
-    let dress = usize::from(dress() == Dress::Visor);
+    let dress = DRESSES.iter().position(|d| *d == dress()).unwrap_or(0);
     dresses[dress][Mood::ALL.iter().position(|m| *m == mood).unwrap_or(0)].clone()
 }
 

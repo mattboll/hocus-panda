@@ -47,7 +47,145 @@ pub fn light() -> bool {
 /// contrast (which wins over the look).
 pub fn frost() -> bool {
     let choice = now();
-    choice.scheme.themed() && !choice.contrast
+    choice.scheme == Scheme::Frost && !choice.contrast
+}
+
+/// Whether the shell draws Matrix's own marks (#431): Matrix, without
+/// high contrast.
+pub fn matrix() -> bool {
+    let choice = now();
+    choice.scheme == Scheme::Matrix && !choice.contrast
+}
+
+/// Matrix's green hairline atop a surface (the bar, the lock's card): 1 px
+/// at `y`, from `left` to `right`, fading in and out at its ends, at 70 %.
+/// Nothing in another theme.
+pub fn hairline(f: &mut iced::widget::canvas::Frame, left: f32, right: f32, y: f32) {
+    use iced::{Point, Size, widget::canvas::gradient::Linear};
+    if !matrix() || right <= left {
+        return;
+    }
+    let green = hocus_link::theme::MATRIX_GREEN;
+    let lit = Color::from_rgba8(green.r, green.g, green.b, 0.7);
+    let clear = Color { a: 0.0, ..lit };
+    let line = Linear::new(Point::new(left, y), Point::new(right, y))
+        .add_stop(0.0, clear)
+        .add_stop(0.5, lit)
+        .add_stop(1.0, clear);
+    f.fill_rectangle(
+        Point::new(left, y),
+        Size::new(right - left, 1.0),
+        iced::widget::canvas::Fill::from(line),
+    );
+}
+
+/// Matrix's code edge in `rect` (8 px wide): one column of frozen rain,
+/// its glyphs the rain's own ([`hocus_link::moving`]), a head lighter and
+/// its tail fading, at 60 %, faded in and out over its first and last
+/// eighth; `seed` picks the column. Drawn once with its surface: it never
+/// moves. Nothing in another theme.
+pub fn code_edge(f: &mut iced::widget::canvas::Frame, rect: iced::Rectangle, seed: f64) {
+    use hocus_link::moving::{
+        GLYPH_BOX, GLYPH_DOTS, STILL_TICK, TAIL_STEPS, hash, lit, rain_glyph,
+    };
+    use iced::{
+        Point, Size,
+        widget::canvas::{Path, path::Builder},
+    };
+    if !matrix() || rect.height < 22.0 {
+        return;
+    }
+    const CELL: f32 = 11.0;
+    const OPACITY: f32 = 0.6;
+    let rows = (rect.height / CELL).floor();
+    let (dots_w, dots_h) = (GLYPH_DOTS.0 as f32, GLYPH_DOTS.1 as f32);
+    let ([x0, y0], [x1, y1]) = GLYPH_BOX;
+    let dot = Size::new(
+        rect.width * (x1 - x0) as f32 / dots_w,
+        CELL * (y1 - y0) as f32 / dots_h,
+    );
+    // By brightness: one path each, one fill each.
+    let mut steps: Vec<(f32, bool, Builder)> = Vec::new();
+    // Four frozen streams down the column, each a head and a tail of 8
+    // to half the column's cells, placed by the seed: the column nearly
+    // full, as the mockup's.
+    let streams: Vec<(f64, f64)> = (0..4)
+        .map(|k| {
+            let k = f64::from(k);
+            let head = (hash(seed, 3.0 + k) * f64::from(rows)).floor();
+            let tail = 8.0 + (hash(seed, 7.0 + k) * f64::from(rows) / 2.0).floor();
+            (head, tail)
+        })
+        .collect();
+    for row in 0..rows as usize {
+        let (mut level, mut head) = (0.0_f64, false);
+        for (top, tail) in &streams {
+            let behind = top - row as f64;
+            if !(0.0..*tail).contains(&behind) {
+                continue;
+            }
+            let here = if behind < 1.0 {
+                1.0
+            } else {
+                1.0 - (behind * TAIL_STEPS / tail).floor() / TAIL_STEPS
+            };
+            if here > level {
+                (level, head) = (here, behind < 1.0);
+            }
+        }
+        if level <= 0.0 {
+            continue;
+        }
+        let y = rect.y + row as f32 * CELL;
+        let middle = (y + CELL / 2.0 - rect.y) / rect.height;
+        let fade = (middle / 0.125).min((1.0 - middle) / 0.125).clamp(0.0, 1.0);
+        let alpha = (level as f32 * fade * OPACITY * 100.0).round() / 100.0;
+        if alpha <= 0.0 {
+            continue;
+        }
+        let glyph = rain_glyph(seed, row as f64, f64::from(STILL_TICK), head);
+        let at = match steps.iter().position(|(a, h, _)| *a == alpha && *h == head) {
+            Some(at) => at,
+            None => {
+                steps.push((alpha, head, Builder::new()));
+                steps.len() - 1
+            }
+        };
+        let builder = &mut steps[at].2;
+        for dy in 0..GLYPH_DOTS.1 {
+            for dx in 0..GLYPH_DOTS.0 {
+                // Mirrored, as in the film.
+                if lit(glyph, GLYPH_DOTS.0 - 1 - dx, dy) {
+                    builder.rectangle(
+                        Point::new(
+                            rect.x + rect.width * x0 as f32 + dx as f32 * dot.width,
+                            y + CELL * y0 as f32 + dy as f32 * dot.height,
+                        ),
+                        dot,
+                    );
+                }
+            }
+        }
+    }
+    for (alpha, head, builder) in steps {
+        let ink = if head {
+            hocus_link::theme::MATRIX_HEAD
+        } else {
+            hocus_link::theme::MATRIX_GREEN
+        };
+        let path: Path = builder.build();
+        f.fill(&path, Color::from_rgba8(ink.r, ink.g, ink.b, alpha));
+    }
+}
+
+/// A clock's character `ch` in `colour`, or Matrix's green for its colon.
+pub fn digit_colour(ch: char, colour: Color) -> Color {
+    if matrix() && ch == ':' {
+        let green = hocus_link::theme::MATRIX_GREEN;
+        Color::from_rgba8(green.r, green.g, green.b, colour.a)
+    } else {
+        colour
+    }
 }
 
 /// Which of a surface's corners take Givre's marks: the bar all four, a
@@ -111,29 +249,47 @@ impl<Message> iced::widget::canvas::Program<Message> for BarMarks {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<iced::widget::canvas::Geometry> {
-        if !frost() {
+        if !frost() && !matrix() {
             return Vec::new();
         }
-        let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
+        let size = bounds.size();
+        let mut frame = iced::widget::canvas::Frame::new(renderer, size);
         corner_marks(
             &mut frame,
-            iced::Rectangle::new(iced::Point::ORIGIN, bounds.size()),
+            iced::Rectangle::new(iced::Point::ORIGIN, size),
             Corners::Four,
+        );
+        // Matrix: the hairline atop, the code edge down the left side.
+        hairline(&mut frame, 14.0, size.width - 14.0, 0.0);
+        code_edge(
+            &mut frame,
+            iced::Rectangle::new(
+                iced::Point::new(1.0, 16.0),
+                iced::Size::new(8.0, size.height - 32.0),
+            ),
+            3.0,
         );
         vec![frame.into_geometry()]
     }
 }
 
-/// Givre's glow behind a clock's digits (`0 0 14px #7FD8FF` at 35 %): the
-/// digit drawn again around itself, faint, by `draw` (an offset and the
-/// glow's colour for that copy), before the digit itself. Nothing in
-/// another theme.
-pub fn glow(mut draw: impl FnMut(iced::Vector, Color)) {
-    if !frost() {
+/// The glow behind a clock's character `ch`: Givre's behind every digit
+/// (`0 0 14px #7FD8FF` at 35 %), Matrix's behind the colon alone (`0 0
+/// 10px` of its green at 60 %). The character drawn again around itself,
+/// faint, by `draw` (an offset and the glow's colour for that copy),
+/// before the character itself. Nothing in another theme.
+pub fn glow(ch: char, mut draw: impl FnMut(iced::Vector, Color)) {
+    let (glow, rings) = if frost() {
+        (
+            hocus_link::theme::FROST_GLOW,
+            [(2.5_f32, 0.07_f32), (5.5, 0.035)],
+        )
+    } else if matrix() && ch == ':' {
+        (hocus_link::theme::MATRIX_GREEN, [(2.0, 0.12), (4.0, 0.06)])
+    } else {
         return;
-    }
-    let glow = hocus_link::theme::FROST_GLOW;
-    for (radius, alpha) in [(2.5_f32, 0.07_f32), (5.5, 0.035)] {
+    };
+    for (radius, alpha) in rings {
         for k in 0..8 {
             let angle = k as f32 * std::f32::consts::FRAC_PI_4;
             draw(

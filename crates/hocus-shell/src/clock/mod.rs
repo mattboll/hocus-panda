@@ -486,7 +486,7 @@ impl Draw<'_> {
         if self.moving.is_some_and(|(from, _)| from[i] != ch) {
             return;
         }
-        crate::theme::glow(|offset, colour| {
+        crate::theme::glow(ch, |offset, colour| {
             let glyph = Glyph {
                 colour: faded(colour, glyph.colour.a),
                 ..glyph
@@ -497,6 +497,10 @@ impl Draw<'_> {
 
     /// Character `i` of `HH:MM`, `ch` now: moving if it changed.
     fn digit(&mut self, cell: Rectangle, glyph: Glyph, ch: char, i: usize) {
+        let glyph = Glyph {
+            colour: crate::theme::digit_colour(ch, glyph.colour),
+            ..glyph
+        };
         let changed = self
             .moving
             .map(|(from, elapsed)| (from[i], elapsed))
