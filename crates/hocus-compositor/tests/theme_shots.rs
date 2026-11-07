@@ -1,13 +1,14 @@
-//! Givre (#740), for the maintainer's eyes: the bar with its agents'
-//! pandas in their visor, the calendar open beside it, two bubbles (one
-//! with its actions, one urgent) and the lock screen, all in Givre, on
-//! the default wallpaper; on GLES (Mesa's software device, or the GPU
+//! The themed themes, Givre (#740) and Matrix (#431), for the
+//! maintainer's eyes: the bar with its agents' pandas in their dress, the
+//! calendar open beside it, two bubbles (one with its actions, one
+//! urgent), a window and its rim, the radial menu, and the lock screen,
+//! in each theme, on the default wallpaper (Matrix on its rain, still); on GLES (Mesa's software device, or the GPU
 //! `HOCUS_TEST_GPU` names) for the glass, else on the CPU (the opaque
 //! fallback). The real shell, its notifications on a D-Bus daemon of the
 //! test's own, its home, state and runtime directories the test's own.
 //!
 //! `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test
-//! givre_shots --run-ignored only` (the shell and `hocus` built first).
+//! theme_shots --run-ignored only` (the shell and `hocus` built first).
 
 mod common;
 
@@ -21,6 +22,9 @@ use std::{
 };
 
 use common::{BTN_LEFT, WAIT};
+
+const BTN_RIGHT: u32 = 0x111;
+const KEY_ESC: u32 = 1;
 use hocus_compositor::{Authenticator, Config, Headless};
 use zbus::zvariant::{OwnedVariant, Variant};
 
@@ -31,9 +35,13 @@ const DATE: (f64, f64) = (1814.0, 82.0);
 
 const DAY: &str = "[[calendars]]\nid = \"work\"\nname = \"Travail\"\ncolor = \"#8FB3FF\"\n\n\
                    [[events]]\ntitle = \"Point produit\"\nstart = \"today 15:00\"\nend = \"today 15:30\"\n";
-const FILE: &str = "[keyboard]\nlayouts = [\"us\"]\n\n[appearance]\ntheme = \"frost\"\naccent = \"ice\"\n\n\
-                    [agents]\npeek = \"off\"\n\n\
+const FILE: &str = "[keyboard]\nlayouts = [\"us\"]\n\n[agents]\npeek = \"off\"\n\n\
                     [[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n";
+
+/// The file in `theme` with `accent`, and `more` of its own.
+fn file(theme: &str, accent: &str, more: &str) -> String {
+    format!("{FILE}\n[appearance]\ntheme = \"{theme}\"\naccent = \"{accent}\"\n{more}")
+}
 
 struct Bed {
     hp: Headless,
@@ -52,7 +60,7 @@ impl Drop for Bed {
     }
 }
 
-fn start() -> anyhow::Result<Option<Bed>> {
+fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
     let Some(shell) = common::shell_program() else {
         eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
         return Ok(None);
@@ -73,7 +81,7 @@ fn start() -> anyhow::Result<Option<Bed>> {
         std::fs::create_dir_all(root.join(sub))?;
     }
     let file = root.join("config/hocuspanda/config.toml");
-    std::fs::write(&file, FILE)?;
+    std::fs::write(&file, text)?;
     std::fs::write(root.join("config/hocuspanda/day.toml"), DAY)?;
     // The day's accounts chosen: no first-run card.
     std::fs::write(root.join("state/hocuspanda/day-sources"), "later\n")?;
@@ -126,7 +134,7 @@ fn start() -> anyhow::Result<Option<Bed>> {
         runtime,
         client,
     };
-    bed.logged("the theme theme=frost")?;
+    bed.logged(&format!("the theme theme={theme}"))?;
     bed.logged("the notifications are served")?;
     Ok(Some(bed))
 }
@@ -206,14 +214,6 @@ impl Bed {
         Ok(())
     }
 
-    /// The file holding `text`, renamed over it as the Settings write it.
-    fn rewrite(&self, text: &str) -> anyhow::Result<()> {
-        let folder = self._dir.path().join("config/hocuspanda");
-        std::fs::write(folder.join(".config.toml.new"), text)?;
-        std::fs::rename(folder.join(".config.toml.new"), folder.join("config.toml"))?;
-        Ok(())
-    }
-
     /// The calendar, opened from the date once the day is read.
     fn calendar(&mut self) -> anyhow::Result<()> {
         self.logged("the day holds")?;
@@ -256,6 +256,16 @@ impl Bed {
         (x, y, w, h): (i32, i32, i32, i32),
     ) -> anyhow::Result<()> {
         common::at_rest(&mut self.hp)?;
+        self.save_now(out, name, (x, y, w, h))
+    }
+
+    /// The same without waiting for rest (the radial menu open).
+    fn save_now(
+        &mut self,
+        out: &Path,
+        name: &str,
+        (x, y, w, h): (i32, i32, i32, i32),
+    ) -> anyhow::Result<()> {
         common::wait(&mut self.hp, Duration::from_millis(300))?;
         let (width, height, px) = self.hp.screenshot(0)?;
         let rgba: Vec<u8> = px
@@ -278,22 +288,50 @@ impl Bed {
 #[test]
 #[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
 fn screenshots_of_givre() -> anyhow::Result<()> {
+    shots("givre", "frost", "ice", "")
+}
+
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_matrix() -> anyhow::Result<()> {
+    shots(
+        "matrix",
+        "matrix",
+        "phosphor",
+        "\n[wallpaper]\npicture = \"rain\"\n",
+    )
+}
+
+/// The shots of `theme` (with `accent`), named `NAME-…`.
+fn shots(name: &str, theme: &str, accent: &str, more: &str) -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let Some(mut bed) = start()? else {
+    let themed = file(theme, accent, more);
+    let Some(mut bed) = start(&themed, theme)? else {
         return Ok(());
     };
-    for (name, state) in [
+    for (agent, state) in [
         ("docs", "working"),
         ("api-paiements", "working"),
         ("migration", "done"),
         ("infra", "failed"),
         ("site-web", "waiting"),
     ] {
-        bed.agent_is(name, state)?;
+        bed.agent_is(agent, state)?;
     }
+    // A window on the left, focused: its rim in the theme's accent.
+    let (_, client) = common::open_showing(
+        &mut bed.hp,
+        "test.theme",
+        common::Shows::Pointing {
+            app_id: "test.theme",
+            size: (900, 600),
+        },
+    )?;
+    // It runs as long as the compositor does.
+    std::mem::forget(client);
     bed.notify(
         "Slack",
         "Léa Martin",
@@ -320,28 +358,47 @@ fn screenshots_of_givre() -> anyhow::Result<()> {
         SCREEN.0 - (BAR_LEFT - 8 - 420),
         SCREEN.1,
     );
-    bed.save(&out, "givre-bar-bubbles.png", right)?;
+    bed.save(&out, &format!("{name}-bar-bubbles.png"), right)?;
+    bed.save(
+        &out,
+        &format!("{name}-desktop.png"),
+        (0, 0, SCREEN.0, SCREEN.1),
+    )?;
+    // The radial menu on the window (Super and a right click).
+    let window = bed
+        .hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("test.theme"))
+        .map(|w| w.rect)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let middle = (
+        f64::from(window.x + window.width / 2),
+        f64::from(window.y + window.height / 2),
+    );
+    bed.hp.pointer_move(middle.0, middle.1);
+    bed.hp.key(common::KEY_LEFTMETA, true);
+    bed.hp.button(BTN_RIGHT, true);
+    bed.hp.button(BTN_RIGHT, false);
+    bed.hp.key(common::KEY_LEFTMETA, false);
+    anyhow::ensure!(bed.hp.radial().is_some(), "no radial menu");
+    common::wait(&mut bed.hp, Duration::from_millis(600))?;
+    let (x, y) = (middle.0 as i32 - 200, middle.1 as i32 - 200);
+    bed.save_now(&out, &format!("{name}-radial.png"), (x, y, 400, 400))?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.hp.pointer_move(400.0, 900.0);
+    common::wait(&mut bed.hp, Duration::from_millis(400))?;
     bed.calendar()?;
     common::wait(&mut bed.hp, Duration::from_secs(1))?;
-    bed.save(&out, "givre-bar-calendar.png", right)?;
-    // The same in the dark theme, to compare, then Givre again.
-    bed.rewrite(&FILE.replace("theme = \"frost\"\naccent = \"ice\"", ""))?;
-    bed.logged("the theme theme=dark")?;
-    common::wait(&mut bed.hp, Duration::from_secs(1))?;
-    bed.save(&out, "dark-bar-calendar.png", right)?;
-    bed.rewrite(FILE)?;
-    let log = bed.log.clone();
-    let back = bed.hp.dispatch_until(WAIT, |_| {
-        common::logged(&log)
-            .lines()
-            .rev()
-            .find(|l| l.contains("the theme theme="))
-            .is_some_and(|l| l.contains("theme=frost"))
-    })?;
-    anyhow::ensure!(back, "never Givre again");
+    bed.save(&out, &format!("{name}-bar-calendar.png"), right)?;
     bed.hp.lock();
     bed.logged("the lock is drawn")?;
     common::wait(&mut bed.hp, Duration::from_secs(4))?;
-    bed.save(&out, "givre-lock.png", (0, 0, SCREEN.0, SCREEN.1))?;
+    bed.save(
+        &out,
+        &format!("{name}-lock.png"),
+        (0, 0, SCREEN.0, SCREEN.1),
+    )?;
     Ok(())
 }
