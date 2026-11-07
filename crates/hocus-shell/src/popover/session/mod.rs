@@ -631,7 +631,7 @@ impl Panel {
         let rect = placed.rect;
         let target = Some(Target::Row(placed.row));
         if placed.enabled && hover == target {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
+            crate::theme::hover(f, &kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
         }
         if focus == target {
             ring(f, rect, ROW_RADIUS);
