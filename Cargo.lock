@@ -2007,6 +2007,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-perf"
+version = "1.0.0"
+dependencies = [
+ "jiff",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "hocus-settings"
 version = "1.0.0"
 dependencies = [
