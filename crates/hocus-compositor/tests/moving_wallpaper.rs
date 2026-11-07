@@ -647,6 +647,22 @@ fn the_still_copy_only_feeds_the_glass() -> anyhow::Result<()> {
             barred.step(STEP)?;
             bare.step(STEP)?;
         }
+        // The same frame of the wallpaper on both: each began on its own
+        // real clock before its clock was held, so on a loaded machine one
+        // may be a frame behind; the one behind steps on until they agree.
+        for _ in 0..20 {
+            let (a, b) = (barred.wall_ticks(OUTPUT), bare.wall_ticks(OUTPUT));
+            match a.cmp(&b) {
+                std::cmp::Ordering::Less => barred.step(STEP)?,
+                std::cmp::Ordering::Greater => bare.step(STEP)?,
+                std::cmp::Ordering::Equal => break,
+            }
+        }
+        assert_eq!(
+            barred.wall_ticks(OUTPUT),
+            bare.wall_ticks(OUTPUT),
+            "{picture}: the same frame on both"
+        );
         assert!(barred.glass_on(), "{picture}");
         let (a, b) = (barred.screenshot(0)?, bare.screenshot(0)?);
         let at = |shot: &(i32, i32, Vec<u8>), x: i32, y: i32| {
