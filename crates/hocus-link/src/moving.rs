@@ -504,28 +504,46 @@ fn still_stars((w, h): (i32, i32), scale: f64) -> Vec<u8> {
     pixels
 }
 
+/// Smooth value noise along `x`, its own for each `seed`: the shaders'
+/// in the same words.
+pub fn noise(x: f64, seed: f64) -> f64 {
+    let i = x.floor();
+    let f = x - i;
+    let k = f * f * (3.0 - 2.0 * f);
+    hash(i, seed) + (hash(i + 1.0, seed) - hash(i, seed)) * k
+}
+
+/// How bright each veil of the aurora is: the ice blue the brightest.
+pub const AURORA_WEIGHTS: [f64; 3] = [0.42, 0.72, 0.36];
+
 /// The aurora at (`u`, `v`), fractions of the screen (`aspect` its width
-/// over its height), at `time` seconds: the sky and its three veils, each
-/// a curtain bright at its lower edge, its rays rising above it, waving.
-/// The shader says the same.
+/// over its height), at `time` seconds: the sky and its three veils. Each
+/// veil is a curtain drifting slowly sideways, its line wandering by noise;
+/// it fades softly below its line, and rises above it in folds of uneven
+/// width and height (noise, never a regular comb). The shader says the
+/// same.
 pub fn aurora(u: f64, v: f64, aspect: f64, time: f64) -> [f64; 3] {
     let mut colour = mix(AURORA_TOP, AURORA_BOTTOM, v).map(|c| c / 255.0);
     let x = u * aspect;
     for (i, veil) in AURORA_VEILS.iter().enumerate() {
         let f = i as f64;
-        let centre = 0.30
-            + 0.12 * f
-            + 0.06 * (x * 1.7 + time * 0.13 * (1.0 + f * 0.4) + f * 2.1).sin()
-            + 0.035 * (x * 4.3 - time * 0.21 + f * 1.3).sin();
+        let xs = x + time * 0.012 * (1.0 + 0.5 * f);
+        let centre = 0.28
+            + 0.13 * f
+            + 0.05 * (xs * 1.3 + time * 0.11 + f * 2.1).sin()
+            + 0.07 * (noise(xs * 2.2 + time * 0.03, 11.0 + f) - 0.5);
         let d = v - centre;
-        let rays = 0.55 + 0.45 * (x * 38.0 + (x * 3.0 + time * 0.3).sin() * 4.0 + f * 5.0).sin();
-        let curtain = if d > 0.0 {
-            (-d * d / 0.0018).exp()
-        } else {
-            (-d * d / 0.03).exp() * rays
-        };
-        let shimmer = 0.75 + 0.25 * (time * 0.7 + x * 2.0 + f).sin();
-        let a = curtain * shimmer * 0.55;
+        let folds = 0.25
+            + 0.75
+                * (0.6 * noise(xs * 9.0 + time * 0.08, 21.0 + f)
+                    + 0.4 * noise(xs * 23.0 - time * 0.05, 31.0 + f));
+        let rise = 0.08 + 0.16 * noise(xs * 4.0 + time * 0.04, 41.0 + f);
+        let above = (-d * d / (rise * rise)).exp() * folds;
+        let below = (-d * d / 0.0045).exp() * (0.6 + 0.4 * folds);
+        let t = ((d + 0.03) / 0.06).clamp(0.0, 1.0);
+        let curtain = above + (below - above) * t * t * (3.0 - 2.0 * t);
+        let shimmer = 0.8 + 0.2 * (time * 0.5 + xs * 1.5 + f).sin();
+        let a = curtain * shimmer * AURORA_WEIGHTS[i];
         for (c, v) in colour.iter_mut().zip(veil) {
             *c += f64::from(*v) / 255.0 * a;
         }
