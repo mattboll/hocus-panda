@@ -3,7 +3,9 @@
 //! [`DWELL`] opens the overview, or closes it when open, as `Super+W` does.
 //!
 //! Once per entry: the corner is spent until the pointer has gone
-//! [`REARM`] px away from it. Only where the pointer stops: not where the
+//! [`REARM`] px away from it; at the session's start the pointer only
+//! resting there (or moved there in place) is no entry, until it has
+//! been that far away once. Only where the pointer stops: not where the
 //! bar stands (its side on the left, on a screen with a bar), nor where
 //! another screen touches the corner (the pointer passes through it); not
 //! while a button is held (a window dragged, a selection), nor over a
@@ -38,8 +40,12 @@ pub const REARM: f64 = 8.0;
 /// Where the pointer stands to the corners.
 #[derive(Debug, Default)]
 pub enum HotCorner {
-    /// Away from them: the next entry counts.
+    /// Not yet: the session starts with the pointer where it may be (a
+    /// screen's top-left corner, at 0, 0, as a headless one does), which
+    /// is no entry. Armed once it has been [`REARM`] px away.
     #[default]
+    Unarmed,
+    /// Away from them: the next entry counts.
     Armed,
     /// In `output`'s since a moment: the timer acts as the dwell ends.
     Dwelling {
@@ -82,6 +88,7 @@ impl State {
             && !self.locked()
             && !self.auth_holds()
             && self.radial.is_none()
+            && !self.capture_open()
             && !self.seat.get_pointer().is_some_and(|p| p.is_grabbed())
             && !self.fullscreen_in_front(output)
             && self.launcher_on(output).is_none()
@@ -114,6 +121,20 @@ impl State {
                 self.hot_corner_enter(here);
             }
             HotCorner::Armed => self.hot_corner_enter(here),
+            HotCorner::Unarmed => {
+                let away = self
+                    .space
+                    .output_under(at)
+                    .next()
+                    .and_then(|o| self.space.output_geometry(o))
+                    .is_none_or(|g| {
+                        let corner = g.loc.to_f64();
+                        at.x - corner.x > REARM || at.y - corner.y > REARM
+                    });
+                if away {
+                    self.hot_corner = HotCorner::Armed;
+                }
+            }
         }
     }
 

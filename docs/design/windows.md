@@ -860,7 +860,9 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   screen's top-left corner (its first logical pixel, where the pointer
   stops pushed up and left) opens the overview, or closes it, as
   `Super+W`. Once per entry: it acts again only after the pointer has
-  gone 8 px away. Not on a screen whose bar stands on the left (its
+  gone 8 px away; at the session's start it acts only once the pointer
+  has been 8 px away (a pointer resting there, as at 0, 0, is no entry),
+  and never while a capture is open. Not on a screen whose bar stands on the left (its
   corner is the bar's), nor where another screen touches the corner (the
   pointer goes on there), nor while a button is held (a window dragged),
   over a fullscreen window or the launcher, nor locked. The corner draws
