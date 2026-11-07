@@ -9,9 +9,9 @@ use iced::{Point, Rectangle, Size};
 use super::words::Words;
 use crate::popover::kit;
 
-/// The header: 40 px, the avatar 32 px, the name 16 px.
+/// The header: 40 px, the avatar 40 px (#649), the name 16 px.
 pub const HEADER: f32 = 40.0;
-pub const AVATAR: f32 = 32.0;
+pub const AVATAR: f32 = 40.0;
 /// The rows: 6 px under the header, 44 px each, a 1 px divider 6 px
 /// from each group; reaching 6 px past the content's sides.
 const ROWS_GAP: f32 = 6.0;

@@ -36,7 +36,7 @@ pub const CURTAIN_FRAME: Duration = Duration::from_millis(100);
 /// The pill, logical pixels; its top at [`PILL_TOP`] of its screen's
 /// height.
 pub const PILL_WIDTH: f64 = 300.0;
-pub const PILL_HEIGHT: f64 = 64.0;
+pub const PILL_HEIGHT: f64 = 80.0;
 pub const PILL_RADIUS: f64 = 20.0;
 pub const PILL_TOP: f64 = 0.64;
 /// It comes in fading and rising [`PILL_RISE`] px over [`PILL_IN`]
