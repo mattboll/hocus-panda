@@ -860,6 +860,13 @@ fn moved_by_its_client_onto_the_third_tile(
         mark,
         "a window over the tiles bar=\"HEADLESS-1\" over=Some((\"HEADLESS-1\", 2))",
     )?;
+    if output == "2560x1600" {
+        shot(
+            &mut bed.hp,
+            "client-move-over-tile",
+            Rect::new(2560 - 900, 1600 - 800, 900, 800),
+        )?;
+    }
     bed.hp.button(BTN_LEFT, false);
     let gone = bed.hp.dispatch_until(WAIT, |hp| hp.windows().is_empty())?;
     anyhow::ensure!(gone, "still shown: {:?}", bed.hp.windows());
