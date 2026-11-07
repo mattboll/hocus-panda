@@ -445,19 +445,18 @@ fn a_theme_switch_draws_one_frame_per_screen() -> anyhow::Result<()> {
     bed.hp.hold_clock();
     common::wait(&mut bed.hp, Duration::from_millis(500))?;
     for (theme, accent) in [("frost", "ice"), ("light", "green"), ("dark", "green")] {
-        let before = bed.hp.output_frames();
-        anyhow::ensure!(before.len() == 2, "two screens: {before:?}");
+        let before = [bed.hp.frames_on(0), bed.hp.frames_on(1)];
         bed.write(&format!(
             "{file}\n[appearance]\ntheme = \"{theme}\"\naccent = \"{accent}\"\n"
         ))?;
         bed.themed(theme, accent)?;
         let drawn = bed
             .hp
-            .dispatch_until(WAIT, |hp| hp.output_frames()[0] > before[0])?;
+            .dispatch_until(WAIT, |hp| hp.frames_on(0) > before[0])?;
         anyhow::ensure!(drawn, "{theme}: the bar's screen not drawn");
         common::at_rest(&mut bed.hp)?;
         common::wait(&mut bed.hp, Duration::from_millis(500))?;
-        let after = bed.hp.output_frames();
+        let after = [bed.hp.frames_on(0), bed.hp.frames_on(1)];
         let drew: Vec<u64> = after.iter().zip(&before).map(|(a, b)| a - b).collect();
         assert_eq!(drew[1], 0, "{theme}: frames on the screen without the bar");
         assert!(

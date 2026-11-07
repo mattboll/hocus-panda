@@ -1138,8 +1138,8 @@ pub struct Appearance {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Wallpaper {
-    /// `"night"`, `"mist"`, `"dawn"`, `"forest"`, `"plain"`, or a
-    /// picture's path: every screen's, but those that have their own.
+    /// `"night"`, `"mist"`, `"dawn"`, `"forest"`, `"rain"`, `"stars"`,
+    /// `"plain"`, or a picture's path: every screen's, but those that have their own.
     #[serde(deserialize_with = "picture")]
     pub picture: hocus_link::wallpaper::Picture,
     /// Each screen its own: `[outputs.NAME] wallpaper`, else `picture`.
@@ -1156,6 +1156,25 @@ pub struct Wallpaper {
     /// The lock's own picture, with `lock = "picture"`.
     #[serde(deserialize_with = "picture")]
     pub lock_picture: hocus_link::wallpaper::Picture,
+    /// A wallpaper that moves ("rain", "stars") moves; else its still
+    /// picture (#433).
+    pub animate: bool,
+    /// On battery a moving wallpaper goes at half its frames, stays
+    /// still, or goes as on mains power.
+    pub on_battery: OnBattery,
+}
+
+/// `[wallpaper] on-battery` (#433).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnBattery {
+    /// Half its frames, so half its pace.
+    #[default]
+    Half,
+    /// Its still picture.
+    Still,
+    /// As on mains power.
+    Full,
 }
 
 impl Default for Wallpaper {
@@ -1167,6 +1186,8 @@ impl Default for Wallpaper {
             color: hocus_link::wallpaper::DEFAULT_COLOR,
             lock: hocus_link::wallpaper::LockLook::default(),
             lock_picture: hocus_link::wallpaper::Picture::default(),
+            animate: true,
+            on_battery: OnBattery::Half,
         }
     }
 }
@@ -1388,6 +1409,8 @@ pub struct Windows {
     pub snap_by_drag: bool,
     /// A moved window wobbles (never with reduced motion).
     pub wobble: bool,
+    /// How applications' windows open and close (#432).
+    pub animation: Animation,
     /// Which windows Alt+Tab lists.
     pub alt_tab: AltTab,
     /// Rules per application, `[[windows.rules]]`, in the file's order:
@@ -1471,10 +1494,26 @@ impl Default for Windows {
             magnet: true,
             snap_by_drag: true,
             wobble: true,
+            animation: Animation::Standard,
             alt_tab: AltTab::All,
             rules: Vec::new(),
         }
     }
+}
+
+/// How applications' windows open and close, `[windows] animation`
+/// (docs/design/windows.md §5): each theme with a look of its own brings
+/// its own, and any can be chosen in any theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Animation {
+    /// Growing from 94 % as they fade in; shrinking a little as they go.
+    #[default]
+    Standard,
+    /// Columns of glyphs falling through the window (#432).
+    Rain,
+    /// Givre's own, designed later: the standard motion until then.
+    Frost,
 }
 
 /// The key held for a drag anywhere in a window: nested, `Super` is

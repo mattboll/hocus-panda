@@ -276,6 +276,7 @@ impl State {
         });
         self.displays.outputs.retain(|o| o != output);
         self.backgrounds.get_mut().forget(&name);
+        self.walls.get_mut().forget(&name);
         self.displays.off.remove(&name);
         self.displays.vrr_on.remove(&name);
         if let Some(rect) = rect {

@@ -577,19 +577,19 @@ impl HeadlessBackend {
         }
     }
 
+    /// Frames drawn on output `index` (in the order given).
+    pub fn frames_on(&self, index: usize) -> u64 {
+        match &self.canvas {
+            Canvas::Gles(c) => c.outputs.get(index).map_or(0, |o| o.frames),
+            Canvas::Pixman(c) => c.outputs.get(index).map_or(0, |o| o.frames),
+        }
+    }
+
     /// Frames drawn, all outputs together.
     pub fn frames(&self) -> u64 {
         match &self.canvas {
             Canvas::Gles(c) => c.outputs.iter().map(|o| o.frames).sum(),
             Canvas::Pixman(c) => c.outputs.iter().map(|o| o.frames).sum(),
-        }
-    }
-
-    /// Frames drawn by each output, in the order they were given.
-    pub fn output_frames(&self) -> Vec<u64> {
-        match &self.canvas {
-            Canvas::Gles(c) => c.outputs.iter().map(|o| o.frames).collect(),
-            Canvas::Pixman(c) => c.outputs.iter().map(|o| o.frames).collect(),
         }
     }
 

@@ -441,6 +441,13 @@
 # snap-by-drag = true
 # A moved window wobbles, then settles (never with reduced motion).
 # wobble = true
+# How applications' windows (and their dialogs larger than 200 x 200 px)
+# open and close: "standard" (grow and fade in 220 ms), "rain" (columns of
+# glyphs fall through them, 360 ms to open, 300 ms to close; at most three
+# at once, none for the windows of the last session coming back) or
+# "frost" (the standard motion for now). With reduced motion or the power
+# saver, and drawing on the CPU, the windows fade instead.
+# animation = "standard"
 # Alt+Tab lists "all" desktops' windows (this one's first) or this
 # "desktop"'s only.
 # alt-tab = "all"
@@ -557,8 +564,8 @@
 
 # [wallpaper]
 # Every screen's background: a built-in, "night", "mist", "dawn" or
-# "forest"; "plain" (the color below); or a picture's path (JPEG, PNG or
-# WebP; ~/ is the home). The Settings copy a picture chosen there into
+# "forest"; one that moves, "rain" or "stars"; "plain" (the color below);
+# or a picture's path (JPEG, PNG or WebP; ~/ is the home). The Settings copy a picture chosen there into
 # ~/.local/share/hocuspanda/wallpapers. A picture that does not read draws
 # night, and the journal says why.
 # picture = "night"
@@ -576,6 +583,15 @@
 # the windows), or "picture": lock-picture, dimmed.
 # lock = "dimmed"
 # lock-picture = "night"
+# A wallpaper that moves runs on the GPU at 15 frames a second (rain) or
+# 20 (stars), on each screen where it shows: it stops under a fullscreen
+# window, covered at more than 90 %, locked, off or under the curtain, after
+# 2 minutes without input, in the power saver and with reduced motion, and
+# stays still under the bar. Turned off, or drawing on the CPU: its still
+# picture.
+# animate = true
+# On battery: "half" its frames (and pace), "still", or "full".
+# on-battery = "half"
 
 # [day]
 # "Your day" in the bar: meetings from calendar accounts, and tasks from

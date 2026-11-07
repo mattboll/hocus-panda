@@ -13,6 +13,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use hocus_link::{
     backdrop::Backdrop,
+    moving::Moving,
     theme::AccentColours,
     wallpaper::{Fit, LockLook, Look, Picture},
 };
@@ -80,6 +81,8 @@ pub enum Msg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tile {
     Builtin(Backdrop),
+    /// A wallpaper that moves (#433), its tile its still picture.
+    Moving(Moving),
     Plain,
     Mine(String),
     Choose,
@@ -89,6 +92,7 @@ impl Tile {
     fn picture(&self) -> Option<Picture> {
         match self {
             Self::Builtin(b) => Some(Picture::Builtin(*b)),
+            Self::Moving(m) => Some(Picture::Moving(*m)),
             Self::Plain => Some(Picture::Plain),
             Self::Mine(word) => Some(Picture::File(word.clone())),
             Self::Choose => None,
@@ -98,6 +102,7 @@ impl Tile {
     fn id(&self, mine: &[Mine]) -> String {
         match self {
             Self::Builtin(b) => format!("tile:{}", b.word()),
+            Self::Moving(m) => format!("tile:{}", m.word()),
             Self::Plain => "tile:plain".to_owned(),
             Self::Mine(word) => format!(
                 "tile:mine:{}",
@@ -363,6 +368,7 @@ impl App {
             .iter()
             .map(|b| Tile::Builtin(*b))
             .collect();
+        tiles.extend(model::MOVING_TILES.iter().map(|m| Tile::Moving(*m)));
         tiles.push(Tile::Plain);
         tiles.extend(
             self.wallpaper
@@ -411,6 +417,8 @@ impl App {
         if self.colour_row_shows() {
             out.push(self.setting_control(model::COLOR));
         }
+        out.push(self.setting_control(model::ANIMATE));
+        out.push(self.setting_control(model::ON_BATTERY));
         out.push(Control::Wallpaper(Stop::Lock));
         if file.lock() == LockLook::Picture {
             out.push(Control::Wallpaper(Stop::LockPicture));
@@ -430,7 +438,7 @@ impl App {
         match self.target_picture() {
             Picture::Plain => true,
             Picture::File(_) => self.file().fit() != Fit::Cover,
-            Picture::Builtin(_) => false,
+            Picture::Builtin(_) | Picture::Moving(_) => false,
         }
     }
 
@@ -877,6 +885,7 @@ impl App {
     ) -> El<'a> {
         page = page.push(self.preview_group());
         page = page.push(self.gallery_group());
+        page = page.push(self.animation_group());
         page = page.push(self.lock_group());
         container(page).id("page:wallpaper".to_owned()).into()
     }
@@ -1173,6 +1182,7 @@ impl App {
                 model::name_of(&Picture::Builtin(*b), lang),
                 *b != Backdrop::Night,
             ),
+            Tile::Moving(m) => (model::name_of(&Picture::Moving(*m), lang), true),
             Tile::Plain => (model::name_of(&Picture::Plain, lang), false),
             Tile::Mine(word) => (model::name_of(&Picture::File(word.clone()), lang), false),
             Tile::Choose => (
@@ -1287,8 +1297,14 @@ impl App {
             .spacing(6)
             .align_y(Alignment::Center);
         if fresh {
+            // A wallpaper that moves says so; the other new ones are new.
+            let badge = if matches!(tile, Tile::Moving(_)) {
+                w("animé", "animated")
+            } else {
+                w("Nouveau", "New")
+            };
             words = words.push(
-                container(t(w("Nouveau", "New").get(lang), 10.0, BLUE.get()).font(SEMIBOLD))
+                container(t(badge.get(lang), 10.0, BLUE.get()).font(SEMIBOLD))
                     .padding([1, 5])
                     .style(|_: &Theme| container::Style {
                         background: Some(Background::Color(rgba(143, 179, 255, 0.16))),
@@ -1321,6 +1337,36 @@ impl App {
                 .into();
         }
         tile.into()
+    }
+
+    /// The wallpapers that move (#433): whether they move, on battery,
+    /// and when they stop by themselves.
+    fn animation_group(&self) -> El<'_> {
+        let lang = self.lang;
+        let head = row![label(w("ANIMATION", "ANIMATION").get(lang))]
+            .align_y(Alignment::Center)
+            .height(28);
+        let controls = self.controls();
+        let mut rows = column![];
+        for (i, id) in [model::ANIMATE, model::ON_BATTERY].into_iter().enumerate() {
+            if let Some(setting) = model::settings().iter().find(|s| s.id == id) {
+                rows = rows.push(divided(i > 0, self.row(setting, &controls)));
+            }
+        }
+        let stops = w(
+            "Elle s’arrête d’elle-même : une fenêtre en plein écran, le fond couvert à plus de 90 %, l’écran verrouillé ou éteint, l’économie d’énergie, les mouvements réduits, 2 min sans un geste. Elle reste immobile sous la barre.",
+            "It stops by itself: a fullscreen window, the background more than 90 % covered, the screen locked or off, the power saver, reduced motion, 2 min without input. It stays still under the bar.",
+        );
+        let card = column![
+            rows,
+            divided(
+                true,
+                container(t(stops.get(lang), 12.0, FAINT.get()))
+                    .padding([10, 12])
+                    .into()
+            ),
+        ];
+        column![head, card_box(card.into())].spacing(8).into()
     }
 
     fn lock_group(&self) -> El<'_> {
