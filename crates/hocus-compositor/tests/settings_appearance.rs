@@ -467,12 +467,13 @@ fn a_swatch_writes_the_accent_and_the_row_says_its_name() -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Givre (#740): its segment writes `theme = "frost"` and its accent,
-/// the ice blue, as one change; one toast says both, and its "Annuler"
-/// takes both back, the violet chosen before with them. The window stays
+/// Givre (#740): its segment writes `theme = "frost"`, its accent (the
+/// ice blue), its windows' motion and the aurora as one change; one toast
+/// says them all, and its "Annuler" takes them all back, the violet
+/// chosen before with them. The window stays
 /// dark, in the ice blue; the bar draws Givre.
 #[test]
-fn choosing_givre_sets_its_accent_in_one_toast_that_undoes_both() -> anyhow::Result<()> {
+fn choosing_givre_sets_its_accent_motion_and_aurora_in_one_toast() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(&format!("{FILE}\n[appearance]\naccent = \"violet\"\n"))? else {
         return Ok(());
     };
@@ -482,13 +483,19 @@ fn choosing_givre_sets_its_accent_in_one_toast_that_undoes_both() -> anyhow::Res
     // The sidebar's foot, under its last section, away from the toast.
     let corner = (window.x + 20, window.bottom() - 40);
     bed.click("segment:appearance.theme:2")?;
-    let text =
-        bed.written(|t| t.contains("theme = \"frost\"") && t.contains("accent = \"ice\""))?;
+    let text = bed.written(|t| {
+        t.contains("theme = \"frost\"")
+            && t.contains("accent = \"ice\"")
+            && t.contains("animation = \"frost\"")
+            && t.contains("picture = \"aurora\"")
+    })?;
     assert!(!text.contains("violet"), "{text}");
     let shown = bed.shows(|s| s["theme"] == "frost" && s["accent"] == "ice")?;
     assert_eq!(row(&shown, "appearance.theme")["value"], "Givre");
     let shown = bed.shows(|s| {
-        s["toast"] == "Thème : Givre · Couleur d’accent : Bleu glacé" && s["toast_action"] == "undo"
+        s["toast"]
+            == "Thème : Givre · Couleur d’accent : Bleu glacé · Ouvrir et fermer : Givre · Fond d’écran : Aurore"
+            && s["toast_action"] == "undo"
     })?;
     assert_eq!(row(&shown, "appearance.accent")["value"], "Bleu glacé");
     bed.shell_said("the theme theme=", &["theme=frost", "accent=ice"])?;
@@ -512,12 +519,87 @@ fn choosing_givre_sets_its_accent_in_one_toast_that_undoes_both() -> anyhow::Res
             .ok_or_else(|| anyhow::anyhow!("no image"))?;
         image.save(out.join("givre-settings.png"))?;
     }
-    // Annuler: both back.
+    // Annuler: all back.
     bed.click("toast-action")?;
     let text = bed.written(|t| !t.contains("frost") && t.contains("accent = \"violet\""))?;
+    assert!(
+        !text.contains("animation") && !text.contains("aurora"),
+        "{text}"
+    );
     assert!(!text.contains("\"ice\""), "{text}");
     bed.shows(|s| s["theme"] == "dark" && s["accent"] == "violet")?;
     bed.shell_said("the theme theme=", &["theme=dark", "accent=violet"])?;
+    Ok(())
+}
+
+/// Matrix (#431): its segment writes the theme, its accent, its windows'
+/// rain and the rain as the wallpaper (over a built-in one) as one
+/// change, one toast saying them all; "Annuler" takes all four back.
+/// Choosing Sombre afterwards gives back what Matrix replaced.
+#[test]
+fn choosing_matrix_sets_its_accent_rain_and_wallpaper_in_one_toast() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(&format!(
+        "{FILE}\n[appearance]\naccent = \"teal\"\n\n[wallpaper]\npicture = \"dawn\"\n"
+    ))?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("segment:appearance.theme:3")?;
+    let all = |t: &str| {
+        t.contains("theme = \"matrix\"")
+            && t.contains("accent = \"phosphor\"")
+            && t.contains("animation = \"rain\"")
+            && t.contains("picture = \"rain\"")
+    };
+    bed.written(all)?;
+    let shown = bed.shows(|s| s["theme"] == "matrix" && s["accent"] == "phosphor")?;
+    assert_eq!(row(&shown, "appearance.theme")["value"], "Matrix");
+    bed.shows(|s| {
+        s["toast"]
+            == "Thème : Matrix · Couleur d’accent : Vert phosphore · Ouvrir et fermer : Pluie · Fond d’écran : Pluie"
+            && s["toast_action"] == "undo"
+    })?;
+    bed.shell_said("the theme theme=", &["theme=matrix", "accent=phosphor"])?;
+    // The window keeps the dark look: its sidebar the dark one's.
+    let window = bed.window()?;
+    let corner = (window.x + 20, window.bottom() - 40);
+    bed.until(corner, |c| c == [0x0F, 0x13, 0x1C])?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        common::at_rest(&mut bed.hp)?;
+        wait(&mut bed.hp, Duration::from_millis(500))?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        image.save(out.join("matrix-settings.png"))?;
+    }
+    // Annuler: all four back.
+    bed.click("toast-action")?;
+    let text = bed.written(|t| {
+        !t.contains("matrix") && t.contains("accent = \"teal\"") && t.contains("\"dawn\"")
+    })?;
+    assert!(!text.contains("animation"), "{text}");
+    bed.shows(|s| s["theme"] == "dark" && s["accent"] == "teal")?;
+    // Matrix again, then Sombre: what it replaced comes back.
+    wait(&mut bed.hp, Duration::from_millis(200))?;
+    bed.click("segment:appearance.theme:3")?;
+    bed.written(all)?;
+    bed.shows(|s| s["theme"] == "matrix")?;
+    bed.click("segment:appearance.theme:0")?;
+    let text = bed.written(|t| {
+        !t.contains("matrix") && t.contains("accent = \"teal\"") && t.contains("\"dawn\"")
+    })?;
+    assert!(!text.contains("animation"), "{text}");
+    bed.shows(|s| {
+        s["toast"]
+            == "Thème : Sombre · Couleur d’accent : Sarcelle · Ouvrir et fermer : Standard · Fond d’écran : Aube"
+    })?;
     Ok(())
 }
 

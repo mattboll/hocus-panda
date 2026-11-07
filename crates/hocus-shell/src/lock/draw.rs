@@ -528,12 +528,12 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
             Point::new(x + w / 2.0, top),
             CLOCK,
             MARTIAN,
-            TEXT.get(),
+            crate::theme::digit_colour(*ch, TEXT.get()),
             Alignment::Center,
         );
         glyph.line_height = LineHeight::Absolute(Pixels(CLOCK));
-        // Givre's glow behind it.
-        crate::theme::glow(|offset, colour| {
+        // The theme's glow behind it.
+        crate::theme::glow(*ch, |offset, colour| {
             f.fill_text(canvas::Text {
                 position: glyph.position + offset,
                 color: colour,
@@ -571,6 +571,9 @@ fn draw_form(
     (now, breathing): (Instant, Option<Instant>),
 ) {
     let shown = &lock.shown;
+    if crate::theme::matrix() {
+        draw_card(f, layout);
+    }
     draw_avatar(f, layout.avatar);
     f.fill_text(text(
         crate::user::name(),
@@ -699,6 +702,45 @@ fn draw_form(
 
 /// The field's shake at `t`: 10, 9, 6, 4 px side to side over
 /// [`LOCK_SHAKE`], each step `cubic-bezier(0.36,0.07,0.19,0.97)`.
+/// Matrix's card under the form (#431): the popovers' glass tint and rim,
+/// its green hairline atop and its code edge down its left side.
+fn draw_card(f: &mut Frame, layout: &Layout) {
+    const AROUND: f32 = 26.0;
+    const RADIUS: f32 = 18.0;
+    let top = layout.avatar.y - 18.0;
+    let rect = Rectangle::new(
+        Point::new(layout.field.x - AROUND, top),
+        Size::new(
+            layout.field.width + 2.0 * AROUND,
+            layout.field.y + layout.field.height + 20.0 - top,
+        ),
+    );
+    let shape = Path::rounded_rectangle(rect.position(), rect.size(), RADIUS.into());
+    let tint = gradient::Linear::new(rect.position(), Point::new(rect.x, rect.y + rect.height))
+        .add_stop(0.0, Ink::Token(|t| t.popover_top).get())
+        .add_stop(1.0, Ink::Token(|t| t.popover_bottom).get());
+    f.fill(&shape, tint);
+    f.stroke(
+        &Path::rounded_rectangle(
+            Point::new(rect.x + 0.5, rect.y + 0.5),
+            Size::new(rect.width - 1.0, rect.height - 1.0),
+            (RADIUS - 0.5).into(),
+        ),
+        Stroke::default()
+            .with_color(Ink::Token(|t| t.bar_border).get())
+            .with_width(1.0),
+    );
+    crate::theme::hairline(f, rect.x + 14.0, rect.x + rect.width - 14.0, rect.y);
+    crate::theme::code_edge(
+        f,
+        Rectangle::new(
+            Point::new(rect.x + 1.0, rect.y + 16.0),
+            Size::new(8.0, rect.height - 32.0),
+        ),
+        9.0,
+    );
+}
+
 pub fn shake_at(t: Duration) -> f32 {
     const STEPS: [(f32, f32); 6] = [
         (0.0, 0.0),

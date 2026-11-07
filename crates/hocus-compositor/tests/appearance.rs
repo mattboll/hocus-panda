@@ -424,6 +424,65 @@ fn givre_draws_the_bar_in_night_blue_and_rests() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Matrix (#431, variant C): the bar's background near black with a
+/// night-blue cast (opaque on the CPU, `#0C1218` to `#060A12`), never
+/// green; the accent the phosphor green; its code edge down the bar's
+/// left side, green glyphs; once drawn, nothing commits at rest.
+#[test]
+fn matrix_draws_the_bar_near_black_with_its_code_edge_and_rests() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let choose = bed.card_item("DayChoose")?;
+    let accent = (choose.0, choose.1 - 8);
+    bed.themed("dark", "green")?;
+    bed.write(&format!(
+        "{FILE}\n[appearance]\ntheme = \"matrix\"\naccent = \"phosphor\"\n"
+    ))?;
+    bed.themed("matrix", "phosphor")?;
+    // Beside the code edge, the bar's own background.
+    let background = (BAR_LEFT + 11, 540);
+    let black = |[r, g, b]: [u8; 3]| b > g && g > r && b < 30 && g < 22;
+    bed.until(background, black)?;
+    bed.until(accent, |c| near(c, [0x00, 0xF0, 0x60]))?;
+    common::at_rest(&mut bed.hp)?;
+    // Green glyphs in the code edge, below the clock.
+    let (width, _, shot) = bed.hp.screenshot(0)?;
+    let green = (BAR_LEFT + 1..BAR_LEFT + 10)
+        .flat_map(|x| (200..1000).map(move |y| (x, y)))
+        .filter(|(x, y)| {
+            let at = ((y * width + x) * 4) as usize;
+            let [b, g, r] = [shot[at], shot[at + 1], shot[at + 2]];
+            g > r.saturating_add(40) && g > b.saturating_add(20)
+        })
+        .count();
+    if let Some(dir) = std::env::var_os("HOCUS_SHOTS") {
+        let rgba: Vec<u8> = shot
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(
+            width as u32,
+            (shot.len() / 4 / width as usize) as u32,
+            rgba,
+        )
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        let bar = image::imageops::crop_imm(&image, BAR_LEFT as u32 - 8, 0, 212, SCREEN.1 as u32);
+        bar.to_image()
+            .save(Path::new(&dir).join("matrix-bar-opaque.png"))?;
+    }
+    assert!(green > 20, "no code edge: {green} green pixels");
+    bed.hp.hold_clock();
+    common::wait(&mut bed.hp, Duration::from_millis(300))?;
+    let commits = |hp: &Headless| [hp.bar_commits(), hp.levels_commits(), hp.tasks_commits()];
+    let before = commits(&bed.hp);
+    common::wait(&mut bed.hp, Duration::from_millis(1500))?;
+    assert_eq!(commits(&bed.hp), before, "the bar's surfaces drew at rest");
+    Ok(())
+}
+
 /// A theme switch draws only where something is in the theme, and stops
 /// (#740, the sprint's budgets): two screens, the bar on the first, to
 /// Givre, light and back to dark. The second shows nothing themed (the
@@ -444,7 +503,12 @@ fn a_theme_switch_draws_one_frame_per_screen() -> anyhow::Result<()> {
     common::at_rest(&mut bed.hp)?;
     bed.hp.hold_clock();
     common::wait(&mut bed.hp, Duration::from_millis(500))?;
-    for (theme, accent) in [("frost", "ice"), ("light", "green"), ("dark", "green")] {
+    for (theme, accent) in [
+        ("frost", "ice"),
+        ("matrix", "phosphor"),
+        ("light", "green"),
+        ("dark", "green"),
+    ] {
         let before = [bed.hp.frames_on(0), bed.hp.frames_on(1)];
         bed.write(&format!(
             "{file}\n[appearance]\ntheme = \"{theme}\"\naccent = \"{accent}\"\n"

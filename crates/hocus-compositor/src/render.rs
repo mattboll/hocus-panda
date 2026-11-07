@@ -652,8 +652,10 @@ impl State {
             self.config
                 .appearance
                 .high_contrast
-                .then_some(self.config.appearance.theme),
+                .then_some(self.config.appearance.theme.windows()),
         );
+        // And in a themed theme's colours and accent (#431, #740).
+        crate::contrast::set_theme(Some(self.theme_choice()));
         let now = self.now();
         self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();

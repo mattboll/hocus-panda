@@ -1143,12 +1143,13 @@ pub struct Appearance {
     pub reduce_transparency: bool,
     /// `"dark"` or `"light"`: the shell, the Settings, the lock and the
     /// authentication dialog draw in it, and applications are told
-    /// (#402); `"frost"` (Givre, #740): the shell's surfaces only, the
-    /// Settings and applications dark.
+    /// (#402); `"frost"` (Givre, #740) or `"matrix"` (#431): the shell's
+    /// surfaces only, the Settings and applications dark.
     #[serde(deserialize_with = "scheme")]
     pub theme: hocus_link::theme::Scheme,
     /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"`, `"wallpaper"`
-    /// or `"ice"` (Givre's): what is chosen, on or focused.
+    /// `"ice"` (Givre's) or `"phosphor"` (Matrix's): what is chosen, on or
+    /// focused.
     #[serde(deserialize_with = "accent")]
     pub accent: hocus_link::theme::Accent,
     /// The Settings' text, from 80 to 150 %: written as `1.2`, held in
