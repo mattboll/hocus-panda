@@ -91,6 +91,8 @@ impl Bridge {
     /// `tell` is called on AccessKit's thread: it should only send the
     /// event on to the shell's loop.
     pub fn new(tell: impl Fn(Event) + Send + Sync + 'static) -> Self {
+        // Before the first adapter: the application's name on AT-SPI.
+        accesskit_unix::set_app_name("Hocuspanda".to_owned());
         let tell: Tell = Arc::new(tell);
         let probe = accesskit_unix::Adapter::new(
             Activation { tell: tell.clone() },

@@ -798,6 +798,92 @@ impl State {
     }
 }
 
+impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): clearing,
+    /// do not disturb and its chips, then each section's notifications,
+    /// their ✕ and their actions.
+    fn tell_readers(&self, state: &State, laid: &Laid, words: Words) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let mut nodes = Vec::new();
+        if let Some((rect, _)) = laid.clear {
+            nodes.push(rows::act(Target::Clear, Role::Button, words.clear(), rect));
+        }
+        nodes.push(
+            rows::act(Target::Switch, Role::ToggleButton, words.dnd(), laid.switch)
+                .checked(laid.dnd.is_on()),
+        );
+        let n = laid.chips.len();
+        for (i, (choice, rect)) in laid.chips.iter().enumerate() {
+            nodes.push(
+                rows::act(
+                    Target::Chip(*choice),
+                    Role::RadioButton,
+                    words.chip(*choice),
+                    *rect,
+                )
+                .checked(laid.dnd.choice() == Some(*choice))
+                .set(i + 1, n),
+            );
+        }
+        if !laid.said.is_empty() {
+            nodes.push(rows::line(laid.said.join(" ")));
+        }
+        if laid.rows.is_empty() {
+            nodes.push(rows::line(words.nothing()));
+        }
+        let fr = words.fr;
+        let mut section = None;
+        for row in &laid.rows {
+            if section != Some(row.section) {
+                let label = words.section(row.section);
+                let mut chars = label.chars();
+                nodes.push(rows::line(chars.next().map_or_else(String::new, |c| {
+                    c.to_string() + &chars.as_str().to_lowercase()
+                })));
+                section = Some(row.section);
+            }
+            let at = |r: Rectangle| laid.on_popover(r, state.scroll);
+            let name = match (row.cut.app.is_empty(), fr) {
+                (true, _) => row.cut.title.clone(),
+                (false, true) => format!("{} : {}", row.cut.app, row.cut.title),
+                (false, false) => format!("{}: {}", row.cut.app, row.cut.title),
+            };
+            let mut body = row.cut.body.join(" ");
+            if !row.when.is_empty() {
+                body = format!("{body} {}", row.when).trim().to_owned();
+            }
+            let mut node = rows::act(Target::Item(row.key), Role::ListItem, name, at(row.rect))
+                .describe(body)
+                .child(rows::act(
+                    Target::Close(row.key),
+                    Role::Button,
+                    if fr { "Retirer" } else { "Dismiss" },
+                    at(row.close()),
+                ));
+            for (i, (label, rect)) in row.actions.iter().enumerate() {
+                node = node.child(rows::act(
+                    Target::Action(row.key, i),
+                    Role::Button,
+                    label.clone(),
+                    at(*rect),
+                ));
+            }
+            nodes.push(node);
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(state.targets().into_iter().map(|(t, _)| t)),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+}
+
 impl<Message> canvas::Program<Message> for Panel {
     type State = State;
 
@@ -872,6 +958,7 @@ impl<Message> canvas::Program<Message> for Panel {
             };
             ring(&mut frame, rect, radius);
         }
+        self.tell_readers(state, laid, words);
         vec![frame.into_geometry(), list.into_geometry()]
     }
 

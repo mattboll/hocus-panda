@@ -748,6 +748,18 @@ impl Headless {
         self.app.state.configure(id, rect);
     }
 
+    /// The screen reader may start, as on a real session, its program
+    /// `program` instead of Orca (#734).
+    pub fn allow_screen_reader(&mut self, program: std::path::PathBuf) {
+        self.app.state.screen_reader.allowed = true;
+        self.app.state.screen_reader.program = Some(program);
+    }
+
+    /// The screen reader's process, while it runs.
+    pub fn screen_reader(&self) -> Option<u32> {
+        self.app.state.screen_reader.running()
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);

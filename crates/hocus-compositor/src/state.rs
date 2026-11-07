@@ -240,6 +240,8 @@ pub struct State {
     pub radial_paint: crate::radial_draw::RadialPaint,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
+    /// The screen reader started with the session (#734).
+    pub screen_reader: crate::screen_reader::ScreenReader,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -483,6 +485,7 @@ impl State {
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             magnifier: crate::magnifier::Magnifier::default(),
+            screen_reader: crate::screen_reader::ScreenReader::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

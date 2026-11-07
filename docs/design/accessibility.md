@@ -10,6 +10,13 @@ What a screen reader reads of the bar, its popovers, the bubbles, the
 lock and the password dialog, and what it hears on its own: in
 [screen-reader.md](screen-reader.md).
 
+The Accessibilité page's row for it (#734): "Lecteur d'écran" / "Screen
+reader", a switch on `[accessibility] screen-reader` (Orca starts with the
+session; off by default), under it "Super+Alt+S le lance ou l'arrête,
+même sur l'écran de verrouillage." / "Super+Alt+S starts or stops it, on
+the lock screen too.". Turned on in the Settings, Orca starts at once
+(the compositor follows the file).
+
 ## The magnifier (#424)
 
 Status: approved 2026-11 with the mockup's recommended options (full

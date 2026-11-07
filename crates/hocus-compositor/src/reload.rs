@@ -11,7 +11,7 @@
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
-//! `[magnifier]` (#424),
+//! `[magnifier]` (#424), `[accessibility]` (#734),
 //! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[agents]`
 //! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
 //! layouts or options changed has its keymap compiled on the thread too
@@ -264,6 +264,10 @@ impl State {
         // used.
         if self.magnifier_config_changed(&new.magnifier) {
             followed.push("[magnifier]");
+        }
+        // The screen reader (#734): started or stopped.
+        if self.accessibility_changed(&new.accessibility) {
+            followed.push("[accessibility]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

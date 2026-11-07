@@ -373,6 +373,7 @@ impl<Message> canvas::Program<Message> for Panel {
         if let Some(rect) = state.focus.and_then(|id| state.rect_of(id)) {
             ring(f, rect, SMALL_RADIUS);
         }
+        self.say(state, shown);
         vec![frame.into_geometry(), rows.into_geometry()]
     }
 
@@ -396,6 +397,44 @@ fn letter_of(name: &str) -> &str {
 }
 
 impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): its windows,
+    /// each a line that goes to it.
+    fn say(&self, state: &State, shown: &Shown) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let mut nodes = Vec::new();
+        if let Some(screen) = &shown.screen {
+            nodes.push(rows::line(screen.clone()));
+        }
+        if shown.rows.is_empty() {
+            nodes.push(rows::line(self.words.no_window()));
+        }
+        for row in &shown.rows {
+            let Some(rect) = state.rect_of(row.id) else {
+                continue;
+            };
+            let mut name = row.title.clone();
+            if row.minimized {
+                name.push_str(if self.words.fr() {
+                    ", réduite"
+                } else {
+                    ", minimised"
+                });
+            }
+            nodes.push(rows::act(row.id, Role::ListItem, name, rect));
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: self.words.windows(shown.rows.len()),
+                nodes,
+                order: rows::order(state.ids()),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+
     /// What it shows, read afresh: whose list (the controller says), its
     /// rows and their titles, cut to their room once.
     fn refresh<Message>(

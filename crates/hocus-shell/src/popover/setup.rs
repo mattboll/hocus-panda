@@ -896,6 +896,7 @@ impl<Message> canvas::Program<Message> for Panel {
         for part in &laid.parts {
             self.part(f, state, part);
         }
+        self.tell_readers(state);
         vec![frame.into_geometry()]
     }
 
@@ -981,6 +982,180 @@ impl Panel {
             tracing::debug!(targets = %targets, "the sources' popover's targets");
             state.targets_said = Some(targets);
         }
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows): its header's
+    /// buttons, then its parts by their kinds; the token's field never
+    /// says what is typed.
+    fn tell_readers(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        let laid = &state.laid;
+        let fr = self.words.back() == "Retour";
+        let rect_of = |t: Target| laid.targets.iter().find(|(x, _)| *x == t).map(|(_, r)| *r);
+        let mut nodes = Vec::new();
+        if laid.back {
+            nodes.push(rows::act(
+                Target::Back,
+                Role::Button,
+                self.words.back(),
+                back_rect(),
+            ));
+        }
+        nodes.push(rows::act(
+            Target::Close,
+            Role::Button,
+            self.words.close(),
+            close_rect(),
+        ));
+        let mut caption: Option<&str> = None;
+        for part in &laid.parts {
+            match part {
+                Part::Kind {
+                    rect,
+                    target,
+                    name,
+                    lines,
+                    ..
+                } => nodes.push(match target {
+                    Some(t) => rows::act(*t, Role::Button, *name, *rect).describe(lines.join(" ")),
+                    None => rows::line(format!("{name}, {}", lines.join(" "))),
+                }),
+                Part::Account { rect, target, name } => {
+                    nodes.push(rows::act(*target, Role::Button, name.clone(), *rect));
+                }
+                Part::Text { lines, .. } => nodes.push(rows::line(lines.join(" "))),
+                Part::Caption { text, .. } => {
+                    caption = Some(text);
+                    nodes.push(rows::line(*text));
+                }
+                Part::Field {
+                    field,
+                    rect,
+                    refused,
+                } => {
+                    let name = caption.unwrap_or_default().to_owned();
+                    let node = match field {
+                        Field::Token => {
+                            Node::new(rows::key(Target::Field(*field)), Role::PasswordField, name)
+                        }
+                        Field::Address => {
+                            Node::new(rows::key(Target::Field(*field)), Role::TextField, name)
+                                .value(state.address.clone())
+                        }
+                    };
+                    nodes.push(
+                        node.bounds(rows::at(*rect))
+                            .act(hocus_a11y::Act::Focus)
+                            .describe(if *refused {
+                                if fr { "Refusé" } else { "Refused" }
+                            } else {
+                                ""
+                            }),
+                    );
+                }
+                Part::Button {
+                    rect,
+                    target,
+                    word,
+                    busy,
+                    ..
+                } => nodes.push(match target {
+                    Some(t) => rows::act(*t, Role::Button, *word, *rect).disabled(*busy),
+                    None => rows::line(*word),
+                }),
+                Part::Calendar {
+                    index,
+                    rect,
+                    name,
+                    colour,
+                    shown,
+                    featured,
+                    read_only,
+                } => {
+                    let mut node = rows::act(
+                        Target::Calendar(*index),
+                        Role::CheckBox,
+                        name.clone(),
+                        *rect,
+                    )
+                    .checked(*shown);
+                    if *read_only {
+                        node = node.describe(if fr { "lecture seule" } else { "read only" });
+                    }
+                    nodes.push(node);
+                    if let Some(at) = rect_of(Target::Swatch(*index)) {
+                        let word = if fr { "Couleur" } else { "Colour" };
+                        nodes.push(rows::act(
+                            Target::Swatch(*index),
+                            Role::Button,
+                            format!("{word} {}, {name}", colour + 1),
+                            at,
+                        ));
+                    }
+                    if let Some(at) = rect_of(Target::Star(*index)) {
+                        let word = self.words.feature();
+                        nodes.push(
+                            rows::act(
+                                Target::Star(*index),
+                                Role::ToggleButton,
+                                format!("{word} {name}"),
+                                at,
+                            )
+                            .checked(*featured),
+                        );
+                    }
+                }
+                Part::Colours { index, chosen, .. } => {
+                    let word = if fr { "Couleur" } else { "Colour" };
+                    let colours: Vec<(Target, Rectangle)> = laid
+                        .targets
+                        .iter()
+                        .filter(|(t, _)| matches!(t, Target::Colour(i, _) if i == index))
+                        .copied()
+                        .collect();
+                    for (n, (t, r)) in colours.iter().enumerate() {
+                        let Target::Colour(_, j) = t else {
+                            continue;
+                        };
+                        nodes.push(
+                            rows::act(*t, Role::RadioButton, format!("{word} {}", j + 1), *r)
+                                .checked(j == chosen)
+                                .set(n + 1, colours.len()),
+                        );
+                    }
+                }
+                Part::Choice {
+                    target,
+                    rect,
+                    label,
+                    value,
+                } => {
+                    nodes
+                        .push(rows::act(*target, Role::Button, *label, *rect).value(value.clone()));
+                }
+                Part::Option {
+                    target,
+                    rect,
+                    name,
+                    chosen,
+                } => {
+                    nodes.push(
+                        rows::act(*target, Role::RadioButton, name.clone(), *rect).checked(*chosen),
+                    );
+                }
+            }
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: Some(laid.title.to_owned()),
+                nodes,
+                order: rows::order(state.order()),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
     }
 
     fn act(state: &mut State, target: Option<Target>) {

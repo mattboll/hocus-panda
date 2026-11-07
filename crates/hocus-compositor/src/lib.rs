@@ -64,6 +64,7 @@ mod reminders;
 mod render;
 mod rules;
 mod scales;
+mod screen_reader;
 mod screen_sets;
 mod screens;
 mod session;
@@ -248,6 +249,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.shell.auth_agent = matches!(options.backend, BackendKind::Tty);
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
+    // Orca only when the compositor is the session (#734).
+    state.screen_reader.allowed = matches!(options.backend, BackendKind::Tty);
+    screen_reader::listen(&event_loop.handle(), &mut state)?;
     state.leave_start(match (options.system_bus, &options.backend) {
         (Some(address), _) => Some(address),
         (None, BackendKind::Tty) => Some("system".to_owned()),

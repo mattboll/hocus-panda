@@ -389,6 +389,7 @@ impl<Message> canvas::Program<Message> for Panel {
         }) {
             ring(f, rect, 8.0);
         }
+        self.tell_readers(state);
         vec![frame.into_geometry()]
     }
 
@@ -559,6 +560,91 @@ impl Panel {
             SMALL,
             NOTE_LINE,
             FAINT.get(),
+        );
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows): Sources' tools
+    /// with their state and button, the command to copy; or the consent's
+    /// words, file and buttons.
+    fn tell_readers(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let words = self.words;
+        let targets = state.targets(words);
+        let mut nodes = Vec::new();
+        let mut subtitle = None;
+        match state.item {
+            Some(Item::Plug(tool)) => {
+                let l = consent_layout(tool, &state.said, words);
+                subtitle = Some(words.plug_title(tool));
+                nodes.push(rows::line(l.what.1.join(" ")));
+                nodes.push(rows::line(format!("{} {}", words.file_changed(), l.file)));
+                nodes.push(rows::line(l.kept.join(" ")));
+                nodes.push(rows::act(
+                    Target::Cancel,
+                    Role::Button,
+                    words.cancel(),
+                    l.cancel,
+                ));
+                nodes.push(rows::act(
+                    Target::Confirm,
+                    Role::Button,
+                    words.plug(),
+                    l.confirm,
+                ));
+            }
+            Some(Item::Sources | Item::AnotherTool) => {
+                let l = state.sources_layout(words);
+                for (row, _, target) in &l.rows {
+                    let (name, tool_state) = match row {
+                        Row::Tool(tool) => (tool.title(), state.said.state(tool.word())),
+                        Row::Herdr => ("herdr", state.said.state("herdr")),
+                    };
+                    let (said, _) = words.tool_state(tool_state);
+                    match target {
+                        Some((t, rect)) => {
+                            let word = match t {
+                                Target::Follow => words.follow(),
+                                Target::Unplug(_) => words.unplug(),
+                                _ => words.plug(),
+                            };
+                            nodes.push(
+                                rows::act(*t, Role::Button, format!("{word} {name}"), *rect)
+                                    .describe(said),
+                            );
+                        }
+                        None => nodes.push(rows::line(format!("{name}, {said}"))),
+                    }
+                }
+                if let Some(rect) = l.decline {
+                    nodes.push(rows::act(
+                        Target::Decline,
+                        Role::Button,
+                        words.decline(),
+                        rect,
+                    ));
+                }
+                nodes.push(rows::line(l.any.1.join(" ")));
+                nodes.push(rows::line(words.command()));
+                nodes.push(rows::act(
+                    Target::Copy,
+                    Role::Button,
+                    words.copy(state.copied),
+                    l.copy,
+                ));
+                nodes.push(rows::line(l.note.1.join(" ")));
+            }
+            _ => {}
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle,
+                nodes,
+                order: rows::order(targets.into_iter().map(|(t, _)| t)),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
         );
     }
 

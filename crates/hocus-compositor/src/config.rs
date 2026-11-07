@@ -45,6 +45,8 @@ pub struct Config {
     pub overview: Overview,
     /// The magnifier (docs/design/accessibility.md, #424).
     pub magnifier: Magnifier,
+    /// The screen reader (docs/design/screen-reader.md, #734).
+    pub accessibility: Accessibility,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -1518,6 +1520,15 @@ impl Default for Overview {
     fn default() -> Self {
         Self { hot_corner: true }
     }
+}
+
+/// `[accessibility]` (docs/design/screen-reader.md, #734).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Accessibility {
+    /// The screen reader (Orca) starts with the session; `Super+Alt+S`
+    /// starts or stops it whatever this says.
+    pub screen_reader: bool,
 }
 
 /// The magnifier, `[magnifier]` (docs/design/accessibility.md, #424).

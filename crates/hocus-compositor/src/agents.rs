@@ -353,8 +353,14 @@ impl Compositor {
             }
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
             Heard::Screens(heard) => self.displays_heard(heard),
+            Heard::Asked(Question::A11y, reply) => {
+                // The shell answers, a moment later.
+                self.ask_a11y(reply);
+                return;
+            }
             Heard::Asked(question, reply) => {
                 let answer = match question {
+                    Question::A11y => return,
                     Question::Idle => {
                         // What changed this turn, judged first.
                         self.flush_idle();

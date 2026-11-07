@@ -293,6 +293,9 @@
 # magnifier-in = ["Super+equal", "Super+plus", "Super+KP_Add"]
 # magnifier-out = ["Super+minus", "Super+KP_Subtract"]
 # magnifier-off = "Super+Escape"
+# Starts the screen reader (Orca), or stops it; on the lock screen too
+# (docs/design/screen-reader.md).
+# screen-reader = "Super+Alt+S"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
@@ -475,6 +478,12 @@
 # follow-keyboard = true
 # Smoothed; off, hard pixels.
 # smooth = true
+
+# [accessibility]
+# The screen reader (Orca) starts with the session; it reads the bar, its
+# popovers, the notifications, the lock screen and the password dialog
+# (docs/design/screen-reader.md). Super+Alt+S starts or stops it anyway.
+# screen-reader = false
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the
