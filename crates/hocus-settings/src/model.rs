@@ -1,4 +1,4 @@
-//! The settings' model: the 18 sections in their 5 groups, and every
+//! The settings' model: the 19 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -51,7 +51,7 @@ impl Group {
     }
 }
 
-/// The eighteen sections, in the sidebar's order.
+/// The nineteen sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
@@ -72,6 +72,8 @@ pub enum SectionId {
     Power,
     Account,
     DateTime,
+    /// A day of the desktop's CPU and memory (#655).
+    Performance,
 }
 
 /// A section: its page and its row in the sidebar.
@@ -90,7 +92,7 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
@@ -109,6 +111,7 @@ impl SectionId {
         Self::Power,
         Self::Account,
         Self::DateTime,
+        Self::Performance,
     ];
 
     pub fn section(self) -> Section {
@@ -321,6 +324,17 @@ impl SectionId {
                 Icon::DateTime,
                 "6.11",
             ),
+            Self::Performance => s(
+                "performance",
+                System,
+                w("Performances", "Performance"),
+                w(
+                    "Ce que le bureau — le compositeur et le shell — a coûté à ta machine. Mesuré toutes les 10 s par un fil à part, sans réveiller le bureau ; gardé 14 jours.",
+                    "What the desktop — the compositor and the shell — cost your machine. Measured every 10 s on a thread of its own, without waking the desktop; kept 14 days.",
+                ),
+                Icon::Performance,
+                "#655",
+            ),
         }
     }
 
@@ -355,6 +369,7 @@ pub enum Icon {
     Power,
     Account,
     DateTime,
+    Performance,
     Home,
     Search,
     Sliders,
@@ -417,6 +432,7 @@ impl Icon {
                 "M12 12 A4 4 0 1 0 12 4 A4 4 0 1 0 12 12 Z M4.5 20.5 A7.5 7.5 0 0 1 19.5 20.5"
             }
             Self::DateTime => "M12 21 A9 9 0 1 0 12 3 A9 9 0 1 0 12 21 Z M12 7.5 V12 L15 14",
+            Self::Performance => "M3 12.5 H7 L9.5 6 L14 19 L16.5 12.5 H21",
             Self::Home => "M3.5 11 L12 4 L20.5 11 M6 9.5 V20 H18 V9.5 M10 20 V14.5 H14 V20",
             Self::Search => {
                 "M10.5 17.5 A7 7 0 1 0 10.5 3.5 A7 7 0 1 0 10.5 17.5 Z M15.6 15.6 L20.5 20.5"
@@ -949,6 +965,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Agents => crate::agents::settings(),
         SectionId::Apps => crate::applications::settings(),
         SectionId::Captures => crate::captures::settings(),
+        SectionId::Performance => crate::perf::settings(),
         _ => &[],
     }
 }
@@ -1012,8 +1029,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eighteen_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 18);
+    fn nineteen_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 19);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -1022,7 +1039,7 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [5, 4, 2, 4, 3],
+            [5, 4, 2, 4, 4],
             "the mockup's groups"
         );
         // Each group's sections come together, in the groups' order.

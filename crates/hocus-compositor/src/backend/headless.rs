@@ -470,6 +470,7 @@ where
             if state.display_off(&out.output) {
                 continue;
             }
+            let started = std::time::Instant::now();
             let shown = magnifier::screen(renderer, state, &out.output, true, &mut out.lens);
             let elements = &shown.elements;
             let mut framebuffer = match renderer.bind(&mut out.target) {
@@ -509,6 +510,7 @@ where
                 state.presented(&out.output, state.clock.now().into(), out.frames);
             }
             state.send_frames(&out.output, Some(shown.states.as_ref().unwrap_or(&states)));
+            state.perf_scene(&out.output, started.elapsed());
             state.desktops_drawn(&out.output);
             state.read_under_grips(renderer);
         }

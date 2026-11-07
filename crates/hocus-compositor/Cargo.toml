@@ -24,6 +24,8 @@ hocus-agents = { path = "../hocus-agents", version = "1.0.0" }
 # The session's start-up applications (6.15), read as the launcher reads
 # desktop entries.
 hocus-xdg = { path = "../hocus-xdg", version = "1.0.0" }
+# A day's CPU and memory, recorded off the loop (#655).
+hocus-perf = { path = "../hocus-perf", version = "1.0.0" }
 anyhow = "1.0.104"
 # The same as smithay's, with signals: SIGTERM and SIGINT stop the loop.
 calloop = { version = "0.14.5", features = ["signals"] }
@@ -42,6 +44,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # the shell's clock reads it.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libloading = "0.8.9"
+# A signal's notification waits for its click on its own thread (#655).
+futures-util = { version = "0.3.34", default-features = false }
 # The lock's PAM conversation (7.1): the C allocator PAM frees its answers
 # with, and the user's account (getpwuid_r).
 libc = "0.2.191"

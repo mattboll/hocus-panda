@@ -110,6 +110,12 @@ impl State {
 
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         use crate::away::{Felt, Pressed};
+        if !matches!(
+            event,
+            InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }
+        ) {
+            self.perf.counters.input();
+        }
         // Any of the user's input, devices added and removed aside, is
         // activity (7.3): it only notes the time. What lifts the curtain,
         // or wakes the screens of a session not locked, goes no further

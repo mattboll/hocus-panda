@@ -1901,6 +1901,8 @@ dependencies = [
  "clap",
  "hocus-agents",
  "hocus-day",
+ "hocus-perf",
+ "jiff",
  "serde_json",
  "tempfile",
 ]
@@ -1913,12 +1915,14 @@ dependencies = [
  "calloop 0.14.5",
  "clap",
  "fontdue",
+ "futures-util",
  "hocus-agents",
  "hocus-compositor",
  "hocus-config",
  "hocus-geometry",
  "hocus-link",
  "hocus-pandas",
+ "hocus-perf",
  "hocus-xdg",
  "image",
  "jiff",
@@ -2007,6 +2011,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-perf"
+version = "1.0.0"
+dependencies = [
+ "jiff",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "hocus-settings"
 version = "1.0.0"
 dependencies = [
@@ -2018,6 +2034,7 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
+ "hocus-perf",
  "hocus-sound",
  "hocus-xdg",
  "iced",
