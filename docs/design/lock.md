@@ -202,15 +202,21 @@ Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`):
   34 px button with its arrow (or its spinner while checking), the line
   12 px under (13.5 px on 1.45, 40 px kept).
 - **The agents waiting**: a count, no name, C's pill (13 px, 600, `#F5C46E`
-  on `rgba(245,180,74,0.10)`, a 34 px row, its 8 px dot), centred 12 px
+  on `rgba(245,180,74,0.10)`, a 34 px row; the waiting panda, 34 px, 6 px
+  in, in place of its dot since #649, playing its mood as the lock
+  shows), centred 12 px
   under the line's room: "2 agents t'attendent" / "2 agents are waiting
   for you". Without one, nothing.
 - **The status row**, bottom right (32 px in, its centre 44 px up, 18 px
   apart): the layout's code in its 44 × 32 button (with a choice of
   layouts), the battery's sign and percentage in its band's colour (with
   a battery), the Wi-Fi's sign (with NetworkManager).
-- **Two pandas asleep** in the bottom left corner (66 and 56 px at 85 %,
-  the second turned 14°, two "z" in Manrope, as Unbounded is not bundled).
+- **Two pandas asleep** in the bottom left corner: the validated resting
+  drawing (#649), 132 and 108 px, at 100 %, the second 12 px into the
+  first's box and turned 14° back; their "z" are the drawing's. As the
+  lock shows they breathe twice, their "z" rising (8 s), then lie still:
+  the lock draws once a minute again. Still with reduced motion, in power
+  saver or on the CPU.
 - **Motion**: the fade in, 250 ms out-cubic (120 ms with reduced motion or
   on the CPU), by the compositor over its frozen frame. The shake, 360 ms
   (10, 9, 6, 4 px), by the shell, on a GPU without reduced motion only. The

@@ -441,8 +441,10 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 - Inert sectors (no desktop on that side, one screen only) at 25 %:
   they neither light nor pick. A switch that is on shows its icon in
   `#7EE0A0` with a 3 px dot.
-- A window hosting an agent that waits: the hub shows its panda (64 px,
-  bobbing); otherwise its application's letter tile.
+- A window hosting an agent (#649: any agent, not only a waiting one):
+  the hub shows the panda of the one that needs the user most (78 px),
+  playing its mood as the menu opens, a waiting one bobbing on; otherwise
+  its application's letter tile.
 - **Closing it**: `Esc`, a click in the hub or outside the menu, the
   window going, its screen going, the session locking.
 - **Keyboard** while open: the arrows step the lit sector that way (from
@@ -714,7 +716,7 @@ connector unplugged before or a new one.
 As built (#417; question 2, option C): when at least one window moved
 with a screen gone or back, the **winking panda** (its hat raised, never
 an agent state's pose) comes out of the bar's edge as an agent's panda
-does (bar.md §7 C: 170 px, its motion, 18 px from the bar, at the
+does (bar.md §7 C: 200 px since #649, its motion, 18 px from the bar, at the
 secretary's height), with a **blue bubble** (`rgba(16,24,44,0.95)`, a
 1 px border `#8FB3FF` at 45 %; under the pointer
 `rgba(22,32,58,0.97)`), two lines of 13 px, the first in bold
@@ -969,22 +971,24 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   the panda in a halo of that colour, and how many agents are in the
   state that needs the user most (waiting, stuck, to see, working,
   resting): "3 t’attendent" / "3 waiting", "1 au travail" / "1 working".
-  The panda is 14 % of the window's width in the layout, 42 px at least
-  and 84 at most, the words in proportion (larger than the mockup's
-  42 px: the pandas big and visible). While one waits, the panda bobs
-  (3 px) and waves its paw on a 1.6 s loop. A desktop with no window
-  (minimised ones aside) shows a sleeping panda in its thumbnail, half
-  its height (64 px at most), eyes shut, a "z" over it, breathing
-  (3.2 s) for two breaths as the overview opens, then still. With
-  reduced motion, no panda moves.
+  The panda is the validated drawing of their mood (#649), 18 % of the
+  window's width in the layout, 56 px at least and 110 at most, the words
+  growing half as fast (12.5 px at 56 px). As the overview opens each
+  badge's panda plays its mood once (about 2.5 s); a waiting one plays it
+  again and again while it waits, bobbing (3 px, 1.6 s loop). A desktop
+  with no window (minimised ones aside) shows the resting panda in its
+  thumbnail, 75 % of its height (96 px at most), breathing twice as two
+  "z" rise (8 s) as the overview opens, then still. With reduced motion
+  or in power saver, no panda moves.
 - **Minimised** windows are laid out after the others, at 60 %; a window
   on all desktops (#723) is laid out, and shown in the thumbnails, on
   every desktop of its screen.
 - **At rest** nothing draws but what clients commit: every picture (the
   titles, the numbers, the badges, the ✕, the pandas) is drawn once on
-  the CPU for each look it takes and kept; a waiting agent's panda
-  waves on twelve pictures of its paw, so the overview never rests
-  while an agent waits, as the radial menu's panda (§10b).
+  the CPU for each look it takes and kept; a panda's burst is a picture
+  per frame (30 a second, resvg), and a waiting agent's plays on, so the
+  overview never rests while an agent waits, as the radial menu's panda
+  (§10b).
 - **As built** (`crates/hocus-compositor/src/overview.rs`, its drawing
   in `overview_draw.rs`). Measured headless
   (`crates/hocus-compositor/tests/overview.rs`, two screens): `Super+W`
@@ -1339,7 +1343,7 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     serial, its connector only as a fallback; each set of screens keeps
     its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
     defaults; Écrans lists the sets known and forgets one. The peek's
-    panda is 170 px (was 96).
+    panda is 170 px (was 96); 200 px since #649, waving its hat twice.
 15. Screens of different scales (#419, the s8a mockup, questions 12 to
     15): a window straddling two scales is asked to draw at the larger,
     reduced on the other screen; a window too big for the screen it is

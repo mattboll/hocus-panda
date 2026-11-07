@@ -213,11 +213,11 @@ the battery's 3 are over, the dim comes at once).
   (`CURTAIN_FRAME`, through the motions' wake-up, no timer of its own),
   and with reduced motion a frame a second, the dim in steps.
 - **The pill**, drawn by the shell on a layer surface of its own
-  connection only (`hocus-curtain`, 300 × 64, anchored to the top of the
+  connection only (`hocus-curtain`, 300 × 80 since #649, anchored to the top of the
   screen the compositor names, its top at 64 % of the screen's height,
   centred across; it takes neither the pointer nor the keys): the glass
   (`rgba(22,27,42,0.86)` to `rgba(14,17,28,0.92)`, opaque on the CPU), a
-  1 px rim, the panda (42 px) falling asleep, "Verrouillage dans 7 s" over
+  1 px rim, the panda (64 px since #649) falling asleep, "Verrouillage dans 7 s" over
   "Bouge la souris pour rester", and the countdown's line. The shell
   draws it at most ten times a second (`request_redraw_at`), and nothing
   once it is gone. The compositor draws its shadow (the popovers'), fades
@@ -374,7 +374,7 @@ real shell on the CPU where the pill is drawn:
 | `before_sleep_the_shells_lock_is_waited_for_two_seconds_at_most` | The shell's lock on screen first; a held shell: let go at 2 s, not before |
 | `the_lid_closed_docked_on_ac_does_not_lock` | The laptop's screen off, the other on, nothing locked; opened, both on |
 | `at_rest_no_wakeup_beyond_the_idle_timer` | Nothing armed at rest but the idle countdown; a frame a tenth of a second while it dims; locked and off, nothing armed, nothing drawn |
-| `the_shell_draws_the_pill_on_the_screen_under_the_pointer` | The pill on the pointer's screen, 300 × 64, centred, at 64 %; gone once lifted |
+| `the_shell_draws_the_pill_on_the_screen_under_the_pointer` | The pill on the pointer's screen, 300 × 80, centred, at 64 %; gone once lifted |
 
 6.10's, `crates/hocus-compositor/tests/power_actions.rs` (a fake logind,
 UPower and power-profiles-daemon on a private system bus, a fake
