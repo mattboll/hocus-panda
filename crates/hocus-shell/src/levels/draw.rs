@@ -717,16 +717,19 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
 }
 
 /// The keyboard's ring around `rect` (bar.md §11): 2 px of the accent as
-/// text, 3 px out, its radius the item's and as much again.
+/// text, 3 px out, its radius the item's and as much again. Under high
+/// contrast, 3 px, 2 px out, the background's colour between: the same
+/// room.
 pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    stroke_around(
-        f,
-        rect,
-        radius,
-        RING_OUT,
-        RING,
-        crate::theme::ACCENT_TEXT.get(),
-    );
+    let colour = crate::theme::ACCENT_TEXT.get();
+    if crate::theme::contrast() {
+        let gap = RING_OUT - 1.0;
+        let back = crate::theme::Ink::Token(|t| t.popover_opaque_bottom).get();
+        stroke_around(f, rect, radius, 0.0, gap, back);
+        stroke_around(f, rect, radius, gap, RING + 1.0, colour);
+    } else {
+        stroke_around(f, rect, radius, RING_OUT, RING, colour);
+    }
 }
 
 /// A stroke `width` wide around `rect`, `out` px from it.

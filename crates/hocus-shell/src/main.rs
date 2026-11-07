@@ -256,6 +256,14 @@ fn clock_shift() -> Option<String> {
     Some(at)
 }
 
+impl Shell {
+    /// Whether `bar` is drawn as a tint over the compositor's blur: on
+    /// glass, unless a maximised window shows on its screen (bar.md §11).
+    fn glass_of(&self, bar: &Bar) -> bool {
+        self.look.glass && !self.opaque.contains(&bar.output)
+    }
+}
+
 /// How bars look, as the compositor says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Look {
@@ -370,6 +378,9 @@ struct Shell {
     to_compositor: Option<mpsc::UnboundedSender<String>>,
     software: bool,
     look: Look,
+    /// The screens whose bar is opaque behind a maximised window, as the
+    /// compositor says (`opaque-bars`).
+    opaque: Vec<String>,
     bars: HashMap<window::Id, Bar>,
     /// Bars asked for on screens whose names have not reached
     /// iced_layershell yet ([`outputs`]): their forms, by screen.
@@ -430,6 +441,7 @@ impl Shell {
                 glass: !software,
                 motion: !software,
             },
+            opaque: Vec::new(),
             bars: HashMap::new(),
             waiting: HashMap::new(),
             now: Instant::now(),
@@ -855,6 +867,11 @@ impl Shell {
                 reminder::set_fullscreen(screens);
                 Task::none()
             }
+            // Every bar draws again: those named opaque, the others glass.
+            ToShell::OpaqueBars(screens) => {
+                self.opaque = screens;
+                Task::none()
+            }
             ToShell::SharedScreens(screens) => {
                 reminder::set_shared(screens);
                 Task::none()
@@ -1262,7 +1279,7 @@ impl Shell {
         let at = self.now + AHEAD;
         let forms = bar.forms(at);
         let (width, height) = bar.clock_surface;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             // The bar's gradient where the clock is, which changes by less
             // than a level over the clock's height.
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
@@ -1299,7 +1316,7 @@ impl Shell {
         let bar = self.bars.values().find(|b| b.levels == id)?;
         let at = self.now + AHEAD;
         let (_, height) = bar.levels_surface;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - levels::draw::BOTTOM as f32 - height as f32 / 2.0;
             mix(
@@ -1330,7 +1347,7 @@ impl Shell {
     fn connections_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = self.bars.values().find(|b| b.connections == id)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - levels::draw::BOTTOM as f32 - 160.0;
             mix(
@@ -1360,7 +1377,7 @@ impl Shell {
     fn desktops_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = self.bars.values().find(|b| b.desktops == id)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle =
                 bar_height - levels::draw::BOTTOM as f32 - desktops::draw::middle(&bar.output);
@@ -1393,7 +1410,7 @@ impl Shell {
         let bar = self.bars.values().find(|b| b.agents == id)?;
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the group, read as it draws.
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
+        let backdrop = (!self.glass_of(bar)).then_some(agents::draw::Backdrop {
             top: OPAQUE_TOP.get(),
             bottom: OPAQUE_BOTTOM.get(),
         });
@@ -1420,7 +1437,7 @@ impl Shell {
         let bar = self.bars.values().find(|b| b.tasks == id)?;
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the list, read as it draws.
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
+        let backdrop = (!self.glass_of(bar)).then_some(agents::draw::Backdrop {
             top: OPAQUE_TOP.get(),
             bottom: OPAQUE_BOTTOM.get(),
         });
@@ -1445,7 +1462,7 @@ impl Shell {
     fn footer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = self.bars.values().find(|b| b.footer == id)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - 40.0;
             mix(
@@ -1476,7 +1493,7 @@ impl Shell {
         let output = in_use::bar_of(id)?;
         let bar = self.bars.values().find(|b| b.output == output)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = column::TOP;
             mix(
@@ -1508,7 +1525,7 @@ impl Shell {
         let output = meeting::bar_of(id)?;
         let bar = self.bars.values().find(|b| b.output == output)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = column::TOP;
             mix(
@@ -1540,7 +1557,7 @@ impl Shell {
         let output = windows::bar_of(id)?;
         let bar = self.bars.values().find(|b| b.output == output)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
+        let backdrop = (!self.glass_of(bar)).then_some(agents::draw::Backdrop {
             top: OPAQUE_TOP.get(),
             bottom: OPAQUE_BOTTOM.get(),
         });
@@ -1566,7 +1583,7 @@ impl Shell {
         let output = today::bar_of(id)?;
         let bar = self.bars.values().find(|b| b.output == output)?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = today::shown(&output).1 + 40.0;
             mix(
@@ -1599,7 +1616,7 @@ impl Shell {
             .values()
             .find(|b| tray::draw::surface(&b.output) == Some(id))?;
         let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
+        let backdrop = (!self.glass_of(bar)).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
             let middle = bar_height - 100.0;
             mix(
@@ -2028,7 +2045,7 @@ impl Shell {
         };
         let width = bar.width(self.now + AHEAD);
         let output = bar.output.clone();
-        let (top, bottom) = if self.look.glass {
+        let (top, bottom) = if self.glass_of(bar) {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
@@ -2045,7 +2062,7 @@ impl Shell {
                 )),
                 border: Border {
                     color: RIM.get(),
-                    width: 1.0,
+                    width: theme::border(),
                     radius: (RADIUS as f32).into(),
                 },
                 ..container::Style::default()

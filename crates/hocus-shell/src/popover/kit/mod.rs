@@ -138,16 +138,17 @@ pub(crate) fn background(f: &mut Frame, size: Size, glass: bool) {
         .add_stop(0.0, top.get())
         .add_stop(1.0, bottom.get());
     f.fill(&shape, canvas::Fill::from(tint));
+    let border = crate::theme::border();
     let rim = Path::rounded_rectangle(
-        Point::new(BORDER / 2.0, BORDER / 2.0),
-        Size::new(size.width - BORDER, size.height - BORDER),
-        (radius - BORDER / 2.0).into(),
+        Point::new(border / 2.0, border / 2.0),
+        Size::new(size.width - border, size.height - border),
+        (radius - border / 2.0).into(),
     );
     f.stroke(
         &rim,
         canvas::Stroke {
             style: canvas::Style::Solid(RIM.get()),
-            width: BORDER,
+            width: border,
             ..canvas::Stroke::default()
         },
     );

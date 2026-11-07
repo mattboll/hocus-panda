@@ -819,7 +819,13 @@ polled from the loop.
   screen readers.
 - Reduced motion: as stated in sections 3, 6 and 7.
 - The glass falls back to an opaque background when "reduce
-  transparency" or high contrast is set, or behind a maximised window.
+  transparency" or high contrast is set, or behind a maximised window:
+  a screen whose current desktop shows a maximised window (not
+  minimised) has its bar opaque and no blur behind it, until the window
+  is restored, minimised, closed or the desktop changes (`opaque-bars`,
+  told to the shell as it changes; the launcher's and the overview's
+  scrims stay, they dim). Measured headless (`appearance.rs`,
+  `behind_a_maximised_window_the_bar_is_opaque`).
 
 ### The whole bar by the keyboard (#422)
 
@@ -943,6 +949,52 @@ strong, the states as text their darker values above; the others keep
 theirs. A "neon" theme, the Matrix one and a theme by the time of day are
 for later.
 
+### High contrast (#423)
+
+`[appearance] high-contrast` reinforces the theme chosen, dark or light,
+and keeps the accent: two more tables of the same tokens
+(`hocus_link::theme::DARK_CONTRAST`, `LIGHT_CONTRAST`), told to the shell
+with the theme (`theme SCHEME ACCENT WALLPAPER contrast`) and read by the
+Settings from the file.
+
+| Token | Dark + contrast | Light + contrast |
+|---|---|---|
+| bar, popover, bubble background | `#05070C`, `#0A0D16` (opaque) | `#FFFFFF` |
+| `bar.border` (also the popovers') | 2 px `#AEB6C6` | 2 px `#2E3546` |
+| `text` / `text.2` / `text.dim` / `text.faint` | `#FFFFFF` / `#F4F6FA` / `#E2E6EE` / `#D0D6E0` | `#000000` / `#0B0F18` / `#1C2230` / `#2E3546` |
+| window / sidebar | `#05070C` / `#000000` | `#FFFFFF` / `#F1F3F7` |
+| card rim, divider | `#8E98AB`, `#6B7488` | `#4A5468`, `#6B7488` |
+| control, its rim | `#000000`, `#D0D6E0` | `#FFFFFF`, `#2E3546` |
+| switch off; chosen segment | black (its border `text.faint`); `#3A4255` | white; `#DDE1EA` |
+| hovers and fills | none | none |
+| text in the accent, the keyboard's ring | its "on dark" lifted until it reads at 7:1 on every background (green `#9DF0B9`) | its "on light" darkened to 7:1 (green about `#155C33`) |
+| `state.wait` / `stuck` / `meeting` as text | `#FFD27A` / `#FFB48A` / `#B5CCFF` | `#6B4500` / `#8A3300` / `#1C48A5` |
+| tinted rows (waiting, stuck, to see) | no tint; a 3 px bar on the row's left in the state's colour | the same |
+
+- Every text pair reads at **7:1** at least on every background of its
+  table, and every border or control's edge at **3:1**, for each accent
+  and a few wallpapers' (unit tests of `hocus-link`:
+  `under_high_contrast_text_reads_at_7_to_1_and_borders_at_3_to_1`).
+- **It implies reduced transparency**: no glass anywhere (`glass_on()`
+  is false); the file keeps its own `reduce-transparency`.
+- The colours drawn outside the tokens are read by rule
+  (`hocus_link::theme::on_contrast`): a white veil faint enough to be a
+  fill or a hover goes; a stronger one (a lit item, a rule) is a solid
+  surface a step off the background; stronger still (a mark, a rim) the
+  cards' rim; a grey a text's colour; a dark background the theme's; a
+  state's tint goes. The gauges, the pandas, the secretary, the desktops'
+  sketches, the wallpaper and the windows keep theirs.
+- **The keyboard's ring**: 3 px, with 2 px of the background between it
+  and its item (§11). The focused window's rim stays 2 px.
+- Applications are told as before (the portal's `contrast = 1`).
+- **Not built**: the radial menu and the overview, drawn by the
+  compositor in their own colours, do not follow it; the hovers' 1 px
+  border in `text.dim` (hovers draw nothing under high contrast).
+- **Measured**: the unit tests above; headless
+  (`crates/hocus-compositor/tests/appearance.rs`), the bar's background
+  `#05070C` under dark and contrast, white under light and contrast, the
+  light theme's own once it is off, the shell told `contrast`, no glass.
+
 ## 14. Open questions
 
 1. ~~The secretary's pencil drawing (section 7, B).~~ Decided on the 4.6
@@ -1027,8 +1079,7 @@ are later slices'.
 - **The background.** The compositor draws the wallpaper under everything
   (6.3, settings.md): by default Nuit, the mockup's night-blue gradient
   and its glows, so that the glass has something to show.
-- **Not built yet:** the glass's opaque fallback behind a maximised window
-  (§11), the contents' cross-fade (§3,
+- **Not built yet:** the contents' cross-fade (§3,
   nothing to fade yet), hover feedback on the edge strip (the mockup's
   green tint is the mockup's own aid), and the blur's corners, which are
   cut to whole pixels under the shell's antialiased rim.

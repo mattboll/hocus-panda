@@ -16,6 +16,7 @@ static NOW: RwLock<Choice> = RwLock::new(Choice {
     scheme: Scheme::Dark,
     accent: Accent::Green,
     wallpaper: hocus_link::theme::BACKDROP_ACCENT,
+    contrast: false,
 });
 
 /// The theme from now on; whether it changed.
@@ -34,6 +35,12 @@ pub fn now() -> Choice {
 /// Whether the shell draws on light backgrounds.
 pub fn light() -> bool {
     now().scheme == Scheme::Light
+}
+
+/// Whether high contrast reinforces the theme (#423): borders 2 px, the
+/// keyboard's ring 3 px with the background between it and its item.
+pub fn contrast() -> bool {
+    now().contrast
 }
 
 pub fn tokens() -> &'static Tokens {
@@ -77,9 +84,9 @@ impl Ink {
     pub fn in_theme(self, choice: Choice) -> Color {
         match self {
             Self::Token(token) => color(token(choice.tokens())),
-            Self::Dark(c) => match choice.scheme {
-                Scheme::Dark => c,
-                Scheme::Light => color(hocus_link::theme::on_light(rgba(c))),
+            Self::Dark(c) => match (choice.scheme, choice.contrast) {
+                (Scheme::Dark, false) => c,
+                _ => color(choice.reads(rgba(c))),
             },
             Self::Accent(alpha) => {
                 let [r, g, b] = choice.accent().base;

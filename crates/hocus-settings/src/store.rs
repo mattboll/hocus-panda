@@ -278,6 +278,11 @@ fn theme_of(doc: &DocumentMut) -> hocus_link::theme::Choice {
             .unwrap_or_default(),
         // The wallpaper's accent is the window's to find (6.3).
         wallpaper: hocus_link::theme::AccentColours::default(),
+        contrast: doc
+            .get("appearance")
+            .and_then(|a| a.get("high-contrast"))
+            .and_then(Item::as_bool)
+            .unwrap_or(false),
     }
 }
 

@@ -572,9 +572,13 @@ impl State {
     }
 
     /// Whether the compositor blurs behind the bars: it can, transparency
-    /// is not reduced, and the shell draws on a GPU.
+    /// is not reduced (high contrast reduces it too, #423), and the shell
+    /// draws on a GPU.
     pub fn glass_on(&self) -> bool {
-        self.blur && !self.config.appearance.reduce_transparency && !self.shell.software
+        self.blur
+            && !self.config.appearance.reduce_transparency
+            && !self.config.appearance.high_contrast
+            && !self.shell.software
     }
 
     /// Tells the shell, if it is there; a shell that does not read loses

@@ -837,6 +837,17 @@ impl Headless {
         })
     }
 
+    /// Whether the bar on `output` is opaque behind a maximised window, as
+    /// the shell was told (bar.md §11).
+    pub fn bar_opaque(&self, output: &str) -> bool {
+        self.app.state.bar_opaque(output)
+    }
+
+    /// Whether the compositor blurs behind the bars.
+    pub fn glass_on(&self) -> bool {
+        self.app.state.glass_on()
+    }
+
     /// The screen whose bar holds the keyboard (an item of it, or its
     /// popover), if one does (`Super+B`, bar.md §11).
     pub fn bar_keyboard(&self) -> Option<String> {

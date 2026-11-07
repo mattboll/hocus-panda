@@ -700,6 +700,12 @@ pub enum ToShell {
     /// window that had it. Written `bar-keyboard OUTPUT` or `bar-keyboard
     /// -`.
     BarKeyboard(Option<String>),
+    /// The screens whose bar draws its opaque background, a maximised
+    /// window showing on their current desktop (bar.md §11): the
+    /// compositor draws no glass behind them. Sent as the shell connects
+    /// and when they change. Written `opaque-bars`, then each screen's
+    /// name after a tab.
+    OpaqueBars(Vec<String>),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -2016,6 +2022,13 @@ impl fmt::Display for ToShell {
             Self::Focus(output) => write!(f, "focus {output}"),
             Self::BarKeyboard(Some(output)) => write!(f, "bar-keyboard {output}"),
             Self::BarKeyboard(None) => f.write_str("bar-keyboard -"),
+            Self::OpaqueBars(screens) => {
+                f.write_str("opaque-bars")?;
+                for screen in screens {
+                    write!(f, "\t{screen}")?;
+                }
+                Ok(())
+            }
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
                 let app = app_word(app);
@@ -2197,6 +2210,17 @@ impl FromStr for ToShell {
             && (names.is_empty() || names.starts_with('\t'))
         {
             return Ok(Self::SharedScreens(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
+        if let Some(names) = line.strip_prefix("opaque-bars")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::OpaqueBars(
                 names
                     .split('\t')
                     .filter(|n| !n.is_empty())
@@ -3198,6 +3222,7 @@ mod tests {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
                 wallpaper: theme::AccentColours::lifted([0x3A, 0x2A, 0x26]),
+                contrast: true,
             }),
             ToShell::Wallpaper(wallpaper::Wallpapers {
                 lock: wallpaper::LockLook::Picture,
@@ -3238,6 +3263,8 @@ mod tests {
             ToShell::Join,
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
+            ToShell::OpaqueBars(vec!["eDP-1".to_owned()]),
+            ToShell::OpaqueBars(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
             ToShell::SharedScreens(Vec::new()),
             ToShell::Day(DayAsk::Calendar {
@@ -3551,6 +3578,7 @@ mod tests {
             "day slept",
             "day slept soon",
             "fullscreenHDMI-A-1",
+            "opaque-barseDP-1",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }

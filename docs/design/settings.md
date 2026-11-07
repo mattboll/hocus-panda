@@ -1008,12 +1008,15 @@ desktop following; an accent among six (bar.md §13 gives every value).
   launcher, the notifications, the lock screen, the authentication
   dialog, the capture's and the sharing's panels); reduced motion and
   reduced transparency to the bars and to what the compositor moves; high
-  contrast to the focused window's rim; the cursor's theme and size to
+  contrast (#423) with the theme (`theme SCHEME ACCENT WALLPAPER
+  contrast`: its own tables of tokens, bar.md §13 "High contrast", no
+  glass) and to the focused window's rim; the cursor's theme and size to
   the cursor (its theme's thread started again) and to the programs
   started afterwards.
 - **The Settings window** reads the same keys with the rest of the file
   and draws in them as soon as the file changes: it is its own preview.
-  Its toast stays dark in both themes.
+  Its toast stays dark in both themes. `high-contrast` too: the window
+  draws the high-contrast tokens of its theme.
 - **Applications** are told through the desktop's portal backend, which
   now serves `org.freedesktop.impl.portal.Settings` (version 2) beside
   the screen cast, on the same name (`hocuspanda.portal`;
