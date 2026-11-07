@@ -8,7 +8,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
-use hocus_a11y::{Node, Rect};
+use hocus_a11y::{Act, Node, Rect, Role};
 use iced::{Rectangle, window};
 
 /// What a popover shows, for screen readers.
@@ -54,6 +54,46 @@ pub fn at(rect: Rectangle) -> Option<Rect> {
 /// A target's key: its debug form.
 pub fn key(target: impl std::fmt::Debug) -> String {
     format!("{target:?}")
+}
+
+/// A row the keyboard's ring goes to (`target`), `Enter` acting on it.
+pub fn act(
+    target: impl std::fmt::Debug,
+    role: Role,
+    name: impl Into<String>,
+    rect: Rectangle,
+) -> Node {
+    Node::new(key(target), role, name)
+        .bounds(at(rect))
+        .act(Act::Click)
+}
+
+/// A slider the ring goes to: its value as words and as a number, 0 to
+/// 100, the arrows' step `step`.
+pub fn slider(
+    target: impl std::fmt::Debug,
+    name: impl Into<String>,
+    value: f32,
+    step: f32,
+    rect: Rectangle,
+) -> Node {
+    Node::new(key(target), Role::Slider, name)
+        .value(format!("{}\u{a0}%", value.round().max(0.0) as u32))
+        .range(f64::from(value), 0.0, 100.0, Some(f64::from(step)))
+        .bounds(at(rect))
+        .act(Act::Increment)
+        .act(Act::Decrement)
+}
+
+/// A line of text that nothing holds: a note, a section's label.
+pub fn line(text: impl Into<String>) -> Node {
+    let text = text.into();
+    Node::new(format!("line:{text}"), Role::Label, text)
+}
+
+/// The keys of `targets`, the ring's order.
+pub fn order<T: std::fmt::Debug>(targets: impl IntoIterator<Item = T>) -> Vec<String> {
+    targets.into_iter().map(key).collect()
 }
 
 /// The `Tab`s that take the ring from `focus` to `to` in `order` (round

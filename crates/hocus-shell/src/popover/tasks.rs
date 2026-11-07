@@ -362,6 +362,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 Alignment::Left,
             ));
         }
+        self.say(state);
         vec![frame.into_geometry()]
     }
 
@@ -380,6 +381,67 @@ impl<Message> canvas::Program<Message> for Panel {
 }
 
 impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): the `+`, the
+    /// field, the tasks' boxes, the empty list's line, "+ N".
+    fn say(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::{Node, Role};
+        let mut nodes = vec![rows::act(
+            Target::Add,
+            Role::Button,
+            self.words.add(),
+            add_rect(),
+        )];
+        if let Some(rect) = state.laid.field {
+            let text = tasks::field()
+                .filter(|f| f.at == At::Popover)
+                .map(|f| f.text);
+            nodes.push(
+                Node::new(
+                    rows::key(Target::Field),
+                    Role::TextField,
+                    self.words.placeholder(),
+                )
+                .value(text.unwrap_or_default())
+                .bounds(rows::at(rect)),
+            );
+        }
+        for (index, top) in state.visible() {
+            let Some(line) = state.lines.lines.get(index) else {
+                continue;
+            };
+            let mut node = Node::new(
+                rows::key(Target::Box(line.key.clone())),
+                Role::CheckBox,
+                line.title.clone(),
+            )
+            .checked(line.look.ticked())
+            .bounds(rows::at(button(top)));
+            if acts(line.look, &line.key) {
+                node = node.act(hocus_a11y::Act::Click);
+            }
+            if matches!(line.look, Look::Unsaved { .. }) {
+                node = node.describe(self.words.unsaved());
+            }
+            nodes.push(node);
+        }
+        if state.laid.empty.is_some() {
+            nodes.push(rows::line(self.words.nothing()));
+        }
+        if let Some((more, _)) = &state.laid.more {
+            nodes.push(rows::line(more.clone()));
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: Some(self.words.count(state.lines.open())),
+                nodes,
+                order: rows::order(state.order()),
+                focus: state.focus.as_ref().map(rows::key),
+            },
+        );
+    }
+
     /// What it shows, read afresh while it is open.
     fn refresh(&self, state: &mut State) {
         if !super::with(|c| c.is_open(self.id)) {

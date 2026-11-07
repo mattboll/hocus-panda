@@ -456,6 +456,30 @@ impl Panel {
             tracing::debug!(%said, "the meeting's popover shows it");
             state.said = Some(said);
         }
+        // For screen readers (crate::a11y::rows): the card's name, its
+        // place, its buttons, what comes next.
+        use crate::a11y::rows::{self, Rows};
+        let mut nodes = vec![rows::line(self.words.name(&card))];
+        for (target, rect) in &layout.buttons {
+            let name = match target {
+                Target::Join => self.words.join_call(),
+                Target::Calendar => self.words.show_in_calendar(),
+            };
+            nodes.push(rows::act(*target, hocus_a11y::Role::Button, name, *rect));
+        }
+        if let Some((time, title)) = &card.then {
+            let then = if self.words.fr() { "Ensuite" } else { "Next" };
+            nodes.push(rows::line(format!("{then} : {time}, {title}")));
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(layout.buttons.iter().map(|(t, _)| *t)),
+                focus: state.focused.map(rows::key),
+            },
+        );
     }
 
     fn act(target: Target) {

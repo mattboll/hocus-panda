@@ -644,6 +644,60 @@ impl Panel {
             tracing::debug!("the window's menu shows it: {said}");
             state.said = Some(said);
         }
+        // For screen readers (crate::a11y::rows): the actions, the switches,
+        // each screen's desktops as radio buttons, then closing.
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let menu = &shown.menu;
+        let fr = self.words.french;
+        let mut nodes = Vec::new();
+        for (target, rect) in &layout.targets {
+            let node = match *target {
+                Target::Above | Target::AllDesktops => rows::act(
+                    *target,
+                    Role::ToggleButton,
+                    self.words.name(*target, menu.maximized),
+                    *rect,
+                )
+                .checked(if *target == Target::Above {
+                    menu.above
+                } else {
+                    menu.all_desktops
+                }),
+                Target::Tile { screen, desktop } => {
+                    let Some(s) = menu.screens.get(screen) else {
+                        continue;
+                    };
+                    let mut name = if fr {
+                        format!("Envoyer sur le bureau {}", desktop + 1)
+                    } else {
+                        format!("Send to desktop {}", desktop + 1)
+                    };
+                    if menu.screens.len() > 1 {
+                        name.push_str(&format!(", {}", self.words.screen(s)));
+                    }
+                    rows::act(*target, Role::RadioButton, name, *rect)
+                        .checked(s.here == Some(desktop))
+                        .set(usize::from(desktop) + 1, usize::from(s.count))
+                }
+                _ => rows::act(
+                    *target,
+                    Role::Button,
+                    self.words.name(*target, menu.maximized),
+                    *rect,
+                ),
+            };
+            nodes.push(node);
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: Some(shown.title.clone()),
+                nodes,
+                order: rows::order(layout.targets.iter().map(|(t, _)| *t)),
+                focus: state.focus.map(rows::key),
+            },
+        );
     }
 
     /// `target` acted on: a switch flips and stays, the rest closes the

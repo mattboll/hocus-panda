@@ -273,6 +273,60 @@ impl Panel {
         Some(canvas::Action::request_redraw().and_capture())
     }
 
+    /// What it shows, for screen readers (crate::a11y::rows): its rows by
+    /// their kinds, a submenu's back row first.
+    fn tell_readers(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use crate::tray::menu::Toggle;
+        use hocus_a11y::{Node, Role};
+        let Some(root) = crate::tray::menu(self.key) else {
+            return;
+        };
+        let level = level(&root);
+        let mut nodes = Vec::new();
+        if level.id != root.id {
+            nodes.push(rows::act(
+                Target::Back,
+                Role::Button,
+                level.label.clone(),
+                title_rect(),
+            ));
+        }
+        for (entry, rect) in rows(level) {
+            if entry.kind == Kind::Separator {
+                continue;
+            }
+            let target = Target::Row(entry.id);
+            let role = match entry.toggle {
+                Toggle::Check(_) => Role::CheckBox,
+                Toggle::Radio(_) => Role::RadioButton,
+                Toggle::None => Role::Button,
+            };
+            let mut node = Node::new(rows::key(target), role, entry.label.clone())
+                .bounds(rows::at(rect))
+                .disabled(!entry.enabled);
+            if let Toggle::Check(on) | Toggle::Radio(on) = entry.toggle {
+                node = node.checked(on);
+            }
+            if entry.submenu() {
+                node = node.expanded(false);
+            }
+            if entry.acts() {
+                node = node.act(hocus_a11y::Act::Click);
+            }
+            nodes.push(node);
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(Self::targets(&root, level)),
+                focus: state.focus.map(rows::key),
+            },
+        );
+    }
+
     /// What it shows, said once as it changes.
     fn say(&self, state: &mut State) {
         let Some(root) = crate::tray::menu(self.key) else {
@@ -428,6 +482,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 ));
             }
         }
+        self.tell_readers(state);
         vec![frame.into_geometry()]
     }
 

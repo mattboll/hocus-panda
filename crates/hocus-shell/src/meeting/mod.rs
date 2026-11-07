@@ -535,6 +535,10 @@ impl Words {
         if self.fr { fr } else { en }
     }
 
+    pub(crate) fn fr(self) -> bool {
+        self.fr
+    }
+
     /// "25 min", "1 h 05".
     pub(crate) fn minutes(minutes: i64) -> String {
         if minutes >= 60 {

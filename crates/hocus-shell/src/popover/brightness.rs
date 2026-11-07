@@ -346,6 +346,7 @@ impl<Message> canvas::Program<Message> for Panel {
             let (rect, radius) = focus.shape(state.keyboard);
             ring(&mut frame, rect, radius);
         }
+        self.say(state, layout);
         vec![frame.into_geometry()]
     }
 
@@ -420,6 +421,65 @@ impl Panel {
             }
         }
         until.map(canvas::Action::request_redraw_at)
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows).
+    fn say(&self, state: &State, layout: &Layout) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let shape = |t: Target| t.shape(state.keyboard).0;
+        let mut nodes = vec![rows::slider(
+            Target::Light,
+            self.words.brightness(),
+            state.light(),
+            5.0,
+            shape(Target::Light),
+        )];
+        if let Some(keyboard) = state.keyboard.filter(|_| layout.keyboard) {
+            let name = if self.words.fr() {
+                "Rétroéclairage du clavier"
+            } else {
+                "Keyboard backlight"
+            };
+            if keyboard.segmented() {
+                let names = self.words.keyboard_levels(keyboard.levels());
+                let level = state.level().min(keyboard.max);
+                nodes.push(rows::line(name));
+                for i in 0..keyboard.levels() {
+                    nodes.push(
+                        rows::act(
+                            Target::Level(i),
+                            Role::RadioButton,
+                            names.get(i as usize).copied().unwrap_or_default(),
+                            shape(Target::Level(i)),
+                        )
+                        .checked(i == level)
+                        .set(i as usize + 1, keyboard.levels() as usize),
+                    );
+                }
+            } else {
+                let share = state.level().min(keyboard.max) as f32 / keyboard.max.max(1) as f32;
+                nodes.push(rows::slider(
+                    Target::Keys,
+                    name,
+                    share * 100.0,
+                    100.0 / keyboard.max.max(1) as f32,
+                    shape(Target::Keys),
+                ));
+            }
+        }
+        for (_, lines) in &layout.notes {
+            nodes.push(rows::line(lines.join(" ")));
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: Some(self.words.built_in().to_owned()),
+                nodes,
+                order: rows::order(state.targets()),
+                focus: state.focus.map(rows::key),
+            },
+        );
     }
 
     /// The keyboard's row: its icon, then its levels or its slider.
