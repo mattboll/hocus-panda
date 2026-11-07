@@ -293,6 +293,7 @@ The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 scripts/vm/debian.sh up        # boot it, user alex / panda
 scripts/vm/debian.sh copy      # target/debug's programs into it (says what libraries it lacks)
 scripts/vm/debian.sh ssh '~/hocus-vm session'    # the session on its tty1
+scripts/vm/debian.sh ssh 'echo --renderer pixman > ~/.hocus-args'  # its next session on the CPU
 scripts/vm/debian.sh keys e c h o ret            # its keyboard (QEMU key names)
 scripts/vm/debian.sh mouse 60 40; scripts/vm/debian.sh click
 scripts/vm/debian.sh screen shot.png             # what its screen shows

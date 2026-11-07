@@ -123,8 +123,9 @@ pub enum BackendKind {
     /// In a window of the current session.
     Winit,
     /// The session itself, on a virtual terminal: DRM/KMS, libinput, a
-    /// seat from logind or seatd.
-    Tty,
+    /// seat from logind or seatd; drawn with GLES, or pixman when GLES
+    /// does not start (#333) or when asked.
+    Tty(RendererChoice),
     /// Nowhere: outputs are offscreen buffers.
     Headless(HeadlessConfig),
 }
@@ -184,7 +185,7 @@ impl RuntimeDir {
             return Ok(Self::Shared(dir.clone()));
         }
         match options.backend {
-            BackendKind::Winit | BackendKind::Tty => std::env::var_os("XDG_RUNTIME_DIR")
+            BackendKind::Winit | BackendKind::Tty(_) => std::env::var_os("XDG_RUNTIME_DIR")
                 .map(|dir| Self::Shared(PathBuf::from(dir)))
                 .context("XDG_RUNTIME_DIR is not set; pass --runtime-dir"),
             BackendKind::Headless(_) => Self::private(),
@@ -235,22 +236,22 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.shell.program = options.shell;
     let system_bus = match (options.system_bus.clone(), &options.backend) {
         (Some(address), _) => Some(away::system::Bus::Given(address)),
-        (None, BackendKind::Tty) => Some(away::system::Bus::System),
+        (None, BackendKind::Tty(_)) => Some(away::system::Bus::System),
         (None, _) => None,
     };
     state.shell.bus = match (options.session_bus, &options.backend) {
         (Some(address), _) => Some(shell::Bus::Given(address)),
-        (None, BackendKind::Tty) => Some(shell::Bus::Session),
+        (None, BackendKind::Tty(_)) => Some(shell::Bus::Session),
         (None, _) => None,
     };
     // On a virtual terminal the compositor is the session: its shell is
     // the session's polkit agent (7.5).
-    state.shell.auth_agent = matches!(options.backend, BackendKind::Tty);
+    state.shell.auth_agent = matches!(options.backend, BackendKind::Tty(_));
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
     state.leave_start(match (options.system_bus, &options.backend) {
         (Some(address), _) => Some(address),
-        (None, BackendKind::Tty) => Some("system".to_owned()),
+        (None, BackendKind::Tty(_)) => Some("system".to_owned()),
         (None, _) => None,
     });
     state.start_sharing();

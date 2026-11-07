@@ -1128,6 +1128,35 @@ they are built.
   portal a previous session left running is restarted then (see
   [sharing](sharing.md#511b-a-portal-left-by-a-previous-session-2026-11-03)).
 
+### Drawn on the CPU when the GPU has no GLES (#333)
+
+On a real screen, the session draws with GLES on the primary GPU. Where
+EGL or GLES cannot start there (no Mesa driver for it, a broken or
+missing EGL), it no longer fails back to the display manager: it draws
+with pixman on the CPU, into dumb buffers, which every display engine
+offers, and says so once in the journal ("no GLES on the GPU (…):
+drawing with pixman on the CPU, slower and without blur").
+
+**As built.** `crates/hocus-compositor/src/backend/tty.rs`: the
+renderer, the screens' buffers and each screen's surface are GLES's or
+pixman's (`Drawing`, `Outputs`, `Surface`), chosen once as the GPU opens
+(`choose`); everything else (the magnifier, captures, screen sharing,
+the lock's last frame) runs on either, as headless already did. On
+pixman, as headless: no blur (the bar's glass is plain), no shaders'
+motions (bar.md), clients' buffers taken by shared memory and linear
+dmabufs. The dumb buffers are opaque (`XRGB8888` first): a primary
+plane may take only that (virtio-gpu's refuses `ARGB8888` there).
+`--renderer pixman` asks for it on a virtual terminal too
+(`--renderer gles`: GLES or fail); the VM's `~/.hocus-args` passes it
+(`echo --renderer pixman > ~/.hocus-args`). If pixman cannot draw
+either, the session fails as before and the display manager comes back.
+Tests: `backend::tty::tests::without_gles_the_screens_are_drawn_with_pixman`
+(GLES failing: pixman made and taken; asked for pixman: GLES never
+tried; asked for GLES: its error); in the VM (2026-11-07), the session
+with `--renderer pixman`, and with EGL made to fail
+(`__EGL_VENDOR_LIBRARY_FILENAMES` naming no vendor): the journal's one
+line, the bar, a terminal typed into; without either, GLES as before.
+
 ### The last session comes back (#725)
 
 Decided with the maintainer (2026-11-06): the applications open at log

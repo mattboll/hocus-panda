@@ -2,7 +2,8 @@
 # Inside the VM (copied there as ~/hocus-vm): hocuspanda as the session on
 # tty1.
 #
-#   hocus-vm session    start the session on tty1 (the screen), with foot
+#   hocus-vm session    start the session on tty1 (the screen), with foot;
+#                       ~/.hocus-args adds arguments (`--renderer pixman`)
 #   hocus-vm log        what it said (its stderr)
 #   hocus-vm stop       stop it
 set -eu
@@ -27,12 +28,14 @@ case "${1:-}" in
         # on stderr is kept, with backtraces, should it end.
         echo $$ > ~/hocus.pid
         systemctl --user start dbus.socket
+        # ~/.hocus-args: more arguments, one line (`--renderer pixman`).
+        # shellcheck disable=SC2046
         RUST_BACKTRACE=1 exec ~/bin/hocuspanda --backend tty --spawn foot \
-            > /dev/null 2> ~/hocus.log ;;
+            $(cat ~/.hocus-args 2>/dev/null) > /dev/null 2> ~/hocus.log ;;
     log) exec cat ~/hocus.log ;;
     stop)
         # The session would start again on tty1 without this.
         rm -f ~/.hocus-session
         kill "$(cat ~/hocus.pid)" && echo stopped ;;
-    *) sed -n '2,8p' "$0"; exit 2 ;;
+    *) sed -n '2,9p' "$0"; exit 2 ;;
 esac

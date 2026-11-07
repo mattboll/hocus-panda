@@ -36,7 +36,7 @@ impl Backend {
     ) -> anyhow::Result<Self> {
         Ok(match kind {
             BackendKind::Winit => Self::Winit(Box::new(winit::init(handle, state)?)),
-            BackendKind::Tty => Self::Tty(Box::new(tty::init(handle, state)?)),
+            BackendKind::Tty(renderer) => Self::Tty(Box::new(tty::init(handle, state, *renderer)?)),
             BackendKind::Headless(config) => Self::Headless(headless::init(config, handle, state)?),
         })
     }
