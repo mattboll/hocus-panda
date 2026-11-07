@@ -355,6 +355,7 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
             "windows.magnet",
             "windows.snap-by-drag",
             "windows.wobble",
+            "windows.animation",
             "windows.alt-tab",
             "overview.hot-corner",
             "ink.enabled"
