@@ -161,6 +161,17 @@ mod tests {
         assert_eq!(light.contrast, 1);
         assert_eq!(light.accent_color, (0.357, 0.553, 0.937));
         assert_eq!(Values::default().color_scheme, 1);
+        // Givre: applications are told dark, and its ice blue.
+        let frost = Values::of(
+            Choice {
+                scheme: Scheme::Frost,
+                accent: Accent::Ice,
+                ..Choice::default()
+            },
+            false,
+        );
+        assert_eq!(frost.color_scheme, 1);
+        assert_eq!(frost.accent_color, (0.498, 0.847, 1.0));
     }
 
     #[test]
