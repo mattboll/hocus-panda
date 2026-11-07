@@ -117,12 +117,49 @@ impl Window {
     }
 }
 
-/// A process's memory since it last went back.
-#[derive(Debug, Default, Clone, Copy)]
+/// A process's memory since it last went back: where it began, its
+/// highest, and where it was each hour since (a step up, a screen
+/// plugged, rises in one hour only: not a leak).
+#[derive(Debug, Default, Clone)]
 struct Growth {
     from: i64,
     from_kb: u32,
     highest: u32,
+    hours: VecDeque<(i64, u32)>,
+}
+
+impl Growth {
+    fn new(t: i64, kb: u32) -> Self {
+        Self {
+            from: t,
+            from_kb: kb,
+            highest: kb,
+            hours: [(t, kb)].into(),
+        }
+    }
+
+    /// Notes `kb` at `t`: a new hour's mark when an hour went by.
+    fn note(&mut self, t: i64, kb: u32) {
+        self.highest = self.highest.max(kb);
+        if self.hours.back().is_none_or(|h| t - h.0 >= 3600) {
+            self.hours.push_back((t, kb));
+            if self.hours.len() > 4 {
+                self.hours.pop_front();
+            }
+        }
+    }
+
+    /// Risen each of its last three hours, by a quarter of the slope at
+    /// least.
+    fn rising(&self) -> bool {
+        let rose = |a: u32, b: u32| f64::from(b) - f64::from(a) >= GROWTH_KB_PER_H / 4.0;
+        self.hours.len() >= 4
+            && self
+                .hours
+                .iter()
+                .zip(self.hours.iter().skip(1))
+                .all(|(a, b)| rose(a.1, b.1))
+    }
 }
 
 /// The five signals, judged sample after sample.
@@ -256,35 +293,35 @@ impl Watch {
                 continue;
             }
             let i = who.index();
-            let growth = match self.growth[i] {
+            let growth = match self.growth[i].take() {
                 Some(mut g) if f64::from(kb) >= f64::from(g.highest) * (1.0 - GROWTH_BACK) => {
-                    g.highest = g.highest.max(kb);
+                    g.note(s.t, kb);
                     g
                 }
                 // Back by more than 5 % (or a new process): it starts
                 // again from here.
                 _ => {
                     self.end(SignalKind::MemoryGrowing, Some(who));
-                    Growth {
-                        from: s.t,
-                        from_kb: kb,
-                        highest: kb,
-                    }
+                    Growth::new(s.t, kb)
                 }
             };
+            // Once raised, it holds until the memory goes back or slows.
+            let rising =
+                growth.rising() || self.open_of(SignalKind::MemoryGrowing, Some(who)).is_some();
+            let (from, from_kb) = (growth.from, growth.from_kb);
             self.growth[i] = Some(growth);
-            let hours = (s.t - growth.from) as f64 / 3600.0;
-            let slope = (f64::from(kb) - f64::from(growth.from_kb)) / hours.max(f64::EPSILON);
-            if s.t - growth.from >= GROWTH_OVER_S && slope > GROWTH_KB_PER_H {
+            let hours = (s.t - from) as f64 / 3600.0;
+            let slope = (f64::from(kb) - f64::from(from_kb)) / hours.max(f64::EPSILON);
+            if s.t - from >= GROWTH_OVER_S && slope > GROWTH_KB_PER_H && rising {
                 let new = self.hold(
                     SignalKind::MemoryGrowing,
-                    growth.from,
+                    from,
                     s.t,
                     slope / 1024.0,
                     Some(who),
                 );
                 if let Some(at) = self.open_of(SignalKind::MemoryGrowing, Some(who)) {
-                    self.open[at].kb = Some([growth.from_kb, kb]);
+                    self.open[at].kb = Some([from_kb, kb]);
                 }
                 raise(new, SignalKind::MemoryGrowing);
             } else {

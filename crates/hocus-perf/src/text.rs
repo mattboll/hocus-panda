@@ -250,6 +250,9 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
     .find_map(|k| of(k).next())
     {
         capital(&event(e, lang))
+    } else if p.wallpaper {
+        lang.pick("Le fond animé en marche", "The moving wallpaper running")
+            .to_owned()
     } else if opened > 1 {
         match lang {
             Lang::French => format!("{opened} fenêtres ouvertes"),

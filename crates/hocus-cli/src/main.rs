@@ -30,6 +30,10 @@
 //! - `hocus settings [SECTION]`: the Settings' window (6.1), on that
 //!   section (`power`), or brought forward on it when it is open.
 //!
+//! - `hocus perf day [--date YYYY-MM-DD] [--json]`: a day of the
+//!   desktop's CPU and memory, its peaks and its signals, as recorded in
+//!   `$XDG_STATE_HOME/hocuspanda/perf` (docs/performance.md).
+//!
 //! The line goes to the compositor's control socket: `--socket`, else
 //! `$HOCUS_SOCKET`, else beside `$WAYLAND_DISPLAY`'s socket.
 
@@ -45,6 +49,7 @@ use clap::{Parser, Subcommand};
 use hocus_agents::{Question, Report, Source, State, hooks};
 
 mod day;
+mod perf;
 
 /// `hocus-settings`, in `PATH` or beside this program, which it becomes.
 fn settings(section: Option<&str>, join: Option<&str>) -> ExitCode {
@@ -129,6 +134,11 @@ enum Command {
         #[command(subcommand)]
         command: DayCommand,
     },
+    /// The desktop's CPU and memory over a day (docs/performance.md).
+    Perf {
+        #[command(subcommand)]
+        command: PerfCommand,
+    },
     /// Asks the desktop what it knows.
     Msg {
         #[command(subcommand)]
@@ -161,6 +171,20 @@ enum MsgCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PerfCommand {
+    /// A day's totals, peaks and signals, read from the files the desktop
+    /// records (the same the Settings' Performances page shows).
+    Day {
+        /// The day (default: today), of the 14 kept.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        date: Option<String>,
+        /// As JSON, for a script, an agent or a bug report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum DayCommand {
     /// Keeps a Planka board's access token, read on standard input, where
     /// the bar reads it: the session's keyring, else a file of yours alone.
@@ -187,6 +211,9 @@ fn main() -> ExitCode {
     let args = Args::parse();
     match args.command {
         Command::Settings { section, join } => settings(section.as_deref(), join.as_deref()),
+        Command::Perf {
+            command: PerfCommand::Day { date, json },
+        } => perf::day(date.as_deref(), json),
         Command::Agent { name, state, pid } => {
             let state = match state.as_str() {
                 "ended" => None,

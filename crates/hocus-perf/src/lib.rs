@@ -13,6 +13,7 @@
 //!   the Settings' Performances page.
 
 pub mod files;
+pub mod fixture;
 pub mod format;
 pub mod record;
 pub mod report;

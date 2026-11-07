@@ -16,6 +16,8 @@ pub const PEAK_FLOOR_PERCENT: f64 = 2.0;
 pub const MOST_PEAKS: usize = 8;
 /// Events this long before or after a peak are what was happening.
 pub const AROUND_S: i64 = 30;
+/// Runs above the threshold this close together are one peak.
+pub const JOINED_S: i64 = 60;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Cpu {
@@ -74,6 +76,8 @@ pub struct Peak {
     pub signal: Option<SignalKind>,
     /// What happened from 30 s before it to 30 s after.
     pub events: Vec<Event>,
+    /// A moving wallpaper ran for most of it.
+    pub wallpaper: bool,
     /// What its samples counted: frames, input events, frames of the
     /// desktop's motions, the applications' commits.
     pub frames: u64,
@@ -174,6 +178,7 @@ fn peak_of(samples: &[&Sample], from: i64, to: i64) -> Peak {
         cpu_ms,
         signal: None,
         events: Vec::new(),
+        wallpaper: false,
         frames: samples.iter().map(|s| u64::from(s.f)).sum(),
         inputs: samples.iter().map(|s| u64::from(s.i)).sum(),
         motion_frames: samples.iter().map(|s| u64::from(s.a)).sum(),
@@ -266,6 +271,14 @@ pub fn report(day: &Day) -> Report {
     // Signals.
     r.signals = signals::judge(samples);
     r.peaks = peaks(samples, &r.signals);
+    for p in &mut r.peaks {
+        let ran: i64 = r
+            .wallpaper
+            .iter()
+            .map(|&w| overlap(w, (p.from, p.to)))
+            .sum();
+        p.wallpaper = ran * 2 > p.seconds();
+    }
     r
 }
 
@@ -276,24 +289,27 @@ fn peaks(samples: &[Sample], signals: &[Signal]) -> Vec<Peak> {
         .max(PEAK_FLOOR_PERCENT);
     let mut found: Vec<Peak> = Vec::new();
     let mut run: Vec<&Sample> = Vec::new();
+    // A run's peak counts the calm samples within it too.
     let close = |run: &mut Vec<&Sample>, found: &mut Vec<Peak>| {
         if let (Some(first), Some(last)) = (run.first(), run.last()) {
-            found.push(peak_of(run, first.from(), last.t));
+            let (from, to) = (first.from(), last.t);
+            let within: Vec<&Sample> = samples
+                .iter()
+                .filter(|s| s.from() >= from && s.t <= to)
+                .collect();
+            found.push(peak_of(&within, from, to));
         }
         run.clear();
     };
     for s in samples {
-        let joined = run
-            .last()
-            .is_none_or(|last| s.from() - last.t <= i64::from(INTERVAL_MS / 1000));
-        if s.desktop_percent() > threshold && joined {
-            run.push(s);
-        } else {
-            close(&mut run, &mut found);
-            if s.desktop_percent() > threshold {
-                run.push(s);
-            }
+        if s.desktop_percent() <= threshold {
+            continue;
         }
+        let joined = run.last().is_none_or(|last| s.from() - last.t <= JOINED_S);
+        if !joined {
+            close(&mut run, &mut found);
+        }
+        run.push(s);
     }
     close(&mut run, &mut found);
     // The signals (a memory's rise spans the day: not a peak), each over a
