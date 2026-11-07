@@ -230,7 +230,7 @@ pub fn load_font(handle: &LoopHandle<'static, App>) {
 
 /// The file fontconfig gives for a semibold sans-serif.
 fn fontconfig_choice() -> Option<PathBuf> {
-    let output = std::process::Command::new("fc-match")
+    let output = crate::programs::default_signals(&mut std::process::Command::new("fc-match"))
         .args(["--format=%{file}", "sans-serif:weight=600"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
