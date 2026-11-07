@@ -32,6 +32,12 @@ impl State {
             tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme changed");
             self.tell_shell(ToShell::Theme(choice));
         }
+        if (now.high_contrast, now.theme) != (old.high_contrast, old.theme) {
+            // What the compositor draws itself, drawn again in its colours.
+            self.radial_paint = crate::radial_draw::RadialPaint::default();
+            self.overview_paint = crate::overview_draw::OverviewPaint::default();
+            self.magnifier.paint = crate::magnifier::draw::Paint::default();
+        }
         if (
             now.reduced_motion,
             now.reduce_transparency,

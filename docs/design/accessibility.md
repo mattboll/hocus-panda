@@ -180,8 +180,8 @@ transparency; 7:1 for text, 3:1 for borders and controls).
   for the other colours, the ring and what is built are in
   [bar.md §13, "High contrast"](bar.md#high-contrast-423). The bar, its
   popovers, the bubbles, the lock screen, the authentication dialog and
-  the Settings draw it; the radial menu and the overview, drawn by the
-  compositor in their own colours, do not yet.
+  the Settings draw it; so do the radial menu, the overview and the
+  magnifier's pill, which the compositor draws.
 - **Reduced transparency** (`[appearance] reduce-transparency`, or high
   contrast): no blur, and the opaque colours of the bar, its popovers, the
   bubbles, the reminder, the capture's and the sharing's panels. Behind a

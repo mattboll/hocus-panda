@@ -16,6 +16,7 @@ mod bubbles;
 mod capture;
 mod clipboard;
 mod config;
+mod contrast;
 mod cursor;
 mod decoration;
 mod desktop_set;

@@ -538,6 +538,13 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         self.grabber.ready(renderer);
+        // What the compositor draws itself, in high contrast if it is on.
+        crate::contrast::set(
+            self.config
+                .appearance
+                .high_contrast
+                .then_some(self.config.appearance.theme),
+        );
         let now = self.now();
         self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();

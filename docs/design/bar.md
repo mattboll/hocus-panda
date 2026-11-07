@@ -991,13 +991,18 @@ Settings from the file.
 - **The keyboard's ring**: 3 px, with 2 px of the background between it
   and its item (§11). The focused window's rim stays 2 px.
 - Applications are told as before (the portal's `contrast = 1`).
-- **Not built**: the radial menu and the overview, drawn by the
-  compositor in their own colours, do not follow it; the hovers' 1 px
-  border in `text.dim` (hovers draw nothing under high contrast).
+- **What the compositor draws itself** (the radial menu, the overview's
+  words, marks and boxes, the magnifier's pill), drawn in the dark
+  theme's colours, reads each colour by the same rule
+  (`crates/hocus-compositor/src/contrast.rs`): its disc and its panels
+  the table's background, opaque; no fills or tints; rims solid, the
+  cards' rim; its words solid at 7:1 (an inert word in `text.dim`).
 - **Measured**: the unit tests above; headless
   (`crates/hocus-compositor/tests/appearance.rs`), the bar's background
   `#05070C` under dark and contrast, white under light and contrast, the
-  light theme's own once it is off, the shell told `contrast`, no glass.
+  light theme's own once it is off, the shell told `contrast`, no glass;
+  `tests/contrast.rs`, the radial menu's disc and the overview's
+  thumbnails' rims under each table.
 
 ## 14. Open questions
 
