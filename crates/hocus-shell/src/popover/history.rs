@@ -130,9 +130,9 @@ const CLOSE_IN: (f32, f32) = (6.0, 8.0);
 const CLOSE_RADIUS: f32 = 6.0;
 const ACTION: f32 = 26.0;
 const ACTION_GAP: f32 = 6.0;
-/// The empty state: the panda 96 px, its words 8 px apart.
-const EMPTY: f32 = 220.0;
-const PANDA: f32 = 96.0;
+/// The empty state: the panda 140 px (#649), its words 8 px apart.
+const EMPTY: f32 = 264.0;
+const PANDA: f32 = 140.0;
 const EMPTY_GAP: f32 = 8.0;
 const NOTHING: f32 = 14.0;
 const ALL_READ: f32 = 12.0;
@@ -758,6 +758,9 @@ pub struct State {
     leaving: Option<Leaving>,
     /// Since when it is empty, for the panda's coming in.
     empty_since: Option<Instant>,
+    /// The panda breathing as two "z" rise, as it opens empty or empties
+    /// (#649).
+    dozing: Option<crate::pandas::Burst>,
     now: Option<Instant>,
 }
 
@@ -1170,7 +1173,12 @@ impl Panel {
                 Point::new(centre - pw / 2.0, top + (PANDA - ph) / 2.0),
                 Size::new(pw, ph),
             ),
-            svg::Svg::new(panda()).opacity(0.9 * p),
+            svg::Svg::new(crate::pandas::drawing(
+                crate::pandas::Mood::Resting,
+                state.dozing,
+                now,
+            ))
+            .opacity(p),
         );
         let y = top + PANDA + EMPTY_GAP + NOTHING * LINE / 2.0;
         f.fill_text(text_in(
@@ -1435,6 +1443,9 @@ impl Panel {
             if laid.rows.is_empty() && !was_empty && state.laid.is_some() {
                 state.empty_since = Some(now);
             }
+            if laid.rows.is_empty() && !was_empty && crate::pandas::lively() {
+                state.dozing = Some(crate::pandas::Burst::of(crate::pandas::Mood::Resting, now));
+            }
             state.scroll = state.scroll.clamp(0.0, laid.most_scroll());
             let targets: Vec<Target> = laid
                 .targets(state.scroll)
@@ -1465,7 +1476,8 @@ impl Panel {
             || state.switch.sliding(now)
             || state
                 .empty_since
-                .is_some_and(|since| self.motion && now < since + REST_IN);
+                .is_some_and(|since| self.motion && now < since + REST_IN)
+            || state.dozing.is_some_and(|d| d.plays(now));
         moving.then(|| canvas::Action::request_redraw_at(now + Duration::from_millis(16)))
     }
 
@@ -1672,16 +1684,6 @@ fn moon(on: bool) -> svg::Handle {
     };
     let moons = MOONS.get_or_init(|| [make("#A9B2C2"), make(notifications::bell::AMBER)]);
     moons[usize::from(on)].clone()
-}
-
-/// The panda asleep, for the empty history.
-fn panda() -> svg::Handle {
-    static PANDA: std::sync::OnceLock<svg::Handle> = std::sync::OnceLock::new();
-    PANDA
-        .get_or_init(|| {
-            svg::Handle::from_memory(include_bytes!("../../assets/pandas/resting.svg").as_slice())
-        })
-        .clone()
 }
 
 #[cfg(test)]

@@ -409,9 +409,11 @@ Approved by the maintainer on 2026-11-02 (issue #394), variant B: by time.
   (`ease-in`), 35 ms after the one above, from the first in view; then
   they go, and the empty state comes in (8 px up and fading in over
   260 ms). Without motion, or on the CPU, at once. ✕ slides its item out
-  the same way. The empty state: the resting panda (96 px, at 90 %),
-  "Rien de neuf" (14 px 600 `#C9D0DC`) and "Tout est lu." (12 px
-  `#7C8698`), 8 px apart, in a 220 px list.
+  the same way. The empty state: the resting panda (140 px, at 100 %,
+  #649), "Rien de neuf" (14 px 600 `#C9D0DC`) and "Tout est lu." (12 px
+  `#7C8698`), 8 px apart, in a 264 px list. As the history opens empty,
+  or empties, the panda breathes once as two "z" rise (4 s), then lies
+  still; not with reduced motion, in power saver or on the CPU.
 - **Scrolling**: past 600 px the list scrolls, the wheel 40 px a notch,
   a 6 px thumb on the right. `Tab` goes through "Tout effacer", the
   switch, the chips, then each item, its ✕ and its actions; the arrows go

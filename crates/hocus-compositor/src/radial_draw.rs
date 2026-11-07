@@ -51,8 +51,8 @@ const HUB_TEXT: f32 = 10.5;
 /// The disc under the sectors, its rim included; the hub's circle.
 const DISC: f64 = RING + RIM;
 const HUB_CIRCLE: f64 = 40.0;
-/// The panda in the hub, and how far it bobs.
-const PANDA: f64 = 64.0;
+/// The panda in the hub (78 px since #649), and how far it bobs.
+const PANDA: f64 = 78.0;
 const BOB: f64 = 2.0;
 const BOB_PERIOD: f64 = 1.6;
 
@@ -103,7 +103,8 @@ struct LookKey {
     enabled: [bool; 8],
     on: [bool; 8],
     maximized: bool,
-    waiting: bool,
+    /// The hub shows a panda.
+    panda: bool,
     french: bool,
     hub: String,
     app: String,
@@ -120,7 +121,7 @@ pub struct RadialPaint {
     fonts: OnceCell<Option<Fonts>>,
     main: Picture<LookKey>,
     arc: Picture<(u32, u32)>,
-    panda: Picture<u32>,
+    panda: Picture<(u32, hocus_pandas::Mood, crate::pandas::Frame)>,
     shadow: FrameIds,
 }
 
@@ -637,7 +638,7 @@ fn draw_main(fonts: &Fonts, key: &LookKey, scale: f64) -> Option<(Vec<u8>, i32)>
         let x = c as f32 * s - width / 2.0;
         let y = (c + 4.0) as f32 * s;
         write(&mut pixmap, &fonts.mono, &words, px, (x, y), TEXT, 0.0);
-    } else if !key.waiting {
+    } else if !key.panda {
         // The application's letter tile.
         let tile = 28.0;
         if let Some(path) = rounded(
@@ -701,47 +702,25 @@ fn draw_arc(share: f64, scale: f64) -> Option<(Vec<u8>, i32)> {
     Some((argb(pixmap), size as i32))
 }
 
-/// The waiting agent's panda, `PANDA` logical pixels at `scale` (the
-/// mockup's, 30 units).
-fn draw_panda(scale: f64) -> Option<(Vec<u8>, i32)> {
+/// The hub's panda in `mood` at `frame`, `PANDA` logical pixels at
+/// `scale`.
+fn draw_panda(
+    mood: hocus_pandas::Mood,
+    frame: crate::pandas::Frame,
+    scale: f64,
+) -> Option<(Vec<u8>, i32)> {
     let size = (PANDA * scale).ceil() as u32;
-    let mut pixmap = Pixmap::new(size, size)?;
-    let k = (PANDA * scale / 30.0) as f32;
-    let t = Transform::from_scale(k, k);
-    let dark = [0x1D, 0x22, 0x30, 0xFF];
-    let mut circle = |x: f32, y: f32, r: f32, c: [u8; 4]| {
-        if let Some(path) = PathBuilder::from_circle(x, y, r) {
-            pixmap.fill_path(&path, &paint(c), FillRule::Winding, t, None);
-        }
-    };
-    circle(15.0, 16.0, 14.5, rgba(245, 180, 74, 0.22));
-    circle(8.5, 8.5, 4.2, dark);
-    circle(21.5, 8.5, 4.2, dark);
-    circle(15.0, 16.5, 10.5, [0xF2, 0xF4, 0xF7, 0xFF]);
-    let mut ellipse = |x: f32, y: f32, rx: f32, ry: f32, degrees: f32, c: [u8; 4]| {
-        if let Some(path) = PathBuilder::from_oval(
-            tiny_skia::Rect::from_xywh(-rx, -ry, 2.0 * rx, 2.0 * ry)
-                .unwrap_or(tiny_skia::Rect::from_xywh(0.0, 0.0, 1.0, 1.0).expect("a unit square")),
-        ) {
-            let place = Transform::from_rotate(degrees)
-                .post_translate(x, y)
-                .post_scale(k, k);
-            pixmap.fill_path(&path, &paint(c), FillRule::Winding, place, None);
-        }
-    };
-    ellipse(10.8, 16.0, 2.8, 3.6, -20.0, dark);
-    ellipse(19.2, 16.0, 2.8, 3.6, 20.0, dark);
-    ellipse(15.0, 21.0, 1.6, 1.1, 0.0, dark);
-    ellipse(26.2, 20.0, 2.6, 3.4, 0.0, dark);
-    ellipse(11.3, 15.4, 1.0, 1.0, 0.0, [0xFF; 4]);
-    ellipse(18.7, 15.4, 1.0, 1.0, 0.0, [0xFF; 4]);
-    Some((argb(pixmap), size as i32))
+    crate::pandas::draw(mood, frame, size).map(|pixels| (pixels, size as i32))
 }
 
 /// tiny-skia's premultiplied RGBA as the renderer's ARGB8888 (B, G, R, A
 /// in memory).
 pub(crate) fn argb(pixmap: Pixmap) -> Vec<u8> {
-    let mut data = pixmap.take();
+    argb_of(pixmap.take())
+}
+
+/// Premultiplied RGBA bytes as the renderer's ARGB8888.
+pub(crate) fn argb_of(mut data: Vec<u8>) -> Vec<u8> {
     for px in data.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
@@ -801,7 +780,7 @@ impl State {
             enabled: radial.enabled,
             on: radial.on,
             maximized: radial.maximized,
-            waiting: radial.waiting,
+            panda: radial.agent.is_some(),
             french,
             hub: hub_words(radial, armed, french, &names),
             app: radial.app.clone(),
@@ -827,16 +806,23 @@ impl State {
                 Err(err) => tracing::warn!(?err, "could not draw the radial menu"),
             }
         };
-        // The panda, bobbing.
-        if radial.waiting && key.hub.is_empty() {
+        // The panda, playing its mood as the menu opens, a waiting one
+        // bobbing.
+        if let Some(state) = radial.agent.filter(|_| key.hub.is_empty()) {
+            let mood = crate::pandas::mood(state);
+            let lively = self.pandas_lively();
+            let frame = lively
+                .then(|| crate::pandas::frame(mood.burst(), now.saturating_sub(radial.opened)))
+                .flatten();
+            let wanted = (key.scale, mood, frame);
             let mut cache = paint.panda.borrow_mut();
-            if cache.as_ref().is_none_or(|(s, _, _, _)| *s != key.scale)
-                && let Some((pixels, px)) = draw_panda(scale)
+            if cache.as_ref().is_none_or(|(k, _, _, _)| *k != wanted)
+                && let Some((pixels, px)) = draw_panda(mood, frame, scale)
             {
-                *cache = Some((key.scale, buffer(&pixels, px, px), px, Id::new()));
+                *cache = Some((wanted, buffer(&pixels, px, px), px, Id::new()));
             }
             if let Some((_, texture, px, id)) = cache.as_ref() {
-                let bob = if self.reduced_motion() {
+                let bob = if !lively || state != crate::overview::AgentState::Waiting {
                     0.0
                 } else {
                     let t = now.saturating_sub(radial.opened).as_secs_f64();
@@ -955,7 +941,7 @@ mod tests {
             enabled: [true; 8],
             on: [false, true, false, false, false, false, false, false],
             maximized: false,
-            waiting: false,
+            panda: false,
             french: true,
             hub: "Super+↑".into(),
             app: "foot".into(),
@@ -969,7 +955,7 @@ mod tests {
             let mid = ((px / 2 * px + px / 2) * 4) as usize;
             assert!(pixels[mid + 3] > 200);
             assert!(draw_arc(0.5, scale).is_some());
-            assert!(draw_panda(scale).is_some());
+            assert!(draw_panda(hocus_pandas::Mood::Waiting, None, scale).is_some());
         }
     }
 
@@ -995,7 +981,7 @@ mod tests {
             desktop: 0,
             other_screen: Some("DP-2".into()),
             app: String::new(),
-            waiting: false,
+            agent: None,
             lit: Some(Sector::Right),
             rest: crate::radial::Rest::Away,
             last: (0.0, 0.0),

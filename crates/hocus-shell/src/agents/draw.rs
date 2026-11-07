@@ -56,11 +56,14 @@ use iced::{
 };
 
 use super::{
-    AGENT_NAME, AGENT_ROW, AGENT_WORD, BADGE, BADGE_TEXT, BUTTON, BUTTON_TEXT, CARD_RADIUS,
+    AGENT_NAME, AGENT_WORD, BADGE, BADGE_TEXT, BUTTON, BUTTON_TEXT, CARD_IN, CARD_NAME_LINE,
+    CARD_NOTE, CARD_NOTE_LINE, CARD_PANDA, CARD_PANDA_GAP, CARD_RADIUS, CARD_ROW_RADIUS, CARD_WORD,
     FOLLOWED, HEAD, HEAD_GAP, HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL,
-    LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_RADIUS,
-    MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
+    LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_PANDA,
+    MINI_PANDA_IN, MINI_RADIUS, MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD,
+    ROW_RADIUS, Row, SAYS, Words,
 };
+use crate::pandas::{self, Burst};
 use crate::theme::Ink;
 use crate::{
     clock::motion::bezier,
@@ -81,6 +84,8 @@ const STUCK: (Color, Color) = (rgb(0xF7A77A), Color::from_rgba8(242, 148, 91, 0.
 const TO_SEE: (Color, Color) = (rgb(0x7EE0A0), Color::from_rgba8(108, 194, 135, 0.10));
 const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
 const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+/// What a card's agent asks, `#C9D0DC`.
+const NOTE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
 /// The pandas' drawings' box (their view box).
 const PANDA_BOX: (f32, f32) = (126.0, 120.5);
 /// A resting agent's panda, asleep.
@@ -114,12 +119,13 @@ const BADGE_INK: Ink = Ink::Fixed(rgb(0x1C1406));
 const AT_WORK: Ink = Ink::Dark(rgb(0x7C8698));
 /// Her ear's amber, its rings' colour.
 const EAR_WAITING: Ink = Ink::Fixed(rgb(0xF5B44A));
-/// When someone starts waiting, the mockup's keyframes in 1.2 s instead
-/// of its 3.2 s (#503), each scaled alike: two rings out of her ear
-/// (`hpRing`, 525 ms `ease-out`, twice: from 90 % to nothing, from 0.9 to
-/// 1.25 times their size), and two hops (`hpBob`, 600 ms `ease-in-out`,
-/// twice: 3 px up at its middle).
-const RING: Duration = Duration::from_millis(525);
+/// When someone starts waiting, the mockup's keyframes (#503, #649):
+/// three rings out of her ear (`hpRing`, 830 ms `ease-out` each: from
+/// 90 % to nothing, from 0.9 to 1.25 times their size), about 2.5 s,
+/// and two hops at their start (`hpBob`, 600 ms `ease-in-out`, twice:
+/// 3 px up at its middle).
+const RING: Duration = Duration::from_millis(830);
+const RINGS_OUT: u32 = 3;
 const BOB: Duration = Duration::from_millis(600);
 const TWICE: u32 = 2;
 const BOB_UP: f32 = 3.0;
@@ -465,6 +471,12 @@ pub struct State {
     /// draw), and since when the secretary radiates for one that started.
     waiting: Option<HashSet<u64>>,
     radiating: Option<Instant>,
+    /// The pandas playing their mood (#649), by agent: its row's, or the
+    /// mini item's waiting one.
+    bursts: HashMap<u64, Burst>,
+    /// The mini item's waiting agent as last drawn, once it drew.
+    mini_waiting: Option<u64>,
+    primed_mini: bool,
 }
 
 /// The secretary's motion at `t` since someone started waiting: her hop
@@ -483,14 +495,14 @@ fn secretary_motion(t: Duration) -> (f32, Option<f32>) {
     } else {
         0.0
     };
-    let rings = (t < RING * TWICE)
+    let rings = (t < RING * RINGS_OUT)
         .then(|| bezier(EASE_OUT, (t.as_secs_f32() / RING.as_secs_f32()).fract()));
     (hop, rings)
 }
 
 /// How long the secretary moves.
 fn secretary_moves(since: Instant, now: Instant) -> bool {
-    now.saturating_duration_since(since) < (BOB * TWICE).max(RING * TWICE)
+    now.saturating_duration_since(since) < (BOB * TWICE).max(RING * RINGS_OUT)
 }
 
 /// A row's motion: from where it was, its tint and opacity then, since
@@ -586,33 +598,14 @@ fn colours(look: Look) -> (Color, Color) {
 /// tint: 3 px wide (bar.md §13).
 const CONTRAST_BAR: f32 = 3.0;
 
-/// The panda for `look`: the validated drawings, one still mood each.
-pub(super) fn panda(look: Look) -> &'static svg::Handle {
-    static PANDAS: OnceLock<[svg::Handle; 5]> = OnceLock::new();
-    let pandas = PANDAS.get_or_init(|| {
-        [
-            include_bytes!("../../assets/pandas/waiting.svg").as_slice(),
-            include_bytes!("../../assets/pandas/stuck.svg").as_slice(),
-            include_bytes!("../../assets/pandas/done.svg").as_slice(),
-            include_bytes!("../../assets/pandas/working.svg").as_slice(),
-            include_bytes!("../../assets/pandas/resting.svg").as_slice(),
-        ]
-        .map(svg::Handle::from_memory)
-    });
-    &pandas[look as usize]
-}
-
 /// The secretary in `mood`: her ear, and the dot on her clipboard, in its
 /// colour.
 pub fn secretary(mood: Mood) -> &'static svg::Handle {
+    use hocus_pandas::Secretary;
     static SECRETARY: OnceLock<[svg::Handle; 3]> = OnceLock::new();
     let drawings = SECRETARY.get_or_init(|| {
-        [
-            include_bytes!("../../assets/pandas/secretary-calm.svg").as_slice(),
-            include_bytes!("../../assets/pandas/secretary-waiting.svg").as_slice(),
-            include_bytes!("../../assets/pandas/secretary-stuck.svg").as_slice(),
-        ]
-        .map(svg::Handle::from_memory)
+        [Secretary::Calm, Secretary::Waiting, Secretary::Stuck]
+            .map(|s| svg::Handle::from_memory(s.still().as_bytes()))
     });
     &drawings[mood as usize]
 }
@@ -648,7 +641,10 @@ fn ear_rings(f: &mut Frame, head: Rectangle, share: f32, alpha: f32) {
 /// Where a row hidden under the "+ N" line is: the place of the row
 /// after the last shown in `layout`.
 fn hidden_y(layout: &Layout) -> f32 {
-    HEADER + super::GAP + layout.rows.len() as f32 * AGENT_ROW
+    layout
+        .rows
+        .last()
+        .map_or(HEADER + super::GAP, |r| r.rect.y + r.rect.height)
 }
 
 impl State {
@@ -763,17 +759,35 @@ impl State {
         self.waiting = Some(waiting);
     }
 
+    /// Agent `id`'s panda plays its mood from `now` (#649), unless it
+    /// plays already: the pointer coming over it replays it once.
+    fn play(&mut self, id: u64, look: Look, now: Instant) {
+        if self.bursts.get(&id).is_some_and(|b| b.plays(now)) {
+            return;
+        }
+        tracing::debug!(
+            id,
+            mood = pandas::mood(look).name(),
+            "a panda plays its mood"
+        );
+        self.bursts.insert(id, Burst::of(pandas::mood(look), now));
+    }
+
     /// The motions over by `now` end; whether one goes on.
     fn tick(&mut self, now: Instant) -> bool {
         self.moving.retain(|_, m| !m.done(now));
         self.leaving.retain(|(_, m)| !m.done(now));
+        self.bursts.retain(|_, b| b.plays(now));
         if self
             .radiating
             .is_some_and(|since| !secretary_moves(since, now))
         {
             self.radiating = None;
         }
-        !self.moving.is_empty() || !self.leaving.is_empty() || self.radiating.is_some()
+        !self.moving.is_empty()
+            || !self.leaving.is_empty()
+            || self.radiating.is_some()
+            || !self.bursts.is_empty()
     }
 }
 
@@ -801,7 +815,36 @@ impl<Message> canvas::Program<Message> for Group {
                     let agents: HashSet<u64> = said.agents.iter().map(|a| a.id).collect();
                     if layout.rows != state.rows || agents != state.agents {
                         state.follow(&layout, agents, *now, self.motion);
+                        // A panda whose agent changed state, or came,
+                        // plays its mood (#649), its hop starting it.
+                        if self.lively() {
+                            let hopping: Vec<(u64, Look)> = layout
+                                .rows
+                                .iter()
+                                .filter(|r| {
+                                    state
+                                        .moving
+                                        .get(&r.id)
+                                        .is_some_and(|m| m.hop && m.since == *now)
+                                })
+                                .map(|r| (r.id, r.look))
+                                .collect();
+                            for (id, look) in hopping {
+                                state.play(id, look, *now);
+                            }
+                        }
                     }
+                    // The mini item's waiting panda plays as it arrives.
+                    let mini = layout.mini.as_ref().and_then(|m| m.waiting).map(|w| w.0);
+                    if let Some(id) = mini
+                        && self.lively()
+                        && state.primed_mini
+                        && state.mini_waiting != Some(id)
+                    {
+                        state.play(id, Look::Waiting, *now);
+                    }
+                    state.mini_waiting = mini;
+                    state.primed_mini = true;
                     let waiting: HashSet<u64> = said
                         .agents
                         .iter()
@@ -940,6 +983,31 @@ fn said(text: &str, at: Point, size: f32, colour: Color, align: Alignment) -> ca
 }
 
 impl Group {
+    /// Whether its pandas play their moods (#649): with motion, and not
+    /// in power saver.
+    fn lively(&self) -> bool {
+        self.motion && pandas::lively()
+    }
+
+    /// The look of agent `id`'s panda as shown: its row's, or the mini
+    /// item's waiting one.
+    fn look_of(&self, id: u64) -> Option<Look> {
+        let layout = layout()?;
+        layout
+            .rows
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.look)
+            .or_else(|| {
+                layout
+                    .mini
+                    .as_ref()
+                    .and_then(|m| m.waiting)
+                    .filter(|w| w.0 == id)
+                    .map(|_| Look::Waiting)
+            })
+    }
+
     /// The form that shows alone (not switching): its items take the
     /// pointer.
     fn alone(&self) -> Option<Form> {
@@ -982,8 +1050,16 @@ impl Group {
             if size.height + 0.5 < mini.height + 2.0 * ROOM {
                 return Vec::new();
             }
-            let rect = Rectangle::new(self.mini_origin(size), Size::new(MINI_ITEM, mini.height));
-            return vec![(mini_item(&layout), rect)];
+            let o = self.mini_origin(size);
+            let rect = Rectangle::new(o, Size::new(MINI_ITEM, mini.height));
+            let mut items = vec![(mini_item(&layout), rect)];
+            // The waiting panda: a button of its own, in front.
+            if let Some((id, square)) = mini.waiting {
+                let square =
+                    Rectangle::new(Point::new(o.x + square.x, o.y + square.y), square.size());
+                items.insert(0, (Item::Agent(id), square));
+            }
+            return items;
         }
         // Not before the surface took the group's new height: a press there
         // would reach what is under it (the resize is the compositor's to
@@ -1048,6 +1124,33 @@ impl Group {
         );
         if let Some(share) = rings {
             ear_rings(f, head, share, alpha);
+        }
+        // Who waits the longest (#649), on the amber tint, lit under the
+        // pointer.
+        if let Some((id, square)) = mini.waiting {
+            let square = at(square);
+            f.fill(
+                &kit::rounded(square, MINI_RADIUS),
+                faded(WAITING.1, alpha * 0.14 / WAITING.1.a),
+            );
+            if state.hover == Some(Item::Agent(id)) {
+                f.fill(
+                    &kit::rounded(square, MINI_RADIUS),
+                    faded(ROW_HOVER.get(), alpha),
+                );
+            }
+            let place = Rectangle::new(
+                Point::new(square.x + MINI_PANDA_IN, square.y + MINI_PANDA_IN),
+                Size::new(MINI_PANDA, MINI_PANDA),
+            );
+            draw_panda(
+                f,
+                place,
+                Look::Waiting,
+                state.bursts.get(&id).copied(),
+                now,
+                alpha,
+            );
         }
         if let Some(badge) = &mini.badge {
             let rect = at(badge.rect);
@@ -1295,8 +1398,18 @@ impl Group {
                 continue;
             }
             let rect = Rectangle::new(Point::new(o.x + row.rect.x, o.y + y), row.rect.size());
+            let radius = if row.card() {
+                CARD_ROW_RADIUS
+            } else {
+                ROW_RADIUS
+            };
             if tint.a > 0.0 {
-                f.fill(&kit::rounded(rect, ROW_RADIUS), faded(tint, shown));
+                f.fill(&kit::rounded(rect, radius), faded(tint, shown));
+            }
+            // A card's rim, the state's colour at 35 % (none under high
+            // contrast: its bar says it).
+            if row.card() && !crate::theme::contrast() {
+                rim(f, rect, radius, faded(dot(row.look), 0.35 * shown));
             }
             if crate::theme::contrast()
                 && matches!(row.look, Look::Waiting | Look::Stuck | Look::ToSee)
@@ -1305,10 +1418,7 @@ impl Group {
                 f.fill(&kit::rounded(bar, CONTRAST_BAR / 2.0), faded(word, shown));
             }
             if state.hover == Some(Item::Agent(row.id)) {
-                f.fill(
-                    &kit::rounded(rect, ROW_RADIUS),
-                    faded(ROW_HOVER.get(), shown),
-                );
+                f.fill(&kit::rounded(rect, radius), faded(ROW_HOVER.get(), shown));
             }
             let middle = rect.center_y();
             let asleep = if row.look == Look::Resting {
@@ -1316,27 +1426,34 @@ impl Group {
             } else {
                 1.0
             };
+            let (left, side) = if row.card() {
+                (rect.x + CARD_IN, CARD_PANDA)
+            } else {
+                (rect.x + ROW_PAD, PANDA)
+            };
             if super::pandas() {
-                // The drawing's box, 126 × 120.5, 30 px wide in its 30 px
-                // square (iced scales a drawing to the rectangle given).
-                let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
                 let place = Rectangle::new(
-                    Point::new(rect.x + ROW_PAD, middle - tall / 2.0 + hop),
-                    Size::new(PANDA, tall),
+                    Point::new(left, middle - side / 2.0 + hop),
+                    Size::new(side, side),
                 );
-                f.draw_svg(
-                    place,
-                    svg::Svg::new(panda(row.look).clone()).opacity(asleep * shown),
-                );
+                let burst = state.bursts.get(&row.id).copied();
+                draw_panda(f, place, row.look, burst, now, asleep * shown);
             } else {
                 // Its dot in the panda's place, hopping as it would.
                 f.fill(
-                    &Path::circle(
-                        Point::new(rect.x + ROW_PAD + PANDA / 2.0, middle + hop),
-                        DOT / 2.0,
-                    ),
+                    &Path::circle(Point::new(left + side / 2.0, middle + hop), DOT / 2.0),
                     faded(dot(row.look), asleep * shown),
                 );
+            }
+            if row.card() {
+                self.card_text(
+                    f,
+                    row,
+                    Point::new(left + side + CARD_PANDA_GAP, middle),
+                    word,
+                    shown,
+                );
+                continue;
             }
             f.fill_text(kit::text_in(
                 kit::MANROPE_SEMIBOLD,
@@ -1364,6 +1481,45 @@ impl Group {
                 faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
+        }
+    }
+
+    /// A card's text from `at` (its left, its middle): the name over the
+    /// state's word over what the agent asks or why it failed.
+    fn card_text(&self, f: &mut Frame, row: &Row, at: Point, word: Color, shown: f32) {
+        let name = AGENT_NAME * CARD_NAME_LINE;
+        let said = CARD_WORD * CARD_NAME_LINE;
+        let note = CARD_NOTE * CARD_NOTE_LINE;
+        let tall = name + said + row.note.len() as f32 * note;
+        let mut y = at.y - tall / 2.0;
+        f.fill_text(kit::text_in(
+            kit::MANROPE_SEMIBOLD,
+            said_at(
+                &row.name,
+                Point::new(at.x, y + name / 2.0),
+                AGENT_NAME,
+                faded(TEXT.get(), shown),
+            ),
+        ));
+        y += name;
+        f.fill_text(kit::text_in(
+            MANROPE_BOLD,
+            said_at(
+                &row.word,
+                Point::new(at.x, y + said / 2.0),
+                CARD_WORD,
+                faded(word, shown),
+            ),
+        ));
+        y += said;
+        for line in &row.note {
+            f.fill_text(said_at(
+                line,
+                Point::new(at.x, y + note / 2.0),
+                CARD_NOTE,
+                faded(NOTE_INK.get(), shown),
+            ));
+            y += note;
         }
     }
 
@@ -1397,6 +1553,13 @@ impl Group {
                     popover::event(popover::Event::ItemLeave { at: bar_at });
                 }
                 state.hover = now;
+                // The pointer over an agent's panda replays its mood once.
+                if let Some(Item::Agent(id)) = now
+                    && self.lively()
+                    && let Some(look) = self.look_of(id)
+                {
+                    state.play(id, look, Instant::now());
+                }
                 if let Some((item, r)) = over {
                     popover::event(popover::Event::ItemEnter {
                         bar: self.bar.clone(),
@@ -1429,6 +1592,50 @@ impl Group {
     }
 }
 
+/// A text from `at` (its left, its line's middle), its line `size` high.
+fn said_at(text: &str, at: Point, size: f32, colour: Color) -> canvas::Text {
+    let mut text = said(text, at, size, colour, Alignment::Left);
+    text.line_height = iced::widget::text::LineHeight::Absolute(size.into());
+    text
+}
+
+/// A 1 px rim inside `rect`, rounded by `radius`.
+fn rim(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color) {
+    let path = Path::rounded_rectangle(
+        Point::new(rect.x + 0.5, rect.y + 0.5),
+        Size::new(rect.width - 1.0, rect.height - 1.0),
+        (radius - 0.5).into(),
+    );
+    f.stroke(
+        &path,
+        canvas::Stroke {
+            style: canvas::Style::Solid(colour),
+            width: 1.0,
+            ..canvas::Stroke::default()
+        },
+    );
+}
+
+/// An agent's panda in the square `place`: the drawing's box, 126 ×
+/// 120.5, as wide as the square, in its middle; a frame of its mood while
+/// `burst` plays (#649), else still.
+pub fn draw_panda(
+    f: &mut Frame,
+    place: Rectangle,
+    look: Look,
+    burst: Option<Burst>,
+    now: Instant,
+    alpha: f32,
+) {
+    let tall = place.width * PANDA_BOX.1 / PANDA_BOX.0;
+    let drawn = Rectangle::new(
+        Point::new(place.x, place.y + (place.height - tall) / 2.0),
+        Size::new(place.width, tall),
+    );
+    let drawing = pandas::drawing(pandas::mood(look), burst, now);
+    f.draw_svg(drawn, svg::Svg::new(drawing).opacity(alpha));
+}
+
 /// A tool's mark at `at`: its letter on its colour, `size` px, rounded.
 pub fn mark(
     f: &mut Frame,
@@ -1459,22 +1666,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_secretary_moves_for_1_2_s_in_the_mockups_shape() {
+    fn the_secretary_rings_three_times_and_hops_twice() {
         let at = Duration::from_millis;
         let start = Instant::now();
-        // 1.2 s in all, once.
-        assert!(secretary_moves(start, start + at(1199)));
-        assert!(!secretary_moves(start, start + at(1200)));
-        assert_eq!(secretary_motion(at(1200)), (0.0, None));
-        // Two hops, 3 px up at their middles, down between them.
+        // About 2.5 s in all, once.
+        assert!(secretary_moves(start, start + at(2489)));
+        assert!(!secretary_moves(start, start + at(2490)));
+        assert_eq!(secretary_motion(at(2490)), (0.0, None));
+        // Two hops, 3 px up at their middles, down between them and after.
         for top in [300, 900] {
             assert!((secretary_motion(at(top)).0 + BOB_UP).abs() < 0.01);
         }
         assert!(secretary_motion(at(600)).0.abs() < 0.01);
-        // Two rings, each from its start, over by 1.05 s.
-        assert!(secretary_motion(at(0)).1.is_some_and(|r| r < 0.01));
-        assert!(secretary_motion(at(524)).1.is_some_and(|r| r > 0.99));
-        assert!(secretary_motion(at(526)).1.is_some_and(|r| r < 0.05));
-        assert_eq!(secretary_motion(at(1050)).1, None);
+        assert!(secretary_motion(at(1500)).0.abs() < 0.01);
+        // Three rings, each from its start.
+        for start in [0, 830, 1660] {
+            assert!(secretary_motion(at(start)).1.is_some_and(|r| r < 0.01));
+            assert!(
+                secretary_motion(at(start + 829))
+                    .1
+                    .is_some_and(|r| r > 0.99)
+            );
+        }
+    }
+
+    #[test]
+    fn a_panda_plays_its_mood_once_then_lies_still() {
+        let now = Instant::now();
+        let mut state = State::default();
+        state.play(1, Look::Waiting, now);
+        assert!(state.tick(now + Duration::from_millis(2000)));
+        // Played again while it plays: it is not cut, nor lengthened.
+        state.play(1, Look::Waiting, now + Duration::from_millis(2000));
+        assert_eq!(state.bursts.get(&1).map(|b| b.since), Some(now));
+        // Over by 2.9 s: nothing moves, nothing more is drawn.
+        assert!(!state.tick(now + Duration::from_millis(2900)));
+        assert!(state.bursts.is_empty());
+        // The pointer coming back replays it.
+        state.play(1, Look::Waiting, now + Duration::from_secs(5));
+        assert!(state.tick(now + Duration::from_secs(6)));
     }
 }

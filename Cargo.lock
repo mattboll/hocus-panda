@@ -1918,12 +1918,14 @@ dependencies = [
  "hocus-config",
  "hocus-geometry",
  "hocus-link",
+ "hocus-pandas",
  "hocus-xdg",
  "image",
  "jiff",
  "libc",
  "libloading",
  "pipewire",
+ "resvg",
  "rustix 1.1.6",
  "serde",
  "serde_json",
@@ -1998,6 +2000,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-pandas"
+version = "0.2.0"
+dependencies = [
+ "resvg",
+]
+
+[[package]]
 name = "hocus-settings"
 version = "0.2.0"
 dependencies = [
@@ -2008,6 +2017,7 @@ dependencies = [
  "hocus-geometry",
  "hocus-link",
  "hocus-network",
+ "hocus-pandas",
  "hocus-sound",
  "hocus-xdg",
  "iced",
@@ -2040,6 +2050,7 @@ dependencies = [
  "hocus-day",
  "hocus-link",
  "hocus-network",
+ "hocus-pandas",
  "hocus-sound",
  "hocus-xdg",
  "iced",

@@ -1,7 +1,7 @@
 //! The pill on its surface, variant A's sizes (logical pixels, the
-//! mockup's divided by its ×1.5): 300 × 64, radius 20, the popovers'
+//! mockup's divided by its ×1.5): 300 × 80, radius 20, the popovers'
 //! glass and a 1 px rim; 12 px in on the left, 18 on the right; the panda
-//! (42 px), 12 px, then two lines 2 px apart: "Verrouillage dans 7 s"
+//! (64 px since #649), 12 px, then two lines 2 px apart: "Verrouillage dans 7 s"
 //! (Manrope 700, 15 px, `text`) over "Bouge la souris pour rester" (13 px,
 //! `text.dim`); the countdown's line (2 px, radius 1,
 //! `rgba(143,179,255,0.75)`), 7 px over the bottom, from 264 px to nothing
@@ -36,7 +36,7 @@ const HEIGHT: f32 = hocus_link::PILL_HEIGHT as f32;
 const RADIUS: f32 = hocus_link::PILL_RADIUS as f32;
 const LEFT: f32 = 12.0;
 const RIGHT: f32 = 18.0;
-const PANDA: f32 = 42.0;
+const PANDA: f32 = 64.0;
 const GAP: f32 = 12.0;
 const TITLE: f32 = 15.0;
 const LINE_GAP: f32 = 2.0;

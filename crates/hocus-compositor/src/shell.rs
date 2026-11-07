@@ -589,6 +589,7 @@ impl State {
         ToShell::Look {
             glass: self.glass_on(),
             motion: !self.reduced_motion(),
+            lively: self.pandas_lively(),
         }
     }
 

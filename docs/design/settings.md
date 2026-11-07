@@ -1525,7 +1525,7 @@ compositor (bar.md "6.16").
 | | Rappeler un agent qui t'attend | menu: Après 2, 5, 10 min, Jamais; at 45 % and inert while the halo is "Jamais" | `[agents] remind` |
 | | Aperçu | a 46 × 118 bar and "Attend · Bloqué · Fini" | — |
 | LES PANDAS ("Ils ne bougent qu'à un changement") | Le panda qui sort de la barre | its panda (58 px) on the left; menu: Quand un agent t'attend ou a fini ("Attend ou a fini"), Quand un agent t'attend, Jamais | `[agents] peek` |
-| | Les pandas dans les lignes des agents | switch; under it three agents as the bar's rows show them, their 48 px pandas or 10 px dots | `[agents] pandas` |
+| | Les pandas dans les lignes des agents | switch; under it the five moods side by side (#649): working, waiting, done, stuck, resting, at 72 px with their word, each playing its mood 300 ms after the one before as the page opens and again under the pointer; with the switch off, their 10 px dots | `[agents] pandas` |
 | | Jamais au repos | "Toujours", static | — |
 
 - **Under the title**: "Le groupe des agents dans la barre, et sa place,
@@ -1578,9 +1578,8 @@ compositor (bar.md "6.16").
   approuver" until one of its hooks (not its turn's end) has run since it
   was plugged in, remembered in `agents.toml` (`codex-approved`); a
   declined tool's day is remembered there too (`[declined-on]`); the
-  pandas are 48 px in the sample and 58 px for the peek (the spec's 30
-  px, larger as the maintainer asked); the sample of three rows under the
-  switch is the page's own; herdr declined and not running says "pas
+  pandas are 72 px in the family (48 px in three sample rows until #649)
+  and 58 px for the peek; the family under the switch is the page's own; herdr declined and not running says "pas
   suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
   does not list the tools yet; "Enregistré" does not wait for the
   watcher's answer.

@@ -26,7 +26,7 @@
 //! What a tool said may hold code or a secret: it is drawn, never logged
 //! (its length is).
 
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use hocus_link::{Form, Note};
 use iced::{
@@ -44,6 +44,7 @@ use super::{
     Event as Seen, Item, Pressed, event,
     kit::{self, FILL, Input, Pointer, text, text_in},
 };
+use crate::pandas::{self, Burst};
 use crate::theme::Ink;
 use crate::{
     agents::{self, Brief, Entry, Look, Words},
@@ -74,10 +75,15 @@ const LABEL: f32 = 11.0;
 const LABEL_SPACING: f32 = 0.08 * LABEL;
 const LABEL_PAD: f32 = 4.0;
 const LINE_GAP: f32 = 2.0;
-/// An agent's line: 5 px in, 6 px past the sides, radius 7; its name
-/// (13 px, 700) and since when (`text.faint`) 6 px apart, over what it
-/// asks or why it failed (12.5 px, `text.dim`), 1 px apart.
+/// An agent's line: 5 px in, 6 px past the sides, radius 7; its panda
+/// (48 px, #649) 10 px before its name (13 px, 700) and since when
+/// (`text.faint`) 6 px apart, over what it asks or why it failed
+/// (12.5 px, `text.dim`), 1 px apart, in the panda's middle.
 const LINE_PAD: f32 = 5.0;
+const PANDA: f32 = 48.0;
+const PANDA_GAP: f32 = 10.0;
+const TEXT_LEFT: f32 = LEFT + PANDA + PANDA_GAP;
+const TEXT_ROOM: f32 = RIGHT - TEXT_LEFT;
 const LINE_OUT: f32 = 6.0;
 const LINE_RADIUS: f32 = 7.0;
 const WHO: f32 = 13.0;
@@ -239,10 +245,10 @@ fn line(
         Look::Resting => -WHEN_GAP,
         _ => measure(&when, WHO, MANROPE),
     };
-    let who = kit::elide(&entry.name, ROOM - WHEN_GAP - when_width, |t| {
+    let who = kit::elide(&entry.name, TEXT_ROOM - WHEN_GAP - when_width, |t| {
         measure(t, WHO, MANROPE_BOLD)
     });
-    let when_x = LEFT + measure(&who, WHO, MANROPE_BOLD) + WHEN_GAP;
+    let when_x = TEXT_LEFT + measure(&who, WHO, MANROPE_BOLD) + WHEN_GAP;
     // Only a waiting or a stuck agent's line says what its tool said; a
     // finished or a working one's says since when, a resting one's its
     // name alone.
@@ -250,9 +256,10 @@ fn line(
         .note
         .as_ref()
         .filter(|_| matches!(look, Look::Waiting | Look::Stuck));
-    let what = note.map(|note| kit::elide(&words.note(note), ROOM, |t| measure(t, WHAT, MANROPE)));
-    let height =
-        2.0 * LINE_PAD + WHO * LINE + what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
+    let what =
+        note.map(|note| kit::elide(&words.note(note), TEXT_ROOM, |t| measure(t, WHAT, MANROPE)));
+    let text = WHO * LINE + what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
+    let height = 2.0 * LINE_PAD + text.max(PANDA);
     Line {
         id: entry.id,
         rect: Rectangle::new(
@@ -394,6 +401,12 @@ pub struct State {
     laid: Option<Laid>,
     pointer: Pointer<Target>,
     focus: Option<Target>,
+    /// Its pandas playing their moods as it opens, and the one the pointer
+    /// came over (#649).
+    bursts: HashMap<u64, Burst>,
+    opened: bool,
+    hovered: Option<Target>,
+    now: Option<Instant>,
 }
 
 impl State {
@@ -431,7 +444,8 @@ impl<Message> canvas::Program<Message> for Panel {
         let mut frame = Frame::new(renderer, bounds.size());
         kit::background(&mut frame, bounds.size(), self.glass);
         if let Some(laid) = &state.laid {
-            self.briefing(&mut frame, laid, state.pointer.hover);
+            let now = state.now.unwrap_or_else(Instant::now);
+            self.briefing(&mut frame, laid, state.pointer.hover, &state.bursts, now);
         }
         if let Some((_, rect)) = state
             .focus
@@ -475,7 +489,14 @@ fn label(f: &mut Frame, word: &str, (x, middle): (f32, f32), colour: Color) {
 }
 
 impl Panel {
-    fn briefing(&self, f: &mut Frame, laid: &Laid, hover: Option<Target>) {
+    fn briefing(
+        &self,
+        f: &mut Frame,
+        laid: &Laid,
+        hover: Option<Target>,
+        bursts: &HashMap<u64, Burst>,
+        now: Instant,
+    ) {
         let words = self.words;
         let top = BORDER + PAD_TOP;
         let middle = top + HEAD / 2.0;
@@ -511,12 +532,30 @@ impl Panel {
                 if hover == Some(Target::Agent(line.id)) {
                     f.fill(&kit::rounded(line.rect, LINE_RADIUS), FILL.get());
                 }
-                let who_middle = line.rect.y + LINE_PAD + WHO * LINE / 2.0;
+                let middle = line.rect.center_y();
+                agents::draw::draw_panda(
+                    f,
+                    Rectangle::new(
+                        Point::new(LEFT, middle - PANDA / 2.0),
+                        Size::new(PANDA, PANDA),
+                    ),
+                    section.look,
+                    bursts.get(&line.id).copied(),
+                    now,
+                    if section.look == Look::Resting {
+                        0.55
+                    } else {
+                        1.0
+                    },
+                );
+                let text_height =
+                    WHO * LINE + line.what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
+                let who_middle = middle - text_height / 2.0 + WHO * LINE / 2.0;
                 f.fill_text(text_in(
                     MANROPE_BOLD,
                     text(
                         line.who.clone(),
-                        Point::new(LEFT, who_middle),
+                        Point::new(TEXT_LEFT, who_middle),
                         WHO,
                         TEXT.get(),
                         Alignment::Left,
@@ -533,7 +572,7 @@ impl Panel {
                     f.fill_text(text(
                         what.clone(),
                         Point::new(
-                            LEFT,
+                            TEXT_LEFT,
                             who_middle + WHO * LINE / 2.0 + WHAT_GAP + WHAT * LINE / 2.0,
                         ),
                         WHAT,
@@ -570,14 +609,44 @@ impl Panel {
 
     /// What it shows, read afresh: laid out again when the agents changed,
     /// or the minute did.
-    fn refresh<Message>(
-        &self,
-        state: &mut State,
-        _now: Instant,
-    ) -> Option<canvas::Action<Message>> {
+    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
         for pressed in kit::keys(self.id) {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
+        state.now = Some(now);
+        let laid = self.lay_out_again(state);
+        // As it opens, each line's panda plays its mood once (#649); the
+        // pointer coming over a line replays its panda's.
+        let lines: Vec<(u64, Look)> = state
+            .laid
+            .iter()
+            .flat_map(|l| l.sections.iter())
+            .flat_map(|s| s.lines.iter().map(|l| (l.id, s.look)))
+            .collect();
+        if pandas::lively() {
+            if !state.opened {
+                for (id, look) in &lines {
+                    state
+                        .bursts
+                        .insert(*id, Burst::of(pandas::mood(*look), now));
+                }
+            }
+            if state.pointer.hover != state.hovered
+                && let Some(Target::Agent(id)) = state.pointer.hover
+                && let Some((_, look)) = lines.iter().find(|(i, _)| *i == id)
+                && !state.bursts.get(&id).is_some_and(|b| b.plays(now))
+            {
+                state.bursts.insert(id, Burst::of(pandas::mood(*look), now));
+            }
+        }
+        state.opened |= state.laid.is_some();
+        state.hovered = state.pointer.hover;
+        state.bursts.retain(|_, b| b.plays(now));
+        laid.or_else(|| (!state.bursts.is_empty()).then(canvas::Action::request_redraw))
+    }
+
+    /// Laid out again when the agents changed, or the minute did.
+    fn lay_out_again<Message>(&self, state: &mut State) -> Option<canvas::Action<Message>> {
         let form = super::with(|c| c.form_of(self.id))?;
         let said = agents::said();
         let now = agents::now_us();
@@ -739,7 +808,10 @@ mod tests {
         );
         assert_eq!(asks.when, "· 2\u{a0}min");
         assert_eq!(bare.what, None);
-        assert!((asks.rect.height - bare.rect.height - (1.0 + 12.5 * LINE)).abs() < 0.01);
+        // Each line as tall as its 48 px panda (#649), 5 px in.
+        assert_eq!(asks.rect.height, 58.0);
+        assert_eq!(bare.rect.height, 58.0);
+        assert_eq!(TEXT_LEFT, LEFT + 58.0);
         // A finished one: since when only.
         let done = &laid.sections[1].lines[0];
         assert_eq!(

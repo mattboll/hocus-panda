@@ -419,8 +419,14 @@ pub enum ToShell {
     /// and an [`ToCompositor::A11yEnd`].
     A11y,
     /// How bars look: on glass the compositor blurs behind (else opaque),
-    /// and whether they move (else reduced motion).
-    Look { glass: bool, motion: bool },
+    /// whether they move (else reduced motion), and whether the pandas
+    /// play their moods (#649: not with reduced motion nor in power saver).
+    /// Written `look glass|opaque motion|still lively|calm`.
+    Look {
+        glass: bool,
+        motion: bool,
+        lively: bool,
+    },
     /// The theme and the accent the shell draws in (`[appearance] theme`
     /// and `accent`, #402): sent as the shell connects and when the file
     /// changes them, or the primary screen's wallpaper while the accent is
@@ -1887,11 +1893,16 @@ fn word<'a>(words: &mut impl Iterator<Item = &'a str>, what: &str) -> Result<&'a
 impl fmt::Display for ToShell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Look { glass, motion } => write!(
+            Self::Look {
+                glass,
+                motion,
+                lively,
+            } => write!(
                 f,
-                "look {} {}",
+                "look {} {} {}",
                 if *glass { "glass" } else { "opaque" },
-                if *motion { "motion" } else { "still" }
+                if *motion { "motion" } else { "still" },
+                if *lively { "lively" } else { "calm" }
             ),
             Self::Theme(choice) => write!(f, "theme {choice}"),
             Self::Locale(locale) => write!(f, "locale {locale}"),
@@ -2411,10 +2422,20 @@ impl FromStr for ToShell {
         }
         let mut words = line.split_whitespace();
         match words.next() {
-            Some("look") => Ok(Self::Look {
-                glass: flag(words.next(), "glass", "opaque")?,
-                motion: flag(words.next(), "motion", "still")?,
-            }),
+            Some("look") => {
+                let glass = flag(words.next(), "glass", "opaque")?;
+                let motion = flag(words.next(), "motion", "still")?;
+                // Before #649 the pandas moved as the bars did.
+                let lively = match words.next() {
+                    None => motion,
+                    word => flag(word, "lively", "calm")?,
+                };
+                Ok(Self::Look {
+                    glass,
+                    motion,
+                    lively,
+                })
+            }
             Some("bar") => Ok(Self::Bar {
                 output: word(&mut words, "output")?.to_owned(),
                 form: word(&mut words, "form")?.parse()?,
@@ -3298,6 +3319,12 @@ mod tests {
             ToShell::Look {
                 glass: true,
                 motion: false,
+                lively: false,
+            },
+            ToShell::Look {
+                glass: false,
+                motion: true,
+                lively: false,
             },
             ToShell::Theme(theme::Choice {
                 scheme: theme::Scheme::Light,

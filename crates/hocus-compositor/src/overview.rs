@@ -78,11 +78,11 @@ pub const FADE: Duration = Duration::from_millis(120);
 /// in this one.
 pub const LIFTING: Duration = Duration::from_millis(120);
 pub const SPRING_BACK: Duration = Duration::from_millis(200);
-/// A waiting agent's panda bobs and waves on this loop; a sleeping one
-/// breathes on this one, for this long after the overview opens.
+/// A waiting agent's panda bobs on this loop, playing its mood again and
+/// again (#649); a sleeping one breathes twice as the overview opens, as
+/// two "z" rise.
 pub const WAVE: Duration = Duration::from_millis(1600);
-pub const BREATH: Duration = Duration::from_millis(3200);
-pub const BREATHING: Duration = Duration::from_millis(6400);
+pub const BREATHING: Duration = Duration::from_millis(8000);
 
 /// The agents of a window, by the state that needs the user most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -1047,7 +1047,7 @@ impl State {
 
     /// The overview's motions; whether something moves now.
     pub fn tick_overview(&mut self, now: Duration) -> bool {
-        let reduced = self.reduced_motion();
+        let lively = self.pandas_lively();
         let empty_desktop = self.overview.is_some() && self.overview_has_empty_desktop();
         let Some(overview) = &mut self.overview else {
             return false;
@@ -1071,14 +1071,15 @@ impl State {
         if let Some(drag) = &overview.drag {
             moving |= now < drag.since + LIFTING;
         }
-        if !reduced {
-            // A waiting agent's panda waves on; the sleeping ones breathe
-            // as it opens.
-            moving |= overview
-                .badges
-                .values()
-                .any(|b| b.state == AgentState::Waiting);
-            moving |= empty_desktop && now < overview.opened + BREATHING;
+        if lively {
+            // Each badge's panda plays its mood as it opens, a waiting
+            // one on and on; the sleeping ones breathe twice (#649).
+            let since = now.saturating_sub(overview.opened);
+            moving |= overview.badges.values().any(|b| {
+                b.state == AgentState::Waiting
+                    || since < hocus_pandas::lasts(crate::pandas::mood(b.state).burst())
+            });
+            moving |= empty_desktop && since < hocus_pandas::lasts(BREATHING);
         }
         moving
     }

@@ -14,7 +14,12 @@
 //!   lines kept), and the agents waiting, a count in an amber pill;
 //! - the status row at the bottom right (the layout's button, the battery,
 //!   the Wi-Fi), 32 px from the right, its centre 44 px over the bottom;
-//! - two pandas asleep in the bottom left corner, 34 px in, 26 px up.
+//! - two pandas asleep in the bottom left corner, 34 px in, 26 px up:
+//!   the validated drawing, 132 and 108 px (#649), the second turned 14°
+//!   back; as the lock shows they breathe twice and their "z" rise (8 s),
+//!   then lie still: the lock draws once a minute again. The agents' pill
+//!   holds the waiting panda (34 px), playing its mood meanwhile. Still
+//!   with reduced motion, in power saver or on the CPU.
 
 use std::{
     collections::HashMap,
@@ -25,7 +30,7 @@ use std::{
 use hocus_link::{LOCK_SHAKE, LockFocus, LockPhase};
 use iced::{
     Color, Font, Pixels, Point, Radians, Rectangle, Renderer, Size, Theme, Vector,
-    advanced::image::FilterMethod,
+    advanced::{image::FilterMethod, svg},
     alignment, mouse,
     widget::{
         canvas::{self, Frame, Geometry, LineCap, LineJoin, Path, Stroke, gradient},
@@ -35,6 +40,7 @@ use iced::{
 };
 
 use super::{Lock, Pointing, Target, Words};
+use crate::pandas::{self, BREATH, Burst, Mood};
 use crate::theme::Ink;
 use crate::{
     clock::time::{Lang, Shown, Wall},
@@ -98,9 +104,15 @@ const LAYOUT_SIZE: Size = Size::new(44.0, 32.0);
 const LAYOUT_RADIUS: f32 = 8.0;
 const ROW_TEXT: f32 = 14.0;
 
-/// The pandas asleep: 34 px from the left, 26 px from the bottom.
+/// The pandas asleep: 34 px from the left, 26 px from the bottom; 132
+/// and 108 px (#649).
 const PANDAS_LEFT: f32 = 34.0;
 const PANDAS_BOTTOM: f32 = 26.0;
+const PANDA_NEAR: f32 = 132.0;
+const PANDA_FAR: f32 = 108.0;
+/// The agents' pill: its panda 34 px, 6 px in.
+const AGENTS_PANDA: f32 = 34.0;
+const AGENTS_IN: f32 = 6.0;
 
 const ACCENT: Ink = Ink::Accent(1.0);
 const ACCENT_TO: Ink = Ink::Dark(rgb(0x3E8FBF));
@@ -116,8 +128,6 @@ const LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 const RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.18));
 const PANDA_DARK: Ink = Ink::Fixed(rgb(0x1D2230));
 const PANDA_LIGHT: Ink = Ink::Fixed(rgb(0xF2F4F7));
-const Z_NEAR: Ink = Ink::Dark(rgb(0x8C96A8));
-const Z_FAR: Ink = Ink::Dark(rgb(0x6A7384));
 
 /// What a canvas of the lock draws: iced draws a canvas' images over its
 /// shapes, so the background's picture is a canvas under the other.
@@ -145,6 +155,13 @@ pub struct View {
 pub struct State {
     at: Option<Point>,
     zero: Option<f32>,
+    /// Since when the pandas breathe, from the lock's first frame (#649).
+    shown: Option<Instant>,
+}
+
+/// The corner's pandas breathe twice as the lock shows.
+fn breaths(since: Instant) -> Burst {
+    Burst::lasting(since, BREATH * 2)
 }
 
 /// Where everything is on a screen `size` large.
@@ -315,13 +332,17 @@ impl<Message> canvas::Program<Message> for View {
                     state.zero =
                         crate::clock::measure(system.raw(), MARTIAN, CLOCK, CLOCK).map(|m| m.zero);
                 }
+                if state.shown.is_none() && pandas::lively() {
+                    state.shown = Some(*now);
+                }
+                let breathing = state.shown.is_some_and(|t| breaths(t).plays(*now));
                 let moving = super::with(|l| {
                     let l = l.as_ref()?;
                     let shaking = l.shake.is_some_and(|(_, since)| {
                         now.saturating_duration_since(since) < LOCK_SHAKE
                     });
                     let spinning = l.checking.is_some() && l.shown.motion;
-                    Some(shaking || spinning)
+                    Some(shaking || spinning || breathing)
                 })?;
                 Some(if moving {
                     canvas::Action::request_redraw()
@@ -384,9 +405,9 @@ impl<Message> canvas::Program<Message> for View {
             state.zero,
         );
         if form {
-            draw_form(&mut frame, &lock, &layout, self.words, now);
+            draw_form(&mut frame, &lock, &layout, self.words, (now, state.shown));
             draw_row(&mut frame, &lock, size, layout.row_centre, self.id);
-            draw_pandas(&mut frame, size);
+            draw_pandas(&mut frame, size, now, state.shown);
         }
         let said = Said {
             output: self.output.clone(),
@@ -534,7 +555,13 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
     ));
 }
 
-fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Instant) {
+fn draw_form(
+    f: &mut Frame,
+    lock: &Lock,
+    layout: &Layout,
+    words: Words,
+    (now, breathing): (Instant, Option<Instant>),
+) {
     let shown = &lock.shown;
     draw_avatar(f, layout.avatar);
     f.fill_text(text(
@@ -655,8 +682,9 @@ fn draw_form(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words, now: Ins
         draw_agents(
             f,
             words.agents(shown.agents),
-            layout.message.center_x(),
-            layout.agents_top,
+            (layout.message.center_x(), layout.agents_top),
+            now,
+            breathing.map(|t| Burst::of(Mood::Waiting, t)),
         );
     }
 }
@@ -1010,44 +1038,52 @@ pub(crate) fn panda_eyes(f: &mut Frame, at: Point, size: f32, eyes: Eyes, alpha:
     f.fill(&nose, dark);
 }
 
-/// The two pandas asleep in the bottom left corner, and their "z".
-fn draw_pandas(f: &mut Frame, size: Size) {
+/// The two pandas asleep in the bottom left corner, breathing twice from
+/// `shown` (#649).
+fn draw_pandas(f: &mut Frame, size: Size, now: Instant, shown: Option<Instant>) {
     let bottom = size.height - PANDAS_BOTTOM;
-    panda(f, Point::new(PANDAS_LEFT, bottom - 66.0), 66.0, true, 0.85);
-    // The second, smaller, 50 px along, 2 px lower, turned 14°.
-    let second = Point::new(PANDAS_LEFT + 50.0 + 28.0, bottom + 2.0 - 28.0);
+    let burst = shown.map(breaths);
+    let drawing = pandas::drawing(Mood::Resting, burst, now);
+    let box_of = |side: f32| Size::new(side, side * pandas::VIEW_BOX.1 / pandas::VIEW_BOX.0);
+    let first = box_of(PANDA_NEAR);
+    f.draw_svg(
+        Rectangle::new(Point::new(PANDAS_LEFT, bottom - first.height), first),
+        svg::Svg::new(drawing.clone()),
+    );
+    // The second, smaller, 12 px into the first's box, its feet 2 px
+    // lower, turned 14° back.
+    let second = box_of(PANDA_FAR);
+    let centre = Point::new(
+        PANDAS_LEFT + PANDA_NEAR - 12.0 + second.width / 2.0,
+        bottom + 2.0 - second.height / 2.0,
+    );
     f.with_save(|f| {
-        f.translate(Vector::new(second.x, second.y));
-        f.rotate(14f32.to_radians());
-        panda(f, Point::new(-28.0, -28.0), 56.0, true, 0.85);
+        f.translate(Vector::new(centre.x, centre.y));
+        f.rotate(-14f32.to_radians());
+        f.draw_svg(
+            Rectangle::new(
+                Point::new(-second.width / 2.0, -second.height / 2.0),
+                second,
+            ),
+            svg::Svg::new(drawing),
+        );
     });
-    let top = bottom - 80.0;
-    f.fill_text(text(
-        "z".to_owned(),
-        Point::new(PANDAS_LEFT + 108.0, top),
-        15.0,
-        MANROPE_BOLD,
-        Z_NEAR.get(),
-        Alignment::Left,
-    ));
-    f.fill_text(text(
-        "z".to_owned(),
-        Point::new(PANDAS_LEFT + 122.0, top - 14.0),
-        11.0,
-        MANROPE_BOLD,
-        Z_FAR.get(),
-        Alignment::Left,
-    ));
 }
 
-/// The agents waiting: an amber dot and their count, in a pill centred on
-/// `cx`.
-fn draw_agents(f: &mut Frame, words: String, cx: f32, top: f32) {
+/// The agents waiting: the waiting panda (34 px, #649) and their count,
+/// in a pill centred on `cx`, its top at `top`.
+fn draw_agents(
+    f: &mut Frame,
+    words: String,
+    (cx, top): (f32, f32),
+    now: Instant,
+    burst: Option<Burst>,
+) {
     let width = crate::popover::kit::measure(&words, AGENTS_TEXT, MANROPE_SEMIBOLD)
-        + 10.0
+        + AGENTS_IN
+        + AGENTS_PANDA
         + 8.0
-        + 8.0
-        + 10.0;
+        + 12.0;
     let rect = Rectangle::new(
         Point::new(cx - width / 2.0, top),
         Size::new(width, AGENTS_HEIGHT),
@@ -1056,14 +1092,18 @@ fn draw_agents(f: &mut Frame, words: String, cx: f32, top: f32) {
         &Path::rounded_rectangle(rect.position(), rect.size(), 10.0.into()),
         crate::theme::ink(Color::from_rgba8(245, 180, 74, 0.10)),
     );
-    f.fill(
-        &Path::circle(Point::new(rect.x + 10.0 + 4.0, rect.center_y()), 4.0),
-        crate::theme::ink(rgb(0xF5B44A)),
+    let tall = AGENTS_PANDA * pandas::VIEW_BOX.1 / pandas::VIEW_BOX.0;
+    f.draw_svg(
+        Rectangle::new(
+            Point::new(rect.x + AGENTS_IN, rect.center_y() - tall / 2.0),
+            Size::new(AGENTS_PANDA, tall),
+        ),
+        svg::Svg::new(pandas::drawing(Mood::Waiting, burst, now)),
     );
     f.fill_text(text(
         words,
         Point::new(
-            rect.x + 10.0 + 8.0 + 8.0,
+            rect.x + AGENTS_IN + AGENTS_PANDA + 8.0,
             rect.center_y() - AGENTS_TEXT * LINE / 2.0,
         ),
         AGENTS_TEXT,
