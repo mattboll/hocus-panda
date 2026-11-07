@@ -408,3 +408,49 @@ fn with_a_bar_on_each_screen_super_b_goes_on_to_the_next_then_back() -> anyhow::
     assert_eq!(bed.focused().as_deref(), Some("test.window"));
     Ok(())
 }
+
+/// The magnifier on (docs/design/accessibility.md): its view follows the
+/// ring, to the clock as `Super+B` lands there, to the footer on `End`.
+#[test]
+fn the_magnifiers_view_follows_the_ring() -> anyhow::Result<()> {
+    const KEY_EQUAL: u32 = 13;
+    let Some(shell) = shell_program() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &["1920x1080"])?;
+    bed.hp.pointer_move(200.0, 500.0);
+    for _ in 0..4 {
+        chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_EQUAL]);
+    }
+    let view = |hp: &Headless| hp.state().magnifier_seen().map(|(_, _, v)| v);
+    let shows = |hp: &Headless, (x, y): (f64, f64)| {
+        view(hp).is_some_and(|(vx, vy, w, h)| vx <= x && x <= vx + w && vy <= y && y <= vy + h)
+    };
+    assert!(view(&bed.hp).is_some(), "the magnifier is off");
+    // The clock's group, near the bar's top right.
+    let clock = (1920.0 - 8.0 - 100.0, 8.0 + 50.0);
+    assert!(!shows(&bed.hp, clock));
+    bed.super_b();
+    let followed = bed.hp.dispatch_until(WAIT, |hp| shows(hp, clock))?;
+    assert!(followed, "the view stays at {:?}", view(&bed.hp));
+    // End: the footer's last button, at the bar's foot.
+    bed.keyboard_on(Some(hocus_link::NAMESPACE))?;
+    wait(&mut bed.hp, Duration::from_millis(200))?;
+    bed.press(KEY_END);
+    let foot = bed.hp.dispatch_until(WAIT, |hp| {
+        view(hp).is_some_and(|(_, y, _, h)| y + h > 1000.0)
+    })?;
+    let said: Vec<String> = bed
+        .log()
+        .lines()
+        .filter(|l| l.contains("keyboard"))
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        foot,
+        "the view stays at {:?}; the shell said:\n{}",
+        view(&bed.hp),
+        said.join("\n")
+    );
+    Ok(())
+}

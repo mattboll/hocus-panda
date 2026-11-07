@@ -635,6 +635,12 @@ pub enum Effect {
         id: window::Id,
         takes: bool,
     },
+    /// The compositor is told where the keyboard's ring is on `bar` (its
+    /// frame), for the magnifier.
+    Ring {
+        bar: String,
+        rect: Rectangle,
+    },
     /// The compositor is asked for the next keyboard layout.
     NextLayout,
     /// A level steps, as its key on the keyboard does (`←`/`→` on the
@@ -1750,6 +1756,10 @@ impl Controller {
         tracing::debug!(item = ?next, "the keyboard on an item");
         self.focused = Some((bar.to_owned(), next, rect));
         effects.push(Effect::Wake(next.namespace(place.form)));
+        effects.push(Effect::Ring {
+            bar: bar.to_owned(),
+            rect,
+        });
     }
 
     /// `Super+B` (bar.md §11): the keyboard into bar `bar`, on the first
@@ -1784,6 +1794,10 @@ impl Controller {
         ));
         self.focused = Some((bar.to_owned(), item, rect));
         effects.push(Effect::Wake(item.namespace(place.form)));
+        effects.push(Effect::Ring {
+            bar: bar.to_owned(),
+            rect,
+        });
         effects
     }
 
@@ -2476,6 +2490,18 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::NextLayout);
             Vec::new()
         }
+        Effect::Ring { bar, rect } => {
+            if bar != crate::ALONE {
+                tell(ToCompositor::Ring(hocus_link::Row {
+                    output: bar,
+                    x: rect.x.round() as i32,
+                    y: rect.y.round() as i32,
+                    width: rect.width.round() as i32,
+                    height: rect.height.round() as i32,
+                }));
+            }
+            Vec::new()
+        }
         Effect::Level(key) => {
             crate::levels::key(key);
             Vec::new()
@@ -2810,6 +2836,14 @@ mod tests {
     use super::*;
 
     const BAR: &str = "HDMI-A-1";
+
+    /// `effects` but the ring's place told for the magnifier.
+    fn no_ring(effects: Vec<Effect>) -> Vec<Effect> {
+        effects
+            .into_iter()
+            .filter(|e| !matches!(e, Effect::Ring { .. }))
+            .collect()
+    }
     const MS: fn(u64) -> Duration = Duration::from_millis;
 
     fn controller(form: Form) -> (Controller, window::Id) {
@@ -3320,7 +3354,7 @@ mod tests {
         c.handle(press(), t);
         c.handle(Event::Escape, t);
         assert!(c.focused(BAR, Item::Sound));
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert_eq!(effects, vec![Effect::Wake(LEVELS_NAMESPACE)]);
         assert!(c.focused(BAR, Item::Battery));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3591,7 +3625,7 @@ mod tests {
             t,
         );
         c.handle(Event::Escape, t);
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::Meeting));
         assert!(effects.contains(&Effect::Keyboard(card, KeyboardInteractivity::Exclusive)));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3639,7 +3673,7 @@ mod tests {
         assert!(!Item::TodayLine(0).hovers(Form::Full));
         // From the card (it had the keyboard), down Today's rows and round.
         c.focused = Some((BAR.to_owned(), Item::Meeting, card));
-        let effects = c.handle(Event::ItemStep { back: false }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::TodayLine(0)));
         assert!(effects.contains(&Effect::Keyboard(today, KeyboardInteractivity::Exclusive)));
         c.handle(Event::ItemStep { back: false }, t);
@@ -3711,7 +3745,7 @@ mod tests {
         );
         c.handle(Event::Escape, t);
         assert!(c.focused(BAR, Item::Wifi));
-        let effects = c.handle(Event::ItemStep { back: true }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: true }, t));
         assert_eq!(
             effects,
             vec![
@@ -3724,7 +3758,7 @@ mod tests {
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 5 }));
         // Up again, along the row: the same surface.
         assert_eq!(
-            c.handle(Event::ItemStep { back: true }, t),
+            no_ring(c.handle(Event::ItemStep { back: true }, t)),
             vec![Effect::Wake(DESKTOPS_NAMESPACE)]
         );
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
@@ -3736,7 +3770,7 @@ mod tests {
             c.handle(Event::ItemStep { back: true }, t);
         }
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
-        let effects = c.handle(Event::ItemStep { back: true }, t);
+        let effects = no_ring(c.handle(Event::ItemStep { back: true }, t));
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
         assert!(c.focused(BAR, Item::Sound));
         // Esc lets it go from there.
@@ -3849,7 +3883,7 @@ mod tests {
         let (mut c, [surface, _, _, _, agents]) = keyboard_bar(Form::Full);
         // Agent 8 waits, 9 is stuck: the ring on 8, the agents' surface
         // holding the keyboard.
-        let effects = c.enter(BAR, &[Item::Agent(8), Item::Agent(9)], t);
+        let effects = no_ring(c.enter(BAR, &[Item::Agent(8), Item::Agent(9)], t));
         assert_eq!(
             effects,
             vec![
@@ -3863,7 +3897,7 @@ mod tests {
         assert!(c.focused(BAR, Item::Agent(9)));
         // Nobody waits nor is stuck: on the clock, the bar's own surface
         // taking the keyboard, the agents' letting it go.
-        let effects = c.enter(BAR, &[], t);
+        let effects = no_ring(c.enter(BAR, &[], t));
         assert_eq!(
             effects,
             vec![
@@ -3945,11 +3979,11 @@ mod tests {
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 1 }));
         // Along the tiles, stopping at their ends.
         assert_eq!(
-            c.handle(Event::ItemSide { right: true }, t),
+            no_ring(c.handle(Event::ItemSide { right: true }, t)),
             vec![Effect::Wake(DESKTOPS_NAMESPACE)]
         );
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 2 }));
-        assert!(c.handle(Event::ItemSide { right: true }, t).is_empty());
+        assert!(no_ring(c.handle(Event::ItemSide { right: true }, t)).is_empty());
         assert!(c.focused(BAR, Item::Desktop { row: 0, index: 2 }));
         c.handle(Event::ItemSide { right: false }, t);
         c.handle(Event::ItemSide { right: false }, t);
@@ -3964,11 +3998,11 @@ mod tests {
         c.handle(Event::ItemStep { back: false }, t);
         assert!(c.focused(BAR, Item::Sound));
         assert_eq!(
-            c.handle(Event::ItemSide { right: true }, t),
+            no_ring(c.handle(Event::ItemSide { right: true }, t)),
             vec![Effect::Level(hocus_link::LevelKey::VolumeUp)]
         );
         assert_eq!(
-            c.handle(Event::ItemSide { right: false }, t),
+            no_ring(c.handle(Event::ItemSide { right: false }, t)),
             vec![Effect::Level(hocus_link::LevelKey::VolumeDown)]
         );
         assert_eq!(c.open_item(), None);

@@ -872,6 +872,9 @@ polled from the loop.
   when pushed, §2), so that the ring shows over a window covering it.
 - The session locking takes the keyboard from the bar: once unlocked,
   the window has it.
+- The magnifier's view follows the ring: the shell tells the compositor
+  where it lands and moves (`ring OUTPUT X Y W H`, the bar's frame;
+  [accessibility.md](accessibility.md)).
 - **Not built**: the bar shown over a fullscreen window while it holds
   the keyboard (a fullscreen window still covers it); a window line's
   menu by `Menu` or `Shift+F10`.

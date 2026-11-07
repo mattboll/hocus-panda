@@ -16,7 +16,10 @@
 //!   the window has it, not the bar.
 
 use hocus_link::ToShell;
-use smithay::desktop::layer_map_for_output;
+use smithay::{
+    desktop::layer_map_for_output,
+    utils::{Logical, Rectangle},
+};
 
 use crate::{State, focus::KeyboardFocus};
 
@@ -57,6 +60,32 @@ impl State {
         if self.shell_linked() && self.bar_holding_keyboard().is_some() {
             self.tell_shell(ToShell::BarKeyboard(None));
         }
+    }
+
+    /// The bar's ring moved to `row` (in its bar's frame): the
+    /// magnifier's view shows it (docs/design/accessibility.md).
+    pub(crate) fn ring_moved(&mut self, row: &hocus_link::Row) {
+        let Some(output) = self.space.outputs().find(|o| o.name() == row.output) else {
+            return;
+        };
+        let Some(screen) = self.space.output_geometry(output) else {
+            return;
+        };
+        let edge = hocus_link::EDGE;
+        // The bar's frame starts at its outer edge, its `x` negative
+        // inside it; on the left, mirrored.
+        let x = match self.bar_side() {
+            hocus_link::Side::Right => screen.loc.x + screen.size.w - edge + row.x,
+            hocus_link::Side::Left => {
+                let bar = self.panel.width(&row.output).unwrap_or(0);
+                screen.loc.x + edge + bar + row.x
+            }
+        };
+        let rect = Rectangle::<f64, Logical>::new(
+            (f64::from(x), f64::from(screen.loc.y + edge + row.y)).into(),
+            (f64::from(row.width), f64::from(row.height)).into(),
+        );
+        self.magnifier_show(rect, crate::magnifier::Show::Focus);
     }
 
     /// The screens with a bar, left to right, then top to bottom.

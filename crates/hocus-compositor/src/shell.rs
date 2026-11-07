@@ -498,6 +498,7 @@ impl State {
             } => self.send_to_asked(id, &output, desktop),
             ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
+            ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
                 None => tracing::warn!(tool, "the shell plugs in a tool that is not one"),

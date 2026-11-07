@@ -1692,6 +1692,10 @@ pub enum ToCompositor {
     /// window. Written `go-to-agent ID`, or `go-to-agent ID OUTPUT X Y W
     /// H` with the row.
     GoToAgent { id: u64, row: Option<Row> },
+    /// The keyboard's ring moved in a bar (`Super+B`, bar.md §11): where
+    /// it is, so that the magnifier's view follows it. Written `ring
+    /// OUTPUT X Y W H`.
+    Ring(Row),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -2691,6 +2695,11 @@ impl fmt::Display for ToCompositor {
                 "go-to-agent {id} {} {} {} {} {}",
                 r.output, r.x, r.y, r.width, r.height
             ),
+            Self::Ring(r) => write!(
+                f,
+                "ring {} {} {} {} {}",
+                r.output, r.x, r.y, r.width, r.height
+            ),
             Self::Plug(tool) => write!(f, "plug {tool}"),
             Self::Unplug(tool) => write!(f, "unplug {tool}"),
             Self::Decline => f.write_str("decline"),
@@ -2943,6 +2952,21 @@ impl FromStr for ToCompositor {
                     }
                 };
                 Ok(Self::GoToAgent { id, row })
+            }
+            Some("ring") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let mut number = |what: &str| -> Result<i32, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::Ring(Row {
+                    output,
+                    x: number("x")?,
+                    y: number("y")?,
+                    width: number("width")?,
+                    height: number("height")?,
+                }))
             }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -3456,6 +3480,13 @@ mod tests {
             ToCompositor::Overview,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
+            ToCompositor::Ring(Row {
+                output: "eDP-1".into(),
+                x: -190,
+                y: 14,
+                width: 172,
+                height: 77,
+            }),
             ToCompositor::GoToAgent {
                 id: 7,
                 row: Some(Row {
