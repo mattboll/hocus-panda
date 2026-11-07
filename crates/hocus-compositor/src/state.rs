@@ -166,6 +166,12 @@ pub struct State {
     pub seam_handle_id: Id,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
+    /// The pointer and the overview's hot corners (#727).
+    pub hot_corner: crate::hot_corner::HotCorner,
+    /// The user has moved the pointer (a device's motion; in a headless
+    /// compositor, from its start: tests put it where they want): screens
+    /// lit after no longer bring it to the primary screen's middle.
+    pub pointer_placed: bool,
     pub wobble: Option<(WindowId, Jelly)>,
     /// The cursor over a window's frame or grip, or during a grab: it
     /// wins over the client's.
@@ -190,6 +196,8 @@ pub struct State {
     pub still: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
+    /// The bar's tiles, and a window moved over them (8.5 B).
+    pub tile_drop: crate::tile_drop::TileDrop,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
     pub going: Option<crate::going::Going>,
     /// The halo around and over the bars (bar.md §6, 4.4).
@@ -224,6 +232,17 @@ pub struct State {
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
     pub switcher: Option<Switcher>,
     pub switcher_out: Option<(Switcher, Tween)>,
+    /// A window's radial menu while it is open, and as it goes (#723);
+    /// the right press that may open it; what draws it.
+    pub radial: Option<crate::radial::Radial>,
+    pub radial_out: Option<crate::radial::Going>,
+    pub radial_press: Option<crate::radial::Press>,
+    pub radial_paint: crate::radial_draw::RadialPaint,
+    /// The overview while it shows (8.5 A), and what draws it.
+    pub overview: Option<crate::overview::Overview>,
+    pub overview_paint: crate::overview_draw::OverviewPaint,
+    /// The windows' states last told the shell (#723).
+    pub told_window_states: Option<hocus_link::WindowStates>,
     /// The switcher's key held down, stepping at the keyboard's repeat
     /// delay and rate: its keycode and its timer (§11).
     pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
@@ -239,6 +258,8 @@ pub struct State {
     pub programs: Programs,
     /// The session's start-up applications, once the bar shows (6.15).
     pub autostart: crate::session::autostart::Autostart,
+    /// The session saved, and the last one put back (windows.md §14).
+    pub session_restore: crate::session::restore::Restore,
     /// The bars' places and forms (docs/design/bar.md §2, §3).
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
@@ -247,6 +268,8 @@ pub struct State {
     pub agents: crate::agents::Agents,
     /// The screens' settings, their trials and the Settings' lines (6.9).
     pub(crate) displays: crate::displays::Displays,
+    /// The screens' identities and their sets (windows.md §12).
+    pub(crate) screen_sets: crate::screen_sets::Sets,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
@@ -349,6 +372,7 @@ impl State {
         );
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let panel = crate::panel::Panel::load(config.state_dir.as_deref());
+        let screen_sets = crate::screen_sets::Sets::load(config.state_dir.as_deref());
         let capture = crate::capture::Capture::load(config.state_dir.as_deref());
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
         let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
@@ -365,7 +389,10 @@ impl State {
             runtime_dir,
             config,
             nested,
-            compositor_state: CompositorState::new::<Self>(dh),
+            // Version 6: a surface is told the scale to draw at
+            // (`preferred_buffer_scale`), the largest of the screens it is
+            // on (docs/design/windows.md §12, #419).
+            compositor_state: CompositorState::new_v6::<Self>(dh),
             xdg_shell_state: XdgShellState::new::<Self>(dh),
             xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
             kde_decoration_state: KdeDecorationState::new::<Self>(
@@ -415,6 +442,8 @@ impl State {
             seam_handle: None,
             seam_handle_id: Id::new(),
             moving: None,
+            hot_corner: crate::hot_corner::HotCorner::default(),
+            pointer_placed: false,
             wobble: None,
             frame_cursor: None,
             last_grip_press: None,
@@ -427,6 +456,7 @@ impl State {
             cursor_images,
             redraw: true,
             strips: HashMap::new(),
+            tile_drop: crate::tile_drop::TileDrop::default(),
             going: None,
             halo,
             peek: crate::peek::Peeks::default(),
@@ -444,15 +474,24 @@ impl State {
             swipes_given: (0, 0),
             switcher: None,
             switcher_out: None,
+            radial: None,
+            radial_out: None,
+            radial_press: None,
+            radial_paint: crate::radial_draw::RadialPaint::default(),
+            overview: None,
+            overview_paint: crate::overview_draw::OverviewPaint::default(),
+            told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,
             xdisplay: None,
             programs: Programs::default(),
             autostart: crate::session::autostart::Autostart::default(),
+            session_restore: crate::session::restore::Restore::default(),
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
             displays: crate::displays::Displays::default(),
+            screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
             gpu: None,

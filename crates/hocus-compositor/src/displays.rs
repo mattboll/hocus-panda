@@ -212,8 +212,18 @@ impl State {
                     .filter(|(_, o)| *o != crate::config::OutputSettings::default())
                     .collect::<Vec<_>>()
             };
-        let outputs_changed = screens(&config.outputs) != screens(&self.config.outputs);
-        let primary_changed = config.panel.output != self.config.panel.output;
+        let sets_changed = config.screen_sets != self.config.screen_sets;
+        let outputs_changed =
+            screens(&config.outputs) != screens(&self.config.outputs) || sets_changed;
+        let primary_before = self.primary_wanted();
+        let primary_changed = config.panel.output != self.config.panel.output
+            || config
+                .screen_set(&self.current_set())
+                .and_then(|s| s.primary.as_ref())
+                != self
+                    .config
+                    .screen_set(&self.current_set())
+                    .and_then(|s| s.primary.as_ref());
         if !outputs_changed && !primary_changed {
             return false;
         }
@@ -222,17 +232,20 @@ impl State {
             primary_changed,
             "the configuration changed: the screens' settings apply"
         );
+        // A screen's bar form chosen in the file is the bar's own (6.4).
+        self.config.outputs = config.outputs.clone();
+        self.config.screen_sets = config.screen_sets.clone();
         if let Some(kept) = &self.displays.kept {
-            let now = config.outputs.get(&kept.output).and_then(|o| o.mode);
+            let now = self.screen_settings(&kept.output).and_then(|o| o.mode);
             if now != kept.file_then {
                 self.displays.kept = None;
             }
         }
-        // A screen's bar form chosen in the file is the bar's own (6.4).
-        self.config.outputs = config.outputs.clone();
         if primary_changed {
             self.config.panel.output = config.panel.output.clone();
-            self.panel.home = None;
+            if self.primary_wanted() != primary_before {
+                self.panel.home = None;
+            }
         }
         self.displays.wanted = true;
         self.displays.dirty = true;
@@ -245,6 +258,7 @@ impl State {
         let name = output.name();
         self.displays.gone.retain(|g| g.name != name);
         if !self.displays.outputs.contains(output) {
+            self.screen_joined(output);
             self.displays.outputs.push(output.clone());
             self.displays.outputs.sort_by_key(Output::name);
         }
@@ -287,6 +301,51 @@ impl State {
         self.displays.dirty = true;
     }
 
+    /// The lid took the laptop's screen away, or gave it back: at once,
+    /// as an unplug or a screen plugged back, so that its windows are
+    /// where they go before anything else happens; the layout follows
+    /// after the turn.
+    pub(crate) fn lid_screens(&mut self) {
+        for output in self.displays.outputs.clone() {
+            let name = output.name();
+            let takes = self.lid_takes(&output);
+            let off = self.displays.off.contains(&name);
+            if takes && !off && self.is_plugged(&output) {
+                tracing::info!(
+                    output = name,
+                    "the lid closed: the screen goes as unplugged"
+                );
+                if let Some(g) = self.space.output_geometry(&output) {
+                    self.displays
+                        .off_places
+                        .insert(name.clone(), (g.loc.x, g.loc.y));
+                }
+                self.displays.off.insert(name);
+                self.screen_turned_off(&output, true);
+            } else if !takes && off && wanted_on(&self.config, &name) {
+                tracing::info!(output = name, "the lid opened: the screen comes back");
+                self.displays.off.remove(&name);
+                let place = self.displays.off_places.remove(&name).unwrap_or_else(|| {
+                    let right = self
+                        .space
+                        .outputs()
+                        .filter_map(|o| self.space.output_geometry(o))
+                        .map(|g| g.loc.x + g.size.w)
+                        .max()
+                        .unwrap_or(0);
+                    (right, 0)
+                });
+                output.change_current_state(None, None, None, Some(place.into()));
+                self.space.map_output(&output, place);
+                layer_map_for_output(&output).arrange();
+                self.panel_refresh();
+                self.output_back(&output, true);
+            }
+        }
+        self.displays.wanted = true;
+        self.displays.dirty = true;
+    }
+
     /// Whether the file turned `output` off.
     pub fn display_off(&self, output: &Output) -> bool {
         self.displays.off.contains(&output.name())
@@ -295,7 +354,8 @@ impl State {
     /// What a screen should be now: on, its mode, its scale, VRR.
     fn display_wanted(&self, output: &Output) -> Wanted {
         let name = output.name();
-        let settings = self.config.outputs.get(&name);
+        let settings = self.screen_settings(&name);
+        let settings = settings.as_ref();
         let facts = output.user_data().get::<Facts>();
         let current = output.current_mode().map(mode3);
         let mode = match (&self.displays.trial, &self.displays.kept, facts) {
@@ -317,7 +377,7 @@ impl State {
             _ => output.current_scale().fractional_scale(),
         };
         Wanted {
-            enabled: settings.is_none_or(|s| s.enabled),
+            enabled: settings.is_none_or(|s| s.enabled) && !self.lid_takes(output),
             mode,
             scale,
             vrr: settings.is_some_and(|s| s.vrr) && facts.is_some_and(|f| f.vrr_capable),
@@ -413,7 +473,7 @@ impl State {
             "a trial ends"
         );
         if kept {
-            let file_then = self.config.outputs.get(&trial.output).and_then(|o| o.mode);
+            let file_then = self.screen_settings(&trial.output).and_then(|o| o.mode);
             self.displays.kept = Some(Kept {
                 output: trial.output.clone(),
                 mode: trial.mode,
@@ -503,6 +563,22 @@ impl State {
     }
 
     fn displays_line(&mut self, session: u64, line: &str) {
+        // "Oublier cet ensemble" (6.9): its screens, a tab before each
+        // (their identities hold spaces).
+        if let Some(screens) = line.strip_prefix("forget-set") {
+            let keys: Vec<String> = screens
+                .split('\t')
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .map(str::to_owned)
+                .collect();
+            if let Err(why) = self.forget_screen_set(&crate::screen_sets::set_name(&keys)) {
+                tracing::warn!(session, line, why, "the Settings asked what cannot be");
+                let refused = serde_json::json!({ "refused": why }).to_string();
+                self.displays_send(Some(session), &refused);
+            }
+            return;
+        }
         let mut words = line.split_whitespace();
         let answer = match (words.next(), words.next(), words.next()) {
             (Some("try"), Some(name), Some(what)) => match what.strip_prefix("mode=") {
@@ -670,7 +746,8 @@ impl State {
         for output in &self.displays.outputs {
             let name = output.name();
             let facts = output.user_data().get::<Facts>();
-            let settings = self.config.outputs.get(&name);
+            let settings = self.screen_settings(&name);
+            let settings = settings.as_ref();
             let mode = output.current_mode().map(mode3);
             let position = self
                 .space
@@ -712,6 +789,7 @@ impl State {
             let built_in = crate::away::is_internal(output);
             list.push(serde_json::json!({
                 "name": name,
+                "key": self.screen_key(&name),
                 "built_in": built_in,
                 "mm": [facts.map_or(0, |f| f.millimetres.0), facts.map_or(0, |f| f.millimetres.1)],
                 "modes": modes,
@@ -738,6 +816,7 @@ impl State {
         for gone in &self.displays.gone {
             list.push(serde_json::json!({
                 "name": gone.name,
+                "key": self.screen_key(&gone.name),
                 "built_in": gone.built_in,
                 "mm": [gone.millimetres.0, gone.millimetres.1],
                 "modes": [],
@@ -754,17 +833,16 @@ impl State {
             "outputs": list,
             "places_refused": self.displays.places_refused,
             "trial": self.displays.trial.as_ref().map(|t| t.id),
+            // The set in use and the sets known (windows.md §12, 6.9).
+            "set": self.current_set(),
+            "sets": self.sets_json(),
         })
     }
 
     /// The screen with the bar, as the rule says now.
     pub(crate) fn panel_primary(&self) -> Option<String> {
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
-        crate::panel::primary(
-            &names,
-            &self.config.panel.output,
-            self.panel.home.as_deref(),
-        )
+        crate::panel::primary(&names, &self.primary_wanted(), self.panel.home.as_deref())
     }
 
     // --- The layout ---------------------------------------------------------------------
@@ -791,7 +869,7 @@ impl State {
                         .insert(name.clone(), (g.loc.x, g.loc.y));
                 }
                 self.displays.off.insert(name);
-                self.screen_turned_off(output);
+                self.screen_turned_off(output, false);
             }
         }
         // Screens turned on again: laid out with the others, their
@@ -800,7 +878,9 @@ impl State {
             .iter()
             .filter(|o| {
                 let name = o.name();
-                self.displays.off.contains(&name) && wanted_on(&self.config, &name)
+                self.displays.off.contains(&name)
+                    && wanted_on(&self.config, &name)
+                    && !self.lid_takes(o)
             })
             .cloned()
             .collect();
@@ -865,7 +945,9 @@ impl State {
                 scaled.push(output.clone());
             }
         }
-        // The places, with every size as it now is.
+        // The places, with every size as it now is; a screen the lid took
+        // away is out of them, as an unplugged one (windows.md §12).
+        let outputs: Vec<Output> = outputs.into_iter().filter(|o| !self.lid_takes(o)).collect();
         let laid: Vec<Laid> = outputs
             .iter()
             .map(|o| {
@@ -874,7 +956,7 @@ impl State {
                 Laid {
                     on: !self.display_off(o),
                     size: logical_size(o).unwrap_or((1, 1)),
-                    file: self.config.outputs.get(&name).and_then(|s| s.position),
+                    file: self.screen_settings(&name).and_then(|s| s.position),
                     placed: facts.map_or_else(
                         || {
                             self.space
@@ -942,10 +1024,12 @@ impl State {
         }
         self.screens_moved(moved, &put);
         for output in &back {
-            self.output_back(output);
+            self.output_back(output, false);
         }
         self.panel_refresh();
+        self.pointer_onto_primary();
         self.rearrange();
+        self.note_screen_set();
         self.redraw = true;
         self.displays.dirty = true;
     }
@@ -1082,7 +1166,7 @@ pub fn say_mode(m: Mode3) -> String {
     }
 }
 
-fn wall_now() -> i64 {
+pub(crate) fn wall_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))

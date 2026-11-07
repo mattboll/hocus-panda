@@ -73,6 +73,9 @@ pub struct Managed {
     /// Its screen went: where it was there, to go back when it comes
     /// back (§12).
     pub came_from: Option<crate::screens::CameFrom>,
+    /// Shrunk to fit the screen it was moved to: its size before, taken
+    /// back on a screen where it fits (§12, #419).
+    pub fitted: Option<crate::scales::Fitted>,
 }
 
 /// A resize under way, or ending.
@@ -170,6 +173,7 @@ impl Managed {
             travel: None,
             snapped_on: None,
             came_from: None,
+            fitted: None,
         }
     }
 
@@ -465,6 +469,7 @@ impl State {
         } else if !resizing {
             self.place_in_space(window, (rect.x, rect.y));
         }
+        self.session_changed();
         self.redraw = true;
     }
 
@@ -532,6 +537,7 @@ impl State {
         self.model.set_desktop(id, desktop);
         if rule.as_ref().is_some_and(|r| r.above) {
             self.model.set_above(id, true);
+            self.tell_window_states(false);
         }
         let now = self.now();
         let mut managed = Managed::new(window.clone());
@@ -592,6 +598,10 @@ impl State {
         } else {
             self.restack();
             self.sync_activated();
+        }
+        // A window of the last session goes back in its place (§14).
+        if parent.is_none() {
+            self.session_window_mapped(id, &window);
         }
         self.share_sources_changed();
         self.redraw = true;
@@ -712,6 +722,9 @@ impl State {
         }
         self.end_popup_grab_of(id);
         self.switcher_forget(id);
+        self.radial_window_gone(id);
+        self.overview_window_gone(id);
+        self.overview_paint.forget(id);
         self.share_window_gone(id);
         self.record_window_gone(id);
         self.overlay.forget(id);
@@ -725,11 +738,16 @@ impl State {
             self.moving = None;
         }
         let had_focus = self.model.focused() == Some(id);
+        let marked = self.model.is_above(id) || self.model.is_everywhere(id);
         self.model.remove(id);
         if had_focus {
             let next = self.model.focused();
             self.focus(next);
         }
+        if marked {
+            self.tell_window_states(false);
+        }
+        self.session_changed();
         self.redraw = true;
     }
 
@@ -854,6 +872,7 @@ impl State {
         for w in &above {
             self.space.raise_element(w, false);
         }
+        self.session_changed();
     }
 
     /// Puts smithay's stacking in the model's order.
@@ -1367,6 +1386,7 @@ impl State {
         for strip in self.strips.values_mut() {
             moving |= strip.tick(now);
         }
+        moving |= self.tile_drop.tick(now);
         moving |= self.tick_going(now);
         moving |= self.tick_halo(now);
         moving |= self.tick_peek(now);
@@ -1380,6 +1400,8 @@ impl State {
             wake(at);
         }
         moving |= self.tick_switcher(now, &mut wake);
+        moving |= self.tick_radial(now);
+        moving |= self.tick_overview(now);
         moving |= self.tick_ink(now, &mut wake);
         self.leaving.retain(|l| !l.tween.done(now));
         moving |= !self.leaving.is_empty();

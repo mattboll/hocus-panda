@@ -12,6 +12,11 @@ taken out, and the view box is the design report's crop (126 × 120.5 units
 round the 120-unit drawing), so that the shell draws them at 24 px, sharp
 at any scale.
 
+`wink.svg` is the same drawing's "wave" mood, winking, its hat raised in
+its left paw, its arms at rest: never an agent's state, it peeks out to
+say that windows moved with a screen (docs/design/windows.md §12,
+"Saying it"), drawn at 170 px.
+
 The secretary (§7 B, 4.6), who heads the agents' group and opens her
 briefing, comes from the same family: round glasses, a clipboard, a pencil
 behind her ear. Her validated drawing (the 4.6 design canvas, October

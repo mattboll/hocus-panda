@@ -35,7 +35,9 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Monotonic, Physical, Point, Rectangle, Scale},
     wayland::{
-        compositor::{SurfaceData, send_surface_state},
+        compositor::{
+            SurfaceData, TraversalAction, send_surface_state, with_surface_tree_downward,
+        },
         fractional_scale::with_fractional_scale,
         presentation::Refresh,
         shell::wlr_layer::Layer,
@@ -134,9 +136,9 @@ pub type OutputElement<R> = OutputElements<R>;
 /// A window drawn alone for a capture, and where it is (global).
 pub(crate) type Alone<R> = (Vec<OutputElement<R>>, Rectangle<f64, Logical>);
 
-/// Tells a surface the scale and transform of the output it shows most on:
-/// fractional-scale's, and wl_surface's preferred buffer scale for clients
-/// that only draw at whole scales.
+/// Tells a surface the scale and transform of `output`: fractional-scale's,
+/// and wl_surface's preferred buffer scale, rounded up, for clients that
+/// only draw at whole scales.
 fn tell_scale(surface: &WlSurface, data: &SurfaceData, output: Option<&Output>) {
     let Some(output) = output else {
         return;
@@ -205,6 +207,25 @@ impl Look {
     }
 }
 
+impl Look {
+    /// As the overview draws it (8.5 A): at `visual`, `alpha` of it,
+    /// without its grip; lifted, with the shadow of a window moving.
+    pub(crate) fn placed(
+        mut self,
+        visual: Rectangle<f64, Logical>,
+        alpha: f32,
+        lifted: bool,
+    ) -> Self {
+        self.visual = visual;
+        self.alpha *= alpha;
+        self.grip = 0.0;
+        if lifted {
+            self.shadow = ShadowStyle::MOVING;
+        }
+        self
+    }
+}
+
 impl State {
     pub(crate) fn look(&self, id: WindowId, now: Duration) -> Option<Look> {
         let managed = self.windows.get(&id)?;
@@ -219,6 +240,18 @@ impl State {
                 visual.loc += (visual.size.to_point() - size.to_point()).downscale(2.0);
                 visual.size = size;
                 alpha = p.clamp(0.0, 1.0) as f32;
+            }
+        }
+        // Over a desktop's tile in the bar (8.5 B): small around the grab
+        // point, under the pointer.
+        if self.moving == Some(id) {
+            let k = self.tile_drop.scale(now);
+            if k < 1.0
+                && let Some(pointer) = self.seat.get_pointer()
+            {
+                let at = pointer.current_location();
+                visual.loc = at + (visual.loc - at).upscale(k);
+                visual.size = visual.size.upscale(k);
             }
         }
         let focus = managed.focus_look(now);
@@ -356,7 +389,7 @@ impl State {
 
     /// A window with its frame, front first: its grip, its rims, its
     /// surfaces and its shadow.
-    fn framed_window<R>(
+    pub(crate) fn framed_window<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
@@ -730,6 +763,9 @@ impl State {
         // brought it in front (#519); its popovers, its halo, the peek and
         // the bubbles stay above them.
         let front = self.bar_in_front(output);
+        // The overview (8.5 A): the windows glide into its layout, which
+        // draws them; with reduced motion they fade under it.
+        let cover = self.overview_cover(now);
         // The windows on this output, front first, where their desktop is
         // on the strip; a fullscreen one on top goes over the bars.
         let looks: Vec<(WindowId, Look)> = self
@@ -744,6 +780,12 @@ impl State {
                 let mut look = self.look(id, now)?;
                 look.visual.loc.x += offset;
                 look.alpha *= alpha;
+                if let Some(cover) = cover {
+                    look.alpha *= cover;
+                    if look.alpha <= 0.0 {
+                        return None;
+                    }
+                }
                 Some((id, look))
             })
             .filter(|(_, look)| {
@@ -755,9 +797,10 @@ impl State {
                 around.overlaps(area.to_f64())
             })
             .collect();
-        let fullscreen_on_top = looks
-            .first()
-            .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
+        let fullscreen_on_top = cover.is_none()
+            && looks
+                .first()
+                .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
         // The handle of a pair's seam, where the pair is now: right above
         // the front one of the two, so that a window over the seam covers
         // it (§8).
@@ -907,6 +950,9 @@ impl State {
                     }),
             );
         }
+        // The overview over the windows, under the bar.
+        let mut overview = self.overview_elements(renderer, output, now);
+        elements.append(&mut overview);
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.
@@ -1462,11 +1508,15 @@ impl State {
         // Locked (7.1), only the lock's surfaces draw: the others wait.
         let locked = self.locked();
         for window in self.space.elements().filter(|_| !locked) {
+            // The largest scale of the screens it overlaps (§12, #419);
+            // on none, the screen it shows most on.
+            let drawing = self.drawing_output(window);
             window.with_surfaces(|surface, data| {
                 if let Some(states) = states {
                     update_surface_primary_scanout_output(surface, output, data, states, compare);
                 }
-                tell_scale(surface, data, primary(surface, data).as_ref());
+                let at = drawing.clone().or_else(|| primary(surface, data));
+                tell_scale(surface, data, at.as_ref());
             });
             window.send_frame(output, now, throttle, primary);
         }
@@ -1478,9 +1528,27 @@ impl State {
             layer.send_frame(output, now, throttle, |_, _| Some(output.clone()));
         }
         if let Some(surface) = self.external_surface_on(output) {
+            with_surface_tree_downward(
+                &surface,
+                (),
+                |_, _, ()| TraversalAction::DoChildren(()),
+                |surface, data, ()| tell_scale(surface, data, Some(output)),
+                |_, _, ()| true,
+            );
             send_frames_surface_tree(&surface, output, now, throttle, |_, _| Some(output.clone()));
         }
         if let CursorImageStatus::Surface(cursor) = &self.cursor {
+            // A client's cursor draws at the scale of the screen under the
+            // pointer.
+            if self.output_under_pointer().as_ref() == Some(output) {
+                with_surface_tree_downward(
+                    cursor,
+                    (),
+                    |_, _, ()| TraversalAction::DoChildren(()),
+                    |surface, data, ()| tell_scale(surface, data, Some(output)),
+                    |_, _, ()| true,
+                );
+            }
             send_frames_surface_tree(cursor, output, now, throttle, |_, _| Some(output.clone()));
         }
     }

@@ -1038,6 +1038,8 @@ impl Compositor {
         let seen = self.halo_seen(&listed);
         let agents: Vec<AgentShown> = listed.into_iter().map(|l| l.shown).collect();
         self.halo_agents(&seen);
+        // The overview's badges (8.5 A).
+        self.overview_agents(&agents);
         self.agents.running = agents.len();
         self.agents_tell_settings();
         if !self.shell_linked() {

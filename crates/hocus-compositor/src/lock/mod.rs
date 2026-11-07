@@ -444,6 +444,9 @@ impl State {
         if self.switcher.is_some() {
             self.end_switcher(false);
         }
+        self.close_radial(None);
+        self.radial_press = None;
+        self.drop_overview();
         self.capture_away();
         if self.ink.shows() {
             self.ink_clear();
@@ -710,12 +713,9 @@ impl State {
 
     fn lock_shown(&self) -> Option<LockShown> {
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
-        let output = crate::panel::primary(
-            &names,
-            &self.config.panel.output,
-            self.panel.home.as_deref(),
-        )
-        .unwrap_or_default();
+        let output =
+            crate::panel::primary(&names, &self.primary_wanted(), self.panel.home.as_deref())
+                .unwrap_or_default();
         let agents = self.agents.told.as_ref().map_or(0, |list| {
             list.iter().filter(|a| a.state == "waiting").count() as u32
         });

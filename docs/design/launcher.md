@@ -403,4 +403,9 @@ the field.
   threshold, it fades in, or out.
 - A launcher closed before the shell's first frame of it (a short swipe,
   or `Super+Space` twice quickly) shows nothing.
-- Tests: `crates/hocus-compositor/tests/gestures.rs`.
+- **Four fingers down with no launcher open** (8.5 A, 2026-11-06): the
+  overview opens on every screen, or closes when open (windows.md §12b),
+  the swipe the desktop's from its start; they no longer reach the
+  application. The same key, `swipe-launcher`, turns both off.
+- Tests: `crates/hocus-compositor/tests/gestures.rs`, and
+  `tests/overview.rs` for the overview's.

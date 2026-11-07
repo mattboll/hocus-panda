@@ -46,6 +46,9 @@ pub enum Front {
     /// Screen `output`'s bar in front of the windows until the pointer
     /// leaves it.
     Raised { output: String },
+    /// Screen `output`'s bar in front while a window is moved over its
+    /// desktops' tiles, until the move ends (8.5 B).
+    Dropping { output: String },
 }
 
 /// Whether a layer surface of the shell's is one of the bar's own, under
@@ -115,8 +118,13 @@ impl Pick {
 
 impl State {
     /// Whether the bar on `output` is in front of the windows.
+    /// The overview keeps it in front on every screen (8.5 A).
     pub fn bar_in_front(&self, output: &Output) -> bool {
-        matches!(&self.panel.front, Front::Raised { output: o } if *o == output.name())
+        self.overview.is_some()
+            || matches!(
+                &self.panel.front,
+                Front::Raised { output: o } | Front::Dropping { output: o } if *o == output.name()
+            )
     }
 
     /// The pointer moved to `at` (global): against a bar's edge, the wait
@@ -124,6 +132,7 @@ impl State {
     /// goes back under the windows.
     pub fn bar_front_follow(&mut self, at: Point<f64, Logical>) {
         match &self.panel.front {
+            Front::Dropping { .. } => return,
             Front::Raised { output } if self.in_bar_column(output, at) => return,
             Front::Pushed { output, .. } if self.pushed_against(output, at) => return,
             Front::Under => {}
@@ -186,10 +195,35 @@ impl State {
         self.pointer_motion(at, time);
     }
 
+    /// A window moved over bar `output`'s tiles: that bar comes in front at
+    /// once, until the move ends (8.5 B).
+    pub fn bar_front_dropping(&mut self, output: &str) {
+        if let Front::Pushed { timer, .. } = &self.panel.front {
+            self.loop_handle.remove(*timer);
+        }
+        if !matches!(&self.panel.front, Front::Dropping { output: o } if o == output) {
+            tracing::debug!(output, "the bar comes in front: a window over its tiles");
+            self.panel.front = Front::Dropping {
+                output: output.to_owned(),
+            };
+            self.redraw = true;
+        }
+    }
+
+    /// The move ends: a bar in front for it goes back under the windows.
+    pub fn bar_front_dropped(&mut self) {
+        if matches!(self.panel.front, Front::Dropping { .. }) {
+            self.panel.front = Front::Under;
+            self.redraw = true;
+        }
+    }
+
     /// A bar went with its screen: it no longer stands in front.
     pub fn bar_front_gone(&mut self, name: &str) {
         match &self.panel.front {
-            Front::Raised { output } if output == name => self.panel.front = Front::Under,
+            Front::Raised { output } | Front::Dropping { output } if output == name => {
+                self.panel.front = Front::Under;
+            }
             Front::Pushed { output, timer } if output == name => {
                 self.loop_handle.remove(*timer);
                 self.panel.front = Front::Under;

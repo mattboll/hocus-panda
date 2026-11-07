@@ -1,8 +1,10 @@
 //! The touchpad's swipes the desktop takes (6.13): three fingers across
 //! move the desktops (windows.md §12, `[touchpad] swipe-desktops`), four
 //! fingers up open the launcher and down close it (launcher.md,
-//! `[touchpad] swipe-launcher`). Every other gesture is the application's
-//! under the pointer (`zwp_pointer_gestures_v1`).
+//! `[touchpad] swipe-launcher`); four fingers down with no launcher open
+//! open the overview, or close it (8.5 A, windows.md §12b). Every other
+//! gesture is the application's under the pointer
+//! (`zwp_pointer_gestures_v1`).
 //!
 //! The fingers' first travel decides ([`Hold::Deciding`]): until they have
 //! gone [`SWIPE_AXIS`] one way, their events are kept; a swipe the desktop
@@ -46,6 +48,9 @@ pub enum Hold {
     Desktops,
     /// Four fingers up or down: the launcher follows.
     Launcher(LauncherSwipe),
+    /// Four fingers down opened or closed the overview: the rest of the
+    /// swipe is the desktop's, doing nothing.
+    Overview,
 }
 
 /// Four fingers bringing the launcher, or taking it away.
@@ -205,6 +210,11 @@ impl State {
                 self.launcher_swipe_end(swipe, cancelled);
                 true
             }
+            (Hold::Overview, Gesture::SwipeUpdate { .. }) => {
+                self.hold = Hold::Overview;
+                true
+            }
+            (Hold::Overview, Gesture::SwipeEnd { .. }) => true,
             // Pinches and holds are never the desktop's.
             (hold, _) => {
                 self.hold = hold;
@@ -230,6 +240,13 @@ impl State {
                 self.desktop_swipe_begin();
                 self.desktop_swipe_update(dx, dy, time);
                 self.hold = Hold::Desktops;
+                return;
+            }
+            // Down with no launcher open: the overview, as `Super+W`.
+            (4, false) if dy > 0.0 && !self.panel.launchers.open() => {
+                tracing::debug!("four fingers down: the overview");
+                self.toggle_overview();
+                self.hold = Hold::Overview;
                 return;
             }
             (4, false) if self.shell_linked() => {

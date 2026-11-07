@@ -689,6 +689,38 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
 | Écran principal | `[panel] output` (Automatique: taken out) |
 
+**With two screens or more** (#417, windows.md §12 "Sets of screens"),
+the place, the mode, the scale, VRR and the primary screen are the set
+in use's: written into its `[[screen-sets]]` table (`[screen-sets.outputs.
+"IDENTITY"] position`, `mode`, `scale`, `vrr`; the set's `primary`, an
+identity), made with its `screens` when its first key is written and
+taken out when "Annuler" leaves nothing but them. "Utiliser cet écran"
+stays `[outputs.NAME] enabled`. With one screen, `[outputs.NAME]` as
+above: those stay the defaults every set starts from.
+
+**ENSEMBLES D'ÉCRANS / SCREEN SETS** (#417, the s8a mockup's state 4),
+under the arrangement's notes, once more than one set is known: a card, a row per set the compositor
+knows (those seen, kept in the state directory, and those in the file;
+its line's `sets`), the one in use first and lit (the accent at 12 %, a
+1 px ring at 40 %, radius 9). Each row: an icon of its screens' shapes
+(each a 1.5 px outline, radius 3; the laptop 20 × 13, the others by
+their proportions, 22 to 34 wide, bottoms aligned, 58 × 30 in all), its
+name in 13.5 px semibold ("Portable + écran 27 pouces", the laptop
+first then the largest; "Portable seul"; "écran externe" when a size is
+not known) and its line in 12 px: "Maintenant" for the set in use, with
+"· nouveau, sa disposition sera gardée" while the file has no table for
+it; else when it was last in use ("Aujourd'hui, 09:12", "Hier, 18:04",
+the weekday within a week, else the date); then "· 2 fenêtres
+l'attendent" when windows wait for one of its screens. The others end
+with a "⋯" button whose menu says "Oublier cet ensemble" / "Forget this
+set": the compositor forgets it (`forget-set`, a tab before each of its
+screens' identities) and its table leaves the file, with the toast
+"Ensemble oublié : …" and its "Annuler" (the table back). Under the
+rows, 12 px faint: "Chaque ensemble garde la place des écrans, leurs
+résolutions, leurs échelles et l'écran principal." The search finds it
+("oublier", "disposition", "screen sets"). Each screen of the line also
+says its identity (`key`).
+
 **The compositor follows the file** (`crates/hocus-compositor/src/
 displays.rs`): the one watcher of the file (`reload.rs`, 6.12's) hands
 the loop what it says, and the loop takes `[outputs]` and `[panel]
@@ -745,8 +777,11 @@ kept, off by default; tap to click on by default.
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
   Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
-  to applications), Quatre doigts vers le haut `[touchpad] swipe-launcher`
-  (the four-finger launcher, 6.13: launcher.md).
+  to applications), Quatre doigts vers le haut ou le bas `[touchpad] swipe-launcher`
+  (up the four-finger launcher, 6.13: launcher.md; down the overview,
+  8.5 A: windows.md §12b; its line "Vers le haut, le lanceur, qui
+  grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes
+  bureaux, ou le lanceur se referme.").
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -816,8 +851,9 @@ built".
 - Three rows of 68 px, each with a 64 × 44 finger diagram on its left
   (a touchpad's outline, white 8 px dots, a dashed green trail): three
   fingers sideways ("Trois doigts de côté", `[touchpad] swipe-desktops`),
-  four fingers up ("Quatre doigts vers le haut", `[touchpad]
-  swipe-launcher`, with its blue "Nouveau" chip), and what is left to
+  four fingers up or down ("Quatre doigts vers le haut ou le bas",
+  `[touchpad] swipe-launcher`, with its blue "Nouveau" chip; down opens
+  the overview since 8.5 A, its diagram still the fingers going up), and what is left to
   applications ("Ce qui reste aux applications", always "Toujours"), a
   note (`Kind::Note`): not a setting,
   never focused, never written. Under the card, the line on natural
@@ -849,7 +885,7 @@ Settings ask the compositor to suspend the desktop's own shortcuts
 so that the default applies and follows future defaults; a family of
 nine is one folded row that unfolds.
 
-- `src/keyboard.rs` holds the rows and the 64 actions of `shortcuts.rs`
+- `src/keyboard.rs` holds the rows and the 66 actions of `shortcuts.rs`
   (each a setting of its own: the search, the undo and the file's
   watching are 6.1's), `src/keys.rs` the chords as written, shown and
   recorded, `src/xkb.rs` XKB's registry (`evdev.xml`) and its French
@@ -1335,6 +1371,7 @@ row.
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
+| VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
 
 - **Under the title**: "Les raccourcis des fenêtres et des bureaux se
@@ -1515,7 +1552,8 @@ tes fichiers, et celles qui démarrent avec la session."
 | | Terminal | menu: Automatique, the terminals, Autre commande… | `[programs] terminal` |
 | | Vidéos | menu | `video/mp4`, `video/webm`, `video/x-matroska`, `video/quicktime`, `video/x-msvideo`, `video/mpeg`, `video/ogg` |
 | | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
-| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+| AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | Rouvrir les applications de la dernière session | a switch | `[session] restore` |
+| | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
 
 - **Reading**: a thread of the page's own (`src/applications.rs`),
   started the first time the page shows, reads the desktop entries as
@@ -1583,6 +1621,13 @@ tes fichiers, et celles qui démarrent avec la session."
   the card at 45 %, with no switch ("Prévue pour GNOME.").
 - **The session** starts them (the compositor, `--session` only): see
   [packaging/README.md](../../packaging/README.md).
+- **Rouvrir les applications de la dernière session** ("Celles ouvertes
+  à la déconnexion reviennent, chaque fenêtre à sa place."), the card's
+  first row: a switch, `[session] restore`, on by default; the
+  compositor reads it at the next log in ([windows.md
+  §14](windows.md#the-last-session-comes-back-725)). Searched as session,
+  rouvrir, restaurer, dernière session, fenêtres, déconnexion (reopen,
+  restore, last session, log out).
 - **Keyboard**: the menus open with `Space`, `Enter` or `Alt+↓`, `↑`/`↓`
   move, `Enter` chooses, `Esc` closes; a switch's ✕ comes after it in the
   `Tab` order, and `Delete` on a user's row's switch removes it.

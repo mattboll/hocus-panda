@@ -134,6 +134,31 @@ open on), agents' badges on windows (slice 3).
   `Alt+Super`), `"alt"` or `"none"` (the frame only). Both followed as the
   file changes.
 
+### Onto a desktop's tile in the bar
+
+Approved 2026-11-06 (8.5 B, issue #490): the mouse's way to another
+desktop or screen, besides the keys (§12).
+
+- While a window is moved by the pointer (its header, `Alt`+drag, the
+  grip) and the pointer comes over a desktop's tile in a bar (bar.md
+  §4.4, any screen's row), the bar comes in front at once (no 300 ms;
+  #519 otherwise unchanged) and stays in front until the move ends.
+- Over a tile: the tile lights (`rgba(108,194,135,0.28)`, a 2 px
+  `#7EE0A0` ring); the window shrinks around the grab point to 30 % of
+  its size in 120 ms, following the pointer, without wobbling; the snap
+  zones and the magnet do nothing there (the tiles win over the right
+  edge's zone). Leaving the tiles gives its size back in 120 ms.
+- Let go on a tile: the window goes to that desktop of that tile's
+  screen, at the place and size (and in the state, snapped or floating)
+  it had before the drag, not where it was let go, leaving toward that
+  desktop's side as `Super+Shift+N` sends it; on another screen, at the
+  same share of its work area, as `Super+Alt+←/→` carries it. The
+  screens keep the desktops they show. Let go on the tile of the desktop
+  it is on, it goes back where the drag began.
+- `Esc` during a drag cancels it: the window goes back where the drag
+  began.
+- Minimised and fullscreen windows are not moved, as before.
+
 ### Magnetic edges
 
 While a window moves, each of its edges **sticks** to a nearby edge when
@@ -211,7 +236,10 @@ Which windows have no header of their own (#716):
   programs the desktop starts are given the same theme and size. Without
   a theme, or for a shape the theme lacks, the compositor draws its own
   plain ones.
-- `Super`+right-drag resizes from the nearest corner.
+- `Super`+right-drag resizes from the nearest corner: once the pointer
+  has moved 6 px with the button down, from where it was pressed. A
+  `Super`+right click that does not move opens the window's radial menu
+  (§10b).
 - Live resize, respecting the application's minimum and maximum sizes,
   and the size it takes: a floating terminal sized by whole cells may
   take a little less than asked, and keeps it once the resize is over,
@@ -317,6 +345,88 @@ Keyboard:
   desktop's list.
 - **Close**: `Super+Q` or `Alt+F4`, or the application's own button.
   Closing never kills the application: it asks it to close.
+- **Always on top** (a window's radial menu, the bar's menu of a window,
+  or `[[windows.rules]] above`): the window stays above the others, its
+  dialogs with it, until toggled; a fullscreen window brought in front
+  covers it while it stays there.
+- **On all desktops** (the same menus): the window shows on every
+  desktop of its screen, staying where it is while the strip slides (it
+  is on the desktop shown, whichever that is); the bar's tiles sketch it
+  in each. Sent to a desktop (`Super+Shift+N`, a menu), it is on that
+  one only again.
+
+## 10b. A window's radial menu (#723)
+
+Its actions around the pointer, each direction meaning something: up and
+down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
+
+| Direction | Action | Same as |
+|---|---|---|
+| up | Maximise / Restore (the label follows the state) | `Super+↑` / `Super+↓` |
+| up-right | Always on top (a switch) | `[[windows.rules]] above` |
+| right | Next desktop (sends the window; the screen stays) | `Super+Shift+<N+1>` |
+| down-right | Other screen (the next by position, onto the desktop it shows) | — |
+| down | Minimise | `Super+H` |
+| down-left | Close (never by a gesture) | `Super+Q` |
+| left | Previous desktop (sends the window; the screen stays) | `Super+Shift+<N−1>` |
+| up-left | On all desktops (a switch) | — |
+
+- **Opening**: `Super` and a right click over a window, released within
+  6 px of the press: the menu opens centred on the pointer and stays
+  open. A right drag of 6 px or more resizes, as before (§8). The key is
+  `[windows] resize-modifier`'s (`"none"`: the grip only). A right click
+  on the grip (§7) opens it too, without a key. Over the bar or another
+  surface of the shell's, nothing opens.
+- **Its look** (the mockup's, real size): a hub of radius 44, the ring to
+  116 with a 6 px rim (`rgba(14,17,28,0.92)`, a 1 px white rim at 10 %,
+  a drop shadow), eight sectors 41.8° wide, their icons 22 px at mid-ring
+  and their labels outside it (12.5 px Manrope 600, `text.dim`, a dark
+  outline; two lines at most), a soft dark halo behind it all so that
+  the labels read over any window. Near a screen's edge it is pushed in
+  to stay whole, labels included (196 px from its centre each way): its
+  centre then is not the pointer.
+- **Picking**: moving into a sector lights it (the accent at 24 %, a
+  1.4 px accent rim, its label bold), and the hub says its shortcut, the
+  desktop it sends to, or the other screen's name. **Crossing a sector's
+  outer rim on the way out picks it**, without a click (a quick flick
+  picks the sector it crossed); a click in a sector picks it too. The
+  picked sector flashes 80 ms and the menu fades in 100 ms; its action
+  runs at once.
+- **Close** lights in orange (`rgba(242,148,91,0.22)`); crossing its rim
+  does nothing. Resting on it 300 ms fills an arc along its rim, the hub
+  then says "clic"; a click then asks the window to close. A click
+  before is ignored.
+- Inert sectors (no desktop on that side, one screen only) at 25 %:
+  they neither light nor pick. A switch that is on shows its icon in
+  `#7EE0A0` with a 3 px dot.
+- A window hosting an agent that waits: the hub shows its panda (64 px,
+  bobbing); otherwise its application's letter tile.
+- **Closing it**: `Esc`, a click in the hub or outside the menu, the
+  window going, its screen going, the session locking.
+- **Keyboard** while open: the arrows step the lit sector that way (from
+  up, → lights up-right), `Tab` and `Shift+Tab` go round, `Enter` or
+  `Space` picks the lit one, Close too, without the rest.
+- While it is open no client sees the pointer or the keys.
+- **Motion**: it opens in 140 ms (scale 0.85 → 1 from its centre, and a
+  fade), closes in 100 ms; with reduced motion it only fades. Nothing
+  draws at rest: only the arc filling and the panda bobbing draw at
+  every frame, each on a small picture of its own.
+- The same actions from the bar: a right click on a window's line
+  (bar.md, "The windows in the bar").
+- **As built** (`crates/hocus-compositor/src/radial.rs`, its drawing in
+  `radial_draw.rs`): the compositor draws it on the CPU with tiny-skia,
+  its words in the shell's own fonts, once for each look it takes.
+  Measured headless (`crates/hocus-compositor/tests/radial.rs`): it opens
+  on the pointer and a drag still resizes; up past the rim maximises,
+  right past it sends to desktop 2 (the screen staying); Close's rim does
+  nothing, a click after the rest asks the window; on desktop 1 previous
+  is inert, with one screen other screen too, with two it sends the
+  window to the second; opened 20 px from the corner it stays whole; the
+  keys; the grip's right click; nothing over a layer surface; always on
+  top stays above a window focused after; on all desktops shows on
+  desktop 2 and, again, only there; `Super+Shift+2` takes it off all
+  desktops. With the real shell (`tests/bar_windows.rs`): nothing over
+  the bar, the ring over a window (`HOCUS_SHOTS`: its screenshots).
 
 ## 11. Alt+Tab
 
@@ -360,13 +470,18 @@ Keyboard:
 ## 12. Virtual desktops
 
 - **Per screen**: each output has its own desktops and switches alone
-  (first build's decision, kept). 4 desktops by default (1 to 9).
+  (first build's decision, kept; confirmed for 8.4, issue #420: a window
+  kept on one screen all day stays put while another switches). 4
+  desktops by default (1 to 9), `[desktops] count` and `names` the same on
+  every screen.
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers; `[touchpad] swipe-desktops
   = false`, the Settings' "Trois doigts de côté", leaves it to
   applications, settings.md), and the bar's tiles (a
   click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
-  the pointer, the tiles on their bar's screen.
+  the pointer, the tiles on their row's screen (the bar on the primary
+  screen shows a row per screen, bar.md §4.4). The dots show on the
+  screen that switches only.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -396,12 +511,30 @@ Keyboard:
 - `Super+Shift+1…4` sends the focused window to that desktop, without
   switching: it leaves the screen toward its desktop's side, a screen's
   width in 320 ms easing in, as leaving windows do (it fades with reduced
-  motion), and the dots show. With `Ctrl`
+  motion), and the dots show. It stays in front as it leaves, over the
+  window focused in its stead, and lands on top of its new desktop's
+  windows (#728; the radial menu, the bar's menu and a tile it is let go
+  on send it the same way). With `Ctrl`
   too, it follows it: the window stays in place as the strip slides
   under it. `Super+Ctrl+Shift+←/→` takes it the same way to the desktop
   on that side of its screen; past the first or the last, it stays (no
   wrap), and the dots show, as with `Super+Ctrl+←/→`. A window being
   dragged while desktops switch goes along.
+- **Another screen** (8.4, issue #420): `Super+Alt+←/→`
+  (`move-to-screen-left`, `move-to-screen-right`, §13) sends the focused
+  window to the screen on that side, by the screens' positions (of those
+  whose middle is on that side, the one level with it, else the nearest;
+  none: nothing happens), onto the desktop that screen shows, at the same
+  share of its work area as a screen unplugged carries a floating window
+  (below), a snapped or maximised one taking the same zone there, a
+  fullscreen one covering it. It keeps the focus; the pointer does not
+  move. It travels there in 320 ms along the strip's curve (at once with
+  reduced motion). Nested, `Super` already is `Alt+Super`, which would
+  make these `Super+←/→`: they have no default there, and one set in the
+  file is taken. `Super+Alt` held shows the laser (ink.md); an arrow
+  pressed with them is the shortcut's. Dragging a window onto another
+  screen (its header, `Alt`+drag, the grip) puts it on the desktop that
+  screen shows.
 - Empty desktops stay; their order is fixed (1 to 4). `[desktops] count`
   sets how many, from 1 to 9, on every screen, followed as the file
   changes (6.14): more are added after the last, empty; fewer take out the
@@ -445,21 +578,151 @@ Keyboard:
   the desktop it was going to. The pointer, if it was there,
   goes to the middle of the new screen; the focus stays on its window if
   that one still shows, otherwise it goes to the window on top that does.
-- When a screen of the same name comes back (the same connector), the
-  windows that came from it go back to it: on their desktop, at their
-  place (the same one on a screen of the same size, the same share of it
-  otherwise), in their state; the screen shows the desktop it showed.
-  A window no longer where it was put (the user moved or resized it,
-  changed it between floating, snapped and fullscreen, or sent it to
-  another desktop) stays where it is; minimising it or bringing it back
-  does not count. Each window remembers only the screen it left, its
-  desktop and its place there.
+- When a screen of the same identity comes back (below: its EDID's make,
+  model and serial, on any connector; #417), the windows that came from
+  it go back to it: on their desktop, at their place (the same one on a
+  screen of the same size, the same share of it otherwise), in their
+  state; the screen shows the desktop it showed. A window no longer where
+  it was put (the user moved or resized it, changed it between floating,
+  snapped and fullscreen, or sent it to another desktop) stays where it
+  is; minimising it or bringing it back does not count. Each window
+  remembers only the screen it left, its desktop and its place there,
+  for the session's length (nothing is written about windows); closed
+  meanwhile, it is forgotten.
+- **They fly back** (#417): each window shown before and after flies
+  from where it is to its place in **320 ms**, `cubic-bezier(0.22, 0.9,
+  0.3, 1)` (the desktops' curve), with no wobble and no transparency;
+  windows on desktops not shown are placed at once. Its place is its own
+  from the start (the drawing only travels), so a click or a key on a
+  flying window acts on it where it goes. Reduced motion: it fades in at
+  its place in 120 ms.
+- **The lid** closed with another screen plugged and on takes the
+  laptop's screen away exactly as an unplug, whatever the lid then does
+  (`[power] lid`, settings.md): its windows go to the other screen, the
+  bar too, and it is out of the set of screens (below); the lid opened
+  brings it back, its windows with it. With no other screen, the lid only
+  turns it off (7.2).
+- **Screens swapped while the machine slept** are seen at resume, in one
+  turn (the real screens' scan): a screen whose EDID changed on its
+  connector went, and another came; one gone and back with the same
+  identity is no change at all.
 - With every screen gone, the windows wait where they are; a screen
   that comes then shows those on it where they were, and takes those on
   none in the middle of its work area.
 - The real screens (tty) and the headless backend's outputs (in tests)
   come and go, through the same code; the nested window is one output
   that never goes.
+
+#### A screen's identity
+
+As built (#417; the maintainer's question 5): a screen is its EDID's
+make (the three letters), model (its name descriptor) and serial number
+(its serial descriptor, else the number in its header): `DEL U3423WE
+7XY1234`. A different monitor on the same cable is another screen; the
+same one on another cable is the same. Without a serial, its connector
+tells it apart, `DEL U2723QE (DP-2)`: two of one model without serials
+swap when their cables do. Without an EDID (a virtual machine's screens,
+the headless outputs) it is its connector, `HEADLESS-2`. Two screens of
+the same identity plugged at once: the second's connector is added. The
+journal says each screen's identity as it lights ("a screen, known as");
+the Settings get it on their line (`key`). The headless harness plugs a
+screen with an identity of its choice (`Headless::plug_screen`), on a
+connector unplugged before or a new one.
+
+#### Sets of screens
+
+- **A set** is the identities of the screens plugged and on: a screen
+  turned off by the file (`enabled = false`) or under the closed lid does
+  not count. The laptop alone, the laptop and the office's screen, the
+  laptop and the home's: three sets.
+- **Each set keeps its own arrangement** (question 6), in the
+  configuration file: `[[screen-sets]]`, its `screens`, its `primary`
+  (an identity) and one table per screen, by identity, with the keys of
+  `[outputs.NAME]` that arrange it (`position`, `mode`, `scale`, `vrr`).
+  What a set's table says wins over `[outputs.NAME]` and `[panel] output`,
+  which stay the defaults any set starts from: a set seen for the first
+  time takes them (then left to right, tops aligned). Plugging a set back
+  restores its arrangement in the same turn as its screens light (the
+  real screens light in its mode and scale at once).
+
+  ```toml
+  [[screen-sets]]
+  screens = ["BOE 0x0BCA (eDP-1)", "DEL U3423WE 7XY1234"]
+  primary = "DEL U3423WE 7XY1234"
+  [screen-sets.outputs."DEL U3423WE 7XY1234"]
+  position = [0, 0]
+  [screen-sets.outputs."BOE 0x0BCA (eDP-1)"]
+  position = [440, 1440]
+  ```
+- **The Settings write it** (settings.md, Écrans): with two screens or
+  more, what the user changes there (a place, a mode, a scale, VRR, the
+  primary screen) goes into the set in use's table, made when needed and
+  taken out when nothing but its screens is left; with one screen, into
+  `[outputs.NAME]`. Turning a screen off and its wallpaper stay
+  `[outputs.NAME]`'s. The compositor only reads the file.
+- **The sets seen** are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`
+  (each set's screens, their sizes, when it was last in use), written on a
+  thread, so that the Settings list them with the file's; "Oublier cet
+  ensemble" takes a set's table out of the file and its line out of that
+  list (`forget-set` on the Settings' line, the set in use never).
+- The bar stays on the primary screen (8.2, several bars, comes later).
+
+#### Saying it
+
+As built (#417; question 2, option C): when at least one window moved
+with a screen gone or back, the **winking panda** (its hat raised, never
+an agent state's pose) comes out of the bar's edge as an agent's panda
+does (bar.md §7 C: 170 px, its motion, 18 px from the bar, at the
+secretary's height), with a **blue bubble** (`rgba(16,24,44,0.95)`, a
+1 px border `#8FB3FF` at 45 %; under the pointer
+`rgba(22,32,58,0.97)`), two lines of 13 px, the first in bold
+`#B9CEFF`:
+
+| | Français | English |
+|---|---|---|
+| Gone | **L'écran externe 34 pouces est parti.** Firefox et foot sont ici, sur le bureau 1. | **The 34-inch screen left.** Firefox and foot are here, on desktop 1. |
+| Back | **Re-bonjour, écran externe 34 pouces !** Firefox et foot y retournent. | **Welcome back, 34-inch screen!** Firefox and foot go back to it. |
+
+The screen is "écran du portable" / "laptop screen" for the built-in
+one (the lid), "écran externe" / "external screen" when its size is not
+known. The windows are their applications' names, the focused one
+first: one ("Firefox est ici"), two ("Firefox et foot"), more ("Firefox,
+foot et 3 autres"), several of one application ("2 fenêtres foot"); "sur
+le bureau N" only when they are all on one desktop. A line longer than
+340 px is cut with an ellipsis.
+
+- It stays **4 s** (not the agents' 8 s), then goes back as a peek does.
+  A click on it sends it back at once (`peek-close`).
+- An agent's peek arriving meanwhile replaces it; it never replaces an
+  agent's (that one goes on; nothing is said of the screens). The
+  secretary's briefing open, nothing is said.
+- **Not while the session is locked**: the windows move, nothing is
+  said.
+- The compositor tells the shell `screens-moved gone|back
+  built-in|external INCHES DESKTOP`, then a tab and each window's
+  application id; the shell names them from their desktop entries.
+- Reduced motion, or a shell on the CPU: it fades in and out in place.
+
+#### Measured headless
+
+`tests/screens_return.rs`: two windows halved on a screen known as `DEL
+U3423WE 7XY1234` go to the other screen's halves, desktop 1, the focus
+kept; another screen on the same connector takes none of them and is a
+set of its own, right of the first; their screen back on another
+connector, they go back to it in their halves. Back, a window is drawn
+where it was, between its two places at 160 ms (past half way), at its
+place at 320 ms on the held clock; with reduced motion at its place at
+once. A file arranging two sets: each takes its places, scale and
+primary screen as its screens are plugged, a set not in the file left
+to right. The Settings forget a set seen (the set in use refused), the
+state file following. The lid closed with another screen on: the
+laptop's window on the other screen, the set without the laptop; opened,
+the window back at its place. With the real shell: no window, nothing
+said; two windows: the panda out beside the bar on the screen still
+there, saying "L’écran externe 27 pouces est parti. Foot et Firefox
+sont ici, sur le bureau 1.", still out at 3.9 s, back from 4 s, its
+surface gone; back, "Re-bonjour, écran externe 27 pouces ! Foot et
+Firefox y retournent."; locked, nothing said.
 
 #### What clients are told
 
@@ -509,6 +772,202 @@ screen that came back, the shell having asked for none of its surfaces
 on no screen; and checks the compositor's choice with a client that asks
 for them so.
 
+### Screens of different scales
+
+A screen at 1 beside one at 2 (or 1.25 … 1.75), side by side (#419; the
+s8a mockup, questions 12 to 15):
+
+- **The same size**: a window keeps its logical size on every screen;
+  each screen draws it at its own scale. A 1000×640 window is 1000×640
+  pixels on a screen at 1 and 2000×1280 on one at 2.
+- **Sharp** (question 12, A): the scale a window is asked to draw at,
+  `wp_fractional_scale_v1.preferred_scale`, and `wl_surface`'s
+  `preferred_buffer_scale` (rounded up) for clients without it, is the
+  **largest** scale of the screens its geometry overlaps (its own
+  shadow does not count); once wholly on one screen, that screen's. It
+  changes when the screens it overlaps change, during a drag too, and is
+  sent at most once a frame, only when it changes. The screen at the
+  smaller scale draws the larger buffer reduced (linear filtering). The
+  compositor offers `wl_compositor` version 6 for that. A window on no
+  screen keeps the scale of the screen it last showed most on.
+- **No gap, no jump**: until the client commits a buffer at the new
+  scale, the screens show the last one at the same logical size; nothing
+  goes blank or changes size.
+- **Too big for its screen** (question 13, C): a floating window dragged
+  onto another screen (its centre there when dropped) whose work area is
+  smaller than it shrinks to fit that work area, wholly inside it; it
+  remembers its size from before and takes it back (kept inside the work
+  area) when dragged onto a screen where it fits, unless the user resized
+  it meanwhile. It is never made smaller than its client's least size.
+  Dragged within one screen, nothing changes; a window dropped in a snap
+  zone takes the zone. A window sent to another screen (the keys'
+  `move-to-screen-left/right`, 8.4; the radial menu or the bar's; let go
+  on another screen's desktop tile) fits and takes its size back the same
+  way, at the same share of the new work area. A screen unplugged carries
+  its windows no larger than the new work area, as above.
+- **The pointer** (question 14, B): moving past an edge of its screen
+  where no screen touches, toward a screen that lies beyond that edge's
+  line (screens of different heights side by side), it goes to the
+  nearest point of that screen instead of stopping. Elsewhere the
+  layout's outer edges still stop it. This is a mouse's or a touchpad's
+  motion; an absolute one (a tablet, a virtual machine's pointer) goes
+  where it points.
+- **Where the pointer starts**: the display manager's place is not
+  handed over, so the session starts with the pointer in the primary
+  screen's middle, never in a screen's corner (where the overview's hot
+  corner is): as the screens light up it goes there, until the user first
+  moves it. Whenever the screens change with the pointer outside all of
+  them, it goes there too. A headless compositor keeps it where its tests
+  put it, from 0, 0; its hot corner only acts once the pointer has been
+  away (§12b).
+- **X11 applications** (question 15, A): XWayland's windows draw at 1;
+  on a screen at 2 they are shown at their logical size, enlarged, a
+  little soft. Their geometry is the same logical size on every screen.
+- **Cursors** keep their logical size; a client's own cursor surface is
+  told the scale of the screen under the pointer.
+- **Layer surfaces** (the bar, wallpapers, the shell's overlays) are each
+  on one screen, and told its scale.
+- **The bar** stays on the primary screen (8.2, several bars, comes
+  later).
+- **Moving the focused window to another screen with the keyboard** is
+  question 16, its own lot.
+
+Measured headless (`tests/scales.rs`): a screen at 2 (2560×1600, 1280×800
+logical) left of one at 1 (1920×1080); a test client drawing at the
+buffer scale it is told, with a band of one-pixel stripes. A 1000×640
+window on the screen at 1 is told 1 (120ths: 120); held across the seam,
+2 (240) at once, its size unchanged; on the screen at 2 its stripes are
+one pixel each, on the one at 1 two buffer pixels make one grey pixel;
+wholly on the screen at 2: 2; back wholly on the one at 1: 1, each change
+said once. A 1500×1000 window dropped on the screen at 2 takes its work
+area's size, inside it; dragged back, 1500×1000; shrunk again, resized by
+its right edge, dragged back: the size it was given. The pointer at
+(1290, 1000) moved 30 px left lands at (1260, 799); at (1290, 400), at
+(1260, 400); the outer edges stop it. Sent by `Super+Alt+←` and back
+by `Super+Alt+→`, the 1500×1000 window fits the screen at 2's work area,
+then is 1500×1000 again. An X11 window of 400×300 opened on
+the screen at 2 is 400×300 logical, its blue over 800×600 pixels. Its
+screenshots (by hand, `HOCUS_SHOTS=DIR`, the ignored tests
+`straddling_shots` with foot and `x11_shots` with xterm): each screen, the
+two as arranged, and the seam's two sides at the same size.
+
+## 12b. The overview (8.5 A, #490)
+
+Approved 2026-11-06 (the s8b mockup, its questions 4 to 7): every
+window and desktop at a glance, and the mouse's way to move windows
+between desktops and screens, beside the bar's tiles (§6, 8.5 B).
+
+- **Opening**: `Super+W` (`[shortcuts] overview`; nested `Alt+Super+W`),
+  four fingers down on a touchpad while no launcher is open (6.13: four
+  fingers down no longer reach the application then; with a launcher
+  open they still close it), and the bar's "+ N autres" over its windows
+  (bar.md, "The windows in the bar"; until now the desktop's list).
+  Closing: the same, `Esc`, or a click on the empty background. The
+  session locking closes it at once.
+- **The hot corner** (#727, as GNOME's): the pointer held 150 ms in a
+  screen's top-left corner (its first logical pixel, where the pointer
+  stops pushed up and left) opens the overview, or closes it, as
+  `Super+W`. Once per entry: it acts again only after the pointer has
+  gone 8 px away; at the session's start it acts only once the pointer
+  has been 8 px away (a pointer resting there, as at 0, 0, is no entry),
+  and never while a capture is open. Not on a screen whose bar stands on the left (its
+  corner is the bar's), nor where another screen touches the corner (the
+  pointer goes on there), nor while a button is held (a window dragged),
+  over a fullscreen window or the launcher, nor locked. The corner draws
+  nothing of its own; with reduced motion the overview fades in as by
+  its keys. `[overview] hot-corner = false` turns it off (Settings,
+  Bureaux et fenêtres, "Coin en haut à gauche : vue d'ensemble", on by
+  default). Nothing runs at rest but the dwell's one timer.
+- **On every screen at once**, each with its own desktops: the wallpaper
+  dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
+  desktops as live thumbnails, in the screen's shape, a ninth of its
+  width each (smaller when they would not fit the work area), 40 px
+  apart, 48 px from the screen's top, centred over the work area; the
+  desktop shown ringed 2 px in the accent; its number under each
+  (10.5 px, `text.faint`; "2 · Mail" with a name). A thumbnail shows its
+  desktop's windows small over the screen's wallpaper, from their own
+  textures (nothing copied). Under them, the shown desktop's windows laid
+  out without overlap, in rows, in their left-to-right order, never
+  larger than they are, centred in the work area 48 px in from its sides
+  and bottom; under each, 10 px down, its application's tile and its
+  title (14 px, cut with "…"). The bar stays in front of it all and
+  keeps working.
+- **Motion**: the windows glide from their places to the layout in
+  240 ms (`cubic-bezier(0.2, 0.9, 0.25, 1)`) and back the same way as it
+  closes, the dim and the thumbnails fading with them; with reduced
+  motion it fades in and out in 120 ms, the windows at their places in
+  the layout.
+- **Pointer**: a window under the pointer gets a 2 px `#7EE0A0` rim and a
+  24 px ✕ over its top-right corner, which asks it to close (as
+  `Super+Q`; the overview stays open). A click on a window closes the
+  overview and focuses it. A click on a thumbnail shows that desktop on
+  its screen (the strip slides under the overview, which slides along)
+  and keeps the overview open; closed, the screen stays on it. No
+  client sees the pointer or the keys while it is open, but the bar.
+- **Drag** (6 px of motion): the window lifts to 42 % of its place in the
+  layout, hanging under the pointer; a thumbnail under the pointer lights
+  (`rgba(108,194,135,0.28)`, a 2 px `#7EE0A0` ring) and says "Lâcher :
+  bureau 3" / "Drop: desktop 3" under it, in front of the window, which
+  hangs under those words. Let go on a thumbnail, the window goes to
+  that desktop of that screen, at its place and size (as `Super+Shift+N`
+  sends it, or `Super+Alt+←/→` across screens); on another screen's
+  windows or background, to the desktop that screen shows; on its own
+  desktop's thumbnail or anywhere else of its own screen, it springs back
+  to its place in the layout (200 ms). The overview stays open.
+- **Keyboard**: the arrows (and `Tab`, `Shift+Tab`) move a selection ring
+  (2 px accent, 4 px out) among the windows of every screen, the first
+  press showing it on the focused window; `Enter` focuses the selected
+  window and closes; `Super+1…9` shows that desktop on the selected
+  window's screen (else the screen under the pointer); `Super+Shift+1…9`
+  sends the selected window there, the selection going on to its
+  neighbour; `Esc` closes. Other keys reach no application.
+- **Agents**: a window hosting agents (the agents' windows, bar.md 4.0)
+  carries a panda badge over its top-left corner, 10 px in: a dark pill
+  (`rgba(14,17,28,0.9)`) ringed 1.5 px in the state's colour at 70 %,
+  the panda in a halo of that colour, and how many agents are in the
+  state that needs the user most (waiting, stuck, to see, working,
+  resting): "3 t’attendent" / "3 waiting", "1 au travail" / "1 working".
+  The panda is 14 % of the window's width in the layout, 42 px at least
+  and 84 at most, the words in proportion (larger than the mockup's
+  42 px: the pandas big and visible). While one waits, the panda bobs
+  (3 px) and waves its paw on a 1.6 s loop. A desktop with no window
+  (minimised ones aside) shows a sleeping panda in its thumbnail, half
+  its height (64 px at most), eyes shut, a "z" over it, breathing
+  (3.2 s) for two breaths as the overview opens, then still. With
+  reduced motion, no panda moves.
+- **Minimised** windows are laid out after the others, at 60 %; a window
+  on all desktops (#723) is laid out, and shown in the thumbnails, on
+  every desktop of its screen.
+- **At rest** nothing draws but what clients commit: every picture (the
+  titles, the numbers, the badges, the ✕, the pandas) is drawn once on
+  the CPU for each look it takes and kept; a waiting agent's panda
+  waves on twelve pictures of its paw, so the overview never rests
+  while an agent waits, as the radial menu's panda (§10b).
+- **As built** (`crates/hocus-compositor/src/overview.rs`, its drawing
+  in `overview_draw.rs`). Measured headless
+  (`crates/hocus-compositor/tests/overview.rs`, two screens): `Super+W`
+  opens it on both, four thumbnails each, the three windows laid out
+  without overlap each on its screen, again closes it; `Esc` closes,
+  every window where it was, the focus and the desktops unchanged; a
+  click on a window focuses it and closes; a click on the second
+  thumbnail shows desktop 2 and keeps it open, the screen staying there
+  after; dragged onto the third thumbnail a window is lifted over it and
+  goes to desktop 3 at its place, the screens unchanged; onto the other
+  screen's background it goes to that screen's shown desktop, onto its
+  fourth thumbnail to its desktop 4; let go elsewhere or on its own
+  thumbnail it springs back; four fingers down open it and again close
+  it, no swipe reaching a client, four up do not; the arrows, `Enter`,
+  `Super+Shift+3`; a window hosting two waiting agents and a working one
+  badged "2 waiting", the badge following their states, the empty
+  desktops' pandas asleep; open and still, no frame drawn in half a
+  second. Unit tests: the layout (in order, never larger, no overlap,
+  rows), the thumbnails' places, the arrows' neighbours, the badges'
+  counts and words, the keys, the glide and the fade, every picture at
+  scales 1 to 2, the paw's few pictures. With the real shell
+  (`tests/bar_windows.rs`): "+ 2 autres" opens it and closes it, the bar
+  in front; two screens with the bar, the badge, a drag over a
+  thumbnail (`HOCUS_SHOTS`: their screenshots).
+
 ## 13. Shortcuts
 
 Most use `Super`, as in the user's current desktop; `Alt+Tab` and
@@ -549,8 +1008,10 @@ holds the keyboard; the virtual terminals' switch stays.
 | `send-to-desktop-1` … `send-to-desktop-9` | `Super+Shift+1` … | Sends the focused window there, staying here (§12) |
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
+| `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
 | `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
+| `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
@@ -627,6 +1088,62 @@ they are built.
   portal a previous session left running is restarted then (see
   [sharing](sharing.md#511b-a-portal-left-by-a-previous-session-2026-11-03)).
 
+### The last session comes back (#725)
+
+Decided with the maintainer (2026-11-06): the applications open at log
+out come back at log in by themselves, without a prompt; a setting turns
+it off (`[session] restore`, on by default; the Settings' Applications
+page, "Rouvrir les applications de la dernière session", settings.md).
+
+- **What is saved**, in `$XDG_STATE_HOME/hocuspanda/session` (TOML), for
+  each window: its application's desktop entry (found from its app id:
+  the entry of that id, else the one whose `StartupWMClass` it is, else
+  the one whose id ends with it, `org.mozilla.firefox` for `firefox`), its
+  app id, its screen by identity (§12) with that screen's size and work
+  area, its desktop, where it floats (where it goes back to when it is
+  snapped, maximised or fullscreen), its state, kept above, on all
+  desktops; the windows of one application in the order they opened. A
+  window waiting for a screen gone is saved where it was on that screen.
+  Never saved: dialogs, the Settings, the shell's own surfaces, windows
+  whose application has no desktop entry.
+- **When**: 3 s after windows changed (opened, closed, moved, resized,
+  sent elsewhere, their state), and as the session ends; log out, restart
+  and shut down save it before they ask the windows to close, and
+  nothing after (cancelled, saving goes on). So a crash or a power cut
+  keeps a recent session. The snapshot is the model's data, taken on the
+  loop; a thread of its own finds the desktop entries and writes the file
+  when it changed, through a temporary file. At rest nothing is woken.
+- **At log in** (`--session`), once the bar shows, with the start-up
+  applications (6.15): each saved application starts once, as the
+  launcher starts it (its entry read again, its `Exec` without a shell,
+  its `Path`, its terminal); not one the autostart starts (the same entry
+  id or the same program), whose windows still go back. Each window that
+  maps takes the first saved place of its application (by app id) still
+  waiting, before its first frame where it can (its size in its first
+  configure): its screen, desktop, place, state, kept above, on all
+  desktops; it opens there without pulsing. Its screen not there: it goes
+  to the screen it opened on, on the same-numbered desktop, at the same
+  share of the work area, in its state, and waits for its screen as a
+  window of a screen unplugged does (§12): it goes back when that screen
+  comes. 30 s after the applications started, the places not taken are
+  dropped.
+- **An application that does not come back** (no longer installed, its
+  program would not run, it ended in error before a window, or no window
+  in 30 s) is skipped, its places dropped; the others come back. Once
+  every application came back or failed, one notification (5.3) names
+  those that did not: "Slack et Signal n’ont pas pu être rouvertes." /
+  "Slack and Signal could not be reopened."
+- Until they come back, the saved windows waiting stay in what is saved:
+  a log out meanwhile loses none.
+- Headless and nested, nothing is saved or restored; tests ask for it
+  (`Headless::restore_session`).
+- **Ported from the first build** (`v0-first-build`, #31): the file of
+  windows, one start per application, matching by app id in order, the
+  save some seconds after a change and at the end with a short wait. Not
+  ported: its card asking what to put back (decided: no prompt), its boot
+  screen, its matching by title (titles change), and its commands taken
+  from the processes (the desktop entry is what starts an application).
+
 ## 15. Performance
 
 - At rest: no frame drawn on an output where nothing changes.
@@ -693,3 +1210,31 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
 12. A window placed over the bar goes in front of it; the desktop's
     placements still keep off the bar, and the pointer pushed against the
     screen's edge brings the bar back in front (#519).
+13. A window's radial menu has eight actions, each direction meaning
+    something; Close sits in the ring, down-left, never picked by a
+    gesture; it opens with `Super` and a right click that does not move,
+    and from the grip; the bar's window lines have the same actions on a
+    right click; "always on top" and "on all desktops" are new window
+    states, marked after the title in the bar (#723).
+14. Screens plugged and unplugged (#417, the s8a mockup, questions 1 to
+    7): windows go as in 8; the winking panda says it with a blue bubble
+    for 4 s; back, windows fly to their places in 320 ms; a window placed
+    meanwhile stays; a screen is known by its EDID's make, model and
+    serial, its connector only as a fallback; each set of screens keeps
+    its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
+    defaults; Écrans lists the sets known and forgets one. The peek's
+    panda is 170 px (was 96).
+15. Screens of different scales (#419, the s8a mockup, questions 12 to
+    15): a window straddling two scales is asked to draw at the larger,
+    reduced on the other screen; a window too big for the screen it is
+    dragged onto shrinks to fit and takes its size back where it fits;
+    the pointer at a step between screens slides onto the screen beyond;
+    X11 applications are shown at their size on a screen at 2, enlarged
+    and a little soft.
+16. Moving windows with the mouse (#490, the s8b mockup, questions 4 to
+    7): both the bar's tiles (8.5 B, first) and the overview (8.5 A);
+    the overview opens with `Super+W`, four fingers down with no launcher
+    open, and the bar's "+ N autres"; a click on a thumbnail shows that
+    desktop and keeps the overview open; windows hosting agents carry a
+    big panda badge, waving while one waits, and empty desktops a
+    sleeping panda.

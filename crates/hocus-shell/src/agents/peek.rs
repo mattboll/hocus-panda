@@ -1,5 +1,5 @@
 //! The panda peeking out of the bar's edge (bar.md §7 C, 4.5): when the
-//! compositor says so (`peek`), the agent's panda (96 px; holding out its
+//! compositor says so (`peek`), the agent's panda (170 px; holding out its
 //! hat when it waits, its arms up when it finished) and its bubble ("**site-web**
 //! t'attend · à l'instant", "**api-paiements** a fini") on a layer surface
 //! of their own beside each bar, 18 px from it, at the agent's row's
@@ -7,6 +7,12 @@
 //! from under the bar and back, and says when it is back (`no-peek`): the
 //! surfaces then go, and nothing is drawn at rest. A newer peek takes the
 //! surfaces of the one out.
+//!
+//! When windows move with a screen gone or back (`screens-moved`,
+//! windows.md §12), the winking panda comes out the same way with a blue
+//! bubble of two lines: "**L'écran externe 34 pouces est parti.**" /
+//! "Firefox et foot sont ici, sur le bureau 1."; a click on it sends it
+//! back.
 //!
 //! The surface takes the pointer only where it draws: the bubble and the
 //! panda. A click on either goes to the agent (§8, 4.3), the streak from
@@ -25,7 +31,7 @@ use std::{
     },
 };
 
-use hocus_link::{EDGE, Form, PEEK_NAMESPACE, Peek, PeekKind};
+use hocus_link::{EDGE, Form, PEEK_NAMESPACE, Peek, PeekKind, ScreensMoved};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -49,7 +55,7 @@ use crate::{
 
 /// The panda's box, and its gap to the bubble; the box's distance from
 /// the bar.
-pub const PANDA: f32 = 96.0;
+pub const PANDA: f32 = 170.0;
 const GAP: f32 = 8.0;
 pub const FROM_BAR: f32 = 18.0;
 /// The bubble: Manrope 13 px, 8 px and 12 px in, a 1 px border, radius 12.
@@ -67,6 +73,15 @@ const BUBBLE_HOVER: Ink = Ink::Dark(Color::from_rgba8(40, 32, 18, 0.96));
 /// Its border, the state's colour at 45 %: amber waiting, green finished.
 const BORDER_WAITING: Ink = Ink::Dark(Color::from_rgba8(245, 180, 74, 0.45));
 const BORDER_DONE: Ink = Ink::Accent(0.45);
+/// Screens moved: blue, an information with nothing to do;
+/// `rgba(16,24,44,0.95)`, its border `#8FB3FF` at 45 %, its first line
+/// `#B9CEFF`.
+const BUBBLE_SCREENS: Ink = Ink::Dark(Color::from_rgba8(16, 24, 44, 0.95));
+const BUBBLE_SCREENS_HOVER: Ink = Ink::Dark(Color::from_rgba8(22, 32, 58, 0.97));
+const BORDER_SCREENS: Ink = Ink::Dark(Color::from_rgba8(143, 179, 255, 0.45));
+const WORD_SCREENS: Ink = Ink::Dark(rgb(0xB9CEFF));
+/// A line of the screens' bubble longer than this is cut.
+const SCREENS_ROOM: f32 = 340.0;
 /// The word after the name, in the rows' colours.
 const WORD_WAITING: Ink = Ink::Dark(rgb(0xF5C46E));
 const WORD_DONE: Ink = Ink::Dark(rgb(0x7EE0A0));
@@ -83,9 +98,9 @@ const CARD_END: f32 = 8.0;
 /// The pandas' drawings' box (their view box, 126 × 120.5 units).
 const PANDA_BOX: (f32, f32) = (126.0, 120.5);
 
-/// The bubble's height: a line of 13 px text, its padding and border.
-fn bubble_height() -> f32 {
-    TEXT_SIZE * LINE + 2.0 * (PAD_Y + BORDER)
+/// The bubble's height: `lines` of 13 px text, its padding and border.
+fn bubble_height(lines: usize) -> f32 {
+    lines.max(1) as f32 * TEXT_SIZE * LINE + 2.0 * (PAD_Y + BORDER)
 }
 
 /// Where everything is on a peek's surface, and where the surface is.
@@ -102,12 +117,13 @@ pub struct Placed {
     pub in_bar: Rectangle,
 }
 
-/// A peek of a bubble `width` wide beside a bar in `form`, the panda's
-/// middle `middle` under the bar's top; `card`: on the CPU.
-pub fn placed(form: Form, middle: f32, width: f32, card: bool) -> Placed {
+/// A peek of a bubble `width` wide and `lines` high beside a bar in
+/// `form`, the panda's middle `middle` under the bar's top (the panda
+/// kept below the bar's top); `card`: on the CPU.
+pub fn placed(form: Form, middle: f32, width: f32, lines: usize, card: bool) -> Placed {
     // In whole pixels: the panda's box keeps its place from the bar.
     let width = width.ceil();
-    let height = bubble_height();
+    let height = bubble_height(lines);
     let (left, top, right, bottom) = if card {
         (0.0, 0.0, CARD_END, 0.0)
     } else {
@@ -123,7 +139,7 @@ pub fn placed(form: Form, middle: f32, width: f32, card: bool) -> Placed {
         (top + PANDA + bottom).ceil() as u32,
     );
     let bar = form.width() as f32;
-    let panda_top = middle - PANDA / 2.0;
+    let panda_top = (middle - PANDA / 2.0).max(0.0);
     let margin = (
         (EDGE as f32 + panda_top - top).round() as i32,
         (EDGE as f32 + bar + FROM_BAR - right).round() as i32,
@@ -166,12 +182,14 @@ fn mirrored(placed: Placed) -> Placed {
 // --- What it says -------------------------------------------------------------------
 
 /// The bubble's text: the name in bold, the word in the state's colour,
-/// since when in `text.faint` (a waiting agent's); each piece's start.
+/// since when in `text.faint` (a waiting agent's); each piece's start on
+/// its line, and its line (from 0).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Said {
-    pub pieces: Vec<(String, f32, Color, iced::Font)>,
+    pub pieces: Vec<(String, f32, Color, iced::Font, usize)>,
     /// The bubble's width.
     pub width: f32,
+    pub lines: usize,
 }
 
 /// What a peek of `kind` for `name`, `minutes` since it began, says, in
@@ -192,27 +210,169 @@ pub fn said(
     let mut pieces = Vec::new();
     let mut x = PAD_X + BORDER;
     let name_width = measure(&name, MANROPE_BOLD);
-    pieces.push((name, x, TEXT.get(), MANROPE_BOLD));
+    pieces.push((name, x, TEXT.get(), MANROPE_BOLD, 0));
     x += name_width + space;
-    pieces.push((word.to_owned(), x, colour.get(), MANROPE));
+    pieces.push((word.to_owned(), x, colour.get(), MANROPE, 0));
     x += measure(word, MANROPE);
     if kind == PeekKind::Waiting {
         let since = words.since(minutes, false);
         x += space;
-        pieces.push((since.clone(), x, FAINT.get(), MANROPE));
+        pieces.push((since.clone(), x, FAINT.get(), MANROPE, 0));
         x += measure(&since, MANROPE);
     }
     Said {
         pieces,
         width: x + PAD_X + BORDER,
+        lines: 1,
+    }
+}
+
+/// The two lines saying windows moved with a screen, in `lang`, their
+/// applications' names `names` (one per window, empty when unknown).
+pub fn screens_lines(lang: Lang, moved: &ScreensMoved, names: &[String]) -> (String, String) {
+    let fr = lang == Lang::French;
+    let screen = match (moved.built_in, moved.inches, fr) {
+        (true, _, true) => "écran du portable".to_owned(),
+        (true, _, false) => "laptop screen".to_owned(),
+        (false, 0, true) => "écran externe".to_owned(),
+        (false, 0, false) => "external screen".to_owned(),
+        (false, i, true) => format!("écran externe {i} pouces"),
+        (false, i, false) => format!("{i}-inch screen"),
+    };
+    let first = match (moved.gone, fr) {
+        (true, true) => format!("L’{screen} est parti."),
+        (true, false) => format!("The {screen} left."),
+        (false, true) => format!("Re-bonjour, {screen}\u{a0}!"),
+        (false, false) => format!("Welcome back, {screen}!"),
+    };
+    let (who, one) = windows_named(fr, names);
+    let second = match (moved.gone, fr, one) {
+        (true, true, _) => {
+            let verb = if one { "est" } else { "sont" };
+            match moved.desktop {
+                0 => format!("{who} {verb} ici."),
+                d => format!("{who} {verb} ici, sur le bureau {d}."),
+            }
+        }
+        (true, false, _) => {
+            let verb = if one { "is" } else { "are" };
+            match moved.desktop {
+                0 => format!("{who} {verb} here."),
+                d => format!("{who} {verb} here, on desktop {d}."),
+            }
+        }
+        (false, true, true) => format!("{who} y retourne."),
+        (false, true, false) => format!("{who} y retournent."),
+        (false, false, true) => format!("{who} goes back to it."),
+        (false, false, false) => format!("{who} go back to it."),
+    };
+    (first, second)
+}
+
+/// The windows named: "Firefox", "Firefox et foot", "Firefox, foot et 3
+/// autres", "3 fenêtres foot"; and whether that is one window.
+fn windows_named(fr: bool, names: &[String]) -> (String, bool) {
+    let unknown = if fr { "une fenêtre" } else { "a window" };
+    let named: Vec<&str> = names
+        .iter()
+        .map(|n| if n.is_empty() { unknown } else { n.as_str() })
+        .collect();
+    let mut distinct: Vec<&str> = Vec::new();
+    for n in &named {
+        if !distinct.contains(n) {
+            distinct.push(n);
+        }
+    }
+    let and = if fr { "et" } else { "and" };
+    match (named.len(), distinct.as_slice()) {
+        (0, _) => (unknown.to_owned(), true),
+        (1, _) => (capital(named[0]), true),
+        (n, [one]) if *one == unknown => (
+            if fr {
+                format!("{n} fenêtres")
+            } else {
+                format!("{n} windows")
+            },
+            false,
+        ),
+        (n, [one]) => (
+            if fr {
+                format!("{n} fenêtres {one}")
+            } else {
+                format!("{n} {one} windows")
+            },
+            false,
+        ),
+        (2, [a, b]) => (format!("{} {and} {b}", capital(a)), false),
+        (n, [a, b, ..]) => {
+            let others = n - named.iter().filter(|x| *x == a || *x == b).count();
+            let rest = match (others, fr) {
+                (1, true) => "1 autre".to_owned(),
+                (1, false) => "1 other".to_owned(),
+                (k, true) => format!("{k} autres"),
+                (k, false) => format!("{k} others"),
+            };
+            if others == 0 {
+                (format!("{} {and} {b}", capital(a)), false)
+            } else {
+                (format!("{}, {b} {and} {rest}", capital(a)), false)
+            }
+        }
+        _ => (unknown.to_owned(), true),
+    }
+}
+
+/// `text` with its first letter up.
+fn capital(text: &str) -> String {
+    let mut letters = text.chars();
+    letters
+        .next()
+        .map(|c| c.to_uppercase().chain(letters).collect())
+        .unwrap_or_default()
+}
+
+/// What the screens' bubble says: its first line in bold, light blue, the
+/// second in the text's colour, each cut to its room.
+pub fn said_screens(
+    lines: (String, String),
+    mut measure: impl FnMut(&str, iced::Font) -> f32,
+) -> Said {
+    let first = kit::elide(&lines.0, SCREENS_ROOM, |t| measure(t, MANROPE_BOLD));
+    let second = kit::elide(&lines.1, SCREENS_ROOM, |t| measure(t, MANROPE));
+    let x = PAD_X + BORDER;
+    let width = measure(&first, MANROPE_BOLD).max(measure(&second, MANROPE));
+    Said {
+        pieces: vec![
+            (first, x, WORD_SCREENS.get(), MANROPE_BOLD, 0),
+            (second, x, TEXT.get(), MANROPE, 1),
+        ],
+        width: x + width + PAD_X + BORDER,
+        lines: 2,
     }
 }
 
 // --- The peek out, and its surfaces ---------------------------------------------
 
+/// What is out: an agent's panda, or the winking one for screens moved.
+#[derive(Debug, Clone)]
+enum Shown {
+    Agent(Peek),
+    Screens,
+}
+
+impl Shown {
+    /// The agent whose row the panda comes out at, if one.
+    fn agent(&self) -> Option<u64> {
+        match self {
+            Self::Agent(peek) => Some(peek.id),
+            Self::Screens => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Out {
-    peek: Peek,
+    shown: Shown,
     said: Said,
     /// Its surface beside each bar, and where.
     surfaces: HashMap<String, (window::Id, Placed)>,
@@ -236,15 +396,16 @@ fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
 
 /// The panda's middle, in bar `bar`'s frame, for agent `id`: its row's,
 /// as the group lays it out now where the bar's column puts it; the
-/// secretary's when it has none shown (under the "+ N" line); in the mini
-/// form, which has no rows, her head's in its item (4.7).
-fn middle(bar: &str, id: u64, form: Form) -> f32 {
+/// secretary's when it has none shown (under the "+ N" line) or for no
+/// agent (screens moved); in the mini form, which has no rows, her head's
+/// in its item (4.7).
+fn middle(bar: &str, id: Option<u64>, form: Form) -> f32 {
     let top = super::draw::top(bar, form);
     if form == Form::Mini {
         return top + super::MINI_PAD_TOP + super::HEAD / 2.0;
     }
     let row = match super::said().shows(now_us()) {
-        super::Shows::Lines(lines) => lines.rows.iter().position(|r| r.id == id),
+        super::Shows::Lines(lines) => lines.rows.iter().position(|r| Some(r.id) == id),
         _ => None,
     };
     match row {
@@ -261,13 +422,42 @@ pub fn peek(peek: Peek) {
     let said = said(words, peek.kind, &peek.name, minutes, |t, font| {
         kit::measure(t, TEXT_SIZE, font)
     });
+    show(Shown::Agent(peek), said);
+}
+
+/// The compositor says windows moved with a screen: the winking panda
+/// says so beside each bar, in place of the one out.
+pub fn screens(moved: ScreensMoved) {
+    let names: Vec<String> = moved
+        .apps
+        .iter()
+        .map(|app| {
+            (!app.is_empty())
+                .then(|| crate::share::app_name(app))
+                .flatten()
+                .unwrap_or_default()
+        })
+        .collect();
+    let lines = screens_lines(Lang::of_messages(), &moved, &names);
+    let said = said_screens(lines, |t, font| kit::measure(t, TEXT_SIZE, font));
+    show(Shown::Screens, said);
+}
+
+/// `shown`, saying `said`, out beside each bar.
+fn show(shown: Shown, said: Said) {
     let bars = popover::with(|c| c.bar_forms());
     let mut effects = Vec::new();
     out(|out| {
         let mut before = out.take().map(|o| o.surfaces).unwrap_or_default();
         let mut surfaces = HashMap::new();
         for (bar, form) in bars {
-            let placed = placed(form, middle(&bar, peek.id, form), said.width, card());
+            let placed = placed(
+                form,
+                middle(&bar, shown.agent(), form),
+                said.width,
+                said.lines,
+                card(),
+            );
             let id = match before.remove(&bar) {
                 Some((id, _)) => {
                     effects.push(Effect::Resize {
@@ -297,15 +487,22 @@ pub fn peek(peek: Peek) {
         }
         effects.extend(before.into_values().map(|(id, _)| Effect::Remove(id)));
         let text: Vec<&str> = said.pieces.iter().map(|p| p.0.as_str()).collect();
-        tracing::debug!(
-            id = peek.id,
-            kind = peek.kind.name(),
-            said = %text.join(" "),
-            bars = surfaces.len(),
-            "the panda peeks out"
-        );
+        match &shown {
+            Shown::Agent(peek) => tracing::debug!(
+                id = peek.id,
+                kind = peek.kind.name(),
+                said = %text.join(" "),
+                bars = surfaces.len(),
+                "the panda peeks out"
+            ),
+            Shown::Screens => tracing::debug!(
+                said = %text.join(" "),
+                bars = surfaces.len(),
+                "the winking panda peeks out"
+            ),
+        }
         *out = Some(Out {
-            peek,
+            shown,
             said,
             surfaces,
         });
@@ -328,7 +525,7 @@ fn regions(placed: &Placed) -> Vec<Rectangle> {
 pub fn back() {
     let gone = out(Option::take);
     if let Some(gone) = gone {
-        tracing::debug!(id = gone.peek.id, "the panda is back");
+        tracing::debug!(id = ?gone.shown.agent(), "the panda is back");
         popover::send(
             gone.surfaces
                 .into_values()
@@ -358,7 +555,13 @@ pub fn moved() {
 pub fn form(bar: &str, form: Form) {
     let moved = out(|out| {
         let out = out.as_mut()?;
-        let placed = placed(form, middle(bar, out.peek.id, form), out.said.width, card());
+        let placed = placed(
+            form,
+            middle(bar, out.shown.agent(), form),
+            out.said.width,
+            out.said.lines,
+            card(),
+        );
         let (id, was) = out.surfaces.get_mut(bar)?;
         (*was != placed)
             .then(|| {
@@ -395,21 +598,49 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 
 // --- Drawing it -------------------------------------------------------------------
 
-/// The panda for `kind`, with its drop shadow, drawn `ROOM` px larger on
-/// each side than its box: waiting holds out its hat, finished arms up.
-fn panda(kind: PeekKind) -> &'static svg::Handle {
-    static PANDAS: OnceLock<[svg::Handle; 2]> = OnceLock::new();
+/// Which panda peeks out: waiting holds out its hat, finished arms up,
+/// the winking one raises its hat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pose {
+    Waiting,
+    Done,
+    Wink,
+}
+
+impl Shown {
+    fn pose(&self) -> Pose {
+        match self {
+            Self::Agent(peek) => match peek.kind {
+                PeekKind::Waiting => Pose::Waiting,
+                PeekKind::Done => Pose::Done,
+            },
+            Self::Screens => Pose::Wink,
+        }
+    }
+}
+
+/// The panda in `pose`, with its drop shadow, drawn `ROOM` px larger on
+/// each side than its box (`shadow`), or plain (on the CPU).
+fn panda(pose: Pose, shadow: bool) -> &'static svg::Handle {
+    static PANDAS: OnceLock<[svg::Handle; 6]> = OnceLock::new();
     let pandas = PANDAS.get_or_init(|| {
-        [
+        let drawings = [
             include_str!("../../assets/pandas/waiting.svg"),
             include_str!("../../assets/pandas/done.svg"),
-        ]
-        .map(|drawing| svg::Handle::from_memory(shadowed(drawing).into_bytes()))
+            include_str!("../../assets/pandas/wink.svg"),
+        ];
+        let shadowed = drawings.map(|d| svg::Handle::from_memory(shadowed(d).into_bytes()));
+        let plain = drawings.map(|d| svg::Handle::from_memory(d.as_bytes()));
+        let [a, b, c] = shadowed;
+        let [d, e, f] = plain;
+        [a, b, c, d, e, f]
     });
-    &pandas[match kind {
-        PeekKind::Waiting => 0,
-        PeekKind::Done => 1,
-    }]
+    let index = match pose {
+        Pose::Waiting => 0,
+        Pose::Done => 1,
+        Pose::Wink => 2,
+    };
+    &pandas[if shadow { index } else { index + 3 }]
 }
 
 /// How far the panda's drawing reaches out for its shadow, px at ×1.
@@ -423,7 +654,7 @@ fn shadowed(drawing: &str) -> String {
         .and_then(|at| drawing[at..].find('>').map(|end| at + end + 1))
         .zip(drawing.rfind("</svg>"))
         .map_or("", |(from, to)| &drawing[from..to]);
-    // The drawing's units per pixel, drawn 96 px wide.
+    // The drawing's units per pixel, drawn 170 px wide.
     let unit = PANDA_BOX.0 / PANDA;
     let (dy, deviation, alpha) = PANDA_SHADOW;
     let reach = PANDA_REACH * unit;
@@ -492,11 +723,11 @@ pub struct State {
 
 impl View {
     /// What it shows now, and where.
-    fn shown(&self) -> Option<(Peek, Said, Placed)> {
+    fn shown(&self) -> Option<(Shown, Said, Placed)> {
         out(|out| {
             let out = out.as_ref()?;
             let (_, placed) = out.surfaces.get(&self.bar)?;
-            Some((out.peek.clone(), out.said.clone(), *placed))
+            Some((out.shown.clone(), out.said.clone(), *placed))
         })
     }
 }
@@ -514,19 +745,27 @@ impl<Message> canvas::Program<Message> for View {
         let iced::Event::Mouse(event) = event else {
             return None;
         };
-        let (peek, _, placed) = self.shown()?;
+        let (shown, _, placed) = self.shown()?;
         state.pointer = pointer(event, bounds, cursor, state.pointer);
         let over = state
             .pointer
             .is_some_and(|at| regions(&placed).iter().any(|r| r.contains(at)));
         match event {
             mouse::Event::ButtonPressed(mouse::Button::Left) if over => {
-                tracing::debug!(id = peek.id, "the peek goes to its agent");
-                popover::send(vec![Effect::GoToAgent {
-                    id: peek.id,
-                    bar: self.bar.clone(),
-                    row: placed.in_bar,
-                }]);
+                match shown {
+                    Shown::Agent(peek) => {
+                        tracing::debug!(id = peek.id, "the peek goes to its agent");
+                        popover::send(vec![Effect::GoToAgent {
+                            id: peek.id,
+                            bar: self.bar.clone(),
+                            row: placed.in_bar,
+                        }]);
+                    }
+                    Shown::Screens => {
+                        tracing::debug!("the winking panda is clicked: it goes back");
+                        popover::send(vec![Effect::PeekClose]);
+                    }
+                }
                 Some(canvas::Action::capture())
             }
             _ if over != state.hover => {
@@ -546,13 +785,20 @@ impl<Message> canvas::Program<Message> for View {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut f = Frame::new(renderer, bounds.size());
-        let Some((peek, said, placed)) = self.shown() else {
+        let Some((shown, said, placed)) = self.shown() else {
             return vec![f.into_geometry()];
         };
-        let fill = if state.hover { BUBBLE_HOVER } else { BUBBLE };
-        let border = match peek.kind {
-            PeekKind::Waiting => BORDER_WAITING,
-            PeekKind::Done => BORDER_DONE,
+        let pose = shown.pose();
+        let fill = match (pose, state.hover) {
+            (Pose::Wink, false) => BUBBLE_SCREENS,
+            (Pose::Wink, true) => BUBBLE_SCREENS_HOVER,
+            (_, false) => BUBBLE,
+            (_, true) => BUBBLE_HOVER,
+        };
+        let border = match pose {
+            Pose::Waiting => BORDER_WAITING,
+            Pose::Done => BORDER_DONE,
+            Pose::Wink => BORDER_SCREENS,
         };
         let size = bounds.size();
         if card() {
@@ -570,21 +816,22 @@ impl<Message> canvas::Program<Message> for View {
             f.fill(&kit::rounded(placed.bubble, RADIUS), fill.get());
             stroke(&mut f, placed.bubble, border.get());
         }
-        let middle = placed.bubble.center_y();
-        for (text, x, colour, font) in &said.pieces {
+        let line = TEXT_SIZE * LINE;
+        let first = placed.bubble.center_y() - (said.lines.max(1) - 1) as f32 * line / 2.0;
+        for (text, x, colour, font, row) in &said.pieces {
             f.fill_text(kit::text_in(
                 *font,
                 kit::text(
                     text.clone(),
-                    Point::new(placed.bubble.x + x, middle),
+                    Point::new(placed.bubble.x + x, first + *row as f32 * line),
                     TEXT_SIZE,
                     *colour,
                     Alignment::Left,
                 ),
             ));
         }
-        // The drawing's box, 126 × 120.5, 96 px wide, in the middle of its
-        // 96 px square; with its shadow's reach around it.
+        // The drawing's box, 126 × 120.5, 170 px wide, in the middle of
+        // its 170 px square; with its shadow's reach around it.
         let tall = PANDA * PANDA_BOX.1 / PANDA_BOX.0;
         let reach = if card() { 0.0 } else { PANDA_REACH };
         let drawn = Rectangle::new(
@@ -594,14 +841,10 @@ impl<Message> canvas::Program<Message> for View {
             ),
             Size::new(PANDA + 2.0 * reach, tall + 2.0 * reach),
         );
-        let drawing = if card() {
-            super::draw::panda(match peek.kind {
-                PeekKind::Waiting => super::Look::Waiting,
-                PeekKind::Done => super::Look::ToSee,
-            })
-            .clone()
-        } else {
-            panda(peek.kind).clone()
+        let drawing = match (card(), pose) {
+            (true, Pose::Waiting) => super::draw::panda(super::Look::Waiting).clone(),
+            (true, Pose::Done) => super::draw::panda(super::Look::ToSee).clone(),
+            (card, pose) => panda(pose, !card).clone(),
         };
         f.draw_svg(drawn, svg::Svg::new(drawing));
         vec![f.into_geometry()]
@@ -692,30 +935,122 @@ mod tests {
     fn it_comes_out_18_px_from_the_bar_at_its_row() {
         // A 200 px bubble beside the full bar, the row's middle 171 px
         // under its top.
-        let p = placed(Form::Full, 171.0, 200.0, false);
-        // The panda's box: 96 px, its right 18 px from the bar, its middle
-        // the row's.
+        let p = placed(Form::Full, 171.0, 200.0, 1, false);
+        // The panda's box: 170 px, its right 18 px from the bar, its
+        // middle the row's.
         assert_eq!(
             p.in_bar,
-            Rectangle::new(Point::new(-310.0, 123.0), Size::new(96.0, 96.0))
+            Rectangle::new(Point::new(-384.0, 86.0), Size::new(170.0, 170.0))
         );
         assert_eq!(p.panda.x + PANDA + ROOM.2, p.size.0 as f32);
         let right = p.margin.1 as f32 + ROOM.2;
         assert_eq!(right, 8.0 + 196.0 + 18.0);
-        assert_eq!(p.margin.0 as f32 + ROOM.1, 8.0 + 123.0);
+        assert_eq!(p.margin.0 as f32 + ROOM.1, 8.0 + 86.0);
         // The bubble 8 px before it, in its middle.
         assert_eq!(p.bubble.x + p.bubble.width + GAP, p.panda.x);
         assert!((p.bubble.center_y() - p.panda.center_y()).abs() < 1e-3);
         assert!((p.bubble.height - (13.0 * LINE + 18.0)).abs() < 1e-3);
         // Beside the mini bar, as far from it.
-        let mini = placed(Form::Mini, 171.0, 200.0, false);
+        let mini = placed(Form::Mini, 171.0, 200.0, 1, false);
         assert_eq!(mini.margin.1 as f32 + ROOM.2, 8.0 + 56.0 + 18.0);
-        assert_eq!(mini.in_bar.x, -56.0 - 18.0 - 96.0);
+        assert_eq!(mini.in_bar.x, -56.0 - 18.0 - 170.0);
         // On the CPU: a card, the panda's box its height, 8 px after it.
-        let card = placed(Form::Full, 171.0, 200.0, true);
-        assert_eq!(card.size, (312, 96));
-        assert_eq!(card.margin, (131, 8 + 196 + 18 - 8, 0, 0));
+        let card = placed(Form::Full, 171.0, 200.0, 1, true);
+        assert_eq!(card.size, (386, 170));
+        assert_eq!(card.margin, (94, 8 + 196 + 18 - 8, 0, 0));
         assert_eq!(card.in_bar, p.in_bar);
+        // Near the bar's top, the panda stays below it.
+        let high = placed(Form::Full, 20.0, 200.0, 2, false);
+        assert_eq!(high.in_bar.y, 0.0);
+        assert!((high.bubble.height - (2.0 * 13.0 * LINE + 18.0)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_winking_panda_says_which_screen_and_windows_moved() {
+        let moved = |gone, built_in, inches, desktop| ScreensMoved {
+            gone,
+            built_in,
+            inches,
+            desktop,
+            apps: Vec::new(),
+        };
+        let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let fr = Lang::French;
+        let en = Lang::English;
+        assert_eq!(
+            screens_lines(fr, &moved(true, false, 34, 1), &names(&["Firefox", "foot"])),
+            (
+                "L’écran externe 34 pouces est parti.".to_owned(),
+                "Firefox et foot sont ici, sur le bureau 1.".to_owned()
+            )
+        );
+        assert_eq!(
+            screens_lines(en, &moved(true, false, 34, 1), &names(&["Firefox", "foot"])),
+            (
+                "The 34-inch screen left.".to_owned(),
+                "Firefox and foot are here, on desktop 1.".to_owned()
+            )
+        );
+        assert_eq!(
+            screens_lines(
+                fr,
+                &moved(false, false, 34, 1),
+                &names(&["Firefox", "foot"])
+            ),
+            (
+                "Re-bonjour, écran externe 34 pouces\u{a0}!".to_owned(),
+                "Firefox et foot y retournent.".to_owned()
+            )
+        );
+        assert_eq!(
+            screens_lines(en, &moved(false, false, 34, 1), &names(&["Firefox"])),
+            (
+                "Welcome back, 34-inch screen!".to_owned(),
+                "Firefox goes back to it.".to_owned()
+            )
+        );
+        // Past two windows, the others counted; the lid's built-in screen;
+        // windows on several desktops.
+        let many = names(&["Firefox", "foot", "Slack", "foot", "Zed"]);
+        assert_eq!(
+            screens_lines(fr, &moved(true, true, 14, 0), &many).1,
+            "Firefox, foot et 2 autres sont ici."
+        );
+        assert_eq!(
+            screens_lines(en, &moved(true, true, 14, 0), &many),
+            (
+                "The laptop screen left.".to_owned(),
+                "Firefox, foot and 2 others are here.".to_owned()
+            )
+        );
+        assert_eq!(
+            screens_lines(fr, &moved(true, false, 0, 2), &names(&["foot", "foot"])).1,
+            "2 fenêtres foot sont ici, sur le bureau 2."
+        );
+        assert_eq!(
+            screens_lines(fr, &moved(false, false, 0, 2), &names(&[""])),
+            (
+                "Re-bonjour, écran externe\u{a0}!".to_owned(),
+                "Une fenêtre y retourne.".to_owned()
+            )
+        );
+        // Two lines, the first in bold light blue.
+        let said = said_screens(
+            (
+                "L’écran externe est parti.".to_owned(),
+                "Firefox est ici.".to_owned(),
+            ),
+            measure,
+        );
+        assert_eq!(said.lines, 2);
+        assert_eq!(said.pieces[0].3, MANROPE_BOLD);
+        assert_eq!(said.pieces[0].2, WORD_SCREENS.get());
+        assert_eq!((said.pieces[0].4, said.pieces[1].4), (0, 1));
+        let long = said_screens((String::new(), "x".repeat(200)), measure);
+        assert!(
+            long.width <= SCREENS_ROOM + 2.0 * (PAD_X + BORDER) + 1.0,
+            "{long:?}"
+        );
     }
 
     #[test]

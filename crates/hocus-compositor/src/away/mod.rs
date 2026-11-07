@@ -258,6 +258,7 @@ impl State {
             system::FromSystem::Handles(fd) => self.power_handles(fd),
             system::FromSystem::Level(level) => self.power_level(level),
             system::FromSystem::Profile(profile) => self.power_profile(profile),
+            system::FromSystem::Lid(closed) => self.lid_read(closed),
         }
     }
 
@@ -549,13 +550,26 @@ impl State {
         self.away_arm();
     }
 
-    /// The laptop's own screens off for the lid, or on again.
+    /// The laptop's own screens off for the lid, or on again: with another
+    /// screen on, taken away as an unplug does, and back (windows.md §12).
     pub(crate) fn set_lid_dark(&mut self, dark: bool) {
         if self.away.lid_dark != dark {
             self.away.lid_dark = dark;
             self.displays.dirty = true;
             self.redraw = true;
+            self.lid_screens();
         }
+    }
+
+    /// Whether the lid closed over `output` takes it away, as an unplug
+    /// does: it is the laptop's own, dark for the lid, and another screen
+    /// is plugged and on by the file.
+    pub(crate) fn lid_takes(&self, output: &Output) -> bool {
+        self.away.lid_dark
+            && is_internal(output)
+            && self.displays.outputs.iter().any(|o| {
+                !is_internal(o) && self.config.outputs.get(&o.name()).is_none_or(|s| s.enabled)
+            })
     }
 
     /// UPower says the machine is on battery, or on AC: the delays are
@@ -620,6 +634,8 @@ impl State {
                 self.ask_inhibitor();
             }
             self.lock_woke();
+            // The lid may have opened while asleep, unseen.
+            self.lid_again("the machine woke up");
             self.away.woke = true;
             self.redraw = true;
             // The user woke it: the screens on, the countdowns from now.

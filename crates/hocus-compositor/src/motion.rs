@@ -121,6 +121,9 @@ pub const PREVIEW_DELAY: Duration = Duration::from_millis(80);
 
 /// The desktops' strip slides in this time (§12).
 pub const DESKTOP_SLIDE: Duration = Duration::from_millis(320);
+/// Windows flying back to a screen that came back (windows.md §12), along
+/// the desktops' curve.
+pub const SCREEN_BACK: Duration = Duration::from_millis(320);
 /// Alt+Tab (§11): held this long, its panel shows; it appears and
 /// vanishes in these times, scaling from this much; its selection's ring
 /// moves in this time.

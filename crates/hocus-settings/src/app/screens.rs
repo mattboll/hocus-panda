@@ -25,9 +25,9 @@ use crate::{
     model::Icon,
     screens::{
         self, ARRANGE, Align, IDENTIFY, MIRROR, Mode3, NIGHT_LIGHT, PRIMARY, RATE, RESOLUTION,
-        ROTATION, Rect, SCALE, SCALES, Said, Screen, Screens, Side, USE, VRR,
+        ROTATION, Rect, SCALE, SCALES, SETS, Said, Screen, Screens, Side, USE, VRR,
     },
-    store::KeyEdit,
+    store::{self, KeyEdit},
 };
 
 type El<'a> = Element<'a, Message>;
@@ -71,6 +71,8 @@ pub enum Msg {
     Revert,
     Identify,
     Identified(u64),
+    /// A set's row's menu, by the set's name.
+    SetMenu(String),
 }
 
 /// A menu's choice on this page.
@@ -82,6 +84,8 @@ pub enum Choice {
     Scale(Option<f64>),
     /// `None`: automatic.
     Primary(Option<String>),
+    /// "Oublier cet ensemble": the set, by its name.
+    Forget(String),
 }
 
 /// A press on a screen of the drawing, until it is let go.
@@ -134,6 +138,8 @@ pub struct Page {
     /// A trial asked, its answer not come.
     asked: Option<(String, &'static str)>,
     identify: Option<(u64, Instant)>,
+    /// The set whose row's menu is open.
+    set_menu: Option<String>,
     serial: u64,
     /// Where the pointer is on the window, as its events said it.
     pointer: Option<Point>,
@@ -144,6 +150,8 @@ pub struct Page {
 pub enum Control {
     Identify,
     Screen(String),
+    /// A set of screens' "⋯", by the set's name.
+    Set(String),
     Row(&'static str),
 }
 
@@ -299,9 +307,25 @@ impl App {
                 self.screens.menu = None;
                 iced::Task::none()
             }
+            Msg::Choose(_, Choice::Forget(name)) => {
+                self.screens.menu = None;
+                self.forget_set(&name)
+            }
             Msg::Choose(row, choice) => {
                 self.screens.menu = None;
                 self.screens_choose(row, choice)
+            }
+            Msg::SetMenu(name) => {
+                let open = self.screens.menu.is_some_and(|(r, _)| r == SETS)
+                    && self.screens.set_menu.as_deref() == Some(name.as_str());
+                if open {
+                    self.screens.menu = None;
+                } else {
+                    self.screens.menu = Some((SETS, Instant::now()));
+                    self.screens.set_menu = Some(name);
+                    self.screens.menu_index = 0;
+                }
+                iced::Task::none()
             }
             Msg::Keep => {
                 if let Some(trial) = &self.screens.trial
@@ -429,7 +453,7 @@ impl App {
         };
         let lang = self.lang;
         let mut edits = vec![KeyEdit {
-            key: key(&screen.name, "mode"),
+            key: self.file_key(&screen.name, "mode"),
             value: Some(format!("\"{}\"", trial.mode)),
         }];
         let size = mode_size(&trial.mode).map(|(w, h)| logical((w, h), screen.scale));
@@ -510,7 +534,7 @@ impl App {
             USE => {
                 let off = screen.enabled;
                 let edit = KeyEdit {
-                    key: key(&screen.name, "enabled"),
+                    key: self.file_key(&screen.name, "enabled"),
                     value: off.then(|| "false".to_owned()),
                 };
                 let done = match (off, lang) {
@@ -534,7 +558,7 @@ impl App {
             VRR => {
                 let on = !screen.vrr;
                 let edit = KeyEdit {
-                    key: key(&screen.name, "vrr"),
+                    key: self.file_key(&screen.name, "vrr"),
                     value: on.then(|| "true".to_owned()),
                 };
                 let yes = |b: bool| match (b, lang) {
@@ -603,7 +627,7 @@ impl App {
             Choice::Scale(scale) => {
                 let applies = scale.unwrap_or(screen.auto_scale);
                 let mut edits = vec![KeyEdit {
-                    key: key(&screen.name, "scale"),
+                    key: self.file_key(&screen.name, "scale"),
                     value: scale.map(toml_float),
                 }];
                 if let Some(mode) = screen.mode {
@@ -632,13 +656,25 @@ impl App {
                 self.ask_keys(edits, said, Doing::New, None);
                 iced::Task::none()
             }
+            Choice::Forget(_) => iced::Task::none(),
             Choice::Primary(name) => {
                 let said_now = self.say_primary(name.as_deref());
                 let said_then = self.say_primary(self.primary_named().as_deref());
-                let edits = vec![KeyEdit {
-                    key: vec!["panel".to_owned(), "output".to_owned()],
-                    value: name.map(|n| toml_edit::Value::from(n).to_string()),
-                }];
+                // A set of several screens keeps its own (windows.md §12),
+                // by identity.
+                let known = self.screens_list();
+                let edits = match known.and_then(|k| Some((k, k.set_in_use()?))) {
+                    Some((known, set)) => vec![KeyEdit {
+                        key: vec![store::SCREEN_SETS.to_owned(), set, "primary".to_owned()],
+                        value: name
+                            .and_then(|n| known.get(&n).map(|s| s.key.clone()))
+                            .map(|k| toml_edit::Value::from(k).to_string()),
+                    }],
+                    None => vec![KeyEdit {
+                        key: vec!["panel".to_owned(), "output".to_owned()],
+                        value: name.map(|n| toml_edit::Value::from(n).to_string()),
+                    }],
+                };
                 let done = match lang {
                     Lang::French => format!("Écran principal : {said_now}"),
                     Lang::English => format!("Primary screen: {said_now}"),
@@ -708,30 +744,111 @@ impl App {
             .plugged()
             .map(|s| (s.name.clone(), if s.name == name { at } else { s.position }))
             .collect();
-        position_edits(&screens::normalised(&places))
+        self.position_edits(&screens::normalised(&places))
     }
 
     /// Whether the file places the screens (every screen plugged has a
-    /// `position`).
+    /// `position`, in the set in use's table when it has several).
     fn file_places(&self) -> bool {
         let Some(known) = self.screens_list() else {
             return false;
         };
+        let Some(snapshot) = self.snapshot.as_ref() else {
+            return false;
+        };
+        if let Some(set) = known.set_in_use() {
+            let placed = snapshot.screen_set(&set).map(|s| s.placed.clone());
+            return placed.is_some_and(|placed| known.set.iter().all(|k| placed.contains(k)));
+        }
         let names: Vec<&str> = known.plugged().map(|s| s.name.as_str()).collect();
         !names.is_empty()
-            && names.iter().all(|n| {
-                self.snapshot
-                    .as_ref()
-                    .is_some_and(|s| s.screens_placed.iter().any(|p| p == n))
-            })
+            && names
+                .iter()
+                .all(|n| snapshot.screens_placed.iter().any(|p| p == n))
     }
 
-    /// `[panel] output` as the file says it.
+    /// The primary screen as the file names it: the set in use's when it
+    /// has several screens (by identity), else `[panel] output`.
     fn primary_named(&self) -> Option<String> {
-        self.snapshot
-            .as_ref()
-            .and_then(|s| s.primary_output.clone())
-            .filter(|n| !n.is_empty())
+        let snapshot = self.snapshot.as_ref()?;
+        if let Some(known) = self.screens_list()
+            && let Some(set) = known.set_in_use()
+        {
+            let key = snapshot.screen_set(&set)?.primary.clone()?;
+            return known
+                .list
+                .iter()
+                .find(|s| s.key == key && s.connected)
+                .map(|s| s.name.clone());
+        }
+        snapshot.primary_output.clone().filter(|n| !n.is_empty())
+    }
+
+    /// The key screen `name`'s `what` is written at: the set in use's
+    /// table when it has several screens, else `[outputs.NAME]`.
+    fn file_key(&self, name: &str, what: &str) -> Vec<String> {
+        match self.screens_list() {
+            Some(known) => known.key_of(name, what),
+            None => vec!["outputs".to_owned(), name.to_owned(), what.to_owned()],
+        }
+    }
+
+    /// Every place, as edits.
+    fn position_edits(&self, places: &[(String, (i32, i32))]) -> Vec<KeyEdit> {
+        places
+            .iter()
+            .map(|(name, (x, y))| KeyEdit {
+                key: self.file_key(name, "position"),
+                value: Some(format!("[{x}, {y}]")),
+            })
+            .collect()
+    }
+
+    /// "Oublier cet ensemble": the compositor forgets it, and its table
+    /// leaves the file (with "Annuler" then).
+    fn forget_set(&mut self, name: &str) -> iced::Task<Message> {
+        let Some(set) = self
+            .screens_list()
+            .and_then(|k| k.sets.iter().find(|s| s.name == name))
+            .cloned()
+        else {
+            return iced::Task::none();
+        };
+        if set.current {
+            return iced::Task::none();
+        }
+        if let Some(line) = &self.screens.line {
+            let screens: String = set.name.split('\n').map(|k| format!("\t{k}")).collect();
+            line.ask(format!("forget-set{screens}"));
+        }
+        let lang = self.lang;
+        let title = set.title(lang);
+        if !set.in_file {
+            let text = match lang {
+                Lang::French => format!("Ensemble oublié : {title}"),
+                Lang::English => format!("Set forgotten: {title}"),
+            };
+            return self.toast(text, ToastAction::None, super::UNDONE);
+        }
+        let done = match lang {
+            Lang::French => format!("Ensemble oublié : {title}"),
+            Lang::English => format!("Set forgotten: {title}"),
+        };
+        let said = super::KeysSaid {
+            redone: redone_of(&done, lang),
+            undone: match lang {
+                Lang::French => format!("Annulé : la disposition de « {title} » est revenue."),
+                Lang::English => format!("Undone: the arrangement of “{title}” is back."),
+            },
+            done,
+            row: SETS,
+        };
+        let edits = vec![KeyEdit {
+            key: vec![store::SCREEN_SETS.to_owned(), set.name.clone()],
+            value: None,
+        }];
+        self.ask_keys(edits, said, Doing::New, None);
+        iced::Task::none()
     }
 
     /// A screen dropped: where it lands, written with the other's place.
@@ -784,7 +901,7 @@ impl App {
                 )
             })
             .collect();
-        let edits = position_edits(&screens::normalised(&places));
+        let edits = self.position_edits(&screens::normalised(&places));
         let done = format!("{} {place}", moving.title(lang));
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
@@ -872,7 +989,7 @@ impl App {
             row: ARRANGE,
         };
         self.ask_keys(
-            position_edits(&screens::normalised(&places)),
+            self.position_edits(&screens::normalised(&places)),
             said,
             Doing::New,
             None,
@@ -885,6 +1002,20 @@ impl App {
     /// A menu's choices, with their labels.
     fn screens_choices(&self, row: &str) -> Vec<(Choice, String)> {
         let lang = self.lang;
+        if row == SETS {
+            return self
+                .screens
+                .set_menu
+                .clone()
+                .map(|name| {
+                    vec![(
+                        Choice::Forget(name),
+                        self.say(w("Oublier cet ensemble", "Forget this set"))
+                            .to_owned(),
+                    )]
+                })
+                .unwrap_or_default();
+        }
         let Some(screen) = self.chosen() else {
             return Vec::new();
         };
@@ -973,6 +1104,15 @@ impl App {
         let mut out = vec![Control::Identify];
         if let Some(known) = self.screens_list() {
             out.extend(known.plugged().map(|s| Control::Screen(s.name.clone())));
+            if known.sets.len() >= 2 {
+                out.extend(
+                    known
+                        .sets
+                        .iter()
+                        .filter(|s| !s.current)
+                        .map(|s| Control::Set(s.name.clone())),
+                );
+            }
         }
         out.extend([USE, RESOLUTION, RATE, SCALE, VRR, PRIMARY].map(Control::Row));
         out
@@ -1051,6 +1191,12 @@ impl App {
                 let name = name.clone();
                 self.screens.selected = Some(name.clone());
                 self.arrow(&name, side)
+            }
+            (Control::Set(name), Named::Enter | Named::Space) => {
+                self.screens_update(Msg::SetMenu(name.clone()))
+            }
+            (Control::Set(name), Named::ArrowDown) if alt => {
+                self.screens_update(Msg::SetMenu(name.clone()))
             }
             (Control::Row(row @ (USE | VRR)), Named::Enter | Named::Space) => {
                 self.screens_update(Msg::Toggle(row))
@@ -1214,6 +1360,11 @@ impl App {
         for note in self.notes() {
             page = page.push(note);
         }
+        // The sets of screens known, under the arrangement (windows.md
+        // §12).
+        if let Some(sets) = self.sets_group() {
+            page = page.push(sets);
+        }
         // The chosen screen.
         if let Some(screen) = self.chosen() {
             page = page.push(self.screen_group(screen));
@@ -1255,6 +1406,7 @@ impl App {
             ]
             .spacing(8),
         );
+
         // The night light, later.
         let mut night = column![];
         let rows = [
@@ -1308,6 +1460,147 @@ impl App {
             .spacing(8),
         );
         container(page).id("page:screens".to_owned()).into()
+    }
+
+    /// ENSEMBLES D'ÉCRANS: a row for each set known, the one in use lit
+    /// first; the others' menu forgets one. Nothing while only one set is
+    /// known: there is nothing to choose or forget.
+    fn sets_group(&self) -> Option<El<'_>> {
+        let known = self.screens_list()?;
+        if known.sets.len() < 2 {
+            return None;
+        }
+        let lang = self.lang;
+        let now = jiff::Timestamp::now().as_second();
+        let zone = jiff::tz::TimeZone::system();
+        let mut list = column![].spacing(2);
+        for (i, set) in known.sets.iter().enumerate() {
+            let shapes = row(set
+                .in_order()
+                .into_iter()
+                .map(|screen| {
+                    let (w, h) = if screen.built_in {
+                        (20.0, 13.0)
+                    } else if screen.size.0 > 0 && screen.size.1 > 0 {
+                        let w = (screen.size.0 as f32 / 110.0).clamp(22.0, 34.0);
+                        (
+                            w,
+                            (w * screen.size.1 as f32 / screen.size.0 as f32).clamp(11.0, 20.0),
+                        )
+                    } else {
+                        (26.0, 16.0)
+                    };
+                    container(Space::new().width(w).height(h))
+                        .style(|_: &Theme| container::Style {
+                            border: border(3.0, 1.5, DIM.get()),
+                            ..container::Style::default()
+                        })
+                        .into()
+                })
+                .collect::<Vec<El<'_>>>())
+            .spacing(3)
+            .align_y(Alignment::End);
+            let words = column![
+                t(set.title(lang), 13.5, TEXT.get()).font(SEMIBOLD),
+                t(set.line(lang, now, &zone), 12.0, DIM.get()),
+            ]
+            .spacing(2)
+            .width(Length::Fill);
+            let mut line = row![
+                container(shapes)
+                    .width(58)
+                    .height(30)
+                    .align_y(Alignment::End),
+                words
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center);
+            if !set.current {
+                let open = self.screens.menu.is_some_and(|(r, _)| r == SETS)
+                    && self.screens.set_menu.as_deref() == Some(set.name.as_str());
+                let inert = !self.writable();
+                let focused = self.focused(&Control::Set(set.name.clone()));
+                let more = button(
+                    container(t(
+                        "⋯",
+                        16.0,
+                        fade(TEXT.get(), if inert { INERT } else { 1.0 }),
+                    ))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+                )
+                .width(32)
+                .height(28)
+                .padding(0)
+                .on_press_maybe((!inert).then(|| Message::Screens(Msg::SetMenu(set.name.clone()))))
+                .style(move |_, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: Some(Background::Color(crate::theme::ink(rgba(
+                            255,
+                            255,
+                            255,
+                            if hovered || open { 0.09 } else { 0.0 },
+                        )))),
+                        text_color: TEXT.get(),
+                        border: if focused {
+                            ring(7.0)
+                        } else {
+                            border(7.0, 1.0, Color::TRANSPARENT)
+                        },
+                        ..button::Style::default()
+                    }
+                });
+                line = line.push(container(more).id(format!("control:set:{i}")));
+            }
+            let current = set.current;
+            list = list.push(
+                container(line)
+                    .padding([8, 10])
+                    .width(Length::Fill)
+                    .style(move |_: &Theme| container::Style {
+                        background: current
+                            .then(|| Background::Color(crate::theme::Ink::Accent(0.12).get())),
+                        border: border(
+                            9.0,
+                            1.0,
+                            if current {
+                                crate::theme::Ink::Accent(0.40).get()
+                            } else {
+                                Color::TRANSPARENT
+                            },
+                        ),
+                        ..container::Style::default()
+                    })
+                    .id(format!("set:{i}")),
+            );
+        }
+        let note = t(
+            self.say(w(
+                "Chaque ensemble garde la place des écrans, leurs résolutions, leurs échelles et l’écran principal.",
+                "Each set keeps its screens' places, resolutions, scales and the primary screen.",
+            )),
+            12.0,
+            FAINT.get(),
+        );
+        Some(
+            container(
+                column![
+                    row![label(self.say(w("ENSEMBLES D’ÉCRANS", "SCREEN SETS")))]
+                        .height(28)
+                        .align_y(Alignment::Center),
+                    card_box(
+                        container(column![list, container(note).padding([4, 6])].spacing(6))
+                            .padding(6)
+                            .into()
+                    ),
+                ]
+                .spacing(8),
+            )
+            .id(format!("row:{SETS}"))
+            .into(),
+        )
     }
 
     /// Nothing to draw yet, or nothing will come: the drawing says so.
@@ -1844,7 +2137,17 @@ impl App {
     /// The page's open menu, under its button.
     pub(super) fn screens_menu_list(&self) -> Option<El<'_>> {
         let (row, since) = self.screens.menu?;
-        let at = *self.places.at.get(&format!("control:{row}"))?;
+        let anchor = if row == SETS {
+            let index = self.screens_list().and_then(|k| {
+                k.sets
+                    .iter()
+                    .position(|s| Some(&s.name) == self.screens.set_menu.as_ref())
+            })?;
+            format!("control:set:{index}")
+        } else {
+            format!("control:{row}")
+        };
+        let at = *self.places.at.get(&anchor)?;
         let current = self.screens_current(row);
         let opened = if self.reduced_motion {
             1.0
@@ -2126,22 +2429,6 @@ impl App {
 
 /// The trial's length, as the compositor counts it.
 const TRIAL_SECONDS: u64 = 15;
-
-/// `[outputs.NAME] what`.
-fn key(name: &str, what: &str) -> Vec<String> {
-    vec!["outputs".to_owned(), name.to_owned(), what.to_owned()]
-}
-
-/// Every place, as edits.
-fn position_edits(places: &[(String, (i32, i32))]) -> Vec<KeyEdit> {
-    places
-        .iter()
-        .map(|(name, (x, y))| KeyEdit {
-            key: key(name, "position"),
-            value: Some(format!("[{x}, {y}]")),
-        })
-        .collect()
-}
 
 /// `1.25` as TOML: a float that says no more than it is.
 fn toml_float(scale: f64) -> String {

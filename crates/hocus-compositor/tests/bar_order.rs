@@ -661,10 +661,10 @@ fn the_peek_comes_out_beside_its_agents_row_under_to_do() -> anyhow::Result<()> 
         hp.peek_commits() > 0 && hp.peek_surfaces().len() == 1 && hp.peek().is_some()
     })?;
     anyhow::ensure!(shown, "no peek: {:?}", bed.hp.peek_surfaces());
-    // On the CPU a card, its 96 px panda's middle on the row's, beside the
+    // On the CPU a card, its 170 px panda's middle on the row's, beside the
     // bar.
     let peek = bed.hp.peek_surfaces()[0].1;
-    assert_eq!(peek.y + 48, row, "{peek:?}");
+    assert_eq!(peek.y + 85, row, "{peek:?}");
     assert!(peek.x + peek.width <= FULL_X, "{peek:?}");
     bed.shot("peek")?;
     Ok(())

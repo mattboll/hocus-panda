@@ -153,7 +153,7 @@ group where it is.
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 40 px head, `AGENTS` and the total over her line; "Sources" in her briefing. One 34 px row per agent (4.1, track 4 "the lines"): its panda (30 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted. Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 26 px + 34 px a row (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
-| — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the desktop's list; none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
+| — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
@@ -312,8 +312,35 @@ group where it is.
 - **Motion**: the sketch follows the windows as they open, close, move and
   resize, and nothing draws at rest; nothing moves in the tiles but the
   ring, from the desktop left to the one shown (none with reduced motion).
-- **Several screens**: a bar shows its own screen's desktops (sprint 8
-  decides the rest).
+- **Several screens** (approved 2026-11-06, issue #420, variant A): each
+  screen keeps its own desktops (windows.md §12). With `[panel] screens =
+  "primary"` (the default) the primary screen's bar shows **one row of
+  tiles per connected screen**: its own first, then the others in the
+  screens' arrangement (left to right, then top to bottom, by their
+  positions). With `"all"`, each bar shows its own screen's row only.
+  **A row is shaped like its screen**: tiles keep the 4-a-row width; their
+  height follows the screen's aspect, 30 px at 16:10 (and narrower) down
+  to 20 px at 21:9 and wider (`30 × 1.6 / aspect`, on a whole pixel). A
+  bar showing one row alone keeps 3.9's 30 px tiles, whatever its
+  screen's shape: there is no other screen to tell it from.
+  No label: the shape and the sketch say which screen. 6 px between a
+  screen's own wrapped rows, 10 px between two screens' rows. A tile's
+  sketch, ring, icons and number are 3.9/3.9b's, from that screen's
+  `desktops` line (icons only in sketches of 12 × 12 px or more, so
+  rarely in 20 px tiles). A click, `Enter` or the wheel on a row switch
+  that row's screen, sliding as with the keys. The list of another
+  screen's tile adds a line under its title saying which screen, as the
+  Settings' Écrans page (6.9) names it: "sur l’écran externe 34 pouces"
+  / "on the 34-inch external screen" (12 px, `text.faint`). Screen
+  readers: "Écran externe 34 pouces, Bureau 2, 1 fenêtre" / "34-inch
+  external screen, Desktop 2, 1 window". A screen plugged in adds its row
+  (the surface grows, layer-shell); one unplugged takes it away (its
+  windows per windows.md §12). At rest nothing draws.
+- **A window let go on a tile** (approved 2026-11-06, issue #490, 8.5 B):
+  a window moved over the tiles brings the bar in front at once; the tile
+  under it lights (`rgba(108,194,135,0.28)`, a 2 px `#7EE0A0` ring); let
+  go there, it goes to that desktop of that row's screen (windows.md §6,
+  "Onto a desktop's tile in the bar").
 - **Names** of desktops (`[desktops] names`, 6.14; windows.md §12): a
   tile's name for screen readers is "Travail, M fenêtres", its list's
   title "Travail"; without a name, "Bureau N, M fenêtres" / "Desktop N, M
@@ -368,7 +395,9 @@ the card's place, she is alone with a green "+" badge, and opens Sources.
 The halo and the peek work as in the full form, the peek at her head;
 spacer, the desktops (3.9, variant
 A): a dot per desktop (18 × 13, radius 4), two to a row, 4 px apart, 14 px
-above the connections' buttons: the current one filled with the accent,
+above the connections' buttons (with several screens, 8.4: one block of
+dots per screen, in the full form's rows' order, 10 px apart, a wider
+screen's dots lower, 18 × 9 at 21:9): the current one filled with the accent,
 those with windows `rgba(255,255,255,0.30)`, the empty ones
 `rgba(255,255,255,0.10)` with a 1 px `rgba(255,255,255,0.12)` ring; a click
 goes to that desktop, the wheel as in the full form; resting 150 ms on a
@@ -478,7 +507,7 @@ never on battery saver, never with reduced motion.
     an agent finishes (its panda with arms up). Once per change, and once
     more with the 5-minute reminder of a waiting agent (§6). Never for a
     stuck agent: the orange line and glow show it.
-  - **Where**: the 96 px panda comes out of the bar's edge at the agent's
+  - **Where**: the 170 px panda (96 px until #417) comes out of the bar's edge at the agent's
     row's height, 18 px from the bar, from under the bar's surface. Beside
     it, 8 px before it, a bubble: Manrope 13 px, 8 px and 12 px in,
     `rgba(30,26,18,0.92)` (`rgba(40,32,18,0.96)` under the pointer), radius
@@ -489,7 +518,7 @@ never on battery saver, never with reduced motion.
     since when `text.faint`), "**api-paiements** a fini" / "**api-paiements**
     is done" (`#7EE0A0`).
   - **Motion**: out in 320 ms, `cubic-bezier(0.2, 0.9, 0.25, 1.15)`, from
-    150 px under the bar, fading in over 260 ms (`ease-out`); still while
+    190 px under the bar (150 with the 96 px panda), fading in over 260 ms (`ease-out`); still while
     out; back into the bar after **8 s**, in 260 ms (`cubic-bezier(0.5, 0,
     0.75, 0.3)`), fading out over 220 ms (`ease-in`). With reduced motion,
     or a shell on the CPU: it fades in and out in place, without sliding.
@@ -499,6 +528,9 @@ never on battery saver, never with reduced motion.
   - Nothing is drawn at rest: it is a surface of the shell's above the
     windows, beside each bar, taking the pointer only where it draws, and
     gone once back.
+  - **Screens moved** (#417, windows.md §12 "Saying it"): the winking
+    panda comes out the same way, with a blue bubble of two lines, for
+    4 s; an agent's peek replaces it, it never replaces an agent's.
 
 ## 8. Going to an agent
 
@@ -2243,7 +2275,7 @@ issue #388): it stays out 8 s, and also comes out when an agent finishes.
 - **Reduced motion, or a shell on the CPU**: no slide; it fades in over
   260 ms (`ease-out`) and out over 220 ms (`ease-in`) in place. On the CPU
   the shell's buffers have no alpha: the bubble's card holds the panda
-  too (96 px high, the bubble's colour, made opaque, and its border round
+  too (170 px high since #417, the bubble's colour, made opaque, and its border round
   both, 8 px after the panda), without shadows, and the compositor cuts
   its rounded corners.
 - **A long name** is cut with an ellipsis at 280 px, so that the bubble
@@ -4101,8 +4133,8 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   most recent focus (the compositor's own order, Alt+Tab's), at most 3;
   minimised ones too, greyed and their icon at half, as their desktop's
   list has them (3.9c). Past 3, a 20 px "+ N autres" / "+ N more"
-  (12.5 px, `text.faint`) opens the current desktop's list (3.9b, every
-  window of the desktop) beside it, until the overview comes (8.5). No
+  (12.5 px, `text.faint`) opens the overview (8.5 A, windows.md §12b;
+  the current desktop's list, 3.9b, until then); again, it closes it. No
   window on the desktop: no group.
 - **A line**: 30 px, 6 px past the group's sides, radius 8: the
   application's icon (18 px, from the icon theme as the tiles find
@@ -4147,8 +4179,8 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   button (radius 10) 14 px over the dots, lit `0.06` under the pointer,
   `0.08` while its popover shows; a 150 ms hover or a click opens the
   popover: 240 px, the popovers' glass, its bottom on the item's, the
-  same lines (up to 3, with their ✕) and "+ N", which gives way to the
-  desktop's list. A line brings its window and closes the popover; a ✕
+  same lines (up to 3, with their ✕) and "+ N", which closes it and
+  opens the overview (8.5 A, windows.md §12b). A line brings its window and closes the popover; a ✕
   asks its window to close, the popover staying and following the
   windows as they go. `Tab` and the arrows go through the lines, their
   ✕ and "+ N"; `Esc` closes it.
@@ -4200,6 +4232,53 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   words, the surface's placement, the lines' parts, the popover's height
   (`hocus-shell`); the room shared (`column`). With `HOCUS_SHOTS=dir`,
   the screenshots of the pull request.
+
+### A window's menu beside the bar (2026-11-06)
+
+Issue #723, with the radial menu of a window (windows.md §10b): the same
+actions from the bar's window lines, variant A of the maintainer's
+choice (a right click on the line).
+
+- **Opening**: a right click on a window's line (the full form's group,
+  the mini form's popover, a desktop's list's rows) opens a 240 px
+  popover beside the bar, the popovers' glass, its top on the line's,
+  pushed up to stay on the screen (§9); from a popover's line it takes
+  that popover's place. The shell asks the compositor what it shows
+  (`window-menu ID`), and opens it when the compositor answers, at once
+  (`window-menu ID FLAGS\tSCREEN…`).
+- **What it shows**, top to bottom: the application's icon and the
+  window's title (13.5 px bold, cut with "…"); 30 px rows (radius 8, lit
+  `0.06` under the pointer), each with the radial menu's icon (14 px):
+  "Agrandir" / "Maximise" (or "Restaurer" / "Restore", maximised) with
+  `Super+↑` (`Super+↓`), "Réduire" / "Minimise" with `Super+H` (keys in
+  Martian Mono 10.5, `text.faint`); a rule; "Au premier plan" / "Always
+  on top" and "Sur tous les bureaux" / "On all desktops" with 30 × 17
+  switches (the accent when on); a rule; "ENVOYER SUR" / "SEND TO" in
+  spaced capitals, then for each screen, left to right by position, its
+  name (the built-in one is "ce portable" / "this laptop") and a row of
+  tiles, one per desktop, shaped like the screen (24 px high at most),
+  numbered, the desktop it shows lighter, the window's own ringed in the
+  accent and inert; a rule; "Fermer" / "Close" in orange with `Super+Q`.
+- **Acting**: a switch flips at once and the menu stays; Maximise,
+  Minimise, a tile (the window goes to that desktop of that screen, the
+  screen staying as it is) and Close close it (`window-action ID ACTION`,
+  `send-to ID OUTPUT N`). `Tab` and the arrows go through it, `Enter` or
+  `Space` acts, `Esc` closes it.
+- **The marks**: a window kept above the others has a 12 px mark after
+  its title in its line (two windows, the front one up), one on all
+  desktops another (three panes), in `text.dim`; the title gives them
+  room. The compositor says which windows are so (`window-states ABOVE
+  ALL`) as the shell connects and when it changes.
+- **Measured headless** (`crates/hocus-compositor/tests/bar_windows.rs`,
+  the real shell): a right click on a line opens the menu, 240 px beside
+  the bar, whole on the screen, its words and the window's desktop
+  ringed, `Esc` closes it and its Close asks the window
+  (`a_right_click_on_a_line_opens_its_windows_menu_beside_the_bar`); its
+  switches flip and the line shows both marks, a tile sends the window to
+  desktop 3, the screen staying
+  (`the_window_menus_switches_and_tiles_act_on_its_window`). Unit tests:
+  the menu's layout, its inert tile and its words (`hocus-shell`); its
+  lines read back (`hocus-link`). With `HOCUS_SHOTS=dir`, the screenshots.
 
 ### 6.2, the themes, the accent and the formats (2026-11-05)
 
@@ -4390,3 +4469,70 @@ Issue #450, its second part: what the Settings' Agents page reads and asks
 - **Tests** (`crates/hocus-compositor/tests/settings_agents.rs`, the real
   Settings, the tools in the test's home, a fake herdr): see settings.md.
 
+### 8.4, desktops across several screens (2026-11-06)
+
+What the approved s8b mockup shows for 8.4, variant A (issue #420); §4.4
+and §5 say the rest.
+
+- **The compositor tells** each bar which screens' desktops it shows,
+  `desk-screens BAR` then each screen as `OUTPUT,WIDTH,HEIGHT,BUILT-IN,
+  INCHES,NUMBER` (its logical size for its rows' shape; what names it as
+  the Écrans page does: the built-in panel, its diagonal, its number, 1
+  the built-in panel then by connector), as the shell connects and when
+  the screens come, go, move or resize, or `[panel] screens` changes. It
+  then tells every one of those screens' `desktops`, `titles` and
+  `recent` lines, as 3.9 says for a bar's own screen (at most once a frame
+  of that screen, never at rest).
+- **The shell** keeps the screens by bar and each screen's desktops by
+  screen; a tile is a row's (its screen's, 0 the bar's own) and a
+  desktop's. Its surface is as tall as the screens' rows (`desktops/
+  draw.rs`, `Group`): a 16:10 laptop's row of four and a 21:9 screen's
+  make 30 + 10 + 20 px of tiles. Each row's ring moves alone, from the
+  desktop its screen left to the one it shows.
+- **The overview** (8.5 A): windows.md §12b.
+- **Measured headless** (`crates/hocus-compositor/tests/desktops_screens.rs`,
+  the compositor alone): two screens, each switching alone; the primary
+  bar's rows (its own, then the other), one each with `screens = "all"`,
+  a row gone with its screen and back with it; `Super+Alt+→` and `←`
+  (windows.md §12), a snapped window in the same zone, nothing with no
+  screen on that side; a window dragged onto the other screen on the
+  desktop it shows. Unit tests for the rows' shape and heights, the
+  words, the link's line. The screenshots for the maintainer: the real
+  shell on the CPU, a 16:10 screen and a 21:9 one
+  (`tests/desktops_shots.rs`, by hand, `HOCUS_SHOTS=DIR`).
+
+### 8.5 B, a window let go on a desktop's tile (2026-11-06)
+
+What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
+8.5 A, is windows.md §12b); windows.md §6 says the behaviour.
+
+- **Where the tiles are**: the shell says, for each bar, each tile's
+  screen, desktop and place on its desktops' surface (`desk-tiles BAR
+  OUTPUT,N,X,Y,W,H …`), whenever they move or change (not while the bar
+  switches forms, when there are none); the compositor knows where that
+  surface is. It finds the tile under the pointer at each motion of a
+  move, no more.
+- **What the shell is told**: `drop-over BAR OUTPUT N` as the window comes
+  over a tile, `drop-over BAR -` as it leaves the tiles or is let go; the
+  tiles' surface alone draws, that tile lit.
+- **The bar in front** while a window is over its tiles stays in front
+  until the move ends (`Front::Dropping`), then goes back under the
+  windows.
+- **The shrink** is drawn, not configured: the window keeps its size, its
+  picture scaled about the pointer (`render.rs`), 120 ms each way (at once
+  with reduced motion); nothing runs at rest.
+- **Measured headless**: the compositor alone, a layer surface of the
+  test's for the tiles' and the tiles said as the shell says them
+  (`crates/hocus-compositor/tests/desktop_drop.rs`): over the second
+  tile, told, the bar in front, the window at 30 %; let go, on the second
+  desktop at its place, the screens still on theirs, the bar back under;
+  let go on its own desktop's tile, back; on the other screen's tiles, to
+  that screen, shown on the desktop it shows, out of sight on another;
+  off the tiles, full size again, the bar still in front, `Esc` back
+  where it began. The real shell (`tests/bar_desktops.rs`): its tiles
+  said, the second one lit under the window, the window let go there on
+  the second desktop. The screenshots: `tests/desktops_shots.rs`, a window
+  over the wide screen's third tile, then let go there.
+- **Across screens on the way**: a window moved onto another screen takes
+  the desktop that screen shows as its centre crosses over, not once let
+  go, so that it stays in sight there.

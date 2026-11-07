@@ -55,6 +55,7 @@ pub mod sound;
 pub mod tasks;
 pub mod tray;
 pub mod wifi;
+pub mod window_menu;
 pub mod windows;
 
 use std::{
@@ -90,10 +91,14 @@ pub enum Item {
     /// The keyboard's layout: a click, or `Enter` while it holds the
     /// keyboard, asks for the next one (3.8).
     Keyboard,
-    /// A desktop's tile (or dot), from 0: a click, or `Enter` while it
-    /// holds the keyboard, goes to that desktop (3.9); hovered, it shows
-    /// the list of its windows (3.9b).
-    Desktop(u8),
+    /// A desktop's tile (or dot) of the bar's row `row` (its screen's, 8.4:
+    /// 0 the bar's own), desktop `index` from 0: a click, or `Enter` while
+    /// it holds the keyboard, goes to that desktop of that screen (3.9);
+    /// hovered, it shows the list of its windows (3.9b).
+    Desktop {
+        row: u8,
+        index: u8,
+    },
     /// The Sources popover (4.0): from the secretary's briefing, which it
     /// replaces (4.6), and the card's "Un autre outil ?".
     Sources,
@@ -162,12 +167,15 @@ pub enum Item {
     Window(u64),
     /// Its ✕: a click, or `Enter`, asks it to close.
     WindowClose(u64),
-    /// The windows' "+ N autres": the current desktop's list (3.9b), by a
-    /// click.
+    /// The windows' "+ N autres": the overview (8.5 A), by a click or
+    /// `Enter`.
     WindowsMore,
     /// The mini form's windows' item: their popover, by a hover or a
     /// click.
     Windows,
+    /// A window's menu (#723), by the compositor's id: opened by a right
+    /// click on its line, once the compositor said what it shows.
+    WindowMenu(u64),
 }
 
 impl Item {
@@ -176,7 +184,7 @@ impl Item {
         !matches!(
             self,
             Self::Keyboard
-                | Self::Desktop(_)
+                | Self::Desktop { .. }
                 | Self::Decline
                 | Self::Agent(_)
                 | Self::Menu
@@ -190,6 +198,7 @@ impl Item {
                 | Self::DayLater
                 | Self::Window(_)
                 | Self::WindowClose(_)
+                | Self::WindowsMore
         )
     }
 
@@ -208,9 +217,11 @@ impl Item {
     /// screen-wide launcher must not open on the way past.
     fn hovers(self, form: Form) -> bool {
         match self {
-            Self::Desktop(_) | Self::Clipboard | Self::Notifications | Self::User | Self::InUse => {
-                true
-            }
+            Self::Desktop { .. }
+            | Self::Clipboard
+            | Self::Notifications
+            | Self::User
+            | Self::InUse => true,
             Self::Keyboard
             | Self::Agent(_)
             | Self::Menu
@@ -233,7 +244,7 @@ impl Item {
     /// Its popover's width, logical pixels.
     fn width(self) -> u32 {
         match self {
-            Self::Desktop(_) => desktop::WIDTH,
+            Self::Desktop { .. } => desktop::WIDTH,
             Self::Secretary => briefing::WIDTH,
             Self::Notifications => history::WIDTH,
             Self::Clipboard => clipboard::WIDTH,
@@ -245,6 +256,7 @@ impl Item {
             Self::DayChoose => setup::WIDTH,
             Self::Calendar => calendar::WIDTH,
             Self::Windows => windows::WIDTH,
+            Self::WindowMenu(_) => window_menu::WIDTH,
             Self::WindowsMore => desktop::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
@@ -260,7 +272,7 @@ impl Item {
             Self::Bluetooth => bluetooth::height(),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
-            Self::Desktop(index) => desktop::height(bar, index),
+            Self::Desktop { row, index } => desktop::height(bar, row, index),
             Self::Sources | Self::AnotherTool => agents::sources_height(form),
             Self::Plug(tool) => agents::consent_height(tool),
             Self::Secretary => briefing::height(form),
@@ -274,8 +286,10 @@ impl Item {
             Self::Tasks | Self::TasksMore => tasks::height(),
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
+            Self::WindowMenu(id) => window_menu::height(id),
             Self::WindowsMore => desktop::height(
                 bar,
+                0,
                 u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
             ),
             Self::Keyboard
@@ -298,7 +312,7 @@ impl Item {
     /// look does not change (it is lit by the pointer already); Sources
     /// lights the mini form's agents' item, which opens it on the card.
     fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop(_)) && (!self.agents() || self == Self::Sources)
+        !matches!(self, Self::Desktop { .. }) && (!self.agents() || self == Self::Sources)
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -309,7 +323,7 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop(_) | Self::Agent(_) | Self::Secretary => {}
+            Self::Keyboard | Self::Desktop { .. } | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
@@ -322,7 +336,11 @@ impl Item {
             Self::DayChoose => crate::setup::opening(),
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
-            Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows => {}
+            Self::Window(_)
+            | Self::WindowClose(_)
+            | Self::WindowsMore
+            | Self::Windows
+            | Self::WindowMenu(_) => {}
         }
     }
 
@@ -333,7 +351,7 @@ impl Item {
             | Self::Brightness
             | Self::Battery
             | Self::Keyboard
-            | Self::Desktop(_)
+            | Self::Desktop { .. }
             | Self::Sources
             | Self::AnotherTool
             | Self::Plug(_)
@@ -355,7 +373,8 @@ impl Item {
             | Self::Window(_)
             | Self::WindowClose(_)
             | Self::WindowsMore
-            | Self::Windows => {}
+            | Self::Windows
+            | Self::WindowMenu(_) => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -377,7 +396,7 @@ impl Item {
             (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
                 CONNECTIONS_NAMESPACE
             }
-            (Self::Desktop(_), _) => DESKTOPS_NAMESPACE,
+            (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE
             }
@@ -395,9 +414,14 @@ impl Item {
                 _,
             ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
-            (Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore | Self::Windows, _) => {
-                WINDOWS_NAMESPACE
-            }
+            (
+                Self::Window(_)
+                | Self::WindowClose(_)
+                | Self::WindowsMore
+                | Self::Windows
+                | Self::WindowMenu(_),
+                _,
+            ) => WINDOWS_NAMESPACE,
             (
                 Self::Sources
                 | Self::AnotherTool
@@ -422,7 +446,7 @@ impl Item {
         !matches!(
             self,
             Self::Sound
-                | Self::Desktop(_)
+                | Self::Desktop { .. }
                 | Self::Secretary
                 | Self::InUse
                 | Self::Tray(_)
@@ -432,6 +456,7 @@ impl Item {
                 | Self::DayChoose
                 | Self::Windows
                 | Self::WindowsMore
+                | Self::WindowMenu(_)
         ) && !self.agents()
     }
 
@@ -612,6 +637,8 @@ pub enum Effect {
         bar: String,
         row: Rectangle,
     },
+    /// The winking panda clicked: the compositor sends it back.
+    PeekClose,
     /// The compositor plugs a tool in, or unplugs it (4.0).
     Plug(crate::agents::Tool),
     Unplug(crate::agents::Tool),
@@ -1064,7 +1091,10 @@ impl Controller {
                 Phase::Open(open)
                     if open.bar == bar
                         && open.how == Opened::Hover
-                        && matches!((open.item, item), (Item::Desktop(_), Item::Desktop(_))) =>
+                        && matches!(
+                            (open.item, item),
+                            (Item::Desktop { .. }, Item::Desktop { .. })
+                        ) =>
                 {
                     tracing::debug!(?item, "the list shows another desktop");
                     open.item = item;
@@ -1180,7 +1210,16 @@ impl Controller {
             Event::Chosen => self.close(now, &mut effects),
             Event::Replace(item) => {
                 if let Phase::Open(open) = &self.phase {
-                    let (bar, from) = (open.bar.clone(), open.from);
+                    // A window's menu from a popover's line: its top on
+                    // that popover's, where the line was (#726).
+                    let from = match item {
+                        Item::WindowMenu(_) => Rectangle {
+                            y: open.rect.y,
+                            ..open.from
+                        },
+                        _ => open.from,
+                    };
+                    let bar = open.bar.clone();
                     self.close(now, &mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
                 }
@@ -1621,7 +1660,7 @@ fn anchor(
             return Rectangle { y: card, ..from };
         }
     }
-    if !matches!(item, Item::Desktop(_)) {
+    if !matches!(item, Item::Desktop { .. }) {
         return from;
     }
     let top = items
@@ -1636,8 +1675,8 @@ fn anchor(
 fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
     match item {
         Item::Keyboard => Some(Effect::NextLayout),
-        Item::Desktop(index) => Some(Effect::Desktop {
-            bar,
+        Item::Desktop { row, index } => Some(Effect::Desktop {
+            bar: crate::desktops::output_of(&bar, row),
             to: DesktopTo::At(index),
         }),
         Item::Decline => Some(Effect::Decline),
@@ -1663,6 +1702,10 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
             tracing::debug!(window = id, "the bar's windows ask a window to close");
             Some(Effect::Tell(ToCompositor::Close(id)))
         }
+        Item::WindowsMore => {
+            tracing::debug!("the bar's windows ask for the overview");
+            Some(Effect::Tell(ToCompositor::Overview))
+        }
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth
@@ -1680,8 +1723,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Tasks
         | Item::TasksMore
         | Item::DayChoose
-        | Item::WindowsMore
-        | Item::Windows => None,
+        | Item::Windows
+        | Item::WindowMenu(_) => None,
     }
 }
 
@@ -2233,6 +2276,10 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 height: row.height.round() as i32,
             });
             tell(ToCompositor::GoToAgent { id, row });
+            Vec::new()
+        }
+        Effect::PeekClose => {
+            tell(ToCompositor::PeekClose);
             Vec::new()
         }
         Effect::Plug(tool) => {
@@ -3089,11 +3136,13 @@ mod tests {
         c.set_items(
             BAR,
             DESKTOPS_NAMESPACE,
-            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+            (0..6)
+                .map(|i| (Item::Desktop { row: 0, index: i }, tile(i)))
+                .collect(),
         );
         let enter = |i: u8| Event::ItemEnter {
             bar: BAR.to_owned(),
-            item: Item::Desktop(i),
+            item: Item::Desktop { row: 0, index: i },
             rect: tile(i),
         };
         // In the full form too, 150 ms after; its top on the tiles' first
@@ -3118,7 +3167,7 @@ mod tests {
         );
         let effects = c.handle(enter(4), t + MS(220));
         assert!(effects.contains(&Effect::Wake(POPOVER_NAMESPACE)));
-        assert!(c.shows(BAR, Item::Desktop(4)));
+        assert!(c.shows(BAR, Item::Desktop { row: 0, index: 4 }));
         assert!(c.is_open(id));
         assert_eq!(c.deadline(), None);
         // A row chosen: it closes.
@@ -3132,7 +3181,7 @@ mod tests {
         let effects = c.handle(
             Event::ItemPress {
                 bar: BAR.to_owned(),
-                item: Item::Desktop(1),
+                item: Item::Desktop { row: 0, index: 1 },
                 rect: tile(1),
             },
             t + MS(600),
@@ -3408,7 +3457,9 @@ mod tests {
         c.set_items(
             BAR,
             DESKTOPS_NAMESPACE,
-            (0..6).map(|i| (Item::Desktop(i), tile(i))).collect(),
+            (0..6)
+                .map(|i| (Item::Desktop { row: 0, index: i }, tile(i)))
+                .collect(),
         );
         c.set_items(BAR, CONNECTIONS_NAMESPACE, vec![(Item::Wifi, wifi)]);
         c.set_items(BAR, LEVELS_NAMESPACE, vec![(Item::Sound, gauge())]);
@@ -3416,7 +3467,7 @@ mod tests {
         let effects = c.handle(
             Event::ItemPress {
                 bar: BAR.to_owned(),
-                item: Item::Desktop(4),
+                item: Item::Desktop { row: 0, index: 4 },
                 rect: tile(4),
             },
             t,
@@ -3449,26 +3500,60 @@ mod tests {
                 Effect::Wake(DESKTOPS_NAMESPACE),
             ]
         );
-        assert!(c.focused(BAR, Item::Desktop(5)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 5 }));
         // Up again, along the row: the same surface.
         assert_eq!(
             c.handle(Event::ItemStep { back: true }, t),
             vec![Effect::Wake(DESKTOPS_NAMESPACE)]
         );
-        assert!(c.focused(BAR, Item::Desktop(4)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
         // Enter: that desktop, the keyboard kept.
         assert_eq!(c.handle(Event::ItemActivate, t), vec![go(4)]);
-        assert!(c.focused(BAR, Item::Desktop(4)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 4 }));
         // From the first tile back round to the levels' last item.
         for _ in 0..4 {
             c.handle(Event::ItemStep { back: true }, t);
         }
-        assert!(c.focused(BAR, Item::Desktop(0)));
+        assert!(c.focused(BAR, Item::Desktop { row: 0, index: 0 }));
         let effects = c.handle(Event::ItemStep { back: true }, t);
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
         assert!(c.focused(BAR, Item::Sound));
         // Esc lets it go from there.
         let effects = c.handle(Event::ItemRelease, t);
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::None)));
+    }
+
+    /// A window's menu (#726): its top on the line right-clicked, wherever
+    /// the line is in the bar; low in it, pushed up to stay whole, never
+    /// sent to the bar's foot.
+    #[test]
+    fn a_windows_menu_opens_with_its_top_on_its_line() {
+        let (mut c, _) = controller(Form::Full);
+        let t = Instant::now();
+        // Not shown yet: 200 px tall.
+        let height = Item::WindowMenu(7).height(BAR, Form::Full, true) as f32;
+        assert!(!Item::WindowMenu(7).on_bottom());
+        let line = |y: f32| Rectangle::new(Point::new(-190.0, y), Size::new(184.0, 30.0));
+        let mut tops = Vec::new();
+        for y in [120.0, 500.0, HEIGHT - 40.0] {
+            let opened = c.handle(
+                Event::Open {
+                    bar: BAR.to_owned(),
+                    item: Item::WindowMenu(7),
+                    rect: line(y),
+                },
+                t,
+            );
+            assert!(
+                opened.iter().any(|e| matches!(e, Effect::Open { .. })),
+                "{opened:?}"
+            );
+            let Phase::Open(open) = &c.phase else {
+                panic!("not open");
+            };
+            tops.push(open.rect.y);
+            assert!(open.rect.y + open.rect.height <= HEIGHT, "{:?}", open.rect);
+        }
+        assert_eq!(tops, [120.0, 500.0, HEIGHT - height]);
     }
 }

@@ -99,12 +99,22 @@ struct Outputs<R, T> {
     outputs: Vec<OutputBuffer<T>>,
     /// Outputs unplugged, by name, with where they were: a test plugs
     /// them back.
-    unplugged: Vec<(String, OutputSpec, (i32, i32))>,
+    unplugged: Vec<Unplugged>,
 }
+
+/// An output unplugged: its name, what it was, where, and who.
+type Unplugged = (
+    String,
+    OutputSpec,
+    (i32, i32),
+    Option<crate::screen_sets::Identity>,
+);
 
 struct OutputBuffer<T> {
     output: Output,
     spec: OutputSpec,
+    /// Who the screen is, as its EDID would say (tests give one).
+    identity: Option<crate::screen_sets::Identity>,
     position: (i32, i32),
     global: GlobalId,
     target: T,
@@ -274,6 +284,8 @@ where
         specs: &[OutputSpec],
         state: &mut State,
     ) -> anyhow::Result<Self> {
+        // Tests put the pointer where they want, from 0, 0.
+        state.pointer_placed = true;
         let mut outputs = Self {
             renderer,
             format,
@@ -281,7 +293,7 @@ where
             unplugged: Vec::new(),
         };
         for (i, (spec, position)) in specs.iter().zip(output_spec::layout(specs)).enumerate() {
-            outputs.add(format!("HEADLESS-{}", i + 1), *spec, position, state)?;
+            outputs.add(format!("HEADLESS-{}", i + 1), *spec, position, None, state)?;
         }
         Ok(outputs)
     }
@@ -292,6 +304,7 @@ where
         name: String,
         spec: OutputSpec,
         position: (i32, i32),
+        identity: Option<crate::screen_sets::Identity>,
         state: &mut State,
     ) -> anyhow::Result<()> {
         let target = self
@@ -307,6 +320,10 @@ where
                 model: "Headless".into(),
             },
         );
+        if let Some(identity) = &identity {
+            let identity = identity.clone();
+            output.user_data().insert_if_missing(|| identity);
+        }
         let global = output.create_global::<State>(&state.display_handle);
         let mode = Mode {
             size: (spec.width, spec.height).into(),
@@ -344,6 +361,7 @@ where
             damage_tracker: OutputDamageTracker::from_output(&output),
             output,
             spec,
+            identity,
             position,
             global,
             target,
@@ -382,32 +400,48 @@ where
         tracing::info!(output = name, "output unplugged");
         state.unplug_output(&gone.output, gone.global);
         self.unplugged
-            .push((name.to_string(), gone.spec, gone.position));
+            .push((name.to_string(), gone.spec, gone.position, gone.identity));
         Ok(())
     }
 
     /// Output `name`, unplugged before, comes back where it was or at
-    /// `at`.
+    /// `at`; `screen`: another screen on that connector, or a new
+    /// connector, and who it is.
     fn plug(
         &mut self,
         name: &str,
         at: Option<(i32, i32)>,
+        screen: Option<(OutputSpec, Option<crate::screen_sets::Identity>)>,
         state: &mut State,
     ) -> anyhow::Result<()> {
-        let index = self
-            .unplugged
-            .iter()
-            .position(|(n, _, _)| n == name)
-            .with_context(|| format!("no output {name} unplugged"))?;
-        let (name, spec, position) = self.unplugged.remove(index);
-        self.add(name.clone(), spec, at.unwrap_or(position), state)?;
+        let index = self.unplugged.iter().position(|(n, ..)| n == name);
+        let (name, spec, position, identity) = match (index, screen) {
+            (Some(index), None) => self.unplugged.remove(index),
+            (Some(index), Some((spec, identity))) => {
+                let (name, _, position, _) = self.unplugged.remove(index);
+                (name, spec, position, identity)
+            }
+            (None, Some((spec, identity))) => {
+                // A connector new to the desktop: right of the others.
+                let right = state
+                    .space
+                    .outputs()
+                    .filter_map(|o| state.space.output_geometry(o))
+                    .map(|g| g.loc.x + g.size.w)
+                    .max()
+                    .unwrap_or(0);
+                (name.to_owned(), spec, (right, 0), identity)
+            }
+            (None, None) => anyhow::bail!("no output {name} unplugged"),
+        };
+        self.add(name.clone(), spec, at.unwrap_or(position), identity, state)?;
         let output = self
             .outputs
             .iter()
             .find(|o| o.output.name() == name)
             .map(|o| o.output.clone())
             .context("the output just made")?;
-        state.output_back(&output);
+        state.output_back(&output, true);
         Ok(())
     }
 
@@ -564,11 +598,12 @@ impl HeadlessBackend {
         &mut self,
         name: &str,
         at: Option<(i32, i32)>,
+        screen: Option<(OutputSpec, Option<crate::screen_sets::Identity>)>,
         state: &mut State,
     ) -> anyhow::Result<()> {
         match &mut self.canvas {
-            Canvas::Gles(c) => c.plug(name, at, state),
-            Canvas::Pixman(c) => c.plug(name, at, state),
+            Canvas::Gles(c) => c.plug(name, at, screen, state),
+            Canvas::Pixman(c) => c.plug(name, at, screen, state),
         }
     }
 

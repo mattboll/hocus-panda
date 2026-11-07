@@ -21,8 +21,15 @@ pub struct Config {
     pub keyboard: Keyboard,
     /// Settings per screen, by connector name (`eDP-1`, `DP-2`).
     pub outputs: BTreeMap<String, OutputSettings>,
+    /// Each set of screens' own arrangement over `[outputs.NAME]`
+    /// (`[[screen-sets]]`, windows.md §12): the Settings write it.
+    #[serde(rename = "screen-sets")]
+    pub screen_sets: Vec<ScreenSet>,
     pub shortcuts: Shortcuts,
     pub programs: Programs,
+    /// The last session's applications reopened at log in (windows.md
+    /// §14).
+    pub session: SessionSettings,
     pub appearance: Appearance,
     /// The desktop's background and the lock's (6.3).
     pub wallpaper: Wallpaper,
@@ -34,6 +41,8 @@ pub struct Config {
     pub windows: Windows,
     /// Drawing on the screen (6.14, docs/design/ink.md).
     pub ink: Ink,
+    /// The overview's ways in (docs/design/windows.md §12b).
+    pub overview: Overview,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -782,7 +791,8 @@ pub struct Touchpad {
     pub off_with_mouse: bool,
     /// Three fingers sideways change desktop (windows.md §12).
     pub swipe_desktops: bool,
-    /// Four fingers up open the launcher (6.13, not built: read, kept).
+    /// Four fingers up open the launcher, down close it (6.13); down with
+    /// no launcher open show the overview (8.5 A).
     pub swipe_launcher: bool,
 }
 
@@ -1490,6 +1500,20 @@ impl Default for Ink {
     }
 }
 
+/// The overview, `[overview]` (docs/design/windows.md §12b).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Overview {
+    /// The pointer held in a screen's top-left corner opens it (#727).
+    pub hot_corner: bool,
+}
+
+impl Default for Overview {
+    fn default() -> Self {
+        Self { hot_corner: true }
+    }
+}
+
 /// One screen's settings, `[outputs.eDP-1]`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -1527,6 +1551,66 @@ impl OutputSettings {
             wallpaper: None,
             ..self.clone()
         }
+    }
+}
+
+/// A set of screens and its own arrangement, `[[screen-sets]]`: its
+/// screens by identity (windows.md §12), which is primary, and each
+/// screen's place, mode, scale and VRR over its `[outputs.NAME]`.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreenSet {
+    pub screens: Vec<String>,
+    /// The primary screen, by identity, over `[panel] output`.
+    pub primary: Option<String>,
+    /// By identity.
+    pub outputs: BTreeMap<String, SetScreen>,
+}
+
+impl ScreenSet {
+    /// Whether it is the set of `keys`, in any order.
+    pub fn is(&self, keys: &[String]) -> bool {
+        let mut mine = self.screens.clone();
+        let mut theirs = keys.to_vec();
+        mine.sort();
+        mine.dedup();
+        theirs.sort();
+        theirs.dedup();
+        !mine.is_empty() && mine == theirs
+    }
+}
+
+/// A screen's arrangement in a set: what it says wins over
+/// `[outputs.NAME]`.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SetScreen {
+    #[serde(deserialize_with = "scale")]
+    pub scale: Option<f64>,
+    #[serde(deserialize_with = "mode")]
+    pub mode: Option<ModeWanted>,
+    #[serde(deserialize_with = "position")]
+    pub position: Option<(i32, i32)>,
+    pub vrr: Option<bool>,
+}
+
+impl SetScreen {
+    /// `base` with what this says over it.
+    pub fn over(&self, base: OutputSettings) -> OutputSettings {
+        OutputSettings {
+            scale: self.scale.or(base.scale),
+            mode: self.mode.or(base.mode),
+            position: self.position.or(base.position),
+            vrr: self.vrr.unwrap_or(base.vrr),
+            ..base
+        }
+    }
+}
+
+impl Config {
+    /// The file's arrangement of the set of `keys`.
+    pub fn screen_set(&self, keys: &[String]) -> Option<&ScreenSet> {
+        self.screen_sets.iter().find(|s| s.is(keys))
     }
 }
 
@@ -1664,17 +1748,27 @@ impl Config {
         pixels: (i32, i32),
         millimetres: (i32, i32),
     ) -> (f64, ScaleFrom) {
-        match self.outputs.get(name).and_then(|o| o.scale) {
-            Some(scale) => (scale, ScaleFrom::Config),
-            None => (
-                crate::output_spec::default_scale(pixels, millimetres),
-                ScaleFrom::Automatic {
-                    dpi: crate::output_spec::density(pixels, millimetres)
-                        // Down: a screen shown at 191 dpi or less never takes 2 by itself.
-                        .map(|dpi| dpi.floor() as u32),
-                },
-            ),
-        }
+        output_scale(self.outputs.get(name), pixels, millimetres)
+    }
+}
+
+/// The scale of a screen with `settings`: theirs, or
+/// 1 or 2 by its density.
+pub fn output_scale(
+    settings: Option<&OutputSettings>,
+    pixels: (i32, i32),
+    millimetres: (i32, i32),
+) -> (f64, ScaleFrom) {
+    match settings.and_then(|o| o.scale) {
+        Some(scale) => (scale, ScaleFrom::Config),
+        None => (
+            crate::output_spec::default_scale(pixels, millimetres),
+            ScaleFrom::Automatic {
+                dpi: crate::output_spec::density(pixels, millimetres)
+                    // Down: a screen shown at 191 dpi or less never takes 2 by itself.
+                    .map(|dpi| dpi.floor() as u32),
+            },
+        ),
     }
 }
 
@@ -1780,6 +1874,21 @@ impl SystemKeyboard {
             }
         }
         (!keyboard.layout.is_empty()).then_some(keyboard)
+    }
+}
+
+/// The session, `[session]` (windows.md §14, 6.15).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionSettings {
+    /// At log in, the applications open at the last log out start again,
+    /// each window back in its place.
+    pub restore: bool,
+}
+
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self { restore: true }
     }
 }
 
@@ -2133,6 +2242,11 @@ mod tests {
         assert!(!set.windows.magnet && !set.windows.snap_by_drag && !set.windows.wobble);
         assert_eq!(set.windows.alt_tab, AltTab::Desktop);
         assert!(!set.ink.enabled);
+        // The overview's corner (#727): on unless said.
+        assert!(none.overview.hot_corner);
+        let off: Config = toml::from_str("[overview]\nhot-corner = false\n")?;
+        assert!(!off.overview.hot_corner);
+        assert!(toml::from_str::<Config>("[overview]\ncorner = true\n").is_err());
         for bad in [
             "move-modifier = \"ctrl\"",
             "alt-tab = \"some\"",

@@ -56,8 +56,8 @@
 # off-with-mouse = false
 # Three fingers sideways change desktop, following them.
 # swipe-desktops = true
-# Four fingers up open the launcher, down close it (not built yet: read
-# and kept, for 6.13).
+# Four fingers up open the launcher, down close it; down with no launcher
+# open show the overview, or close it.
 # swipe-launcher = true
 
 # [panel]
@@ -140,6 +140,24 @@
 #   vrr = true
 # Its own wallpaper, while [wallpaper] per-screen is true (else picture):
 #   wallpaper = "~/.local/share/hocuspanda/wallpapers/Montagne.jpg"
+#
+# Each set of screens (the screens plugged and on together) keeps its
+# own arrangement over the [outputs.NAME] above, which stay what a set
+# seen for the first time starts from. A screen is named by its EDID's
+# make, model and serial ("DEL U3423WE 7XY1234"), or by its connector
+# when it has none; the journal says it as it lights ("a screen, known
+# as"). With two screens or more, the Settings' Écrans page writes the
+# arrangement there: each screen's mode, position, scale and vrr, and
+# the primary screen (over [panel] output):
+#
+#   [[screen-sets]]
+#   screens = ["BOE 0x0BCA (eDP-1)", "DEL U3423WE 7XY1234"]
+#   primary = "DEL U3423WE 7XY1234"
+#   [screen-sets.outputs."DEL U3423WE 7XY1234"]
+#   position = [0, 0]
+#   [screen-sets.outputs."BOE 0x0BCA (eDP-1)"]
+#   position = [440, 1440]
+#   scale = 1.25
 
 # [shortcuts]
 # Every shortcut of the desktop: modifiers (Super, Shift, Ctrl, Alt) and
@@ -217,11 +235,20 @@
 # screen, going there with it; it stays past the first or the last.
 # take-to-desktop-left = "Super+Ctrl+Shift+Left"
 # take-to-desktop-right = "Super+Ctrl+Shift+Right"
+# Sends the focused window to the screen on the left or the right, onto
+# the desktop it shows, at the same share of its work area. Nested (in a
+# window of another session), these have no default: Super is Alt+Super
+# there already.
+# move-to-screen-left = "Super+Alt+Left"
+# move-to-screen-right = "Super+Alt+Right"
 # The bar's other form, on the screen under the pointer.
 # toggle-bar = "Super+B"
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
 # launcher = "Super+Space"
+# The overview: every screen's desktops and windows at once; again, it
+# closes (docs/design/windows.md §12b).
+# overview = "Super+W"
 # The clipboard's history, from the bar of the focused window's screen, its
 # search holding the keyboard; again, it closes (docs/design/bar.md, 5.6).
 # clipboard = "Super+V"
@@ -358,6 +385,12 @@
 # and xterm found in PATH.
 # terminal = ""
 
+# [session]
+# At log in, the applications open at the last log out start again, each
+# window back in its place: its screen, desktop, place and state. The
+# session is kept in $XDG_STATE_HOME/hocuspanda/session.
+# restore = true
+
 # [desktops]
 # Desktops on each screen, from 1 to 9. Each screen switches its own.
 # Followed as the file changes: more are added after the last, empty;
@@ -399,6 +432,13 @@
 #   desktop = 2
 #   size = "maximized"
 #   above = false
+
+# [overview]
+# The pointer held a moment (150 ms) in a screen's top-left corner opens
+# the overview, or closes it, as Super+W does; once each time it enters.
+# Not where the bar stands (on the left), nor where another screen touches
+# the corner, nor over a fullscreen window or while a button is held.
+# hot-corner = true
 
 # [ink]
 # Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt

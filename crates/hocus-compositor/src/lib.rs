@@ -32,6 +32,7 @@ mod grip_tone;
 pub mod halo;
 mod handlers;
 mod harness;
+pub mod hot_corner;
 pub mod idle;
 mod ink;
 mod input;
@@ -46,16 +47,22 @@ pub mod model;
 pub mod motion;
 mod output_spec;
 mod overlay;
+mod overview;
+mod overview_draw;
 mod panel;
 pub mod peek;
 mod popover;
 mod popups;
 mod programs;
+pub mod radial;
+mod radial_draw;
 pub mod record;
 mod reload;
 mod reminders;
 mod render;
 mod rules;
+mod scales;
+mod screen_sets;
 mod screens;
 mod session;
 mod share;
@@ -67,6 +74,7 @@ mod state;
 mod switcher;
 pub mod test_gpu;
 mod text_input;
+pub mod tile_drop;
 mod tray;
 mod wallpaper;
 mod windows;
@@ -85,8 +93,9 @@ pub use config::{
     Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
     Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
     HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
-    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
-    Remind, Rule as WindowRule, ScaleFrom, SoundPrograms, SystemKeyboard, Windows,
+    Overview as OverviewSettings, PanelScreens, PeekRule, Power as PowerSettings, PowerAc,
+    PowerBattery, PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet,
+    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -98,6 +107,7 @@ pub use hocus_link::Form as BarForm;
 pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 pub use record::{RecordInfo, Source as RecordSource};
+pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;
 pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;
@@ -252,6 +262,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());
+        // Saved from now on; the last one put back once the bar shows.
+        state.session_begin();
     }
     if options.xwayland {
         xwayland::start(&event_loop.handle(), &mut state);
@@ -288,6 +300,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     event_loop
         .run(None, &mut app, App::after_dispatch)
         .context("the event loop failed")?;
+    // The session as it ends, for the next log in (windows.md §14).
+    app.state.session_end();
     remove_sockets(&app.state);
     let ending = app.state.ending;
     drop(app);

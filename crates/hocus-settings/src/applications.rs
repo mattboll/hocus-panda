@@ -7,6 +7,9 @@
 //!   are written, the rest of the file kept ([`hocus_xdg::mimeapps`]).
 //! - The terminal is the file's `[programs] terminal` (a setting of the
 //!   model, drawn by the page).
+//! - "Rouvrir les applications de la dernière session" is the file's
+//!   `[session] restore` (a switch of the model, under the start-up
+//!   applications): the compositor reads it at the next log in.
 //! - The start-up applications are the XDG autostart entries the session
 //!   starts once the bar shows ([`hocus_xdg::autostart`], as the
 //!   compositor reads them): a switch off is the user's copy with
@@ -45,6 +48,8 @@ pub const TERMINAL: &str = "programs.terminal";
 pub const VIDEOS: &str = "applications.videos";
 pub const IMAGES: &str = "applications.images";
 pub const STARTUP: &str = "applications.startup";
+/// The last session's applications reopened at log in (windows.md §14).
+pub const RESTORE: &str = "session.restore";
 /// The start-up row just added, lit as a search result.
 pub const ADDED: &str = "applications.startup.added";
 
@@ -231,43 +236,84 @@ pub fn differs_said(mime: &str, app: &str, lang: Lang) -> String {
     }
 }
 
-/// The terminal: a key of the file, its row drawn by the page.
+/// The terminal: a key of the file, its row drawn by the page; the
+/// last session's applications reopened, a switch.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        vec![Setting {
-            id: TERMINAL,
-            section: SectionId::Apps,
-            group: DEFAULTS_GROUP,
-            name: w("Terminal", "Terminal"),
-            line: Some(w(
-                "Super+Entrée, et les applications qui s’ouvrent dans un terminal.",
-                "Super+Return, and applications that open in a terminal.",
-            )),
-            keywords: (
-                &[
-                    "terminal",
-                    "console",
-                    "par défaut",
-                    "super+entrée",
-                    "ligne de commande",
-                ],
-                &[
-                    "terminal",
-                    "console",
-                    "default",
-                    "super+return",
-                    "command line",
-                ],
-            ),
-            kind: Kind::Text,
-            places: Places::One(Place {
-                key: &["programs", "terminal"],
-                codec: Codec::Text,
-                default: Value::Text(String::new()),
-            }),
-            needs: None,
-        }]
+        vec![
+            Setting {
+                id: TERMINAL,
+                section: SectionId::Apps,
+                group: DEFAULTS_GROUP,
+                name: w("Terminal", "Terminal"),
+                line: Some(w(
+                    "Super+Entrée, et les applications qui s’ouvrent dans un terminal.",
+                    "Super+Return, and applications that open in a terminal.",
+                )),
+                keywords: (
+                    &[
+                        "terminal",
+                        "console",
+                        "par défaut",
+                        "super+entrée",
+                        "ligne de commande",
+                    ],
+                    &[
+                        "terminal",
+                        "console",
+                        "default",
+                        "super+return",
+                        "command line",
+                    ],
+                ),
+                kind: Kind::Text,
+                places: Places::One(Place {
+                    key: &["programs", "terminal"],
+                    codec: Codec::Text,
+                    default: Value::Text(String::new()),
+                }),
+                needs: None,
+            },
+            Setting {
+                id: RESTORE,
+                section: SectionId::Apps,
+                group: STARTUP_GROUP,
+                name: w(
+                    "Rouvrir les applications de la dernière session",
+                    "Reopen the applications of the last session",
+                ),
+                line: Some(w(
+                    "Celles ouvertes à la déconnexion reviennent, chaque fenêtre à sa place.",
+                    "Those open at log out come back, each window in its place.",
+                )),
+                keywords: (
+                    &[
+                        "session",
+                        "rouvrir",
+                        "restaurer",
+                        "dernière session",
+                        "fenêtres",
+                        "déconnexion",
+                    ],
+                    &[
+                        "session",
+                        "reopen",
+                        "restore",
+                        "last session",
+                        "windows",
+                        "log out",
+                    ],
+                ),
+                kind: Kind::Switch,
+                places: Places::One(Place {
+                    key: &["session", "restore"],
+                    codec: Codec::Bool,
+                    default: Value::Bool(true),
+                }),
+                needs: None,
+            },
+        ]
     })
 }
 
@@ -1126,6 +1172,41 @@ fn watch(dirs: &Dirs, asks: mpsc::Sender<Ask>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Rouvrir les applications de la dernière session": a switch of the
+    /// start-up group, `[session] restore`, on when the file says nothing;
+    /// turned off, the file says so, the rest kept.
+    #[test]
+    fn the_last_session_switch_is_session_restore_on_by_default() -> anyhow::Result<()> {
+        use crate::{
+            model::Source,
+            store::{self, Raw, Reading, Slot},
+        };
+        let setting = crate::model::setting(RESTORE).ok_or_else(|| anyhow::anyhow!("none"))?;
+        assert_eq!(setting.section, SectionId::Apps);
+        assert_eq!(setting.group, STARTUP_GROUP);
+        assert_eq!(setting.kind, Kind::Switch);
+        let Places::One(place) = &setting.places else {
+            anyhow::bail!("not one key");
+        };
+        assert_eq!(place.key, &["session", "restore"]);
+        assert_eq!(place.default, Value::Bool(true));
+        let slot = Slot::of(setting, Source::Ac);
+        let text = "[programs]\nterminal = \"foot\"\n";
+        assert_eq!(
+            store::read(text).readings.get(&slot),
+            Some(&Reading::Absent)
+        );
+        let off = store::written(text, slot, &Raw::Set(Value::Bool(false)))
+            .map_err(anyhow::Error::msg)?;
+        assert!(off.contains("[session]\nrestore = false"), "{off}");
+        assert!(off.contains("terminal = \"foot\""), "{off}");
+        assert_eq!(
+            store::read(&off).readings.get(&slot),
+            Some(&Reading::Value(Value::Bool(false)))
+        );
+        Ok(())
+    }
 
     fn entry_of(id: &str, user: bool, installed: bool) -> autostart::Entry {
         autostart::Entry {

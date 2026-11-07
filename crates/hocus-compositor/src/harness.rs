@@ -69,6 +69,13 @@ impl Drop for Headless {
     }
 }
 
+/// A window the overview lays out: its app id, its place (x, y, width,
+/// height), global.
+pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
+/// A window dragged in the overview: its app id, the thumbnail it is
+/// over (screen, desktop).
+pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
+
 /// What a test can know about a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
@@ -698,6 +705,49 @@ impl Headless {
         self.app.state.autostart = crate::session::autostart::Autostart::Waiting(dirs);
     }
 
+    /// The session is saved in the configuration's state directory, and
+    /// the last one saved there put back once the bar shows, as
+    /// `--session` does (windows.md §14); asked before the loop runs.
+    pub fn restore_session(&mut self) {
+        self.app.state.session_begin();
+    }
+
+    /// Saves the session now, and waits until it is written.
+    pub fn save_session(&mut self) -> anyhow::Result<()> {
+        self.app.state.session_save();
+        anyhow::ensure!(
+            self.app.state.session_flush(Duration::from_secs(10)),
+            "the session was not written"
+        );
+        Ok(())
+    }
+
+    /// The session ends, as the compositor's does: saved and written.
+    pub fn end_session(&mut self) {
+        self.app.state.session_end();
+    }
+
+    /// Whether the last session is still coming back.
+    pub fn session_restoring(&self) -> bool {
+        self.app.state.session_restoring()
+    }
+
+    /// The last session's applications that did not come back, by name.
+    pub fn session_not_back(&self) -> Vec<String> {
+        self.app.state.session_not_back().to_vec()
+    }
+
+    /// Runs `action` on window `id`, as its radial menu does (#723).
+    pub fn window_action(&mut self, id: WindowId, action: hocus_link::WindowAction) {
+        self.app.state.run_window_action(id, action);
+    }
+
+    /// Puts floating window `id` at `rect` (global), as a drag and a
+    /// resize would.
+    pub fn place_window(&mut self, id: WindowId, rect: Rect) {
+        self.app.state.configure(id, rect);
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);
@@ -986,6 +1036,12 @@ impl Headless {
     /// The lid closes, or opens (a laptop's switch).
     pub fn lid(&mut self, closed: bool) {
         self.app.state.lid(closed);
+    }
+
+    /// The session back from another terminal, as the tty backend says
+    /// it (what it does beyond the screens).
+    pub fn session_back(&mut self) {
+        self.app.state.session_back();
     }
 
     /// Output `name` is a laptop's own screen: the lid closes over it.
@@ -1305,6 +1361,7 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
+        self.app.state.pointer_placed = true;
         let from = self
             .app
             .state
@@ -1319,6 +1376,19 @@ impl Headless {
         self.time += 10;
         let time = self.time;
         self.app.state.pointer_motion(Point::from((x, y)), time);
+    }
+
+    /// Moves the pointer by (`dx`, `dy`), as a mouse does: it stays on the
+    /// outputs, sliding onto a screen beyond an edge no screen touches.
+    pub fn pointer_by(&mut self, dx: f64, dy: f64) {
+        let state = &self.app.state;
+        let from = state
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let to = state.onto_outputs(from, from + Point::from((dx, dy)));
+        self.pointer_move(to.x, to.y);
     }
 
     pub fn button(&mut self, button: u32, pressed: bool) {
@@ -1495,6 +1565,132 @@ impl Headless {
         state
             .output_under_pointer()
             .map_or(0, |o| state.strip(&o).current())
+    }
+
+    /// A window's radial menu while it is open (#723): its window, its
+    /// centre, the sector lit, whether Close is armed.
+    pub fn radial(&self) -> Option<crate::radial::Seen> {
+        let state = &self.app.state;
+        let radial = state.radial.as_ref()?;
+        Some(crate::radial::Seen {
+            window: radial.window,
+            centre: radial.centre,
+            lit: radial.lit,
+            armed: radial.armed(state.now()),
+            enabled: radial.enabled,
+            on: radial.on,
+        })
+    }
+
+    /// The overview (8.5 A): `Some(true)` open, `Some(false)` closing,
+    /// `None` gone.
+    pub fn overview(&self) -> Option<bool> {
+        self.app.state.overview.as_ref().map(|o| o.open())
+    }
+
+    /// The overview's thumbnails: each screen's and desktop's (from 0),
+    /// and its middle, global.
+    pub fn overview_thumbs(&self) -> Vec<(String, usize, (f64, f64))> {
+        self.app
+            .state
+            .overview_screens()
+            .into_iter()
+            .flat_map(|s| {
+                let name = s.output.name();
+                s.thumbs
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(d, t)| (name.clone(), d, t.centre()))
+            })
+            .collect()
+    }
+
+    /// The windows the overview lays out on the screens' shown desktops:
+    /// each one's app id and its place (x, y, width, height), global.
+    pub fn overview_windows(&self) -> Vec<OverviewWindow> {
+        let state = &self.app.state;
+        state
+            .overview_slots_all()
+            .into_iter()
+            .map(|(id, a)| {
+                let app = state
+                    .windows
+                    .get(&id)
+                    .and_then(|m| crate::windows::app_id(&m.window));
+                (app, (a.x, a.y, a.w, a.h))
+            })
+            .collect()
+    }
+
+    /// The overview's agents' badges: each window's app id, the state
+    /// its badge shows and how many agents are in it.
+    pub fn overview_badges(&self) -> Vec<(Option<String>, String, usize)> {
+        let state = &self.app.state;
+        let Some(overview) = &state.overview else {
+            return Vec::new();
+        };
+        let mut out: Vec<_> = overview
+            .badges
+            .iter()
+            .map(|(id, b)| {
+                let app = state
+                    .windows
+                    .get(id)
+                    .and_then(|m| crate::windows::app_id(&m.window));
+                (app, format!("{:?}", b.state).to_lowercase(), b.count)
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The overview's thumbnails where a panda sleeps: their screen and
+    /// desktop (from 0).
+    pub fn overview_asleep(&self) -> Vec<(String, usize)> {
+        self.app.state.overview_asleep()
+    }
+
+    /// The overview's selected window's app id, when its ring shows.
+    pub fn overview_selected(&self) -> Option<String> {
+        let state = &self.app.state;
+        let overview = state.overview.as_ref().filter(|o| o.ring)?;
+        let id = overview.selected?;
+        state
+            .windows
+            .get(&id)
+            .and_then(|m| crate::windows::app_id(&m.window))
+    }
+
+    /// The window dragged in the overview: its app id, and the thumbnail
+    /// it is over (screen, desktop).
+    pub fn overview_drag(&self) -> Option<OverviewDrag> {
+        let state = &self.app.state;
+        let drag = state.overview.as_ref()?.drag.as_ref()?;
+        let app = state
+            .windows
+            .get(&drag.window)
+            .and_then(|m| crate::windows::app_id(&m.window));
+        Some((app, drag.over.clone()))
+    }
+
+    /// Whether the radial menu is still drawn going.
+    pub fn radial_going(&self) -> bool {
+        self.app.state.radial_out.is_some()
+    }
+
+    /// The windows on all desktops (#723).
+    pub fn everywhere(&self) -> Vec<WindowId> {
+        self.app.state.model.everywhere().collect()
+    }
+
+    /// Whether window `id` is kept above the others.
+    pub fn above(&self, id: WindowId) -> bool {
+        self.app.state.model.is_above(id)
+    }
+
+    /// The stack, bottom first.
+    pub fn stack(&self) -> Vec<WindowId> {
+        self.app.state.model.stack().to_vec()
     }
 
     /// Alt+Tab while held: its windows in order, the selected one, and
@@ -1724,6 +1920,54 @@ impl Headless {
             .map(smithay::output::Output::name)
     }
 
+    /// Bar `bar`'s desktops' tiles are where `tiles` say on its desktops'
+    /// surface, as the shell says them (8.5 B).
+    pub fn desk_tiles(&mut self, bar: &str, tiles: Vec<hocus_link::DeskTile>) {
+        self.app.state.desk_tiles_said(bar.to_owned(), tiles);
+    }
+
+    /// The tile a moved window is over: the bar's screen, the tile's
+    /// screen and desktop (from 0).
+    pub fn drop_over(&self) -> Option<(String, String, usize)> {
+        self.app
+            .state
+            .tile_drop
+            .over
+            .as_ref()
+            .map(|o| (o.bar.clone(), o.output.clone(), o.desktop))
+    }
+
+    /// The bars' tiles as the shell said them, global: the bar's screen,
+    /// the tile's screen and desktop (from 0), its middle.
+    pub fn desk_tile_middles(&self) -> Vec<(String, String, usize, (f64, f64))> {
+        self.app
+            .state
+            .tile_rects()
+            .into_iter()
+            .map(|(o, r)| {
+                let middle = (r.loc.x + r.size.w / 2.0, r.loc.y + r.size.h / 2.0);
+                (o.bar, o.output, o.desktop, middle)
+            })
+            .collect()
+    }
+
+    /// The pointer as a session finds it at its start, never moved by the
+    /// user: screens lit from now on bring it to the primary's middle.
+    pub fn pointer_unplaced(&mut self) {
+        self.app.state.pointer_placed = false;
+    }
+
+    /// The window a pointer's move is moving, if any.
+    pub fn moving(&self) -> Option<crate::model::WindowId> {
+        self.app.state.moving
+    }
+
+    /// The moved window's share of its size as drawn now (8.5 B).
+    pub fn moved_scale(&self) -> f64 {
+        let state = &self.app.state;
+        state.tile_drop.scale(state.now())
+    }
+
     /// The next meeting is `near`, as the calendar will say: the halo
     /// lights without an agent.
     pub fn meeting_near(&mut self, near: Option<crate::halo::Meeting>) {
@@ -1755,7 +1999,60 @@ impl Headless {
         backend
             .headless_mut()
             .context("not headless")?
-            .plug(name, None, state)
+            .plug(name, None, None, state)
+    }
+
+    /// A screen of `spec`, who `identity` says (its EDID's make, model and
+    /// serial; none: known by its connector), plugged on connector `name`:
+    /// one unplugged before, in its place, or a new one, right of the
+    /// others.
+    pub fn plug_screen(
+        &mut self,
+        name: &str,
+        spec: crate::OutputSpec,
+        identity: Option<crate::screen_sets::Identity>,
+    ) -> anyhow::Result<()> {
+        let App { state, backend } = &mut self.app;
+        backend.headless_mut().context("not headless")?.plug(
+            name,
+            None,
+            Some((spec, identity)),
+            state,
+        )
+    }
+
+    /// The key screen `name` is known by (its identity's, windows.md §12).
+    pub fn screen_key(&self, name: &str) -> String {
+        self.app.state.screen_key(name)
+    }
+
+    /// The set of screens in use: their keys, sorted.
+    pub fn screen_set(&self) -> Vec<String> {
+        self.app.state.current_set()
+    }
+
+    /// The sets as the Settings are told them (6.9).
+    pub fn screen_sets_said(&self) -> serde_json::Value {
+        self.app.state.sets_json()
+    }
+
+    /// Whether the winking panda saying screens moved is out.
+    pub fn screens_peek_out(&self) -> bool {
+        self.app.state.peek.screens_out()
+    }
+
+    /// Whether the panda out goes back.
+    pub fn peek_going_back(&self) -> bool {
+        self.app.state.peek.going_back()
+    }
+
+    /// The Settings forget the set of `screens` (by their keys), as
+    /// "Oublier cet ensemble" does (6.9).
+    pub fn forget_screen_set(&mut self, screens: &[&str]) -> Result<(), String> {
+        let keys: Vec<String> = screens.iter().map(|s| (*s).to_owned()).collect();
+        self.app
+            .state
+            .forget_screen_set(&crate::screen_sets::set_name(&keys))
     }
 
     /// Output `name`, unplugged before, comes back with its top-left
@@ -1765,7 +2062,7 @@ impl Headless {
         backend
             .headless_mut()
             .context("not headless")?
-            .plug(name, Some((x, y)), state)
+            .plug(name, Some((x, y)), None, state)
     }
 
     /// Why the compositor was asked to end, if it was.

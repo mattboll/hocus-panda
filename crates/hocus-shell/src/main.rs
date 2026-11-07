@@ -701,6 +701,14 @@ impl Shell {
                 desktops::set_recent(recent);
                 Task::none()
             }
+            ToShell::DeskScreens { bar, screens } => {
+                desktops::set_screens(bar, screens);
+                Task::none()
+            }
+            ToShell::DropOver { bar, over } => {
+                desktops::set_drop(bar, over);
+                Task::none()
+            }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
                 Task::none()
@@ -732,6 +740,10 @@ impl Shell {
             }
             ToShell::NoPeek => {
                 agents::peek::back();
+                Task::none()
+            }
+            ToShell::ScreensMoved(moved) => {
+                agents::peek::screens(moved);
                 Task::none()
             }
             ToShell::AgentPandas(pandas) => {
@@ -879,6 +891,14 @@ impl Shell {
             }
             ToShell::SessionMenu { output } => {
                 popover::session::open(&output);
+                Task::none()
+            }
+            ToShell::WindowMenu(menu) => {
+                popover::window_menu::answer(menu);
+                Task::none()
+            }
+            ToShell::WindowStates(states) => {
+                windows::set_states(states);
                 Task::none()
             }
         }
@@ -1828,7 +1848,16 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Desktop(_) | popover::Item::WindowsMore => {
+            popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
+                id,
+                window,
+                words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+            popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
                 canvas(popover::desktop::Panel {
                     id,
                     words: self.words,
@@ -2324,6 +2353,18 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             desktops::set_recent(recent);
                             continue;
                         }
+                        // The screens a bar shows the desktops of (8.4):
+                        // only their surface draws, resized to their rows.
+                        Ok(ToShell::DeskScreens { bar, screens }) => {
+                            desktops::set_screens(bar, screens);
+                            continue;
+                        }
+                        // A window moved over a tile (8.5 B): only the
+                        // tiles draw, that one lit.
+                        Ok(ToShell::DropOver { bar, over }) => {
+                            desktops::set_drop(bar, over);
+                            continue;
+                        }
                         Ok(ToShell::BarWindows(shown)) => {
                             windows::set_shown(shown);
                             continue;
@@ -2357,6 +2398,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            continue;
+                        }
+                        Ok(ToShell::ScreensMoved(moved)) => {
+                            agents::peek::screens(moved);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group

@@ -26,6 +26,20 @@
 //! and nothing else's draws it. It follows the connections' group as that
 //! grows or shrinks, as the connections follow the levels, and is as tall
 //! as its rows.
+//!
+//! Several screens (8.4): one group of tiles per screen the bar shows, its
+//! own first, 10 px apart, each shaped like its screen: the tiles keep
+//! their width, their height follows the screen's (30 px at 16:10 and
+//! narrower, down to 20 px at 21:9 and wider); in the mini form a block of
+//! dots per screen, a wider screen's dots lower (18 × 9 at 21:9). No
+//! label: the shape and the sketch say which screen. A click, `Enter` or
+//! the wheel on a group goes to a desktop of its screen.
+//!
+//! A window moved over a tile (8.5 B): the tile lights,
+//! `rgba(108,194,135,0.28)` with a 2 px `#7EE0A0` ring, as where the
+//! window would go; the compositor says which (`drop-over`), knowing where
+//! the tiles are as the surface says them (`desk-tiles`), each time they
+//! move or change.
 
 use std::{
     collections::HashMap,
@@ -33,7 +47,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{DESKTOPS_NAMESPACE, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look, SHARE};
+use hocus_link::{
+    DESKTOPS_NAMESPACE, DeskScreen, DeskTile, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look,
+    SHARE, ToCompositor,
+};
 use iced::{
     Color, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment, keyboard, mouse,
     widget::{
@@ -94,6 +111,54 @@ const DOT_FULL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.30));
 const DOT_EMPTY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 
+/// A tile a window would be let go on (8.5 B): lit green, ringed 2 px.
+const DROP_FILL: Ink = Ink::Fixed(Color::from_rgba8(108, 194, 135, 0.28));
+const DROP_RING: Ink = Ink::Fixed(Color::from_rgb8(0x7E, 0xE0, 0xA0));
+const DROP_RING_WIDTH: f32 = 2.0;
+
+/// Where each bar's tiles were last said to be, by the bar's screen.
+static TOLD: Mutex<Option<HashMap<String, Vec<DeskTile>>>> = Mutex::new(None);
+
+/// Bar `bar`'s tiles are `tiles` on its surface (as shown, `shown`): the
+/// compositor is told when that changed, for a window let go on one.
+fn tell_tiles(bar: &str, tiles: &[(Item, Rectangle)], shown: &[Shown]) {
+    let tiles: Vec<DeskTile> = tiles
+        .iter()
+        .filter_map(|(item, r)| {
+            let Item::Desktop { row, index } = item else {
+                return None;
+            };
+            Some(DeskTile {
+                output: shown.get(usize::from(*row))?.screen.output.clone(),
+                desktop: *index,
+                rect: [
+                    r.x.round() as i32,
+                    r.y.round() as i32,
+                    r.width.round() as i32,
+                    r.height.round() as i32,
+                ],
+            })
+        })
+        .collect();
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    let told = told.get_or_insert_with(HashMap::new);
+    if told.get(bar) == Some(&tiles) {
+        return;
+    }
+    told.insert(bar.to_owned(), tiles.clone());
+    popover::tell(ToCompositor::DeskTiles {
+        bar: bar.to_owned(),
+        tiles,
+    });
+}
+
+/// Between two screens' groups (8.4), in both forms.
+const SCREEN_GAP: f32 = 10.0;
+/// A screen's tiles' height at its narrowest and widest (8.4): 30 px at
+/// 16:10 (and narrower), 20 px at 21:9 (and wider).
+const TILE_LOWEST: f32 = 20.0;
+const TILE_ASPECT: f32 = 1.6;
+
 /// The ring's move: the strip's slide (windows.md §12).
 const RING_MOVE: Duration = Duration::from_millis(320);
 const STRIP: (f32, f32, f32, f32) = (0.22, 0.9, 0.3, 1.0);
@@ -110,19 +175,87 @@ fn rows(form: Form, count: usize) -> usize {
     count.div_ceil(columns(form)).max(1)
 }
 
-/// The height of `count` desktops' tiles (or dots) in `form`.
-fn group_height(form: Form, count: usize) -> f32 {
-    let rows = rows(form, count) as f32;
-    match form {
-        Form::Full => rows * TILE_HEIGHT + (rows - 1.0) * TILE_GAP,
-        Form::Mini => rows * DOT.height + (rows - 1.0) * DOT_GAP,
+/// A screen's desktops in a bar (8.4): how many, and its tiles' height,
+/// after its shape.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Group {
+    pub count: usize,
+    pub tile: f32,
+}
+
+impl Group {
+    /// A screen's group: its desktops, if said yet.
+    fn of(screen: &DeskScreen, desktops: Option<&Desktops>) -> Self {
+        Self {
+            count: desktops.map_or(0, |d| usize::from(d.count)),
+            tile: tile_height(screen.width, screen.height),
+        }
+    }
+
+    /// Its tiles' (or dots') height in `form`.
+    fn height_in(self, form: Form) -> f32 {
+        match form {
+            Form::Full => self.tile,
+            Form::Mini => (DOT.height * self.tile / TILE_HEIGHT).round(),
+        }
+    }
+
+    /// Its height in `form`, rows and the gaps between them.
+    fn total(self, form: Form) -> f32 {
+        let rows = rows(form, self.count) as f32;
+        let gap = match form {
+            Form::Full => TILE_GAP,
+            Form::Mini => DOT_GAP,
+        };
+        rows * self.height_in(form) + (rows - 1.0) * gap
     }
 }
 
-/// Desktop `index`'s tile (or dot) in `form`, its group's sides `left` and
-/// `right` and its top `top` on the surface: rows from the top, filled from
-/// the left; a tile's sides on whole pixels.
-pub fn tile(form: Form, index: usize, (left, right): (f32, f32), top: f32) -> Rectangle {
+/// A screen's tiles' height (8.4): 30 px at 16:10 and narrower, lower as
+/// it is wider, 20 px at 21:9 and wider, on a whole pixel; 30 px when its
+/// size is not known.
+pub fn tile_height(width: u32, height: u32) -> f32 {
+    if width == 0 || height == 0 {
+        return TILE_HEIGHT;
+    }
+    let aspect = width as f32 / height as f32;
+    (TILE_HEIGHT * TILE_ASPECT / aspect)
+        .round()
+        .clamp(TILE_LOWEST, TILE_HEIGHT)
+}
+
+/// The height of the groups' tiles (or dots) in `form`, 10 px between two
+/// screens'; a row's when there is none.
+fn group_height(form: Form, groups: &[Group]) -> f32 {
+    if groups.is_empty() {
+        return Group {
+            count: 0,
+            tile: TILE_HEIGHT,
+        }
+        .total(form);
+    }
+    groups.iter().map(|g| g.total(form)).sum::<f32>() + SCREEN_GAP * (groups.len() - 1) as f32
+}
+
+/// Group `at`'s top below the first's.
+fn group_top(form: Form, groups: &[Group], at: usize) -> f32 {
+    groups
+        .iter()
+        .take(at)
+        .map(|g| g.total(form) + SCREEN_GAP)
+        .sum()
+}
+
+/// Desktop `index`'s tile (or dot) in `form`, `height` high, its group's
+/// sides `left` and `right` and its top `top` on the surface: rows from
+/// the top, filled from the left; a tile's sides on whole pixels.
+pub fn tile(
+    form: Form,
+    index: usize,
+    (left, right): (f32, f32),
+    top: f32,
+    height: f32,
+) -> Rectangle {
     let (row, column) = (index / columns(form), index % columns(form));
     match form {
         Form::Full => {
@@ -130,16 +263,16 @@ pub fn tile(form: Form, index: usize, (left, right): (f32, f32), top: f32) -> Re
             let from = left + column as f32 * (width + TILE_GAP);
             let (x0, x1) = (from.round(), (from + width).round());
             Rectangle::new(
-                Point::new(x0, top + row as f32 * (TILE_HEIGHT + TILE_GAP)),
-                Size::new(x1 - x0, TILE_HEIGHT),
+                Point::new(x0, top + row as f32 * (height + TILE_GAP)),
+                Size::new(x1 - x0, height),
             )
         }
         Form::Mini => {
             let width = DOT_COLUMNS as f32 * DOT.width + DOT_GAP;
             let x = ((left + right - width) / 2.0).round() + column as f32 * (DOT.width + DOT_GAP);
             Rectangle::new(
-                Point::new(x, top + row as f32 * (DOT.height + DOT_GAP)),
-                DOT,
+                Point::new(x, top + row as f32 * (height + DOT_GAP)),
+                Size::new(DOT.width, height),
             )
         }
     }
@@ -166,7 +299,7 @@ pub fn sketch(tile: Rectangle, rect: [u16; 4]) -> Rectangle {
 // --- Where the surface goes ----------------------------------------------------
 
 /// A bar's desktops' surface, as last placed.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Place {
     id: window::Id,
     form: Form,
@@ -174,8 +307,8 @@ struct Place {
     /// The connections' group's tops above the levels' surface's bottom
     /// (full, mini).
     tops: (f32, f32),
-    /// The desktops shown.
-    count: usize,
+    /// The screens' desktops shown.
+    groups: Vec<Group>,
     /// The surface's bottom above the levels' surface's bottom.
     bottom: f32,
     asked: Option<((u32, u32), i32)>,
@@ -199,14 +332,14 @@ fn bottom_of(top: f32) -> f32 {
 
 /// The surface's size and its bottom above the levels' surface's, for
 /// `form` (both while the bar switches) over connections whose tops are
-/// `tops`, for `count` desktops.
+/// `tops`, for the screens' desktops `groups`.
 fn placement(
     form: Form,
     switching: bool,
     (full, mini): (f32, f32),
-    count: usize,
+    groups: &[Group],
 ) -> ((u32, u32), f32) {
-    let height = |form| group_height(form, count) + 2.0 * ROOM;
+    let height = |form| group_height(form, groups) + 2.0 * ROOM;
     let (full_bottom, mini_bottom) = (bottom_of(full), bottom_of(mini));
     match (switching, form) {
         (true, _) => {
@@ -225,12 +358,33 @@ fn margin(bottom: f32) -> (i32, i32, i32, i32) {
     (0, EDGE + 1, bottom, 0)
 }
 
+/// The groups bar `bar` shows: a screen's each, its own first (8.4).
+fn groups_of(bar: &str) -> Vec<Group> {
+    shaped(
+        super::screens(bar)
+            .iter()
+            .map(|s| Group::of(s, super::snapshot(&s.output).as_ref()))
+            .collect(),
+    )
+}
+
+/// The groups as drawn: shaped like their screens when there are several
+/// to tell apart; one alone keeps the 30 px tiles (and 13 px dots) of 3.9.
+fn shaped(mut groups: Vec<Group>) -> Vec<Group> {
+    if groups.len() < 2 {
+        for g in &mut groups {
+            g.tile = TILE_HEIGHT;
+        }
+    }
+    groups
+}
+
 /// Bar `bar`'s surface `id` opens in `form`: its size and margins.
 pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, i32, i32)) {
     let tops = crate::network::draw::group_tops(bar);
-    let count = super::snapshot(bar).map_or(0, |d| usize::from(d.count));
+    let groups = groups_of(bar);
     places(|places| {
-        let (size, bottom) = placement(form, false, tops, count);
+        let (size, bottom) = placement(form, false, tops, &groups);
         let margin = margin(bottom);
         places.insert(
             bar.to_owned(),
@@ -239,7 +393,7 @@ pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, 
                 form,
                 switching: false,
                 tops,
-                count,
+                groups,
                 bottom,
                 asked: Some((size, margin.2)),
                 input: Some(true),
@@ -255,7 +409,7 @@ pub fn forget(bar: &str) {
 
 /// The surface's new size and margins, if they change.
 fn refit(place: &mut Place) -> Option<crate::network::draw::Placed> {
-    let (size, bottom) = placement(place.form, place.switching, place.tops, place.count);
+    let (size, bottom) = placement(place.form, place.switching, place.tops, &place.groups);
     place.bottom = bottom;
     let margin = margin(bottom);
     if place.asked == Some((size, margin.2)) {
@@ -288,8 +442,8 @@ pub fn top_above_bottom(bar: &str) -> Option<f32> {
 pub fn top_above_bottom_in(bar: &str, form: Form) -> Option<f32> {
     places(|places| {
         let place = places.get(bar)?;
-        let (_, bottom) = placement(form, false, place.tops, place.count);
-        Some(crate::levels::draw::BOTTOM as f32 + bottom + ROOM + group_height(form, place.count))
+        let (_, bottom) = placement(form, false, place.tops, &place.groups);
+        Some(crate::levels::draw::BOTTOM as f32 + bottom + ROOM + group_height(form, &place.groups))
     })
 }
 
@@ -326,11 +480,13 @@ pub fn follow_all() {
     }
 }
 
-/// Bar `bar`'s screen has `count` desktops now: the surface to their rows.
-pub fn count(bar: &str, count: usize) {
+/// Bar `bar`'s screens or their desktops changed: the surface to their
+/// rows.
+pub fn rows_changed(bar: &str) {
+    let groups = groups_of(bar);
     resize(places(|places| {
         let place = places.get_mut(bar)?;
-        place.count = count;
+        place.groups = groups;
         refit(place)
     }));
 }
@@ -388,25 +544,48 @@ pub struct Tiles {
     pub bar: String,
 }
 
+/// A screen's desktops as the surface shows them: the screen, and its
+/// desktops once said.
+#[derive(Debug, Clone, PartialEq)]
+struct Shown {
+    screen: DeskScreen,
+    desktops: Option<Desktops>,
+}
+
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    shown: Option<Desktops>,
+    /// A row per screen, the bar's own first (8.4).
+    shown: Vec<Shown>,
     /// Their names as said with them (6.14).
     names: Vec<Option<String>>,
-    /// The ring on its way to the current desktop: from where it was in
-    /// each form (full, mini), since then.
-    ring: Option<([Rectangle; 2], Instant)>,
+    /// Each screen's ring on its way to its current desktop: from where it
+    /// was in each form (full, mini), since then, by the screen's name.
+    rings: HashMap<String, ([Rectangle; 2], Instant)>,
     now: Option<Instant>,
     pointer: Option<Point>,
-    hover: Option<u8>,
+    /// The tile under the pointer: its row and its desktop.
+    hover: Option<(u8, u8)>,
     last: Option<Point>,
     wheel: kit::Wheel,
 }
 
 impl State {
-    fn count(&self) -> usize {
-        self.shown.as_ref().map_or(0, |d| usize::from(d.count))
+    /// The screens' groups as shown.
+    fn groups(&self) -> Vec<Group> {
+        shaped(
+            self.shown
+                .iter()
+                .map(|s| Group::of(&s.screen, s.desktops.as_ref()))
+                .collect(),
+        )
+    }
+
+    /// Whether any desktop is said.
+    fn any(&self) -> bool {
+        self.shown
+            .iter()
+            .any(|s| s.desktops.as_ref().is_some_and(|d| d.count > 0))
     }
 }
 
@@ -423,7 +602,7 @@ impl<Message> canvas::Program<Message> for Tiles {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => {
                 self.refresh(state, bounds.size(), *now);
-                state.ring.is_some().then(canvas::Action::request_redraw)
+                (!state.rings.is_empty()).then(canvas::Action::request_redraw)
             }
             iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -461,46 +640,75 @@ impl<Message> canvas::Program<Message> for Tiles {
             })
             .collect();
         popover::with(|c| c.set_items(&self.bar, DESKTOPS_NAMESPACE, in_bar));
-        let Some(shown) = &state.shown else {
+        // While the bar switches forms there are none to let a window go on.
+        tell_tiles(&self.bar, &items, &state.shown);
+        if !state.any() {
             return vec![frame.into_geometry()];
-        };
+        }
         let (right, left) = self.sides(size);
         let column = Rectangle::new(
             Point::new(left.max(0.0), 0.0),
             Size::new((right - left.max(0.0)).max(0.0), size.height),
         );
         let now = state.now.unwrap_or_else(Instant::now);
+        let groups = state.groups();
         frame.with_clip(column, |f| {
             for &(form, alpha) in &self.forms {
-                for index in 0..usize::from(shown.count) {
-                    let rect = self.rect(form, size, index, usize::from(shown.count));
-                    let hover = state.hover == Some(index as u8);
-                    match form {
-                        Form::Full => {
-                            full(f, rect, shown, index, hover, state.ring.is_none(), alpha)
+                for (row, shown) in state.shown.iter().enumerate() {
+                    let Some(desktops) = &shown.desktops else {
+                        continue;
+                    };
+                    let moving = state.rings.contains_key(&desktops.output);
+                    for index in 0..usize::from(desktops.count) {
+                        let rect = self.rect(form, size, (row, index), &groups);
+                        let hover = state.hover == Some((row as u8, index as u8));
+                        match form {
+                            Form::Full => full(f, rect, desktops, index, hover, !moving, alpha),
+                            Form::Mini => mini(f, rect, desktops, index, !moving, alpha),
                         }
-                        Form::Mini => mini(f, rect, shown, index, state.ring.is_none(), alpha),
                     }
-                }
-                // The ring on its way.
-                if state.ring.is_some() {
-                    let rect = self.ring(state, form, size, now);
-                    match form {
-                        Form::Full => inner_ring(
+                    // The tile a moved window is over (8.5 B).
+                    if let Some((output, index)) = super::drop_on(&self.bar)
+                        && output == desktops.output
+                        && index < desktops.count
+                    {
+                        let rect = self.rect(form, size, (row, usize::from(index)), &groups);
+                        let radius = match form {
+                            Form::Full => TILE_RADIUS,
+                            Form::Mini => DOT_RADIUS,
+                        };
+                        f.fill(
+                            &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                            faded(DROP_FILL.get(), alpha),
+                        );
+                        inner_ring(
                             f,
                             rect,
-                            TILE_RADIUS,
-                            CURRENT_RING,
-                            faded(ACCENT.get(), alpha),
-                        ),
-                        Form::Mini => f.fill(
-                            &Path::rounded_rectangle(
-                                rect.position(),
-                                rect.size(),
-                                DOT_RADIUS.into(),
+                            radius,
+                            DROP_RING_WIDTH,
+                            faded(DROP_RING.get(), alpha),
+                        );
+                    }
+                    // The ring on its way.
+                    if moving {
+                        let rect = self.ring(state, form, size, row, now);
+                        match form {
+                            Form::Full => inner_ring(
+                                f,
+                                rect,
+                                TILE_RADIUS,
+                                CURRENT_RING,
+                                faded(ACCENT.get(), alpha),
                             ),
-                            faded(ACCENT.get(), alpha),
-                        ),
+                            Form::Mini => f.fill(
+                                &Path::rounded_rectangle(
+                                    rect.position(),
+                                    rect.size(),
+                                    DOT_RADIUS.into(),
+                                ),
+                                faded(ACCENT.get(), alpha),
+                            ),
+                        }
                     }
                 }
             }
@@ -671,9 +879,15 @@ impl Tiles {
         (right, right + 2.0 - self.bar_width)
     }
 
-    /// Desktop `index`'s tile (or dot) of `form` on the surface, of
-    /// `count`.
-    fn rect(&self, form: Form, size: Size, index: usize, count: usize) -> Rectangle {
+    /// Row `row`'s desktop `index`'s tile (or dot) of `form` on the
+    /// surface, of the screens' `groups`.
+    fn rect(
+        &self,
+        form: Form,
+        size: Size,
+        (row, index): (usize, usize),
+        groups: &[Group],
+    ) -> Rectangle {
         let (right, left) = self.sides(size);
         let (bottom, (full, mini)) = where_is(&self.bar);
         // From the levels' surface's bottom to this surface's.
@@ -682,21 +896,28 @@ impl Tiles {
             Form::Full => ((left + SIDE, right - SIDE), at(full)),
             Form::Mini => ((left, right), at(mini)),
         };
-        tile(form, index, sides, group_bottom - group_height(form, count))
+        let top = group_bottom - group_height(form, groups) + group_top(form, groups, row);
+        let height = groups.get(row).map_or(TILE_HEIGHT, |g| g.height_in(form));
+        tile(form, index, sides, top, height)
     }
 
-    /// Where the ring is at `now` in `form`: on its way, or on the current
-    /// desktop.
-    fn ring(&self, state: &State, form: Form, size: Size, now: Instant) -> Rectangle {
-        let Some(shown) = &state.shown else {
+    /// Where row `row`'s ring is at `now` in `form`: on its way, or on its
+    /// current desktop.
+    fn ring(&self, state: &State, form: Form, size: Size, row: usize, now: Instant) -> Rectangle {
+        let Some(desktops) = state.shown.get(row).and_then(|s| s.desktops.as_ref()) else {
             return Rectangle::default();
         };
-        let to = self.rect(form, size, usize::from(shown.current), state.count());
-        let Some((from, since)) = state.ring else {
+        let to = self.rect(
+            form,
+            size,
+            (row, usize::from(desktops.current)),
+            &state.groups(),
+        );
+        let Some((from, since)) = state.rings.get(&desktops.output) else {
             return to;
         };
         let from = from[usize::from(form == Form::Mini)];
-        let t = now.saturating_duration_since(since).as_secs_f32() / RING_MOVE.as_secs_f32();
+        let t = now.saturating_duration_since(*since).as_secs_f32() / RING_MOVE.as_secs_f32();
         let p = bezier(STRIP, t.clamp(0.0, 1.0));
         let lerp = |a: f32, b: f32| a + (b - a) * p;
         Rectangle::new(
@@ -710,12 +931,22 @@ impl Tiles {
         let [(form, _)] = self.forms.as_slice() else {
             return Vec::new();
         };
-        let count = state.count();
-        (0..count)
-            .map(|i| {
+        let groups = state.groups();
+        state
+            .shown
+            .iter()
+            .enumerate()
+            .flat_map(|(row, shown)| {
+                let count = shown.desktops.as_ref().map_or(0, |d| usize::from(d.count));
+                (0..count).map(move |i| (row, i))
+            })
+            .map(|(row, i)| {
                 (
-                    Item::Desktop(u8::try_from(i).unwrap_or(u8::MAX)),
-                    self.rect(*form, size, i, count),
+                    Item::Desktop {
+                        row: u8::try_from(row).unwrap_or(u8::MAX),
+                        index: u8::try_from(i).unwrap_or(u8::MAX),
+                    },
+                    self.rect(*form, size, (row, i), &groups),
                 )
             })
             .collect()
@@ -731,51 +962,88 @@ impl Tiles {
         )
     }
 
-    /// What the compositor said last: the ring sets off when the current
-    /// desktop changed, from where it is.
+    /// What the compositor said last: a screen's ring sets off when its
+    /// current desktop changed, from where it is.
     fn refresh(&self, state: &mut State, size: Size, now: Instant) {
-        if state
-            .ring
-            .is_some_and(|(_, since)| now.saturating_duration_since(since) >= RING_MOVE)
-        {
-            state.ring = None;
-        }
-        let desktops = super::snapshot(&self.bar);
-        let names: Vec<Option<String>> = desktops.as_ref().map_or_else(Vec::new, |d| {
-            (0..usize::from(d.count)).map(super::name).collect()
-        });
-        if desktops != state.shown || names != state.names {
-            if let (Some(before), Some(after)) = (&state.shown, &desktops)
-                && before.current != after.current
-                && self.motion
-            {
-                let from = [Form::Full, Form::Mini].map(|form| self.ring(state, form, size, now));
-                state.ring = Some((from, now));
+        state
+            .rings
+            .retain(|_, (_, since)| now.saturating_duration_since(*since) < RING_MOVE);
+        let shown: Vec<Shown> = super::screens(&self.bar)
+            .into_iter()
+            .map(|screen| {
+                let desktops = super::snapshot(&screen.output);
+                Shown { screen, desktops }
+            })
+            .collect();
+        let count = shown
+            .iter()
+            .filter_map(|s| s.desktops.as_ref())
+            .map(|d| usize::from(d.count))
+            .max()
+            .unwrap_or(0);
+        let names: Vec<Option<String>> = (0..count).map(super::name).collect();
+        if shown != state.shown || names != state.names {
+            if self.motion {
+                for (row, after) in shown.iter().enumerate() {
+                    let before = state
+                        .shown
+                        .iter()
+                        .position(|s| s.screen.output == after.screen.output);
+                    let (Some(before), Some(now_said)) = (before, &after.desktops) else {
+                        continue;
+                    };
+                    let Some(was) = &state.shown[before].desktops else {
+                        continue;
+                    };
+                    if was.current != now_said.current && before == row {
+                        let from = [Form::Full, Form::Mini]
+                            .map(|form| self.ring(state, form, size, row, now));
+                        state.rings.insert(now_said.output.clone(), (from, now));
+                    }
+                }
             }
-            if let Some(desktops) = &desktops {
-                let said: Vec<String> = (0..usize::from(desktops.count))
+            // A line per screen's row, its own first.
+            for (row, s) in shown.iter().enumerate() {
+                let Some(d) = &s.desktops else {
+                    continue;
+                };
+                let said: Vec<String> = (0..usize::from(d.count))
                     .map(|i| {
                         let name = names.get(i).cloned().flatten();
-                        self.words
-                            .desktop(i + 1, name.as_deref(), on(desktops, i).count())
+                        let windows = on(d, i).count();
+                        if row == 0 {
+                            self.words.desktop(i + 1, name.as_deref(), windows)
+                        } else {
+                            let screen = (s.screen.built_in, s.screen.inches, s.screen.number);
+                            self.words
+                                .screen_desktop(screen, i + 1, name.as_deref(), windows)
+                        }
                     })
                     .collect();
                 tracing::debug!(
                     bar = self.bar,
-                    current = desktops.current + 1,
+                    current = d.current + 1,
+                    screen = d.output,
+                    row,
                     said = %said.join(" · "),
-                    windows = ?desktops.windows,
+                    windows = ?d.windows,
                     "the desktops' tiles show it"
                 );
             }
-            state.shown = desktops;
+            state.shown = shown;
             state.names = names;
         }
         state.now = Some(now);
-        if state.hover.is_some_and(|h| usize::from(h) >= state.count()) {
+        if state.hover.is_some_and(|(row, index)| {
+            state
+                .shown
+                .get(usize::from(row))
+                .and_then(|s| s.desktops.as_ref())
+                .is_none_or(|d| index >= d.count)
+        }) {
             state.hover = None;
         }
-        takes_pointer(&self.bar, state.count() > 0);
+        takes_pointer(&self.bar, state.any());
     }
 
     fn mouse<Message>(
@@ -792,8 +1060,8 @@ impl Tiles {
         let over = at.and_then(|at| items.iter().find(|(_, r)| r.contains(at)).copied());
         let rect =
             |item: Rectangle| Rectangle::new(self.in_bar(item.position(), size), item.size());
-        let index = |item: Item| match item {
-            Item::Desktop(i) => Some(i),
+        let tile = |item: Item| match item {
+            Item::Desktop { row, index } => Some((row, index)),
             _ => None,
         };
         match event {
@@ -801,7 +1069,7 @@ impl Tiles {
                 let at = at?;
                 let bar_at = self.in_bar(at, size);
                 state.last = Some(bar_at);
-                let now = over.and_then(|(item, _)| index(item));
+                let now = over.and_then(|(item, _)| tile(item));
                 if now == state.hover {
                     if now.is_none() {
                         popover::event(popover::Event::Pointer { at: bar_at });
@@ -840,11 +1108,20 @@ impl Tiles {
                 Some(canvas::Action::request_redraw().and_capture())
             }
             mouse::Event::WheelScrolled { delta } => {
-                // Over the tiles and the gaps between them.
-                let group = items.iter().map(|(_, r)| *r).reduce(|a, b| a.union(&b))?;
-                if !at.is_some_and(|at| group.contains(at)) {
-                    return None;
-                }
+                // Over a screen's tiles and the gaps between them: that
+                // screen's desktops.
+                let at = at?;
+                let row = (0..state.shown.len()).find(|row| {
+                    items
+                        .iter()
+                        .filter(|(item, _)| {
+                            tile(*item).is_some_and(|(r, _)| usize::from(r) == *row)
+                        })
+                        .map(|(_, r)| *r)
+                        .reduce(|a, b| a.union(&b))
+                        .is_some_and(|group| group.contains(at))
+                })?;
+                let output = state.shown[row].screen.output.clone();
                 let notches = state.wheel.notches(delta, kit::scale(&self.bar));
                 let to = if notches > 0 {
                     DesktopTo::Previous
@@ -853,7 +1130,7 @@ impl Tiles {
                 };
                 let effects = (0..notches.unsigned_abs())
                     .map(|_| popover::Effect::Desktop {
-                        bar: self.bar.clone(),
+                        bar: output.clone(),
                         to,
                     })
                     .collect::<Vec<_>>();
@@ -871,33 +1148,41 @@ impl Tiles {
 mod tests {
     use super::*;
 
+    /// A 16:10 screen's `count` desktops.
+    fn one(count: usize) -> Group {
+        Group {
+            count,
+            tile: TILE_HEIGHT,
+        }
+    }
+
     #[test]
     fn the_tiles_go_four_to_a_row_and_their_windows_where_they_are_on_the_screen() {
         // The full form's group: 172 px between the bar's 12 px paddings.
         let sides = (11.0, 183.0);
-        let first = tile(Form::Full, 0, sides, 5.0);
+        let first = tile(Form::Full, 0, sides, 5.0, TILE_HEIGHT);
         assert_eq!(
             first,
             Rectangle::new(Point::new(11.0, 5.0), Size::new(39.0, 30.0))
         );
         // 38.5 px each, 6 apart, their sides on whole pixels; the last
         // ends on the group's side.
-        let last = tile(Form::Full, 3, sides, 5.0);
+        let last = tile(Form::Full, 3, sides, 5.0, TILE_HEIGHT);
         assert_eq!(last.x + last.width, 183.0);
-        assert_eq!(tile(Form::Full, 1, sides, 5.0).x, 56.0);
+        assert_eq!(tile(Form::Full, 1, sides, 5.0, TILE_HEIGHT).x, 56.0);
         // Six: the fifth and the sixth on a second row, from the left.
-        let fifth = tile(Form::Full, 4, sides, 5.0);
+        let fifth = tile(Form::Full, 4, sides, 5.0, TILE_HEIGHT);
         assert_eq!((fifth.x, fifth.y), (11.0, 41.0));
-        assert_eq!(group_height(Form::Full, 6), 66.0);
-        assert_eq!(group_height(Form::Full, 9), 102.0);
+        assert_eq!(group_height(Form::Full, &[one(6)]), 66.0);
+        assert_eq!(group_height(Form::Full, &[one(9)]), 102.0);
         // The dots: two to a row, centred in the mini bar.
         let dots = (0.0, 54.0);
-        assert_eq!(tile(Form::Mini, 0, dots, 0.0).x, 7.0);
+        assert_eq!(tile(Form::Mini, 0, dots, 0.0, DOT.height).x, 7.0);
         assert_eq!(
-            tile(Form::Mini, 3, dots, 0.0),
+            tile(Form::Mini, 3, dots, 0.0, DOT.height),
             Rectangle::new(Point::new(29.0, 17.0), DOT)
         );
-        assert_eq!(group_height(Form::Mini, 4), 30.0);
+        assert_eq!(group_height(Form::Mini, &[one(4)]), 30.0);
         // A window on the left half of the screen, and one over all of it:
         // 4 px inside the tile.
         // Half a pixel in from their places: the halves 1 px apart.
@@ -932,14 +1217,65 @@ mod tests {
         // The connections' top 200 px above the levels' surface's bottom
         // (full), 150 (mini).
         let tops = (200.0, 150.0);
-        let (size, bottom) = placement(Form::Full, false, tops, 4);
+        let (size, bottom) = placement(Form::Full, false, tops, &[one(4)]);
         assert_eq!((size, bottom), ((194, 40), 209.0));
-        assert_eq!(placement(Form::Full, false, tops, 6).0, (194, 76));
-        let (size, bottom) = placement(Form::Mini, false, tops, 4);
+        assert_eq!(placement(Form::Full, false, tops, &[one(6)]).0, (194, 76));
+        let (size, bottom) = placement(Form::Mini, false, tops, &[one(4)]);
         assert_eq!((size, bottom), ((54, 40), 159.0));
         // While switching, both forms.
-        let (size, bottom) = placement(Form::Mini, true, tops, 4);
+        let (size, bottom) = placement(Form::Mini, true, tops, &[one(4)]);
         assert_eq!((size, bottom), ((194, 90), 159.0));
         assert_eq!(margin(209.0), (0, 9, 8 + 41 + 209, 0));
+    }
+
+    #[test]
+    fn each_screens_row_takes_its_shape_and_two_screens_rows_are_10_px_apart() {
+        // 16:10 and narrower: 30 px; 16:9, 27; 21:9 and wider, 20; not
+        // known, 30.
+        assert_eq!(tile_height(2560, 1600), 30.0);
+        assert_eq!(tile_height(1280, 1024), 30.0);
+        assert_eq!(tile_height(1920, 1080), 27.0);
+        assert_eq!(tile_height(3440, 1440), 20.0);
+        assert_eq!(tile_height(5120, 1440), 20.0);
+        assert_eq!(tile_height(0, 0), 30.0);
+        // The dots: 18 × 13 at 16:10, 18 × 9 at 21:9.
+        let laptop = one(4);
+        let wide = Group {
+            count: 4,
+            tile: tile_height(3440, 1440),
+        };
+        assert_eq!(laptop.height_in(Form::Mini), 13.0);
+        assert_eq!(wide.height_in(Form::Mini), 9.0);
+        // Two rows of four, 10 px apart: 30 + 10 + 20.
+        let groups = [laptop, wide];
+        assert_eq!(group_height(Form::Full, &groups), 60.0);
+        assert_eq!(group_top(Form::Full, &groups, 1), 40.0);
+        // Six on the laptop: two rows of its own, 6 px apart, then the
+        // wide screen's 10 px under them.
+        let groups = [one(6), wide];
+        assert_eq!(
+            group_height(Form::Full, &groups),
+            30.0 + 6.0 + 30.0 + 10.0 + 20.0
+        );
+        // The mini form: two blocks of two rows of dots, 10 px apart.
+        assert_eq!(
+            group_height(Form::Mini, &[laptop, wide]),
+            (2.0 * 13.0 + 4.0) + 10.0 + (2.0 * 9.0 + 4.0)
+        );
+        // One screen alone keeps 3.9's tiles, whatever its shape.
+        assert_eq!(shaped(vec![wide]), [one(4)]);
+        assert_eq!(shaped(vec![laptop, wide]), [laptop, wide]);
+        // The wide screen's tiles keep their width, lower.
+        let sides = (11.0, 183.0);
+        let a = tile(Form::Full, 1, sides, 0.0, laptop.tile);
+        let b = tile(Form::Full, 1, sides, 40.0, wide.tile);
+        assert_eq!((a.x, a.width), (b.x, b.width));
+        assert_eq!(b.height, 20.0);
+        // The surface grows by the second screen's row.
+        let tops = (200.0, 150.0);
+        assert_eq!(
+            placement(Form::Full, false, tops, &[laptop, wide]).0,
+            (194, 70)
+        );
     }
 }

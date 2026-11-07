@@ -146,6 +146,8 @@ Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 "fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
 the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
 the real screen; nested and headless take `--output`; `panel-form`),
+`[[screen-sets]]` (each set of screens' arrangement, docs/design/windows.md
+§12; the sets seen are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`),
 `[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
 `toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
@@ -282,13 +284,17 @@ The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 
 ```sh
 scripts/vm/debian.sh up        # boot it, user alex / panda
-scripts/vm/debian.sh copy      # target/debug's hocuspanda into it
+scripts/vm/debian.sh copy      # target/debug's programs into it (says what libraries it lacks)
 scripts/vm/debian.sh ssh '~/hocus-vm session'    # the session on its tty1
 scripts/vm/debian.sh keys e c h o ret            # its keyboard (QEMU key names)
 scripts/vm/debian.sh mouse 60 40; scripts/vm/debian.sh click
 scripts/vm/debian.sh screen shot.png             # what its screen shows
 scripts/vm/debian.sh ssh '~/hocus-vm log'        # what the session said
 scripts/vm/debian.sh down
+# two screens, both lit: Virtual-1 1280x800 at scale 1, Virtual-2 2560x1440
+# at 1.5 (HOCUS_VM_HEAD1_SIZE, HOCUS_VM_HEAD1_SCALE)
+HOCUS_VM_HEADS=2 scripts/vm/debian.sh up
+scripts/vm/debian.sh screen shot.png 1           # what the second screen shows
 # a second VM beside the maintainer's: its own name and ports
 HOCUS_VM_NAME=other HOCUS_VM_SSH_PORT=2532 HOCUS_VM_HTTP_PORT=2590 scripts/vm/debian.sh up
 # to try it by hand: its screen in a window, with its keyboard and mouse

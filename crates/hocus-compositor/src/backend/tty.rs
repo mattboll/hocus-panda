@@ -328,6 +328,8 @@ fn on_session(app: &mut App, event: SessionEvent) {
             if let Err(err) = tty.gpu.outputs.activate(false) {
                 tracing::warn!(%err, "could not take the screens back");
             }
+            // The lid may have moved meanwhile, unseen.
+            state.session_back();
             // What the screens show was another terminal's: draw it all.
             tty.relight();
             // Screens may have come or gone meanwhile.
@@ -403,11 +405,28 @@ impl TtyBackend {
             .filter(|c| c.state() == connector::State::Connected && !c.modes().is_empty())
             .filter(|c| !non_desktop(drm, c.handle()))
             .collect();
+        // Gone, or another screen on the same connector (swapped while
+        // the machine slept): that one goes, the other lights.
         let gone: Vec<crtc::Handle> = self
             .gpu
             .screens
             .iter()
-            .filter(|(_, s)| !connected.iter().any(|c| c.handle() == s.connector))
+            .filter(|(_, s)| {
+                !connected.iter().any(|c| c.handle() == s.connector)
+                    || s.output
+                        .user_data()
+                        .get::<crate::screen_sets::Identity>()
+                        .is_some_and(|was| {
+                            let read = edid(drm, s.connector);
+                            let (make, model) = read.as_deref().map(identity).unwrap_or_default();
+                            let now = crate::screen_sets::Identity {
+                                make,
+                                model,
+                                serial: read.as_deref().and_then(serial),
+                            };
+                            *was != now
+                        })
+            })
             .map(|(crtc, _)| *crtc)
             .collect();
         for crtc in gone {
@@ -432,7 +451,7 @@ impl TtyBackend {
             match self.light(crtc, info, state) {
                 Ok(screen) => {
                     // The windows that came from it go back.
-                    state.output_back(&screen.output);
+                    state.output_back(&screen.output, true);
                     self.gpu.screens.insert(crtc, screen);
                 }
                 Err(err) => tracing::warn!("could not light a screen: {err:#}"),
@@ -482,9 +501,14 @@ impl TtyBackend {
     ) -> anyhow::Result<Screen> {
         let name = connector_name(info);
         let drm = self.gpu.outputs.device();
-        let (make, model) = edid(drm, info.handle())
-            .map(|e| identity(&e))
-            .unwrap_or_default();
+        let read = edid(drm, info.handle());
+        let (make, model) = read.as_deref().map(identity).unwrap_or_default();
+        // Who it is (windows.md §12): its make, model and serial.
+        let who = crate::screen_sets::Identity {
+            make: make.clone(),
+            model: model.clone(),
+            serial: read.as_deref().and_then(serial),
+        };
         let preferred_mode = preferred(info)
             .map(|i| info.modes()[i])
             .or_else(|| info.modes().first().copied())
@@ -507,10 +531,9 @@ impl TtyBackend {
         };
         // Lit at once in the mode the file asks (6.9), else its preferred
         // size at its highest rate.
-        let wanted = state
-            .config
-            .outputs
-            .get(&name)
+        let settings = state.joining_settings(&name, &who);
+        let wanted = settings
+            .as_ref()
             .and_then(|o| o.mode)
             .and_then(|m| m.pick(&facts.modes))
             .unwrap_or_else(|| facts.default_mode());
@@ -531,6 +554,7 @@ impl TtyBackend {
                 model: model.clone().unwrap_or_else(|| "Unknown".into()),
             },
         );
+        output.user_data().insert_if_missing(|| who.clone());
         // The name people know it by, for the shell (its EDID's model).
         if let Some(model) = model {
             output
@@ -550,9 +574,7 @@ impl TtyBackend {
         // Its scale before it lights: lit at 1 first, its clients would
         // draw twice.
         let (output_scale, scale_from) =
-            state
-                .config
-                .output_scale(&name, (mode.size.w, mode.size.h), size_mm);
+            crate::config::output_scale(settings.as_ref(), (mode.size.w, mode.size.h), size_mm);
         output.change_current_state(
             Some(mode),
             Some(Transform::Normal),
@@ -973,6 +995,30 @@ fn edid(device: &DrmDevice, connector: connector::Handle) -> Option<Vec<u8>> {
     device.get_property_blob(blob).ok()
 }
 
+/// The screen's serial number, from its EDID: its serial descriptor's
+/// text, else the number in its header (none when 0).
+pub fn serial(edid: &[u8]) -> Option<String> {
+    const HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
+    if edid.len() < 128 || edid[..8] != HEADER {
+        return None;
+    }
+    let text = (0..4).find_map(|i| {
+        let d = &edid[54 + i * 18..72 + i * 18];
+        (d[..3] == [0, 0, 0] && d[3] == 0xff).then(|| {
+            String::from_utf8_lossy(&d[5..])
+                .split('\n')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
+    });
+    text.filter(|t| !t.is_empty()).or_else(|| {
+        let number = u32::from_le_bytes([edid[12], edid[13], edid[14], edid[15]]);
+        (number != 0).then(|| number.to_string())
+    })
+}
+
 /// The maker's three-letter code and the screen's name, from its EDID.
 pub fn identity(edid: &[u8]) -> (Option<String>, Option<String>) {
     const HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
@@ -1022,5 +1068,14 @@ mod tests {
             (Some("DEL".to_string()), Some("U2723QE".to_string()))
         );
         assert_eq!(identity(&edid[..64]), (None, None));
+        // No serial: none in the header, no serial descriptor.
+        assert_eq!(serial(&edid), None);
+        edid[12..16].copy_from_slice(&1234u32.to_le_bytes());
+        assert_eq!(serial(&edid).as_deref(), Some("1234"));
+        // The descriptor's text wins.
+        let d = 54 + 2 * 18;
+        edid[d..d + 5].copy_from_slice(&[0, 0, 0, 0xff, 0]);
+        edid[d + 5..d + 18].copy_from_slice(b"7XY1234\n     ");
+        assert_eq!(serial(&edid).as_deref(), Some("7XY1234"));
     }
 }

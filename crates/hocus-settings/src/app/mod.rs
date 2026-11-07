@@ -1721,7 +1721,7 @@ impl App {
                 .collect();
         }
         if section == SectionId::Apps {
-            return self.apps_stops().into_iter().map(Control::Apps).collect();
+            return self.apps_controls();
         }
         if section == SectionId::Keyboard {
             if self.keys.sub {

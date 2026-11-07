@@ -415,6 +415,7 @@ impl State {
         self.tell_screens(true);
         self.tell_layouts();
         self.tell_desktops();
+        self.tell_window_states(true);
         self.tell_agents();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
@@ -477,10 +478,25 @@ impl State {
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
+            ToCompositor::DeskTiles { bar, tiles } => self.desk_tiles_said(bar, tiles),
+            ToCompositor::Overview => {
+                tracing::debug!("the bar asks for the overview");
+                self.toggle_overview();
+            }
             ToCompositor::Close(id) => {
                 tracing::debug!(window = id, "the shell asks a window to close");
                 self.close_window(crate::model::WindowId(id));
             }
+            ToCompositor::WindowAction { id, action } => {
+                tracing::debug!(window = id, action = action.name(), "the bar's menu acts");
+                self.run_window_action(crate::model::WindowId(id), action);
+            }
+            ToCompositor::SendTo {
+                id,
+                output,
+                desktop,
+            } => self.send_to_asked(id, &output, desktop),
+            ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
@@ -498,6 +514,7 @@ impl State {
                 tracing::warn!(tool, "the shell follows a tool that is not herdr");
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
+            ToCompositor::PeekClose => self.peek_closed(),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {
@@ -727,6 +744,63 @@ fn vulkan_driver(kernel: &str) -> Option<&'static str> {
         "v3d" => "*broadcom*",
         _ => return None,
     })
+}
+
+/// Sends one notification, `org.freedesktop.Notifications.Notify` on
+/// `bus` (the shell serves it, 5.3), from `Hocuspanda` with `icon`, on a
+/// thread of its own: a call to another process never holds the loop.
+pub fn notify(bus: Bus, icon: &'static str, summary: String) {
+    let started = std::thread::Builder::new()
+        .name("notification".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match runtime {
+                Ok(runtime) => runtime.block_on(notify_on(bus, icon, summary)),
+                Err(err) => tracing::warn!(%err, "no runtime for a notification"),
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "a notification is not sent");
+    }
+}
+
+async fn notify_on(bus: Bus, icon: &str, summary: String) {
+    let builder = match &bus {
+        Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),
+        Bus::Session => zbus::connection::Builder::session(),
+    };
+    let connection = match builder.build().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::warn!(%err, summary, "no session bus: a notification is not sent");
+            return;
+        }
+    };
+    let hints: std::collections::HashMap<&str, zbus::Variant<'_>> =
+        std::collections::HashMap::new();
+    let sent = connection
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "Hocuspanda",
+                0u32,
+                icon,
+                summary.as_str(),
+                "",
+                Vec::<&str>::new(),
+                hints,
+                -1i32,
+            ),
+        )
+        .await;
+    if let Err(err) = sent {
+        tracing::warn!(%err, summary, "a notification is not sent");
+    }
 }
 
 #[cfg(test)]
