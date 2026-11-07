@@ -352,31 +352,34 @@ impl<Message> canvas::Program<Message> for Levels {
             .map(|(item, rect)| (*item, self.in_bar_rect(*rect, size)))
             .collect();
         popover::with(|c| c.set_items(&self.bar, hocus_link::LEVELS_NAMESPACE, in_bar));
-        for (item, rect) in items {
-            let radius = if item == Item::Keyboard {
-                crate::layouts::draw::MINI_RADIUS
-            } else {
-                radius
-            };
-            let (open, focused) =
-                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
-            let lit = if open {
-                Some(OPEN)
-            } else if state.hover == Some(item) {
-                Some(HOVER)
-            } else {
-                None
-            };
-            if let Some(colour) = lit {
-                frame.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour.get(),
-                );
+        // Under the signs and gauges, which are drawn in the column's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
+            for (item, rect) in items {
+                let radius = if item == Item::Keyboard {
+                    crate::layouts::draw::MINI_RADIUS
+                } else {
+                    radius
+                };
+                let (open, focused) =
+                    popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
+                let lit = if open {
+                    Some(OPEN)
+                } else if state.hover == Some(item) {
+                    Some(HOVER)
+                } else {
+                    None
+                };
+                if let Some(colour) = lit {
+                    f.fill(
+                        &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                        colour.get(),
+                    );
+                }
+                if focused {
+                    ring(f, rect, radius);
+                }
             }
-            if focused {
-                ring(&mut frame, rect, radius);
-            }
-        }
+        });
         let gauges = state.gauges.map(|g| g.at(at));
         let (zero, zero_bold) = state.zero.unwrap_or((VALUE * 0.6, MINI_VALUE * 0.65));
         let mut drawn = Drawn {
@@ -1514,6 +1517,59 @@ mod tests {
             );
             crate::backdrop::tests::assert_drawn_over(&drawn, &format!("{form:?}"));
         }
+    }
+
+    #[test]
+    fn a_hovered_items_sign_and_gauge_show_over_its_hover() {
+        // Its hover drawn under what the column's clip draws, on both
+        // renderers (crate::backdrop::layer): what the sound's row shows
+        // opaque, unlit, is the same pixel for pixel once the row is lit,
+        // the translucent hover under it, and the row lit around it. (The
+        // GPU's order is not drawn here: the tests have only the CPU.)
+        use super::super::model::Sound;
+        let sound = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            ..Snapshot::default()
+        };
+        let (w, h) = FULL_SURFACE;
+        let size = Size::new(w as f32, h as f32);
+        let mut unlit = state(sound, 0);
+        let now = unlit.at.expect("drawn at");
+        unlit.gauges[0].toward(Some(62.0), now, false, false);
+        let program = levels(Form::Full);
+        let items = program.items(&unlit, size);
+        let [(Item::Sound, row)] = items.as_slice() else {
+            panic!("{items:?}");
+        };
+        let lit = State {
+            hover: Some(Item::Sound),
+            gauges: unlit.gauges,
+            ..state(sound, 0)
+        };
+        let surface = iced::Size::new(w, h);
+        let before = crate::backdrop::tests::pixels_of(&program, &unlit, surface);
+        let after = crate::backdrop::tests::pixels_of(&program, &lit, surface);
+        let at = |x: u32, y: u32| ((y * w + x) * 4) as usize;
+        let corner = at(row.x as u32 + 6, row.y as u32 + 2);
+        assert_ne!(after[corner..corner + 4], before[corner..corner + 4], "lit");
+        let mut opaque = 0;
+        for y in row.y as u32..(row.y + row.height) as u32 {
+            for x in row.x as u32..(row.x + row.width) as u32 {
+                let i = at(x, y);
+                if before[i + 3] == 255 {
+                    opaque += 1;
+                    assert_eq!(
+                        after[i..i + 4],
+                        before[i..i + 4],
+                        "({x}, {y}) under the hover"
+                    );
+                }
+            }
+        }
+        assert!(opaque > 50, "the sign and the gauge are drawn: {opaque}");
     }
 
     fn state(levels: Snapshot, lines: usize) -> State {

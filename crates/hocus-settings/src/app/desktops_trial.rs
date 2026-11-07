@@ -540,24 +540,28 @@ impl canvas::Program<Message> for Drawing {
         _: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut f = canvas::Frame::new(renderer, bounds.size());
-        let screen = canvas::Path::rounded_rectangle(Point::ORIGIN, bounds.size(), 9.0.into());
-        f.fill(
-            &screen,
-            canvas::Gradient::Linear(
-                canvas::gradient::Linear::new(
-                    Point::ORIGIN,
-                    Point::new(bounds.width * 0.4, bounds.height),
-                )
-                .add_stop(0.0, Color::from_rgb8(0x16, 0x1e, 0x31))
-                .add_stop(1.0, Color::from_rgb8(0x0c, 0x11, 0x1d)),
-            ),
-        );
-        f.stroke(
-            &screen,
-            canvas::Stroke::default()
-                .with_color(rgba(255, 255, 255, 0.06))
-                .with_width(1.0),
-        );
+        // The screen in a clip of its own, as the windows are: iced's GPU
+        // renderer puts a frame's own shapes after its clips', over them.
+        f.with_clip(Rectangle::with_size(bounds.size()), |f| {
+            let screen = canvas::Path::rounded_rectangle(Point::ORIGIN, bounds.size(), 9.0.into());
+            f.fill(
+                &screen,
+                canvas::Gradient::Linear(
+                    canvas::gradient::Linear::new(
+                        Point::ORIGIN,
+                        Point::new(bounds.width * 0.4, bounds.height),
+                    )
+                    .add_stop(0.0, Color::from_rgb8(0x16, 0x1e, 0x31))
+                    .add_stop(1.0, Color::from_rgb8(0x0c, 0x11, 0x1d)),
+                ),
+            );
+            f.stroke(
+                &screen,
+                canvas::Stroke::default()
+                    .with_color(rgba(255, 255, 255, 0.06))
+                    .with_width(1.0),
+            );
+        });
         // A window past the screen's edge is cut there, its title too.
         f.with_clip(Rectangle::with_size(bounds.size()), |f| {
             let t = trial::TERMINAL;

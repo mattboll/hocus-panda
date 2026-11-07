@@ -427,26 +427,29 @@ impl<Message> canvas::Program<Message> for Connections {
             Some((Form::Mini, _)) => MINI_ITEM_RADIUS,
             _ => ITEM_RADIUS,
         };
-        for (item, rect) in items {
-            let (open, focused) =
-                popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
-            let lit = if open {
-                Some(OPEN)
-            } else if state.hover == Some(item) {
-                Some(HOVER)
-            } else {
-                None
-            };
-            if let Some(colour) = lit {
-                frame.fill(
-                    &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                    colour.get(),
-                );
+        // Under the signs and gauges, which are drawn in the column's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
+            for (item, rect) in items {
+                let (open, focused) =
+                    popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)));
+                let lit = if open {
+                    Some(OPEN)
+                } else if state.hover == Some(item) {
+                    Some(HOVER)
+                } else {
+                    None
+                };
+                if let Some(colour) = lit {
+                    f.fill(
+                        &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                        colour.get(),
+                    );
+                }
+                if focused {
+                    ring(f, rect, radius);
+                }
             }
-            if focused {
-                ring(&mut frame, rect, radius);
-            }
-        }
+        });
         let (right, left) = self.sides(size);
         let column = Rectangle::new(
             Point::new(left.max(0.0), 0.0),

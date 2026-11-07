@@ -348,7 +348,10 @@ impl<Message> canvas::Program<Message> for Panel {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
+        // Under the events' rows, drawn in their list's clip.
+        crate::backdrop::layer(&mut frame, Rectangle::with_size(bounds.size()), |f| {
+            kit::background(f, bounds.size(), self.glass);
+        });
         if let (Some(laid), Some(view)) = (&state.laid, &state.shown) {
             let clip = kit::Clip::new(self.software, draw::list_view(laid));
             draw::calendar(&mut frame, laid, view, state.pointer.hover, clip);
