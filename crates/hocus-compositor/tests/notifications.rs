@@ -653,7 +653,7 @@ fn a_replacement_updates_its_bubble_in_place() -> anyhow::Result<()> {
     let mut bed = start(&shell, |_, _| {})?;
     let id = bed.notify(Notice {
         app: "Firefox",
-        summary: "hocuspanda_0.2.0-1_amd64.deb",
+        summary: "hocuspanda_1.0.0-1_amd64.deb",
         body: "Téléchargement : 12 %",
         progress: Some(12),
         timeout: 2000,
@@ -665,7 +665,7 @@ fn a_replacement_updates_its_bubble_in_place() -> anyhow::Result<()> {
     let again = bed.notify(Notice {
         app: "Firefox",
         replaces: id,
-        summary: "hocuspanda_0.2.0-1_amd64.deb",
+        summary: "hocuspanda_1.0.0-1_amd64.deb",
         body: "Téléchargement : 67 %",
         progress: Some(67),
         timeout: 2000,

@@ -1862,7 +1862,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hocus-a11y"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-agents"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "hocus-link",
  "rustix 1.1.6",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-bluetooth"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -1895,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-cli"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1907,7 +1907,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-compositor"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "calloop 0.14.5",
@@ -1948,7 +1948,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-config"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "tempfile",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-day"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "hocus-config",
@@ -1977,11 +1977,11 @@ dependencies = [
 
 [[package]]
 name = "hocus-geometry"
-version = "0.2.0"
+version = "1.0.0"
 
 [[package]]
 name = "hocus-link"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-network"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "futures-util",
  "rustix 1.1.6",
@@ -2001,14 +2001,14 @@ dependencies = [
 
 [[package]]
 name = "hocus-pandas"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "resvg",
 ]
 
 [[package]]
 name = "hocus-settings"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "hocus-agents",
@@ -2041,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-shell"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "chacha20poly1305",
  "fontdue",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-sound"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "tracing",
@@ -2083,7 +2083,7 @@ dependencies = [
 
 [[package]]
 name = "hocus-xdg"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "tempfile",
  "tracing",

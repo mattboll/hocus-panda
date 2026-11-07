@@ -15,7 +15,7 @@ use tracing_subscriber::EnvFilter;
 
 /// The Hocuspanda desktop's compositor.
 #[derive(Debug, Parser)]
-#[command(version)]
+#[command(name = "hocuspanda", version)]
 struct Args {
     /// Where to draw. Default: in a window when started from a graphical
     /// session, as the session itself on a virtual terminal otherwise.

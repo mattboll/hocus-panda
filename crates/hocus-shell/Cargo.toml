@@ -14,18 +14,18 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-hocus-link = { path = "../hocus-link", version = "0.2.0" }
-hocus-pandas = { path = "../hocus-pandas", version = "0.2.0" }
+hocus-link = { path = "../hocus-link", version = "1.0.0" }
+hocus-pandas = { path = "../hocus-pandas", version = "1.0.0" }
 # What the shell shows, for screen readers: AT-SPI through AccessKit.
-hocus-a11y = { path = "../hocus-a11y", version = "0.2.0" }
+hocus-a11y = { path = "../hocus-a11y", version = "1.0.0" }
 # The desktop entries, read as the compositor and the Settings read them.
-hocus-xdg = { path = "../hocus-xdg", version = "0.2.0" }
+hocus-xdg = { path = "../hocus-xdg", version = "1.0.0" }
 # "Your day"'s data: calendars, events and tasks, read off the loop.
-hocus-day = { path = "../hocus-day", version = "0.2.0" }
+hocus-day = { path = "../hocus-day", version = "1.0.0" }
 # The sound, from PipeWire, shared with the Settings.
-hocus-sound = { path = "../hocus-sound", version = "0.2.0" }
+hocus-sound = { path = "../hocus-sound", version = "1.0.0" }
 # Bluetooth, from BlueZ, shared with the Settings.
-hocus-bluetooth = { path = "../hocus-bluetooth", version = "0.2.0" }
+hocus-bluetooth = { path = "../hocus-bluetooth", version = "1.0.0" }
 # No x11, no winit-side theme detection: the shell only talks Wayland
 # through iced_layershell (tech-choices, spike #315).
 iced = { version = "0.14", default-features = false, features = [
@@ -69,7 +69,7 @@ serde_json = "1.0.154"
 # What zbus calls take, for a call helper of the network's.
 serde = "1.0.229"
 # NetworkManager followed, as the Settings' Réseau page does (6.6).
-hocus-network = { path = "../hocus-network", version = "0.2.0" }
+hocus-network = { path = "../hocus-network", version = "1.0.0" }
 # The Wayland connection iced draws on, made here to read the clipboard
 # on it (paste); the same version as iced_layershell's.
 wayland-client = "0.31.15"
