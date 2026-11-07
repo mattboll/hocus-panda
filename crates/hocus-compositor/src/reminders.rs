@@ -6,17 +6,12 @@
 
 use hocus_link::{ShareSource, ToShell};
 
-use crate::{
-    State,
-    model::{Mode, Zone},
-};
+use crate::State;
 
 /// What the shell was told.
 #[derive(Debug, Default)]
 pub struct Reminders {
     fullscreen: Option<Vec<String>>,
-    /// The screens whose bar is opaque behind a maximised window.
-    opaque: Option<Vec<String>>,
 }
 
 impl State {
@@ -60,55 +55,6 @@ impl State {
     /// The shell connected: it is told them again.
     pub fn tell_fullscreen_again(&mut self) {
         self.reminders.fullscreen = None;
-        self.reminders.opaque = None;
-    }
-
-    /// The screens with a bar whose current desktop shows a maximised
-    /// window: their bar's glass falls back to opaque (bar.md §11), as
-    /// with reduced transparency, the glass beside it a band of blurred
-    /// wallpaper between two opaque surfaces otherwise.
-    fn opaque_screens(&self) -> Vec<String> {
-        let mut screens: Vec<String> = self
-            .space
-            .outputs()
-            .filter(|o| self.panel.bars.contains_key(&o.name()))
-            .filter(|o| {
-                self.windows_on(o).into_iter().any(|id| {
-                    !self.model.is_minimized(id)
-                        && self.on_current_desktop(id)
-                        && self.model.mode(id) == Mode::Snapped(Zone::Maximized)
-                })
-            })
-            .map(|o| o.name())
-            .collect();
-        screens.sort();
-        screens
-    }
-
-    /// Whether the bar on `output` is opaque behind a maximised window, as
-    /// the shell was last told.
-    pub fn bar_opaque(&self, output: &str) -> bool {
-        self.reminders
-            .opaque
-            .as_ref()
-            .is_some_and(|o| o.iter().any(|s| s == output))
-    }
-
-    /// Once a turn of the loop: the shell is told the screens whose bar is
-    /// opaque behind a maximised window, when they changed; the glass
-    /// goes, or comes back, with the next frame.
-    pub fn flush_opaque_bars(&mut self) {
-        if !self.shell_linked() {
-            return;
-        }
-        let screens = self.opaque_screens();
-        if self.reminders.opaque.as_ref() == Some(&screens) {
-            return;
-        }
-        tracing::debug!(?screens, "the bars opaque behind a maximised window");
-        self.reminders.opaque = Some(screens.clone());
-        self.tell_shell(ToShell::OpaqueBars(screens));
-        self.redraw = true;
     }
 
     /// The screens shared now, by their connectors' names (5.11).

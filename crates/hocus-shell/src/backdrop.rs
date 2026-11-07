@@ -1,5 +1,5 @@
 //! The bar's opaque colour behind one of its surfaces (bar.md §11): on
-//! the CPU, and on the GPU behind a maximised window (`opaque-bars`).
+//! the CPU, and on the GPU with reduced transparency or high contrast.
 //!
 //! It is a geometry of its own, under the surface's drawing. iced's GPU
 //! renderer (iced_wgpu 0.14) keeps a frame's shapes in two lists: those
