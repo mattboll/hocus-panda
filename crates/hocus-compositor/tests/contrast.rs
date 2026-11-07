@@ -159,7 +159,9 @@ fn the_overviews_thumbnails_have_solid_rims_under_high_contrast() -> anyhow::Res
             .any(|p| near(*p, dark_rim) || near(*p, light_rim)),
         "a faint rim of its own: {own:?}"
     );
-    for (scheme, rim) in [(Scheme::Dark, dark_rim), (Scheme::Light, light_rim)] {
+    // On the dimmed wallpaper, dark whatever the theme: the dark table's
+    // rim in both.
+    for (scheme, rim) in [(Scheme::Dark, dark_rim), (Scheme::Light, dark_rim)] {
         let mut hp = start(Some(scheme))?;
         let at = overview_thumb(&mut hp)?;
         let seen = left_of(&mut hp, at)?;

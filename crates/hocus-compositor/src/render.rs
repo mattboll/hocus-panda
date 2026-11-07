@@ -960,7 +960,12 @@ impl State {
             );
         }
         // The overview over the windows, under the bar.
+        // Its words and marks sit on the dimmed wallpaper, dark in either
+        // theme: under high contrast, the dark table's.
+        let contrast = crate::contrast::now();
+        crate::contrast::set(contrast.map(|_| hocus_link::theme::Scheme::Dark));
         let mut overview = self.overview_elements(renderer, output, now);
+        crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing

@@ -996,7 +996,9 @@ Settings from the file.
   theme's colours, reads each colour by the same rule
   (`crates/hocus-compositor/src/contrast.rs`): its disc and its panels
   the table's background, opaque; no fills or tints; rims solid, the
-  cards' rim; its words solid at 7:1 (an inert word in `text.dim`).
+  cards' rim; its words solid at 7:1 (an inert word in `text.dim`). The
+  overview, on the dimmed wallpaper (dark in either theme), reads by the
+  dark table.
 - **Measured**: the unit tests above; headless
   (`crates/hocus-compositor/tests/appearance.rs`), the bar's background
   `#05070C` under dark and contrast, white under light and contrast, the
