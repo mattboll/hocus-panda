@@ -452,8 +452,8 @@
 # open and close: "standard" (grow and fade in 220 ms), "rain" (columns of
 # glyphs fall through them, 360 ms to open, 300 ms to close; at most three
 # at once, none for the windows of the last session coming back) or
-# "frost" (corner marks, a line tracing the frame, then a frosted pane
-# clearing; the same times and rules). With reduced motion or the power
+# "frost" (seen through a sheet of ice that thaws to clear glass; the same
+# times and rules). With reduced motion or the power
 # saver, and drawing on the CPU, the windows fade instead.
 # animation = "standard"
 # Alt+Tab lists "all" desktops' windows (this one's first) or this

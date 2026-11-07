@@ -15,9 +15,9 @@
 //! only how it is drawn. On pixman the window fades over the same time
 //! instead, so the frames counted are the same.
 //!
-//! Givre's frost line (#740, `animation = "frost"`) is the same motion
-//! drawn otherwise: corner marks, a line tracing the frame, a frosted pane
-//! clearing; the same times, rules and fallbacks ([`Style`]).
+//! Givre's thawing pane (#740, `animation = "frost"`) is the same motion
+//! drawn otherwise: the window seen through ice that thaws to clear glass;
+//! the same times, rules and fallbacks ([`Style`]).
 
 use std::{
     cell::{Cell, RefCell},
@@ -40,7 +40,7 @@ pub const SMALLEST: i32 = 200;
 pub enum Style {
     /// Columns of glyphs (#432).
     Rain,
-    /// The frost line (#740).
+    /// The thawing pane (#740).
     Frost,
 }
 

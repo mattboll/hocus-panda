@@ -53,7 +53,7 @@ pub struct RainLook {
     pub alpha: f32,
     /// The window in its picture, physical pixels: x, y, width, height.
     pub window: [f32; 4],
-    /// The rain, or Givre's frost line (#740), and the frost's colours.
+    /// The rain, or Givre's thawing pane (#740), and the ice's colours.
     pub style: crate::rain::Style,
     pub frost: FrostColours,
     /// Physical pixels a logical one.
@@ -267,14 +267,16 @@ void main() {
 }
 ";
 
-/// Givre's frost line (#740). Opening, 360 ms: four corner marks appear
-/// (0 to 40 ms), a 1.6 px line traces the frame from its top left corner
-/// (0 to 150 ms, ease-out), the window shows under a frosted pane (an icy
-/// tint, the window seen through frost, crystal strokes) that clears from
-/// 110 to 360 ms, the line and the marks fading at its end. Closing,
-/// 300 ms: the pane frosts over (0 to 150 ms), the window fades (120 to
-/// 300 ms), the line retracts around the frame (150 to 300 ms). Lengths
-/// in logical pixels (`px` physical ones each).
+/// Givre's thawing pane (#740, "la vitre qui dégèle"). Opening, 360 ms:
+/// the window shows through a sheet of ice: refracted (the gradient of a
+/// 3-octave noise shifts where it is read, 5 px at most, never within a few
+/// px of its edges, gone by 200 ms so that its text is steady), under a
+/// pale veil with a web of fine cracks; the ice thaws to clear glass while
+/// one reflection crosses it diagonally. Closing, 300 ms: the reverse, the
+/// pane freezing over, then fading. No pixel is brighter than both the
+/// window's there and the ice: the cracks and the reflection are the ice's
+/// own, never a pattern laid on the window. Lengths in logical pixels
+/// (`px` physical ones each).
 const FROST: &str = "
 uniform sampler2D tex;
 uniform vec2 size;
@@ -282,90 +284,66 @@ uniform vec4 win;
 uniform float t;
 uniform float closing;
 uniform float seed;
-uniform vec3 line;
-uniform vec3 corner;
-uniform vec3 tint;
+uniform vec3 ice;
+uniform vec3 crack;
 uniform float alpha;
 uniform float px;
 
-float ease_out(float x) {
-    x = clamp(x, 0.0, 1.0);
-    return 1.0 - (1.0 - x) * (1.0 - x);
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h(i), h(i + vec2(1.0, 0.0)), f.x), mix(h(i + vec2(0.0, 1.0)), h(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
-// A crystal's stroke in each cell of 18 px, at its own angle, in some.
-float crystals(vec2 p) {
-    vec2 c = floor(p / 18.0);
-    vec2 q = p / 18.0 - c - 0.5;
-    float angle = h(c + seed) * 6.2831853;
-    vec2 d = vec2(cos(angle), sin(angle));
-    float along = abs(dot(q, d));
-    float across = abs(dot(q, vec2(-d.y, d.x)));
-    float len = 0.25 + 0.2 * h(c + 3.1);
-    float stroke = (1.0 - smoothstep(0.0, 0.04, across)) * (1.0 - smoothstep(len, len + 0.05, along));
-    return stroke * step(0.35, h(c + 7.7));
+float fbm(vec2 p) {
+    return 0.57 * noise(p) + 0.29 * noise(p * 2.07 + 7.3) + 0.14 * noise(p * 4.13 + 1.7);
+}
+
+float ease_out(float x) {
+    x = clamp(x, 0.0, 1.0);
+    return 1.0 - pow(1.0 - x, 3.0);
+}
+
+float ease_in_out(float x) {
+    x = clamp(x, 0.0, 1.0);
+    return x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0;
 }
 
 void main() {
-    float trace;
-    float lit;
-    float marks;
-    float pane;
-    float shown;
-    if (closing > 0.5) {
-        pane = smoothstep(0.0, 0.15, t);
-        shown = 1.0 - smoothstep(0.12, 0.30, t);
-        trace = 1.0 - ease_out((t - 0.15) / 0.15);
-        lit = 1.0;
-        marks = 1.0 - smoothstep(0.20, 0.30, t);
-    } else {
-        marks = smoothstep(0.0, 0.04, t) * (1.0 - smoothstep(0.30, 0.36, t));
-        trace = ease_out(t / 0.15);
-        lit = 1.0 - smoothstep(0.25, 0.36, t);
-        pane = 1.0 - smoothstep(0.11, 0.36, t);
-        shown = smoothstep(0.0, 0.11, t);
-    }
-    vec4 c = texture2D(tex, v_px / size);
+    float thawed = closing > 0.5 ? 1.0 - ease_in_out(t / 0.30) : ease_out((t - 0.02) / 0.34);
+    float frozen = 1.0 - thawed;
+    float shown = smoothstep(0.0, 0.4, thawed);
+    vec4 here = texture2D(tex, v_px / size);
     vec2 l = (v_px - win.xy) / px;
     vec2 w = win.zw / px;
-    vec4 base = c * shown;
-    if (l.x >= 0.0 && l.y >= 0.0 && l.x < w.x && l.y < w.y) {
-        // The window through frost: a few taps around, the icy tint, the
-        // crystals.
-        float r = 6.0 * px * pane;
-        vec2 o = (vec2(h(l * 0.37 + seed), h(l * 0.53 + seed + 1.0)) - 0.5) * 2.0 * r;
-        vec4 frosted = (c + texture2D(tex, (v_px + o) / size)
-            + texture2D(tex, (v_px + vec2(r, -0.5 * r)) / size)
-            + texture2D(tex, (v_px + vec2(-0.7 * r, r)) / size)) * 0.25;
-        vec4 seen = mix(c, frosted, pane);
-        seen.rgb = mix(seen.rgb, tint * seen.a, 0.42 * pane);
-        seen.rgb += line * crystals(l) * 0.55 * pane * seen.a;
-        base = seen * shown;
+    if (l.x < 0.0 || l.y < 0.0 || l.x >= w.x || l.y >= w.y) {
+        gl_FragColor = here * shown * alpha;
+        return;
     }
-    // The line on the frame, as far round as it is traced.
-    vec2 q = abs(l - w * 0.5) - w * 0.5;
-    float dist = abs(length(max(q, 0.0)) + min(max(q.x, q.y), 0.0));
-    float top = abs(l.y);
-    float right = abs(w.x - l.x);
-    float bottom = abs(w.y - l.y);
-    float left = abs(l.x);
-    float near = min(min(top, right), min(bottom, left));
-    float s = near == top ? l.x
-        : near == right ? w.x + l.y
-        : near == bottom ? w.x + w.y + (w.x - l.x)
-        : 2.0 * w.x + w.y + (w.y - l.y);
-    float round_ = s / (2.0 * (w.x + w.y));
-    float traced = 1.0 - smoothstep(trace - 0.004, trace, round_);
-    float a = (1.0 - smoothstep(0.8, 0.8 + 1.0 / px, dist)) * traced * lit * step(0.0005, trace);
-    base = base * (1.0 - a) + vec4(line, 1.0) * a;
-    // The four corner marks, 10 px long, 4 px out.
-    vec2 g = l + 4.0;
-    vec2 k = min(g, w + 8.0 - g);
-    float mark = (k.x >= 0.0 && k.y >= 0.0
-        && ((k.x < 1.6 && k.y < 10.0) || (k.y < 1.6 && k.x < 10.0))) ? 1.0 : 0.0;
-    float m = mark * marks * 0.75;
-    base = base * (1.0 - m) + vec4(corner, 1.0) * m;
-    gl_FragColor = base * alpha;
+    // The refraction: small, none near the edges, and gone by 200 ms of
+    // an opening.
+    float edge = min(min(l.x, l.y), min(w.x - l.x, w.y - l.y));
+    float settle = closing > 0.5 ? 1.0 : 1.0 - smoothstep(0.06, 0.20, t);
+    float amp = pow(frozen, 1.6) * 5.0 * settle * smoothstep(3.0, 12.0, edge);
+    vec2 q = l;
+    if (amp > 0.01) {
+        vec2 np = l / 70.0 + seed * 0.13;
+        float n0 = fbm(np);
+        vec2 grad = vec2(fbm(np + vec2(0.03, 0.0)) - n0, fbm(np + vec2(0.0, 0.03)) - n0) / 0.03;
+        q = clamp(l + grad * amp, vec2(0.0), w - 0.5);
+    }
+    vec4 c = texture2D(tex, (win.xy + q * px) / size);
+    // The ice: a pale veil and fine cracks, thawing.
+    float ridge = 1.0 - abs(fbm(l / 46.0 + 3.7 + seed * 0.07) * 2.0 - 1.0);
+    float cracks = pow(ridge, 22.0);
+    vec3 rgb = mix(c.rgb, ice * c.a, frozen * 0.38) + crack * cracks * frozen * 0.9 * c.a;
+    // One reflection crossing it diagonally.
+    float k = l.x / w.x * 0.6 + l.y / w.y * 0.4;
+    float sweep = closing > 0.5 ? 1.25 - t / 0.26 * 1.5 : (t - 0.06) / 0.30 * 1.5 - 0.25;
+    rgb += vec3(exp(-pow((k - sweep) / 0.05, 2.0)) * 0.28 * c.a * (0.3 + 0.7 * frozen));
+    rgb = min(rgb, max(max(c.rgb, here.rgb), ice * c.a));
+    gl_FragColor = vec4(rgb, c.a) * shown * alpha;
 }
 ";
 
@@ -685,8 +663,8 @@ fn make(renderer: &mut GlesRenderer) -> Result<Glyphs, String> {
                     gl,
                     &frost,
                     &[
-                        "matrix", "glyphs", "tex", "size", "win", "t", "closing", "seed", "line",
-                        "corner", "tint", "alpha", "px",
+                        "matrix", "glyphs", "tex", "size", "win", "t", "closing", "seed", "ice",
+                        "crack", "alpha", "px",
                     ],
                 )?,
                 compile(
@@ -932,9 +910,8 @@ impl Matrix for GlesRenderer {
                         for (name, c) in [
                             ("head", look.colours.head),
                             ("tail", look.colours.tail),
-                            ("line", look.frost.line),
-                            ("corner", look.frost.corner),
-                            ("tint", look.frost.tint),
+                            ("ice", look.frost.ice),
+                            ("crack", look.frost.crack),
                         ] {
                             let [r, g, b] = rgb(c);
                             gl.Uniform3f(p.at(name), r, g, b);

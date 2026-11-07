@@ -382,6 +382,13 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that looks like a document: a dark
+    /// header with a title, then paragraphs of text on a pale page (drawn
+    /// with the system's sans font when there is one, else grey lines).
+    Document {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
     /// An xdg toplevel of this size that takes the keyboard and says the
     /// layout (XKB's group) each modifiers event gives it.
     Typing {
@@ -631,6 +638,7 @@ fn run_client(
         typing: false,
         clear: false,
         checkered: false,
+        document: None,
         fill: None,
         header: None,
         undrawn: false,
@@ -715,6 +723,16 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.checkered = true;
+        }
+        Some(Shows::Document { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.document = Some(((0, 0), Vec::new()));
         }
         Some(Shows::Typing { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -1043,6 +1061,8 @@ struct Client {
     clear: bool,
     /// Drawn in black and white squares.
     checkered: bool,
+    /// Drawn as a document: its text's coverage, by its size.
+    document: Option<((i32, i32), Vec<u8>)>,
     /// Its surface's colour, when not a window's.
     fill: Option<u32>,
     /// Its header's colour ([`Shows::KdeDecorated`]).
@@ -1118,11 +1138,33 @@ impl Client {
         else {
             return;
         };
+        if let Some((at, _)) = &self.document
+            && *at != (iw, ih)
+        {
+            self.document = Some(((iw, ih), document_text(iw, ih)));
+        }
+        let text = self.document.as_ref().map(|(_, t)| t.as_slice());
         for (i, pixel) in canvas.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let (x, y) = (i as i32 % w, i as i32 / w);
             let inside = x >= m && y >= m && x < m + iw && y < m + ih;
             let colour: u32 = match (self.clear, inside) {
                 (true, _) => 0,
+                (false, true) if text.is_some() => {
+                    let (dx, dy) = (x - m, y - m);
+                    let cover = text.map_or(0, |t| t[(dy * iw + dx) as usize]);
+                    let (page, ink): ([u8; 3], [u8; 3]) = if dy < HEADER_HEIGHT as i32 {
+                        ([0x1E, 0x25, 0x36], [0xE8, 0xEE, 0xF6])
+                    } else {
+                        ([0xF5, 0xF7, 0xFA], [0x22, 0x2A, 0x38])
+                    };
+                    let mixed: Vec<u32> = (0..3)
+                        .map(|c| {
+                            let (a, b) = (u32::from(page[c]), u32::from(ink[c]));
+                            (a * (255 - u32::from(cover)) + b * u32::from(cover)) / 255
+                        })
+                        .collect();
+                    0xff00_0000 | (mixed[0] << 16) | (mixed[1] << 8) | mixed[2]
+                }
                 (false, true) if self.checkered => {
                     if ((x - m) / 3 + (y - m) / 3) % 2 == 0 {
                         0xffff_ffff
@@ -2155,4 +2197,95 @@ pub fn other_program(
     })?;
     anyhow::ensure!(mapped, "{app_id} never mapped: {:?}", hp.windows());
     Ok(other)
+}
+
+/// A document's text for a window `w` × `h`: its coverage, a byte a pixel,
+/// a title in the header then paragraphs, with the system's sans font
+/// (fontdue), else grey lines where the words would be.
+fn document_text(w: i32, h: i32) -> Vec<u8> {
+    let mut cover = vec![0u8; (w.max(1) * h.max(1)) as usize];
+    let font = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+        .iter()
+        .find_map(|path| std::fs::read(path).ok())
+        .and_then(|bytes| fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok());
+    let lines = [
+        (17.0, 26, "Notes — réunion du jeudi"),
+        (15.0, 72, "Ordre du jour"),
+        (
+            13.0,
+            100,
+            "Le compositeur dessine les fenêtres qui s’ouvrent à travers",
+        ),
+        (
+            13.0,
+            120,
+            "une vitre de glace qui dégèle : l’image se réfracte, puis",
+        ),
+        (
+            13.0,
+            140,
+            "la glace fond en verre clair, et un reflet la traverse.",
+        ),
+        (
+            13.0,
+            172,
+            "1. Les budgets : 23 images à l’ouverture, 19 à la fermeture.",
+        ),
+        (13.0, 192, "2. Le texte ne doit plus onduler après 200 ms."),
+        (
+            13.0,
+            212,
+            "3. Les bords de la fenêtre restent droits du début à la fin.",
+        ),
+        (
+            13.0,
+            244,
+            "Prochaine étape : l’essayer sur le portable, en vrai.",
+        ),
+        (
+            13.0,
+            264,
+            "Puis comparer avec la buée qui s’efface et la pluie.",
+        ),
+    ];
+    for (size, baseline, text) in lines {
+        if baseline + 4 >= h {
+            break;
+        }
+        let mut x = 18.0f32;
+        for ch in text.chars() {
+            let Some(font) = &font else {
+                // Grey lines, a word's worth at a time.
+                let x0 = x as i32;
+                x += size * 0.55;
+                if ch == ' ' || x0 >= w - 18 {
+                    continue;
+                }
+                for yy in baseline - (size * 0.6) as i32..baseline {
+                    for xx in x0..(x as i32).min(w - 18) {
+                        cover[(yy * w + xx) as usize] = 150;
+                    }
+                }
+                continue;
+            };
+            let (metrics, bitmap) = font.rasterize(ch, size);
+            let (gx, gy) = (
+                x as i32 + metrics.xmin,
+                baseline - metrics.height as i32 - metrics.ymin,
+            );
+            for row in 0..metrics.height as i32 {
+                for col in 0..metrics.width as i32 {
+                    let (px, py) = (gx + col, gy + row);
+                    if px < 0 || py < 0 || px >= w - 8 || py >= h {
+                        continue;
+                    }
+                    let c = bitmap[(row * metrics.width as i32 + col) as usize];
+                    let at = (py * w + px) as usize;
+                    cover[at] = cover[at].max(c);
+                }
+            }
+            x += metrics.advance_width;
+        }
+    }
+    cover
 }

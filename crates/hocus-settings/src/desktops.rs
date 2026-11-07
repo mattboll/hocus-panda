@@ -515,8 +515,8 @@ pub fn settings() -> &'static [Setting] {
                 MOVE,
                 w("Ouvrir et fermer", "Open and close"),
                 w(
-                    "Pluie : des colonnes de caractères tombent dans la fenêtre qui s’ouvre (360 ms) et l’emportent quand elle se ferme (300 ms). Givre : un trait de givre fait le tour de la fenêtre, puis une vitre givrée s’efface.",
-                    "Rain: columns of glyphs fall through a window as it opens (360 ms) and carry it away as it closes (300 ms). Frost: a frost line traces the window's frame, then a frosted pane clears.",
+                    "Pluie : des colonnes de caractères tombent dans la fenêtre qui s’ouvre (360 ms) et l’emportent quand elle se ferme (300 ms). Givre : la fenêtre apparaît à travers une vitre de glace qui dégèle.",
+                    "Rain: columns of glyphs fall through a window as it opens (360 ms) and carry it away as it closes (300 ms). Frost: the window shows through a sheet of ice that thaws to clear glass.",
                 ),
                 (
                     &["ouvrir", "fermer", "animation", "pluie", "matrix", "givre"],
