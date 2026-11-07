@@ -695,6 +695,8 @@ impl State {
                 | T::Meeting(_)
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
+                | T::A11yLine(_)
+                | T::A11yEnd
         )
     }
 

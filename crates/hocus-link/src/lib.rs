@@ -408,6 +408,10 @@ impl FromStr for Side {
 /// What the compositor tells the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToShell {
+    /// Says what the shell shows, for screen readers (`hocus msg a11y`,
+    /// docs/design/screen-reader.md): answered by [`ToCompositor::A11yLine`]s
+    /// and an [`ToCompositor::A11yEnd`].
+    A11y,
     /// How bars look: on glass the compositor blurs behind (else opaque),
     /// and whether they move (else reduced motion).
     Look { glass: bool, motion: bool },
@@ -1638,6 +1642,11 @@ pub enum MeetingNear {
 pub enum ToCompositor {
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
+    /// A line of what the shell shows, for screen readers ([`ToShell::A11y`]),
+    /// its control characters made spaces.
+    A11yLine(String),
+    /// The last of them.
+    A11yEnd,
     /// The shell's surfaces of this namespace have something new to show:
     /// the compositor sends them a configure, as they are. iced draws
     /// every surface after any message of the shell's own, and the whole
@@ -1808,6 +1817,16 @@ pub fn screen_name(name: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     name.trim().to_owned()
+}
+
+/// A line of the screen readers' tree as a [`ToCompositor::A11yLine`]
+/// carries it: its control characters made spaces, its indent kept.
+pub fn a11y_text(line: &str) -> String {
+    line.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 /// A line that does not read.
@@ -2083,6 +2102,7 @@ impl fmt::Display for ToShell {
             Self::Recorded(recorded) => recorded.write(f),
             Self::Lock(shown) => shown.write(f),
             Self::Unlocked => f.write_str("unlocked"),
+            Self::A11y => f.write_str("a11y"),
             Self::Curtain(shown) => shown.write(f),
             Self::CurtainEnd => f.write_str("curtain-end"),
             Self::LeaveCan(can) => can.write(f),
@@ -2421,6 +2441,7 @@ impl FromStr for ToShell {
             Some("recording-end") => Ok(Self::RecordingEnd),
             Some("lock") => LockShown::read(&mut words).map(Self::Lock),
             Some("unlocked") => Ok(Self::Unlocked),
+            Some("a11y") => Ok(Self::A11y),
             Some("curtain") => CurtainShown::read(&mut words).map(Self::Curtain),
             Some("curtain-end") => Ok(Self::CurtainEnd),
             Some("leave-can") => LeaveCan::read(&mut words).map(Self::LeaveCan),
@@ -2622,6 +2643,8 @@ impl fmt::Display for ToCompositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Software => f.write_str("software"),
+            Self::A11yLine(line) => write!(f, "a11y-line {}", a11y_text(line)),
+            Self::A11yEnd => f.write_str("a11y-end"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
             Self::NextLayout => f.write_str("next-layout"),
@@ -2718,6 +2741,12 @@ impl FromStr for ToCompositor {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(text) = line.strip_prefix("copy ") {
             return Ok(Self::Copy(text.to_owned()));
+        }
+        if let Some(text) = line.strip_prefix("a11y-line ") {
+            return Ok(Self::A11yLine(text.to_owned()));
+        }
+        if line == "a11y-line" {
+            return Ok(Self::A11yLine(String::new()));
         }
         if let Some(rest) = line.strip_prefix("share ") {
             return ShareAsk::read(rest).map(Self::Share);
@@ -2879,6 +2908,7 @@ impl FromStr for ToCompositor {
                     .map_err(|e| BadLine(format!("window: {e}")))?,
             )),
             Some("overview") => Ok(Self::Overview),
+            Some("a11y-end") => Ok(Self::A11yEnd),
             Some("close") => Ok(Self::Close(
                 word(&mut words, "window")?
                     .parse()
@@ -3291,6 +3321,7 @@ mod tests {
                 output: "HDMI-A-1".into(),
             }),
             ToShell::Unlocked,
+            ToShell::A11y,
             ToShell::Curtain(CurtainShown {
                 elapsed: 0,
                 length: 10_000,
@@ -3409,6 +3440,8 @@ mod tests {
             ToCompositor::Bring(42),
             ToCompositor::Close(42),
             ToCompositor::Overview,
+            ToCompositor::A11yLine("  button \"14 h 32\" <click>".into()),
+            ToCompositor::A11yEnd,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
             ToCompositor::GoToAgent {

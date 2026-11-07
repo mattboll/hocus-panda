@@ -273,23 +273,6 @@ fn listed(mixer: &Mixer) -> (Vec<App>, usize) {
 
 // --- For screen readers ---------------------------------------------------------
 
-/// What holds the keyboard, as the popover last drew it.
-static FOCUSED: Mutex<Option<Target>> = Mutex::new(None);
-
-/// The popover's rows for screen readers (crate::a11y), in the keyboard's
-/// order: the mute button, the volume, the outputs, the microphone's, the
-/// applications', the Settings' link; and the key of the one holding the
-/// keyboard.
-pub fn a11y(words: crate::a11y::Words) -> (Vec<hocus_a11y::Node>, Option<String>) {
-    let mixer = levels::sound::mixer();
-    let (apps, _) = listed(&mixer);
-    let focus = *FOCUSED.lock().unwrap_or_else(PoisonError::into_inner);
-    (
-        a11y_rows(&mixer, &apps, words),
-        focus.map(|t| format!("{t:?}")),
-    )
-}
-
 /// The rows for `mixer`, `apps` listed.
 fn a11y_rows(mixer: &Mixer, apps: &[App], words: crate::a11y::Words) -> Vec<hocus_a11y::Node> {
     use hocus_a11y::{Act, Node, Rect, Role};
@@ -374,7 +357,7 @@ fn a11y_rows(mixer: &Mixer, apps: &[App], words: crate::a11y::Words) -> Vec<hocu
 }
 
 /// The popover's subtitle: the default output's name.
-pub fn a11y_subtitle() -> Option<String> {
+fn a11y_subtitle() -> Option<String> {
     levels::sound::mixer()
         .sinks
         .iter()
@@ -494,7 +477,25 @@ impl<Message> canvas::Program<Message> for Panel {
             let (rect, radius) = target.shape(layout);
             ring(&mut frame, rect, radius);
         }
-        *FOCUSED.lock().unwrap_or_else(PoisonError::into_inner) = state.focus;
+        crate::a11y::rows::publish(
+            self.id,
+            crate::a11y::rows::Rows {
+                subtitle: a11y_subtitle(),
+                nodes: a11y_rows(
+                    &state.mixer,
+                    &state.apps,
+                    crate::a11y::Words {
+                        fr: self.words.fr(),
+                    },
+                ),
+                order: state
+                    .targets()
+                    .into_iter()
+                    .map(crate::a11y::rows::key)
+                    .collect(),
+                focus: state.focus.map(crate::a11y::rows::key),
+            },
+        );
         vec![frame.into_geometry()]
     }
 

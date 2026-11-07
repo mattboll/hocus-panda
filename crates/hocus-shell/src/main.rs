@@ -867,6 +867,10 @@ impl Shell {
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
+            ToShell::A11y => {
+                a11y::dump();
+                Task::none()
+            }
             ToShell::Unlocked => {
                 let effects = lock::end();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))

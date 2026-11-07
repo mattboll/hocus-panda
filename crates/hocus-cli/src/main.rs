@@ -154,6 +154,10 @@ enum MsgCommand {
         #[arg(long)]
         follow: bool,
     },
+    /// What the bar and the shell's other surfaces show, as screen
+    /// readers read it: each window's nodes, their roles, names, values,
+    /// states, places and actions (docs/design/screen-reader.md).
+    A11y,
 }
 
 #[derive(Debug, Subcommand)]
@@ -215,6 +219,7 @@ fn main() -> ExitCode {
                 MsgCommand::Idle => Question::Idle,
                 MsgCommand::Lock => Question::Lock,
                 MsgCommand::Outputs => Question::Outputs,
+                MsgCommand::A11y => Question::A11y,
                 MsgCommand::InputDevices { follow: true } => {
                     return follow(args.socket, Question::InputDevices { follow: true });
                 }

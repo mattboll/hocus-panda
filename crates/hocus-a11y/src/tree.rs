@@ -401,7 +401,11 @@ impl Node {
             let _ = write!(out, " {position}/{size}");
         }
         if let Some(b) = self.bounds {
-            let _ = write!(out, " @{},{} {}x{}", b.x, b.y, b.width, b.height);
+            let _ = write!(
+                out,
+                " @{:.0},{:.0} {:.0}x{:.0}",
+                b.x, b.y, b.width, b.height
+            );
         }
         if !self.acts.is_empty() {
             let acts: Vec<&str> = self.acts.iter().map(|a| a.word()).collect();

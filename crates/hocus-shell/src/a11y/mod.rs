@@ -17,6 +17,7 @@
 
 mod announce;
 mod bar;
+pub mod rows;
 mod surfaces;
 mod words;
 
@@ -44,55 +45,116 @@ const TICK: Duration = Duration::from_millis(250);
 const SAID_FOR: Duration = Duration::from_secs(10);
 
 /// Starts the thread, if the compositor named a session bus.
+/// What the thread hears.
+enum Heard {
+    /// From AccessKit's thread.
+    Bridge(Event),
+    /// The compositor asks what the shell shows (`hocus msg a11y`).
+    Dump,
+}
+
+/// The thread's channel, once it runs.
+static HEARD: std::sync::Mutex<Option<mpsc::Sender<Heard>>> = std::sync::Mutex::new(None);
+
+/// Starts the thread: always, for `hocus msg a11y`; its bridge to AT-SPI
+/// only if the compositor named a session bus.
 pub fn start() {
-    let Some(bus) = crate::day::session_bus() else {
-        tracing::info!("no session bus named: nothing for screen readers");
-        return;
-    };
-    // AccessKit connects to the session's bus: it must be the one named.
-    let session = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
-    if bus != "session" && session.as_deref() != Some(bus.as_str()) {
-        tracing::info!("the session bus is not the one named: nothing for screen readers");
-        return;
-    }
+    let (tell, heard) = mpsc::channel();
+    *HEARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tell.clone());
+    let bridged = bridged();
     let started = std::thread::Builder::new()
         .name("a11y".to_owned())
-        .spawn(run);
+        .spawn(move || {
+            let bridge = bridged.then(|| {
+                Bridge::new(move |event| {
+                    let _ = tell.send(Heard::Bridge(event));
+                })
+            });
+            run(bridge, &heard);
+        });
     if let Err(err) = started {
         tracing::warn!(%err, "no thread for screen readers");
     }
 }
 
-fn run() {
-    let (tell, heard) = mpsc::channel();
-    let mut bridge = Bridge::new(move |event| {
-        let _ = tell.send(event);
-    });
+/// The compositor asks what the shell shows: each window's tree, said
+/// back a line at a time (`hocus msg a11y`).
+pub fn dump() {
+    let sent = HEARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|tell| tell.send(Heard::Dump).is_ok());
+    if !sent {
+        crate::popover::tell(hocus_link::ToCompositor::A11yEnd);
+    }
+}
+
+/// Whether the shell may register on the session's accessibility bus: on
+/// the bus the compositor names only.
+fn bridged() -> bool {
+    let Some(bus) = crate::day::session_bus() else {
+        tracing::info!("no session bus named: nothing for screen readers");
+        return false;
+    };
+    // AccessKit connects to the session's bus: it must be the one named.
+    let session = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+    if bus != "session" && session.as_deref() != Some(bus.as_str()) {
+        tracing::info!("the session bus is not the one named: nothing for screen readers");
+        return false;
+    }
+    true
+}
+
+fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
     let mut said = Said::default();
     loop {
-        let event = if hocus_a11y::listening() {
+        let listening = bridge.is_some() && hocus_a11y::listening();
+        let heard = if listening {
             match heard.recv_timeout(said.wait(Instant::now())) {
-                Ok(event) => Some(event),
+                Ok(heard) => Some(heard),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         } else {
             match heard.recv() {
-                Ok(event) => Some(event),
+                Ok(heard) => Some(heard),
                 Err(_) => return,
             }
         };
-        match event {
-            Some(Event::Listening(true)) => bridge.forget(),
-            Some(Event::Listening(false)) => {
+        match heard {
+            Some(Heard::Bridge(Event::Listening(true))) => {
+                if let Some(bridge) = &mut bridge {
+                    bridge.forget();
+                }
+                // The open popover says its rows again.
+                crate::popover::send(vec![crate::popover::Effect::Wake(
+                    hocus_link::POPOVER_NAMESPACE,
+                )]);
+            }
+            Some(Heard::Bridge(Event::Listening(false))) => {
                 said.announcer.reset();
-                bridge.keep([]);
+                if let Some(bridge) = &mut bridge {
+                    bridge.keep([]);
+                }
                 continue;
             }
-            Some(Event::Asked(asked)) => said.carry_out(&asked),
+            Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
+            Some(Heard::Dump) => {
+                for window in said.describe(Instant::now()) {
+                    for line in window.dump().lines() {
+                        crate::popover::tell(hocus_link::ToCompositor::A11yLine(line.to_owned()));
+                    }
+                }
+                crate::popover::tell(hocus_link::ToCompositor::A11yEnd);
+            }
             None => {}
         }
-        if hocus_a11y::listening() {
+        if let Some(bridge) = &mut bridge
+            && hocus_a11y::listening()
+        {
             let windows = said.describe(Instant::now());
             bridge.show(windows);
         }
@@ -108,8 +170,8 @@ enum Target {
         item: Item,
         rect: Rectangle,
     },
-    /// A row of the sound's popover, by its key.
-    Sound(String),
+    /// A row of the open popover, by its key.
+    Row(String),
     /// A bubble's action, or the bubble itself (`None`: its default).
     Bubble { serial: u64, action: Option<String> },
     Lock {
@@ -208,17 +270,17 @@ impl Said {
             active,
             ..surfaces::Popover::default()
         };
-        if item == Item::Sound {
-            let (rows, focus) = crate::popover::sound::a11y(words);
-            for row in &rows {
+        let surface = crate::popover::with(|c| c.open_surface())?;
+        if let Some(rows) = rows::of(surface) {
+            for node in &rows.order {
                 self.targets.insert(
-                    ("popover".to_owned(), row.key.clone()),
-                    Target::Sound(row.key.clone()),
+                    ("popover".to_owned(), node.clone()),
+                    Target::Row(node.clone()),
                 );
             }
-            shown.rows = rows;
-            shown.focus = focus.filter(|_| active);
-            shown.subtitle = crate::popover::sound::a11y_subtitle();
+            shown.rows = rows.nodes;
+            shown.focus = rows.focus.filter(|_| active);
+            shown.subtitle = rows.subtitle;
         }
         Some(surfaces::popover(&shown))
     }
@@ -412,12 +474,7 @@ impl Said {
                     rect: *rect,
                 });
             }
-            (Target::Sound(key), act) => match (key.as_str(), act) {
-                ("Mute", Act::Click) => crate::levels::key(LevelKey::Mute),
-                ("Slider", Act::Increment) => crate::levels::key(LevelKey::VolumeUp),
-                ("Slider", Act::Decrement) => crate::levels::key(LevelKey::VolumeDown),
-                _ => tracing::debug!(key, ?act, "not done from a screen reader yet"),
-            },
+            (Target::Row(row), act) => press_row(row, act),
             (Target::Bubble { serial, action }, Act::Click) => {
                 crate::notifications::input(match action {
                     Some(key) => crate::notifications::Input::Action {
@@ -439,6 +496,34 @@ impl Said {
             }
             (_, act) => tracing::debug!(?act, "not done from a screen reader"),
         }
+    }
+}
+
+/// The keys that reach row `row` of the open popover and act on it: `Tab`
+/// to it, then `Enter` (a click), or the arrows (a slider's step).
+fn press_row(row: &str, act: Act) {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let Some(surface) = crate::popover::with(|c| c.open_surface()) else {
+        return;
+    };
+    let Some(rows) = rows::of(surface) else {
+        return;
+    };
+    let Some(tabs) = rows::tabs(&rows.order, rows.focus.as_deref(), row) else {
+        return;
+    };
+    let then = match act {
+        Act::Click => Named::Enter,
+        Act::Increment => Named::ArrowRight,
+        Act::Decrement => Named::ArrowLeft,
+        Act::Focus => Named::Shift,
+        Act::Menu => return,
+    };
+    for _ in 0..tabs {
+        crate::popover::key(&Key::Named(Named::Tab), Modifiers::empty(), None);
+    }
+    if then != Named::Shift {
+        crate::popover::key(&Key::Named(then), Modifiers::empty(), None);
     }
 }
 

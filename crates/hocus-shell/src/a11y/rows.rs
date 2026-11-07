@@ -1,0 +1,86 @@
+//! A popover's rows for screen readers: each popover says, as it draws,
+//! what it shows by the kit's kinds (buttons, switches, sliders, radio
+//! buttons, fields, lines), the order its keyboard's ring goes through
+//! them, and which one the ring is on. Only one popover shows at a time;
+//! a screen reader's click on a row is the keys that would reach it (`Tab`
+//! to it, then `Enter`), so that every popover does what it does for the
+//! keyboard.
+
+use std::sync::{Mutex, PoisonError};
+
+use hocus_a11y::{Node, Rect};
+use iced::{Rectangle, window};
+
+/// What a popover shows, for screen readers.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Rows {
+    /// The line under its title.
+    pub subtitle: Option<String>,
+    pub nodes: Vec<Node>,
+    /// The keys of the rows the keyboard's ring goes through, in its
+    /// order (`Tab`).
+    pub order: Vec<String>,
+    /// The row the ring is on.
+    pub focus: Option<String>,
+}
+
+static ROWS: Mutex<Option<(window::Id, Rows)>> = Mutex::new(None);
+
+/// Popover `surface` shows `rows` now.
+pub fn publish(surface: window::Id, rows: Rows) {
+    let mut kept = ROWS.lock().unwrap_or_else(PoisonError::into_inner);
+    if kept
+        .as_ref()
+        .is_none_or(|(s, r)| *s != surface || *r != rows)
+    {
+        *kept = Some((surface, rows));
+    }
+}
+
+/// What popover `surface` last said it shows.
+pub fn of(surface: window::Id) -> Option<Rows> {
+    ROWS.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|(s, _)| *s == surface)
+        .map(|(_, r)| r.clone())
+}
+
+/// A rectangle of the popover's, as a node's bounds.
+pub fn at(rect: Rectangle) -> Option<Rect> {
+    Some(Rect::new(rect.x, rect.y, rect.width, rect.height))
+}
+
+/// A target's key: its debug form.
+pub fn key(target: impl std::fmt::Debug) -> String {
+    format!("{target:?}")
+}
+
+/// The `Tab`s that take the ring from `focus` to `to` in `order` (round
+/// its end; from nothing, `Tab` goes to the first).
+pub fn tabs(order: &[String], focus: Option<&str>, to: &str) -> Option<usize> {
+    let to = order.iter().position(|k| k == to)?;
+    let n = order.len();
+    Some(
+        match focus.and_then(|f| order.iter().position(|k| k == f)) {
+            Some(at) => (to + n - at) % n,
+            None => to + 1,
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ring_goes_to_a_row_by_tabs() {
+        let order: Vec<String> = ["a", "b", "c"].iter().map(|s| (*s).to_owned()).collect();
+        assert_eq!(tabs(&order, None, "a"), Some(1));
+        assert_eq!(tabs(&order, None, "c"), Some(3));
+        assert_eq!(tabs(&order, Some("b"), "b"), Some(0));
+        assert_eq!(tabs(&order, Some("c"), "a"), Some(1));
+        assert_eq!(tabs(&order, Some("a"), "c"), Some(2));
+        assert_eq!(tabs(&order, Some("a"), "z"), None);
+    }
+}
