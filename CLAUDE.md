@@ -254,6 +254,13 @@ screenshots:
 HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor --test lock_shots --run-ignored only
 ```
 
+Screen readers (docs/design/screen-reader.md, crate `hocus-a11y`): the
+shell describes what it shows on AT-SPI only on the session bus the
+compositor names, and only while an assistive technology listens. Try it
+on a dbus-daemon of your own with `at-spi-bus-launcher
+--launch-immediately` on it (`IsEnabled` set), never on the live
+session's buses; `RUST_LOG=hocus_a11y=debug` logs each window's tree.
+
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
 which Claude Code's and Codex's hooks run once plugged in from the bar.
