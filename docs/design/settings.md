@@ -1224,7 +1224,14 @@ copy only ever shows through the glass: beside a bar, in its gaps and
 outside its rounded corners, and with no bar, the screen shows the moving
 wallpaper (`tests/moving_wallpaper.rs`,
 `the_still_copy_only_feeds_the_glass`, pixel for pixel against a screen
-without a bar). Without
+without a bar). Between its frames, the wallpaper is drawn again in each
+place that changed over it, never over the bounds of those places: what
+lies between them (the bar, its glass) is not drawn again, and would be
+covered until the next frame, the bar flickering or gone a moment
+(`the_bar_shows_whole_between_the_wallpapers_frames`; with the real shell
+on wgpu, `tests/themed_bar.rs`: Givre's and Matrix's bars across the
+wallpaper's frames, a window over them, desktop switches and a theme
+switch). Without
 GLES (pixman), and in the lock (the shell's), the Settings' tiles and the
 preview, the still picture (`hocus_link::moving::still`, the same recipe
 at a fixed moment) is drawn once on a thread, at the screen's pixels, as a

@@ -701,6 +701,119 @@ fn the_still_copy_only_feeds_the_glass() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Between two of its frames, a moving wallpaper is drawn again only
+/// where something over it changed, never over what did not: with the
+/// desktops' dots changing at the top of the screen and the pointer
+/// moving over the bar, the bar shows whole at every frame, the glass's
+/// still copy taken again meanwhile (a popover comes). Drawn over
+/// the bounds of those scattered places, the wallpaper covered the bar
+/// between them until its next frame (the bar flickering, or gone a
+/// moment, on a desktop switch or as a window passes).
+#[test]
+fn the_bar_shows_whole_between_the_wallpapers_frames() -> anyhow::Result<()> {
+    const BAR: u32 = 0xffe0_a020;
+    for picture in ["rain", "aurora"] {
+        let Some(mut hp) = gles(moving(picture), &[(1280, 800)])? else {
+            return Ok(());
+        };
+        std::mem::forget(common::client(
+            hp.socket(),
+            Some(Shows::Layer {
+                namespace: hocus_link::NAMESPACE,
+                size: (196, 0),
+                margin: (8, 8),
+                colour: BAR,
+            }),
+        )?);
+        let placed = hp.dispatch_until(common::WAIT, |hp| {
+            hp.bar_surfaces().first().is_some_and(|(_, r)| r.width > 0)
+        })?;
+        anyhow::ensure!(placed, "no bar surface");
+        common::wait(&mut hp, Duration::from_millis(200))?;
+        let bar = hp.bar_surfaces()[0].1;
+        hp.hold_clock();
+        hp.pointer_move(400.0, 400.0);
+        for _ in 0..10 {
+            hp.step(STEP)?;
+        }
+        let ticks = hp.wall_ticks(OUTPUT);
+        // To the next desktop: its dots show at the top of the screen.
+        common::chord(
+            &mut hp,
+            &[
+                common::KEY_LEFTMETA,
+                common::KEY_LEFTCTRL,
+                common::KEY_RIGHT,
+            ],
+        );
+        let mut partial = 0;
+        let blurs = hp.glass_blurs();
+        for i in 0..60 {
+            if i == 20 {
+                std::mem::forget(common::client(
+                    hp.socket(),
+                    Some(Shows::Layer {
+                        namespace: hocus_link::POPOVER_NAMESPACE,
+                        size: (280, 200),
+                        // Away from the bar: its shadow falls on it beside it.
+                        margin: (300, 700),
+                        colour: 0xff20_c060,
+                    }),
+                )?);
+            }
+            let pointer = (
+                f64::from(bar.x + 30 + (i % 10) * 12),
+                f64::from(200 + i * 8),
+            );
+            hp.pointer_move(pointer.0, pointer.1);
+            hp.step(STEP)?;
+            if hp
+                .take_damage(0)
+                .is_some_and(|d| d.width < 1280 || d.height < 800)
+            {
+                partial += 1;
+            }
+            let (width, _, shot) = hp.screenshot(0)?;
+            let wrong: Vec<(i32, i32)> = (bar.y + 20..bar.y + bar.height - 20)
+                .step_by(10)
+                .flat_map(|y| {
+                    (bar.x + 16..bar.x + bar.width - 16)
+                        .step_by(10)
+                        .map(move |x| (x, y))
+                })
+                // Away from the pointer.
+                .filter(|(x, y)| {
+                    (f64::from(*x) - pointer.0).abs() > 48.0
+                        || (f64::from(*y) - pointer.1).abs() > 48.0
+                })
+                .filter(|(x, y)| {
+                    let at = ((y * width + x) * 4) as usize;
+                    let [b, g, r] = [shot[at], shot[at + 1], shot[at + 2]];
+                    [r, g, b]
+                        .iter()
+                        .zip([(BAR >> 16) as u8, (BAR >> 8) as u8, BAR as u8])
+                        .any(|(seen, want)| seen.abs_diff(want) > 3)
+                })
+                .take(5)
+                .collect();
+            assert!(
+                wrong.is_empty(),
+                "{picture}, frame {i}: the bar does not show at {wrong:?}"
+            );
+        }
+        assert!(hp.wall_ticks(OUTPUT) > ticks, "{picture}: it moved");
+        assert!(
+            hp.glass_blurs() > blurs,
+            "{picture}: the still copy was not taken again"
+        );
+        assert!(
+            partial > 10,
+            "{picture}: {partial} frames drew a part of the screen"
+        );
+    }
+    Ok(())
+}
+
 /// The aurora for the maintainer, written to `$HOCUS_SHOTS`: without a
 /// bar, a second apart; under the bar's glass (a clear surface stands for
 /// the shell's bar, so the glass shows alone); its still picture. Run by
