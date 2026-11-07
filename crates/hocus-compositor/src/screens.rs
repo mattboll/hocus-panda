@@ -513,6 +513,35 @@ impl State {
 
     /// Whether `rect`'s centre (a point's, for an empty one) is on a
     /// screen.
+    /// The pointer to the primary screen's middle as the screens light up,
+    /// until the user moves it: the session starts there, wherever the
+    /// display manager left it (its place is not handed over), never in a
+    /// screen's corner. And whenever the screens change with it outside
+    /// all of them.
+    pub(crate) fn pointer_onto_primary(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let at = pointer.current_location();
+        let off = !self.on_a_screen(Rect::new(at.x.floor() as i32, at.y.floor() as i32, 0, 0));
+        if self.pointer_placed && !off {
+            return;
+        }
+        let names: Vec<String> = self.space.outputs().map(Output::name).collect();
+        let primary =
+            crate::panel::primary(&names, &self.primary_wanted(), self.panel.home.as_deref());
+        let Some(geometry) = primary
+            .and_then(|name| self.space.outputs().find(|o| o.name() == name).cloned())
+            .and_then(|o| self.space.output_geometry(&o))
+        else {
+            return;
+        };
+        let (x, y) = rect_of(geometry).centre();
+        tracing::debug!(x, y, "the pointer to the primary screen's middle");
+        let time = self.input_time();
+        self.pointer_motion(Point::from((x, y)), time);
+    }
+
     fn on_a_screen(&self, rect: Rect) -> bool {
         let (x, y) = rect.centre();
         self.space.outputs().any(|o| {

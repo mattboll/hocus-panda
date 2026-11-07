@@ -812,6 +812,14 @@ s8a mockup, questions 12 to 15):
   layout's outer edges still stop it. This is a mouse's or a touchpad's
   motion; an absolute one (a tablet, a virtual machine's pointer) goes
   where it points.
+- **Where the pointer starts**: the display manager's place is not
+  handed over, so the session starts with the pointer in the primary
+  screen's middle, never in a screen's corner (where the overview's hot
+  corner is): as the screens light up it goes there, until the user first
+  moves it. Whenever the screens change with the pointer outside all of
+  them, it goes there too. A headless compositor keeps it where its tests
+  put it, from 0, 0; its hot corner only acts once the pointer has been
+  away (§12b).
 - **X11 applications** (question 15, A): XWayland's windows draw at 1;
   on a screen at 2 they are shown at their logical size, enlarged, a
   little soft. Their geometry is the same logical size on every screen.

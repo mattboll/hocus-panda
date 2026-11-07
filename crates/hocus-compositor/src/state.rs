@@ -168,6 +168,10 @@ pub struct State {
     pub moving: Option<WindowId>,
     /// The pointer and the overview's hot corners (#727).
     pub hot_corner: crate::hot_corner::HotCorner,
+    /// The user has moved the pointer (a device's motion; in a headless
+    /// compositor, from its start: tests put it where they want): screens
+    /// lit after no longer bring it to the primary screen's middle.
+    pub pointer_placed: bool,
     pub wobble: Option<(WindowId, Jelly)>,
     /// The cursor over a window's frame or grip, or during a grab: it
     /// wins over the client's.
@@ -439,6 +443,7 @@ impl State {
             seam_handle_id: Id::new(),
             moving: None,
             hot_corner: crate::hot_corner::HotCorner::default(),
+            pointer_placed: false,
             wobble: None,
             frame_cursor: None,
             last_grip_press: None,

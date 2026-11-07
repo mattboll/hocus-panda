@@ -1361,6 +1361,7 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
+        self.app.state.pointer_placed = true;
         let from = self
             .app
             .state
@@ -1948,6 +1949,12 @@ impl Headless {
                 (o.bar, o.output, o.desktop, middle)
             })
             .collect()
+    }
+
+    /// The pointer as a session finds it at its start, never moved by the
+    /// user: screens lit from now on bring it to the primary's middle.
+    pub fn pointer_unplaced(&mut self) {
+        self.app.state.pointer_placed = false;
     }
 
     /// The window a pointer's move is moving, if any.

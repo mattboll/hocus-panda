@@ -127,3 +127,30 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area))?;
     Ok(())
 }
+
+/// The pointer as a session starts: the display manager's place is not
+/// handed over, so as the screens light up it goes to the primary
+/// screen's middle, never left in a screen's corner, until the user moves
+/// it; screens lit after leave it where the user put it. A headless
+/// compositor keeps it at 0, 0 for its tests, as unplaced here.
+#[test]
+fn the_pointer_starts_in_the_primary_screens_middle_until_moved() -> anyhow::Result<()> {
+    let mut hp = common::compositor()?;
+    assert_eq!(hp.pointer(), (0.0, 0.0));
+    hp.pointer_unplaced();
+    hp.plug_screen(
+        "HEADLESS-2",
+        hocus_compositor::OutputSpec::new(2560, 1440),
+        None,
+    )?;
+    // The first screen is the primary one (its bar's).
+    assert_eq!(hp.pointer(), (960.0, 540.0));
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // Moved by the user: a screen lit after leaves it there.
+    hp.pointer_move(100.0, 120.0);
+    hp.unplug("HEADLESS-2")?;
+    hp.plug("HEADLESS-2")?;
+    assert_eq!(hp.pointer(), (100.0, 120.0));
+    Ok(())
+}

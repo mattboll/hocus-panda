@@ -1027,6 +1027,7 @@ impl State {
             self.output_back(output, false);
         }
         self.panel_refresh();
+        self.pointer_onto_primary();
         self.rearrange();
         self.note_screen_set();
         self.redraw = true;

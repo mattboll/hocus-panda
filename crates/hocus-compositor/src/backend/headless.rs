@@ -284,6 +284,8 @@ where
         specs: &[OutputSpec],
         state: &mut State,
     ) -> anyhow::Result<Self> {
+        // Tests put the pointer where they want, from 0, 0.
+        state.pointer_placed = true;
         let mut outputs = Self {
             renderer,
             format,

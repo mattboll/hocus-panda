@@ -460,6 +460,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        self.pointer_placed = true;
         let from = pointer.current_location();
         let to = self.onto_outputs(from, from + event.delta());
         // Games and 3D tools read the motion itself (relative-pointer).
@@ -485,6 +486,7 @@ impl State {
         let Some(location) = self.absolute_location::<I>(event) else {
             return;
         };
+        self.pointer_placed = true;
         self.pointer_motion(location, event.time_msec());
     }
 
