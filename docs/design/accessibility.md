@@ -4,6 +4,12 @@ Sizes are logical pixels. Each part is its own issue; this file gathers
 what the desktop does for whoever needs to see larger, read without
 seeing, work without a mouse, or see clearer.
 
+## Screen readers (#421)
+
+What a screen reader reads of the bar, its popovers, the bubbles, the
+lock and the password dialog, and what it hears on its own: in
+[screen-reader.md](screen-reader.md).
+
 ## The magnifier (#424)
 
 Status: approved 2026-11 with the mockup's recommended options (full
