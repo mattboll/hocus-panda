@@ -51,7 +51,9 @@ calculation, the web), the palette acts on what is open.
   family), or for a switch its state ("activé" in green / "désactivé"),
   or for an inert action its reason (italic, 12.5 px).
 - **The selected row**: the launcher's green border and tint
-  (`rgba(108,194,135,.6)` / `.14`). The first row is selected.
+  (`rgba(108,194,135,.6)` / `.14`). The first row that can run is
+  selected as the list opens and as the query changes, past inert ones;
+  the arrows still go over inert rows (`Enter` on one does nothing).
 - Nine rows' room at most; the list scrolls past that (a 3 px scroll
   mark). A footer line (12 px, `#7C8698`) under a rule says how many
   actions match and the keys.

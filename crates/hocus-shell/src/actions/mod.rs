@@ -226,10 +226,10 @@ impl Open {
     /// The first row the selection goes to.
     fn first(&self) -> usize {
         let selectable = |r: &Row| r.selectable();
-        // In a step, the first target that can be picked.
+        // The first row that can run; an inert one only when none can.
         self.rows
             .iter()
-            .position(|r| selectable(r) && (self.step.is_none() || r.inert().is_none()))
+            .position(|r| selectable(r) && r.inert().is_none())
             .or_else(|| self.rows.iter().position(selectable))
             .unwrap_or(0)
     }
