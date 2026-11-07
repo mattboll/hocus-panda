@@ -808,10 +808,12 @@ impl State {
             return Some(FilterResult::Intercept(Kept::Vt(vt)));
         }
         let shortcuts = &self.config.shortcuts;
+        // The levels' keys and the magnifier's (#424) work locked.
         let level = keysym
             .raw_latin_sym_or_raw_current_sym()
             .and_then(|key| shortcuts.action(mods, key, self.nested))
-            .filter(|(action, _)| matches!(action, crate::Action::Level(_)));
+            .filter(|(action, _)| matches!(action, crate::Action::Level(_)))
+            .or_else(|| self.magnifier_chord(mods, keysym));
         if let Some((action, chord)) = level {
             self.kept_keys.insert(code);
             return Some(FilterResult::Intercept(Kept::Shortcut(action, chord)));

@@ -811,6 +811,8 @@ impl State {
                 // click (6.4's page).
                 "bar": self.panel.bars.get(&name).map(|b| b.form.name()),
                 "bar_chosen": self.panel.chosen(&name).map(hocus_link::Form::name),
+                // The magnifier on it (#424): its zoom and view, or null.
+                "magnifier": self.magnifier_json(&name),
             }));
         }
         for gone in &self.displays.gone {

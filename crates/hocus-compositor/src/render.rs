@@ -96,6 +96,8 @@ render_elements! {
     Ink = crate::ink::InkElement<R>,
     /// A half of the lock opening (7.1).
     Part = Keyed<RelocateRenderElement<CropRenderElement<WaylandSurfaceRenderElement<R>>>>,
+    /// The screen's picture seen through the magnifier's view (#424).
+    Zoom = crate::magnifier::draw::ZoomElement<<R as RendererSuper>::TextureId>,
 }
 
 /// What an output's elements are drawn for.

@@ -43,6 +43,7 @@ mod leave;
 mod levels;
 pub mod lock;
 mod magnet;
+mod magnifier;
 pub mod model;
 pub mod motion;
 mod output_spec;
@@ -91,11 +92,12 @@ pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
     Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
-    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
-    HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
-    Overview as OverviewSettings, PanelScreens, PeekRule, Power as PowerSettings, PowerAc,
-    PowerBattery, PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet,
-    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Windows,
+    Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FollowPointer,
+    FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings,
+    OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings, PanelScreens,
+    PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
+    Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
+    SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -259,6 +261,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
         reload::start(&event_loop.handle(), &file, &state.config);
     }
     let backend = Backend::init(&options.backend, &event_loop.handle(), &mut state)?;
+    // On from the start when `[magnifier]` says so (#424), its screens
+    // known now.
+    state.magnifier_start();
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());

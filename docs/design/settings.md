@@ -970,6 +970,10 @@ window is the preview.
 | | Date | menu, each choice with today's date beside it: "En toutes lettres" (jeudi 5 novembre), "Abrégée" (jeu. 5 nov.), "En chiffres" (05/11/2026), "Année d'abord" (2026-11-05) | `[locale] date = "long" \| "short" \| "numeric" \| "iso"` |
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
 | | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
+| LOUPE (until the Accessibilité page, which takes it) | Loupe | switch | `[magnifier] enabled` ([accessibility.md](accessibility.md)) |
+| | Zoom | menu "×1,5" to "×16", the keys' steps | `[magnifier] zoom` (1 to 16) |
+| | La vue suit le pointeur | menu "Au bord", "Au centre", "Proportionnellement" | `[magnifier] follow-pointer = "edge" \| "centre" \| "proportional"` |
+| | Suivre le clavier, Lissage | switches | `[magnifier] follow-keyboard`, `smooth` |
 
 - **The keyboard**: 6.1's; the segmented controls and the swatches move
   and choose with `←` and `→`; the link opens with `Enter`.
