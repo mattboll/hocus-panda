@@ -256,6 +256,8 @@ impl State {
                 visual.size = visual.size.upscale(k);
             }
         }
+        // Its own opacity (#735), the frame and the shadow with it.
+        alpha *= f32::from(managed.opacity) / 100.0;
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
         // A client drawing its own shadow (a floating GTK window) keeps it:
@@ -750,6 +752,10 @@ impl State {
         self.ink_elements(renderer, output, now, &mut elements);
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
+        // A window's opacity changing: its percentage (#735).
+        if purpose.screen() {
+            self.opacity_elements(renderer, output, &mut elements);
+        }
         // The launcher's toast over the launcher fading out; never in a
         // capture.
         if purpose.screen() {

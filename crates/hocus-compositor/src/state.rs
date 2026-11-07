@@ -240,6 +240,8 @@ pub struct State {
     pub radial_paint: crate::radial_draw::RadialPaint,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
+    /// The windows' opacity's wheel and its pill (#735).
+    pub opacity: crate::opacity::Opacity,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -483,6 +485,7 @@ impl State {
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             magnifier: crate::magnifier::Magnifier::default(),
+            opacity: crate::opacity::Opacity::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             xwm: None,

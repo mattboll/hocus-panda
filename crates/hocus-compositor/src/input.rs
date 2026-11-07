@@ -1029,10 +1029,11 @@ impl State {
     }
 
     /// A scroll, from a device or a test: `Super` held, the magnifier's
-    /// zoom (#424); else to the client under the pointer.
+    /// zoom (#424); `Super`+`Alt`, the opacity of the window under the
+    /// pointer (#735); else to the client under the pointer.
     pub fn pointer_axis(&mut self, frame: AxisFrame) {
         let vertical = frame.axis.1;
-        if self.magnifier_scroll(vertical) {
+        if self.magnifier_scroll(vertical) || self.opacity_scroll(vertical) {
             return;
         }
         if let Some(pointer) = self.seat.get_pointer() {

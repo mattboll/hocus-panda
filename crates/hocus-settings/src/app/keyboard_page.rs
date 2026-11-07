@@ -1419,6 +1419,10 @@ impl App {
                 w("Super + clic droit glissé", "Super + right-drag"),
             ),
             (
+                w("Transparence d’une fenêtre", "Window opacity"),
+                w("Super + Alt + molette", "Super + Alt + wheel"),
+            ),
+            (
                 w("Changer de terminal virtuel", "Switch virtual terminal"),
                 w("Ctrl + Alt + F1 … F12", "Ctrl + Alt + F1 … F12"),
             ),

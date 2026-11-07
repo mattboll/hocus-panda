@@ -290,7 +290,10 @@
 # magnifier-off = "Super+Escape"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
-# resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
+# resizes it; Super+Alt and the wheel over a window make it more or less
+# transparent, by 10 % down to 20 % (kept while it is open, and in the
+# session restored); Ctrl+Alt+F1 to F12 switch to another virtual
+# terminal.
 
 # [capture]
 # Written by the Settings' Captures et presse-papiers page, every key

@@ -1684,6 +1684,16 @@ impl Headless {
         self.app.state.model.is_above(id)
     }
 
+    /// Window `id`'s opacity, in percent (#735).
+    pub fn opacity(&self, id: WindowId) -> u8 {
+        self.app.state.opacity_of(id)
+    }
+
+    /// The window whose opacity's pill shows, and its percentage.
+    pub fn opacity_pill(&self) -> Option<(WindowId, u8)> {
+        self.app.state.opacity_pill()
+    }
+
     /// The stack, bottom first.
     pub fn stack(&self) -> Vec<WindowId> {
         self.app.state.model.stack().to_vec()

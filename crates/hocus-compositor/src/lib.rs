@@ -46,6 +46,7 @@ mod magnet;
 mod magnifier;
 pub mod model;
 pub mod motion;
+mod opacity;
 mod output_spec;
 mod overlay;
 mod overview;

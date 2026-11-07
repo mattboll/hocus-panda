@@ -42,7 +42,45 @@ open on), agents' badges on windows (slice 3).
   with no padding keeps its first column.
 - A shadow: offset 0, 12 px down; blur 36 px; black at 35 % unfocused,
   45 % focused.
-- No transparency at any time, moving included.
+- No transparency at any time, moving included, unless the user asks
+  for it on a window (below).
+
+### A window's opacity (#735)
+
+The maintainer's idea, approved without a mockup (2026-11): `Super`+`Alt`
+and the wheel over a window make it more or less transparent.
+
+- **Steps**: 10 % a notch, wheel down more transparent, up more opaque;
+  from 100 % down to 20 %, a floor that keeps it visible. A touchpad's
+  two fingers count a notch every 15 px.
+- **Kept** per window for its life, and in the saved session (§14): it
+  comes back at the same opacity. Reduced transparency (accessibility,
+  A.3) does not block it: it is the user's own choice on that window.
+- **The pill**: while it changes, a pill in the window's middle says the
+  percentage ("70 %"), drawn as the magnifier's (accessibility.md): 32 px
+  high, dark at 94 %, a half-filled circle and the percentage in the
+  accent's light green; 2 s after the last notch it fades out in 120 ms
+  (at once with reduced motion). Never in a capture, a recording or a
+  share.
+- `Super` alone and the wheel stay the magnifier's. Holding `Super`+`Alt`
+  shows the laser ([ink.md](ink.md)): the first notch hides it until the
+  keys are let go, as a shortcut does. Over no window (the bar, the
+  desktop) or with the overview, the radial menu or Alt+Tab open, the
+  wheel does nothing.
+- Nested, `Super` is `Alt+Super` already, and `Alt+Super` and the wheel
+  is the magnifier's: no opacity wheel there.
+
+**As built.** `crates/hocus-compositor/src/opacity.rs` (the steps, the
+wheel, the pill); the window's `Look` takes its opacity, its frame and
+shadow with it, so the overview's thumbnails show it too; a capture of
+the window alone (`Alt+Print`) takes it opaque. A see-through window
+does not wobble while it moves (it is drawn rigid). The session file keeps `opacity = 60` for a window that
+is not opaque. Listed in the Settings' shortcuts sub-page, among the
+fixed ones ("Transparence d'une fenêtre", "Super + Alt + molette"), and
+in `packaging/config.toml`. Tests: `tests/window_opacity.rs` (the steps,
+the floor, the magnifier left to `Super`, the pill going, the pixels
+half see-through) and `tests/session_restore.rs` (kept across
+sessions).
 
 ## 4. Focus
 
@@ -1063,7 +1101,8 @@ the rules per application, `[[windows.rules]]` (§5);
 `[ink] enabled` turns drawing on the screen off; all followed as the
 file changes.
 
-Not configurable yet: `Super`+drag draws on the screen,
+Not configurable yet: `Super`+`Alt` and the wheel over a window change
+its opacity (§3, #735); `Super`+drag draws on the screen,
 `Super`+`Shift`+drag draws an arrow and `Super`+`Alt` held shows the
 laser (`Alt+Super` and `Alt+Super+Shift` drag nested; [ink.md](ink.md));
 `Ctrl+Alt+F1…F12` switch virtual terminals. The other sections' shortcuts join the table as
@@ -1103,8 +1142,8 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   app id, its screen by identity (§12) with that screen's size and work
   area, its desktop, where it floats (where it goes back to when it is
   snapped, maximised or fullscreen), its state, kept above, on all
-  desktops; the windows of one application in the order they opened. A
-  window waiting for a screen gone is saved where it was on that screen.
+  desktops, its opacity when it is not opaque (§3, #735); the windows of
+  one application in the order they opened. A window waiting for a screen gone is saved where it was on that screen.
   Never saved: dialogs, the Settings, the shell's own surfaces, windows
   whose application has no desktop entry.
 - **When**: 3 s after windows changed (opened, closed, moved, resized,
