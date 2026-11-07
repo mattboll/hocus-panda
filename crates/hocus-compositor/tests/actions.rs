@@ -474,7 +474,12 @@ fn typing_filters_enter_runs_on_the_target_and_the_recent_come_first() -> anyhow
     // overview by its keyword.
     let shows = bed.typed("bur")?;
     let listed = rows(&shows);
-    assert!(listed[0].starts_with('*'), "the first selected: {listed:?}");
+    // The first row that can run is selected, past an inert one.
+    assert!(
+        listed[0].starts_with("Bureau de gauche") && listed[0].contains("~ déjà le premier bureau"),
+        "{listed:?}"
+    );
+    assert!(listed[1].starts_with("*Bureau de droite"), "{listed:?}");
     assert!(
         listed
             .iter()
