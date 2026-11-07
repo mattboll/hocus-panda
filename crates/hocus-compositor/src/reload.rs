@@ -251,6 +251,14 @@ impl State {
             }
             followed.push("[windows] [ink]");
         }
+        // The overview's hot corner (#727): read as the pointer enters one.
+        if new.overview != self.config.overview {
+            self.config.overview = new.overview.clone();
+            if !self.config.overview.hot_corner {
+                self.hot_corner_off();
+            }
+            followed.push("[overview]");
+        }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {
             self.config.panel.windows = new.panel.windows;

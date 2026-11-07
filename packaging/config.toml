@@ -427,6 +427,13 @@
 #   size = "maximized"
 #   above = false
 
+# [overview]
+# The pointer held a moment (150 ms) in a screen's top-left corner opens
+# the overview, or closes it, as Super+W does; once each time it enters.
+# Not where the bar stands (on the left), nor where another screen touches
+# the corner, nor over a fullscreen window or while a button is held.
+# hot-corner = true
+
 # [ink]
 # Super+drag draws on the screen, Super+Shift+drag an arrow, Super+Alt
 # held shows a laser. Off, they do nothing and pass to the window.

@@ -735,6 +735,10 @@ impl App {
             vec![model_row(model::ALT_TAB_ROW)],
         ));
         page = page.push(group(
+            head(model::OVERVIEW.label.get(lang), None),
+            vec![model_row(model::HOT_CORNER)],
+        ));
+        page = page.push(group(
             head(model::DRAW.label.get(lang), None),
             vec![model_row(model::INK)],
         ));

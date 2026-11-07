@@ -570,6 +570,9 @@ impl State {
             }
             return;
         }
+        // A screen's top-left corner opens the overview, or closes it
+        // (#727): before the overview takes the pointer.
+        self.hot_corner_motion(location);
         // The overview open (8.5 A): no client sees the pointer but over
         // the bar.
         if !self.auth_holds() && self.overview_takes(location) {

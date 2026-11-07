@@ -38,6 +38,8 @@ pub struct Config {
     pub windows: Windows,
     /// Drawing on the screen (6.14, docs/design/ink.md).
     pub ink: Ink,
+    /// The overview's ways in (docs/design/windows.md §12b).
+    pub overview: Overview,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -1495,6 +1497,20 @@ impl Default for Ink {
     }
 }
 
+/// The overview, `[overview]` (docs/design/windows.md §12b).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Overview {
+    /// The pointer held in a screen's top-left corner opens it (#727).
+    pub hot_corner: bool,
+}
+
+impl Default for Overview {
+    fn default() -> Self {
+        Self { hot_corner: true }
+    }
+}
+
 /// One screen's settings, `[outputs.eDP-1]`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -2208,6 +2224,11 @@ mod tests {
         assert!(!set.windows.magnet && !set.windows.snap_by_drag && !set.windows.wobble);
         assert_eq!(set.windows.alt_tab, AltTab::Desktop);
         assert!(!set.ink.enabled);
+        // The overview's corner (#727): on unless said.
+        assert!(none.overview.hot_corner);
+        let off: Config = toml::from_str("[overview]\nhot-corner = false\n")?;
+        assert!(!off.overview.hot_corner);
+        assert!(toml::from_str::<Config>("[overview]\ncorner = true\n").is_err());
         for bad in [
             "move-modifier = \"ctrl\"",
             "alt-tab = \"some\"",
