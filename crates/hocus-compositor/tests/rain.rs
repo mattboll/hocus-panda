@@ -289,7 +289,7 @@ fn a_rain_costs_its_frames_on_its_screen_alone() -> anyhow::Result<()> {
 }
 
 #[test]
-fn the_frost_line_costs_the_rains_frames() -> anyhow::Result<()> {
+fn the_thawing_pane_costs_the_rains_frames() -> anyhow::Result<()> {
     costs(frosting())
 }
 
@@ -405,11 +405,11 @@ fn shots_of_the_rain() -> anyhow::Result<()> {
     shots(raining(), "rain")
 }
 
-/// The frost line's frames (#740), as the rain's.
+/// The thawing pane's frames (#740), on a window of text.
 #[test]
 #[ignore = "screenshots, by hand"]
-fn shots_of_the_frost_line() -> anyhow::Result<()> {
-    shots(frosting(), "frost")
+fn shots_of_the_thaw() -> anyhow::Result<()> {
+    shots(frosting(), "thaw")
 }
 
 fn shots(mut config: Config, name: &str) -> anyhow::Result<()> {
@@ -428,11 +428,9 @@ fn shots(mut config: Config, name: &str) -> anyhow::Result<()> {
     anyhow::ensure!(hp.renderer() == "gles", "no GLES here");
     common::at_rest(&mut hp)?;
     hp.hold_clock();
-    let shows = common::Shows::KdeDecorated {
+    let shows = common::Shows::Document {
         app_id: "test.shot",
         size: (640, 420),
-        server: false,
-        header: Some(0xff20_2733),
     };
     let (rect, client) = common::open_showing(&mut hp, "test.shot", shows)?;
     let crop = Some((
@@ -461,35 +459,107 @@ fn shots(mut config: Config, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// How many sampled pixels near the frame of `rect` (2 px out to 2 px in)
-/// show the frost line's ice, and how many of those just outside its
-/// corners its marks.
-fn ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> (usize, usize) {
-    let icy = |x: i32, y: i32| {
+/// Over `rect`'s inside, the share of pixels whose brightness against
+/// their right neighbour is ordered as in the checkered window (white and
+/// black squares of 3 px): 1 when nothing is displaced, whatever the veil;
+/// and the same within 3 px of its edges alone.
+fn steady(shot: &(i32, i32, Vec<u8>), rect: Rect) -> (f64, f64) {
+    let lum = |x: i32, y: i32| {
         let i = ((y * shot.0 + x) * 4) as usize;
-        let p = &shot.2[i..i + 4];
-        let (b, g, r) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
-        b > 180 && g > 170 && r > 120
+        u32::from(shot.2[i]) + u32::from(shot.2[i + 1]) + u32::from(shot.2[i + 2])
     };
-    let mut line = 0;
-    for x in (rect.x + 20..rect.x + rect.width - 20).step_by(4) {
-        line += usize::from((-1..=1).any(|d| icy(x, rect.y + d)));
-    }
-    let mut marks = 0;
-    for (cx, cy) in [
-        (rect.x - 4, rect.y - 4),
-        (rect.x + rect.width + 3, rect.y - 4),
-    ] {
-        for d in 2..8 {
-            let dx = if cx < rect.x { d } else { -d };
-            marks += usize::from(icy(cx + dx, cy) || icy(cx + dx, cy + 1));
+    let white = |dx: i32, dy: i32| (dx / 3 + dy / 3) % 2 == 0;
+    let (mut all, mut kept, mut edge, mut edge_kept) = (0u64, 0u64, 0u64, 0u64);
+    for dy in (1..rect.height - 1).step_by(2) {
+        for dx in 1..rect.width - 2 {
+            if white(dx, dy) == white(dx + 1, dy) {
+                continue;
+            }
+            let (x, y) = (rect.x + dx, rect.y + dy);
+            let ordered = (lum(x, y) > lum(x + 1, y)) == white(dx, dy);
+            let near = dx < 3 || dy < 3 || rect.width - dx < 4 || rect.height - dy < 4;
+            all += 1;
+            kept += u64::from(ordered);
+            if near {
+                edge += 1;
+                edge_kept += u64::from(ordered);
+            }
         }
     }
-    (line, marks)
+    (
+        kept as f64 / all.max(1) as f64,
+        edge_kept as f64 / edge.max(1) as f64,
+    )
+}
+
+/// Pixels of `rect` brighter, in a channel, than both the test window's
+/// and the ice's (`#DBF0FF`), by more than rounding.
+fn brighter_than_window_and_ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> usize {
+    let window = [
+        WINDOW_COLOUR & 0xff,
+        (WINDOW_COLOUR >> 8) & 0xff,
+        (WINDOW_COLOUR >> 16) & 0xff,
+    ]
+    .map(|v| v as i32);
+    let ice = [0xFF, 0xF0, 0xDB];
+    let mut over = 0;
+    for y in (rect.y + 2..rect.y + rect.height - 2).step_by(2) {
+        for x in (rect.x + 2..rect.x + rect.width - 2).step_by(2) {
+            let i = ((y * shot.0 + x) * 4) as usize;
+            let p = &shot.2[i..i + 3];
+            over += usize::from((0..3).any(|c| i32::from(p[c]) > window[c].max(ice[c]) + 3));
+        }
+    }
+    over
 }
 
 #[test]
-fn the_frost_line_traces_the_frame_then_the_pane_clears() -> anyhow::Result<()> {
+fn the_pane_thaws_its_text_steady_from_200_ms_its_edges_never_wavering() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
+    if hp.renderer() != "gles" {
+        eprintln!("no GLES here: the pane does not thaw");
+        return Ok(());
+    }
+    common::at_rest(&mut hp)?;
+    hp.hold_clock();
+    let shows = common::Shows::Checkered {
+        app_id: "test.thaw",
+        size: (600, 400),
+    };
+    let (rect, _client) = common::open_showing(&mut hp, "test.thaw", shows)?;
+    assert!(hp.raining("test.thaw"));
+    let mut seen = Vec::new();
+    let mut t = 0;
+    hp.step(Duration::ZERO)?;
+    while t <= 360 {
+        let shot = hp.screenshot(0)?;
+        seen.push((t, steady(&shot, rect)));
+        hp.step(Duration::from_millis(30))?;
+        t += 30;
+    }
+    eprintln!("{seen:?}");
+    for (t, (inside, edges)) in &seen {
+        if *t == 0 {
+            continue;
+        }
+        // The frame never wavers.
+        assert!(*edges > 0.99, "{t} ms: edges {edges}");
+        // The text is steady from 200 ms on.
+        if *t >= 210 {
+            assert!(*inside > 0.99, "{t} ms: {inside}");
+        }
+    }
+    // It did refract early on.
+    assert!(
+        seen.iter()
+            .any(|(t, (inside, _))| *t <= 120 && *inside < 0.97),
+        "{seen:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_pane_thaws_to_the_window_and_freezes_away_adding_nothing_brighter() -> anyhow::Result<()> {
     let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
     let gles = hp.renderer() == "gles";
     common::at_rest(&mut hp)?;
@@ -507,43 +577,36 @@ fn the_frost_line_traces_the_frame_then_the_pane_clears() -> anyhow::Result<()> 
         seen.push((
             at,
             shown(&shot, rect).0,
-            ice(&shot, rect),
             shown_as(&shot, rect, true).0,
+            brighter_than_window_and_ice(&shot, rect),
         ));
     }
     eprintln!("{}: {seen:?}", hp.renderer());
+    // Nothing at first, whole and untinted at 360 ms.
+    assert!(seen[0].1 < 0.01 && seen[0].2 < 0.01, "{seen:?}");
+    assert!(seen[4].1 > 0.99, "{seen:?}");
     if gles {
-        // Nothing at first; at 90 ms the marks and the line round the
-        // top, the window under its frost (not yet itself); whole and
-        // untinted at 360 ms, no line left.
-        assert!(seen[0].1 < 0.01 && seen[0].2.0 == 0, "{seen:?}");
-        assert!(
-            seen[1].2.0 > 50 && seen[1].2.1 > 0,
-            "line and marks: {seen:?}"
-        );
-        assert!(
-            seen[1].1 < 0.01 && seen[1].3 > 0.5,
-            "seen through frost at 90 ms: {seen:?}"
-        );
-        assert!(seen[4].1 > 0.99 && seen[4].2 == (0, 0), "{seen:?}");
-    } else {
-        assert!(seen[0].1 < 0.01 && seen[4].1 > 0.99, "{seen:?}");
+        // Seen through the ice at 90 ms: there, but not itself yet.
+        assert!(seen[1].1 < 0.5 && seen[1].2 > 0.5, "{seen:?}");
+        // No pattern brighter than the window and the ice.
+        assert!(seen.iter().all(|s| s.3 == 0), "{seen:?}");
     }
-    // Closing: shown at 0, gone at 300 ms.
+    // Closing: whole at 0, gone at 300 ms, nothing brighter meanwhile.
     let _ = client.commands.send(common::Command::Close);
     hp.dispatch_until(common::WAIT, |hp| hp.rains() == 1)?;
     hp.step(Duration::ZERO)?;
     let first = shown(&hp.screenshot(0)?, rect).0;
+    let mut brighter = 0;
     for _ in 0..18 {
         hp.step(STEP)?;
+        brighter += brighter_than_window_and_ice(&hp.screenshot(0)?, rect);
     }
-    let last = shown(&hp.screenshot(0)?, rect).0;
-    let (line, marks) = ice(&hp.screenshot(0)?, rect);
+    let last = shown_as(&hp.screenshot(0)?, rect, true).0;
     assert!(first > 0.95, "{first}");
-    assert!(
-        last < 0.01 && (line, marks) == (0, 0),
-        "{last} {line} {marks}"
-    );
+    assert!(last < 0.01, "{last}");
+    if gles {
+        assert_eq!(brighter, 0);
+    }
     Ok(())
 }
 

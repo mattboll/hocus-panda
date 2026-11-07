@@ -246,8 +246,8 @@ the glass's) and, where it draws there, on pixman.
 | 100 ms after its end | 0 frames | 0 |
 | Allocations on the loop | a whole rain ≤ the standard opening's + 50; none growing frame after frame | + 31 over 22 frames (the first one makes the picture), then 63 a frame, flat (its picture is drawn again only when the window commits) |
 
-The frost line (#740) is held to the same budgets
-(`the_frost_line_costs_the_rains_frames`): 22 frames to open, 19 to
+The thawing pane (#740) is held to the same budgets
+(`the_thawing_pane_costs_the_rains_frames`): 22 frames to open, 19 to
 close, none elsewhere, none 100 ms after.
 
 **A moving wallpaper** (`tests/moving_wallpaper.rs`):

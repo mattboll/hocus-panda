@@ -1536,8 +1536,8 @@ pub enum Animation {
     Standard,
     /// Columns of glyphs falling through the window (#432).
     Rain,
-    /// Givre's frost line (#740): corner marks, a line tracing the frame,
-    /// a frosted pane clearing.
+    /// Givre's thawing pane (#740): the window seen through ice thawing
+    /// to clear glass.
     Frost,
 }
 

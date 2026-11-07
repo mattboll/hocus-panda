@@ -1480,7 +1480,7 @@ row.
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
-| | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the frost line) | `[windows] animation = "standard" \| "rain" \| "frost"` |
+| | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the thawing pane) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
 | VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |

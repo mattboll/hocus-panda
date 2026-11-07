@@ -1119,7 +1119,7 @@ impl State {
             }
             let local = Rectangle::new(rect.loc - origin, rect.size);
             // Through its rain (#432), its last frame drawn once; a margin
-            // around it for the frost line's marks (#740).
+            // around it for the thawing pane (#740).
             if let Some(rain) = &leaving.rain {
                 let margin = match rain.style {
                     crate::rain::Style::Rain => 0.0,

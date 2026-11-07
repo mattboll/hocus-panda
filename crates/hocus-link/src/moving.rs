@@ -115,23 +115,24 @@ pub const fn rain_colours(_scheme: crate::theme::Scheme) -> RainColours {
     PHOSPHOR
 }
 
-/// The frost line's colours (#740), tokens a theme sets: the line
-/// tracing a window's frame, its four corner marks, the pane's icy tint.
+/// The thawing pane's colours (#740), tokens a theme sets: the ice's pale
+/// veil (no pixel of the motion is brighter than both it and the
+/// window), its fine cracks, and Givre's tint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FrostColours {
-    pub line: [u8; 3],
-    pub corner: [u8; 3],
+    pub ice: [u8; 3],
+    pub crack: [u8; 3],
     pub tint: [u8; 3],
 }
 
 /// Givre's ice.
 pub const FROST: FrostColours = FrostColours {
-    line: [0xEA, 0xF6, 0xFF],
-    corner: [0xBF, 0xEF, 0xFF],
+    ice: [0xDB, 0xF0, 0xFF],
+    crack: [0xEB, 0xFA, 0xFF],
     tint: [0x7F, 0xD8, 0xFF],
 };
 
-/// The frost line's colours in `scheme`: Givre's ice in every theme until
+/// The thawing pane's colours in `scheme`: Givre's ice in every theme until
 /// a theme gives its own.
 pub const fn frost_colours(_scheme: crate::theme::Scheme) -> FrostColours {
     FROST
