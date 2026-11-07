@@ -63,6 +63,7 @@ impl CompositorHandler for State {
             if let Some(window) = self.window_for(&root) {
                 window.on_commit();
                 self.window_commits += 1;
+                self.perf.counters.app_commit();
             }
         }
         xdg_shell::handle_commit(self, surface);

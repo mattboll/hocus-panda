@@ -94,6 +94,8 @@ impl State {
     /// left, and only then do clients learn that its global went
     /// (docs/design/windows.md §12, "What clients are told").
     pub fn unplug_output(&mut self, output: &Output, global: GlobalId) {
+        self.perf
+            .event(hocus_perf::EventKind::ScreenUnplugged, output.name());
         self.display_removed(output);
         self.output_gone(output, true);
         // Also when it had no place on the desktop, which `output_gone`
@@ -343,6 +345,10 @@ impl State {
     /// screen plugged, or the lid opened; not the file turning it on).
     pub fn output_back(&mut self, output: &Output, say: bool) {
         let name = output.name();
+        if say {
+            self.perf
+                .event(hocus_perf::EventKind::ScreenPlugged, name.clone());
+        }
         let key = self.screen_key(&name);
         let now = self.now();
         let reduced = self.reduced_motion();

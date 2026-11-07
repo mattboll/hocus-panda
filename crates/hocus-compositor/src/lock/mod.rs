@@ -381,6 +381,7 @@ impl State {
             },
             "the session locks"
         );
+        self.perf.event(hocus_perf::EventKind::Locked, "");
         // What takes input or shows over the desktop goes first, while it
         // can still say so to its clients; the session menu's confirmation
         // too (7.4).
@@ -486,6 +487,7 @@ impl State {
             return;
         };
         tracing::info!("the session unlocks");
+        self.perf.event(hocus_perf::EventKind::Unlocked, "");
         let mut locked = *locked;
         if let Step::Waiting {
             timer: Some(timer), ..

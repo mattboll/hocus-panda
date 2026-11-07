@@ -140,6 +140,8 @@ pub struct State {
     pub spawned_at: Option<Duration>,
     /// Commits of the windows' surfaces so far, for tests: none at rest.
     pub window_commits: u64,
+    /// The day's performance: what the loop counts, the recorder (#655).
+    pub perf: crate::perf::Perf,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
     /// xdg-foreign's handles and the dialogs made through them (#595).
@@ -436,6 +438,7 @@ impl State {
             activation_tokens: HashMap::new(),
             spawned_at: None,
             window_commits: 0,
+            perf: crate::perf::Perf::default(),
             activate_on_map: Vec::new(),
             foreign: crate::foreign::Foreign::default(),
             tray_click: None,

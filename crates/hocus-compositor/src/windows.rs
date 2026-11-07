@@ -490,6 +490,8 @@ impl State {
             return;
         };
         let app = app_id(&window).unwrap_or_default();
+        self.perf
+            .event(hocus_perf::EventKind::WindowOpened, app.clone());
         // Its application's rule (6.14, rules.rs): its size was in its
         // first configure, unless it asked for one.
         let rule = self.opening_rule(&window);
@@ -717,6 +719,10 @@ impl State {
         let Some(id) = self.id_of(window) else {
             return;
         };
+        self.perf.event(
+            hocus_perf::EventKind::WindowClosed,
+            app_id(window).unwrap_or_default(),
+        );
         self.leave(id, false);
         if let Some(app) = app_id(window)
             && let Some(rect) = self.rect_of(id)

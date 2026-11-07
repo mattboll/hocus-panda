@@ -308,8 +308,16 @@ impl State {
         if self.power_config_changed(&new) {
             followed.push("[idle] [power]");
         }
+        // The day's recording (#655): started or stopped.
+        if new.perf.record != self.config.perf.record {
+            self.config.perf.record = new.perf.record;
+            self.perf_follow();
+            followed.push("[perf]");
+        }
         if !followed.is_empty() {
             tracing::info!(?followed, "the configuration changed on disk");
+            self.perf
+                .event(hocus_perf::EventKind::Config, followed.join(" "));
         }
     }
 

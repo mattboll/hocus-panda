@@ -1713,6 +1713,8 @@ impl State {
                 Refresh::Fixed(Duration::from_secs_f64(1000.0 / f64::from(m.refresh)))
             });
         feedback.presented::<_, Monotonic>(time, refresh, seq, Kind::Vsync);
+        // Counted for the day's performance (#655).
+        self.perf_frame(output);
         // The lock on screen: what the machine waits for before it sleeps
         // (7.2).
         self.lock_presented_on(output);

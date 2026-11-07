@@ -39,6 +39,20 @@ const STACK: usize = 256 * 1024;
 /// not judged slow.
 const SETTLING: Duration = Duration::from_secs(30);
 
+/// The line the Settings say their page on, on the compositor's control
+/// socket: their process, and the page's name (none as they close).
+pub fn settings_line(pid: u32, page: &str) -> String {
+    let page: String = page.chars().filter(|c| !c.is_control()).collect();
+    format!("perf settings {pid} {page}")
+}
+
+/// What such a line says.
+pub fn settings_said(line: &str) -> Option<(u32, &str)> {
+    let rest = line.trim_end().strip_prefix("perf settings ")?;
+    let (pid, page) = rest.split_once(' ').unwrap_or((rest, ""));
+    Some((pid.parse().ok()?, page))
+}
+
 /// Now, in Unix seconds.
 pub fn unix_now() -> i64 {
     SystemTime::now()
@@ -464,6 +478,13 @@ fn run(setup: Setup, mut before: Taken, stopped: &mpsc::Receiver<()>) {
                     (now_ticks.saturating_sub(was) * tick_ms, kb)
                 }
                 None => {
+                    // The Settings closed: their process is not followed
+                    // any more (another may take its number).
+                    if let (Who::Settings, Some(pid)) = (who, pids[i]) {
+                        let _ = counters
+                            .settings_pid
+                            .compare_exchange(pid, 0, Relaxed, Relaxed);
+                    }
                     seen[i] = Seen::default();
                     (0, 0)
                 }
@@ -685,6 +706,15 @@ mod tests {
         drop(today);
         let again = Today::open(dir.path(), date).expect("opened");
         assert_eq!(again.notified, [SignalKind::Wakeups]);
+    }
+
+    #[test]
+    fn the_settings_line_goes_and_comes_back() {
+        let line = settings_line(4321, "Fond d’écran\n");
+        assert_eq!(line, "perf settings 4321 Fond d’écran");
+        assert_eq!(settings_said(&line), Some((4321, "Fond d’écran")));
+        assert_eq!(settings_said("perf settings 0"), Some((0, "")));
+        assert_eq!(settings_said("msg idle"), None);
     }
 
     #[test]

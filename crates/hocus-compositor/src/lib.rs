@@ -58,6 +58,7 @@ mod overview_draw;
 mod pandas;
 mod panel;
 pub mod peek;
+mod perf;
 mod popover;
 mod popups;
 mod programs;
@@ -102,9 +103,9 @@ pub use config::{
     Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FollowPointer,
     FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings,
     NightLight, OldKeys as OldPowerKeys, OpenSize, OutputSettings, Overview as OverviewSettings,
-    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
-    Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
-    SystemKeyboard, Windows,
+    PanelScreens, PeekRule, Perf as PerfSettings, Power as PowerSettings, PowerAc, PowerBattery,
+    PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings,
+    SetScreen, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -267,6 +268,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
+    // The day recorded off the loop (#655), the shell's process known.
+    state.perf_follow();
     wallpaper::start(&event_loop.handle(), &mut state);
     if let Some(file) = state.config.file.clone() {
         reload::start(&event_loop.handle(), &file, &state.config);
@@ -373,6 +376,7 @@ impl App {
     /// After each turn of the loop: draws what changed, and sends what
     /// clients were told.
     fn after_dispatch(&mut self) {
+        let started = std::time::Instant::now();
         let Self { state, backend } = self;
         // Motions under way ask for the next frame.
         state.tick();
@@ -404,5 +408,7 @@ impl App {
         if let Err(err) = state.display_handle.flush_clients() {
             tracing::warn!(%err, "could not flush the clients");
         }
+        // A wakeup, and what its turn's work took (#655).
+        state.perf.counters.turn(started.elapsed());
     }
 }
