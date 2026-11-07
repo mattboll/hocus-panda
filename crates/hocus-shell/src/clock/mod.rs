@@ -306,12 +306,10 @@ impl<Message> canvas::Program<Message> for Clock {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        if let Some(colour) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), colour);
-        }
+        let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         item::draw(self, state, &mut frame, bounds.size());
         let Some(shown) = &state.shown else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         // The bar's inside, less its rim, in the surface's coordinates.
         let right = self.surface_width;
@@ -342,7 +340,7 @@ impl<Message> canvas::Program<Message> for Clock {
                 Form::Mini => self.draw_mini(&mut draw, state, shown, centre, alpha),
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 }
 

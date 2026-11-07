@@ -30,6 +30,7 @@ mod a11y;
 mod actions;
 mod agents;
 mod auth;
+mod backdrop;
 mod bluetooth;
 mod capture;
 mod clipboard;

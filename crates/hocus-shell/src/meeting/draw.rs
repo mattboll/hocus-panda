@@ -368,11 +368,9 @@ impl canvas::Program<Message> for View {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
-        if let Some(backdrop) = self.backdrop {
-            frame.fill_rectangle(Point::ORIGIN, size, backdrop);
-        }
+        let under = crate::backdrop::under(renderer, size, self.backdrop);
         let Some(card) = super::snapshot() else {
-            return vec![frame.into_geometry()];
+            return crate::backdrop::over(under, frame);
         };
         let parts = self.parts(size, &card);
         let items = parts
@@ -459,7 +457,7 @@ impl canvas::Program<Message> for View {
                 *kept = Some(said);
             }
         }
-        vec![frame.into_geometry()]
+        crate::backdrop::over(under, frame)
     }
 
     fn mouse_interaction(
