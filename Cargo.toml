@@ -40,3 +40,5 @@ debug-assertions = false
 # (`iced_tiny_skia::draw_whole_frames`, #662): the Settings do.
 [patch.crates-io]
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
+# The shell named "Hocuspanda" on AT-SPI (#734).
+accesskit_unix = { path = "vendor/accesskit_unix" }

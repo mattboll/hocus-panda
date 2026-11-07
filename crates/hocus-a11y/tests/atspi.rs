@@ -136,7 +136,7 @@ while app is None and time.time() < deadline:
     desktop = Atspi.get_desktop(0)
     for i in range(desktop.get_child_count()):
         a = desktop.get_child_at_index(i)
-        if a is not None and (a.get_name() or '').startswith(app_name) and a.get_child_count() >= 4:
+        if a is not None and (a.get_name() or '') == app_name and a.get_child_count() >= 4:
             app = a
     if app is None:
         time.sleep(0.1)
@@ -377,13 +377,9 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
     let shown = wait_for(&said, "shown").expect("the program heard nobody listen");
     assert_ne!(shown, "shown 0", "no tree built");
 
-    let app = exe
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.chars().take(5).collect::<String>())
-        .expect("its name");
+    // Named as the bridge names it, not after its program.
     let read = private("python3", &dir, &bus)
-        .args(["-I", "-c", READER, &app])
+        .args(["-I", "-c", READER, "Hocuspanda"])
         .output()
         .expect("the reader");
     let tree = String::from_utf8_lossy(&read.stdout).into_owned();
@@ -398,6 +394,7 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
             "no line starting {line:?} in:\n{tree}"
         );
     };
+    has("application | Hocuspanda");
     has("frame | Barre — eDP-1");
     has("panel | Bureaux");
     has("button | 14 h 32, jeudi 6 novembre |");
