@@ -244,17 +244,21 @@ the glass's) and, where it draws there, on pixman.
 | Frames to close, on its screen | ≤ ⌈0.30 × refresh⌉ + 1 (19) | 19 |
 | On the other screen | 0 | 0 |
 | 100 ms after its end | 0 frames | 0 |
-| Allocations on the loop | a whole rain ≤ the standard opening's + 50; none growing frame after frame | 71 a frame against the standard's 80 (its picture is drawn again only when the window commits) |
+| Allocations on the loop | a whole rain ≤ the standard opening's + 50; none growing frame after frame | + 31 over 22 frames (the first one makes the picture), then 63 a frame, flat (its picture is drawn again only when the window commits) |
+
+The frost line (#740) is held to the same budgets
+(`the_frost_line_costs_the_rains_frames`): 22 frames to open, 19 to
+close, none elsewhere, none 100 ms after.
 
 **A moving wallpaper** (`tests/moving_wallpaper.rs`):
 
 | Budget | Gate | Measured |
 |---|---|---|
-| Visible 60 s: frames on its screen | rain ≤ 902, stars ≤ 1 202; on battery ≤ 482 / 602 | 900, 1 200; 450, 600 |
+| Visible 60 s: frames on its screen | rain ≤ 902, stars ≤ 1 202, aurora ≤ 602; on battery ≤ 482 / 602 / 302 | 900, 1 200, 600; 450, 600, 300 |
 | Covered (≥ 90 %) 60 s | 0 frames, 0 of its own, 0 wakes | 0, 0, 0 |
 | Another screen covered | 0 frames there | 0 |
 | The bar's glass over it, 60 s | 0 blurs after the first | 0 |
-| Allocations a frame, over a turn of the loop at rest | ≤ 30, none growing over the minute | 29 to 30 (most are smithay's drawing of a frame and the loop's timer) |
+| Allocations a frame, over a turn of the loop at rest | ≤ 30 at most, the last minutes' mean no higher than the first's | 24 to 25 at most, 14 on average, flat (one timer for the wallpapers, set again by itself, never inserted per frame) |
 | Reduced motion, power saver, `animate = false`, battery "still", locked, fullscreen, 2 min without input | no frame of its own | none |
 | Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
 | Memory | the atlas ≤ 256 KB a scale; no screen-sized buffer more | 16 KB for every scale; on GLES the wallpaper thread's still picture is not even drawn (the shader draws into the screen's frame) |
