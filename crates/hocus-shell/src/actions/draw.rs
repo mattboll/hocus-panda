@@ -1303,11 +1303,11 @@ fn panda(state: &str) -> &'static svg::Handle {
     static PANDAS: OnceLock<[svg::Handle; 5]> = OnceLock::new();
     let pandas = PANDAS.get_or_init(|| {
         [
-            include_bytes!("../../assets/pandas/waiting.svg").as_slice(),
-            include_bytes!("../../assets/pandas/stuck.svg").as_slice(),
-            include_bytes!("../../assets/pandas/done.svg").as_slice(),
-            include_bytes!("../../assets/pandas/working.svg").as_slice(),
-            include_bytes!("../../assets/pandas/resting.svg").as_slice(),
+            hocus_pandas::Mood::Waiting.still().as_bytes(),
+            hocus_pandas::Mood::Stuck.still().as_bytes(),
+            hocus_pandas::Mood::Done.still().as_bytes(),
+            hocus_pandas::Mood::Working.still().as_bytes(),
+            hocus_pandas::Mood::Resting.still().as_bytes(),
         ]
         .map(svg::Handle::from_memory)
     });
