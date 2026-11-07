@@ -779,6 +779,40 @@ impl State {
             .then_some(id)
     }
 
+    /// After each turn of the loop (#737): what is under the pointer may
+    /// have changed without it moving (a window raised or focused by the
+    /// keyboard, Alt+Tab, a desktop switched, a window mapped, closed or
+    /// moved, the overview or a menu closing). The pointer's focus follows
+    /// at once, with a motion at the same place: the next wheel, press or
+    /// key goes to what shows under it, not to what was there. Nothing
+    /// while something of the desktop's own holds the pointer (the radial
+    /// menu, the overview, the capture, the authentication dialog, the
+    /// share's chooser), which pointer motion handles itself, nor over the
+    /// shell's surfaces above the windows.
+    pub(crate) fn pointer_after_turn(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let at = pointer.current_location();
+        if self.radial.is_some()
+            || self.overview_takes(at)
+            || self.capture_choosing()
+            || self.auth_keeps_pointer(at)
+            || self.share_keeps_pointer(at)
+            // The shell's surfaces above the windows (the launcher, a
+            // popover, the bar) take the pointer as it moves: one coming
+            // under a still pointer does not take it (its hover would
+            // choose what the keyboard chooses).
+            || self
+                .layer_surface_under(at, crate::handlers::layer_shell::Stand::Above)
+                .is_some()
+        {
+            return;
+        }
+        let time = u32::try_from(self.now().as_millis() % u128::from(u32::MAX)).unwrap_or(0);
+        self.pointer_refocus(time);
+    }
+
     /// The pointer's focus to what is under it now, if that is no longer
     /// what has it: a surface came, went or moved under the pointer since
     /// it last moved, and a press would go to what was there, not to what

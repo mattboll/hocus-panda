@@ -390,6 +390,9 @@ impl App {
         // The screens' settings (6.9): the layout applied when it was
         // asked, then the Settings told what changed.
         state.displays_after_turn(backend);
+        // What is under the pointer, if this turn changed it without the
+        // pointer moving (#737).
+        state.pointer_after_turn();
         backend.after_dispatch(state);
         state.space.refresh();
         state.popups.cleanup();

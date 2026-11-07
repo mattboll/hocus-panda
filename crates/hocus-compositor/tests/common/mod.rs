@@ -551,6 +551,8 @@ pub enum Pointed {
     Motion,
     Press,
     Release,
+    /// The wheel (or a touchpad's scroll).
+    Axis,
 }
 
 /// A client running on its thread.
@@ -1301,7 +1303,7 @@ impl PointerHandler for Client {
                     PointerEventKind::Motion { .. } => Some(Pointed::Motion),
                     PointerEventKind::Press { .. } => Some(Pointed::Press),
                     PointerEventKind::Release { .. } => Some(Pointed::Release),
-                    _ => None,
+                    PointerEventKind::Axis { .. } => Some(Pointed::Axis),
                 };
                 if let Some(pointed) = pointed {
                     let _ = self.events.send(Event::Pointer(pointed));
