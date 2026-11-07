@@ -16,7 +16,7 @@ use std::{io::Write, os::unix::net::UnixStream, path::Path, time::Duration};
 use common::{
     BTN_LEFT, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, WAIT, chord, open, two_screens, wait,
 };
-use hocus_compositor::{Headless, model::Rect};
+use hocus_compositor::{Headless, hot_corner, model::Rect};
 
 const FIRST: &str = "HEADLESS-1";
 const SECOND: &str = "HEADLESS-2";
@@ -449,5 +449,133 @@ fn at_rest_the_open_overview_draws_nothing() -> anyhow::Result<()> {
     wait(&mut hp, Duration::from_millis(500))?;
     assert_eq!(hp.frames(), frames, "frames drawn at rest");
     assert_eq!(hp.overview(), Some(true));
+    Ok(())
+}
+
+// --- The hot corner (#727) ---------------------------------------------------
+
+/// Two screens as `start`'s, the configuration `toml` says; the pointer in
+/// the first's middle.
+fn with_config(toml: &str) -> anyhow::Result<Headless> {
+    let config: hocus_compositor::Config = toml::from_str(toml)?;
+    let mut hp = Headless::start_with(
+        hocus_compositor::HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?, "2560x1440".parse()?],
+            renderer: hocus_compositor::RendererChoice::Pixman,
+            ..hocus_compositor::HeadlessConfig::default()
+        },
+        config,
+    )?;
+    hp.pointer_move(960.0, 540.0);
+    open(&mut hp, "test.left", (700, 500))?;
+    Ok(hp)
+}
+
+/// The pointer into the first screen's top-left corner, as pushed there.
+fn into_the_corner(hp: &mut Headless) {
+    hp.pointer_move(40.0, 30.0);
+    hp.pointer_move(0.0, 0.0);
+}
+
+/// Waits until the overview is open.
+fn open_now(hp: &mut Headless) -> anyhow::Result<()> {
+    let open = hp.dispatch_until(WAIT, |hp| hp.overview() == Some(true))?;
+    anyhow::ensure!(open, "the overview never opened");
+    Ok(())
+}
+
+/// Held there 150 ms, the pointer opens the overview (#727); only passing,
+/// nothing. Once per entry: staying, or coming back without going 8 px
+/// away, does nothing more; left and entered again, it closes, as
+/// `Super+W` again does.
+#[test]
+fn the_top_left_corner_opens_it_after_a_short_rest_once_per_entry() -> anyhow::Result<()> {
+    let mut hp = start()?;
+    // Passing through: shorter than the rest (unless the machine held
+    // the test longer than it, which proves nothing either way).
+    let entered = std::time::Instant::now();
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(40))?;
+    let passed = entered.elapsed() < hot_corner::DWELL;
+    hp.pointer_move(300.0, 200.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    if passed {
+        assert_eq!(hp.overview(), None, "open as the pointer passed");
+    } else {
+        hp.key(KEY_ESC, true);
+        hp.key(KEY_ESC, false);
+        hp.dispatch_until(WAIT, |hp| hp.overview().is_none())?;
+    }
+    // Held: open, not before the rest's end.
+    let entered = std::time::Instant::now();
+    into_the_corner(&mut hp);
+    open_now(&mut hp)?;
+    assert!(entered.elapsed() >= hot_corner::DWELL, "open at once");
+    // Staying, or back from 5 px away: still open.
+    wait(&mut hp, Duration::from_millis(400))?;
+    hp.pointer_move(5.0, 5.0);
+    hp.pointer_move(0.0, 0.0);
+    wait(&mut hp, Duration::from_millis(400))?;
+    assert_eq!(hp.overview(), Some(true));
+    // Away, and in again: it closes.
+    hp.pointer_move(400.0, 300.0);
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(200))?;
+    closed(&mut hp)?;
+    Ok(())
+}
+
+/// Only where the pointer stops, and when it may act: not at the second
+/// screen's corner, which the first screen's top-right touches; not while
+/// a button is held (entered so, it waits to be left); not over a
+/// fullscreen window; not where the bar stands (on the left); not with
+/// `[overview] hot-corner = false`. With reduced motion it opens, fading.
+#[test]
+fn the_corner_acts_only_where_the_pointer_stops_and_when_on() -> anyhow::Result<()> {
+    let mut hp = start()?;
+    // The second screen's corner: the pointer goes on to the first.
+    hp.pointer_move(1960.0, 30.0);
+    hp.pointer_move(1920.0, 0.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // A button held, from the desktop's middle to the corner, let go there.
+    hp.pointer_move(960.0, 900.0);
+    hp.button(BTN_LEFT, true);
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(300))?;
+    hp.button(BTN_LEFT, false);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // A fullscreen window on the screen.
+    hp.pointer_move(960.0, 540.0);
+    let (_, client) = common::open_with(&mut hp, "test.full", (600, 400), false)?;
+    client.commands.send(common::Command::Fullscreen(true))?;
+    let full = hp.dispatch_until(WAIT, |hp| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some("test.full") && w.rect.width == 1920)
+    })?;
+    anyhow::ensure!(full, "never fullscreen");
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // As configured by default, it opens.
+    let mut hp = with_config("")?;
+    into_the_corner(&mut hp);
+    open_now(&mut hp)?;
+    // The bar on the left, its own corner.
+    let mut hp = with_config("[panel]\nside = \"left\"\n")?;
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // Off.
+    let mut hp = with_config("[overview]\nhot-corner = false\n")?;
+    into_the_corner(&mut hp);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    // Reduced motion: it opens all the same.
+    let mut hp = with_config("[appearance]\nreduced-motion = true\n")?;
+    into_the_corner(&mut hp);
+    open_now(&mut hp)?;
     Ok(())
 }

@@ -166,6 +166,8 @@ pub struct State {
     pub seam_handle_id: Id,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
+    /// The pointer and the overview's hot corners (#727).
+    pub hot_corner: crate::hot_corner::HotCorner,
     pub wobble: Option<(WindowId, Jelly)>,
     /// The cursor over a window's frame or grip, or during a grab: it
     /// wins over the client's.
@@ -436,6 +438,7 @@ impl State {
             seam_handle: None,
             seam_handle_id: Id::new(),
             moving: None,
+            hot_corner: crate::hot_corner::HotCorner::default(),
             wobble: None,
             frame_cursor: None,
             last_grip_press: None,

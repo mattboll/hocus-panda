@@ -32,6 +32,7 @@ mod grip_tone;
 pub mod halo;
 mod handlers;
 mod harness;
+pub mod hot_corner;
 pub mod idle;
 mod ink;
 mod input;
@@ -92,9 +93,9 @@ pub use config::{
     Agents as AgentsSettings, AltTab, Appearance, Capture as CaptureSettings, CaptureFormat,
     Clipboard as ClipboardSettings, Config, Delay as PowerDelay, Desktops, DragKey, FormChoice,
     HaloRule, Idle as IdleSettings, Ink, Lid, OldKeys as OldPowerKeys, OpenSize, OutputSettings,
-    PanelScreens, PeekRule, Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording,
-    Remind, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
-    SystemKeyboard, Windows,
+    Overview as OverviewSettings, PanelScreens, PeekRule, Power as PowerSettings, PowerAc,
+    PowerBattery, PowerButton, Recording, Remind, Rule as WindowRule, ScaleFrom, ScreenSet,
+    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.

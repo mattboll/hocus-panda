@@ -682,6 +682,200 @@ fn a_window_let_go_on_a_tile_goes_to_that_desktop() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// With `HOCUS_SHOTS` naming a folder: `rect` of the screen, as
+/// `WHAT.png`.
+fn shot(hp: &mut Headless, what: &str, rect: Rect) -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
+        return Ok(());
+    };
+    common::at_rest(hp)?;
+    let (width, _, bytes) = hp.screenshot(0)?;
+    let mut image = image::RgbaImage::new(rect.width as u32, rect.height as u32);
+    for y in 0..rect.height {
+        for x in 0..rect.width {
+            let at = usize::try_from((rect.y + y) * width + rect.x + x)? * 4;
+            let p = &bytes[at..at + 4];
+            image.put_pixel(x as u32, y as u32, image::Rgba([p[2], p[1], p[0], 255]));
+        }
+    }
+    image.save(Path::new(&folder).join(format!("{what}.png")))?;
+    Ok(())
+}
+
+/// A right click on a window's line in the bar opens its menu with its
+/// top on that line's (#726), as on a laptop: the levels under the tiles
+/// and nine desktops' three rows of them lift the lines high enough for
+/// the menu to hang from either whole. The first build sent it to the
+/// bar's foot whatever the line.
+#[test]
+fn a_windows_menu_opens_with_its_top_on_its_line() -> anyhow::Result<()> {
+    const BTN_RIGHT: u32 = 0x111;
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        Setup {
+            count: 9,
+            ..Setup::default()
+        },
+    )?;
+    let _first = bed.open_titled("test.first", "Premier", (600, 400))?;
+    let _second = bed.open_titled("test.second", "Second", (600, 400))?;
+    bed.settle()?;
+    let ids: Vec<u64> = ["test.second", "test.first"]
+        .iter()
+        .map(|app| {
+            bed.hp
+                .windows()
+                .into_iter()
+                .find(|w| w.app_id.as_deref() == Some(*app))
+                .map(|w| w.id.0)
+                .ok_or_else(|| anyhow::anyhow!("no {app}"))
+        })
+        .collect::<anyhow::Result<_>>()?;
+    let mut tops = Vec::new();
+    for id in ids {
+        // The line's middle as the shell said it, in the bar's frame (its
+        // right edge, 8 px down).
+        let item = format!("Window({id})@");
+        let log = bed.log.clone();
+        let said = |text: &str| {
+            text.lines()
+                .rev()
+                .find(|l| l.contains("the windows are drawn at rest") && l.contains(&item))
+                .and_then(|l| {
+                    l.split(&item)
+                        .nth(1)?
+                        .split_whitespace()
+                        .next()
+                        .map(str::to_owned)
+                })
+        };
+        let found = bed
+            .hp
+            .dispatch_until(WAIT, |_| said(&plain(&log)).is_some())?;
+        anyhow::ensure!(found, "no line for window {id}");
+        let at = said(&plain(&log)).unwrap_or_default();
+        let (x, y) = at
+            .split_once(',')
+            .ok_or_else(|| anyhow::anyhow!("no place in {at:?}"))?;
+        let (x, y) = (1920.0 - 8.0 + x.parse::<f64>()?, 8.0 + y.parse::<f64>()?);
+        let line = (y - 15.0).round() as i32;
+        let mark = bed.mark();
+        common::over(&mut bed.hp, (x, y), hocus_link::WINDOWS_NAMESPACE)?;
+        bed.hp.button(BTN_RIGHT, true);
+        bed.hp.button(BTN_RIGHT, false);
+        bed.logged_after(mark, &format!("the window's menu shows it: window={id} "))?;
+        let drawn = bed
+            .hp
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+        anyhow::ensure!(drawn, "no menu drawn");
+        let menu = common::drawn_popovers(&bed.hp)[0];
+        // Whole on the screen, its top on the line's.
+        assert!(menu.y + menu.height <= 1080 - 8, "{menu:?}");
+        assert!(
+            (menu.y - line).abs() <= 1,
+            "the line at {line}, the menu at {menu:?}"
+        );
+        tops.push(menu.y);
+        if tops.len() == 2 {
+            shot(
+                &mut bed.hp,
+                "window-menu-line",
+                Rect::new(1920 - 560, 1080 - 700, 560, 700),
+            )?;
+        }
+        chord(&mut bed.hp, &[KEY_ESC]);
+        let gone = bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(gone, "the menu stays after Esc");
+    }
+    // The second line's menu lower than the first's, by a line.
+    assert_eq!(tops[1] - tops[0], 30, "{tops:?}");
+    Ok(())
+}
+
+/// A window its client moves (`xdg_toplevel.move`, as an application
+/// dragged by its own header, #729), on the maintainer's 2560 × 1600
+/// laptop: let go on the third tile, it goes to that desktop, the tile lit
+/// on the way.
+#[test]
+fn a_window_moved_by_its_client_let_go_on_a_tile_goes_to_that_desktop() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    for output in ["2560x1600@1.25", "2560x1600"] {
+        moved_by_its_client_onto_the_third_tile(&shell, output)?;
+    }
+    Ok(())
+}
+
+fn moved_by_its_client_onto_the_third_tile(
+    shell: &Path,
+    output: &'static str,
+) -> anyhow::Result<()> {
+    let mut bed = start(
+        shell,
+        Setup {
+            output,
+            ..Setup::default()
+        },
+    )?;
+    let (window, _client) = common::open_showing(
+        &mut bed.hp,
+        "test.self",
+        common::Shows::Moving {
+            app_id: "test.self",
+            size: (900, 600),
+        },
+    )?;
+    bed.settle()?;
+    bed.placed_drawn()?;
+    let mark = bed.mark();
+    let (x, y) = (f64::from(window.x + 300), f64::from(window.y + 20));
+    let to = bed.middle(2);
+    bed.hp.pointer_move(x, y);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    bed.hp.button(BTN_LEFT, true);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    for step in 1..=20 {
+        let t = f64::from(step) / 20.0;
+        bed.hp.pointer_move(x + (to.0 - x) * t, y + (to.1 - y) * t);
+        bed.hp.dispatch(Duration::from_millis(16))?;
+    }
+    anyhow::ensure!(bed.hp.moving().is_some(), "the client's move never began");
+    let over = bed.hp.dispatch_until(WAIT, |hp| hp.drop_over().is_some())?;
+    anyhow::ensure!(
+        over,
+        "never over a tile: the pointer at {to:?}, the tiles said {:?}",
+        bed.hp.desk_tile_middles()
+    );
+    assert_eq!(
+        bed.hp.drop_over(),
+        Some(("HEADLESS-1".to_owned(), "HEADLESS-1".to_owned(), 2))
+    );
+    bed.logged_after(
+        mark,
+        "a window over the tiles bar=\"HEADLESS-1\" over=Some((\"HEADLESS-1\", 2))",
+    )?;
+    if output == "2560x1600" {
+        shot(
+            &mut bed.hp,
+            "client-move-over-tile",
+            Rect::new(2560 - 900, 1600 - 800, 900, 800),
+        )?;
+    }
+    bed.hp.button(BTN_LEFT, false);
+    let gone = bed.hp.dispatch_until(WAIT, |hp| hp.windows().is_empty())?;
+    anyhow::ensure!(gone, "still shown: {:?}", bed.hp.windows());
+    assert_eq!(bed.hp.desktop().0, 0);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, common::KEY_3]);
+    common::wait_for_rect(&mut bed.hp, "test.self", window)?;
+    Ok(())
+}
+
 #[test]
 fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()> {
     let Some(shell) = ready() else {

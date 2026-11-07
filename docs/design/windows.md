@@ -511,7 +511,10 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 - `Super+Shift+1…4` sends the focused window to that desktop, without
   switching: it leaves the screen toward its desktop's side, a screen's
   width in 320 ms easing in, as leaving windows do (it fades with reduced
-  motion), and the dots show. With `Ctrl`
+  motion), and the dots show. It stays in front as it leaves, over the
+  window focused in its stead, and lands on top of its new desktop's
+  windows (#728; the radial menu, the bar's menu and a tile it is let go
+  on send it the same way). With `Ctrl`
   too, it follows it: the window stays in place as the strip slides
   under it. `Super+Ctrl+Shift+←/→` takes it the same way to the desktop
   on that side of its screen; past the first or the last, it stays (no
@@ -853,6 +856,18 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   (bar.md, "The windows in the bar"; until now the desktop's list).
   Closing: the same, `Esc`, or a click on the empty background. The
   session locking closes it at once.
+- **The hot corner** (#727, as GNOME's): the pointer held 150 ms in a
+  screen's top-left corner (its first logical pixel, where the pointer
+  stops pushed up and left) opens the overview, or closes it, as
+  `Super+W`. Once per entry: it acts again only after the pointer has
+  gone 8 px away. Not on a screen whose bar stands on the left (its
+  corner is the bar's), nor where another screen touches the corner (the
+  pointer goes on there), nor while a button is held (a window dragged),
+  over a fullscreen window or the launcher, nor locked. The corner draws
+  nothing of its own; with reduced motion the overview fades in as by
+  its keys. `[overview] hot-corner = false` turns it off (Settings,
+  Bureaux et fenêtres, "Coin en haut à gauche : vue d'ensemble", on by
+  default). Nothing runs at rest but the dwell's one timer.
 - **On every screen at once**, each with its own desktops: the wallpaper
   dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
   desktops as live thumbnails, in the screen's shape, a ninth of its

@@ -456,6 +456,7 @@ impl Item {
                 | Self::DayChoose
                 | Self::Windows
                 | Self::WindowsMore
+                | Self::WindowMenu(_)
         ) && !self.agents()
     }
 
@@ -1209,7 +1210,16 @@ impl Controller {
             Event::Chosen => self.close(now, &mut effects),
             Event::Replace(item) => {
                 if let Phase::Open(open) = &self.phase {
-                    let (bar, from) = (open.bar.clone(), open.from);
+                    // A window's menu from a popover's line: its top on
+                    // that popover's, where the line was (#726).
+                    let from = match item {
+                        Item::WindowMenu(_) => Rectangle {
+                            y: open.rect.y,
+                            ..open.from
+                        },
+                        _ => open.from,
+                    };
+                    let bar = open.bar.clone();
                     self.close(now, &mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
                 }
@@ -3511,5 +3521,39 @@ mod tests {
         // Esc lets it go from there.
         let effects = c.handle(Event::ItemRelease, t);
         assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::None)));
+    }
+
+    /// A window's menu (#726): its top on the line right-clicked, wherever
+    /// the line is in the bar; low in it, pushed up to stay whole, never
+    /// sent to the bar's foot.
+    #[test]
+    fn a_windows_menu_opens_with_its_top_on_its_line() {
+        let (mut c, _) = controller(Form::Full);
+        let t = Instant::now();
+        // Not shown yet: 200 px tall.
+        let height = Item::WindowMenu(7).height(BAR, Form::Full, true) as f32;
+        assert!(!Item::WindowMenu(7).on_bottom());
+        let line = |y: f32| Rectangle::new(Point::new(-190.0, y), Size::new(184.0, 30.0));
+        let mut tops = Vec::new();
+        for y in [120.0, 500.0, HEIGHT - 40.0] {
+            let opened = c.handle(
+                Event::Open {
+                    bar: BAR.to_owned(),
+                    item: Item::WindowMenu(7),
+                    rect: line(y),
+                },
+                t,
+            );
+            assert!(
+                opened.iter().any(|e| matches!(e, Effect::Open { .. })),
+                "{opened:?}"
+            );
+            let Phase::Open(open) = &c.phase else {
+                panic!("not open");
+            };
+            tops.push(open.rect.y);
+            assert!(open.rect.y + open.rect.height <= HEIGHT, "{:?}", open.rect);
+        }
+        assert_eq!(tops, [120.0, 500.0, HEIGHT - height]);
     }
 }

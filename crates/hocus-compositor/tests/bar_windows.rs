@@ -1132,6 +1132,38 @@ fn a_right_click_on_a_line_opens_its_windows_menu_beside_the_bar() -> anyhow::Re
     Ok(())
 }
 
+/// The menu's top on the line right-clicked (#726), kept whole on the
+/// screen: here, nothing under the tiles, the lines sit near the bar's
+/// foot, and the menu is pushed up until its bottom is the bar's. The
+/// lines lifted by the levels under the tiles, as on a laptop, are
+/// `bar_desktops`' (`a_windows_menu_opens_with_its_top_on_its_line`).
+#[test]
+fn low_in_the_bar_the_windows_menu_is_pushed_up_whole() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.shows(&format!("«{}»*; «{}»", FIREFOX.1, FOOT.1))?;
+    for app in [FIREFOX.0, FOOT.0] {
+        let id = bed.id_of(app)?;
+        let item = format!("Window({id})");
+        let (_, middle) = bed.item_at(&item, SCREEN.0)?;
+        let line = (middle - f64::from(LINE) / 2.0).round() as i32;
+        bed.right_click(&item)?;
+        bed.last_is(MENU, &[&format!("window={id} ")])?;
+        let menu = bed.menu()?;
+        let bottom = SCREEN.1 as i32 - EDGE;
+        assert!(line + menu.height > bottom, "the line is not low: {line}");
+        assert_eq!(menu.y + menu.height, bottom, "{app}: {menu:?}");
+        chord(&mut bed.hp, &[KEY_ESC]);
+        let gone = bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(gone, "the menu stays after Esc");
+    }
+    Ok(())
+}
+
 /// Its switches flip and the line shows their marks; a tile sends the
 /// window to that desktop, the screen staying (#723).
 #[test]

@@ -31,6 +31,10 @@ pub const ALT_TAB: RowGroup = RowGroup {
     label: w("ALT+TAB", "ALT+TAB"),
     per_source: false,
 };
+pub const OVERVIEW: RowGroup = RowGroup {
+    label: w("VUE D’ENSEMBLE", "OVERVIEW"),
+    per_source: false,
+};
 pub const DRAW: RowGroup = RowGroup {
     label: w("DESSINER SUR L’ÉCRAN", "DRAW ON THE SCREEN"),
     per_source: false,
@@ -44,6 +48,7 @@ pub const MAGNET: &str = "windows.magnet";
 pub const SNAP: &str = "windows.snap-by-drag";
 pub const WOBBLE: &str = "windows.wobble";
 pub const ALT_TAB_ROW: &str = "windows.alt-tab";
+pub const HOT_CORNER: &str = "overview.hot-corner";
 pub const INK: &str = "ink.enabled";
 /// The rules per application, a row of the page's own (6.14).
 pub const RULES: &str = "desktops.rules";
@@ -524,6 +529,24 @@ pub fn settings() -> &'static [Setting] {
                 ),
             ),
             setting(
+                HOT_CORNER,
+                OVERVIEW,
+                w(
+                    "Coin en haut à gauche : vue d’ensemble",
+                    "Top-left corner: overview",
+                ),
+                w(
+                    "Le pointeur poussé un instant dans le coin en haut à gauche d’un écran ouvre la vue d’ensemble, comme Super+W ; encore, il la ferme.",
+                    "The pointer pushed for a moment into a screen’s top-left corner opens the overview, as Super+W does; again, it closes it.",
+                ),
+                (
+                    &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
+                    &["hot corner", "corner", "overview", "activities", "desktops"],
+                ),
+                Kind::Switch,
+                switch(&["overview", "hot-corner"]),
+            ),
+            setting(
                 INK,
                 DRAW,
                 w("Dessiner sur l’écran", "Draw on the screen"),
@@ -643,6 +666,7 @@ mod tests {
                 "windows.snap-by-drag",
                 "windows.wobble",
                 "windows.alt-tab",
+                "overview.hot-corner",
                 "ink.enabled"
             ]
         );

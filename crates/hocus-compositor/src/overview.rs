@@ -3,8 +3,9 @@
 //! and the windows of the desktop it shows laid out without overlap.
 //!
 //! `Super+W` (`[shortcuts] overview`), four fingers down on a touchpad
-//! while no launcher is open (`crate::gestures`), or the bar's "+ N
-//! autres" (the shell's `overview`) open it; the same, `Esc`, or a click
+//! while no launcher is open (`crate::gestures`), the bar's "+ N autres"
+//! (the shell's `overview`), or the pointer held in a screen's top-left
+//! corner (`crate::hot_corner`) open it; the same, `Esc`, or a click
 //! on the empty background close it. A click on a window focuses it and
 //! closes the overview; a click on a desktop's thumbnail shows that
 //! desktop and keeps it open; a window dragged (6 px) lifts to 42 % under
