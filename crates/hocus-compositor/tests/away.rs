@@ -467,10 +467,11 @@ fn the_shell_draws_the_pill_on_the_screen_under_the_pointer() -> anyhow::Result<
     anyhow::ensure!(drawn, "no pill");
     let (output, rect) = hp.curtain_surfaces().remove(0);
     assert_eq!(output, "HEADLESS-2");
-    // 1280 × 800 logical, from x 1920: centred, its top at 512.
+    // 1280 × 800 logical, from x 1920: centred, its top at 512; 80 high
+    // for its 64 px panda (#649).
     assert_eq!(
         (rect.x, rect.y, rect.width, rect.height),
-        (1920 + (1280 - 300) / 2, 512, 300, 64)
+        (1920 + (1280 - 300) / 2, 512, 300, 80)
     );
     hp.pointer_move(2000.0, 400.0);
     assert_eq!(hp.away(), Shown::Here);
