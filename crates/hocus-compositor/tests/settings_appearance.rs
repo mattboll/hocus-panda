@@ -8,7 +8,9 @@
 //! writes `[appearance] theme` and the whole desktop follows (the window,
 //! the bar); a swatch writes `[appearance] accent`; 12 hours shows "2:25
 //! PM" in the bar, the calendar and the lock; the language switch turns
-//! the shell's and the window's words at once; and at rest nothing draws.
+//! the shell's and the window's words at once; at rest nothing draws; and
+//! Givre (#740) sets its accent with it, in one toast that undoes both,
+//! the window staying dark.
 //! What the programs show is read from their logs, never on a time.
 
 mod common;
@@ -227,7 +229,7 @@ impl Bed {
     }
 
     fn click(&mut self, id: &str) -> anyhow::Result<()> {
-        if !id.starts_with("option:") {
+        if !id.starts_with("option:") && id != "toast-action" {
             self.reveal(id)?;
         }
         let places = self.places_with(id)?;
@@ -462,6 +464,60 @@ fn a_swatch_writes_the_accent_and_the_row_says_its_name() -> anyhow::Result<()> 
     let shown = bed.shows(|s| s["accent"] == "violet")?;
     assert_eq!(row(&shown, "appearance.accent")["value"], "Violet");
     bed.shell_said("the theme theme=", &["accent=violet"])?;
+    Ok(())
+}
+
+/// Givre (#740): its segment writes `theme = "frost"` and its accent,
+/// the ice blue, as one change; one toast says both, and its "Annuler"
+/// takes both back, the violet chosen before with them. The window stays
+/// dark, in the ice blue; the bar draws Givre.
+#[test]
+fn choosing_givre_sets_its_accent_in_one_toast_that_undoes_both() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(&format!("{FILE}\n[appearance]\naccent = \"violet\"\n"))? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(shown["accent"], "violet");
+    let window = bed.window()?;
+    // The sidebar's foot, under its last section, away from the toast.
+    let corner = (window.x + 20, window.bottom() - 40);
+    bed.click("segment:appearance.theme:2")?;
+    let text =
+        bed.written(|t| t.contains("theme = \"frost\"") && t.contains("accent = \"ice\""))?;
+    assert!(!text.contains("violet"), "{text}");
+    let shown = bed.shows(|s| s["theme"] == "frost" && s["accent"] == "ice")?;
+    assert_eq!(row(&shown, "appearance.theme")["value"], "Givre");
+    let shown = bed.shows(|s| {
+        s["toast"] == "Thème : Givre · Couleur d’accent : Bleu glacé" && s["toast_action"] == "undo"
+    })?;
+    assert_eq!(row(&shown, "appearance.accent")["value"], "Bleu glacé");
+    bed.shell_said("the theme theme=", &["theme=frost", "accent=ice"])?;
+    // The window keeps the dark look: its sidebar the dark one's.
+    let sidebar = [0x0F, 0x13, 0x1C];
+    bed.until(corner, |c| c == sidebar)?;
+    wait(&mut bed.hp, Duration::from_millis(200))?;
+    assert_eq!(bed.pixel(corner)?, sidebar, "the window left the dark look");
+    // For the maintainer's eyes, with `HOCUS_SHOTS`: the window and the
+    // bar, the toast showing.
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        common::at_rest(&mut bed.hp)?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        image.save(out.join("givre-settings.png"))?;
+    }
+    // Annuler: both back.
+    bed.click("toast-action")?;
+    let text = bed.written(|t| !t.contains("frost") && t.contains("accent = \"violet\""))?;
+    assert!(!text.contains("\"ice\""), "{text}");
+    bed.shows(|s| s["theme"] == "dark" && s["accent"] == "violet")?;
+    bed.shell_said("the theme theme=", &["theme=dark", "accent=violet"])?;
     Ok(())
 }
 

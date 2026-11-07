@@ -195,6 +195,14 @@ impl Headless {
         self.app.backend.headless().map_or(0, |h| h.frames())
     }
 
+    /// Frames drawn so far by each output, in the order given.
+    pub fn output_frames(&self) -> Vec<u64> {
+        self.app
+            .backend
+            .headless()
+            .map_or_else(Vec::new, |h| h.output_frames())
+    }
+
     /// What output `index` (in the order given, of those plugged) showed
     /// last: its size in pixels, and its rows of ARGB8888 pixels (B, G, R,
     /// A in memory).

@@ -585,6 +585,14 @@ impl HeadlessBackend {
         }
     }
 
+    /// Frames drawn by each output, in the order they were given.
+    pub fn output_frames(&self) -> Vec<u64> {
+        match &self.canvas {
+            Canvas::Gles(c) => c.outputs.iter().map(|o| o.frames).collect(),
+            Canvas::Pixman(c) => c.outputs.iter().map(|o| o.frames).collect(),
+        }
+    }
+
     fn frame(&mut self, state: &mut State) {
         state.redraw = false;
         match &mut self.canvas {

@@ -980,8 +980,61 @@ light by rule (`hocus_link::theme::on_light`): a white at some opacity
 becomes `#141926` at 1.25 times it, a near-white the text, a dark
 background the light window's at the same opacity, a shadow half as
 strong, the states as text their darker values above; the others keep
-theirs. A "neon" theme, the Matrix one and a theme by the time of day are
-for later.
+theirs. Givre (below) is a third theme; the Matrix one and a theme by
+the time of day are for later.
+
+### Givre (#740)
+
+A third theme, `[appearance] theme = "frost"`, shown as "Givre": icy blue
+on night-blue frosted glass, a quiet science-fiction look (#431's third
+version; Matrix, the fourth, comes once its tokens exist). It is the
+shell's own: the bar (both forms), its popovers, the notifications'
+bubbles, the lock screen, the authentication dialog, the launcher and the
+action palette take it; the Settings window and the applications do not
+(they stay dark, only the accent is Givre's, and applications are told
+`color-scheme = 1`). Its tokens are `hocus_link::theme::FROST`:
+
+| Token | Givre |
+|---|---|
+| `bar.bg` | `linear(rgba(10,20,40,0.58) → rgba(6,12,26,0.68))` on the glass (#517, as dark); opaque `#0E1A30 → #08101F` |
+| popovers' background | `rgba(10,20,40,0.62) → rgba(6,12,26,0.74)` (a little denser, as dark's are); opaque the same as the bar's |
+| `bar.border`, and every surface's rim | 1 px `rgba(190,232,255,0.40)`: the icy hairline |
+| corner marks | four 10 px viewfinder marks, 1.5 px, `#BFEFFF` at 75 %, 5 px in, on the bar; the top left and bottom right ones on a popover or a bubble (an urgent bubble has its own rim instead) |
+| `text` / `text.2` / `text.dim` / `text.faint` | `#EAF6FF` (15.8:1) / `#C4D9EA` (12.0) / `#93AEC8` (7.6) / `#7D98B2` (5.8), on the opaque top |
+| window / sidebar / menu (the lock's panels, the dialog) | `#0E1A30` / `#08101F` / `#111E36` |
+| `accent` / on its fill | `ice`, `#7FD8FF` (10.9:1) / `#04111D` |
+| the clock's digits (bar and lock) | a glow, `0 0 14px #7FD8FF` at 35 %, drawn as faint copies round each digit |
+| the pandas | Givre's ice visor over their eyes (pushed up on the forehead asleep), their green in `#7FD8FF` (`hocus_pandas::Dress::Visor`); the secretary as she is |
+| the agents' states, the gauges | unchanged: wait `#FFC23D`, stuck `#FF8A66`, done `#7EE0A0`, meeting `#8FB3FF` |
+| fonts | today's: Manrope, Martian Mono |
+
+- **The colours drawn outside the tokens** are read by rule
+  (`hocus_link::theme::on_frost`): the dark tokens their Givre values; a
+  dark background of a surface's own night blue at the same opacity; a
+  grey text icy at the same lightness; white veils, hovers and fills stay
+  white; the states, gauges and accents keep theirs. A surface's rim
+  drawn as a faint white is the icy hairline (`Ink::Rim`).
+- **High contrast wins**: Givre with `high-contrast` draws the dark
+  theme's high-contrast tokens, without its marks, glow or visor.
+  **Reduced transparency** (or the CPU) gives the opaque tints above, the
+  marks kept.
+- **The accent**: choosing Givre in the Settings sets `accent = "ice"`,
+  and leaving it gives back the accent from before (settings.md, "The
+  themes and the accent"); `ice` stays one of the accents to choose, and
+  a file may name another with Givre.
+- **What it does not change**: the compositor's own drawings (the radial
+  menu, the overview, the windows' rims) stay as in dark; the windows'
+  open and close motion and the wallpaper Givre proposes (#740's second
+  part, with #432 and #433) are not built yet.
+- **Budgets**: at rest nothing more is drawn than in dark (the at-rest
+  tests hold); a theme switch draws one frame per screen, each of the
+  bar's surfaces once (`tests/appearance.rs`:
+  `a_theme_switch_draws_one_frame_per_screen`,
+  `givre_draws_the_bar_in_night_blue_and_rests`). Contrast: unit tests of
+  `hocus-link` (`givre_reads_at_7_to_1_on_its_opaque_fallback_and_its_rims_at_3_to_1`):
+  texts at 7:1 on the opaque fallback, the faint at 4.5:1, the rim and
+  the marks at 3:1 over it. The rim is at 40 % rather than the mockup's
+  30 %, which reads at 2.4:1 over the opaque fallback.
 
 ### High contrast (#423)
 
