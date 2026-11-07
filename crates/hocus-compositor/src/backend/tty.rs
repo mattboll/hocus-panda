@@ -3,6 +3,11 @@
 //! GLES, input comes from libinput. Switching to another terminal pauses
 //! all of it; coming back draws everything again.
 //!
+//! Where EGL or GLES cannot start on the GPU (no driver for it, a broken
+//! one), the screens are drawn with pixman on the CPU into dumb buffers
+//! instead of failing (#333): slower, without blur, but a desktop. It is
+//! said once in the journal; `--renderer pixman` asks for it.
+//!
 //! The primary GPU's connected screens are lit, and follow what is plugged
 //! and unplugged. Other GPUs' screens and VR headsets (drm-lease) come with
 //! the several-screens slice.
@@ -14,6 +19,7 @@ use smithay::{
     backend::{
         allocator::{
             Fourcc,
+            dumb::DumbAllocator,
             format::FormatSet,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
@@ -30,6 +36,7 @@ use smithay::{
             ImportDma, ImportMemWl,
             gles::{GlesRenderer, GlesTexture},
             multigpu::{GpuManager, gbm::GbmGlesBackend},
+            pixman::PixmanRenderer,
         },
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::{UdevBackend, UdevEvent, all_gpus, primary_gpu},
@@ -42,6 +49,7 @@ use smithay::{
         },
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
         input::{DeviceCapability, Libinput},
+        pixman,
         rustix::fs::OFlags,
         wayland_server::backend::GlobalId,
     },
@@ -49,7 +57,7 @@ use smithay::{
 };
 
 use crate::{
-    App, State,
+    App, RendererChoice, State,
     backend::{
         Backend, add_output,
         clips::clipped,
@@ -63,27 +71,156 @@ use crate::{
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
-type Outputs = DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>;
-type Surface = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
+type GbmOutputs = DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>;
+type GbmSurface = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
 type Api = GbmGlesBackend<GlesRenderer, DrmDeviceFd>;
+/// Pixman's: dumb buffers, which every display engine has, made
+/// framebuffers by the device itself. Shared, as the manager wants an
+/// allocator it can clone.
+type Dumb = std::sync::Arc<std::sync::Mutex<DumbAllocator>>;
+type DumbOutputs = DrmOutputManager<Dumb, DrmDeviceFd, (), DrmDeviceFd>;
+type DumbSurface = DrmOutput<Dumb, DrmDeviceFd, (), DrmDeviceFd>;
+type PixmanTarget = pixman::Image<'static, 'static>;
+type PixmanLens = magnifier::Lens<<PixmanRenderer as magnifier::Magnify>::Canvas>;
 
 /// Scan-out formats, tried in order: 8 bits per channel, which every
 /// display engine takes.
 const COLOR_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Abgr8888];
+/// Pixman's: without alpha first, a dumb buffer's framebuffer being of its
+/// format, which a primary plane may only take opaque (virtio-gpu's).
+const DUMB_FORMATS: [Fourcc; 4] = [
+    Fourcc::Xrgb8888,
+    Fourcc::Xbgr8888,
+    Fourcc::Argb8888,
+    Fourcc::Abgr8888,
+];
 
 pub struct TtyBackend {
     session: LibSeatSession,
     libinput: Libinput,
-    /// The renderer of the primary GPU, which draws every screen. Kept in
-    /// smithay's multi-GPU manager, which other GPUs will join.
-    gpus: GpuManager<Api>,
-    /// The primary GPU's render node, as `gpus` knows it.
-    render_node: DrmNode,
+    /// What draws every screen.
+    drawing: Drawing,
     gpu: Gpu,
     /// The session is in the foreground: its terminal is the one shown.
     active: bool,
-    /// Screen sharing's frames (5.11), on the primary GPU.
-    share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
+}
+
+/// What draws the screens: GLES on the primary GPU, or pixman on the CPU
+/// when GLES cannot start there (#333).
+enum Drawing {
+    Gles {
+        /// The renderer of the primary GPU. Kept in smithay's multi-GPU
+        /// manager, which other GPUs will join.
+        gpus: GpuManager<Api>,
+        /// The primary GPU's render node, as `gpus` knows it.
+        render_node: DrmNode,
+        /// Screen sharing's frames (5.11), on the primary GPU.
+        share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
+    },
+    Pixman {
+        renderer: PixmanRenderer,
+        share: Box<crate::share::frames::Frames<PixmanRenderer, PixmanTarget>>,
+    },
+}
+
+impl Drawing {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Gles { .. } => "gles",
+            Self::Pixman { .. } => "pixman",
+        }
+    }
+}
+
+/// Runs `$body` with `$r` the renderer that draws the screens, `$share`
+/// its screen sharing's frames and `$t` its offscreen target's type; its
+/// value, or `None` when the renderer is not there.
+macro_rules! with_renderer {
+    ($drawing:expr, |$r:ident, $share:ident, $t:ident| $body:expr) => {
+        match $drawing {
+            Drawing::Gles {
+                gpus,
+                render_node,
+                share: $share,
+            } => match gpus.single_renderer(render_node) {
+                Ok(mut renderer) => {
+                    #[allow(unused_variables)]
+                    let $share = &mut **$share;
+                    let $r: &mut GlesRenderer = renderer.as_mut();
+                    #[allow(dead_code)]
+                    type $t = GlesTexture;
+                    Some($body)
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "no renderer");
+                    None
+                }
+            },
+            Drawing::Pixman {
+                renderer,
+                share: $share,
+            } => {
+                #[allow(unused_variables)]
+                let $share = &mut **$share;
+                let $r: &mut PixmanRenderer = renderer;
+                #[allow(dead_code)]
+                type $t = PixmanTarget;
+                Some($body)
+            }
+        }
+    };
+}
+
+/// Runs `$body` with `$s` the screen's surface, whichever renderer draws
+/// it.
+macro_rules! with_surface {
+    ($surface:expr, |$s:ident| $body:expr) => {
+        match $surface {
+            Surface::Gles($s) => $body,
+            Surface::Pixman($s) => $body,
+        }
+    };
+}
+
+/// The primary GPU's screens, as GLES or pixman drives them.
+enum Outputs {
+    Gles(GbmOutputs),
+    Pixman(DumbOutputs),
+}
+
+impl Outputs {
+    fn device(&self) -> &DrmDevice {
+        match self {
+            Self::Gles(o) => o.device(),
+            Self::Pixman(o) => o.device(),
+        }
+    }
+
+    fn pause(&mut self) {
+        match self {
+            Self::Gles(o) => o.pause(),
+            Self::Pixman(o) => o.pause(),
+        }
+    }
+
+    fn activate(&mut self) -> anyhow::Result<()> {
+        match self {
+            Self::Gles(o) => o.activate(false).map_err(|err| anyhow::anyhow!("{err}")),
+            Self::Pixman(o) => o.activate(false).map_err(|err| anyhow::anyhow!("{err}")),
+        }
+    }
+}
+
+/// One screen's surface.
+enum Surface {
+    Gles(GbmSurface),
+    Pixman(DumbSurface),
+}
+
+/// One screen's picture while the magnifier is on it (#424).
+enum Lens {
+    Gles(magnifier::Lens<GlesTexture>),
+    Pixman(PixmanLens),
 }
 
 impl std::fmt::Debug for TtyBackend {
@@ -91,6 +228,7 @@ impl std::fmt::Debug for TtyBackend {
         f.debug_struct("TtyBackend")
             .field("seat", &self.session.seat())
             .field("gpu", &self.gpu.path)
+            .field("renderer", &self.drawing.name())
             .field("screens", &self.gpu.screens.len())
             .field("active", &self.active)
             .finish()
@@ -126,12 +264,20 @@ struct Screen {
     /// Its connector's modes, as the kernel gives them.
     modes: Vec<smithay::reexports::drm::control::Mode>,
     /// Its picture while the magnifier is on it (#424).
-    lens: magnifier::Lens<GlesTexture>,
+    lens: Lens,
+    /// The night light's temperature its gamma ramp was last given
+    /// (`Some(None)`: its own white); `None`: to give again (#436).
+    gamma: Option<Option<u32>>,
 }
 
 /// Takes the seat, opens the primary GPU, lights the connected screens and
-/// starts reading input.
-pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Result<TtyBackend> {
+/// starts reading input. `renderer`: GLES, falling back to pixman (`Auto`),
+/// or only one of them.
+pub fn init(
+    handle: &LoopHandle<'static, App>,
+    state: &mut State,
+    renderer: RendererChoice,
+) -> anyhow::Result<TtyBackend> {
     let (session, notifier) = LibSeatSession::new()
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("could not take the seat (is logind or seatd running?)")?;
@@ -149,15 +295,13 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
         .udev_assign_seat(&seat)
         .map_err(|()| anyhow::anyhow!("libinput could not take seat {seat}"))?;
 
-    let (gpu, gpus, render_node) = open_primary(handle, &session, &path, state)?;
+    let (gpu, drawing) = open_primary(handle, &session, &path, state, renderer)?;
     let mut backend = TtyBackend {
         session: session.clone(),
         libinput: libinput.clone(),
-        gpus,
-        render_node,
+        drawing,
         gpu,
         active: true,
-        share: Default::default(),
     };
 
     handle
@@ -209,13 +353,48 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     Ok(backend)
 }
 
+/// GLES or pixman, as asked: `Auto` takes pixman when GLES does not
+/// start, and says so once (#333); `Gles` and `Pixman` take only theirs.
+/// Neither renderer is made before it is chosen.
+pub(crate) enum Chosen<G, P> {
+    Gles(G),
+    Pixman(P),
+}
+
+pub(crate) fn choose<G, P>(
+    asked: RendererChoice,
+    gles: impl FnOnce() -> anyhow::Result<G>,
+    pixman: impl FnOnce() -> anyhow::Result<P>,
+) -> anyhow::Result<Chosen<G, P>> {
+    match asked {
+        RendererChoice::Pixman => {
+            tracing::info!("drawing with pixman, as asked");
+            pixman().map(Chosen::Pixman)
+        }
+        RendererChoice::Gles | RendererChoice::GlesSoftware => gles().map(Chosen::Gles),
+        RendererChoice::Auto => match gles() {
+            Ok(gles) => Ok(Chosen::Gles(gles)),
+            Err(err) => {
+                tracing::warn!(
+                    "no GLES on the GPU ({err:#}): drawing with pixman on the CPU, \
+                     slower and without blur"
+                );
+                pixman()
+                    .map(Chosen::Pixman)
+                    .context("pixman could not draw either")
+            }
+        },
+    }
+}
+
 /// Opens the primary GPU through the seat, with its renderer.
 fn open_primary(
     handle: &LoopHandle<'static, App>,
     session: &LibSeatSession,
     path: &std::path::Path,
     state: &mut State,
-) -> anyhow::Result<(Gpu, GpuManager<Api>, DrmNode)> {
+    asked: RendererChoice,
+) -> anyhow::Result<(Gpu, Drawing)> {
     let fd = session
         .clone()
         .open(
@@ -227,9 +406,81 @@ fn open_primary(
     let fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let node = DrmNode::from_file(&fd).context("not a DRM device")?;
     let (drm, notifier) = DrmDevice::new(fd.clone(), true).context("could not use the GPU")?;
-    let gbm = GbmDevice::new(fd).context("could not create a GBM device")?;
-    let render_node = render_node(&gbm, node);
+    let chosen = choose(
+        asked,
+        || open_gles(&fd, node, state),
+        || PixmanRenderer::new().context("could not create the pixman renderer"),
+    )?;
+    let (outputs, drawing, render_node) = match chosen {
+        Chosen::Gles((gbm, gpus, render_node, render_formats)) => {
+            let allocator = GbmAllocator::new(
+                gbm.clone(),
+                GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+            );
+            let outputs = DrmOutputManager::new(
+                drm,
+                allocator,
+                GbmFramebufferExporter::new(gbm.clone(), Some(render_node)),
+                Some(gbm),
+                COLOR_FORMATS,
+                render_formats,
+            );
+            let drawing = Drawing::Gles {
+                gpus,
+                render_node,
+                share: Box::default(),
+            };
+            (Outputs::Gles(outputs), drawing, Some(render_node))
+        }
+        Chosen::Pixman(renderer) => {
+            state.shm_state.update_formats(renderer.shm_formats());
+            dmabuf_global(state, renderer.dmabuf_formats(), None);
+            let outputs = DrmOutputManager::new(
+                drm,
+                Dumb::new(std::sync::Mutex::new(DumbAllocator::new(fd.clone()))),
+                fd.clone(),
+                None,
+                DUMB_FORMATS,
+                renderer.dmabuf_formats(),
+            );
+            let drawing = Drawing::Pixman {
+                renderer,
+                share: Box::default(),
+            };
+            (Outputs::Pixman(outputs), drawing, None)
+        }
+    };
+    handle
+        .insert_source(notifier, move |event, metadata, app| match event {
+            DrmEvent::VBlank(crtc) => on_vblank(app, crtc, metadata),
+            DrmEvent::Error(err) => tracing::warn!(%err, %node, "GPU error"),
+        })
+        .map_err(|err| err.error)
+        .context("could not watch the GPU")?;
+    match render_node {
+        Some(render_node) => tracing::info!(gpu = %path.display(), %render_node, "GPU ready"),
+        None => tracing::info!(gpu = %path.display(), "GPU ready, drawn with pixman"),
+    }
+    Ok((
+        Gpu {
+            node,
+            path: path.to_path_buf(),
+            outputs,
+            screens: HashMap::new(),
+        },
+        drawing,
+    ))
+}
 
+/// What GLES needs on the GPU: its GBM device, its renderer in the
+/// multi-GPU manager, its render node and the formats it draws into.
+type GlesParts = (GbmDevice<DrmDeviceFd>, GpuManager<Api>, DrmNode, FormatSet);
+
+/// GBM, EGL and GLES on the GPU `fd` opens; what the clients are told it
+/// takes.
+fn open_gles(fd: &DrmDeviceFd, node: DrmNode, state: &mut State) -> anyhow::Result<GlesParts> {
+    let gbm = GbmDevice::new(fd.clone()).context("could not create a GBM device")?;
+    let render_node = render_node(&gbm, node);
     let mut gpus = GpuManager::new(Api::default()).map_err(|err| anyhow::anyhow!("{err}"))?;
     gpus.as_mut()
         .add_node(render_node, gbm.clone())
@@ -245,36 +496,7 @@ fn open_primary(
         state.blur = true;
         gles.egl_context().dmabuf_render_formats().clone()
     };
-    let allocator = GbmAllocator::new(
-        gbm.clone(),
-        GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
-    );
-    let outputs = DrmOutputManager::new(
-        drm,
-        allocator,
-        GbmFramebufferExporter::new(gbm.clone(), Some(render_node)),
-        Some(gbm),
-        COLOR_FORMATS,
-        render_formats,
-    );
-    handle
-        .insert_source(notifier, move |event, metadata, app| match event {
-            DrmEvent::VBlank(crtc) => on_vblank(app, crtc, metadata),
-            DrmEvent::Error(err) => tracing::warn!(%err, %node, "GPU error"),
-        })
-        .map_err(|err| err.error)
-        .context("could not watch the GPU")?;
-    tracing::info!(gpu = %path.display(), %render_node, "GPU ready");
-    Ok((
-        Gpu {
-            node,
-            path: path.to_path_buf(),
-            outputs,
-            screens: HashMap::new(),
-        },
-        gpus,
-        render_node,
-    ))
+    Ok((gbm, gpus, render_node, render_formats))
 }
 
 /// The render node a GPU's renderer goes by; a VM's GPU without 3D draws
@@ -328,8 +550,8 @@ fn on_session(app: &mut App, event: SessionEvent) {
             if tty.libinput.resume().is_err() {
                 tracing::warn!("libinput could not resume");
             }
-            if let Err(err) = tty.gpu.outputs.activate(false) {
-                tracing::warn!(%err, "could not take the screens back");
+            if let Err(err) = tty.gpu.outputs.activate() {
+                tracing::warn!("could not take the screens back: {err:#}");
             }
             // The lid may have moved meanwhile, unseen.
             state.session_back();
@@ -364,8 +586,12 @@ fn on_vblank(app: &mut App, crtc: crtc::Handle, metadata: &mut Option<DrmEventMe
     let Some(screen) = tty.gpu.screens.get_mut(&crtc) else {
         return;
     };
-    if let Err(err) = screen.surface.frame_submitted() {
-        tracing::warn!(output = screen.output.name(), ?err, "frame not presented");
+    if let Err(err) = with_surface!(&mut screen.surface, |s| s
+        .frame_submitted()
+        .map(drop)
+        .map_err(|err| format!("{err:?}")))
+    {
+        tracing::warn!(output = screen.output.name(), err, "frame not presented");
     }
     screen.flip.presented();
     screen.presented += 1;
@@ -472,11 +698,11 @@ impl TtyBackend {
             return;
         };
         tracing::info!(output = screen.output.name(), "screen unplugged");
-        screen.surface.with_compositor(|c| {
+        with_surface!(&screen.surface, |s| s.with_compositor(|c| {
             if let Err(err) = c.clear() {
                 tracing::debug!(%err, "could not clear the screen");
             }
-        });
+        }));
         // Its windows go to a screen still there, then its global.
         state.unplug_output(&screen.output, screen.global);
         for token in [screen.health, screen.pace].into_iter().flatten() {
@@ -586,32 +812,55 @@ impl TtyBackend {
         );
         output.set_preferred(mode);
 
-        let mut renderer = self
-            .gpus
-            .single_renderer(&self.render_node)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let gles: &mut GlesRenderer = renderer.as_mut();
-        let surface = self
-            .gpu
-            .outputs
-            .initialize_output::<_, OutputElement<GlesRenderer>>(
-                crtc,
-                drm_mode,
-                &[info.handle()],
-                &output,
-                None,
-                gles,
-                &DrmOutputRenderElements::default(),
-            )
-            .map_err(|err| anyhow::anyhow!("{err}"))
-            .with_context(|| format!("could not drive {name}"))?;
+        let (surface, lens) = match (&mut self.drawing, &mut self.gpu.outputs) {
+            (
+                Drawing::Gles {
+                    gpus, render_node, ..
+                },
+                Outputs::Gles(outputs),
+            ) => {
+                let mut renderer = gpus
+                    .single_renderer(render_node)
+                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                let gles: &mut GlesRenderer = renderer.as_mut();
+                let surface = outputs
+                    .initialize_output::<_, OutputElement<GlesRenderer>>(
+                        crtc,
+                        drm_mode,
+                        &[info.handle()],
+                        &output,
+                        None,
+                        gles,
+                        &DrmOutputRenderElements::default(),
+                    )
+                    .map_err(|err| anyhow::anyhow!("{err}"))
+                    .with_context(|| format!("could not drive {name}"))?;
+                (Surface::Gles(surface), Lens::Gles(Default::default()))
+            }
+            (Drawing::Pixman { renderer, .. }, Outputs::Pixman(outputs)) => {
+                let surface = outputs
+                    .initialize_output::<_, OutputElement<PixmanRenderer>>(
+                        crtc,
+                        drm_mode,
+                        &[info.handle()],
+                        &output,
+                        None,
+                        renderer,
+                        &DrmOutputRenderElements::default(),
+                    )
+                    .map_err(|err| anyhow::anyhow!("{err}"))
+                    .with_context(|| format!("could not drive {name}"))?;
+                (Surface::Pixman(surface), Lens::Pixman(Default::default()))
+            }
+            _ => anyhow::bail!("the renderer and the screens' buffers disagree"),
+        };
 
-        facts.vrr_capable = surface.with_compositor(|c| {
+        facts.vrr_capable = with_surface!(&surface, |s| s.with_compositor(|c| {
             !matches!(
                 c.vrr_supported(info.handle()),
                 Ok(smithay::backend::drm::VrrSupport::NotSupported) | Err(_)
             )
-        });
+        }));
         facts.placed = (x, 0);
         facts.placed_size = crate::displays::logical_size(&output).unwrap_or((1, 1));
         output.user_data().insert_if_missing(|| facts);
@@ -635,7 +884,8 @@ impl TtyBackend {
             pace: None,
             powered: true,
             modes: info.modes().to_vec(),
-            lens: magnifier::Lens::default(),
+            lens,
+            gamma: None,
         })
     }
 
@@ -659,19 +909,36 @@ impl TtyBackend {
             .copied()
             .find(|m| crate::displays::mode3(Mode::from(*m)) == mode)
             .with_context(|| format!("{} does not offer it", output.name()))?;
-        let mut renderer = self
-            .gpus
-            .single_renderer(&self.render_node)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let gles: &mut GlesRenderer = renderer.as_mut();
-        screen
-            .surface
-            .use_mode::<_, OutputElement<GlesRenderer>>(
-                drm_mode,
-                gles,
-                &DrmOutputRenderElements::default(),
-            )
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        match (&mut self.drawing, &mut screen.surface) {
+            (
+                Drawing::Gles {
+                    gpus, render_node, ..
+                },
+                Surface::Gles(surface),
+            ) => {
+                let mut renderer = gpus
+                    .single_renderer(render_node)
+                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                let gles: &mut GlesRenderer = renderer.as_mut();
+                surface
+                    .use_mode::<_, OutputElement<GlesRenderer>>(
+                        drm_mode,
+                        gles,
+                        &DrmOutputRenderElements::default(),
+                    )
+                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+            }
+            (Drawing::Pixman { renderer, .. }, Surface::Pixman(surface)) => {
+                surface
+                    .use_mode::<_, OutputElement<PixmanRenderer>>(
+                        drm_mode,
+                        renderer,
+                        &DrmOutputRenderElements::default(),
+                    )
+                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+            }
+            _ => anyhow::bail!("the renderer and the screen's buffers disagree"),
+        }
         output.change_current_state(Some(Mode::from(drm_mode)), None, None, None);
         screen.flip = Flip::Idle;
         screen.dirty = true;
@@ -687,10 +954,9 @@ impl TtyBackend {
             .values_mut()
             .find(|s| s.output == *output)
             .with_context(|| format!("no screen {}", output.name()))?;
-        screen
-            .surface
+        with_surface!(&screen.surface, |s| s
             .with_compositor(|c| c.use_vrr(on))
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+            .map_err(|err| anyhow::anyhow!("{err}")))?;
         screen.dirty = true;
         Ok(())
     }
@@ -700,15 +966,19 @@ impl TtyBackend {
     fn relight(&mut self) {
         for screen in self.gpu.screens.values_mut() {
             screen.flip = Flip::Idle;
-            screen.surface.with_compositor(|c| {
-                if let Err(err) = c.reset_state() {
-                    tracing::warn!(%err, "could not reset a screen");
-                }
+            with_surface!(&screen.surface, |s| {
+                s.with_compositor(|c| {
+                    if let Err(err) = c.reset_state() {
+                        tracing::warn!(%err, "could not reset a screen");
+                    }
+                });
+                s.reset_buffers();
             });
-            screen.surface.reset_buffers();
             screen.dirty = true;
             // Turned off again by `power` if it was.
             screen.powered = true;
+            // Another terminal may have set its own ramp.
+            screen.gamma = None;
         }
     }
 
@@ -726,20 +996,22 @@ impl TtyBackend {
             if powered {
                 tracing::info!(output, "screen on");
                 screen.flip = Flip::Idle;
-                screen.surface.with_compositor(|c| {
-                    if let Err(err) = c.reset_state() {
-                        tracing::warn!(%err, "could not reset a screen");
-                    }
+                with_surface!(&screen.surface, |s| {
+                    s.with_compositor(|c| {
+                        if let Err(err) = c.reset_state() {
+                            tracing::warn!(%err, "could not reset a screen");
+                        }
+                    });
+                    s.reset_buffers();
                 });
-                screen.surface.reset_buffers();
                 screen.dirty = true;
             } else {
                 tracing::info!(output, "screen off");
-                screen.surface.with_compositor(|c| {
+                with_surface!(&screen.surface, |s| s.with_compositor(|c| {
                     if let Err(err) = c.clear() {
                         tracing::warn!(%err, "could not turn a screen off");
                     }
-                });
+                }));
                 screen.flip = Flip::Idle;
                 screen.dirty = false;
             }
@@ -751,12 +1023,13 @@ impl TtyBackend {
         // The desktop's last frame as it locks (7.1), before anything else
         // draws it locked; none while another terminal shows.
         if state.lock.wants_freeze() {
-            match self.gpus.single_renderer(&self.render_node) {
-                Ok(mut renderer) if self.active => {
-                    let gles: &mut GlesRenderer = renderer.as_mut();
-                    crate::lock::draw::freeze::<_, GlesTexture>(gles, state);
-                }
-                _ => crate::lock::draw::no_freeze(state),
+            let frozen = self.active
+                && with_renderer!(&mut self.drawing, |r, share, Target| {
+                    crate::lock::draw::freeze::<_, Target>(r, state)
+                })
+                .is_some();
+            if !frozen {
+                crate::lock::draw::no_freeze(state);
             }
         }
         // A capture asked for (5.8): drawn for it on the primary GPU, which
@@ -765,26 +1038,21 @@ impl TtyBackend {
             if !self.active {
                 tracing::info!("the session is in the background: nothing captured");
                 state.capture.take_pending();
-            } else {
-                match self.gpus.single_renderer(&self.render_node) {
-                    Ok(mut renderer) => {
-                        let gles: &mut GlesRenderer = renderer.as_mut();
-                        crate::capture::shoot::take::<_, GlesTexture>(gles, state);
-                    }
-                    Err(err) => {
-                        tracing::warn!(%err, "no renderer: nothing captured");
-                        state.capture.take_pending();
-                    }
-                }
+            } else if with_renderer!(&mut self.drawing, |r, share, Target| {
+                crate::capture::shoot::take::<_, Target>(r, state)
+            })
+            .is_none()
+            {
+                tracing::warn!("no renderer: nothing captured");
+                state.capture.take_pending();
             }
         }
         // Screen sharing's thumbnails and frames (5.11): none while another
         // terminal shows.
-        if self.active
-            && let Ok(mut renderer) = self.gpus.single_renderer(&self.render_node)
-        {
-            let gles: &mut GlesRenderer = renderer.as_mut();
-            crate::share::frames::run::<_, GlesTexture>(gles, state, &mut self.share);
+        if self.active {
+            with_renderer!(&mut self.drawing, |r, share, Target| {
+                crate::share::frames::run::<_, Target>(r, state, share)
+            });
         }
         if self.active {
             // Back from sleep (7.2): a display engine may have lost what
@@ -794,6 +1062,7 @@ impl TtyBackend {
                 self.relight();
             }
             self.power(state);
+            self.night_light(state.night_light_kelvin());
         }
         if !state.redraw {
             return;
@@ -817,14 +1086,39 @@ impl TtyBackend {
         }
     }
 
+    /// Each lit screen's gamma ramp for the night light's temperature
+    /// (#436), when it is not what it was last given.
+    fn night_light(&mut self, kelvin: Option<u32>) {
+        let Gpu {
+            outputs, screens, ..
+        } = &mut self.gpu;
+        let drm = outputs.device();
+        for (crtc, screen) in screens.iter_mut() {
+            if !screen.powered || screen.gamma == Some(kelvin) {
+                continue;
+            }
+            match set_gamma(drm, *crtc, kelvin) {
+                Ok(()) => screen.gamma = Some(kelvin),
+                // A frame on its way: again after the next.
+                Err(err) if err.kind() == std::io::ErrorKind::ResourceBusy => {
+                    tracing::debug!(output = screen.output.name(), %err, "gamma busy");
+                }
+                Err(err) => {
+                    // Not again for this temperature.
+                    screen.gamma = Some(kelvin);
+                    tracing::warn!(
+                        output = screen.output.name(),
+                        %err,
+                        "no night light on this screen"
+                    );
+                }
+            }
+        }
+    }
+
     /// Draws one screen and queues the frame for its next vblank.
     fn render(&mut self, crtc: crtc::Handle, state: &mut State) {
-        let Self {
-            gpus,
-            gpu,
-            render_node,
-            ..
-        } = self;
+        let Self { drawing, gpu, .. } = self;
         let Some(screen) = gpu.screens.get_mut(&crtc) else {
             return;
         };
@@ -833,52 +1127,114 @@ impl TtyBackend {
         if !screen.powered {
             return;
         }
-        let mut renderer = match gpus.single_renderer(render_node) {
-            Ok(renderer) => renderer,
-            Err(err) => {
-                tracing::warn!(%err, "no renderer");
-                return;
+        let output = screen.output.clone();
+        // What the frame did: drawn (or nothing to draw), and what its
+        // elements' states were; `None` when it failed.
+        macro_rules! draw {
+            ($r:expr, $surface:expr, $lens:expr) => {{
+                let r = $r;
+                let shown = magnifier::screen(r, state, &output, true, $lens);
+                let elements = clipped(&shown.elements);
+                match $surface.render_frame(r, &elements, BACKGROUND, FrameFlags::DEFAULT) {
+                    Ok(result) => {
+                        let empty = result.is_empty;
+                        let states = result.states;
+                        magnifier::after(r, &shown);
+                        let states = shown.states.unwrap_or(states);
+                        let queued = if empty {
+                            Ok(())
+                        } else {
+                            $surface.queue_frame(()).map_err(|err| format!("{err:?}"))
+                        };
+                        state.read_under_grips(r);
+                        Some((empty, states, queued))
+                    }
+                    Err(err) => {
+                        tracing::warn!(output = output.name(), ?err, "rendering failed");
+                        magnifier::after(r, &shown);
+                        None
+                    }
+                }
+            }};
+        }
+        let drawn = match (drawing, &mut screen.surface, &mut screen.lens) {
+            (
+                Drawing::Gles {
+                    gpus, render_node, ..
+                },
+                Surface::Gles(surface),
+                Lens::Gles(lens),
+            ) => match gpus.single_renderer(render_node) {
+                Ok(mut renderer) => {
+                    let gles: &mut GlesRenderer = renderer.as_mut();
+                    draw!(gles, surface, lens)
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "no renderer");
+                    None
+                }
+            },
+            (Drawing::Pixman { renderer, .. }, Surface::Pixman(surface), Lens::Pixman(lens)) => {
+                draw!(renderer, surface, lens)
+            }
+            _ => {
+                tracing::warn!(
+                    output = output.name(),
+                    "the renderer and the screen disagree"
+                );
+                None
             }
         };
-        let gles: &mut GlesRenderer = renderer.as_mut();
-        let shown = magnifier::screen(gles, state, &screen.output, true, &mut screen.lens);
-        let elements = clipped(&shown.elements);
-        let result =
-            match screen
-                .surface
-                .render_frame(gles, &elements, BACKGROUND, FrameFlags::DEFAULT)
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    tracing::warn!(output = screen.output.name(), ?err, "rendering failed");
-                    magnifier::after(gles, &shown);
-                    return;
-                }
-            };
-        let empty = result.is_empty;
-        let states = result.states;
-        magnifier::after(gles, &shown);
-        let states = shown.states.unwrap_or(states);
+        let Some((empty, states, queued)) = drawn else {
+            return;
+        };
         if !empty {
-            match screen.surface.queue_frame(()) {
+            match queued {
                 Ok(()) => {
                     screen.flip.queued(state.clock.now().into());
                     watch_flip(screen, crtc, state);
                 }
                 Err(err) => {
-                    tracing::warn!(
-                        output = screen.output.name(),
-                        ?err,
-                        "could not queue the frame"
-                    );
+                    tracing::warn!(output = output.name(), err, "could not queue the frame");
                 }
             }
         }
-        state.send_frames(&screen.output, Some(&states));
-        state.desktops_drawn(&screen.output);
-        state.read_under_grips(gles);
+        state.send_frames(&output, Some(&states));
+        state.desktops_drawn(&output);
         if empty {
             pace(screen, crtc, state);
+        }
+    }
+}
+
+/// `crtc`'s gamma ramp for `kelvin` (`None`: straight, its own white),
+/// at the size its display engine takes (the legacy ramp, which the
+/// kernel turns into `GAMMA_LUT` for atomic drivers).
+fn set_gamma(drm: &DrmDevice, crtc: crtc::Handle, kelvin: Option<u32>) -> std::io::Result<()> {
+    let size = drm.get_crtc(crtc)?.gamma_length() as usize;
+    if size < 2 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "the screen's display engine has no gamma ramp",
+        ));
+    }
+    let [red, green, blue] =
+        crate::night_light::ramp(size, kelvin.unwrap_or(crate::night_light::NEUTRAL));
+    drm.set_gamma(crtc, &red, &green, &blue)
+}
+
+impl Drop for TtyBackend {
+    /// The screens' own white back for what shows after the session (the
+    /// display manager, a console), when the night light warmed them.
+    fn drop(&mut self) {
+        if self.active
+            && self
+                .gpu
+                .screens
+                .values()
+                .any(|s| s.gamma.is_some_and(|k| k.is_some()))
+        {
+            self.night_light(None);
         }
     }
 }
@@ -951,15 +1307,17 @@ fn watch_flip(screen: &mut Screen, crtc: crtc::Handle, state: &State) {
                 );
                 // The lost flip counts as done; the CRTC is committed afresh
                 // with the next frame.
-                if let Err(err) = screen.surface.frame_submitted() {
-                    tracing::debug!(?err, "no frame to drop");
-                }
-                screen.surface.with_compositor(|c| {
-                    if let Err(err) = c.reset_state() {
-                        tracing::warn!(%err, "could not reset the screen");
+                with_surface!(&mut screen.surface, |s| {
+                    if let Err(err) = s.frame_submitted() {
+                        tracing::debug!(?err, "no frame to drop");
                     }
+                    s.with_compositor(|c| {
+                        if let Err(err) = c.reset_state() {
+                            tracing::warn!(%err, "could not reset the screen");
+                        }
+                    });
+                    s.reset_buffers();
                 });
-                screen.surface.reset_buffers();
                 screen.dirty = true;
                 tty.render(crtc, state);
                 TimeoutAction::Drop
@@ -1058,6 +1416,59 @@ pub fn identity(edid: &[u8]) -> (Option<String>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What was chosen, and which of the renderers were made.
+    fn chosen(
+        asked: RendererChoice,
+        gles_starts: bool,
+    ) -> (Result<&'static str, String>, Vec<&'static str>) {
+        let made = std::cell::RefCell::new(Vec::new());
+        let result = choose(
+            asked,
+            || {
+                made.borrow_mut().push("gles");
+                if gles_starts {
+                    Ok(())
+                } else {
+                    anyhow::bail!("could not open EGL")
+                }
+            },
+            || {
+                made.borrow_mut().push("pixman");
+                anyhow::Ok(())
+            },
+        );
+        let result = result
+            .map(|c| match c {
+                Chosen::Gles(()) => "gles",
+                Chosen::Pixman(()) => "pixman",
+            })
+            .map_err(|err| format!("{err:#}"));
+        (result, made.into_inner())
+    }
+
+    #[test]
+    fn without_gles_the_screens_are_drawn_with_pixman() {
+        // GLES starts: GLES, pixman never made.
+        assert_eq!(
+            chosen(RendererChoice::Auto, true),
+            (Ok("gles"), vec!["gles"])
+        );
+        // EGL or GLES fails: pixman instead of failing.
+        assert_eq!(
+            chosen(RendererChoice::Auto, false),
+            (Ok("pixman"), vec!["gles", "pixman"])
+        );
+        // Asked for: pixman, GLES not even tried.
+        assert_eq!(
+            chosen(RendererChoice::Pixman, true),
+            (Ok("pixman"), vec!["pixman"])
+        );
+        // GLES asked for and failing: the error, no fallback.
+        let (result, made) = chosen(RendererChoice::Gles, false);
+        assert_eq!(made, vec!["gles"]);
+        assert!(result.is_err_and(|e| e.contains("EGL")));
+    }
 
     #[test]
     fn a_screen_says_who_made_it_and_its_name() {

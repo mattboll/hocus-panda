@@ -27,7 +27,7 @@ use std::{
 
 use crate::{
     lang::{Lang, w},
-    model::{Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
 };
 
 /// A mode: width, height (pixels), refresh (mHz).
@@ -1014,6 +1014,39 @@ pub const ROTATION: &str = "screens.rotation";
 pub const PRIMARY: &str = "screens.primary";
 pub const MIRROR: &str = "screens.mirror";
 pub const NIGHT_LIGHT: &str = "screens.night-light";
+pub const NIGHT_FROM: &str = "screens.night-light.from";
+pub const NIGHT_TO: &str = "screens.night-light.to";
+pub const NIGHT_TEMPERATURE: &str = "screens.night-light.temperature";
+/// The night light's rows (#436), in the page's order: the page draws
+/// them as the model's rows, written by the file's worker.
+pub const NIGHT_ROWS: [&str; 4] = [NIGHT_LIGHT, NIGHT_FROM, NIGHT_TO, NIGHT_TEMPERATURE];
+/// When it can start and end, every half hour.
+const EVENINGS: &[&str] = &[
+    "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30",
+    "23:00", "23:30",
+];
+const MORNINGS: &[&str] = &[
+    "05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30",
+];
+
+fn hours(list: &'static [&'static str]) -> Kind {
+    Kind::Menu(
+        list.iter()
+            .map(|h| Choice {
+                label: w(h, h),
+                value: Value::Word(h),
+            })
+            .collect(),
+    )
+}
+
+fn night(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
+    Places::One(Place {
+        key,
+        codec,
+        default,
+    })
+}
 /// The sets of screens known (windows.md §12).
 pub const SETS: &str = "screens.sets";
 
@@ -1138,13 +1171,94 @@ pub fn settings() -> &'static [Setting] {
                 ),
                 &["screen-sets"],
             ),
-            s(
-                NIGHT_LIGHT,
-                NIGHT,
-                w("Éclairage nocturne", "Night light"),
-                (&["nuit", "lumière bleue"], &["night light", "blue light"]),
-                &[],
-            ),
+            Setting {
+                id: NIGHT_LIGHT,
+                section: SectionId::Screens,
+                group: NIGHT,
+                name: w("Éclairage nocturne", "Night light"),
+                line: Some(w(
+                    "Des couleurs plus chaudes le soir, moins de lumière bleue.",
+                    "Warmer colours in the evening, less blue light.",
+                )),
+                keywords: (
+                    &["nuit", "lumière bleue", "chaud", "soir", "yeux"],
+                    &["night light", "blue light", "warm", "evening", "eyes"],
+                ),
+                kind: Kind::Switch,
+                places: night(&["night-light", "enabled"], Codec::Bool, Value::Bool(false)),
+                needs: None,
+            },
+            Setting {
+                id: NIGHT_FROM,
+                section: SectionId::Screens,
+                group: NIGHT,
+                name: w("À partir de", "From"),
+                line: Some(w(
+                    "Les couleurs se réchauffent en 30 min.",
+                    "The colours warm up over 30 min.",
+                )),
+                keywords: (
+                    &["nuit", "horaires", "heure", "soir"],
+                    &["night light", "schedule", "time", "evening"],
+                ),
+                kind: hours(EVENINGS),
+                places: night(
+                    &["night-light", "from"],
+                    Codec::Word(EVENINGS),
+                    Value::Word("21:00"),
+                ),
+                needs: Some(NIGHT_LIGHT),
+            },
+            Setting {
+                id: NIGHT_TO,
+                section: SectionId::Screens,
+                group: NIGHT,
+                name: w("Jusqu’à", "Until"),
+                line: Some(w(
+                    "Puis elles reviennent en 30 min.",
+                    "Then they come back over 30 min.",
+                )),
+                keywords: (
+                    &["nuit", "horaires", "heure", "matin"],
+                    &["night light", "schedule", "time", "morning"],
+                ),
+                kind: hours(MORNINGS),
+                places: night(
+                    &["night-light", "to"],
+                    Codec::Word(MORNINGS),
+                    Value::Word("07:00"),
+                ),
+                needs: Some(NIGHT_LIGHT),
+            },
+            Setting {
+                id: NIGHT_TEMPERATURE,
+                section: SectionId::Screens,
+                group: NIGHT,
+                name: w("Température", "Temperature"),
+                line: Some(w(
+                    "Plus bas, plus chaud. 6500 K : les couleurs de l’écran.",
+                    "Lower is warmer. 6500 K: the screen's own colours.",
+                )),
+                keywords: (
+                    &["nuit", "chaud", "kelvin", "couleur"],
+                    &["night light", "warm", "kelvin", "colour"],
+                ),
+                kind: Kind::Slider {
+                    min: 2500,
+                    max: 6000,
+                    step: 100,
+                    unit: " K",
+                },
+                places: night(
+                    &["night-light", "temperature"],
+                    Codec::Int {
+                        min: 1500,
+                        max: 6500,
+                    },
+                    Value::Int(4000),
+                ),
+                needs: Some(NIGHT_LIGHT),
+            },
         ]
     })
 }

@@ -40,25 +40,25 @@ use crate::{
 };
 
 /// The pill (the mockup's): 32 px high, 12 px from the screen's top.
-const PILL_H: f64 = 32.0;
+pub(crate) const PILL_H: f64 = 32.0;
 const PILL_TOP: f64 = 12.0;
-const PAD_LEFT: f64 = 12.0;
+pub(crate) const PAD_LEFT: f64 = 12.0;
 const PAD_RIGHT: f64 = 6.0;
 const GAP: f64 = 8.0;
-const ICON: f64 = 15.0;
-const ICON_GAP: f64 = 6.0;
+pub(crate) const ICON: f64 = 15.0;
+pub(crate) const ICON_GAP: f64 = 6.0;
 const BUTTON: f64 = 24.0;
 const HINT_PAD: f64 = 6.0;
 const LABEL_PX: f32 = 12.5;
-const ZOOM_PX: f32 = 13.0;
+pub(crate) const ZOOM_PX: f32 = 13.0;
 const HINT_PX: f32 = 11.5;
-const PILL_FILL: [u8; 4] = [14, 17, 28, 240];
-const PILL_RIM: [u8; 4] = [255, 255, 255, 41];
-const TEXT: [u8; 4] = [0xD5, 0xDB, 0xE5, 0xFF];
+pub(crate) const PILL_FILL: [u8; 4] = [14, 17, 28, 240];
+pub(crate) const PILL_RIM: [u8; 4] = [255, 255, 255, 41];
+pub(crate) const TEXT: [u8; 4] = [0xD5, 0xDB, 0xE5, 0xFF];
 const HINT: [u8; 4] = [0x8C, 0x96, 0xA8, 0xFF];
-const ACCENT: [u8; 4] = [0x7E, 0xE0, 0xA0, 0xFF];
+pub(crate) const ACCENT: [u8; 4] = [0x7E, 0xE0, 0xA0, 0xFF];
 const BUTTON_FILL: [u8; 4] = [255, 255, 255, 20];
-const PILL_SHADOW: ShadowStyle = ShadowStyle {
+pub(crate) const PILL_SHADOW: ShadowStyle = ShadowStyle {
     dy: 8.0,
     blur: 24.0,
     alpha: 0.45,
@@ -691,7 +691,7 @@ fn draw_minimap(scale: f64, (w, h): (i32, i32), rect: [i32; 4]) -> Option<Vec<u8
 }
 
 /// `texture` (`px` pixels) at `rect` (logical) on a screen at `scale`.
-fn placed<R>(
+pub(crate) fn placed<R>(
     renderer: &mut R,
     texture: &MemoryRenderBuffer,
     px: (i32, i32),

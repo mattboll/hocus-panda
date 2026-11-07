@@ -2314,6 +2314,12 @@ meeting and the notifications wait for the calendar and sprint 5.
   clipboard in its colour (green `#7BC47F`, amber `#F5B44A`, orange
   `#F2945B`), drawn by iced's `svg` at the screen's scale, sharp at ×1 and
   ×2; 40 px in the group, 34 px in her briefing.
+- **Her pencil** (#331, redrawn 2026-11): it read as stuck into her
+  head, its end hidden under the head's outline. It now rests behind her
+  left ear, its sharpened point down by her cheek and its eraser up past
+  the ear's top, both ends clear of the head's outline; the ear hides its
+  middle. Same colours and strokes as before, the point's wood
+  `#F3D9A8` and its lead added.
 - **The header** is a row as wide as the agents' (6 px past the group's
   sides), 44 px (2 px around her head), radius 9: her head, 8 px, then
   "AGENTS" (11.5 px 700, spaced, `text.dim`) and the total (Manrope 600,

@@ -6,14 +6,14 @@
 //!   its application's desktop entry, its app id, its screen (by identity,
 //!   §12), that screen's size and work area, its desktop, where it floats,
 //!   its state (floating, a zone, maximised, fullscreen), kept above, on
-//!   all desktops; the windows of an application in the order they
-//!   opened. A snapshot is taken on the loop (cheap: the model's data) a
-//!   few seconds after windows changed, and as the session ends (before
-//!   log out asks the windows to close); a thread of its own finds each
-//!   window's desktop entry (the desktop files are files) and writes the
-//!   file when it changed, so that a crash keeps a recent state. Never
-//!   saved: dialogs, the Settings, the shell's own surfaces, windows whose
-//!   application has no desktop entry.
+//!   all desktops, its opacity (#735); the windows of an application in
+//!   the order they opened. A snapshot is taken on the loop (cheap: the
+//!   model's data) a few seconds after windows changed, and as the
+//!   session ends (before log out asks the windows to close); a thread of
+//!   its own finds each window's desktop entry (the desktop files are
+//!   files) and writes the file when it changed, so that a crash keeps a
+//!   recent state. Never saved: dialogs, the Settings, the shell's own
+//!   surfaces, windows whose application has no desktop entry.
 //! - **Restored** once the bar shows (with the start-up applications,
 //!   [`super::autostart`]), when `[session] restore` is on: each saved
 //!   application starts once (not those the autostart starts: their
@@ -103,6 +103,9 @@ pub struct SavedWindow {
     pub state: Shape,
     pub above: bool,
     pub everywhere: bool,
+    /// Its opacity in percent (#735), when not opaque.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<u8>,
 }
 
 /// A window's state, as saved.
@@ -523,6 +526,9 @@ impl State {
         if saved.everywhere {
             self.set_everywhere(id, true);
         }
+        if let Some(percent) = saved.opacity {
+            self.set_opacity(id, percent);
+        }
         if gone && let Some(put) = self.put_now(id) {
             let came = CameFrom {
                 output: saved.screen.clone(),
@@ -751,6 +757,7 @@ impl State {
         let mode = self.model.mode(id);
         let above = self.model.is_above(id);
         let everywhere = self.model.is_everywhere(id);
+        let opacity = Some(managed.opacity).filter(|p| *p < crate::opacity::FULL);
         // Waiting for its screen gone: where it was there.
         if let Some(came) = managed
             .came_from
@@ -772,6 +779,7 @@ impl State {
                 state: Shape::of(mode),
                 above,
                 everywhere,
+                opacity,
             });
         }
         let output = self.output_of(id)?;
@@ -796,6 +804,7 @@ impl State {
             state: Shape::of(mode),
             above,
             everywhere,
+            opacity,
         })
     }
 }
@@ -1032,6 +1041,7 @@ mod tests {
             state,
             above: desktop == 2,
             everywhere: false,
+            opacity: (desktop == 2).then_some(60),
         };
         let saved = Saved {
             windows: vec![

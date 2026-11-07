@@ -290,7 +290,10 @@
 # magnifier-off = "Super+Escape"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
-# resizes it; Ctrl+Alt+F1 to F12 switch to another virtual terminal.
+# resizes it; Super+Alt and the wheel over a window make it more or less
+# transparent, by 10 % down to 20 % (kept while it is open, and in the
+# session restored); Ctrl+Alt+F1 to F12 switch to another virtual
+# terminal.
 
 # [capture]
 # Written by the Settings' Captures et presse-papiers page, every key
@@ -470,6 +473,19 @@
 # follow-keyboard = true
 # Smoothed; off, hard pixels.
 # smooth = true
+
+# [night-light]
+# Warmer colours in the evening (docs/design/windows.md §14): the screens'
+# white made warmer, from `from` to `to` (the clock's hours), fading in
+# over 30 min from `from` and out over 30 min from `to`. The same hour
+# twice: all day. On a screen the session drives itself (not in a window
+# of another session).
+# enabled = false
+# The temperature at night, in kelvin, from 1500 (very warm) to 6500 (the
+# screen's own white).
+# temperature = 4000
+# from = "21:00"
+# to = "07:00"
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the

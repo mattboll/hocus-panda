@@ -637,6 +637,8 @@ impl State {
             // The lid may have opened while asleep, unseen.
             self.lid_again("the machine woke up");
             self.away.woke = true;
+            // The clock moved on meanwhile: the night light at its hour.
+            self.night_light_update();
             self.redraw = true;
             // The user woke it: the screens on, the countdowns from now.
             self.felt(Felt::Other);

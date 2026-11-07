@@ -45,6 +45,9 @@ pub struct Config {
     pub overview: Overview,
     /// The magnifier (docs/design/accessibility.md, #424).
     pub magnifier: Magnifier,
+    /// Warmer colours in the evening (#436, docs/design/windows.md §14).
+    #[serde(rename = "night-light")]
+    pub night_light: NightLight,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -1543,6 +1546,59 @@ impl Default for Magnifier {
             smooth: true,
         }
     }
+}
+
+/// The night light, `[night-light]` (#436): the screens' colours warmer
+/// from `from` to `to`, wall-clock hours, fading in and out 30 min.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct NightLight {
+    pub enabled: bool,
+    /// The colour temperature at night, in kelvin, from 1500 to 6500
+    /// (6500: the screen's own white).
+    #[serde(deserialize_with = "kelvin")]
+    pub temperature: u32,
+    /// When it starts warming and when it goes back, in minutes since
+    /// midnight (`"21:00"`, `"7:30"`). The same hour: all day.
+    #[serde(deserialize_with = "clock_time")]
+    pub from: u16,
+    #[serde(deserialize_with = "clock_time")]
+    pub to: u16,
+}
+
+impl Default for NightLight {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            temperature: 4000,
+            from: 21 * 60,
+            to: 7 * 60,
+        }
+    }
+}
+
+fn kelvin<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let kelvin = u32::deserialize(deserializer)?;
+    if (1500..=6500).contains(&kelvin) {
+        Ok(kelvin)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "night light temperature {kelvin}: from 1500 to 6500"
+        )))
+    }
+}
+
+/// `"21:00"`, `"7:30"`: minutes since midnight.
+fn clock_time<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    parse_clock_time(&text)
+        .ok_or_else(|| serde::de::Error::custom(format!("{text:?}: a time of day, as \"21:00\"")))
+}
+
+pub(crate) fn parse_clock_time(text: &str) -> Option<u16> {
+    let (h, m) = text.trim().split_once(':')?;
+    let (h, m): (u16, u16) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60 && text.trim().len() <= 5).then_some(h * 60 + m)
 }
 
 /// How the magnifier's view follows the pointer.

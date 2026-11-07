@@ -1,6 +1,6 @@
 //! The Écrans page (6.9, variant A: the arrangement on top): the drawing
 //! of the screens, a click choosing one and a drag placing it; the chosen
-//! screen's rows, then all screens', then the night light (later); the
+//! screen's rows, then all screens', then the night light's (#436); the
 //! notes for a screen missing; the "Garder ?" dialog of a mode tried.
 //!
 //! The screens are the compositor's, over its line ([`crate::screens`]).
@@ -24,8 +24,8 @@ use crate::{
     lang::{Lang, w},
     model::Icon,
     screens::{
-        self, ARRANGE, Align, IDENTIFY, MIRROR, Mode3, NIGHT_LIGHT, PRIMARY, RATE, RESOLUTION,
-        ROTATION, Rect, SCALE, SCALES, SETS, Said, Screen, Screens, Side, USE, VRR,
+        self, ARRANGE, Align, IDENTIFY, MIRROR, Mode3, PRIMARY, RATE, RESOLUTION, ROTATION, Rect,
+        SCALE, SCALES, SETS, Said, Screen, Screens, Side, USE, VRR,
     },
     store::{self, KeyEdit},
 };
@@ -1407,55 +1407,20 @@ impl App {
             .spacing(8),
         );
 
-        // The night light, later.
+        // The night light (#436): the model's rows, the file's keys.
+        let controls = self.controls();
         let mut night = column![];
-        let rows = [
-            (
-                w("Éclairage nocturne", "Night light"),
-                w(
-                    "Des couleurs plus chaudes le soir.",
-                    "Warmer colours in the evening.",
-                ),
-            ),
-            (
-                w("Horaires", "Schedule"),
-                w("Du coucher au lever du soleil", "From sunset to sunrise"),
-            ),
-            (w("Température", "Temperature"), w("Chaude", "Warm")),
-        ];
-        for (i, (name, line)) in rows.into_iter().enumerate() {
-            let id = if i == 0 {
-                NIGHT_LIGHT
-            } else {
-                "screens.night-light.more"
-            };
-            night = night.push(divided(
-                i > 0,
-                container(self.screen_row(
-                    id,
-                    self.say(name),
-                    Some(self.say(line).to_owned()),
-                    None,
-                    None,
-                    if i == 0 {
-                        switch(false, true, false, 1.0, None)
-                    } else {
-                        Space::new().into()
-                    },
-                ))
-                .style(|_: &Theme| container::Style::default())
-                .into(),
-            ));
+        for (i, id) in screens::NIGHT_ROWS.iter().enumerate() {
+            if let Some(setting) = crate::model::setting(id) {
+                night = night.push(divided(i > 0, self.row(setting, &controls)));
+            }
         }
         page = page.push(
             column![
-                row![
-                    label(self.say(w("ÉCLAIRAGE NOCTURNE", "NIGHT LIGHT"))),
-                    container(later(lang)).padding(Padding::default().left(8)),
-                ]
-                .height(28)
-                .align_y(Alignment::Center),
-                container(card_box(night.into())).style(|_: &Theme| container::Style::default()),
+                row![label(self.say(w("ÉCLAIRAGE NOCTURNE", "NIGHT LIGHT")))]
+                    .height(28)
+                    .align_y(Alignment::Center),
+                card_box(night.into()),
             ]
             .spacing(8),
         );

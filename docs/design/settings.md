@@ -642,7 +642,12 @@ its connector, size and density), its rows "Utiliser cet écran",
 the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
 (inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
 ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
-ÉCLAIRAGE NOCTURNE, "Plus tard", inert. Screens are numbered 1 for the
+ÉCLAIRAGE NOCTURNE (#436): "Éclairage nocturne" (a switch, "Des couleurs
+plus chaudes le soir, moins de lumière bleue."), "À partir de" (18:00 to
+23:30, every half hour), "Jusqu'à" (05:00 to 09:30) and "Température"
+(a slider, 2500 to 6000 K by 100, "3500 K"), the last three inert while
+it is off: the model's rows, written at once by the file's worker.
+Screens are numbered 1 for the
 built-in panel, then by connector, and named "Écran du portable", "Écran
 externe 34 pouces" (its EDID's size), or "Écran 2" when its size is not
 known.
@@ -688,6 +693,7 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Échelle | `[outputs.NAME] scale` (Automatique: taken out) |
 | Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
 | Écran principal | `[panel] output` (Automatique: taken out) |
+| Éclairage nocturne, À partir de, Jusqu'à, Température | `[night-light] enabled`, `from`, `to`, `temperature` |
 
 **With two screens or more** (#417, windows.md §12 "Sets of screens"),
 the place, the mode, the scale, VRR and the primary screen are the set
@@ -749,7 +755,8 @@ compositor does not draw one screen's picture on another; the row is
 "Plus tard", inert); **Identifier**'s overlay on the screens themselves
 (the drawing shows the numbers large for 3 s, the compositor draws
 nothing yet); a drop that would split three screens or more (only two are
-drawn against each other); the night light.
+drawn against each other); the night light from sunset to sunrise (its
+hours are the user's, windows.md §14).
 
 ## Souris et pavé tactile (6.12)
 
