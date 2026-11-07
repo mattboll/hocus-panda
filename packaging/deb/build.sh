@@ -106,12 +106,15 @@ Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda
 Description: Wayland desktop for developers who work with AI agents
  Hocuspanda is a Wayland desktop on smithay: floating windows that snap,
- virtual desktops, and the state of the user's AI agents at a glance.
+ virtual desktops, several screens of mixed scales, and the state of the
+ user's AI agents at a glance, embodied by pandas.
  Display managers offer it as the "Hocuspanda" session.
  .
- This early version holds the compositor, its session, the base of its
- bar and its Settings; Super+Return opens a terminal, Super+B takes the
- keyboard into the bar and Super+Shift+E logs out.
+ It holds the compositor, its session, the bar (sound, networks,
+ Bluetooth, battery, the day's calendar and tasks, the agents, a
+ launcher and notifications), the lock screen and the Settings;
+ Super+Return opens a terminal, Super+B takes the keyboard into the bar
+ and Super+Shift+E logs out.
 CONTROL
 
 mkdir -p "$out"
