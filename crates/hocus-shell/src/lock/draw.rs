@@ -532,6 +532,14 @@ fn draw_clock(f: &mut Frame, cx: f32, top: f32, shown: &Shown, zero: Option<f32>
             Alignment::Center,
         );
         glyph.line_height = LineHeight::Absolute(Pixels(CLOCK));
+        // Givre's glow behind it.
+        crate::theme::glow(|offset, colour| {
+            f.fill_text(canvas::Text {
+                position: glyph.position + offset,
+                color: colour,
+                ..glyph.clone()
+            });
+        });
         f.fill_text(glyph);
         x += w;
     }

@@ -152,6 +152,11 @@ pub(crate) fn background(f: &mut Frame, size: Size, glass: bool) {
             ..canvas::Stroke::default()
         },
     );
+    crate::theme::corner_marks(
+        f,
+        Rectangle::new(Point::ORIGIN, size),
+        crate::theme::Corners::Diagonal,
+    );
 }
 
 /// `content` in Manrope at `size`, its line centred on `position`.
