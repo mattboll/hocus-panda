@@ -53,6 +53,7 @@ mod output_spec;
 mod overlay;
 mod overview;
 mod overview_draw;
+mod pandas;
 mod panel;
 pub mod peek;
 mod popover;

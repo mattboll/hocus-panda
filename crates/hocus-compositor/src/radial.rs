@@ -200,8 +200,9 @@ pub struct Radial {
     pub other_screen: Option<String>,
     /// Its application's id, for the hub's letter.
     pub app: String,
-    /// It hosts an agent that waits: the hub shows its panda.
-    pub waiting: bool,
+    /// It hosts agents: the hub shows the panda of the one that needs
+    /// the user most (#649).
+    pub agent: Option<crate::overview::AgentState>,
     pub lit: Option<Sector>,
     pub rest: Rest,
     /// The pointer as last seen.
@@ -450,10 +451,12 @@ impl State {
         let mut on = [false; 8];
         on[Sector::UpRight.index()] = self.model.is_above(id);
         on[Sector::UpLeft.index()] = self.model.is_everywhere(id);
-        let waiting = self
+        let agent = self
             .agents_shown()
             .iter()
-            .any(|a| a.window == id.0 && a.state == "waiting");
+            .filter(|a| a.window == id.0)
+            .map(|a| crate::overview::AgentState::of(&a.state))
+            .min();
         let app = self
             .windows
             .get(&id)
@@ -474,7 +477,7 @@ impl State {
             desktop,
             other_screen: other.map(|o| crate::radial_draw::screen_label(&o)),
             app,
-            waiting,
+            agent,
             lit: None,
             rest: Rest::Away,
             last: (at.x, at.y),
@@ -591,11 +594,18 @@ impl State {
     /// The menu's motions; whether something moves now.
     pub fn tick_radial(&mut self, now: Duration) -> bool {
         let mut moving = false;
+        let lively = self.pandas_lively();
         if let Some(radial) = &mut self.radial {
             moving |= now < radial.opened + OPEN;
             moving |= radial.tick(now);
-            // The panda bobs.
-            moving |= radial.waiting && !self.reduced_motion();
+            // The panda plays its mood as the menu opens; a waiting one
+            // bobs on.
+            if lively && let Some(state) = radial.agent
+            {
+                let burst = hocus_pandas::lasts(crate::pandas::mood(state).burst());
+                moving |= state == crate::overview::AgentState::Waiting
+                    || now < radial.opened + burst;
+            }
         }
         if let Some(going) = &self.radial_out {
             if going.tween.done(now) {
@@ -890,7 +900,7 @@ mod tests {
             desktop: 1,
             other_screen: None,
             app: String::new(),
-            waiting: false,
+            agent: None,
             lit: None,
             rest: Rest::Away,
             last: (500.0, 400.0),
