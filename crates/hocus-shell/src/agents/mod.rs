@@ -1149,7 +1149,8 @@ fn row(
     let height = row_height(line.look);
     let rect = Rectangle::new(Point::new(-ROW_OUT, y), Size::new(width, height));
     if !line.look.carded() {
-        let room = width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - measure(&word, AGENT_WORD, MANROPE);
+        let room =
+            width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - measure(&word, AGENT_WORD, MANROPE);
         return Row {
             id: line.id,
             look: line.look,
@@ -1615,7 +1616,10 @@ mod tests {
         // Room for all: five at most, "+ N" for the rest.
         assert_eq!(rows_that_fit(&working(3), f32::INFINITY), MOST_ROWS);
         assert_eq!(rows_that_fit(&working(3), head + 3.0 * 46.0), MOST_ROWS);
-        assert_eq!(rows_that_fit(&working(8), head + 5.0 * 46.0 + 20.0), MOST_ROWS);
+        assert_eq!(
+            rows_that_fit(&working(8), head + 5.0 * 46.0 + 20.0),
+            MOST_ROWS
+        );
         // Three that do not all fit: two over "+ 1".
         assert_eq!(rows_that_fit(&working(3), head + 3.0 * 46.0 - 1.0), 2);
         assert_eq!(rows_that_fit(&working(8), head + 5.0 * 46.0 + 19.0), 4);
@@ -1641,7 +1645,10 @@ mod tests {
         let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.5;
         let words = Words::new(Lang::French);
         let mut waiting = shown(1, "waiting", 0, "site-web");
-        waiting.note = Some(Note::allow("Bash", "npm install --save-dev typescript eslint prettier"));
+        waiting.note = Some(Note::allow(
+            "Bash",
+            "npm install --save-dev typescript eslint prettier",
+        ));
         let mut stuck = shown(2, "failed", 0, "infra");
         stuck.note = Some(Note::Says("terraform plan a échoué".into()));
         let agents = vec![waiting, stuck, shown(3, "working", 0, "docs")];
@@ -1658,12 +1665,20 @@ mod tests {
             .collect();
         assert_eq!(
             rows,
-            [(66.0, 68.0, true), (134.0, 68.0, true), (202.0, 46.0, false)]
+            [
+                (66.0, 68.0, true),
+                (134.0, 68.0, true),
+                (202.0, 46.0, false)
+            ]
         );
         // What it asks on two lines at most, cut, in the card's room.
         let card = &laid.rows[0];
         assert_eq!(card.note.len(), 2);
-        assert!(card.note[0].starts_with("Autoriser Bash"), "{:?}", card.note);
+        assert!(
+            card.note[0].starts_with("Autoriser Bash"),
+            "{:?}",
+            card.note
+        );
         assert!(card.note[1].ends_with('…'), "{:?}", card.note);
         for line in &card.note {
             assert!(measure(line, CARD_NOTE, MANROPE) <= card_room() + 0.01);
@@ -1728,7 +1743,10 @@ mod tests {
         // apart, the item 52 px taller.
         assert_eq!(
             three.waiting,
-            Some((5, Rectangle::new(Point::new(0.0, 54.0), Size::new(48.0, 48.0))))
+            Some((
+                5,
+                Rectangle::new(Point::new(0.0, 54.0), Size::new(48.0, 48.0))
+            ))
         );
         assert!((three.height - (calm.height + 52.0)).abs() < 0.01);
         // Wider with two figures, toward her head.

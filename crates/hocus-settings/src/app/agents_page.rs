@@ -166,7 +166,10 @@ fn still(mood: hocus_pandas::Mood) -> svg::Handle {
     let drawings = STILL.get_or_init(|| {
         hocus_pandas::Mood::ALL.map(|m| svg::Handle::from_memory(m.still().as_bytes()))
     });
-    let at = hocus_pandas::Mood::ALL.iter().position(|m| *m == mood).unwrap_or(0);
+    let at = hocus_pandas::Mood::ALL
+        .iter()
+        .position(|m| *m == mood)
+        .unwrap_or(0);
     drawings[at].clone()
 }
 
@@ -235,7 +238,12 @@ impl App {
     /// it plays: from the page's opening (each 300 ms after the one
     /// before), or from the pointer coming over it.
     fn agents_burst(&self, i: usize, now: Instant) -> Option<Duration> {
-        family_burst(i, self.agents.hop, self.agents.petted.get(i).copied().flatten(), now)
+        family_burst(
+            i,
+            self.agents.hop,
+            self.agents.petted.get(i).copied().flatten(),
+            now,
+        )
     }
 
     /// The keyboard's stops, in `Tab`'s order.
@@ -1188,12 +1196,9 @@ impl App {
             cells = cells.push(
                 mouse_area(
                     container(
-                        column![
-                            face,
-                            t(w(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),
-                        ]
-                        .spacing(4)
-                        .align_x(Alignment::Center),
+                        column![face, t(w(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),]
+                            .spacing(4)
+                            .align_x(Alignment::Center),
                     )
                     .padding([8, 4])
                     .width(Length::FillPortion(1))

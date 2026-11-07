@@ -600,11 +600,10 @@ impl State {
             moving |= radial.tick(now);
             // The panda plays its mood as the menu opens; a waiting one
             // bobs on.
-            if lively && let Some(state) = radial.agent
-            {
+            if lively && let Some(state) = radial.agent {
                 let burst = hocus_pandas::lasts(crate::pandas::mood(state).burst());
-                moving |= state == crate::overview::AgentState::Waiting
-                    || now < radial.opened + burst;
+                moving |=
+                    state == crate::overview::AgentState::Waiting || now < radial.opened + burst;
             }
         }
         if let Some(going) = &self.radial_out {

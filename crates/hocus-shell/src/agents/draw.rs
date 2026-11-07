@@ -59,9 +59,9 @@ use super::{
     AGENT_NAME, AGENT_WORD, BADGE, BADGE_TEXT, BUTTON, BUTTON_TEXT, CARD_IN, CARD_NAME_LINE,
     CARD_NOTE, CARD_NOTE_LINE, CARD_PANDA, CARD_PANDA_GAP, CARD_RADIUS, CARD_ROW_RADIUS, CARD_WORD,
     FOLLOWED, HEAD, HEAD_GAP, HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL,
-    LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM,
-    MINI_PANDA, MINI_PANDA_IN, MINI_RADIUS, MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP,
-    ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
+    LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_PANDA,
+    MINI_PANDA_IN, MINI_RADIUS, MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD,
+    ROW_RADIUS, Row, SAYS, Words,
 };
 use crate::pandas::{self, Burst};
 use crate::theme::Ink;
@@ -765,7 +765,11 @@ impl State {
         if self.bursts.get(&id).is_some_and(|b| b.plays(now)) {
             return;
         }
-        tracing::debug!(id, mood = pandas::mood(look).name(), "a panda plays its mood");
+        tracing::debug!(
+            id,
+            mood = pandas::mood(look).name(),
+            "a panda plays its mood"
+        );
         self.bursts.insert(id, Burst::of(pandas::mood(look), now));
     }
 
@@ -989,14 +993,19 @@ impl Group {
     /// item's waiting one.
     fn look_of(&self, id: u64) -> Option<Look> {
         let layout = layout()?;
-        layout.rows.iter().find(|r| r.id == id).map(|r| r.look).or_else(|| {
-            layout
-                .mini
-                .as_ref()
-                .and_then(|m| m.waiting)
-                .filter(|w| w.0 == id)
-                .map(|_| Look::Waiting)
-        })
+        layout
+            .rows
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.look)
+            .or_else(|| {
+                layout
+                    .mini
+                    .as_ref()
+                    .and_then(|m| m.waiting)
+                    .filter(|w| w.0 == id)
+                    .map(|_| Look::Waiting)
+            })
     }
 
     /// The form that shows alone (not switching): its items take the
@@ -1121,13 +1130,23 @@ impl Group {
                 faded(WAITING.1, alpha * 0.14 / WAITING.1.a),
             );
             if state.hover == Some(Item::Agent(id)) {
-                f.fill(&kit::rounded(square, MINI_RADIUS), faded(ROW_HOVER.get(), alpha));
+                f.fill(
+                    &kit::rounded(square, MINI_RADIUS),
+                    faded(ROW_HOVER.get(), alpha),
+                );
             }
             let place = Rectangle::new(
                 Point::new(square.x + MINI_PANDA_IN, square.y + MINI_PANDA_IN),
                 Size::new(MINI_PANDA, MINI_PANDA),
             );
-            draw_panda(f, place, Look::Waiting, state.bursts.get(&id).copied(), now, alpha);
+            draw_panda(
+                f,
+                place,
+                Look::Waiting,
+                state.bursts.get(&id).copied(),
+                now,
+                alpha,
+            );
         }
         if let Some(badge) = &mini.badge {
             let rect = at(badge.rect);
@@ -1371,7 +1390,11 @@ impl Group {
                 continue;
             }
             let rect = Rectangle::new(Point::new(o.x + row.rect.x, o.y + y), row.rect.size());
-            let radius = if row.card() { CARD_ROW_RADIUS } else { ROW_RADIUS };
+            let radius = if row.card() {
+                CARD_ROW_RADIUS
+            } else {
+                ROW_RADIUS
+            };
             if tint.a > 0.0 {
                 f.fill(&kit::rounded(rect, radius), faded(tint, shown));
             }
@@ -1415,7 +1438,13 @@ impl Group {
                 );
             }
             if row.card() {
-                self.card_text(f, row, Point::new(left + side + CARD_PANDA_GAP, middle), word, shown);
+                self.card_text(
+                    f,
+                    row,
+                    Point::new(left + side + CARD_PANDA_GAP, middle),
+                    word,
+                    shown,
+                );
                 continue;
             }
             f.fill_text(kit::text_in(
@@ -1457,12 +1486,22 @@ impl Group {
         let mut y = at.y - tall / 2.0;
         f.fill_text(kit::text_in(
             kit::MANROPE_SEMIBOLD,
-            said_at(&row.name, Point::new(at.x, y + name / 2.0), AGENT_NAME, faded(TEXT.get(), shown)),
+            said_at(
+                &row.name,
+                Point::new(at.x, y + name / 2.0),
+                AGENT_NAME,
+                faded(TEXT.get(), shown),
+            ),
         ));
         y += name;
         f.fill_text(kit::text_in(
             MANROPE_BOLD,
-            said_at(&row.word, Point::new(at.x, y + said / 2.0), CARD_WORD, faded(word, shown)),
+            said_at(
+                &row.word,
+                Point::new(at.x, y + said / 2.0),
+                CARD_WORD,
+                faded(word, shown),
+            ),
         ));
         y += said;
         for line in &row.note {
@@ -1635,7 +1674,11 @@ mod tests {
         // Three rings, each from its start.
         for start in [0, 830, 1660] {
             assert!(secretary_motion(at(start)).1.is_some_and(|r| r < 0.01));
-            assert!(secretary_motion(at(start + 829)).1.is_some_and(|r| r > 0.99));
+            assert!(
+                secretary_motion(at(start + 829))
+                    .1
+                    .is_some_and(|r| r > 0.99)
+            );
         }
     }
 

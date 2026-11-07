@@ -110,8 +110,7 @@ fn played(
         // On whole steps: the same moment, the same drawing (and iced's
         // cache of it).
         let t = hocus_pandas::STEP * hocus_pandas::step(t);
-        Some((b.window, hocus_pandas::step(t)))
-            .zip(hocus_pandas::frame(mood, b.window, t))
+        Some((b.window, hocus_pandas::step(t))).zip(hocus_pandas::frame(mood, b.window, t))
     });
     match (frame, wrap) {
         (Some((key, svg)), wrap) => cached(mood, key, wrap, || match wrap {
@@ -119,9 +118,7 @@ fn played(
             None => svg,
         }),
         (None, None) => still(mood),
-        (None, Some(wrap)) => cached(mood, (Duration::MAX, 0), Some(wrap), || {
-            wrap(mood.still())
-        }),
+        (None, Some(wrap)) => cached(mood, (Duration::MAX, 0), Some(wrap), || wrap(mood.still())),
     }
 }
 
@@ -167,10 +164,16 @@ mod tests {
         let mid = played(Mood::Waiting, Some(burst), at(700), None);
         assert_ne!(mid.id(), still(Mood::Waiting).id());
         // The same moment, the same drawing.
-        assert_eq!(played(Mood::Waiting, Some(burst), at(700), None).id(), mid.id());
+        assert_eq!(
+            played(Mood::Waiting, Some(burst), at(700), None).id(),
+            mid.id()
+        );
         let after = played(Mood::Waiting, Some(burst), at(3000), None);
         assert_eq!(after.id(), still(Mood::Waiting).id());
         // Without a burst (no motion), the still drawing.
-        assert_eq!(played(Mood::Waiting, None, at(700), None).id(), still(Mood::Waiting).id());
+        assert_eq!(
+            played(Mood::Waiting, None, at(700), None).id(),
+            still(Mood::Waiting).id()
+        );
     }
 }

@@ -106,45 +106,45 @@ impl Mood {
         const RING1: Part = part("ring1", Ring, 1.9, Out, 0.0, (85.0, 33.0));
         const RING2: Part = part("ring2", Ring, 1.9, Out, 0.95, (85.0, 33.0));
         const WORKING: &[Part] = &[
-                    SPARK,
-                    part("lid", Twinkle, 1.8, InOut, 0.0, (60.0, 88.5)),
-                    part("paw-l", Type, 0.46, InOut, 0.0, (42.0, 100.0)),
-                    part("paw-r", Type, 0.46, InOut, 0.23, (78.0, 100.0)),
+            SPARK,
+            part("lid", Twinkle, 1.8, InOut, 0.0, (60.0, 88.5)),
+            part("paw-l", Type, 0.46, InOut, 0.0, (42.0, 100.0)),
+            part("paw-r", Type, 0.46, InOut, 0.23, (78.0, 100.0)),
         ];
         const WAITING: &[Part] = &[
-                    SPARK,
-                    RING1,
-                    RING2,
-                    part("ask", Bob, 1.3, InOut, 0.0, (97.5, 9.8)),
-                    part("swing", Sway, 2.6, InOut, 0.0, (60.0, 100.0)),
+            SPARK,
+            RING1,
+            RING2,
+            part("ask", Bob, 1.3, InOut, 0.0, (97.5, 9.8)),
+            part("swing", Sway, 2.6, InOut, 0.0, (60.0, 100.0)),
         ];
         const DONE: &[Part] = &[
-                    SPARK,
-                    RING1,
-                    RING2,
-                    part("toss", Toss, 1.5, InOut, 0.0, (0.0, -11.8)),
-                    part("c1", Twinkle, 1.1, InOut, 0.0, (42.0, 10.0)),
-                    part("c2", Twinkle, 1.1, InOut, 0.55, (108.0, 55.5)),
-                    part("c3", Twinkle, 1.1, InOut, 0.0, (72.0, 6.0)),
-                    part("c4", Twinkle, 1.1, InOut, 0.55, (112.0, 20.0)),
-                    part("c5", Twinkle, 1.1, InOut, 0.0, (10.0, 62.0)),
+            SPARK,
+            RING1,
+            RING2,
+            part("toss", Toss, 1.5, InOut, 0.0, (0.0, -11.8)),
+            part("c1", Twinkle, 1.1, InOut, 0.0, (42.0, 10.0)),
+            part("c2", Twinkle, 1.1, InOut, 0.55, (108.0, 55.5)),
+            part("c3", Twinkle, 1.1, InOut, 0.0, (72.0, 6.0)),
+            part("c4", Twinkle, 1.1, InOut, 0.55, (112.0, 20.0)),
+            part("c5", Twinkle, 1.1, InOut, 0.0, (10.0, 62.0)),
         ];
         const STUCK: &[Part] = &[
-                    SPARK,
-                    part("p1", Smoke, 2.1, Out, 0.0, (104.0, 74.0)),
-                    part("p2", Smoke, 2.1, Out, 0.7, (109.0, 66.0)),
-                    part("p3", Smoke, 2.1, Out, 1.4, (104.0, 59.0)),
+            SPARK,
+            part("p1", Smoke, 2.1, Out, 0.0, (104.0, 74.0)),
+            part("p2", Smoke, 2.1, Out, 0.7, (109.0, 66.0)),
+            part("p3", Smoke, 2.1, Out, 1.4, (104.0, 59.0)),
         ];
         const RESTING: &[Part] = &[
-                    SPARK,
-                    part("body", Breathe, 4.0, InOut, 0.0, (60.0, 115.0)),
-                    part("z1", Z, 2.8, Out, 0.0, (96.0, 24.0)),
-                    part("z2", Z, 2.8, Out, 1.4, (106.5, 8.5)),
+            SPARK,
+            part("body", Breathe, 4.0, InOut, 0.0, (60.0, 115.0)),
+            part("z1", Z, 2.8, Out, 0.0, (96.0, 24.0)),
+            part("z2", Z, 2.8, Out, 1.4, (106.5, 8.5)),
         ];
         const WINK: &[Part] = &[
-                    SPARK,
-                    part("eye", Blink, 4.6, Plain, 0.0, (72.0, 51.5)),
-                    part("swing", Wave, 1.1, InOut, 0.0, (36.0, 76.0)),
+            SPARK,
+            part("eye", Blink, 4.6, Plain, 0.0, (72.0, 51.5)),
+            part("swing", Wave, 1.1, InOut, 0.0, (36.0, 76.0)),
         ];
         match self {
             Self::Working => WORKING,
@@ -281,6 +281,9 @@ impl Part {
     }
 }
 
+/// An animation's transforms' keyframes and its opacities'.
+type Keys = (&'static [(f32, Pose)], &'static [(f32, f32)]);
+
 /// The pandas canvas's keyframes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Anim {
@@ -301,8 +304,7 @@ impl Anim {
     /// Its transform's keyframes and its opacity's, by share of a cycle
     /// (a property a keyframe leaves out goes between those that set it,
     /// as CSS does).
-    fn keys(self) -> (&'static [(f32, Pose)], &'static [(f32, f32)]) {
-        type Keys = (&'static [(f32, Pose)], &'static [(f32, f32)]);
+    fn keys(self) -> Keys {
         const fn scale(s: f32) -> Pose {
             Pose::scaled(s, s)
         }
@@ -404,8 +406,8 @@ impl Anim {
     /// `ease`.
     fn at(self, share: f32, ease: Ease) -> Pose {
         let (transforms, opacities) = self.keys();
-        let mut pose = between(transforms, share, ease, |a, b, k| a.towards(*b, k))
-            .unwrap_or(Pose::REST);
+        let mut pose =
+            between(transforms, share, ease, |a, b, k| a.towards(*b, k)).unwrap_or(Pose::REST);
         pose.opacity = between(opacities, share, ease, |a, b, k| a + (b - a) * k).unwrap_or(1.0);
         pose
     }
@@ -634,7 +636,11 @@ mod tests {
         assert!(part.at(2.6, 2.3 + 0.3).is_rest());
         assert!(!part.at(2.6, 2.3 - 0.23).is_rest());
         // A hat tossed a whole turn lands without turning back.
-        let toss = Mood::Done.parts().iter().find(|p| p.id == "toss").expect("toss");
+        let toss = Mood::Done
+            .parts()
+            .iter()
+            .find(|p| p.id == "toss")
+            .expect("toss");
         for ms in 1500..1800 {
             let pose = toss.at(2.6, ms as f32 / 1000.0);
             assert!(pose.turn.abs() < 0.5, "{ms}: {}", pose.turn);

@@ -1040,9 +1040,7 @@ impl State {
                 // rising.
                 let size = (rect.size.h * SLEEP_SHARE).min(SLEEP_MOST);
                 let frame = lively
-                    .then(|| {
-                        crate::pandas::frame(BREATHING, now.saturating_sub(overview.opened))
-                    })
+                    .then(|| crate::pandas::frame(BREATHING, now.saturating_sub(overview.opened)))
                     .flatten();
                 let at = Point::<f64, Logical>::from((
                     rect.loc.x + (rect.size.w - size) / 2.0,

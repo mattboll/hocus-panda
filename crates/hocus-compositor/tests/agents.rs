@@ -3929,7 +3929,10 @@ fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<
     let (_, top) = bed.mini_item("Secretary")?;
     // Its 48 px square under her head, 4 px apart, in the item's middle.
     assert!((x - (MINI_RIGHT - 28.0)).abs() < 0.6, "{x}");
-    assert!((y - (top + 4.0 + 46.0 + 4.0 + 24.0)).abs() < 0.6, "{y} under {top}");
+    assert!(
+        (y - (top + 4.0 + 46.0 + 4.0 + 24.0)).abs() < 0.6,
+        "{y} under {top}"
+    );
     assert_eq!(
         bed.surface().height,
         (MINI_HEIGHT + MINI_WAITING + 10.0).ceil() as i32
@@ -4140,9 +4143,11 @@ fn pandas_shot(bed: &mut Bed, folder: &Path, name: &str, width: i32) -> anyhow::
     let (screen, height, bytes) = bed.hp.screenshot(0)?;
     let pixel = |x: i32, y: i32| {
         let at = usize::try_from(y * screen + x).unwrap_or(0) * 4;
-        bytes.get(at..at + 4).map_or(image::Rgba([0, 0, 0, 255]), |p| {
-            image::Rgba([p[2], p[1], p[0], 255])
-        })
+        bytes
+            .get(at..at + 4)
+            .map_or(image::Rgba([0, 0, 0, 255]), |p| {
+                image::Rgba([p[2], p[1], p[0], 255])
+            })
     };
     let w = width.min(screen);
     image::RgbaImage::from_fn(w as u32, height as u32, |x, y| {

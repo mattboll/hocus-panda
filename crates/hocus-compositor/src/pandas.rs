@@ -34,8 +34,12 @@ pub type Frame = Option<(Duration, u16)>;
 
 /// The frame of a burst of `window` `t` into it: none once it is over.
 pub fn frame(window: Duration, t: Duration) -> Frame {
-    (t < hocus_pandas::lasts(window))
-        .then(|| (window, (t.as_secs_f64() * STEPS).floor().min(f64::from(u16::MAX)) as u16))
+    (t < hocus_pandas::lasts(window)).then(|| {
+        (
+            window,
+            (t.as_secs_f64() * STEPS).floor().min(f64::from(u16::MAX)) as u16,
+        )
+    })
 }
 
 /// `mood` at `frame`, `side` pixels square (its drawing as wide, in the
@@ -43,7 +47,11 @@ pub fn frame(window: Duration, t: Duration) -> Frame {
 pub fn draw(mood: Mood, frame: Frame, side: u32) -> Option<Vec<u8>> {
     let drawing = frame
         .and_then(|(window, step)| {
-            hocus_pandas::frame(mood, window, Duration::from_secs_f64(f64::from(step) / STEPS))
+            hocus_pandas::frame(
+                mood,
+                window,
+                Duration::from_secs_f64(f64::from(step) / STEPS),
+            )
         })
         .unwrap_or_else(|| mood.still().to_owned());
     let tree = usvg::Tree::from_str(&drawing, &usvg::Options::default())
@@ -66,7 +74,10 @@ mod tests {
     fn a_burst_has_frames_then_none() {
         let window = Mood::Waiting.burst();
         assert_eq!(frame(window, Duration::ZERO), Some((window, 0)));
-        assert_eq!(frame(window, Duration::from_millis(1000)), Some((window, 30)));
+        assert_eq!(
+            frame(window, Duration::from_millis(1000)),
+            Some((window, 30))
+        );
         assert_eq!(frame(window, hocus_pandas::lasts(window)), None);
     }
 

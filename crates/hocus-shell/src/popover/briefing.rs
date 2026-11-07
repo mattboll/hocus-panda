@@ -256,9 +256,8 @@ fn line(
         .note
         .as_ref()
         .filter(|_| matches!(look, Look::Waiting | Look::Stuck));
-    let what = note.map(|note| {
-        kit::elide(&words.note(note), TEXT_ROOM, |t| measure(t, WHAT, MANROPE))
-    });
+    let what =
+        note.map(|note| kit::elide(&words.note(note), TEXT_ROOM, |t| measure(t, WHAT, MANROPE)));
     let text = WHO * LINE + what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
     let height = 2.0 * LINE_PAD + text.max(PANDA);
     Line {
@@ -543,7 +542,11 @@ impl Panel {
                     section.look,
                     bursts.get(&line.id).copied(),
                     now,
-                    if section.look == Look::Resting { 0.55 } else { 1.0 },
+                    if section.look == Look::Resting {
+                        0.55
+                    } else {
+                        1.0
+                    },
                 );
                 let text_height =
                     WHO * LINE + line.what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
@@ -606,11 +609,7 @@ impl Panel {
 
     /// What it shows, read afresh: laid out again when the agents changed,
     /// or the minute did.
-    fn refresh<Message>(
-        &self,
-        state: &mut State,
-        now: Instant,
-    ) -> Option<canvas::Action<Message>> {
+    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
         for pressed in kit::keys(self.id) {
             let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
         }
@@ -618,11 +617,18 @@ impl Panel {
         let laid = self.lay_out_again(state);
         // As it opens, each line's panda plays its mood once (#649); the
         // pointer coming over a line replays its panda's.
-        let lines: Vec<(u64, Look)> = state.laid.iter().flat_map(|l| l.sections.iter()).flat_map(|s| s.lines.iter().map(|l| (l.id, s.look))).collect();
+        let lines: Vec<(u64, Look)> = state
+            .laid
+            .iter()
+            .flat_map(|l| l.sections.iter())
+            .flat_map(|s| s.lines.iter().map(|l| (l.id, s.look)))
+            .collect();
         if pandas::lively() {
             if !state.opened {
                 for (id, look) in &lines {
-                    state.bursts.insert(*id, Burst::of(pandas::mood(*look), now));
+                    state
+                        .bursts
+                        .insert(*id, Burst::of(pandas::mood(*look), now));
                 }
             }
             if state.pointer.hover != state.hovered

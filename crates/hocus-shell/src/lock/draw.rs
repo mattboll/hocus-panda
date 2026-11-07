@@ -1061,7 +1061,10 @@ fn draw_pandas(f: &mut Frame, size: Size, now: Instant, shown: Option<Instant>) 
         f.translate(Vector::new(centre.x, centre.y));
         f.rotate(-14f32.to_radians());
         f.draw_svg(
-            Rectangle::new(Point::new(-second.width / 2.0, -second.height / 2.0), second),
+            Rectangle::new(
+                Point::new(-second.width / 2.0, -second.height / 2.0),
+                second,
+            ),
             svg::Svg::new(drawing),
         );
     });
