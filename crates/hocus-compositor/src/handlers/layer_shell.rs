@@ -312,6 +312,8 @@ impl State {
                 let focus = KeyboardFocus::Wayland(layer.wl_surface().clone());
                 if keyboard.current_focus().as_ref() != Some(&focus) {
                     keyboard.set_focus(self, Some(focus), serial);
+                    // A bar holding the keyboard stands in front.
+                    self.redraw = true;
                 }
             }
             None => {
@@ -330,6 +332,7 @@ impl State {
                 if !kept {
                     let focused = self.model.focused();
                     self.focus(focused);
+                    self.redraw = true;
                 }
             }
         }

@@ -30,7 +30,9 @@ use std::{
 };
 
 use bluez::{Answer, Bluez, Call, FakeDevice, Pairing, Setup};
-use common::{BTN_LEFT, KEY_DOWN, KEY_ESC, KEY_LEFTMETA, KEY_TAB, WAIT, chord, wait};
+use common::{
+    BTN_LEFT, KEY_DOWN, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB, WAIT, chord, wait,
+};
 use fakes::Fakes;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
@@ -429,7 +431,7 @@ impl Bed {
     }
 
     fn mini(&mut self) -> anyhow::Result<()> {
-        chord(&mut self.hp, &[KEY_LEFTMETA, KEY_B]);
+        chord(&mut self.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
         let mini = self.hp.dispatch_until(WAIT, |hp| {
             hp.connections_surfaces()
                 .first()

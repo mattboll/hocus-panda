@@ -19,7 +19,9 @@ use std::{
     time::Duration,
 };
 
-use common::{BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, rect_of};
+use common::{
+    BTN_LEFT, KEY_LEFT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, WAIT, chord, open, rect_of,
+};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
     BarForm, Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect,
@@ -159,7 +161,7 @@ fn super_b_on_the_left_moves_the_windows_that_touch_the_bar() -> anyhow::Result<
     open(&mut hp, "beside", (500, 300))?;
     let centred = rect_of(&hp, "beside").ok_or_else(|| anyhow::anyhow!("no window"))?;
     hp.pointer_move(1000.0, 800.0);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     assert_eq!(form(&hp), Some(BarForm::Mini));
     let area = Rect::new(8 + 56 + 8, 8, 1920 - 8 - 56 - 8 - 8, 1064);
     assert_eq!(hp.work_area(), Some(area));
@@ -356,7 +358,7 @@ fn a_window_that_follows_the_bar_stays_behind_for_the_pointer_too() -> anyhow::R
     in_front_now(&mut hp, "opening")?;
     // The bar's form: the maximised window takes its new room.
     hp.pointer_move(middle.0, middle.1);
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = Rect::new(8, 8, 1920 - 8 - 56 - 8 - 8, 1064);
     common::wait_for_rect(&mut hp, "behind", mini)?;
     click(&mut hp, middle.0, middle.1);

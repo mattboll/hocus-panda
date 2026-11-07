@@ -54,6 +54,9 @@ pub enum Question {
     /// Followed, the connection stays open and hears each device plugged,
     /// changed or unplugged.
     InputDevices { follow: bool },
+    /// What the shell shows, for screen readers: each window's tree, a
+    /// node a line (docs/design/screen-reader.md).
+    A11y,
 }
 
 impl Question {
@@ -65,6 +68,7 @@ impl Question {
             Self::Outputs => "msg outputs",
             Self::InputDevices { follow: false } => "msg input-devices",
             Self::InputDevices { follow: true } => "msg input-devices follow",
+            Self::A11y => "msg a11y",
         }
     }
 
@@ -76,6 +80,7 @@ impl Question {
             "msg outputs" => Some(Self::Outputs),
             "msg input-devices" => Some(Self::InputDevices { follow: false }),
             "msg input-devices follow" => Some(Self::InputDevices { follow: true }),
+            "msg a11y" => Some(Self::A11y),
             _ => None,
         }
     }
@@ -356,6 +361,7 @@ mod tests {
         assert_eq!(Question::of("agent command k idle - k"), None);
         assert_eq!(Question::of("msg"), None);
         assert_eq!(Question::of(Question::Lock.line()), Some(Question::Lock));
+        assert_eq!(Question::of(Question::A11y.line()), Some(Question::A11y));
         for follow in [false, true] {
             let question = Question::InputDevices { follow };
             assert_eq!(Question::of(question.line()), Some(question));

@@ -748,6 +748,18 @@ impl Headless {
         self.app.state.configure(id, rect);
     }
 
+    /// The screen reader may start, as on a real session, its program
+    /// `program` instead of Orca (#734).
+    pub fn allow_screen_reader(&mut self, program: std::path::PathBuf) {
+        self.app.state.screen_reader.allowed = true;
+        self.app.state.screen_reader.program = Some(program);
+    }
+
+    /// The screen reader's process, while it runs.
+    pub fn screen_reader(&self) -> Option<u32> {
+        self.app.state.screen_reader.running()
+    }
+
     /// Tells the shell `message`, as the compositor would.
     pub fn tell_shell(&mut self, message: hocus_link::ToShell) {
         self.app.state.tell_shell(message);
@@ -835,6 +847,23 @@ impl Headless {
                 .find(|l| l.wl_surface() == &surface)
                 .map(|l| l.namespace().to_owned())
         })
+    }
+
+    /// Whether the bar on `output` is opaque behind a maximised window, as
+    /// the shell was told (bar.md §11).
+    pub fn bar_opaque(&self, output: &str) -> bool {
+        self.app.state.bar_opaque(output)
+    }
+
+    /// Whether the compositor blurs behind the bars.
+    pub fn glass_on(&self) -> bool {
+        self.app.state.glass_on()
+    }
+
+    /// The screen whose bar holds the keyboard (an item of it, or its
+    /// popover), if one does (`Super+B`, bar.md §11).
+    pub fn bar_keyboard(&self) -> Option<String> {
+        self.app.state.bar_holding_keyboard()
     }
 
     /// What output `index` (in the order given) drew over since the last

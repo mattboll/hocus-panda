@@ -362,6 +362,15 @@ impl Words {
     }
 
     /// Over the modes, in capitals.
+    /// The modes' label, as said rather than drawn in capitals.
+    pub fn mode_label(self) -> &'static str {
+        if self.fr() {
+            "Mode d'énergie"
+        } else {
+            "Power mode"
+        }
+    }
+
     pub fn power_mode(self) -> &'static str {
         if self.fr() {
             "MODE D'ÉNERGIE"

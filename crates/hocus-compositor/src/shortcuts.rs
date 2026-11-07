@@ -56,6 +56,10 @@ pub enum Action {
     MoveToScreen(i32),
     /// The bar's other form, on the screen under the pointer.
     ToggleBar,
+    /// The keyboard into the bar of the focused window's screen (else the
+    /// pointer's); held by a bar already, into the next screen's, then
+    /// back to the window (bar.md §11).
+    FocusBar,
     /// Volume, mute or brightness: to the shell, which keeps them.
     Level(LevelKey),
     /// The launcher, on the screen under the pointer; open, it closes.
@@ -83,15 +87,18 @@ pub enum Action {
     MagnifierIn,
     MagnifierOut,
     MagnifierOff,
+    /// The screen reader started, or stopped (#734,
+    /// `crate::screen_reader`).
+    ScreenReader,
 }
 
 impl Action {
-    /// The magnifier's: they work on the lock screen and in the
-    /// authentication dialog too.
+    /// The magnifier's and the screen reader's: they work on the lock
+    /// screen and in the authentication dialog too.
     pub fn magnifier(self) -> bool {
         matches!(
             self,
-            Self::MagnifierIn | Self::MagnifierOut | Self::MagnifierOff
+            Self::MagnifierIn | Self::MagnifierOut | Self::MagnifierOff | Self::ScreenReader
         )
     }
 }
@@ -275,7 +282,8 @@ shortcuts! {
     take_to_desktop_right: ["Super+Ctrl+Shift+Right"] => Action::TakeToDesktopBy(1),
     move_to_screen_left: ["Super+Alt+Left"] => Action::MoveToScreen(-1),
     move_to_screen_right: ["Super+Alt+Right"] => Action::MoveToScreen(1),
-    toggle_bar: ["Super+B"] => Action::ToggleBar,
+    toggle_bar: ["Super+Shift+B"] => Action::ToggleBar,
+    focus_bar: ["Super+B"] => Action::FocusBar,
     launcher: ["Super+Space"] => Action::Launcher,
     overview: ["Super+W"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
@@ -295,6 +303,7 @@ shortcuts! {
     magnifier_in: ["Super+equal", "Super+plus", "Super+KP_Add"] => Action::MagnifierIn,
     magnifier_out: ["Super+minus", "Super+KP_Subtract"] => Action::MagnifierOut,
     magnifier_off: ["Super+Escape"] => Action::MagnifierOff,
+    screen_reader: ["Super+Alt+S"] => Action::ScreenReader,
 }
 
 impl Shortcuts {
@@ -427,6 +436,7 @@ impl State {
                     self.toggle_bar(&output.name());
                 }
             }
+            Action::FocusBar => self.focus_bar(),
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
             Action::Overview => self.toggle_overview(),
@@ -439,6 +449,7 @@ impl State {
             Action::MagnifierIn => self.magnifier_step(true),
             Action::MagnifierOut => self.magnifier_step(false),
             Action::MagnifierOff => self.magnifier_off(),
+            Action::ScreenReader => self.toggle_screen_reader(),
         }
     }
 
@@ -644,6 +655,10 @@ mod tests {
         assert_eq!(action(logo, Keysym::Escape), Some(Action::MagnifierOff));
         assert_eq!(action(none, Keysym::Escape), None);
         assert!(Action::MagnifierOut.magnifier() && !Action::Desktop(5).magnifier());
+        // The screen reader's (#734), on the lock screen too.
+        let logo_alt = mods(true, false, false, true);
+        assert_eq!(action(logo_alt, Keysym::s), Some(Action::ScreenReader));
+        assert!(Action::ScreenReader.magnifier());
     }
 
     #[test]

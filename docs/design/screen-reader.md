@@ -18,7 +18,8 @@ the bubbles, the lock and the password dialog (3: B).
   among its kind ("2 sur 4"), bounds and actions. Crate `hocus-a11y` turns
   them into AccessKit trees and hands them to AT-SPI (`accesskit_unix`,
   MIT OR Apache-2.0), one top-level window per surface, all under one
-  application (`hocuspanda-shell`).
+  application, "Hocuspanda" (a vendored `accesskit_unix` takes the name;
+  the published one names it after the program).
 - **The bar's items are the keyboard's.** A bar's nodes are the items its
   surfaces register with the popovers' controller for the keyboard
   (`Controller::items_of`), in their order from the top and at their
@@ -76,6 +77,7 @@ the bubbles, the lock and the password dialog (3: B).
 | Tray | toolbar | "Icônes des applications" | buttons named by the item's title | click, menu |
 | A popover | frame, dialog | its title ("Son"), described by its subtitle ("Haut-parleurs du portable") | active and focused while it holds the keyboard | — |
 | The sound's rows | toggle button "Couper le son" (pressed when muted), slider "Volume", radio buttons for the outputs (checked: the default, "1 sur 2"), the microphone's, "Couper le son de Firefox", "Réglages du son…" | | focus follows the keyboard's ring | |
+| Every popover's rows | by the kit's kinds: switches (Wi-Fi, Bluetooth, do not disturb, "Au premier plan") as toggle buttons; sliders (brightness, the keyboard's backlight); choices as radio buttons (power modes, outputs, a window's desktops, a calendar's colours, the keyboard's levels); lines (a window, a notification, a clipboard item, an agent, an event) as list items or buttons with their details as description; fields (a task, the search, a Wi-Fi password and Planka's token as password text, never their value); section labels and notes as labels | | focus follows each popover's ring (the clipboard's: its selection) | as the keys do |
 | A bubble | frame, notification | "Slack : Léa Martin", ", urgent" when critical; described by its body; a progress bar when it has one | said as it comes | click: its default action; its actions as buttons |
 | The lock (its screen with the form) | frame | "Session verrouillée" | label: the clock; password text "Mot de passe", described by what the form says (wrong, Caps Lock, wait); button "Déverrouiller"; button "Disposition du clavier : Français. Changer"; label "2 agents t'attendent" | the field focused as the compositor says |
 | The lock (other screens) | frame | "Session verrouillée" | the clock alone | — |
@@ -107,9 +109,41 @@ the bubbles, the lock and the password dialog (3: B).
 Done as the pointer or the keys would: a click on a bar's item is the
 popovers' controller's press on it (opens its popover, or acts); the
 volume's and the brightness' increment and decrement are the level keys;
-the sound popover's mute and volume, the same; a bubble's action, its
-action; the lock's and the dialog's buttons, a press and a release on
-them.
+a bubble's action, its action; the lock's and the dialog's buttons, a
+press and a release on them. A popover's row: the keys that reach it and
+act, as the popover takes them (`Tab` to it, then `Enter`, or the arrows
+for a slider's step; the clipboard's selection by the arrows). A row the
+keys cannot reach (the clipboard's pin) has no action.
+
+Each popover says what it shows as it draws (`crate::a11y::rows`): its
+rows, the order of its ring and where the ring is. It costs nothing at
+rest: a popover draws only while it is open and changes.
+
+## Orca with the session
+
+- `[accessibility] screen-reader = true` starts Orca (`orca --replace`) as
+  the session's program as the session starts; `Super+Alt+S`
+  (`[shortcuts] screen-reader`) starts or stops it, on the lock screen and
+  in the password dialog too. Only when the compositor is the session (a
+  virtual terminal): nested, nothing starts (it would read the session it
+  runs in). Changing the key in the file starts or stops it.
+- Stopped by its own process id: `SIGTERM`, then `SIGKILL` if it is still
+  there 2 s later.
+- The Settings' Accessibilité page (A.2/A.3) gets its row: "Lecteur
+  d'écran", a switch on `[accessibility] screen-reader`
+  ([accessibility.md](accessibility.md)). The Keyboard page lists the
+  shortcut in a group of its own, "LECTEUR D'ÉCRAN".
+
+## `hocus msg a11y`
+
+`hocus msg a11y` prints what the shell shows for screen readers, each
+window's tree a node a line (role, name, value, range, description,
+states, place among its kind, bounds, actions; the window's focus and
+whether it is active), whether a reader listens or not: the compositor
+asks the shell (`a11y`), which says it a line at a time (`a11y-line`,
+`a11y-end`); "no shell" without one. The shell also logs each window's
+tree as a reader gets it (`RUST_LOG=hocus_a11y=debug`, "the accessibility
+tree").
 
 ## Testing
 
@@ -122,6 +156,11 @@ them.
   states and actions above in French and in English, the announcement
   rule, the lock, the password dialog, a bubble and the sound popover's
   rows.
+- `crates/hocus-compositor/tests/screen_reader.rs`: the real shell's tree
+  through `hocus msg a11y` (the bar's sound a slider; its popover a
+  dialog with its rows, holding the keyboard; `Tab` moving the focus;
+  `Esc` giving the focus back to the bar's sound), and `Super+Alt+S`
+  starting a fake screen reader, as on a real session, and stopping it.
 - By hand, never on the live session's buses: a headless compositor with
   `--session-bus` on a dbus-daemon of its own, `at-spi-bus-launcher
   --launch-immediately` on it with `IsEnabled` set, then a reader (Orca,
@@ -130,14 +169,7 @@ them.
 
 ## Not built yet
 
-- The other popovers' rows: they show as a dialog named by their title
-  (the sound's has its rows).
-- `hocus msg a11y` (the tree printed by the compositor's control socket):
-  the shell logs each window's tree at debug level
-  (`RUST_LOG=hocus_a11y=debug`, "the accessibility tree").
-- Starting Orca with the session (`[accessibility] screen-reader`) and its
-  shortcut: the Settings' accessibility page and the compositor.
 - A text field's caret and selection (iced does not expose them): fields
-  are read by name only.
-- The application's name on AT-SPI is the program's (`hocuspanda-shell`):
-  AccessKit takes it from the executable.
+  are read by name (and a non-secret one by its text) only.
+- The session does not set `GTK_A11Y` or `QT_LINUX_ACCESSIBILITY_ALWAYS_ON`
+  while a reader runs: applications keep their own defaults.

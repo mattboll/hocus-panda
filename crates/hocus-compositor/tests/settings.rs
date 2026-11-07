@@ -4,7 +4,7 @@
 //! power supplies, buses or GPU (it draws with tiny-skia).
 //!
 //! One test per point of the issue: the window opens with its sidebar's
-//! 17 sections; searching "veille" finds "Mettre en veille après", the lid
+//! 18 sections; searching "veille" finds "Mettre en veille après", the lid
 //! and the power button, and opening a result lights its row; changing the
 //! delay writes `[idle] delay` at once, the file's other sections and
 //! comments kept; "Annuler" and `Ctrl+Z` take it back; a hand edit of the
@@ -338,7 +338,7 @@ fn kept(before: &str, after: &str, but: &[&str]) -> bool {
 }
 
 #[test]
-fn the_window_opens_with_its_sidebars_17_sections() -> anyhow::Result<()> {
+fn the_window_opens_with_its_sidebars_18_sections() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -348,9 +348,10 @@ fn the_window_opens_with_its_sidebars_17_sections() -> anyhow::Result<()> {
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    assert_eq!(sections.len(), 17, "{sections:?}");
+    assert_eq!(sections.len(), 18, "{sections:?}");
     assert_eq!(sections[0], "Apparence et langue");
-    assert_eq!(sections[14], "Énergie");
+    assert_eq!(sections[3], "Accessibilité");
+    assert_eq!(sections[15], "Énergie");
     // Each drawn in the sidebar, in that order, under the home's row.
     let places = bed.places_with("nav:date-and-time")?;
     let y = |id: &str| places[id][1].as_f64().unwrap_or(-1.0);
@@ -359,6 +360,7 @@ fn the_window_opens_with_its_sidebars_17_sections() -> anyhow::Result<()> {
         "appearance",
         "wallpaper",
         "bar",
+        "accessibility",
         "agenda",
         "screens",
         "sound",

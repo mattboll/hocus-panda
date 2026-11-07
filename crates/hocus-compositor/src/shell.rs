@@ -68,6 +68,17 @@ pub struct Shell {
     /// to it as it starts (`WAYLAND_SOCKET`): the only client whose lock
     /// surfaces show (7.1).
     pub client: Option<smithay::reexports::wayland_server::backend::ClientId>,
+    /// `hocus msg a11y`'s askers, answered with the lines the shell says
+    /// once it ends them.
+    a11y: A11yAsked,
+}
+
+/// The screen readers' tree asked of the shell: who waits, and what it said
+/// so far.
+#[derive(Debug, Default)]
+struct A11yAsked {
+    askers: Vec<std::sync::mpsc::Sender<String>>,
+    said: String,
 }
 
 /// The session bus the shell serves the notifications on (5.3).
@@ -439,6 +450,7 @@ impl State {
             }
             tracing::info!("the shell is gone; its bars' space stays");
         }
+        self.answer_a11y(Some("the shell went\n"));
         self.peek_shell_gone();
         self.auth_shell_gone();
         // The meeting's halo is the shell's to say: its next one says it
@@ -468,6 +480,13 @@ impl State {
                 self.tell_shell(self.bar_look());
             }
             ToCompositor::Wake(namespace) => self.wake_shell_surfaces(&namespace),
+            ToCompositor::A11yLine(line) => {
+                if !self.shell.a11y.askers.is_empty() {
+                    self.shell.a11y.said.push_str(&line);
+                    self.shell.a11y.said.push('\n');
+                }
+            }
+            ToCompositor::A11yEnd => self.answer_a11y(None),
             ToCompositor::Closing(namespace) if hocus_link::slides_in(&namespace) => {
                 self.bubble_closing(&namespace);
             }
@@ -498,6 +517,7 @@ impl State {
             } => self.send_to_asked(id, &output, desktop),
             ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
+            ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
                 Some(tool) => self.agent_tools_asked(hocus_agents::watch::Ask::Plug(tool)),
                 None => tracing::warn!(tool, "the shell plugs in a tool that is not one"),
@@ -572,9 +592,37 @@ impl State {
     }
 
     /// Whether the compositor blurs behind the bars: it can, transparency
-    /// is not reduced, and the shell draws on a GPU.
+    /// is not reduced (high contrast reduces it too, #423), and the shell
+    /// draws on a GPU.
     pub fn glass_on(&self) -> bool {
-        self.blur && !self.config.appearance.reduce_transparency && !self.shell.software
+        self.blur
+            && !self.config.appearance.reduce_transparency
+            && !self.config.appearance.high_contrast
+            && !self.shell.software
+    }
+
+    /// `hocus msg a11y`: the shell is asked what it shows for screen
+    /// readers; `reply` hears it once the shell said it all (or went).
+    pub(crate) fn ask_a11y(&mut self, reply: std::sync::mpsc::Sender<String>) {
+        if self.shell.link.is_none() {
+            let _ = reply.send("no shell\n".to_owned());
+            return;
+        }
+        self.shell.a11y.askers.push(reply);
+        if self.shell.a11y.askers.len() == 1 {
+            self.shell.a11y.said.clear();
+            self.tell_shell(ToShell::A11y);
+        }
+    }
+
+    /// Answers whoever asked for the screen readers' tree: with what the
+    /// shell said, or `instead`.
+    fn answer_a11y(&mut self, instead: Option<&str>) {
+        let said = std::mem::take(&mut self.shell.a11y.said);
+        let answer = instead.map_or(said, str::to_owned);
+        for asker in self.shell.a11y.askers.drain(..) {
+            let _ = asker.send(answer.clone());
+        }
     }
 
     /// Tells the shell, if it is there; a shell that does not read loses

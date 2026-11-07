@@ -58,8 +58,22 @@ pub const MAGNIFIER: RowGroup = RowGroup {
     per_source: false,
 };
 
-pub const SHORTCUT_GROUPS: [RowGroup; 7] =
-    [WINDOWS, DESKTOPS, BAR, CAPTURES, SESSION, MEDIA, MAGNIFIER];
+/// The screen reader's shortcut (#734).
+pub const SCREEN_READER: RowGroup = RowGroup {
+    label: w("LECTEUR D'ÉCRAN", "SCREEN READER"),
+    per_source: false,
+};
+
+pub const SHORTCUT_GROUPS: [RowGroup; 8] = [
+    WINDOWS,
+    DESKTOPS,
+    BAR,
+    CAPTURES,
+    SESSION,
+    MEDIA,
+    MAGNIFIER,
+    SCREEN_READER,
+];
 
 pub const SWITCHES: &[&str] = &[
     "",
@@ -402,10 +416,20 @@ fn actions() -> Vec<Action> {
             (&["applications", "chercher"], &["apps", "search"]),
         ),
         a(
+            "focus-bar",
+            BAR,
+            w("Aller dans la barre", "Go to the bar"),
+            &["Super+B"],
+            (
+                &["clavier", "barre", "accessibilité", "focus"],
+                &["keyboard", "panel", "accessibility", "focus"],
+            ),
+        ),
+        a(
             "toggle-bar",
             BAR,
             w("Changer la forme de la barre", "Change the bar's form"),
-            &["Super+B"],
+            &["Super+Shift+B"],
             (&["mini", "barre"], &["panel", "bar"]),
         ),
         a(
@@ -533,6 +557,20 @@ fn actions() -> Vec<Action> {
             w("Éteindre la loupe", "Turn the magnifier off"),
             &["Super+Escape"],
             (&["loupe", "zoom"], &["magnifier", "zoom"]),
+        ),
+        // The screen reader (#734).
+        a(
+            "screen-reader",
+            SCREEN_READER,
+            w(
+                "Lancer ou arrêter le lecteur d'écran",
+                "Start or stop the screen reader",
+            ),
+            &["Super+Alt+S"],
+            (
+                &["lecteur d'écran", "orca", "aveugle", "voix"],
+                &["screen reader", "orca", "blind", "speech"],
+            ),
         ),
     ]);
     list
@@ -784,18 +822,19 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 70);
+        assert_eq!(all.len(), 72);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
         let count = |g| all.iter().filter(|s| s.group == g).count();
         assert_eq!(count(WINDOWS), 16);
         assert_eq!(count(DESKTOPS), 34);
-        assert_eq!(count(BAR), 6);
+        assert_eq!(count(BAR), 7);
         assert_eq!(count(CAPTURES), 4);
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);
         assert_eq!(count(MAGNIFIER), 3);
+        assert_eq!(count(SCREEN_READER), 1);
         // The shipped file's keys, every one.
         let shipped = include_str!("../../../packaging/config.toml");
         for setting in &all {

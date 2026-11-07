@@ -48,6 +48,8 @@ pub struct Config {
     /// Warmer colours in the evening (#436, docs/design/windows.md §14).
     #[serde(rename = "night-light")]
     pub night_light: NightLight,
+    /// The screen reader (docs/design/screen-reader.md, #734).
+    pub accessibility: Accessibility,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -1080,7 +1082,7 @@ impl PanelSide {
 #[serde(rename_all = "kebab-case")]
 pub enum FormChoice {
     /// Full on a screen wide enough (bar.md §3), or as last chosen with a
-    /// click or `Super+B`.
+    /// click or `Super+Shift+B`.
     #[default]
     Auto,
     Full,
@@ -1104,7 +1106,10 @@ impl FormChoice {
 pub struct Appearance {
     /// Windows fade instead of moving, and do not wobble.
     pub reduced_motion: bool,
-    /// The focused window's rim is 2 px wide instead of 1.
+    /// The theme reinforced (#423): the shell, the Settings, the lock and
+    /// the authentication dialog draw its high-contrast tokens, with no
+    /// glass (it implies `reduce-transparency`); the focused window's rim
+    /// is 2 px wide instead of 1; applications are told (`contrast`).
     pub high_contrast: bool,
     /// The Xcursor theme; else `XCURSOR_THEME`'s, else `default`.
     pub cursor_theme: Option<String>,
@@ -1275,6 +1280,7 @@ impl Appearance {
             } else {
                 hocus_link::theme::AccentColours::default()
             },
+            contrast: self.high_contrast,
         }
     }
 }
@@ -1517,6 +1523,15 @@ impl Default for Overview {
     fn default() -> Self {
         Self { hot_corner: true }
     }
+}
+
+/// `[accessibility]` (docs/design/screen-reader.md, #734).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Accessibility {
+    /// The screen reader (Orca) starts with the session; `Super+Alt+S`
+    /// starts or stops it whatever this says.
+    pub screen_reader: bool,
 }
 
 /// The magnifier, `[magnifier]` (docs/design/accessibility.md, #424).

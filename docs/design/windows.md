@@ -67,6 +67,10 @@ and the wheel over a window make it more or less transparent.
   keys are let go, as a shortcut does. Over no window (the bar, the
   desktop) or with the overview, the radial menu or Alt+Tab open, the
   wheel does nothing.
+  `Super+Alt+S` (the screen reader, accessibility.md) is a key: the
+  wheel with `Super+Alt` leaves it alone. Reduced transparency and high
+  contrast (the Accessibility page) leave a window's own opacity as the
+  user set it.
 - Nested, `Super` is `Alt+Super` already, and `Alt+Super` and the wheel
   is the magnifier's: no opacity wheel there.
 
@@ -1047,7 +1051,8 @@ holds the keyboard; the virtual terminals' switch stays.
 | `take-to-desktop-1` … `take-to-desktop-9` | `Super+Ctrl+Shift+1` … | Takes the focused window there, going with it (§12) |
 | `take-to-desktop-left`, `take-to-desktop-right` | `Super+Ctrl+Shift+←`, `Super+Ctrl+Shift+→` | Takes the focused window to the desktop on that side of its screen, going with it; it stays past the first or the last (§12) |
 | `move-to-screen-left`, `move-to-screen-right` | `Super+Alt+←`, `Super+Alt+→`; none nested | Sends the focused window to the screen on that side, onto the desktop it shows, at the same share of its work area (§12) |
-| `toggle-bar` | `Super+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `toggle-bar` | `Super+Shift+B` | The bar's other form, on the screen under the pointer ([bar.md](bar.md)) |
+| `focus-bar` | `Super+B` | The keyboard into the bar of the focused window's screen; again, the next screen's bar, then back to the window ([bar.md](bar.md) §11) |
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
@@ -1058,6 +1063,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `volume-up`, `volume-down`, `mute` | the keyboard's sound keys | 5 % a press, stepping on while held; to the shell's gauges |
 | `brightness-up`, `brightness-down` | the keyboard's brightness keys | The same for the screen's brightness, down to 5 % |
 | `magnifier-in`, `magnifier-out`, `magnifier-off` | `Super+=` (`Super+plus`, keypad `+`), `Super+-` (keypad `-`), `Super+Escape` | The magnifier a step in (on at its last zoom), a step out (off at 1×), off; also on the lock screen. `Super+-` takes the key that types `-`: on AZERTY, the `6` key's place does not go to desktop 6 ([accessibility.md](accessibility.md)) |
+| `screen-reader` | `Super+Alt+S` | The screen reader (Orca) started or stopped, only when the compositor is the session; also on the lock screen ([screen-reader.md](screen-reader.md)) |
 
 Other settings of this slice in the same file: `[keyboard]` (layouts;
 without them, the system's `/etc/default/keyboard`, then XKB's `us`;

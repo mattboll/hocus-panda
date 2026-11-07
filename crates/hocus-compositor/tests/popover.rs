@@ -20,7 +20,9 @@ mod fakes;
 
 use std::time::{Duration, Instant};
 
-use common::{BTN_LEFT, KEY_ESC, KEY_LEFTMETA, KEY_TAB, WAIT, chord, shell_program, wait};
+use common::{
+    BTN_LEFT, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_TAB, WAIT, chord, shell_program, wait,
+};
 use fakes::{FakeSink, Fakes};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
@@ -319,7 +321,7 @@ fn in_the_mini_form_hovering_the_gauge_opens_it_and_leaving_closes_it() -> anyho
     };
     let fakes = Fakes::start_with(&OUTPUTS)?;
     let mut hp = start(&fakes, &shell)?;
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let mini = hp.dispatch_until(WAIT, |hp| {
         hp.levels_surfaces()
             .first()

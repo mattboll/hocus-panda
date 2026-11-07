@@ -317,6 +317,65 @@ pub fn height(form: Form) -> u32 {
 
 // --- The panel ------------------------------------------------------------------
 
+impl Panel {
+    /// What it shows, for screen readers (crate::a11y::rows): each section's
+    /// agents, their names whole, since when, what their tool said, then
+    /// the count and Sources.
+    fn tell_readers(&self, state: &State) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let Some(laid) = &state.laid else {
+            return;
+        };
+        let words = self.words;
+        let mut nodes = Vec::new();
+        for section in &laid.sections {
+            let label = words.section(section.look);
+            let mut label_chars = label.chars();
+            let label = label_chars.next().map_or_else(String::new, |first| {
+                first.to_string() + &label_chars.as_str().to_lowercase()
+            });
+            nodes.push(rows::line(label));
+            for line in &section.lines {
+                let agent = state.said.agents.iter().find(|a| a.id == line.id);
+                let name = agent.map_or_else(|| line.who.clone(), |a| crate::a11y::plain(&a.name));
+                let when = line.when.trim_start_matches('·').trim();
+                let name = if when.is_empty() {
+                    name
+                } else {
+                    format!("{name}, {when}")
+                };
+                let note = agent
+                    .and_then(|a| a.note.as_ref())
+                    .filter(|_| matches!(section.look, Look::Waiting | Look::Stuck))
+                    .map(|n| words.note(n));
+                let mut node = rows::act(Target::Agent(line.id), Role::Button, name, line.rect);
+                if let Some(note) = note {
+                    node = node.describe(note);
+                }
+                nodes.push(node);
+            }
+        }
+        nodes.push(rows::line(laid.footer.clone()));
+        nodes.push(rows::act(
+            Target::Sources,
+            Role::Button,
+            words.sources(),
+            laid.sources,
+        ));
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(laid.targets().into_iter().map(|(t, _)| t)),
+                focus: state.focus.map(rows::key),
+                arrows: false,
+            },
+        );
+    }
+}
+
 /// The briefing on its surface.
 #[derive(Debug, Clone)]
 pub struct Panel {
@@ -380,6 +439,7 @@ impl<Message> canvas::Program<Message> for Panel {
         {
             ring(&mut frame, rect, LINE_RADIUS);
         }
+        self.tell_readers(state);
         vec![frame.into_geometry()]
     }
 

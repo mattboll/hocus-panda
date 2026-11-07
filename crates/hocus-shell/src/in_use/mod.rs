@@ -572,6 +572,15 @@ impl Words {
         }
     }
 
+    /// The words to pause or resume the recording, for screen readers.
+    pub fn pause_recording(self, paused: bool) -> &'static str {
+        if paused {
+            self.pick("Reprendre l'enregistrement", "Resume the recording")
+        } else {
+            self.pick("Mettre l'enregistrement en pause", "Pause the recording")
+        }
+    }
+
     fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
         if self.fr { fr } else { en }
     }

@@ -13,7 +13,7 @@ mod fakes;
 
 use std::time::Duration;
 
-use common::{KEY_LEFTMETA, WAIT, chord, shell_program, wait};
+use common::{KEY_LEFTMETA, KEY_LEFTSHIFT, WAIT, chord, shell_program, wait};
 use fakes::Fakes;
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
@@ -184,7 +184,7 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     assert_eq!(hp.bar_commits(), bars);
 
     // The mini form: the sound's vertical gauge.
-    chord(&mut hp, &[KEY_LEFTMETA, KEY_B]);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_B]);
     let placed = hp.dispatch_until(WAIT, |hp| {
         hp.levels_surfaces() == vec![("HEADLESS-1".to_owned(), MINI)]
     })?;

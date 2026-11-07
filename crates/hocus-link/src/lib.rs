@@ -408,6 +408,10 @@ impl FromStr for Side {
 /// What the compositor tells the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToShell {
+    /// Says what the shell shows, for screen readers (`hocus msg a11y`,
+    /// docs/design/screen-reader.md): answered by [`ToCompositor::A11yLine`]s
+    /// and an [`ToCompositor::A11yEnd`].
+    A11y,
     /// How bars look: on glass the compositor blurs behind (else opaque),
     /// and whether they move (else reduced motion).
     Look { glass: bool, motion: bool },
@@ -694,6 +698,18 @@ pub enum ToShell {
     /// The windows kept above the others and those on all desktops, for
     /// the marks after their titles in the bar ([`WindowStates`]).
     WindowStates(WindowStates),
+    /// `Super+B` (`[shortcuts] focus-bar`, bar.md §11): the keyboard goes
+    /// into `output`'s bar, on its waiting agent, else its stuck one, else
+    /// its clock; `None`, the bar holding it lets it go, back to the
+    /// window that had it. Written `bar-keyboard OUTPUT` or `bar-keyboard
+    /// -`.
+    BarKeyboard(Option<String>),
+    /// The screens whose bar draws its opaque background, a maximised
+    /// window showing on their current desktop (bar.md §11): the
+    /// compositor draws no glass behind them. Sent as the shell connects
+    /// and when they change. Written `opaque-bars`, then each screen's
+    /// name after a tab.
+    OpaqueBars(Vec<String>),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1638,6 +1654,11 @@ pub enum MeetingNear {
 pub enum ToCompositor {
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
+    /// A line of what the shell shows, for screen readers ([`ToShell::A11y`]),
+    /// its control characters made spaces.
+    A11yLine(String),
+    /// The last of them.
+    A11yEnd,
     /// The shell's surfaces of this namespace have something new to show:
     /// the compositor sends them a configure, as they are. iced draws
     /// every surface after any message of the shell's own, and the whole
@@ -1680,6 +1701,10 @@ pub enum ToCompositor {
     /// window. Written `go-to-agent ID`, or `go-to-agent ID OUTPUT X Y W
     /// H` with the row.
     GoToAgent { id: u64, row: Option<Row> },
+    /// The keyboard's ring moved in a bar (`Super+B`, bar.md §11): where
+    /// it is, so that the magnifier's view follows it. Written `ring
+    /// OUTPUT X Y W H`.
+    Ring(Row),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having
     /// read what it changes: the compositor writes its hooks, off its
     /// loop, then says [`ToShell::AgentTools`]. Written `plug TOOL`.
@@ -1808,6 +1833,16 @@ pub fn screen_name(name: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     name.trim().to_owned()
+}
+
+/// A line of the screen readers' tree as a [`ToCompositor::A11yLine`]
+/// carries it: its control characters made spaces, its indent kept.
+pub fn a11y_text(line: &str) -> String {
+    line.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 /// A line that does not read.
@@ -2008,6 +2043,15 @@ impl fmt::Display for ToShell {
                 write!(f, "agent-rows {}", if *pandas { "pandas" } else { "dots" })
             }
             Self::Focus(output) => write!(f, "focus {output}"),
+            Self::BarKeyboard(Some(output)) => write!(f, "bar-keyboard {output}"),
+            Self::BarKeyboard(None) => f.write_str("bar-keyboard -"),
+            Self::OpaqueBars(screens) => {
+                f.write_str("opaque-bars")?;
+                for screen in screens {
+                    write!(f, "\t{screen}")?;
+                }
+                Ok(())
+            }
             Self::Launcher { output, scale } => write!(f, "launcher {output} {scale}"),
             Self::Copied { app, clip } => {
                 let app = app_word(app);
@@ -2083,6 +2127,7 @@ impl fmt::Display for ToShell {
             Self::Recorded(recorded) => recorded.write(f),
             Self::Lock(shown) => shown.write(f),
             Self::Unlocked => f.write_str("unlocked"),
+            Self::A11y => f.write_str("a11y"),
             Self::Curtain(shown) => shown.write(f),
             Self::CurtainEnd => f.write_str("curtain-end"),
             Self::LeaveCan(can) => can.write(f),
@@ -2189,6 +2234,17 @@ impl FromStr for ToShell {
             && (names.is_empty() || names.starts_with('\t'))
         {
             return Ok(Self::SharedScreens(
+                names
+                    .split('\t')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
+        if let Some(names) = line.strip_prefix("opaque-bars")
+            && (names.is_empty() || names.starts_with('\t'))
+        {
+            return Ok(Self::OpaqueBars(
                 names
                     .split('\t')
                     .filter(|n| !n.is_empty())
@@ -2421,6 +2477,7 @@ impl FromStr for ToShell {
             Some("recording-end") => Ok(Self::RecordingEnd),
             Some("lock") => LockShown::read(&mut words).map(Self::Lock),
             Some("unlocked") => Ok(Self::Unlocked),
+            Some("a11y") => Ok(Self::A11y),
             Some("curtain") => CurtainShown::read(&mut words).map(Self::Curtain),
             Some("curtain-end") => Ok(Self::CurtainEnd),
             Some("leave-can") => LeaveCan::read(&mut words).map(Self::LeaveCan),
@@ -2429,6 +2486,11 @@ impl FromStr for ToShell {
                 output: word(&mut words, "output")?.to_owned(),
             }),
             Some("focus") => Ok(Self::Focus(word(&mut words, "output")?.to_owned())),
+            Some("bar-keyboard") => Ok(Self::BarKeyboard(
+                Some(word(&mut words, "output")?)
+                    .filter(|o| *o != "-")
+                    .map(str::to_owned),
+            )),
             Some("emoji") => {
                 let output = word(&mut words, "output")?.to_owned();
                 let mut number = |what: &str| -> Result<i32, BadLine> {
@@ -2622,6 +2684,8 @@ impl fmt::Display for ToCompositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Software => f.write_str("software"),
+            Self::A11yLine(line) => write!(f, "a11y-line {}", a11y_text(line)),
+            Self::A11yEnd => f.write_str("a11y-end"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
             Self::NextLayout => f.write_str("next-layout"),
@@ -2652,6 +2716,11 @@ impl fmt::Display for ToCompositor {
             Self::GoToAgent { id, row: Some(r) } => write!(
                 f,
                 "go-to-agent {id} {} {} {} {} {}",
+                r.output, r.x, r.y, r.width, r.height
+            ),
+            Self::Ring(r) => write!(
+                f,
+                "ring {} {} {} {} {}",
                 r.output, r.x, r.y, r.width, r.height
             ),
             Self::Plug(tool) => write!(f, "plug {tool}"),
@@ -2718,6 +2787,12 @@ impl FromStr for ToCompositor {
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         if let Some(text) = line.strip_prefix("copy ") {
             return Ok(Self::Copy(text.to_owned()));
+        }
+        if let Some(text) = line.strip_prefix("a11y-line ") {
+            return Ok(Self::A11yLine(text.to_owned()));
+        }
+        if line == "a11y-line" {
+            return Ok(Self::A11yLine(String::new()));
         }
         if let Some(rest) = line.strip_prefix("share ") {
             return ShareAsk::read(rest).map(Self::Share);
@@ -2879,6 +2954,7 @@ impl FromStr for ToCompositor {
                     .map_err(|e| BadLine(format!("window: {e}")))?,
             )),
             Some("overview") => Ok(Self::Overview),
+            Some("a11y-end") => Ok(Self::A11yEnd),
             Some("close") => Ok(Self::Close(
                 word(&mut words, "window")?
                     .parse()
@@ -2906,6 +2982,21 @@ impl FromStr for ToCompositor {
                     }
                 };
                 Ok(Self::GoToAgent { id, row })
+            }
+            Some("ring") => {
+                let output = word(&mut words, "output")?.to_owned();
+                let mut number = |what: &str| -> Result<i32, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::Ring(Row {
+                    output,
+                    x: number("x")?,
+                    y: number("y")?,
+                    width: number("width")?,
+                    height: number("height")?,
+                }))
             }
             _ => Err(BadLine(format!("unknown line {line:?}"))),
         }
@@ -3185,6 +3276,7 @@ mod tests {
                 scheme: theme::Scheme::Light,
                 accent: theme::Accent::Violet,
                 wallpaper: theme::AccentColours::lifted([0x3A, 0x2A, 0x26]),
+                contrast: true,
             }),
             ToShell::Wallpaper(wallpaper::Wallpapers {
                 lock: wallpaper::LockLook::Picture,
@@ -3225,6 +3317,8 @@ mod tests {
             ToShell::Join,
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
+            ToShell::OpaqueBars(vec!["eDP-1".to_owned()]),
+            ToShell::OpaqueBars(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
             ToShell::SharedScreens(Vec::new()),
             ToShell::Day(DayAsk::Calendar {
@@ -3291,6 +3385,7 @@ mod tests {
                 output: "HDMI-A-1".into(),
             }),
             ToShell::Unlocked,
+            ToShell::A11y,
             ToShell::Curtain(CurtainShown {
                 elapsed: 0,
                 length: 10_000,
@@ -3376,7 +3471,12 @@ mod tests {
         for message in to_shell
             .into_iter()
             .chain(keys)
-            .chain([ToShell::Outside, ToShell::Focus("DP-2".into())])
+            .chain([
+                ToShell::Outside,
+                ToShell::Focus("DP-2".into()),
+                ToShell::BarKeyboard(Some("DP-2".into())),
+                ToShell::BarKeyboard(None),
+            ])
             .chain(clips())
             .chain(screens)
             .chain(layouts)
@@ -3409,8 +3509,17 @@ mod tests {
             ToCompositor::Bring(42),
             ToCompositor::Close(42),
             ToCompositor::Overview,
+            ToCompositor::A11yLine("  button \"14 h 32\" <click>".into()),
+            ToCompositor::A11yEnd,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
+            ToCompositor::Ring(Row {
+                output: "eDP-1".into(),
+                x: -190,
+                y: 14,
+                width: 172,
+                height: 77,
+            }),
             ToCompositor::GoToAgent {
                 id: 7,
                 row: Some(Row {
@@ -3533,6 +3642,7 @@ mod tests {
             "day slept",
             "day slept soon",
             "fullscreenHDMI-A-1",
+            "opaque-barseDP-1",
         ] {
             assert!(bad.parse::<ToShell>().is_err(), "{bad:?}");
         }

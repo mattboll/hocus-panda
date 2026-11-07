@@ -469,6 +469,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 );
             }
         }
+        self.tell_readers(state, layout);
         vec![frame.into_geometry()]
     }
 
@@ -685,6 +686,109 @@ impl Panel {
                 ),
             ));
         }
+    }
+
+    /// What it shows, for screen readers (crate::a11y::rows): its rows; a
+    /// confirmation's title and buttons; who holds it back, and the
+    /// buttons to go back to them, close them or go on.
+    fn tell_readers(&self, state: &State, layout: &layout::Layout) {
+        use crate::a11y::rows::{self, Rows};
+        use hocus_a11y::Role;
+        let mut nodes = Vec::new();
+        match &layout.view {
+            View::Rows { rows: placed, .. } => {
+                for p in placed {
+                    nodes.push(
+                        rows::act(
+                            Target::Row(p.row),
+                            Role::Button,
+                            self.row_word(p.row),
+                            p.rect,
+                        )
+                        .disabled(!p.enabled),
+                    );
+                }
+            }
+            View::Confirm {
+                action,
+                now,
+                cancel,
+                ..
+            } => {
+                nodes.push(rows::line(self.words.title(*action)));
+                if let Some(now) = now {
+                    nodes.push(rows::act(
+                        Target::Now,
+                        Role::Button,
+                        self.words.now(*action),
+                        *now,
+                    ));
+                }
+                if let Some(cancel) = cancel {
+                    nodes.push(rows::act(
+                        Target::Cancel,
+                        Role::Button,
+                        self.words.cancel(),
+                        *cancel,
+                    ));
+                }
+            }
+            View::Held {
+                action,
+                title: lines,
+                sentence,
+                blocks,
+                anyway,
+                cancel,
+                ..
+            } => {
+                nodes.push(rows::line(lines.join(" ")));
+                nodes.push(rows::line(sentence.join(" ")));
+                for (i, block) in blocks.iter().enumerate() {
+                    nodes.push(rows::line(format!(
+                        "{}, {}",
+                        block.name,
+                        block.reason.join(" ")
+                    )));
+                    nodes.push(rows::act(
+                        Target::Back(i),
+                        Role::Button,
+                        block.back_word.clone(),
+                        block.back,
+                    ));
+                    if let Some(force) = block.force {
+                        nodes.push(rows::act(
+                            Target::Force(i),
+                            Role::Button,
+                            format!("{}, {}", self.words.close_anyway(), block.name),
+                            force,
+                        ));
+                    }
+                }
+                nodes.push(rows::act(
+                    Target::Anyway,
+                    Role::Button,
+                    self.words.anyway(*action),
+                    *anyway,
+                ));
+                nodes.push(rows::act(
+                    Target::Cancel,
+                    Role::Button,
+                    self.words.cancel(),
+                    *cancel,
+                ));
+            }
+        }
+        rows::publish(
+            self.id,
+            Rows {
+                subtitle: None,
+                nodes,
+                order: rows::order(layout.targets().into_iter().map(|(t, _)| t)),
+                focus: state.focused.map(rows::key),
+                arrows: false,
+            },
+        );
     }
 
     fn row_word(&self, row: Row) -> &'static str {

@@ -359,6 +359,71 @@ fn once_the_switch_is_drawn_nothing_commits_at_rest() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// High contrast (#423) reinforces the theme chosen: the bar's background
+/// opaque and darker (lighter on light), no glass, the shell told with
+/// the theme; switched off, the theme as it was.
+#[test]
+fn high_contrast_reinforces_the_theme_and_drops_the_glass() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(&format!(
+        "{FILE}\n[appearance]\nhigh-contrast = true\nreduce-transparency = false\n"
+    ))?
+    else {
+        return Ok(());
+    };
+    bed.themed("dark", "green")?;
+    let log = bed.log.clone();
+    let told = |text: &str| {
+        text.lines()
+            .rev()
+            .find(|l| l.contains("the theme theme="))
+            .is_some_and(|l| l.contains(" contrast "))
+    };
+    assert!(told(&plain(&log)), "the shell was not told high contrast");
+    assert!(!bed.hp.glass_on());
+    bed.until(BAR_BACKGROUND, |c| near(c, [0x05, 0x07, 0x0C]))?;
+    // Light, high contrast: white.
+    bed.write(&format!(
+        "{FILE}\n[appearance]\ntheme = \"light\"\nhigh-contrast = true\n"
+    ))?;
+    bed.themed("light", "green")?;
+    bed.until(BAR_BACKGROUND, |c| near(c, [0xFF, 0xFF, 0xFF]))?;
+    // Off: the light theme's own background.
+    bed.write(&format!("{FILE}\n[appearance]\ntheme = \"light\"\n"))?;
+    let off = bed.hp.dispatch_until(WAIT, |_| {
+        plain(&log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the theme theme="))
+            .is_some_and(|l| !l.contains(" contrast "))
+    })?;
+    assert!(off, "high contrast never went");
+    bed.until(BAR_BACKGROUND, |c| near(c, [0xF0, 0xF2, 0xF6]))?;
+    Ok(())
+}
+
+/// Behind a maximised window, the bar's glass falls back to opaque (bar.md
+/// §11): the shell is told, and told again as the window is restored.
+#[test]
+fn behind_a_maximised_window_the_bar_is_opaque() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    common::open(&mut bed.hp, "test.window", (600, 400))?;
+    common::wait(&mut bed.hp, Duration::from_millis(200))?;
+    assert!(!bed.hp.bar_opaque("HEADLESS-1"));
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_UP]);
+    let opaque = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.bar_opaque("HEADLESS-1"))?;
+    assert!(opaque, "the bar stayed glass behind a maximised window");
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_DOWN]);
+    let glass = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !hp.bar_opaque("HEADLESS-1"))?;
+    assert!(glass, "the bar stayed opaque once the window was restored");
+    Ok(())
+}
+
 // --- The Settings window ------------------------------------------------------
 
 const APP_ID: &str = "hocus-settings";

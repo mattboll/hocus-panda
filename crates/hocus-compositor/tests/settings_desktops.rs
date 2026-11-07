@@ -511,7 +511,7 @@ fn with_reduced_motion_the_wobble_is_off_and_links_to_it() -> anyhow::Result<()>
         "Coupées tant que Mouvements réduits est activé."
     );
     bed.click("link:appearance.reduced-motion")?;
-    bed.shows(|s| s["page"] == "appearance" && s["lit"] == "appearance.reduced-motion")?;
+    bed.shows(|s| s["page"] == "accessibility" && s["lit"] == "appearance.reduced-motion")?;
     Ok(())
 }
 

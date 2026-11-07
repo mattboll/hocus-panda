@@ -441,6 +441,7 @@ impl State {
     /// and the strokes go.
     fn lock_closes_everything(&mut self) {
         self.end_popup_grab();
+        self.bar_keyboard_away();
         if self.switcher.is_some() {
             self.end_switcher(false);
         }
@@ -695,6 +696,8 @@ impl State {
                 | T::Meeting(_)
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
+                | T::A11yLine(_)
+                | T::A11yEnd
         )
     }
 

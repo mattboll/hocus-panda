@@ -11,6 +11,7 @@ mod appearance;
 pub mod auth;
 pub mod away;
 mod backend;
+mod bar_keys;
 mod bubbles;
 mod capture;
 mod clipboard;
@@ -65,6 +66,7 @@ mod reminders;
 mod render;
 mod rules;
 mod scales;
+mod screen_reader;
 mod screen_sets;
 mod screens;
 mod session;
@@ -250,6 +252,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.shell.auth_agent = matches!(options.backend, BackendKind::Tty(_));
     shell::listen(&event_loop.handle(), &mut state)?;
     lock::listen(&event_loop.handle(), &mut state)?;
+    // Orca only when the compositor is the session (#734).
+    state.screen_reader.allowed = matches!(options.backend, BackendKind::Tty(_));
+    screen_reader::listen(&event_loop.handle(), &mut state)?;
     state.leave_start(match (options.system_bus, &options.backend) {
         (Some(address), _) => Some(address),
         (None, BackendKind::Tty(_)) => Some("system".to_owned()),
@@ -374,6 +379,8 @@ impl App {
         state.flush_bubbles_screen();
         // The screens a fullscreen window covers, when they changed.
         state.flush_fullscreen();
+        // The bars opaque behind a maximised window, when they changed.
+        state.flush_opaque_bars();
         // Whether something holds idleness off, when that changed.
         state.flush_idle();
         // The lock (7.1): an external locker's unlock judged, the screens
