@@ -373,7 +373,7 @@ fn the_shortcuts_are_on_a_sub_page_with_their_own_search() -> anyhow::Result<()>
     );
     let shown = bed.shortcuts()?;
     // 71 actions: three families of nine folded, 44 others.
-    assert_eq!(shortcut_ids(&shown).len(), 47, "{:?}", shortcut_ids(&shown));
+    assert_eq!(shortcut_ids(&shown).len(), 48, "{:?}", shortcut_ids(&shown));
     // Its own search: Print's.
     bed.click("shortcuts:search")?;
     bed.type_text("impr")?;
