@@ -129,12 +129,14 @@ fn the_rain_and_the_stars_run_at_their_own_pace() -> anyhow::Result<()> {
 /// Frames and the wallpaper's own frames and wakes over 60 s of the held
 /// clock, stepped by `step`; and the allocations of a step that drew the
 /// wallpaper over `rest`, those of a step that drew nothing: the most of
-/// any, and their means in the minute's second tenth and its last two.
+/// any, the fewest in the minute's second tenth and in its last two, and
+/// the means there (said, not gated).
 struct Minute {
     frames: u64,
     ticks: u64,
     wakes: u64,
-    over_rest: (u64, f64, f64),
+    over_rest: (u64, u64, u64),
+    means: (f64, f64),
 }
 
 fn a_minute(hp: &mut Headless, step: Duration, rest: u64) -> anyhow::Result<Minute> {
@@ -152,26 +154,38 @@ fn a_minute(hp: &mut Headless, step: Duration, rest: u64) -> anyhow::Result<Minu
     }
     let over = |n: &u64| n.saturating_sub(rest);
     let most = drawing.iter().map(|(_, n)| over(n)).max().unwrap_or(0);
-    let mean = |from: u32, to: u32| {
-        let picked: Vec<u64> = drawing
+    let picked = |from: u32, to: u32| -> Vec<u64> {
+        drawing
             .iter()
             .filter(|(k, _)| (from..to).contains(k))
             .map(|(_, n)| over(n))
-            .collect();
-        picked.iter().sum::<u64>() as f64 / picked.len().max(1) as f64
+            .collect()
     };
+    let fewest = |p: Vec<u64>| p.into_iter().min().unwrap_or(0);
+    let mean = |p: Vec<u64>| p.iter().sum::<u64>() as f64 / p.len().max(1) as f64;
     let tenth = steps / 10;
+    let (early, late) = ((tenth, 2 * tenth), (8 * tenth, steps));
     Ok(Minute {
         frames: hp.frames_on(0) - frames,
         ticks: hp.wall_ticks(OUTPUT) - ticks,
         wakes: hp.wall_wakes() - wakes,
-        over_rest: (most, mean(tenth, 2 * tenth), mean(8 * tenth, steps)),
+        over_rest: (
+            most,
+            fewest(picked(early.0, early.1)),
+            fewest(picked(late.0, late.1)),
+        ),
+        means: (mean(picked(early.0, early.1)), mean(picked(late.0, late.1))),
     })
 }
 
 /// A minute of `picture`, on battery or not: at most `most` frames, and
 /// at most 30 allocations a frame over a turn of the loop at rest, none
 /// growing over the minute. Stepped a frame of its own at a time.
+///
+/// Growth is read from the fewest allocations of a frame early and late,
+/// not their means: a step takes a turn of the loop more or fewer as the
+/// real clock goes on a loaded machine, a few allocations each, which
+/// moved a mean over 30 frames by 2 on CI with the pace exact.
 fn a_minute_of(picture: &str, battery: bool, most: u64) -> anyhow::Result<()> {
     let Some(mut hp) = gles(moving(picture), &[(320, 200)])? else {
         return Ok(());
@@ -203,8 +217,8 @@ fn a_minute_of(picture: &str, battery: bool, most: u64) -> anyhow::Result<()> {
     let minute = a_minute(&mut hp, step, rest)?;
     eprintln!(
         "{picture}, battery {battery}: {} frames, {} of its own, {} wakes; \
-         allocations of a frame over a step at rest ({rest}): {:?}",
-        minute.frames, minute.ticks, minute.wakes, minute.over_rest
+         allocations of a frame over a step at rest ({rest}): {:?}, means {:?}",
+        minute.frames, minute.ticks, minute.wakes, minute.over_rest, minute.means
     );
     assert!(
         minute.frames <= most,
@@ -214,9 +228,10 @@ fn a_minute_of(picture: &str, battery: bool, most: u64) -> anyhow::Result<()> {
     assert!(minute.frames >= most * 9 / 10, "it ran: {}", minute.frames);
     assert!(minute.over_rest.0 <= 30, "{:?}", minute.over_rest);
     assert!(
-        minute.over_rest.2 <= minute.over_rest.1 + 1.0,
-        "{:?}",
-        minute.over_rest
+        minute.over_rest.2 <= minute.over_rest.1 + 1,
+        "{:?}, means {:?}",
+        minute.over_rest,
+        minute.means
     );
     Ok(())
 }
