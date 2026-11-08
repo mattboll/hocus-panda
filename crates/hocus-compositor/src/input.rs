@@ -796,6 +796,13 @@ impl State {
     /// share's chooser), which pointer motion handles itself, nor over the
     /// shell's surfaces above the windows.
     pub(crate) fn pointer_after_turn(&mut self) {
+        let time = u32::try_from(self.now().as_millis() % u128::from(u32::MAX)).unwrap_or(0);
+        self.pointer_follows(time);
+    }
+
+    /// The pointer's focus to what shows under the still pointer, as
+    /// [`Self::pointer_after_turn`] says, at `time`.
+    fn pointer_follows(&mut self, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -815,7 +822,6 @@ impl State {
         {
             return;
         }
-        let time = u32::try_from(self.now().as_millis() % u128::from(u32::MAX)).unwrap_or(0);
         self.pointer_refocus(time);
     }
 
@@ -1081,6 +1087,10 @@ impl State {
             if self.auth_keeps_pointer(pointer.current_location()) {
                 return;
             }
+            // What shows under the pointer may have changed in this very
+            // turn (Alt+Tab let go with the wheel in the same batch of
+            // input), before the turn's end makes the focus follow (#737).
+            self.pointer_follows(frame.time);
             pointer.axis(self, frame);
             pointer.frame(self);
         }
