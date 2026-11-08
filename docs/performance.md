@@ -258,7 +258,7 @@ close, none elsewhere, none 100 ms after.
 | Covered (≥ 90 %) 60 s | 0 frames, 0 of its own, 0 wakes | 0, 0, 0 |
 | Another screen covered | 0 frames there | 0 |
 | The bar's glass over it | ≤ 1 blur in 60 s, ≤ 5 in 10 min (its still copy taken again every 2 min), at least 1 in 10 min | 0 in 60 s, 3 in 10 min |
-| Allocations a frame, over a turn of the loop at rest | ≤ 30 at most; the fewest of a frame in the minute's last fifth no more than in its second tenth + 1 (not the means: a step takes a loop turn more or fewer as the real clock goes under load, which moved a mean by 2 on CI) | 24 to 25 at most, 13 to 15 on average, flat (one timer for the wallpapers, set again by itself, never inserted per frame) |
+| Allocations a frame, over a turn of the loop at rest | ≤ 30 on every frame of the minute; growth from its start to its end is not gated (a step takes a loop turn more or fewer as the real clock goes under load, some ten allocations each way: early and late counts read the load), what grows with the frames fails the cap | 24 to 25 at most, 13 to 15 on average, flat (one timer for the wallpapers, set again by itself, never inserted per frame) |
 | Reduced motion, power saver, `animate = false`, battery "still", locked, fullscreen, 2 min without input | no frame of its own | none |
 | Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
 | Memory | the atlas ≤ 256 KB a scale; no screen-sized buffer more | 16 KB for every scale; on GLES the wallpaper thread's still picture is not even drawn (the shader draws into the screen's frame) |
