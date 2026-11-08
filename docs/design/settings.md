@@ -14,7 +14,8 @@ The maintainer decided on 2026-11-04:
   user;
 - the search finds French and English words and the file's keys;
 - 18 sections in 5 groups (6.12 and 6.14 to 6.17 have their own tickets;
-  Accessibilité came with the accessibility issues, #422 to #424).
+  Accessibilité came with the accessibility issues, #422 to #424);
+  Performances (#655) made them 19.
 
 6.1 is the app's frame: the window, the sidebar, the home, the search, the
 toast with its undo, the file's reading, writing and watching, the model
@@ -66,9 +67,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 18 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 19 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came).
+came, 27 px since Performances came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -969,8 +970,8 @@ window is the preview.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
-| THÈME ET COULEUR | Thème | segmented "Sombre \| Clair" | `[appearance] theme = "dark" \| "light"` |
-| | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper"` |
+| THÈME ET COULEUR | Thème | segmented "Sombre \| Clair \| Givre \| Matrix" | `[appearance] theme = "dark" \| "light" \| "frost" \| "matrix"` |
+| | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, the themed theme's own (Givre's ice blue, Matrix's phosphor green) first while it is chosen (or while it is the accent), the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper" \| "ice" \| "phosphor"` |
 | TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
 | CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
 | | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
@@ -1007,9 +1008,10 @@ window is the preview.
 Issue #402, decided 2026-11-05: dark and light themes in v1, the whole
 desktop following; an accent among six (bar.md §13 gives every value).
 
-- **The keys**: `[appearance] theme = "dark" | "light"` and `accent =
-  "green" | "blue" | "violet" | "rose" | "teal" | "wallpaper"`; a word not
-  understood refuses the file, as any key's.
+- **The keys**: `[appearance] theme = "dark" | "light" | "frost" |
+  "matrix"` and `accent = "green" | "blue" | "violet" | "rose" | "teal" |
+  "wallpaper" | "ice" | "phosphor"`; a word not understood refuses the
+  file, as any key's.
 - **Live**: `[appearance]` is followed as the file changes, through the
   compositor's one watcher (`reload.rs`, `appearance/mod.rs`): the theme
   and the accent go to the shell (`theme SCHEME ACCENT` on the line),
@@ -1043,6 +1045,25 @@ desktop following; an accent among six (bar.md §13 gives every value).
 - **Choices made here**: the wallpaper's accent is the primary screen's
   wallpaper's (6.3, below; Nuit's `#7A96E0` by default); the windows' rims and grips, drawn over the wallpaper, keep
   their colours; the screen around a capture stays dimmed dark.
+- **Givre and Matrix** (#740, #431, bar.md §13): themes of the shell's
+  own; the window keeps the dark look, only its accent changes. Choosing
+  one is one change of several keys (`theme_proposes` in
+  `appearance.rs`, called whenever the theme's segment changes), written
+  together:
+
+  | Theme | `accent` | `[windows] animation` | `[wallpaper] picture` (over a built-in only) |
+  |---|---|---|---|
+  | Givre | `"ice"` | `"frost"` | `"aurora"` |
+  | Matrix | `"phosphor"` | `"rain"` | `"rain"` |
+
+  What each replaced is kept in `$XDG_STATE_HOME/hocuspanda/theme-before`;
+  one toast says them all ("Thème : Matrix · Couleur d'accent : Vert
+  phosphore · Ouvrir et fermer : Pluie · Fond d'écran : Pluie") and its
+  "Annuler" (or `Ctrl+Z`) takes them all back. Leaving the theme gives
+  back each key that still holds the theme's value (its line taken out
+  where there was none); one changed meanwhile stays. A picture of one's
+  own is never replaced. From one themed theme to the other, the first's
+  are given back, then the second's set.
 
 ## Accessibilité (#422, #423, #424)
 
@@ -1099,9 +1120,10 @@ page).
 | Group | What | Key |
 |---|---|---|
 | APERÇU | segmented "Tous les écrans \| Chaque écran"; the screens side by side, bottoms aligned, each with its background and the bar's strip on the primary, "Écran du portable · Nuit" under it; with "Chaque écran" a click chooses the screen the gallery applies to (green ring) | `[wallpaper] per-screen = false` |
-| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
+| FONDS | "Pour tous les écrans" / "Pour l’écran du portable"; tiles: Nuit, Brume, Aube, Forêt ("Nouveau"), Pluie, Étoiles and Aurore ("animé", #433, #740), Couleur unie, one's own pictures (✕ removes), "Choisir une image…" | `[wallpaper] picture = "night" \| "mist" \| "dawn" \| "forest" \| "rain" \| "stars" \| "aurora" \| "plain" \| PATH`, or `[outputs.NAME] wallpaper` with per-screen |
 | | Remplissage (a picture of one's own): "Couvrir l’écran", "L’image entière", "Centrer, sans agrandir" | `[wallpaper] fit = "cover" \| "contain" \| "center"` |
 | | Couleur unie (the plain background, or around a picture not covering): six 24 px swatches, Nuit, Ardoise (default), Bleu profond, Sapin, Terre, Graphite | `[wallpaper] color = "#1b2233"` |
+| ANIMATION (#433) | Animer le fond, "La pluie à 15 images par seconde, les étoiles à 20, l’aurore à 10.": switch; Sur batterie: menu "Ralentie (moitié)" (default), "Arrêtée", "Comme sur secteur"; then the line of when it stops by itself (a fullscreen window, the background more than 90 % covered, the screen locked or off, the power saver, reduced motion, 2 min without input; still under the bar) | `[wallpaper] animate = true`, `on-battery = "half" \| "still" \| "full"` |
 | ÉCRAN DE VERROUILLAGE | the lock's drawing (its source, the veil, the clock), a radio list: "Le fond du bureau, assombri" (default), "… flouté", "Une autre image"; then "Image du verrouillage", a list of the same backgrounds and "Choisir une image…" | `[wallpaper] lock = "dimmed" \| "blurred" \| "picture"`, `lock-picture` |
 
 - **Writing**: a tile, the scope and the lock's picture are keys the page
@@ -1140,10 +1162,11 @@ page).
   `Space`/`Enter` choose; `Delete` removes one's own), the fit's menu, the
   swatches (`←`/`→`), the lock's choices (arrows), the lock's picture
   (`Space` opens its list).
-- **The search** finds "Fond du bureau", "Fonds fournis", "Choisir une
-  image", "Un fond par écran", "Remplissage", "Couleur unie", "Écran de
-  verrouillage" and "Image du verrouillage" by the spec's nearby words
-  and their keys.
+- **The search** finds "Fond du bureau", "Fonds fournis", "Fonds animés"
+  ("animé", "pluie", "étoiles"), "Choisir une image", "Un fond par
+  écran", "Remplissage", "Couleur unie", "Animer le fond", "Sur batterie"
+  ("batterie"), "Écran de verrouillage" and "Image du verrouillage" by the
+  spec's nearby words and their keys.
 - **The accent "wallpaper"** is the primary screen's wallpaper's: Nuit's
   `#7A96E0`, Brume's, Aube's and Forêt's main glow's hue, the plain
   colour's, a picture's strongest hue, each lifted to the accents'
@@ -1166,6 +1189,55 @@ meanwhile (a screen's first frame draws a built-in at once, as before).
 The shell draws the lock's on a thread of its own from `wallpaper` on the
 line (each screen's picture, the lock's, the fit and the colour), the
 window its thumbnails on the page's thread. At rest nothing is drawn.
+
+**The wallpapers that move (#433).** Rain (cells of 14 × 22 logical px,
+each column's head `#CCFFCC` moving one cell per frame, its tail
+`#00F060` fading out in 6 steps, a glyph changing now and then, over
+`#02040A` to `#050B1C`) and Stars (three planes, about 900 stars drifting
+towards the viewer, the nearest some 6 px a second, twinkling, over a
+night-blue haze) and Aurore (#740, Givre's: three veils, cyan, the
+brightest ice blue and violet, drifting slowly sideways over a night sky
+with a few stars, each fading softly below its wandering line and rising
+above it in folds of uneven width and height, from one octave of smooth
+noise rather than a regular pattern; 10 frames a second), in every theme;
+the rain's colours are tokens a theme sets
+(`hocus_link::moving::rain_colours`, phosphor green in every theme for
+now). The compositor draws them with GLES shaders straight into the
+screen's frame (`src/matrix.rs`, `src/moving.rs`), from their time alone;
+rain 15 frames a second, stars 20, aurora 10, half (and so half the
+pace) on battery, woken by one timer on the loop that sets itself again
+at the running ones' fastest pace and goes when none runs, never a frame
+queued per tick. The day's record (#655) is told when one starts moving
+and when it stops (`WallpaperMoving`, `WallpaperStill`, with its word). Each screen decides alone: a moving wallpaper stops,
+its last frame staying and going on from there, under a fullscreen
+window, covered at 90 % or more by the windows shown, locked, off, under
+the idle curtain, 2 minutes after the last input (until the next), in
+power-profiles-daemon's power saver, with reduced motion, `animate =
+false`, and on battery with `on-battery = "still"`. The glass (the
+bar's, the popovers', the launcher's) blurs a still copy of the
+wallpaper drawn by a second element of it, never the wallpaper's frames:
+the copy is taken as the wallpaper starts, again when a surface with glass
+appears (the bar, a popover, the launcher, the emoji picker) and every
+2 minutes while it moves, one blur of each pane each time, so that the
+glass never drifts far from what moves beside it. That still
+copy only ever shows through the glass: beside a bar, in its gaps and
+outside its rounded corners, and with no bar, the screen shows the moving
+wallpaper (`tests/moving_wallpaper.rs`,
+`the_still_copy_only_feeds_the_glass`, pixel for pixel against a screen
+without a bar). Between its frames, the wallpaper is drawn again in each
+place that changed over it, never over the bounds of those places: what
+lies between them (the bar, its glass) is not drawn again, and would be
+covered until the next frame, the bar flickering or gone a moment
+(`the_bar_shows_whole_between_the_wallpapers_frames`; with the real shell
+on wgpu, `tests/themed_bar.rs`: Givre's and Matrix's bars across the
+wallpaper's frames, a window over them, desktop switches and a theme
+switch). Without
+GLES (pixman), and in the lock (the shell's), the Settings' tiles and the
+preview, the still picture (`hocus_link::moving::still`, the same recipe
+at a fixed moment) is drawn once on a thread, at the screen's pixels, as a
+picture of one's own. The glyphs are the desktop's own drawings (46
+half-width katakana, the digits and 8 signs on 5 × 7 dots, drawn
+mirrored), one 64 × 64 atlas of 16 KB whatever the scale.
 
 **The compositor follows the file**: `[wallpaper]` and `[outputs.NAME]
 wallpaper` through `reload.rs`; a screen's `wallpaper` is not part of its
@@ -1419,6 +1491,7 @@ row.
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
+| | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the thawing pane) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
 | VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
@@ -1447,7 +1520,8 @@ row.
 - **Not now**: with `[appearance] reduced-motion`, the wobble's row is at
   45 %, inert, its line in amber "Coupées tant que Mouvements réduits est
   activé." with "Apparence et langue ›" (6.2's row lit); its key keeps its
-  value. With `move-modifier = "super"` the ink's row is at 45 %, "Super +
+  value. "Ouvrir et fermer" too: "Un fondu court tant que Mouvements
+  réduits est activé."  With `move-modifier = "super"` the ink's row is at 45 %, "Super +
   glisser déplace les fenêtres : l'encre ne se lance plus. Choisis Alt
   pour la retrouver.", and choosing Super says so in its toast
   ("Déplacer : Super + glisser · l'encre ne se lance plus").
@@ -1762,6 +1836,45 @@ row.
   sheet is not built); the chips' tiles are initials, not the
   applications' icons; Super+V's "Historique coupé · Réglages" is a line,
   not a link.
+
+## Performances (#655)
+
+Issue #655, as the sprint's approved mockup and spec specify it (the
+recommended options): a day of the desktop's CPU and memory, as the
+compositor's recorder wrote it (docs/performance.md, "A day's view").
+Section `performance` (`hocus settings performance`), SYSTÈME's last row;
+a signal's notification opens it. `hocus perf day` reads the same files
+with the same report (`hocus_perf::report`).
+
+| Group (its note) | What | Where |
+|---|---|---|
+| (the day) | "‹", "Aujourd'hui, samedi 7 novembre" ("Hier, …", or the date), "session 08:30 → 18:30", "›"; "Jour \| 7 jours" on the right. ‹ › step through the days kept, inert at either end | the files' names |
+| (tiles, two by two) | CPU (the compositor's and the shell's average, in percent of one core, its CPU time, each one's); Mémoire (at the end, at the start, the peak and when, each one's); Images (the frames, those drawn while locked, the wakeups at rest a second); Mouvements (a moving wallpaper's running time, the frames of the desktop's motions, the power on battery or "sur secteur : puissance non mesurée") | the report's totals |
+| SIGNAUX ("2 aujourd'hui") | each signal in orange, "⚠ 15:10–15:25 : des images sans que rien ne bouge", what it measured and its rule, "Copier le rapport" (the signal, then the day as `hocus perf day` says it, to the clipboard; "Copié" for 2 s); then "✓ Rien d'autre" (or "✓ Aucun signal") with the kinds under their thresholds | the report's signals |
+| LA JOURNÉE ("une échelle par bande") | one canvas, five bands on one time axis, each with its own scale, never two: CPU stacked (the compositor blue, the shell green, a bucket's highest sample fainter above its average, the 10 % threshold dashed orange), the peaks numbered over their bars (orange for a signal's); the resident memory in two lines, a memory only growing dashed orange with "shell : ne fait que monter ⚠"; the frames a second in grey bars; what was happening (a tick per slice with events, the notable ones written: a screen, Réglages, verrouillé, fond animé, many windows); the machine's power on battery, "sur secteur : non mesurée" where on AC. Locked hatched grey through every band, a moving wallpaper hatched green over the CPU and the events. The hours under it | the day's samples in 160 slices |
+| LES PICS | a row per peak: its number (orange for a signal's), when (Martian Mono), what was happening (bold) and a line ("29 images/s · en usage · 2 autres événements"), its CPU and its length; a signal's row tinted orange, a moving wallpaper's green | the report's peaks |
+| ENREGISTREMENT | Mesurer la journée (a switch) | `[perf] record` |
+| | Les fichiers: "~/.local/state/hocuspanda/perf · 14 jours · moins de 1 Mo par jour", "Ouvrir le dossier ›" (`xdg-open`) | |
+
+- **"7 jours"**: the seven days up to the one shown, a row each: its
+  date, a bar of its average CPU (the week's highest full), its CPU, its
+  memory at the end, its signals ("⚠ 2 signaux"); a day recorded opens
+  on a click, one not recorded says "—".
+- **Read off the window's thread**: the day (and its week) is read on a
+  thread of the page's own the first time the page shows it and when the
+  day changes; nothing is read or drawn at rest. A day being recorded is
+  read again when the page opens.
+- **The page told**: the window tells the compositor its page as it
+  changes, with its process, on the control socket (`perf settings PID
+  NAME`, off its thread): the page's name is an event of the day, and the
+  Settings' CPU and memory are measured while they run.
+- **Choices made here (to confirm on the machine)**: the tiles are two by
+  two (the page is 720 px wide; the mockup's 1340 px window had them in a
+  row); the fourth tile is "Mouvements" (a moving wallpaper's time, the
+  motions' frames, the power) until the Matrix rain says its own time;
+  the chart has no hover (the peaks' table says what each number was);
+  the CPU's bars are the slice's average with its highest sample fainter
+  above it, so that a 40 s peak shows its height.
 
 ## Saving
 
@@ -2250,6 +2363,15 @@ the same bed with timedated faked on a D-Bus daemon of the test's own
 - `without_timedated_the_page_says_so`
 - `the_format_link_and_the_search_light_their_rows`
 - `at_rest_the_page_draws_once_a_minute_only`
+- `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
+
+`crates/hocus-compositor/tests/settings_perf.rs` (#655, Performances),
+the same bed with the compositor recording every 200 ms; the page's logic
+(the day read, the tiles, the chart's slices, the day picker) is tested in
+`hocus_settings::perf`, its look on screenshots of an invented day
+(`hocus_perf::fixture`):
+
+- `the_page_opened_is_in_the_day_and_the_settings_are_measured`
 - `screenshots_for_the_pull_request` (ignored; `HOCUS_SHOTS=DIR`)
 
 `crates/hocus-compositor/tests/settings_applications.rs` (6.15), the same

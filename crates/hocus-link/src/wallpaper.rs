@@ -20,6 +20,7 @@ use std::{
 use crate::{
     BadLine,
     backdrop::{self, Backdrop},
+    moving::{self, Moving},
     theme::AccentColours,
 };
 
@@ -28,6 +29,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Picture {
     Builtin(Backdrop),
+    /// A built-in that moves (#433): the compositor's shader draws it,
+    /// its still picture where it does not run.
+    Moving(Moving),
     /// The `color`, the whole screen.
     Plain,
     /// A picture's path, as the file writes it.
@@ -49,11 +53,14 @@ impl Picture {
         if let Some(builtin) = Backdrop::of(text) {
             return Ok(Self::Builtin(builtin));
         }
+        if let Some(moving) = Moving::of(text) {
+            return Ok(Self::Moving(moving));
+        }
         if text.contains('/') && !text.contains(['\t', '\n', '\r']) {
             return Ok(Self::File(text.to_owned()));
         }
         Err(format!(
-            "no wallpaper {text:?}: night, mist, dawn, forest, plain or a picture's path"
+            "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain or a picture's path"
         ))
     }
 
@@ -61,6 +68,7 @@ impl Picture {
     pub fn word(&self) -> &str {
         match self {
             Self::Builtin(builtin) => builtin.word(),
+            Self::Moving(moving) => moving.word(),
             Self::Plain => "plain",
             Self::File(path) => path,
         }
@@ -318,9 +326,23 @@ impl fmt::Debug for Rendered {
 /// `look` for a screen `size` physical pixels large. Slow for a picture
 /// (it is read and decoded): on a thread of its own.
 pub fn render(look: &Look, size: (i32, i32)) -> Rendered {
+    render_at(look, size, 1.0)
+}
+
+/// `look` for a screen `size` physical pixels large at `scale`: a moving
+/// wallpaper's still picture is drawn at the screen's pixels, its cells at
+/// their logical size (the others do not depend on the scale).
+pub fn render_at(look: &Look, size: (i32, i32), scale: f64) -> Rendered {
     let size = (size.0.max(1), size.1.max(1));
     match &look.picture {
         Picture::Builtin(builtin) => builtin_rendered(*builtin, size, None),
+        Picture::Moving(m) => Rendered {
+            width: size.0,
+            height: size.1,
+            pixels: moving::still(*m, size, scale),
+            accent: m.accent(),
+            failed: None,
+        },
         // As large as a built-in: drawn stretched, a picture of one pixel
         // would be blended with its outside at the screen's edges.
         Picture::Plain => {

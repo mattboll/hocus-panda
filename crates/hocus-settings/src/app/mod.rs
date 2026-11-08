@@ -24,6 +24,7 @@ mod keyboard_page;
 mod keys_in;
 mod mouse;
 mod network;
+mod perf_page;
 mod places;
 mod power_page;
 mod screens;
@@ -352,6 +353,8 @@ pub enum Message {
     Agents(agents_page::Msg),
     /// The Applications page's (6.15).
     Apps(applications::Msg),
+    /// The Performances page's (#655).
+    Perf(perf_page::Msg),
     Nothing,
 }
 
@@ -447,6 +450,8 @@ pub struct App {
     /// The Applications page: what its thread read, its menus and sheet
     /// (6.15).
     apps: applications::State,
+    /// The Performances page: the day its thread read (#655).
+    perf: perf_page::State,
 }
 
 impl App {
@@ -464,6 +469,7 @@ impl App {
         let power = power_page::State::start(&sender);
         let agents = agents_page::State::with(&sender);
         let apps = applications::State::new(sender.clone());
+        let perf = perf_page::State::new(&sender, start.places.state.clone());
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -549,6 +555,7 @@ impl App {
             power,
             agents,
             apps,
+            perf,
         };
         if let Some(address) = start.pair {
             app.bluetooth_pair_address(address);
@@ -694,6 +701,7 @@ impl App {
         self.wallpaper_want();
         self.network_visit();
         self.agents_visit();
+        self.perf_after();
         self.network_after_key();
         self.now = Instant::now();
         self.knobs
@@ -854,6 +862,9 @@ impl App {
             }
             Message::Choose(slot, value) => {
                 self.menu = None;
+                if self.theme_chose(slot, &value) {
+                    return Task::none();
+                }
                 self.bar_chose(slot, &value);
                 self.agents_chose(slot, &value);
                 let say = self.desktops_toast(slot, &value);
@@ -940,6 +951,7 @@ impl App {
             Message::Power(msg) => self.power_update(msg),
             Message::Agents(msg) => self.agents_update(msg),
             Message::Apps(msg) => self.apps_update(msg),
+            Message::Perf(msg) => self.perf_update(msg),
         }
     }
 
@@ -2090,7 +2102,8 @@ impl App {
                         self.step_choice(slot, &values, named == Named::ArrowRight)
                     }
                     (Kind::Swatches, Named::ArrowLeft | Named::ArrowRight) => {
-                        let values: Vec<Value> = hocus_link::theme::Accent::ALL
+                        let values: Vec<Value> = self
+                            .accents_shown()
                             .iter()
                             .map(|a| Value::Word(a.word()))
                             .collect();

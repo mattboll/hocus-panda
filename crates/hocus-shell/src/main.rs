@@ -2077,7 +2077,10 @@ impl Shell {
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
         };
-        let column = container(Space::new())
+        let marks = canvas(theme::BarMarks)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let column = container(marks)
             .width(width)
             .height(Length::Fill)
             .style(move |_| container::Style {

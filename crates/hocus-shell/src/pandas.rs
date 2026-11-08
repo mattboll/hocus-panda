@@ -8,6 +8,9 @@
 //! Pandas play only when the shell moves things (not with reduced motion,
 //! nor on the CPU) and the compositor says they may (not in power saver):
 //! [`lively`]. Otherwise they are the still drawings, at their sizes.
+//!
+//! In Givre they wear its ice visor, in Matrix Neo's glasses
+//! ([`hocus_pandas::Dress`], #740, #431), still or moving alike.
 
 use std::{
     sync::{
@@ -19,7 +22,7 @@ use std::{
 
 use iced::advanced::svg;
 
-pub use hocus_pandas::{BREATH, Mood, VIEW_BOX};
+pub use hocus_pandas::{BREATH, Dress, Mood, VIEW_BOX};
 
 use crate::agents::Look;
 
@@ -73,12 +76,28 @@ impl Burst {
     }
 }
 
-/// `mood`'s still drawing.
+/// How the theme of the moment dresses the pandas.
+pub fn dress() -> Dress {
+    if crate::theme::frost() {
+        Dress::Visor
+    } else if crate::theme::matrix() {
+        Dress::Glasses
+    } else {
+        Dress::Plain
+    }
+}
+
+/// `mood`'s still drawing, in the theme's dress.
 pub fn still(mood: Mood) -> svg::Handle {
-    static STILL: OnceLock<[svg::Handle; 6]> = OnceLock::new();
-    STILL.get_or_init(|| Mood::ALL.map(|m| svg::Handle::from_memory(m.still().as_bytes())))
-        [Mood::ALL.iter().position(|m| *m == mood).unwrap_or(0)]
-    .clone()
+    const DRESSES: [Dress; 3] = [Dress::Plain, Dress::Visor, Dress::Glasses];
+    static STILL: OnceLock<[[svg::Handle; 6]; 3]> = OnceLock::new();
+    let dresses = STILL.get_or_init(|| {
+        DRESSES.map(|dress| {
+            Mood::ALL.map(|m| svg::Handle::from_memory(dress.wear(m.still(), m).into_bytes()))
+        })
+    });
+    let dress = DRESSES.iter().position(|d| *d == dress()).unwrap_or(0);
+    dresses[dress][Mood::ALL.iter().position(|m| *m == mood).unwrap_or(0)].clone()
 }
 
 /// `mood` at `now`: a frame of `burst` while it plays (and the pandas are
@@ -105,6 +124,7 @@ fn played(
     now: Instant,
     wrap: Option<fn(&str) -> String>,
 ) -> svg::Handle {
+    let dress = dress();
     let frame = burst.and_then(|b| {
         let t = now.saturating_duration_since(b.since);
         // On whole steps: the same moment, the same drawing (and iced's
@@ -113,28 +133,34 @@ fn played(
         Some((b.window, hocus_pandas::step(t))).zip(hocus_pandas::frame(mood, b.window, t))
     });
     match (frame, wrap) {
-        (Some((key, svg)), wrap) => cached(mood, key, wrap, || match wrap {
-            Some(wrap) => wrap(&svg),
-            None => svg,
+        (Some((key, svg)), wrap) => cached(mood, key, dress, wrap, || {
+            let svg = dress.wear(&svg, mood);
+            match wrap {
+                Some(wrap) => wrap(&svg),
+                None => svg,
+            }
         }),
         (None, None) => still(mood),
-        (None, Some(wrap)) => cached(mood, (Duration::MAX, 0), Some(wrap), || wrap(mood.still())),
+        (None, Some(wrap)) => cached(mood, (Duration::MAX, 0), dress, Some(wrap), || {
+            wrap(&dress.wear(mood.still(), mood))
+        }),
     }
 }
 
-type Key = (Mood, (Duration, u32), Option<usize>);
+type Key = (Mood, (Duration, u32), Dress, Option<usize>);
 
 /// The last frames made, so that several bars drawing the same panda at
 /// the same moment make it once.
 fn cached(
     mood: Mood,
     at: (Duration, u32),
+    dress: Dress,
     wrap: Option<fn(&str) -> String>,
     make: impl FnOnce() -> String,
 ) -> svg::Handle {
     const KEPT: usize = 24;
     static FRAMES: Mutex<Vec<(Key, svg::Handle)>> = Mutex::new(Vec::new());
-    let key = (mood, at, wrap.map(|w| w as usize));
+    let key = (mood, at, dress, wrap.map(|w| w as usize));
     let mut frames = FRAMES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some((_, handle)) = frames.iter().find(|(k, _)| *k == key) {
         return handle.clone();

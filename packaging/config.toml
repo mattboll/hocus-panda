@@ -343,6 +343,13 @@
 # skip-secrets = true
 # ignore = []
 
+# [perf]
+# The day's CPU and memory of the compositor and the shell, sampled every
+# 10 s on a thread of their own, kept 14 days in
+# ~/.local/state/hocuspanda/perf (Settings > Performances, and
+# `hocus perf day`). Followed live.
+# record = true
+
 # [agents]
 # How the bar calls you for the agents (Claude Code, Codex, herdr, and
 # what says its state with `hocus agent`), followed live. Which of their
@@ -441,6 +448,14 @@
 # snap-by-drag = true
 # A moved window wobbles, then settles (never with reduced motion).
 # wobble = true
+# How applications' windows (and their dialogs larger than 200 x 200 px)
+# open and close: "standard" (grow and fade in 220 ms), "rain" (columns of
+# glyphs fall through them, 360 ms to open, 300 ms to close; at most three
+# at once, none for the windows of the last session coming back) or
+# "frost" (seen through a sheet of ice that thaws to clear glass; the same
+# times and rules). With reduced motion or the power
+# saver, and drawing on the CPU, the windows fade instead.
+# animation = "standard"
 # Alt+Tab lists "all" desktops' windows (this one's first) or this
 # "desktop"'s only.
 # alt-tab = "all"
@@ -507,14 +522,19 @@
 
 # [appearance]
 # The theme the bar, its menus, the launcher, the lock screen, the
-# authentication dialog and the Settings draw in: "dark" or "light".
-# Applications are told too, through the desktop portal's
-# org.freedesktop.appearance color-scheme (GTK 4, libadwaita, Qt 6.5 and
-# browsers follow it).
+# authentication dialog and the Settings draw in: "dark" or "light"; or
+# "frost" (Givre), icy blue on night-blue glass, or "matrix", near-black
+# glass with the phosphor green in touches, for the bar, its menus, the
+# notifications, the launcher and the lock screen, the Settings and
+# applications staying dark. Applications are told too, through the
+# desktop portal's org.freedesktop.appearance color-scheme (GTK 4,
+# libadwaita, Qt 6.5 and browsers follow it).
 # theme = "dark"
 # What is chosen, on or focused (switches, the selection, the keyboard's
-# ring): "green" (the pandas'), "blue", "violet", "rose", "teal", or
-# "wallpaper" (its dominant hue). Applications are told it as the portal's
+# ring): "green" (the pandas'), "blue", "violet", "rose", "teal",
+# "wallpaper" (its dominant hue), "ice" (Givre's) or "phosphor"
+# (Matrix's), which choosing those themes in the Settings sets.
+# Applications are told it as the portal's
 # accent-color.
 # accent = "green"
 # How much larger the Settings window draws its text and pieces, from
@@ -554,8 +574,8 @@
 
 # [wallpaper]
 # Every screen's background: a built-in, "night", "mist", "dawn" or
-# "forest"; "plain" (the color below); or a picture's path (JPEG, PNG or
-# WebP; ~/ is the home). The Settings copy a picture chosen there into
+# "forest"; one that moves, "rain", "stars" or "aurora"; "plain" (the color below);
+# or a picture's path (JPEG, PNG or WebP; ~/ is the home). The Settings copy a picture chosen there into
 # ~/.local/share/hocuspanda/wallpapers. A picture that does not read draws
 # night, and the journal says why.
 # picture = "night"
@@ -573,6 +593,15 @@
 # the windows), or "picture": lock-picture, dimmed.
 # lock = "dimmed"
 # lock-picture = "night"
+# A wallpaper that moves runs on the GPU at 15 frames a second (rain),
+# 20 (stars) or 10 (aurora), on each screen where it shows: it stops under a fullscreen
+# window, covered at more than 90 %, locked, off or under the curtain, after
+# 2 minutes without input, in the power saver and with reduced motion; the
+# glass over it blurs a still picture of it. Turned off, or drawing on the CPU: its still
+# picture.
+# animate = true
+# On battery: "half" its frames (and pace), "still", or "full".
+# on-battery = "half"
 
 # [day]
 # "Your day" in the bar: meetings from calendar accounts, and tasks from

@@ -579,6 +579,14 @@ impl State {
             return;
         }
         tracing::info!(battery, "the power source");
+        self.perf.event(
+            if battery {
+                hocus_perf::EventKind::OnBattery
+            } else {
+                hocus_perf::EventKind::OnAc
+            },
+            "",
+        );
         self.away.battery = battery;
         self.power_delays_changed();
         self.power_saver_check();
@@ -608,6 +616,14 @@ impl State {
 
     /// logind says the machine is about to sleep (`true`), or woke up.
     pub(crate) fn prepare_for_sleep(&mut self, sleeping: bool) {
+        self.perf.event(
+            if sleeping {
+                hocus_perf::EventKind::Suspend
+            } else {
+                hocus_perf::EventKind::Resume
+            },
+            "",
+        );
         if sleeping && !self.config.power.lock_before_sleep {
             tracing::info!("the machine is about to sleep, unlocked (lock-before-sleep off)");
             self.away.sleep.until = None;

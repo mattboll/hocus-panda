@@ -177,8 +177,14 @@ impl Bed {
         )?;
         handle.commands.send(Command::Title(title))?;
         self.clients.push(handle);
-        wait(&mut self.hp, Duration::from_millis(100))?;
-        self.id_of(app_id)
+        // The title comes from the client's thread: until the compositor
+        // has it, the palette names the window by its application's id.
+        let id = self.id_of(app_id)?;
+        let titled = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.window_title(id) == title)?;
+        anyhow::ensure!(titled, "{app_id} is titled {:?}", self.hp.window_title(id));
+        Ok(id)
     }
 
     fn id_of(&self, app_id: &str) -> anyhow::Result<WindowId> {

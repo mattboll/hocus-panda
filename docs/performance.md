@@ -129,3 +129,150 @@ decoded once per change (`Backgrounds::decodes`) and its source dropped
 once scaled. Memory: one RGBA buffer per screen at its size for a picture
 (16.4 MB for 2560 × 1600, 19.8 MB for 3440 × 1440); a built-in or the
 plain colour a sixteenth of that (a quarter of the pixels each way).
+
+## A day's view (#655)
+
+Counts gate CI (frames, scenes, wakeups, allocations: the same on any
+machine); times, CPU and watts depend on the machine and are only read,
+over a real day. The compositor records that day: is the desktop light
+over hours of work, and when is it not, and why?
+
+### What is recorded
+
+A thread of the compositor (`perf`, `hocus_perf::record`), never the
+loop, wakes every 10 s and appends one sample to the day's file:
+
+- the compositor's, the shell's and, while they run, the Settings' CPU
+  time (user and system, `/proc/PID/stat`) and resident memory
+  (`/proc/PID/statm`);
+- what the loop counted since the last sample, in atomics it only
+  increments (`hocus_perf::Counters`): the frames drawn (all screens, and
+  each screen's when there are several), the scenes built, the loop's
+  turns (its wakeups), the user's input events, the frames drawn while
+  one of the desktop's motions ran, the applications' window commits;
+  the longest turn and the longest frame; allocations, when the program
+  counts them (none does yet);
+- on battery, the machine's power (`power_now`, else `current_now` ×
+  `voltage_now`, in `/sys/class/power_supply`); nothing on AC;
+- what happened since the last sample, which explains a peak: a window
+  opened or closed (its application), a screen plugged or unplugged, the
+  lock and the unlock, the machine going to sleep and waking, the
+  configuration changing (its sections: `[appearance]`, `[wallpaper]`…),
+  the power source, a page of the Settings opened (they say it on the
+  control socket, `perf settings PID NAME`, which the socket's own thread
+  notes: the loop is not told), a moving wallpaper started or stopped.
+  The loop pushes them into a ring of 128, under a lock it takes only to
+  push one.
+
+The file is `$XDG_STATE_HOME/hocuspanda/perf/YYYY-MM-DD` (the local
+date), one JSON line per sample, appended, so that a day reads after a
+crash up to its last whole line. Fields at zero are left out: a sample
+at rest is about 80 bytes. A `start` line marks each session, a
+`notified` line each signal notified. 14 days are kept: older files are
+removed as the recorder starts and as a day begins. `[perf] record =
+false` (the Settings' "Mesurer la journée"): no thread, no file; changed
+in the file, the recorder starts or stops at once.
+
+### Signals
+
+What counts as a problem, judged sample after sample by
+`hocus_perf::Watch` (a few minutes of samples in hand at most), the same
+way while recording and when a day is read:
+
+| Signal | When |
+|---|---|
+| sustained CPU | the compositor and the shell above 10 % of one core on average over 5 min |
+| frames at rest | more than 1 frame a second for 1 min, with no input, no application's window drawing, beside the desktop's own motions |
+| wakeups | more than 5 loop wakeups a second on average over 10 min with no input |
+| memory only growing | the compositor's or the shell's, rising for more than 3 h at more than 2 MB an hour, each of its last three hours higher than the one before, never more than 5 % back |
+| slow moment | a frame over 50 ms, or a loop turn over 16 ms (not in the first 30 s, while the session starts) |
+
+A gap (the machine asleep, the session off) ends what was running. A
+signal raised sends a notification of low urgency (to the history, no
+bubble), once a day per kind (even across sessions: the `notified`
+lines), "Le bureau a dessiné 9 images par seconde sans rien qui bouge
+(depuis 15:10)."; opened from the history, it opens the Settings'
+Performances page. The notification is sent and waited on by a thread of
+its own; only its opening comes back to the loop.
+
+### A day read back
+
+`hocus_perf::report` reads a day: its totals (CPU, memory at the start,
+the end and its peak, frames, scenes, wakeups at rest, the frames drawn
+while locked, the power on battery, a moving wallpaper's time), its
+signals, and its peaks: runs above twice the day's median CPU and above
+2 % of one core (runs a minute apart or less are one), and every
+signal's span but a memory's, the eight that cost the most CPU kept,
+numbered by time, each with the events from 30 s before it to 30 s
+after. The Settings' Performances page (docs/design/settings.md) and
+
+```sh
+hocus perf day [--date YYYY-MM-DD] [--json]
+```
+
+show the same report: the command as text in the messages' language, or
+as JSON for a script or an agent. A day not recorded says so and fails.
+`hocus_perf::fixture` is an invented working day, for the tests and the
+screenshots.
+
+### Its own budgets
+
+- The loop: **0** wakeups and frames more at rest with recording on
+  (`tests/perf.rs`, `recording_wakes_the_loop_no_more_at_rest`: 2 s at
+  rest, the recorder sampling every 50 ms, the loop turning and drawing
+  as with it off: once, nothing).
+- The thread: one wakeup per sample; a stack of 256 KB; the ring of
+  events and a few minutes of samples in hand.
+- The disk: under 1 MB a day (`a_working_day_is_under_a_megabyte`: 24 h,
+  10 of them at work, an event a minute); a day's file is cut at 1 MB in
+  any case.
+- Reading a day (the page, the command): on the Settings' own thread as
+  the page shows, nothing at rest.
+
+## What moves for show: the window rain and the moving wallpapers (#432, #433)
+
+Counts gate, times are reported. Each motion is counted on the held
+clock, on GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU`
+names: without either, the tests that only GLES draws are skipped, as
+the glass's) and, where it draws there, on pixman.
+
+**A window's rain** (`tests/rain.rs`, 60 Hz):
+
+| Budget | Gate | Measured (2026-11-07, llvmpipe and pixman) |
+|---|---|---|
+| Frames to open, on its screen | ≤ ⌈0.36 × refresh⌉ + 1 (23) | 22 |
+| Frames to close, on its screen | ≤ ⌈0.30 × refresh⌉ + 1 (19) | 19 |
+| On the other screen | 0 | 0 |
+| 100 ms after its end | 0 frames | 0 |
+| Allocations on the loop | its first two frames (which make its picture) ≤ the standard opening's + 100, each after ≤ the standard's most + 10 (frame by frame: either opening's frames take 7 more or fewer as the client's commits fall in them, too much for totals); none growing frame after frame | 318 to 334 against 254 to 270, then 63 a frame (75 the last) against 58 to 71, flat (its picture is drawn again only when the window commits) |
+
+The thawing pane (#740) is held to the same budgets
+(`the_thawing_pane_costs_the_rains_frames`): 22 frames to open, 19 to
+close, none elsewhere, none 100 ms after.
+
+**A moving wallpaper** (`tests/moving_wallpaper.rs`):
+
+| Budget | Gate | Measured |
+|---|---|---|
+| Visible 60 s: frames on its screen | rain ≤ 902, stars ≤ 1 202, aurora ≤ 602; on battery ≤ 482 / 602 / 302 | 900, 1 200, 600; 450, 600, 300 |
+| Covered (≥ 90 %) 60 s | 0 frames, 0 of its own, 0 wakes | 0, 0, 0 |
+| Another screen covered | 0 frames there | 0 |
+| The bar's glass over it | ≤ 1 blur in 60 s, ≤ 5 in 10 min (its still copy taken again every 2 min), at least 1 in 10 min | 0 in 60 s, 3 in 10 min |
+| Allocations a frame, over a turn of the loop at rest | ≤ 30 on every frame of the minute; growth from its start to its end is not gated (a step takes a loop turn more or fewer as the real clock goes under load, some ten allocations each way: early and late counts read the load), what grows with the frames fails the cap | 24 to 25 at most, 13 to 15 on average, flat (one timer for the wallpapers, set again by itself, never inserted per frame) |
+| Reduced motion, power saver, `animate = false`, battery "still", locked, fullscreen, 2 min without input | no frame of its own | none |
+| Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
+| Memory | the atlas ≤ 256 KB a scale; no screen-sized buffer more | 16 KB for every scale; on GLES the wallpaper thread's still picture is not even drawn (the shader draws into the screen's frame) |
+
+Reported, not gated: `cargo nextest run -p hocus-compositor --test
+moving_wallpaper --run-ignored only timings` (a frame at 3440 × 1440, beside
+a still one), and the shots for the pull request
+(`HOCUS_SHOTS=DIR … --run-ignored only shots`).
+
+The glass never blurs a moving wallpaper's frames: what is behind a pane
+is drawn with a second element of the wallpaper, a still copy whose
+commit changes only when it is taken again (as a surface with glass
+appears, and every 2 minutes while it moves); the screen shows the moving
+one, which replaces it once the panes are done. Between its frames it is
+drawn again only in the places that changed over it, each apart (eight
+to a draw call, nothing allocated), never their bounds: the damage
+tracker draws again what is over it only where it is damaged.

@@ -98,6 +98,10 @@ render_elements! {
     Part = Keyed<RelocateRenderElement<CropRenderElement<WaylandSurfaceRenderElement<R>>>>,
     /// The screen's picture seen through the magnifier's view (#424).
     Zoom = crate::magnifier::draw::ZoomElement<<R as RendererSuper>::TextureId>,
+    /// A window opening or closing in a rain (#432).
+    Rain = crate::matrix::RainElement,
+    /// A wallpaper that moves (#433).
+    Wall = crate::matrix::WallElement,
 }
 
 /// What an output's elements are drawn for.
@@ -173,6 +177,7 @@ where
 }
 
 /// How a window looks at a moment.
+#[derive(Clone)]
 pub(crate) struct Look {
     /// Where it is drawn, global.
     pub visual: Rectangle<f64, Logical>,
@@ -188,6 +193,9 @@ pub(crate) struct Look {
     own_shadow: bool,
     /// Its corners' radius as drawn, when not the window's own scaled.
     corner: Option<f64>,
+    /// Raining (#432): the fade it is drawn with where the rain is not
+    /// (pixman), over the rain's time.
+    rain: Option<f32>,
 }
 
 impl Look {
@@ -205,6 +213,7 @@ impl Look {
             shadow: ShadowStyle::UNFOCUSED,
             own_shadow: true,
             corner: Some(corner),
+            rain: None,
         }
     }
 }
@@ -258,6 +267,14 @@ impl State {
         }
         // Its own opacity (#735), the frame and the shadow with it.
         alpha *= f32::from(managed.opacity) / 100.0;
+        // Raining: drawn through the rain where the renderer can, else
+        // fading over the same time.
+        // Its last frame of rain is the window whole: drawn as it is then.
+        let rain = managed
+            .rain
+            .as_ref()
+            .filter(|r| !r.done(now))
+            .map(|r| r.fade(now));
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
         // A client drawing its own shadow (a floating GTK window) keeps it:
@@ -289,6 +306,7 @@ impl State {
             shadow,
             own_shadow,
             corner: None,
+            rain,
         })
     }
 
@@ -513,6 +531,95 @@ impl State {
         renderer.bend(jelly, &picture, &parts, 1.0)
     }
 
+    /// Window `id` raining (#432): its frame drawn into a picture, drawn
+    /// through the rain at `now`. `None`: the renderer has no rain.
+    fn rain_window<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        look: &Look,
+        output_origin: Point<f64, Logical>,
+        scale: f64,
+        now: Duration,
+    ) -> Option<crate::matrix::RainElement>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let rain = self.windows.get(&id)?.rain.as_ref()?;
+        let (w, h) = (look.visual.size.w, look.visual.size.h);
+        let style = look.shadow;
+        let margin = (1.25 * style.blur + style.dy + 2.0).ceil();
+        let extent = Rectangle::new(
+            (-margin, -margin).into(),
+            (w + 2.0 * margin, h + 2.0 * margin).into(),
+        );
+        let picture_origin = look.visual.loc + extent.loc;
+        let picture = Picture {
+            window: Rectangle::new(look.visual.loc - output_origin, look.visual.size),
+            extent,
+            scale,
+        };
+        // Its picture drawn again only when the window or its frame
+        // changed: most frames draw the rain alone.
+        let size = picture.buffer_size();
+        // Its rim drawn as it ends: its focus changing under the motion
+        // does not draw the picture again.
+        let focus = if self.windows.get(&id).is_some_and(|m| m.focused) {
+            1.0
+        } else {
+            0.0
+        };
+        let redraw = rain.stale.get()
+            || rain.drawn_focus.get() != focus
+            || rain
+                .picture
+                .borrow()
+                .as_ref()
+                .is_none_or(|(s, _)| *s != size);
+        let mut parts = Vec::new();
+        if redraw {
+            let mut solid = look.clone();
+            solid.alpha = 1.0;
+            solid.focus = focus;
+            self.framed_window(renderer, id, &solid, picture_origin, scale, &mut parts);
+            rain.stale.set(false);
+            rain.drawn_focus.set(focus);
+        }
+        let shader = self.rain_look(rain, now, &picture, look.alpha);
+        renderer.rain(rain, redraw, &picture, &parts, shader)
+    }
+
+    /// What the rain's shader is told for `rain` over `picture`.
+    fn rain_look(
+        &self,
+        rain: &crate::rain::Rain,
+        now: Duration,
+        picture: &Picture,
+        alpha: f32,
+    ) -> crate::matrix::RainLook {
+        let (time, closing) = rain.shader_time(now);
+        let scale = picture.scale;
+        let (cw, ch) = hocus_link::moving::WINDOW_CELL;
+        crate::matrix::RainLook {
+            time,
+            closing,
+            seed: rain.seed,
+            cell: ((cw * scale) as f32, (ch * scale) as f32),
+            colours: hocus_link::moving::rain_colours(self.config.appearance.theme),
+            alpha,
+            window: [
+                (-picture.extent.loc.x * scale) as f32,
+                (-picture.extent.loc.y * scale) as f32,
+                (picture.window.size.w * scale) as f32,
+                (picture.window.size.h * scale) as f32,
+            ],
+            style: rain.style,
+            frost: hocus_link::moving::frost_colours(self.config.appearance.theme),
+            scale: scale as f32,
+        }
+    }
+
     /// What `output` shows, front first. `cursor`: whether the compositor
     /// draws the cursor (nested, the host does).
     pub fn output_elements<R>(
@@ -545,8 +652,10 @@ impl State {
             self.config
                 .appearance
                 .high_contrast
-                .then_some(self.config.appearance.theme),
+                .then_some(self.config.appearance.theme.windows()),
         );
+        // And in a themed theme's colours and accent (#431, #740).
+        crate::contrast::set_theme(Some(self.theme_choice()));
         let now = self.now();
         self.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();
@@ -878,9 +987,24 @@ impl State {
             } else {
                 &mut windows
             };
-            match self.bent_window(renderer, *id, look, origin, scale) {
-                Some(bent) => out.push(OutputElements::Bent(bent)),
-                None => self.framed_window(renderer, *id, look, origin, scale, out),
+            // Raining (#432): through the rain, else fading over its time.
+            let rain = look.rain.map(|fade| {
+                (
+                    fade,
+                    self.rain_window(renderer, *id, look, origin, scale, now),
+                )
+            });
+            match rain {
+                Some((_, Some(rain))) => out.push(OutputElements::Rain(rain)),
+                Some((fade, None)) => {
+                    let mut faded = look.clone();
+                    faded.alpha *= fade;
+                    self.framed_window(renderer, *id, &faded, origin, scale, out);
+                }
+                None => match self.bent_window(renderer, *id, look, origin, scale) {
+                    Some(bent) => out.push(OutputElements::Bent(bent)),
+                    None => self.framed_window(renderer, *id, look, origin, scale, out),
+                },
             }
             if palette_target == Some(*id)
                 && let Some((_, _, alpha)) = palette
@@ -993,8 +1117,53 @@ impl State {
             if !rect.overlaps(area.to_f64()) {
                 continue;
             }
-            let alpha = (1.0 - leaving.fade.linear(now)) as f32;
             let local = Rectangle::new(rect.loc - origin, rect.size);
+            // Through its rain (#432), its last frame drawn once; a margin
+            // around it for the thawing pane (#740).
+            if let Some(rain) = &leaving.rain {
+                let margin = match rain.style {
+                    crate::rain::Style::Rain => 0.0,
+                    crate::rain::Style::Frost => 8.0,
+                };
+                let picture = Picture {
+                    window: local,
+                    extent: Rectangle::new(
+                        (-margin, -margin).into(),
+                        (local.size.w + 2.0 * margin, local.size.h + 2.0 * margin).into(),
+                    ),
+                    scale,
+                };
+                let first = rain
+                    .picture
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|(s, _)| *s != picture.buffer_size());
+                let mut parts = Vec::new();
+                if first {
+                    let at = Point::<f64, Logical>::from((margin, margin));
+                    let clip = Rectangle::new(
+                        at.to_physical_precise_round(scale),
+                        local.size.to_physical_precise_round(scale),
+                    );
+                    let radius = (decoration::RADIUS * scale).round() as i32;
+                    parts.extend(
+                        leaving
+                            .picture
+                            .stretched(renderer, Rectangle::new(at, local.size), scale, 1.0)
+                            .into_iter()
+                            .map(|e| Rounded::new(e, clip, radius, Outside::Shown, scale)),
+                    );
+                }
+                let look = self.rain_look(rain, now, &picture, 1.0);
+                if let Some(element) = renderer.rain(rain, first, &picture, &parts, look) {
+                    elements.push(OutputElements::Rain(element));
+                    continue;
+                }
+            }
+            let alpha = match &leaving.rain {
+                Some(rain) => rain.fade(now),
+                None => (1.0 - leaving.fade.linear(now)) as f32,
+            };
             let clip: Rectangle<i32, Physical> = Rectangle::new(
                 local.loc.to_physical_precise_round(scale),
                 local.size.to_physical_precise_round(scale),
@@ -1033,8 +1202,17 @@ impl State {
         let bar_glass_at = if front { glass_at } else { elements.len() };
         layers(renderer, Layer::Bottom, Pick::All, &mut elements);
         layers(renderer, Layer::Background, Pick::All, &mut elements);
-        if let Some(backdrop) = self.backdrop_element(renderer, output) {
-            elements.push(backdrop);
+        // A wallpaper that moves (#433): still behind the glass, which is
+        // blurred from what is behind it below; moving on the screen, put
+        // in its place once the glass is done.
+        let wall = self.wall_elements(renderer, output);
+        match &wall {
+            Some((_, still)) => elements.push(OutputElements::Wall(still.clone())),
+            None => {
+                if let Some(backdrop) = self.backdrop_element(renderer, output) {
+                    elements.push(backdrop);
+                }
+            }
         }
         let mut glass = self.glass_element(renderer, output, now, &elements[bar_glass_at..]);
         let popovers = self.popover_glass(renderer, output, now, &elements[glass_at..]);
@@ -1062,6 +1240,13 @@ impl State {
             && let Some(pane) = self.capture_glass(renderer, output, glass, &elements[glass.at..])
         {
             elements.insert(glass.at, pane);
+        }
+        if let Some((moving, _)) = wall
+            && let Some(at) = elements
+                .iter()
+                .rposition(|e| matches!(e, OutputElements::Wall(_)))
+        {
+            elements[at] = OutputElements::Wall(moving);
         }
         elements
     }
@@ -1392,6 +1577,7 @@ impl State {
         let key = crate::wallpaper::Key {
             look: self.wallpaper_look(&name),
             size: (size.w, size.h),
+            scale: (output.current_scale().fractional_scale() * 1000.0).round() as u32,
         };
         let (buffer, (w, h)) = {
             let mut backgrounds = self.backgrounds.borrow_mut();
@@ -1713,6 +1899,8 @@ impl State {
                 Refresh::Fixed(Duration::from_secs_f64(1000.0 / f64::from(m.refresh)))
             });
         feedback.presented::<_, Monotonic>(time, refresh, seq, Kind::Vsync);
+        // Counted for the day's performance (#655).
+        self.perf_frame(output);
         // The lock on screen: what the machine waits for before it sleeps
         // (7.2).
         self.lock_presented_on(output);

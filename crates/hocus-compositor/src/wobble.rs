@@ -614,7 +614,7 @@ impl Bend for GlesRenderer {
 
 /// The frame's `projection` (3×3, by columns) after the mesh's vertices,
 /// laid out over `geometry`, are moved and stretched onto `dst`.
-fn placed(
+pub(crate) fn placed(
     projection: &[f32; 9],
     geometry: Rectangle<i32, Physical>,
     dst: Rectangle<i32, Physical>,
@@ -645,7 +645,7 @@ fn placed(
 }
 
 /// Draws the window's parts into its picture.
-fn draw_picture<E: RenderElement<GlesRenderer>>(
+pub(crate) fn draw_picture<E: RenderElement<GlesRenderer>>(
     renderer: &mut GlesRenderer,
     target: &mut GlesTexture,
     picture: &Picture,

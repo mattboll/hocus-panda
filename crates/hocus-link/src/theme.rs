@@ -12,6 +12,16 @@
 //! at least, the accent as text lifted or darkened to 7:1, and the colours
 //! drawn for the dark theme read by [`on_contrast`].
 //!
+//! Givre (`theme = "frost"`, #740, bar.md §13 "Givre") is a themed theme:
+//! the shell's surfaces take its tokens ([`FROST`]: night-blue glass, icy
+//! text and hairlines), and read the colours drawn for the dark theme by
+//! [`on_frost`]; the Settings window and the applications stay dark
+//! ([`Scheme::windows`]), only the accent is the theme's. High contrast
+//! wins over it: the dark theme's high-contrast tokens. Matrix
+//! (`theme = "matrix"`, #431, variant C "discret, avec lisière") is the
+//! second: near-black glass, green only for the accent and a few marks
+//! ([`MATRIX`], [`on_matrix`]).
+//!
 //! No toolkit here: colours are red, green, blue and an opacity, which each
 //! program turns into its own.
 
@@ -25,17 +35,38 @@ pub enum Scheme {
     #[default]
     Dark,
     Light,
+    /// Givre: icy blue on night-blue glass, for the shell's surfaces only.
+    Frost,
+    /// Matrix: near-black glass, the phosphor green in touches.
+    Matrix,
 }
 
 impl Scheme {
-    pub const ALL: [Self; 2] = [Self::Dark, Self::Light];
+    pub const ALL: [Self; 4] = [Self::Dark, Self::Light, Self::Frost, Self::Matrix];
 
     /// Its word in the file and on the line.
     pub const fn word(self) -> &'static str {
         match self {
             Self::Dark => "dark",
             Self::Light => "light",
+            Self::Frost => "frost",
+            Self::Matrix => "matrix",
         }
+    }
+
+    /// The theme application windows draw in, the Settings' among them: a
+    /// themed theme (Givre) keeps them dark, only its accent shows there.
+    pub const fn windows(self) -> Self {
+        match self {
+            Self::Frost | Self::Matrix => Self::Dark,
+            scheme => scheme,
+        }
+    }
+
+    /// Whether it is a themed theme: one of the shell's own look (Givre,
+    /// Matrix), with marks of its own and its pandas' dress.
+    pub const fn themed(self) -> bool {
+        matches!(self, Self::Frost | Self::Matrix)
     }
 
     pub fn of(word: &str) -> Option<Self> {
@@ -47,13 +78,16 @@ impl Scheme {
         match self {
             Self::Dark => &DARK,
             Self::Light => &LIGHT,
+            Self::Frost => &FROST,
+            Self::Matrix => &MATRIX,
         }
     }
 
-    /// Its tokens under high contrast.
+    /// Its tokens under high contrast: a themed theme's are the dark
+    /// one's (high contrast wins over the look).
     pub const fn contrast_tokens(self) -> &'static Tokens {
         match self {
-            Self::Dark => &DARK_CONTRAST,
+            Self::Dark | Self::Frost | Self::Matrix => &DARK_CONTRAST,
             Self::Light => &LIGHT_CONTRAST,
         }
     }
@@ -62,7 +96,7 @@ impl Scheme {
     /// prefers light (0, no preference, is never said).
     pub const fn portal_value(self) -> u32 {
         match self {
-            Self::Dark => 1,
+            Self::Dark | Self::Frost | Self::Matrix => 1,
             Self::Light => 2,
         }
     }
@@ -78,7 +112,7 @@ impl FromStr for Scheme {
     type Err = BadLine;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::of(s).ok_or_else(|| BadLine(format!("no theme {s:?}: dark or light")))
+        Self::of(s).ok_or_else(|| BadLine(format!("no theme {s:?}: dark, light, frost or matrix")))
     }
 }
 
@@ -94,6 +128,10 @@ pub enum Accent {
     Teal,
     /// The wallpaper's dominant hue, lifted to the others' lightness.
     Wallpaper,
+    /// Givre's ice blue, `#7FD8FF`: the accent choosing Givre sets.
+    Ice,
+    /// Matrix's phosphor green, `#00F060`: the accent choosing Matrix sets.
+    Phosphor,
 }
 
 /// An accent's three values: `base` fills the switches, the selection and
@@ -232,13 +270,15 @@ fn contrast_rgb(a: [u8; 3], b: Rgba) -> f64 {
 }
 
 impl Accent {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Green,
         Self::Blue,
         Self::Violet,
         Self::Rose,
         Self::Teal,
         Self::Wallpaper,
+        Self::Ice,
+        Self::Phosphor,
     ];
 
     pub const fn word(self) -> &'static str {
@@ -249,6 +289,8 @@ impl Accent {
             Self::Rose => "rose",
             Self::Teal => "teal",
             Self::Wallpaper => "wallpaper",
+            Self::Ice => "ice",
+            Self::Phosphor => "phosphor",
         }
     }
 
@@ -265,6 +307,8 @@ impl Accent {
             Self::Rose => ("Rose", "Pink"),
             Self::Teal => ("Sarcelle", "Teal"),
             Self::Wallpaper => ("Du fond d'écran", "From the wallpaper"),
+            Self::Ice => ("Bleu glacé", "Ice blue"),
+            Self::Phosphor => ("Vert phosphore", "Phosphor green"),
         }
     }
 
@@ -296,6 +340,16 @@ impl Accent {
                 on_light: [0x1D, 0x76, 0x6F],
             },
             Self::Wallpaper => BACKDROP_ACCENT,
+            Self::Ice => AccentColours {
+                base: [0x7F, 0xD8, 0xFF],
+                on_dark: [0x7F, 0xD8, 0xFF],
+                on_light: [0x1F, 0x6E, 0x94],
+            },
+            Self::Phosphor => AccentColours {
+                base: [0x00, 0xF0, 0x60],
+                on_dark: [0x00, 0xF0, 0x60],
+                on_light: [0x0B, 0x70, 0x34],
+            },
         }
     }
 }
@@ -368,7 +422,7 @@ impl FromStr for Accent {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::of(s).ok_or_else(|| {
             BadLine(format!(
-                "no accent {s:?}: green, blue, violet, rose, teal or wallpaper"
+                "no accent {s:?}: green, blue, violet, rose, teal, wallpaper, ice or phosphor"
             ))
         })
     }
@@ -403,7 +457,18 @@ impl Choice {
         match (self.contrast, self.scheme) {
             (false, Scheme::Dark) => dark,
             (false, Scheme::Light) => on_light(dark),
+            (false, Scheme::Frost) => on_frost(dark),
+            (false, Scheme::Matrix) => on_matrix(dark),
             (true, scheme) => on_contrast(dark, scheme),
+        }
+    }
+
+    /// The same theme as application windows draw in it (the Settings):
+    /// Givre's windows are dark, with its accent.
+    pub const fn in_windows(self) -> Self {
+        Self {
+            scheme: self.scheme.windows(),
+            ..self
         }
     }
 
@@ -420,7 +485,7 @@ impl Choice {
     pub fn accent_text(self) -> [u8; 3] {
         let colours = self.accent();
         let text = match self.scheme {
-            Scheme::Dark => colours.on_dark,
+            Scheme::Dark | Scheme::Frost | Scheme::Matrix => colours.on_dark,
             Scheme::Light => colours.on_light,
         };
         if self.contrast {
@@ -605,6 +670,96 @@ pub const LIGHT: Tokens = Tokens {
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
 };
+
+/// Givre (#740, bar.md §13): night-blue glass, icy text and hairlines.
+/// Its texts read at 7:1 at least on the opaque fallback (text 15.8,
+/// text.2 12.0, text.dim 7.6), the accent at 10.9; its rim, the icy
+/// hairline, at 3:1 over it. The Settings never draw in it.
+pub const FROST: Tokens = Tokens {
+    window: hex(0x0E1A30),
+    sidebar: hex(0x08101F),
+    text: hex(0xEAF6FF),
+    text2: hex(0xC4D9EA),
+    dim: hex(0x93AEC8),
+    faint: hex(0x7D98B2),
+    card: rgba(160, 220, 255, 0.05),
+    card_rim: rgba(190, 232, 255, 0.10),
+    divider: rgba(190, 232, 255, 0.08),
+    control: rgba(255, 255, 255, 0.06),
+    control_rim: rgba(190, 232, 255, 0.16),
+    menu: hex(0x111E36),
+    switch_off: rgba(255, 255, 255, 0.18),
+    segmented: rgba(255, 255, 255, 0.05),
+    segment_chosen: rgba(255, 255, 255, 0.13),
+    window_rim: rgba(255, 255, 255, 0.14),
+    high_contrast: rgba(255, 255, 255, 0.90),
+    bar_top: rgba(10, 20, 40, 0.58),
+    bar_bottom: rgba(6, 12, 26, 0.68),
+    bar_opaque_top: hex(0x0E1A30),
+    bar_opaque_bottom: hex(0x08101F),
+    bar_border: rgba(190, 232, 255, 0.40),
+    popover_top: rgba(10, 20, 40, 0.62),
+    popover_bottom: rgba(6, 12, 26, 0.74),
+    popover_opaque_top: hex(0x0E1A30),
+    popover_opaque_bottom: hex(0x08101F),
+    over: hex(0xFFFFFF),
+    shadow: hex(0x000000),
+    toast: hex(0x262C3C),
+    on_accent: hex(0x04111D),
+};
+
+/// Givre's viewfinder corner marks: 10 px, 1.5 px thick, `#BFEFFF` at
+/// 75 %, 5 px in from the corners of the bar, its popovers and the
+/// notifications' bubbles.
+pub const FROST_CORNER: Rgba = rgba(0xBF, 0xEF, 0xFF, 0.75);
+/// The clock's glow in Givre: `#7FD8FF` at 35 %, 14 px.
+pub const FROST_GLOW: Rgba = rgba(0x7F, 0xD8, 0xFF, 0.35);
+/// The pandas' green, and what it is in Givre.
+pub const PANDA_GREEN: [u8; 3] = [0x7B, 0xC4, 0x7F];
+
+/// Matrix (#431, variant C): glass black with a night-blue cast, never
+/// green nor brown; green only for the accent, the rims at 14 %, the
+/// clock's colon, a hairline atop the bar and the lock's card, and the
+/// code edge. Its texts read at 7:1 at least on the opaque fallback (text
+/// 16.3, text.2 12.0, text.dim 7.3), the accent at 12.2. The Settings
+/// never draw in it.
+pub const MATRIX: Tokens = Tokens {
+    window: hex(0x0C1218),
+    sidebar: hex(0x060A12),
+    text: hex(0xE8F1EC),
+    text2: hex(0xC2D2C8),
+    dim: hex(0x8FA79A),
+    faint: hex(0x7A9285),
+    card: rgba(0, 240, 96, 0.04),
+    card_rim: rgba(255, 255, 255, 0.07),
+    divider: rgba(255, 255, 255, 0.06),
+    control: rgba(255, 255, 255, 0.06),
+    control_rim: rgba(255, 255, 255, 0.12),
+    menu: hex(0x0F161E),
+    switch_off: rgba(255, 255, 255, 0.18),
+    segmented: rgba(255, 255, 255, 0.05),
+    segment_chosen: rgba(255, 255, 255, 0.13),
+    window_rim: rgba(255, 255, 255, 0.14),
+    high_contrast: rgba(255, 255, 255, 0.90),
+    bar_top: rgba(8, 13, 22, 0.58),
+    bar_bottom: rgba(4, 8, 15, 0.68),
+    bar_opaque_top: hex(0x0C1218),
+    bar_opaque_bottom: hex(0x060A12),
+    bar_border: rgba(0, 240, 96, 0.14),
+    popover_top: rgba(8, 13, 22, 0.62),
+    popover_bottom: rgba(4, 8, 15, 0.74),
+    popover_opaque_top: hex(0x0C1218),
+    popover_opaque_bottom: hex(0x060A12),
+    over: hex(0xFFFFFF),
+    shadow: hex(0x000000),
+    toast: hex(0x262C3C),
+    on_accent: hex(0x001A0A),
+};
+
+/// Matrix's green: its hairlines, the clock's colon, the code edge.
+pub const MATRIX_GREEN: Rgba = rgba(0x00, 0xF0, 0x60, 1.0);
+/// The code edge's glyphs' heads, as the rain's.
+pub const MATRIX_HEAD: Rgba = rgba(0xCC, 0xFF, 0xCC, 1.0);
 
 /// The dark theme under high contrast (#423): opaque backgrounds, white
 /// text, solid rims and dividers, 2 px borders.
@@ -829,6 +984,110 @@ const PAIRS: &[([u8; 3], [u8; 3])] = &[
     ([0xF2, 0x94, 0x5B], [0xA8, 0x4A, 0x14]),
     ([0xF7, 0xB9, 0x8A], [0xA0, 0x4C, 0x1C]),
     ([0xFF, 0xE0, 0x8A], [0x86, 0x62, 0x08]),
+];
+
+/// How a colour drawn for the dark theme reads in Givre, for the colours
+/// the shell draws that are not one of the [`Tokens`]: the pairs below
+/// first (each dark token), then by rule: a dark background turns night
+/// blue at the same opacity, a grey text icy at the same lightness. White
+/// veils, rims and hovers stay white (the mockup's); the states, the
+/// gauges, the accents and the pandas keep their colours.
+pub fn on_frost(dark: Rgba) -> Rgba {
+    let Rgba { r, g, b, a } = dark;
+    if let Some((_, frost)) = FROST_PAIRS.iter().find(|(d, _)| *d == [r, g, b]) {
+        return Rgba {
+            r: frost[0],
+            g: frost[1],
+            b: frost[2],
+            a,
+        };
+    }
+    let (low, high) = (r.min(g).min(b), r.max(g).max(b));
+    let grey = high - low <= 0x28;
+    if grey && high > 0 && high <= 0x40 {
+        let tint = |v: u8, k: f32| (f32::from(v) * k).round() as u8;
+        return Rgba {
+            r: tint(r, 0.45),
+            g: tint(g, 0.74),
+            b: tint(b, 0.95),
+            a,
+        };
+    }
+    if grey && low >= 0x50 && !(low >= 0xC8 && a < 1.0) {
+        let (_, _, lightness) = hsl([r, g, b]);
+        let [r, g, b] = rgb_of(207.0, 0.38, lightness);
+        return Rgba { r, g, b, a };
+    }
+    dark
+}
+
+/// Colours with a value of their own in Givre, by their dark one.
+const FROST_PAIRS: &[([u8; 3], [u8; 3])] = &[
+    // text, text.2, dim, faint
+    ([0xEE, 0xF1, 0xF6], [0xEA, 0xF6, 0xFF]),
+    ([0xD5, 0xDB, 0xE5], [0xC4, 0xD9, 0xEA]),
+    ([0xA9, 0xB2, 0xC2], [0x93, 0xAE, 0xC8]),
+    ([0x8C, 0x96, 0xA8], [0x7D, 0x98, 0xB2]),
+    // the windows', sidebars' and menus' backgrounds (the lock's panels)
+    ([0x14, 0x19, 0x26], [0x0E, 0x1A, 0x30]),
+    ([0x0F, 0x13, 0x1C], [0x08, 0x10, 0x1F]),
+    ([0x1F, 0x25, 0x34], [0x11, 0x1E, 0x36]),
+    // the bar's and popovers' backgrounds
+    ([22, 27, 42], [10, 20, 40]),
+    ([14, 17, 28], [6, 12, 26]),
+    // text and marks on an accent's fill
+    ([0x0B, 0x10, 0x20], [0x04, 0x11, 0x1D]),
+];
+
+/// How a colour drawn for the dark theme reads in Matrix: as in Givre
+/// ([`on_frost`]), its own values: the dark tokens their Matrix values; a
+/// dark background near black with a night-blue cast; a grey text a
+/// barely green grey at the same lightness; the rest as drawn.
+pub fn on_matrix(dark: Rgba) -> Rgba {
+    let Rgba { r, g, b, a } = dark;
+    if let Some((_, matrix)) = MATRIX_PAIRS.iter().find(|(d, _)| *d == [r, g, b]) {
+        return Rgba {
+            r: matrix[0],
+            g: matrix[1],
+            b: matrix[2],
+            a,
+        };
+    }
+    let (low, high) = (r.min(g).min(b), r.max(g).max(b));
+    let grey = high - low <= 0x28;
+    if grey && high > 0 && high <= 0x40 {
+        let tint = |v: u8, k: f32| (f32::from(v) * k).round() as u8;
+        return Rgba {
+            r: tint(r, 0.36),
+            g: tint(g, 0.48),
+            b: tint(b, 0.52),
+            a,
+        };
+    }
+    if grey && low >= 0x50 && !(low >= 0xC8 && a < 1.0) {
+        let (_, _, lightness) = hsl([r, g, b]);
+        let [r, g, b] = rgb_of(145.0, 0.14, lightness);
+        return Rgba { r, g, b, a };
+    }
+    dark
+}
+
+/// Colours with a value of their own in Matrix, by their dark one.
+const MATRIX_PAIRS: &[([u8; 3], [u8; 3])] = &[
+    // text, text.2, dim, faint
+    ([0xEE, 0xF1, 0xF6], [0xE8, 0xF1, 0xEC]),
+    ([0xD5, 0xDB, 0xE5], [0xC2, 0xD2, 0xC8]),
+    ([0xA9, 0xB2, 0xC2], [0x8F, 0xA7, 0x9A]),
+    ([0x8C, 0x96, 0xA8], [0x7A, 0x92, 0x85]),
+    // the windows', sidebars' and menus' backgrounds (the lock's panels)
+    ([0x14, 0x19, 0x26], [0x0C, 0x12, 0x18]),
+    ([0x0F, 0x13, 0x1C], [0x06, 0x0A, 0x12]),
+    ([0x1F, 0x25, 0x34], [0x0F, 0x16, 0x1E]),
+    // the bar's and popovers' backgrounds
+    ([22, 27, 42], [8, 13, 22]),
+    ([14, 17, 28], [4, 8, 15]),
+    // text and marks on an accent's fill
+    ([0x0B, 0x10, 0x20], [0x00, 0x1A, 0x0A]),
 ];
 
 #[cfg(test)]
@@ -1081,6 +1340,191 @@ mod tests {
                 .parse::<Choice>()
                 .is_err()
         );
+    }
+
+    /// `over` at `alpha` over the opaque `under`.
+    fn composited(over: Rgba, under: Rgba) -> Rgba {
+        let mix =
+            |o: u8, u: u8| (f32::from(o) * over.a + f32::from(u) * (1.0 - over.a)).round() as u8;
+        rgba(
+            mix(over.r, under.r),
+            mix(over.g, under.g),
+            mix(over.b, under.b),
+            1.0,
+        )
+    }
+
+    #[test]
+    fn givre_reads_at_7_to_1_on_its_opaque_fallback_and_its_rims_at_3_to_1() {
+        let t = &FROST;
+        let opaque = [
+            t.bar_opaque_top,
+            t.bar_opaque_bottom,
+            t.popover_opaque_top,
+            t.popover_opaque_bottom,
+            t.window,
+            t.sidebar,
+        ];
+        for under in opaque {
+            for text in [t.text, t.text2, t.dim] {
+                let ratio = contrast(text, under);
+                assert!(ratio >= 7.0, "{text:?} on {under:?}: {ratio:.2}");
+            }
+            let ratio = contrast(t.faint, under);
+            assert!(ratio >= 4.5, "faint on {under:?}: {ratio:.2}");
+            let ice = hex(0x7FD8FF);
+            assert!(contrast(ice, under) >= 7.0, "the accent on {under:?}");
+            for edge in [t.bar_border, FROST_CORNER] {
+                let ratio = contrast(composited(edge, under), under);
+                assert!(ratio >= 3.0, "{edge:?} on {under:?}: {ratio:.2}");
+            }
+        }
+        // On the menus, the texts at 4.5:1 at least.
+        for text in [t.text, t.text2, t.dim, t.faint] {
+            assert!(contrast(text, t.menu) >= 4.5, "{text:?} on the menu");
+        }
+        // The spec's ratios, to a tenth.
+        let at = |text| (contrast(text, t.bar_opaque_top) * 10.0).round() / 10.0;
+        assert_eq!([at(t.text), at(t.text2), at(t.dim)], [15.8, 12.0, 7.6]);
+        assert_eq!(at(hex(0x7FD8FF)), 10.9);
+        // Text on the accent's fill.
+        assert!(contrast(t.on_accent, hex(0x7FD8FF)) >= 7.0);
+        // The states keep their colours, and still read on it.
+        for state in [0xFFC23D, 0xFF8A66, 0x7EE0A0, 0x8FB3FF] {
+            assert_eq!(on_frost(hex(state)), hex(state));
+            assert!(contrast(hex(state), t.bar_opaque_top) >= 4.5, "{state:06x}");
+        }
+        // The glass is the table's: night blue, partly see-through.
+        assert_eq!(t.bar_top, rgba(10, 20, 40, 0.58));
+        assert_eq!(t.bar_bottom, rgba(6, 12, 26, 0.68));
+    }
+
+    #[test]
+    fn the_dark_colours_read_icy_in_givre() {
+        assert_eq!(on_frost(DARK.text), FROST.text);
+        assert_eq!(on_frost(DARK.dim), FROST.dim);
+        assert_eq!(on_frost(DARK.faint), FROST.faint);
+        assert_eq!(on_frost(rgba(22, 27, 42, 0.95)), rgba(10, 20, 40, 0.95));
+        // A dark background of a surface's own turns night blue.
+        let back = on_frost(rgba(26, 31, 48, 0.97));
+        assert!(back.b > back.g && back.g > back.r, "{back:?}");
+        assert_eq!(back.a, 0.97);
+        // A grey text turns icy, as light as it was.
+        let grey = on_frost(hex(0xC9D0DC));
+        assert!(grey.b > grey.r, "{grey:?}");
+        let (_, _, l0) = hsl([0xC9, 0xD0, 0xDC]);
+        let (_, _, l1) = hsl([grey.r, grey.g, grey.b]);
+        assert!((l0 - l1).abs() < 0.01, "{l0} {l1}");
+        // White veils and the pandas' colours stay.
+        assert_eq!(
+            on_frost(rgba(255, 255, 255, 0.08)),
+            rgba(255, 255, 255, 0.08)
+        );
+        assert_eq!(on_frost(hex(0x7BC47F)), hex(0x7BC47F));
+    }
+
+    #[test]
+    fn givre_keeps_windows_dark_and_yields_to_high_contrast() {
+        let frost = Choice {
+            scheme: Scheme::Frost,
+            accent: Accent::Ice,
+            ..Choice::default()
+        };
+        assert_eq!(frost.tokens(), &FROST);
+        let windows = frost.in_windows();
+        assert_eq!(windows.scheme, Scheme::Dark);
+        assert_eq!(windows.tokens(), &DARK);
+        assert_eq!(windows.accent(), Accent::Ice.colours());
+        assert_eq!(windows.reads(DARK.text), DARK.text);
+        assert_eq!(frost.accent_text(), [0x7F, 0xD8, 0xFF]);
+        // Applications are told dark.
+        assert_eq!(Scheme::Frost.portal_value(), 1);
+        // High contrast wins: the dark theme's high-contrast tokens.
+        let contrast = Choice {
+            contrast: true,
+            ..frost
+        };
+        assert_eq!(contrast.tokens(), &DARK_CONTRAST);
+        assert_eq!(contrast.reads(DARK.dim), DARK_CONTRAST.dim);
+        // On the line and in the file.
+        assert_eq!(frost.to_string(), "frost ice 7a96e0,a4b8f0,3a58b0");
+        assert_eq!(frost.to_string().parse::<Choice>(), Ok(frost));
+        assert_eq!("frost".parse::<Scheme>(), Ok(Scheme::Frost));
+        assert_eq!("ice".parse::<Accent>(), Ok(Accent::Ice));
+        assert!("givre".parse::<Scheme>().is_err());
+        assert!(Scheme::Frost.themed() && !Scheme::Dark.themed());
+    }
+
+    #[test]
+    fn matrix_reads_at_7_to_1_and_keeps_its_green_for_touches() {
+        let t = &MATRIX;
+        for under in [
+            t.bar_opaque_top,
+            t.bar_opaque_bottom,
+            t.popover_opaque_top,
+            t.popover_opaque_bottom,
+            t.window,
+            t.sidebar,
+        ] {
+            for text in [t.text, t.text2, t.dim] {
+                let ratio = contrast(text, under);
+                assert!(ratio >= 7.0, "{text:?} on {under:?}: {ratio:.2}");
+            }
+            assert!(contrast(t.faint, under) >= 4.5, "faint on {under:?}");
+            assert!(
+                contrast(MATRIX_GREEN, under) >= 7.0,
+                "the accent on {under:?}"
+            );
+        }
+        for text in [t.text, t.text2, t.dim, t.faint] {
+            assert!(contrast(text, t.menu) >= 4.5, "{text:?} on the menu");
+        }
+        let at = |text| (contrast(text, t.bar_opaque_top) * 10.0).round() / 10.0;
+        assert_eq!([at(t.text), at(t.text2), at(t.dim)], [16.3, 12.0, 7.3]);
+        assert!(contrast(t.on_accent, MATRIX_GREEN) >= 7.0);
+        // The glass: black with a night-blue cast, never green nor brown.
+        for glass in [
+            t.bar_top,
+            t.bar_bottom,
+            t.bar_opaque_top,
+            t.bar_opaque_bottom,
+        ] {
+            assert!(glass.b > glass.g && glass.g > glass.r, "{glass:?}");
+        }
+        // The dark colours read as Matrix's; the states keep theirs.
+        assert_eq!(on_matrix(DARK.text), t.text);
+        assert_eq!(on_matrix(DARK.faint), t.faint);
+        assert_eq!(on_matrix(rgba(22, 27, 42, 0.95)), rgba(8, 13, 22, 0.95));
+        for state in [0xFFC23D, 0xFF8A66, 0x7EE0A0, 0x8FB3FF] {
+            assert_eq!(on_matrix(hex(state)), hex(state));
+        }
+        assert_eq!(
+            on_matrix(rgba(255, 255, 255, 0.08)),
+            rgba(255, 255, 255, 0.08)
+        );
+        let grey = on_matrix(hex(0xC9D0DC));
+        assert!(grey.g > grey.r && grey.g > grey.b, "{grey:?}");
+        // Windows dark, in its accent; high contrast wins; on the line.
+        let matrix = Choice {
+            scheme: Scheme::Matrix,
+            accent: Accent::Phosphor,
+            ..Choice::default()
+        };
+        assert_eq!(matrix.in_windows().tokens(), &DARK);
+        assert_eq!(matrix.accent_text(), [0x00, 0xF0, 0x60]);
+        assert_eq!(Scheme::Matrix.portal_value(), 1);
+        assert_eq!(
+            Choice {
+                contrast: true,
+                ..matrix
+            }
+            .tokens(),
+            &DARK_CONTRAST
+        );
+        assert_eq!(matrix.to_string().parse::<Choice>(), Ok(matrix));
+        assert_eq!("matrix".parse::<Scheme>(), Ok(Scheme::Matrix));
+        assert_eq!("phosphor".parse::<Accent>(), Ok(Accent::Phosphor));
+        assert!(Scheme::Matrix.themed());
     }
 
     #[test]

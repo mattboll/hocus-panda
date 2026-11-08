@@ -5,16 +5,33 @@
 //! on_contrast` says for the theme chosen (texts at 7:1, no tints nor
 //! fills, solid rims), and rims are the cards' rim.
 //!
+//! A themed theme (Givre, Matrix: #740, #431) is read the same way when
+//! high contrast is off ([`set_theme`]): the colours as the shell reads
+//! them in it (`Choice::reads`), and the pandas' green, the compositor's
+//! accent (the focused window's rim, the radial menu's lit sector, the
+//! overview's current desktop and selection), the theme's accent.
+//!
 //! What is drawn for an output is drawn on the loop's thread, the output's
 //! look set first ([`set`]): a thread's own, so that two compositors in one
 //! process (tests) never share it.
 
 use std::cell::Cell;
 
-use hocus_link::theme::{Rgba, Scheme, on_contrast};
+use hocus_link::theme::{Choice, Rgba, Scheme, on_contrast};
 
 thread_local! {
     static CONTRAST: Cell<Option<Scheme>> = const { Cell::new(None) };
+    static THEMED: Cell<Option<Choice>> = const { Cell::new(None) };
+}
+
+/// The compositor's own accent, drawn for the dark theme: the pandas'
+/// green.
+const GREEN: [u8; 3] = [0x6C, 0xC2, 0x87];
+
+/// What is drawn from now on this thread is in `choice`, a themed theme
+/// (`None`, or a plain theme: as drawn).
+pub fn set_theme(choice: Option<Choice>) {
+    THEMED.with(|t| t.set(choice.filter(|c| c.scheme.themed() && !c.contrast)));
 }
 
 /// What is drawn from now on this thread is in high contrast for `scheme`
@@ -43,9 +60,14 @@ fn bytes(c: Rgba) -> [u8; 4] {
 
 /// A colour (drawn for the dark theme) as it reads now.
 pub fn ink(colour: [u8; 4]) -> [u8; 4] {
-    match now() {
-        None => colour,
-        Some(scheme) => bytes(on_contrast(rgba(colour), scheme)),
+    match (now(), THEMED.with(Cell::get)) {
+        (Some(scheme), _) => bytes(on_contrast(rgba(colour), scheme)),
+        (None, Some(choice)) if colour[..3] == GREEN => {
+            let [r, g, b] = choice.accent().base;
+            [r, g, b, colour[3]]
+        }
+        (None, Some(choice)) => bytes(choice.reads(rgba(colour))),
+        (None, None) => colour,
     }
 }
 
@@ -53,7 +75,7 @@ pub fn ink(colour: [u8; 4]) -> [u8; 4] {
 /// cards' rim for a grey, the colour solid else.
 pub fn rim(colour: [u8; 4]) -> [u8; 4] {
     let Some(scheme) = now() else {
-        return colour;
+        return ink(colour);
     };
     if colour[3] == 0 {
         return colour;
@@ -85,5 +107,30 @@ mod tests {
         set(Some(Scheme::Light));
         assert_eq!(ink([0xEE, 0xF1, 0xF6, 0xFF]), [0, 0, 0, 0xFF]);
         set(None);
+    }
+
+    #[test]
+    fn a_themed_theme_reads_the_colours_and_takes_its_accent() {
+        use hocus_link::theme::Accent;
+        let matrix = Choice {
+            scheme: Scheme::Matrix,
+            accent: Accent::Phosphor,
+            ..Choice::default()
+        };
+        set(None);
+        set_theme(Some(matrix));
+        assert_eq!(ink([0x6C, 0xC2, 0x87, 0xFF]), [0x00, 0xF0, 0x60, 0xFF]);
+        assert_eq!(ink([108, 194, 135, 71]), [0x00, 0xF0, 0x60, 71]);
+        assert_eq!(ink([22, 27, 42, 235]), [8, 13, 22, 235]);
+        assert_eq!(rim([0x6C, 0xC2, 0x87, 0xFF]), [0x00, 0xF0, 0x60, 0xFF]);
+        // A state keeps its colour.
+        assert_eq!(ink([0xF2, 0x94, 0x5B, 0xFF]), [0xF2, 0x94, 0x5B, 0xFF]);
+        // High contrast wins; a plain theme is as drawn.
+        set(Some(Scheme::Dark));
+        assert_eq!(ink([0x6C, 0xC2, 0x87, 0xFF]), [0x6C, 0xC2, 0x87, 0xFF]);
+        set(None);
+        set_theme(Some(Choice::default()));
+        assert_eq!(ink([22, 27, 42, 235]), [22, 27, 42, 235]);
+        set_theme(None);
     }
 }

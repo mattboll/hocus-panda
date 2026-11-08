@@ -137,6 +137,57 @@ sessions).
 - **Closing:** to 97 % and 0 opacity in 160 ms, ease-in. The window's last
   frame is what fades; the application is not waited for.
 - Reduced motion: opening and closing fade in 120 ms, without scaling.
+- **How they open and close** is a choice, `[windows] animation` (the
+  Settings' "Ouvrir et fermer"): `"standard"` (above), `"rain"`, or
+  `"frost"` (Givre's thawing pane, below); each
+  theme with a look of its own brings its own, and any can be chosen in
+  any theme.
+- **The rain** (#432): an application's window or dialog larger than
+  200 × 200 px (never a popup, menu, tooltip, layer surface or the
+  shell's own surfaces) opens in 360 ms: columns of glyphs (12 px wide,
+  cells of 12 × 18 logical px, each glyph about 9 × 13 at every scale,
+  #740) fall through its rectangle, each column
+  starting within the first 110 ms and falling in 170 to 250 ms
+  (ease-out); behind each head the window shows, under the tail of
+  glyphs; a green veil (30 % at most) fades out from 240 to 360 ms. It
+  closes in 300 ms: each column drains downward (ease-in), glyphs
+  replacing its last frame from the top. Closed while it opens, it goes
+  back from where it is, never more of it shown. At most three rains at
+  once (the next windows open and close as standard); none for the
+  windows of the last session coming back (§14); with reduced motion and
+  in the power saver, the motion above. The window has the keyboard and
+  the pointer from its first frame: the rain is only how it is drawn.
+  Drawn by a GLES shader (`src/matrix.rs`, `src/rain.rs`) over the
+  window's rectangle from its picture (drawn again only when it commits)
+  and the glyphs' atlas, its colours the theme's rain tokens; on pixman,
+  the window fades in or out over the same time, so the frames counted
+  are the same. Measured headless (`tests/rain.rs`, held clock, 60 Hz):
+  hidden at 0 ms, 28 % shown at 90 ms, 90 % at 180 ms, whole and
+  untinted at 360 ms; 22 frames to open (at most ⌈0.36 × refresh⌉ + 1 =
+  23) and 19 to close (at most ⌈0.30 × refresh⌉ + 1), all on its screen,
+  none on another, none 100 ms after; 31 allocations on the loop more
+  than the standard opening over the whole rain, none growing.
+- **The thawing pane** (#740, Givre's, "la vitre qui dégèle", chosen
+  with the maintainer over the first build's frost line, which read as
+  scratches): the same windows, times, rules and fallbacks as the rain,
+  drawn otherwise. Opening, 360 ms: the window shows through a sheet of
+  ice (from 20 ms, ease-out, its opacity coming in over the first ~100
+  ms): refracted, the gradient of a 3-octave noise shifting where it is
+  read by 5 px at most, never within 3 to 12 px of its edges (the frame
+  never wavers) and gone by 200 ms (the text steady from then); under a
+  pale veil (`#DBF0FF`, 38 % at most) with a web of fine cracks
+  (`#EBFAFF`); the ice thaws to clear glass while one reflection crosses
+  it diagonally. Closing, 300 ms: the reverse, the pane freezing over
+  (ease-in-out), then fading. No pixel is brighter than both the
+  window's there and the ice: the cracks and the reflection never lay a
+  pattern brighter than either. Its colours are the theme's ice tokens
+  (`hocus_link::moving::frost_colours`). Measured headless
+  (`tests/rain.rs`, a checkered window, held clock): nothing at 0 ms; at
+  90 ms the window there but not itself; the text's pattern intact from
+  150 ms; the frame's 3 px intact at every frame; whole and untinted at
+  360 ms; gone at 300 ms closing; no pixel brighter than the window and
+  the ice in any frame; 22 frames to open and 19 to close at 60 Hz, as
+  the rain.
 - **Rules per application** (`[[windows.rules]]`, 6.14; the Settings'
   "Bureaux et fenêtres"), in the file's order, the first of an
   application's applying (its `app-id`, whatever the case): a window of

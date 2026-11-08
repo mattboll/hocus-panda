@@ -61,6 +61,8 @@ pub struct Config {
     pub agents: Agents,
     pub idle: Idle,
     pub power: Power,
+    /// A day's CPU and memory, recorded (#655, docs/performance.md).
+    pub perf: Perf,
     /// Every mouse, trackball and trackpoint (6.12).
     pub pointer: Pointer,
     /// Every touchpad (6.12).
@@ -217,6 +219,27 @@ impl CaptureFormat {
         match self {
             Self::Png => "png",
             Self::Jpeg => "jpg",
+        }
+    }
+}
+
+/// The day's performance, `[perf]` (#655, docs/performance.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Perf {
+    /// The compositor's and the shell's CPU and memory sampled every
+    /// 10 s on a thread of their own, kept 14 days in the state folder.
+    pub record: bool,
+    /// How often, when not every 10 s (tests). Not part of the file.
+    #[serde(skip)]
+    pub interval: Option<std::time::Duration>,
+}
+
+impl Default for Perf {
+    fn default() -> Self {
+        Self {
+            record: true,
+            interval: None,
         }
     }
 }
@@ -1120,11 +1143,13 @@ pub struct Appearance {
     pub reduce_transparency: bool,
     /// `"dark"` or `"light"`: the shell, the Settings, the lock and the
     /// authentication dialog draw in it, and applications are told
-    /// (#402).
+    /// (#402); `"frost"` (Givre, #740) or `"matrix"` (#431): the shell's
+    /// surfaces only, the Settings and applications dark.
     #[serde(deserialize_with = "scheme")]
     pub theme: hocus_link::theme::Scheme,
-    /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"` or
-    /// `"wallpaper"`: what is chosen, on or focused.
+    /// `"green"`, `"blue"`, `"violet"`, `"rose"`, `"teal"`, `"wallpaper"`
+    /// `"ice"` (Givre's) or `"phosphor"` (Matrix's): what is chosen, on or
+    /// focused.
     #[serde(deserialize_with = "accent")]
     pub accent: hocus_link::theme::Accent,
     /// The Settings' text, from 80 to 150 %: written as `1.2`, held in
@@ -1137,8 +1162,8 @@ pub struct Appearance {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Wallpaper {
-    /// `"night"`, `"mist"`, `"dawn"`, `"forest"`, `"plain"`, or a
-    /// picture's path: every screen's, but those that have their own.
+    /// `"night"`, `"mist"`, `"dawn"`, `"forest"`, `"rain"`, `"stars"`,
+    /// `"plain"`, or a picture's path: every screen's, but those that have their own.
     #[serde(deserialize_with = "picture")]
     pub picture: hocus_link::wallpaper::Picture,
     /// Each screen its own: `[outputs.NAME] wallpaper`, else `picture`.
@@ -1155,6 +1180,25 @@ pub struct Wallpaper {
     /// The lock's own picture, with `lock = "picture"`.
     #[serde(deserialize_with = "picture")]
     pub lock_picture: hocus_link::wallpaper::Picture,
+    /// A wallpaper that moves ("rain", "stars", "aurora") moves; else its still
+    /// picture (#433).
+    pub animate: bool,
+    /// On battery a moving wallpaper goes at half its frames, stays
+    /// still, or goes as on mains power.
+    pub on_battery: OnBattery,
+}
+
+/// `[wallpaper] on-battery` (#433).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnBattery {
+    /// Half its frames, so half its pace.
+    #[default]
+    Half,
+    /// Its still picture.
+    Still,
+    /// As on mains power.
+    Full,
 }
 
 impl Default for Wallpaper {
@@ -1166,6 +1210,8 @@ impl Default for Wallpaper {
             color: hocus_link::wallpaper::DEFAULT_COLOR,
             lock: hocus_link::wallpaper::LockLook::default(),
             lock_picture: hocus_link::wallpaper::Picture::default(),
+            animate: true,
+            on_battery: OnBattery::Half,
         }
     }
 }
@@ -1387,6 +1433,8 @@ pub struct Windows {
     pub snap_by_drag: bool,
     /// A moved window wobbles (never with reduced motion).
     pub wobble: bool,
+    /// How applications' windows open and close (#432).
+    pub animation: Animation,
     /// Which windows Alt+Tab lists.
     pub alt_tab: AltTab,
     /// Rules per application, `[[windows.rules]]`, in the file's order:
@@ -1470,10 +1518,27 @@ impl Default for Windows {
             magnet: true,
             snap_by_drag: true,
             wobble: true,
+            animation: Animation::Standard,
             alt_tab: AltTab::All,
             rules: Vec::new(),
         }
     }
+}
+
+/// How applications' windows open and close, `[windows] animation`
+/// (docs/design/windows.md §5): each theme with a look of its own brings
+/// its own, and any can be chosen in any theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Animation {
+    /// Growing from 94 % as they fade in; shrinking a little as they go.
+    #[default]
+    Standard,
+    /// Columns of glyphs falling through the window (#432).
+    Rain,
+    /// Givre's thawing pane (#740): the window seen through ice thawing
+    /// to clear glass.
+    Frost,
 }
 
 /// The key held for a drag anywhere in a window: nested, `Super` is
@@ -2506,12 +2571,26 @@ mod tests {
             toml::from_str("[appearance]\ntheme = \"light\"\naccent = \"teal\"\n")?;
         assert_eq!(config.appearance.theme, Scheme::Light);
         assert_eq!(config.appearance.accent, Accent::Teal);
+        // Givre (#740), with its ice blue.
+        let config: Config = toml::from_str("[appearance]\ntheme = \"frost\"\naccent = \"ice\"\n")?;
+        assert_eq!(config.appearance.theme, Scheme::Frost);
+        assert_eq!(config.appearance.accent, Accent::Ice);
+        let choice = config.appearance.theme_choice(Default::default());
+        assert_eq!(
+            choice.to_string().parse::<hocus_link::theme::Choice>(),
+            Ok(choice)
+        );
         let config: Config = toml::from_str("")?;
         assert_eq!(
             config.appearance.theme_choice(Default::default()),
             Default::default()
         );
-        for bad in ["theme = \"neon\"", "accent = \"amber\"", "theme = 1"] {
+        for bad in [
+            "theme = \"neon\"",
+            "theme = \"givre\"",
+            "accent = \"amber\"",
+            "theme = 1",
+        ] {
             let text = format!("[appearance]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
         }

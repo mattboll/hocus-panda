@@ -108,7 +108,7 @@ const GLASS_TOP: Ink = Ink::Dark(rgba(22, 27, 42, 0.95));
 const GLASS_BOTTOM: Ink = Ink::Dark(rgba(14, 17, 28, 0.97));
 const OPAQUE_TOP: Ink = Ink::Dark(rgb(0x161B2A));
 const OPAQUE_BOTTOM: Ink = Ink::Dark(rgb(0x0E111C));
-const RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.10));
+const RIM: Ink = Ink::Rim(rgba(255, 255, 255, 0.10));
 const RIM_CRITICAL: Ink = Ink::Dark(rgba(242, 148, 91, 0.75));
 const BODY_TEXT: Ink = Ink::Dark(rgb(0xC9D0DC));
 const URGENT: Ink = Ink::Dark(rgb(0xF7A77A));
@@ -547,6 +547,14 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             ..Stroke::default()
         },
     );
+    // Givre's marks; an urgent bubble has its rim instead.
+    if !critical {
+        crate::theme::corner_marks(
+            f,
+            Rectangle::new(Point::ORIGIN, size),
+            crate::theme::Corners::Diagonal,
+        );
+    }
     // The icon, else the first letter of its application on a square.
     let icon = Rectangle::new(
         Point::new(BORDER + PAD_LEFT, BORDER + PAD_TOP),

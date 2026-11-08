@@ -140,6 +140,8 @@ pub struct State {
     pub spawned_at: Option<Duration>,
     /// Commits of the windows' surfaces so far, for tests: none at rest.
     pub window_commits: u64,
+    /// The day's performance: what the loop counts, the recorder (#655).
+    pub perf: crate::perf::Perf,
     /// Windows not mapped yet that asked for the focus with a valid token.
     pub activate_on_map: Vec<WlSurface>,
     /// xdg-foreign's handles and the dialogs made through them (#595).
@@ -156,6 +158,8 @@ pub struct State {
     /// Windows' pictures taken as their surfaces went.
     pub pictures: HashMap<WindowId, Snapshot>,
     pub leaving: Vec<Leaving>,
+    /// The windows' rains so far, for their seeds (#432).
+    pub rain_seeds: u32,
     /// Where a dragged window would snap, and the one fading out.
     pub preview: Option<Preview>,
     pub preview_out: Option<(Rect, Tween)>,
@@ -293,6 +297,8 @@ pub struct State {
     pub panes: std::cell::RefCell<crate::glass::Panes>,
     /// The screens' wallpapers (6.3), drawn on a thread of their own.
     pub backgrounds: std::cell::RefCell<crate::wallpaper::Backgrounds>,
+    /// The screens' wallpapers that move (#433).
+    pub walls: std::cell::RefCell<crate::moving::Walls>,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
     /// Keys whose press was a shortcut: their release is kept from the
@@ -436,6 +442,7 @@ impl State {
             activation_tokens: HashMap::new(),
             spawned_at: None,
             window_commits: 0,
+            perf: crate::perf::Perf::default(),
             activate_on_map: Vec::new(),
             foreign: crate::foreign::Foreign::default(),
             tray_click: None,
@@ -444,6 +451,7 @@ impl State {
             grabber: Grabber::default(),
             pictures: HashMap::new(),
             leaving: Vec::new(),
+            rain_seeds: 0,
             preview: None,
             preview_out: None,
             switcher_repeat: None,
@@ -513,6 +521,7 @@ impl State {
             blur: false,
             panes: std::cell::RefCell::default(),
             backgrounds: std::cell::RefCell::default(),
+            walls: std::cell::RefCell::default(),
             session: None,
             kept_keys: HashSet::new(),
             layout_codes,

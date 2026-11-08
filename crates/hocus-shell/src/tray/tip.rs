@@ -35,7 +35,7 @@ const PAD: Size = Size::new(10.0, 7.0);
 const BORDER: f32 = 1.0;
 const SIZE: f32 = 12.0;
 const FILL: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.96));
-const RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+const RIM: Ink = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.12));
 /// What comes between the name and what the item says.
 const BETWEEN: &str = " · ";
 

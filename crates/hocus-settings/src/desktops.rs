@@ -47,6 +47,9 @@ pub const RESIZE_KEY: &str = "windows.resize-modifier";
 pub const MAGNET: &str = "windows.magnet";
 pub const SNAP: &str = "windows.snap-by-drag";
 pub const WOBBLE: &str = "windows.wobble";
+/// How windows open and close (#432): a list each theme of its own adds
+/// to.
+pub const ANIMATION: &str = "windows.animation";
 pub const ALT_TAB_ROW: &str = "windows.alt-tab";
 pub const HOT_CORNER: &str = "overview.hot-corner";
 pub const INK: &str = "ink.enabled";
@@ -67,6 +70,7 @@ pub const NAME_MOST: usize = 24;
 
 const DRAG_KEYS: &[&str] = &["alt", "super", "none"];
 const ALT_TAB_WORDS: &[&str] = &["all", "desktop"];
+const ANIMATIONS: &[&str] = &["standard", "rain", "frost"];
 
 /// Desktop `index`'s name (from 0) as `names` say it, else "Bureau N".
 pub fn name_of(names: &[String], index: usize, lang: Lang) -> String {
@@ -507,6 +511,29 @@ pub fn settings() -> &'static [Setting] {
                 switch(&["windows", "wobble"]),
             ),
             setting(
+                ANIMATION,
+                MOVE,
+                w("Ouvrir et fermer", "Open and close"),
+                w(
+                    "Pluie : des colonnes de caractères tombent dans la fenêtre qui s’ouvre (360 ms) et l’emportent quand elle se ferme (300 ms). Givre : la fenêtre apparaît à travers une vitre de glace qui dégèle.",
+                    "Rain: columns of glyphs fall through a window as it opens (360 ms) and carry it away as it closes (300 ms). Frost: the window shows through a sheet of ice that thaws to clear glass.",
+                ),
+                (
+                    &["ouvrir", "fermer", "animation", "pluie", "matrix", "givre"],
+                    &["open", "close", "animation", "rain", "matrix", "frost"],
+                ),
+                Kind::Menu(vec![
+                    word("Standard", "Standard", "standard"),
+                    word("Pluie", "Rain", "rain"),
+                    word("Givre", "Frost", "frost"),
+                ]),
+                one(
+                    &["windows", "animation"],
+                    Codec::Word(ANIMATIONS),
+                    Value::Word("standard"),
+                ),
+            ),
+            setting(
                 ALT_TAB_ROW,
                 ALT_TAB,
                 w("Alt+Tab montre", "Alt+Tab shows"),
@@ -665,6 +692,7 @@ mod tests {
                 "windows.magnet",
                 "windows.snap-by-drag",
                 "windows.wobble",
+                "windows.animation",
                 "windows.alt-tab",
                 "overview.hot-corner",
                 "ink.enabled"

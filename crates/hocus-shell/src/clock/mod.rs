@@ -378,6 +378,7 @@ impl Clock {
                 line: BIG,
                 colour,
             };
+            draw.glow(cell, glyph, ch, i);
             draw.digit(cell, glyph, ch, i);
             x += w;
         }
@@ -480,8 +481,26 @@ struct Draw<'a> {
 }
 
 impl Draw<'_> {
+    /// Givre's glow behind character `i` of `HH:MM` (none while it moves).
+    fn glow(&mut self, cell: Rectangle, glyph: Glyph, ch: char, i: usize) {
+        if self.moving.is_some_and(|(from, _)| from[i] != ch) {
+            return;
+        }
+        crate::theme::glow(ch, |offset, colour| {
+            let glyph = Glyph {
+                colour: faded(colour, glyph.colour.a),
+                ..glyph
+            };
+            self.glyph(cell + offset, glyph, ch, Pose::REST);
+        });
+    }
+
     /// Character `i` of `HH:MM`, `ch` now: moving if it changed.
     fn digit(&mut self, cell: Rectangle, glyph: Glyph, ch: char, i: usize) {
+        let glyph = Glyph {
+            colour: crate::theme::digit_colour(ch, glyph.colour),
+            ..glyph
+        };
         let changed = self
             .moving
             .map(|(from, elapsed)| (from[i], elapsed))
