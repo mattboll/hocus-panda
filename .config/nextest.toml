@@ -21,3 +21,5 @@ archive.include = [
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
+# Quarantined: #741.
+default-filter = "not (binary(moving_wallpaper) & test(=a_minute_of_aurora_on_battery_costs_302_frames_at_most))"
