@@ -4,7 +4,8 @@
 //! worker, never the shell's loop.
 //!
 //! - `calendarList` gives the calendars: `summaryOverride` else `summary`,
-//!   `backgroundColor`, `selected`, `accessRole`.
+//!   `backgroundColor`, `selected`, `accessRole`; with `showHidden` (the
+//!   secretary's reader) the calendars the user hid too, marked `hidden`.
 //! - `events`, with `singleEvents=true` (recurring events expanded by
 //!   Google, exceptions honoured), lists the window and gives a
 //!   `nextSyncToken`; a sync from it gives what changed, a `410` that it
@@ -15,7 +16,7 @@
 //!   Online Accounts refusing it is [`SourceError::SignIn`].
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -76,6 +77,11 @@ pub struct GoogleCalendar {
     base: String,
     /// Each calendar's own reminders, for its events that use them.
     defaults: HashMap<CalendarId, Vec<u32>>,
+    /// Calendars the user hid from the list are listed too (the
+    /// secretary reads them: "Congés", a family calendar).
+    show_hidden: bool,
+    /// The calendars listed that the user hid.
+    hidden: HashSet<CalendarId>,
 }
 
 impl std::fmt::Debug for GoogleCalendar {
@@ -97,7 +103,21 @@ impl GoogleCalendar {
             agent: crate::http::agent(TIMEOUT),
             base,
             defaults: HashMap::new(),
+            show_hidden: false,
+            hidden: HashSet::new(),
         }
+    }
+
+    /// The calendars the user hid from the list are listed too
+    /// (`showHidden`).
+    pub fn with_hidden(mut self) -> Self {
+        self.show_hidden = true;
+        self
+    }
+
+    /// Whether `calendar`, as last listed, is one the user hid.
+    pub fn hidden(&self, calendar: &CalendarId) -> bool {
+        self.hidden.contains(calendar)
     }
 
     /// A token not about to expire: the last one, else a new one.
@@ -201,12 +221,21 @@ impl CalendarSource for GoogleCalendar {
         let mut next: Option<String> = None;
         loop {
             let mut query = vec![("maxResults", "250")];
+            if self.show_hidden {
+                query.push(("showHidden", "true"));
+            }
             if let Some(page) = &next {
                 query.push(("pageToken", page));
             }
             let page: CalendarPage = self.get("/users/me/calendarList", &query)?;
+            if next.is_none() {
+                self.hidden.clear();
+            }
             for entry in page.items.into_iter().filter(|c| !c.deleted) {
                 let id = CalendarId::new(entry.id);
+                if entry.hidden {
+                    self.hidden.insert(id.clone());
+                }
                 self.defaults
                     .insert(id.clone(), popups(&entry.default_reminders));
                 calendars.push(Calendar {
@@ -433,6 +462,8 @@ struct CalendarEntry {
     default_reminders: Vec<Reminder>,
     #[serde(default)]
     deleted: bool,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
