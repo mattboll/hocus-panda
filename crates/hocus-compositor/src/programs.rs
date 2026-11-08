@@ -202,6 +202,7 @@ impl crate::State {
         let mut programs = std::mem::take(&mut self.programs);
         programs.ready(&env, || self.activation_token());
         self.start_shell();
+        self.secretary_follow();
     }
 }
 

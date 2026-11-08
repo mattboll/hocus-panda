@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs what a package of Hocuspanda holds, from a release build
 # already made (`cargo build --release --locked -p hocus-compositor -p
-# hocus-shell -p hocus-cli -p hocus-settings`), into
+# hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary`), into
 # a staging directory for the .deb, or into the system.
 #
 #   packaging/install.sh DESTDIR
@@ -19,6 +19,9 @@ release=${CARGO_TARGET_DIR:-$here/../target}/release
 install -D -m 755 "$release/hocuspanda" "$destdir$prefix/bin/hocuspanda"
 # The shell (the bar), which the compositor starts from beside itself.
 install -D -m 755 "$release/hocuspanda-shell" "$destdir$prefix/bin/hocuspanda-shell"
+# The secretary (docs/design/secretary.md), which the compositor starts from
+# beside itself in `[secretary] mode = "assistant"` only.
+install -D -m 755 "$release/hocus-secretary" "$destdir$prefix/bin/hocus-secretary"
 # The Settings (6.1), an application of their own, in the launcher.
 install -D -m 755 "$release/hocus-settings" "$destdir$prefix/bin/hocus-settings"
 install -D -m 644 "$here/hocus-settings.desktop" \

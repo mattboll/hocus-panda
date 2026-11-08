@@ -365,6 +365,15 @@
 # peek = "waiting-and-done"
 # pandas = true
 
+# [secretary]
+# The secretary (docs/design/secretary.md): "classic" is the agents'
+# secretary as she is; "assistant" starts her own process, which keeps an
+# encrypted memory in ~/.local/share/hocuspanda/secretary (its key in the
+# keyring) and reads the sources you consent to. Followed live: back to
+# "classic", her process stops and her memory stays on disk until you ask
+# her to forget it. Her other keys (providers, models) come with her.
+# mode = "classic"
+
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the
 # session is idle, in seconds, from 1 to 86400, or "off". Idle, every

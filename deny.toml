@@ -24,6 +24,12 @@ allow = [
     "OFL-1.1",
 ]
 confidence-threshold = 0.9
+# SQLCipher's sources (decision 0004): SQLite's public-domain blessing, and
+# libtomcrypt's WTFPL, compiled only for targets without a system crypto
+# library. Both more permissive than MIT; this crate only.
+exceptions = [
+    { allow = ["blessing", "WTFPL"], crate = "sqlcipher-src" },
+]
 # The list is a policy, not an inventory.
 unused-allowed-license = "allow"
 

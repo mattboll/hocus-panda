@@ -113,6 +113,13 @@ pub fn shell_program() -> Option<std::path::PathBuf> {
     built("hocuspanda-shell", "hocus-shell")
 }
 
+/// The secretary's program (docs/design/secretary.md), as
+/// [`shell_program`].
+#[allow(dead_code)]
+pub fn secretary_program() -> Option<std::path::PathBuf> {
+    built("hocus-secretary", "hocus-secretary")
+}
+
 /// The Settings' program (6.1), as [`shell_program`].
 pub fn settings_program() -> Option<std::path::PathBuf> {
     built("hocus-settings", "hocus-settings")

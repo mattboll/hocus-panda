@@ -1,0 +1,47 @@
+[package]
+name = "hocus-secretary"
+description = "The Hocuspanda secretary's process: her memory (a temporal graph in an encrypted SQLite), her audit log, her sources' bookkeeping, and her private socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocus-secretary"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0" }
+# Her memory: one SQLite database, encrypted page by page by SQLCipher
+# (BSD-3-Clause; SQLite's public-domain blessing; decision 0004), built
+# from source against the system's libcrypto, FTS5 included.
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled-sqlcipher"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# The fake model's script and the fixture sources' files.
+toml = "1.1.8"
+# Valid and recorded times: instants and civil dates.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
+# Her memory's key: 32 random bytes.
+getrandom = "0.3.4"
+# Her memory's key in the session's Secret Service, on the bus the
+# compositor names, on a thread that waits for it with a timeout.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
+tokio = { version = "1.54.1", features = ["rt", "time"] }
+# How long the machine slept: CLOCK_BOOTTIME against CLOCK_MONOTONIC.
+rustix = { version = "1.1.6", features = ["time"] }
+# Names and aliases folded: accents and case.
+unicode-normalization = "0.1.26"
+clap = { version = "4.6.7", features = ["derive"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+anyhow = "1.0.104"
+# A fake Secret Service on a private bus.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "service"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }

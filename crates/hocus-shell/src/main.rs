@@ -60,6 +60,7 @@ mod pointer;
 mod popover;
 mod reminder;
 mod renderer;
+mod secretary;
 mod setup;
 mod share;
 mod side;
@@ -865,12 +866,21 @@ impl Shell {
             ToShell::Day(ask) => {
                 if let hocus_link::DayAsk::Slept(seconds) = ask {
                     self.slept(seconds);
+                    secretary::resumed(Some(seconds));
                 }
                 day::ask(ask);
                 Task::none()
             }
             ToShell::Join => {
                 reminder::join_key();
+                Task::none()
+            }
+            ToShell::Secretary(shown) => {
+                secretary::told(shown);
+                Task::none()
+            }
+            ToShell::SecretaryAsk(text) => {
+                secretary::ask(text);
                 Task::none()
             }
             ToShell::Fullscreen(screens) => {
@@ -882,6 +892,7 @@ impl Shell {
                 Task::none()
             }
             ToShell::Lock(shown) => {
+                secretary::locked(true);
                 let screens = outputs::step();
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
@@ -891,6 +902,7 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
+                secretary::locked(false);
                 let effects = lock::end();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }

@@ -26,7 +26,7 @@ The binary keeps its symbols, for backtraces.
 On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb
 ```

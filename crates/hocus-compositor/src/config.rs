@@ -63,6 +63,9 @@ pub struct Config {
     pub power: Power,
     /// A day's CPU and memory, recorded (#655, docs/performance.md).
     pub perf: Perf,
+    /// The secretary: as she is (classic), or the assistant of
+    /// docs/design/secretary.md, her own process (§21).
+    pub secretary: Secretary,
     /// Every mouse, trackball and trackpoint (6.12).
     pub pointer: Pointer,
     /// Every touchpad (6.12).
@@ -145,6 +148,32 @@ pub struct Config {
     /// own, so that no test is heard.
     #[serde(skip)]
     pub sound_programs: SoundPrograms,
+    /// The secretary's program (`hocus-secretary`), started in assistant
+    /// mode only. Not part of the file: beside the compositor's, or
+    /// `--secretary`; `None` starts none (tests, unless they give one).
+    #[serde(skip)]
+    pub secretary_program: Option<PathBuf>,
+}
+
+/// `[secretary]` (docs/design/secretary.md §21). Only `mode` is the
+/// compositor's; her other keys (providers, models, her preferences) are
+/// hers, read by her process, and let through here.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default)]
+pub struct Secretary {
+    pub mode: SecretaryMode,
+}
+
+/// Which secretary the desktop has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretaryMode {
+    /// The agents' secretary of bar.md 4.6, as she is: no process, no
+    /// source read, no model called.
+    #[default]
+    Classic,
+    /// The secretary of the spec: `hocus-secretary` started and supervised.
+    Assistant,
 }
 
 /// Where the shutter's programs are found.
@@ -2760,6 +2789,21 @@ mod tests {
             .collect();
         assert!(uncommented.contains("[shortcuts]"), "{uncommented}");
         assert_eq!(toml::from_str::<Config>(&uncommented)?, Config::default());
+        Ok(())
+    }
+
+    #[test]
+    fn the_secretary_is_classic_unless_the_file_says_assistant() -> anyhow::Result<()> {
+        use super::SecretaryMode;
+        assert_eq!(
+            toml::from_str::<Config>("")?.secretary.mode,
+            SecretaryMode::Classic
+        );
+        let config: Config = toml::from_str(
+            "[secretary]\nmode = \"assistant\"\n[secretary.models]\nanswer = \"claude\"\n",
+        )?;
+        assert_eq!(config.secretary.mode, SecretaryMode::Assistant);
+        assert!(toml::from_str::<Config>("[secretary]\nmode = \"on\"\n").is_err());
         Ok(())
     }
 

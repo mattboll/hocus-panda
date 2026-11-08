@@ -523,6 +523,9 @@ pub enum Codec {
     /// A number from `min` to `max` hundredths, written as a decimal
     /// (`1.2`): 6.2's text size, held as a percentage.
     Hundredths { min: i64, max: i64 },
+    /// One of two words, held as a switch: `off`'s word is `false`, `on`'s
+    /// `true` (`[secretary] mode`: "classic" or "assistant").
+    Flag { off: &'static str, on: &'static str },
     /// One XKB option of a family in `[keyboard] options` (`grp:`,
     /// `caps:`, `compose:`): these words, the first `""` for none; the
     /// other options of the line are kept as they are, in their place.
@@ -576,6 +579,11 @@ impl Codec {
     pub fn read(self, item: &toml_edit::Value) -> Option<Value> {
         match self {
             Self::Bool => item.as_bool().map(Value::Bool),
+            Self::Flag { off, on } => match item.as_str() {
+                Some(word) if word == off => Some(Value::Bool(false)),
+                Some(word) if word == on => Some(Value::Bool(true)),
+                _ => None,
+            },
             Self::Int { min, max } => item
                 .as_integer()
                 .filter(|n| (min..=max).contains(n))
@@ -658,6 +666,7 @@ impl Codec {
     pub fn write(self, value: &Value) -> Option<toml_edit::Value> {
         Some(match (self, value) {
             (Self::Bool, Value::Bool(b)) => (*b).into(),
+            (Self::Flag { off, on }, Value::Bool(b)) => (if *b { on } else { off }).into(),
             (Self::Int { min, max }, Value::Int(n)) if (min..=max).contains(n) => (*n).into(),
             (Self::IdleSeconds, Value::Seconds(None)) => "off".into(),
             (Self::IdleSeconds, Value::Seconds(Some(n))) if (1..=IDLE_MOST).contains(n) => {
