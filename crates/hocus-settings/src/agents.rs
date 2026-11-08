@@ -30,11 +30,17 @@ pub const PANDAS_GROUP: RowGroup = RowGroup {
     label: w("LES PANDAS", "THE PANDAS"),
     per_source: false,
 };
+pub const SECRETARY_GROUP: RowGroup = RowGroup {
+    label: w("LA SECRÉTAIRE", "THE SECRETARY"),
+    per_source: false,
+};
 
 pub const HALO: &str = "agents.halo";
 pub const REMIND: &str = "agents.remind";
 pub const PEEK: &str = "agents.peek";
 pub const PANDAS: &str = "agents.pandas";
+/// `[secretary] mode` (docs/design/secretary.md §21).
+pub const SECRETARY: &str = "secretary.mode";
 /// The page's own rows, for the search and the lit row.
 pub const TOOLS_ROW: &str = "agents.tools";
 pub const PREVIEW: &str = "agents.preview";
@@ -678,6 +684,28 @@ pub fn settings() -> &'static [Setting] {
                 Kind::Switch,
                 one(&["agents", "pandas"], Codec::Bool, Value::Bool(true)),
             ),
+            setting(
+                SECRETARY,
+                SECRETARY_GROUP,
+                w("La secrétaire assistante", "The assistant secretary"),
+                w(
+                    "Elle connaît ton équipe et tes projets, lit ton agenda et tes messages sans rien marquer lu, et propose ; tu décides. Coupée, elle ne parle que des agents.",
+                    "She knows your team and projects, reads your calendar and messages without marking anything read, and proposes; you decide. Off, she only speaks of the agents.",
+                ),
+                (
+                    &["secrétaire", "assistante", "mémoire", "classique", "agenda"],
+                    &["secretary", "assistant", "memory", "classic", "calendar"],
+                ),
+                Kind::Switch,
+                one(
+                    &["secretary", "mode"],
+                    Codec::Flag {
+                        off: "classic",
+                        on: "assistant",
+                    },
+                    Value::Bool(false),
+                ),
+            ),
         ]
     })
 }
@@ -738,6 +766,28 @@ mod tests {
         assert!(names("lueur").contains(&"Le halo"));
         assert!(names("agents.pandas").contains(&"Les pandas dans les lignes des agents"));
         assert!(names("hocus agent").contains(&"Un autre outil"));
+    }
+
+    #[test]
+    fn the_secretary_s_switch_writes_classic_or_assistant() {
+        let codec = Codec::Flag {
+            off: "classic",
+            on: "assistant",
+        };
+        assert_eq!(codec.read(&"assistant".into()), Some(Value::Bool(true)));
+        assert_eq!(codec.read(&"classic".into()), Some(Value::Bool(false)));
+        assert_eq!(codec.read(&"on".into()), None);
+        assert_eq!(
+            codec
+                .write(&Value::Bool(true))
+                .and_then(|v| v.as_str().map(str::to_owned)),
+            Some("assistant".to_owned())
+        );
+        let names: Vec<&str> = crate::search::find("secrétaire", Lang::French)
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        assert!(names.contains(&"La secrétaire assistante"), "{names:?}");
     }
 
     #[test]

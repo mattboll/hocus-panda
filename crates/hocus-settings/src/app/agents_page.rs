@@ -716,6 +716,18 @@ impl App {
                 .into(),
             ),
         );
+        // LA SECRÉTAIRE (secretary.md §21): the assistant, or as she is.
+        page = page.push(
+            self.agents_group(
+                model::SECRETARY_GROUP.label.get(lang),
+                self.say(w(
+                    "Sa mémoire reste sur cet ordinateur",
+                    "Her memory stays on this computer",
+                ))
+                .to_owned(),
+                column![model_row(model::SECRETARY)].into(),
+            ),
+        );
         container(page).id("page:agents".to_owned()).into()
     }
 
