@@ -23,6 +23,12 @@
 //! - `hocus msg outputs`: the screens, their modes, places, scales and
 //!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
 //!
+//! - `hocus msg secretary status`, `hocus msg secretary graph NODE
+//!   [--as-of DATE] [--hops N] [--notebook pro|perso]`: the secretary's
+//!   state, or her graph around a node now or as of a date, as JSON
+//!   (docs/design/secretary.md; in assistant mode only). These go to her
+//!   own socket, beside the control socket (`<socket>.secretary`).
+//!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
 //!   on standard input, checked and kept where the bar reads it
 //!   (docs/design/day.md).
@@ -168,6 +174,33 @@ enum MsgCommand {
     /// readers read it: each window's nodes, their roles, names, values,
     /// states, places and actions (docs/design/screen-reader.md).
     A11y,
+    /// The secretary, in assistant mode (docs/design/secretary.md): asked
+    /// on her own socket, beside the control socket.
+    Secretary {
+        #[command(subcommand)]
+        question: SecretaryCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SecretaryCommand {
+    /// Her state: her clock, the lock, her memory's counts, her sources'
+    /// cursors, the last catch-up, her connections, her model.
+    Status,
+    /// Her graph around NODE (a name or an alias): the edges that count,
+    /// now or as of a date, and where she has each from.
+    Graph {
+        node: String,
+        /// YYYY-MM-DD (default: today).
+        #[arg(long, value_name = "DATE")]
+        as_of: Option<String>,
+        /// How many edges away from NODE.
+        #[arg(long, default_value_t = 2)]
+        hops: u8,
+        /// pro or perso (default: both).
+        #[arg(long)]
+        notebook: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -241,6 +274,18 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Msg {
+            question: MsgCommand::Secretary { question },
+        } => match secretary(args.socket, question) {
+            Ok(answer) => {
+                println!("{answer}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("hocus: {err}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Msg { question } => {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
@@ -253,6 +298,7 @@ fn main() -> ExitCode {
                 MsgCommand::InputDevices { follow: false } => {
                     Question::InputDevices { follow: false }
                 }
+                MsgCommand::Secretary { .. } => return ExitCode::FAILURE,
             };
             match ask(args.socket, question) {
                 Ok(answer) => {
@@ -293,6 +339,53 @@ fn main() -> ExitCode {
             }
         },
     }
+}
+
+/// Asks the secretary on her socket, beside the control socket: her
+/// answer as pretty JSON.
+fn secretary(socket: Option<PathBuf>, question: SecretaryCommand) -> Result<String, String> {
+    use hocus_secretary_link::{
+        Client, Connection, FromSecretary, GraphQuery, Notebook, ToSecretary,
+    };
+    let control = socket_path(socket)
+        .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
+    let path = hocus_secretary_link::beside_control(&control)
+        .ok_or_else(|| format!("{}: not a control socket", control.display()))?;
+    let mut her = Connection::open(&path, Client::Cli, ANSWER).map_err(|e| {
+        format!("the secretary does not answer ({e}): is [secretary] mode \"assistant\"?")
+    })?;
+    let answer = match question {
+        SecretaryCommand::Status => her.request(|id| ToSecretary::Status { id })?,
+        SecretaryCommand::Graph {
+            node,
+            as_of,
+            hops,
+            notebook,
+        } => {
+            let notebook = match notebook.as_deref() {
+                None => None,
+                Some(word) => {
+                    Some(Notebook::of(word).ok_or_else(|| format!("{word:?}: pro or perso"))?)
+                }
+            };
+            her.request(|id| ToSecretary::Graph {
+                id,
+                query: GraphQuery {
+                    node,
+                    as_of,
+                    hops,
+                    notebook,
+                },
+            })?
+        }
+    };
+    let value = match answer {
+        FromSecretary::Status { status, .. } => serde_json::to_value(status),
+        FromSecretary::Graph { graph, .. } => serde_json::to_value(graph),
+        other => return Err(format!("an unexpected answer: {other:?}")),
+    }
+    .map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
 
 /// The agent that ran this: the nearest process above that is not a
