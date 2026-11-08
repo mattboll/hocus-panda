@@ -1341,3 +1341,119 @@ The secretary ships behind a setting, `[secretary] mode = "classic" | "assistant
 - **"assistant"**: the secretary of this spec.
 
 The setting is followed live, so switching back to "classic" stops the process and hides the drawer. Her memory stays on disk until the user asks her to forget it. The switch also sits on the Settings › Agents page.
+
+## 22. As built
+
+### Lot 1 (#743): the process, the store, the harness and the flag
+
+- **The flag** (§21): `[secretary] mode`, read by the compositor and
+  followed live; any other key of `[secretary]` is let through for her
+  later lots. The switch is the last group of Settings › Agents, "LA
+  SECRÉTAIRE" ("La secrétaire assistante"), on for `"assistant"`.
+- **Crates**: `hocus-secretary` (library and binary; no smithay, no iced)
+  and `hocus-secretary-link`, her socket's protocol, which the shell and
+  `hocus` use.
+- **Supervision** (§16): the compositor starts `hocus-secretary` from beside
+  its own binary (`--secretary PATH`) once ready, in assistant mode only,
+  with `HOCUS_SECRETARY_SOCKET` (`<socket>.secretary`, `0600`) and
+  `HOCUS_SECRETARY_BUS` (the notifications' bus, whose keyring holds her
+  key; none: a key file). It forks and execs her on its loop, as it does the
+  screen reader, and waits for her on a thread. When she ends she is
+  started again, after 0.5 s doubling to 30 s while she keeps ending
+  within 30 s, as the shell is. Her standard input is a pipe the
+  compositor holds and never writes (`--until-stdin-closes`): back to
+  classic it closes, she ends, and she is killed if she has not after 5 s;
+  the compositor ending closes it too. The shell is told `secretary off`,
+  `secretary unavailable` (down: her header will say "indisponible") or
+  `secretary ready PATH`; the bar works the same either way.
+- **The shell's line to her**: a thread connects (and again after each
+  restart), says hello, the session's lock and, after a resume, the time
+  slept; another reads her lines. Nothing runs on iced's loop. Until the
+  drawer (lot 2), a question reaches her through the shell by the link's
+  `secretary-ask TEXT` (tests).
+- **The protocol** (version 1): one JSON object per line, each way, its
+  kind its only key: `hello {version, client}` first (another version is
+  `refused` and closed), then requests with an `id` that their answers
+  repeat (`status`, `graph {node, as_of, hops, notebook}`, `ask {text}`,
+  answered by `answer {text, done}` parts) and facts with none (`session
+  {locked}`, `resumed {slept}`, and `clock {advance}` on a clock of her
+  own only). A line that does not read is answered with an `error`; the
+  connection stays.
+- **Her loop**: one thread owns her memory; each source syncs on a worker
+  thread of its own, each model call runs on a thread, each connection has
+  a reader and a writer thread. At rest she sleeps until her next source
+  is due: no other wakeup.
+- **The store** (§7.1): SQLCipher (decision 0004, proposed), the raw 32-byte
+  key in the Secret Service (`application=hocuspanda`,
+  `hocuspanda=secretary`), else `memory.key` (`0600`) beside
+  `memory.db`; a key file once there is kept, and no new key is ever made
+  over an existing memory (a keyring that does not answer leaves her
+  memory closed: she ends and is started again later). The tables are
+  §7.1's, with:
+  - `nodes`: their folded name, and the source that made them;
+  - `aliases`: provenance, pointer, source and `accepted_at` (told: kept;
+    extracted or inferred: a proposal);
+  - `edges`: `lineage` (every version of a fact shares its first id),
+    `quote` and `source` for extracted ones. Valid times are civil dates,
+    `[valid_from, valid_to)`. Closing an edge supersedes its version and
+    writes a new one that ends; nothing is deleted. A told edge, or a
+    proposal accepted, closes what it contradicts at its `valid_from`
+    (today without one): `leads` is one per project, `reports_to`,
+    `lives_in`, `birthday` and `partner_of` one per person; an extracted
+    edge closes nothing. Extracted `works_on`, `member_of`, `leads`,
+    `reports_to`, `client_of`, `replaces` and `reviews` are proposals;
+  - `summary_episodes` links a summary to the episodes it covers;
+    `mentions` links an episode or a summary to a node;
+  - `journal`: who (`user`, `source:NAME`, `inference`, `herself`), when,
+    why, the item it came from, and each row inserted, updated (as it was)
+    or deleted (as it was). Undo plays an edit backwards as a new edit (an
+    undo of an undo redoes); it is refused while a later edit still in
+    effect changed the same rows;
+  - every item table's `notebook` is `NOT NULL` and `pro` or `perso`;
+  - FTS5 indexes over nodes, episodes and summaries (accents folded).
+  Queries: by name or accepted alias (accents, case and spaces folded;
+  fuzzy matching comes with entity linking, lot 4), the graph k hops
+  around a node as of a day (accepted, current, valid edges only, of one
+  notebook or both), a node's whole history, what she believed at a
+  recorded time, the proposals, full text. Forget: an item (with what
+  hangs on it), a notebook, or a source (and its cursor); summaries that
+  cited what went are emptied and marked stale until compaction (lot 6)
+  rebuilds them; the journal's snapshots of what went are erased, and one
+  line says a forget happened. Export: JSON (every row, every version) and
+  Markdown (each node, its aliases, its edges with where she has them
+  from, the proposals apart), of one notebook or both.
+- **The audit log** (§14) is a table of her encrypted memory: kind (`read`,
+  `call`, `proposal`, `answer`, `delegation`, `memory`), a fixed word,
+  item ids, and for a call its provider, model, tokens and duration; no
+  field takes content. A trigger refuses any change to a line; lines go
+  after 30 days.
+- **Always on** (§3.10): her sources sync whatever the lock (she is told
+  it, and only notes it), each from its cursor, kept in her memory. At a
+  start she catches up from the last time she noted being alive; on a
+  resume the shell tells her (with the time slept when it knows it, else
+  she measures it, `CLOCK_BOOTTIME` against `CLOCK_MONOTONIC`) and every
+  source syncs at once. Over 4 h away, her status says a "Pendant ton
+  absence" briefing is due and an episode `catch-up` notes it, for lot 5.
+- **The harness**: a clock of her own (`--virtual-clock TIME`, moved by
+  her socket's `clock` line); the scripted fake model (`--fake-model
+  SCRIPT`: replies keyed by role and words, a delay on her clock, tool
+  calls) and its recorder (`--recorder FILE`: every request whole, one
+  JSON object per line); fixture sources (`--fixture FILE`: items arriving
+  at their times, in their account's notebook). Lot 3's sources implement
+  `hocus_secretary::sources::Source` (a name, a notebook, a schedule, a
+  sync from a cursor; items carry a digest, never the text).
+- **`hocus msg secretary status`** and **`hocus msg secretary graph NODE
+  [--as-of DATE] [--hops N] [--notebook pro|perso]`**, as JSON, on her
+  socket beside the control socket.
+- **Tests**: AC1 (`hocus-compositor/tests/secretary.rs`: started in
+  assistant mode only and live, again after a crash with her memory kept,
+  stopped back in classic, ended with the compositor; the bar unchanged,
+  the shell told "unavailable"), AC2 (ten minutes of hers, her source
+  syncing: the compositor's loop not woken, no frame; nothing sent to the
+  shell, no frame of its), AC3 (a question her model takes 30 s to answer:
+  no frame of the shell meanwhile, her answer reaching it after), AC20
+  (`hocus-secretary/tests/audit.rs`), AC37 (`tests/notebooks.rs`), and the
+  graph's (`tests/graph.rs`), the catch-up's (`tests/always_on.rs`).
+- **Not yet**: the drawer and the conversation (lot 2), redaction and
+  sources (lot 3), providers, context assembly and embeddings (lot 4),
+  compaction (lot 6), the Landlock sandbox and the 24 h sealed prompts.

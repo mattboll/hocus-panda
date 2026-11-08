@@ -75,7 +75,7 @@ jobs:
             clang mold pkg-config fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev libssl-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
           sudo chown -R "$USER" ~/apt-archives
       - uses: Swatinem/rust-cache@v2
@@ -116,7 +116,7 @@ jobs:
             clang mold pkg-config \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            libpipewire-0.3-dev
+            libpipewire-0.3-dev libssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
           # Saved by main's build; a pull request's tests start from it.
@@ -133,7 +133,7 @@ jobs:
         # The compositor's tests start the real shell and Settings, and run
         # `hocus`, from beside them: a test binary does not build them. The
         # archive takes them along (.config/nextest.toml).
-        run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings
+        run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
       - name: Tests' archive
         run: cargo nextest archive --workspace --archive-file nextest.tar.zst
       - uses: actions/upload-artifact@v4
@@ -155,7 +155,7 @@ jobs:
             clang mold pkg-config \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            libpipewire-0.3-dev
+            libpipewire-0.3-dev libssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy
@@ -194,7 +194,7 @@ jobs:
             fonts-dejavu-core zstd \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev libssl-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
           sudo chown -R "$USER" ~/apt-archives
       - uses: taiki-e/install-action@v2
@@ -207,7 +207,7 @@ jobs:
         # Without them the tests that need them skip, and would pass.
         run: |
           zstd -dc nextest.tar.zst | tar -t > archive.txt
-          for program in hocuspanda-shell hocus hocus-settings; do
+          for program in hocuspanda-shell hocus hocus-settings hocus-secretary; do
             grep -qE "/debug/$program\$" archive.txt || { echo "::error::$program is not in the archive"; exit 1; }
           done
       - name: Sources older than the programs
@@ -216,7 +216,7 @@ jobs:
         # checkout is newer than the build's. Only those sources are made
         # older: a test may read its other files' times.
         run: |
-          zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' \
+          zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' '*/debug/hocus-secretary.d' \
             | sed 's/^[^:]*: //; s/\\ /\x00/g' | tr ' ' '\n' | tr '\000' ' ' \
             | grep -F "$PWD/" | sort -u > sources.txt
           wc -l sources.txt

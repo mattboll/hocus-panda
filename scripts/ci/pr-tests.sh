@@ -35,7 +35,7 @@ run() {
 }
 
 programs() {
-    cargo build -p hocus-shell -p hocus-cli -p hocus-settings
+    cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
 }
 
 if [ -n "$full" ] || grep -qE '^(Cargo\.lock|Cargo\.toml|rust-toolchain(\.toml)?|\.config/nextest\.toml)$|^crates/[^/]+/tests/(common|levels|fakes)/' <<< "$changed"; then
