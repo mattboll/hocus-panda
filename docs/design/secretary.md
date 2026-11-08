@@ -947,6 +947,25 @@ passes 1 and 2.
 Pass 1's rules and pass 2's prompt are versioned. A change in either re-runs the
 secrets corpus (AC50).
 
+**As built (pass 1, #745).** The token formats are data
+(`crates/hocus-sources/src/redact/rules.toml`, version 1), adapted from
+gitleaks' configuration under its MIT licence, quoted in the file. Beside them,
+in code: IBANs (mod 97), card numbers (Luhn and the networks' prefixes), NIR
+(its key), French passports (their form); identity card and tax numbers by
+their labels only; labelled values with a qualifier ("mdp du wifi :", "le code
+du portail c'est"), with a bare word or two ("mdp Netflix :"), or right after
+the label ("PIN 0912", "clé 4FDA9E2C1B7A"); codes before their label ("482913
+est votre code"); recovery codes and phrases; a login and its password side by
+side ("admin / P@ssw0rd123"); codes entered ("s'ouvre avec 0619", "tu tapes
+1793"); passwords in URLs and secret query parameters; random-looking strings
+outside links, hexadecimal digests, UUIDs and file names. The corpus
+(`tests/fixtures/secrets-corpus.toml`, 104 sentences with secrets, 107 without)
+gives pass 1 alone a recall of 100/104 (96.2 %) and no false positive (0/107);
+what it misses is left to pass 2 ("le code alarme c'est un-deux-trois-quatre",
+"Entre 4417 sur le clavier", "le cadenas du casier, c'est 908", a password
+described before it is given). The rules were tuned on that corpus: a second
+corpus written apart is needed for an unbiased figure.
+
 ## 15. Errors and unknown states
 
 Each says what happened, what she does, and what the user can do. Her ear and the
@@ -1271,6 +1290,80 @@ schedules: at most 1 wakeup a minute idle with Gmail IDLE and Slack notification
      numbers) and masking with pointers.
    - The facts in code: holidays, school holidays, free slots, dates.
    - Covers AC14–15, AC17–19 and AC43.
+   - **As built (#745)**: the library crate `hocus-sources` (no smithay, no
+     iced), for `hocus-secretary`'s source workers to call: source items in,
+     redacted items and facts out. Everything in it blocks; it runs on a
+     worker thread.
+     - `goa::discover(bus)`: every Google account of Online Accounts on the
+       bus the process is given (an address, never the session's by
+       default), with what it has on (calendar, mail, contacts), its IMAP
+       settings (the `Mail` interface) and a suggested notebook: a
+       company's domain pro, gmail.com perso (the first one pro when all are
+       gmail.com). `goa::sheet` gives each consent sheet's words. Tokens
+       are asked for each time (`hocus-day`'s `GoaToken`), never kept.
+     - `ConsentBook`: one record per decision (source = account id and kind:
+       calendar, birthdays, mail; identity; notebook; granted or revoked;
+       when), never rewritten. Readers take a `Grant`, which only the book
+       makes: an unconsented source cannot be read, by the types.
+     - `cycle::Sources::cycle`: one read of every consented source; a
+       revoked one is not read and gives `Event::Purge` once. Its
+       `Cursors` (calendar sync tokens, IMAP cursors, the day birthdays
+       were read) are to be kept on disk by the process for the catch-up
+       after a suspend.
+     - Calendars: `hocus-day`'s Google reader, now with `showHidden` (it
+       marks the calendars the user hid); a window first, then each
+       calendar's sync token.
+     - Birthdays: CardDAV (`REPORT addressbook-query` asking `FN`, `N`,
+       `BDAY`, `ANNIVERSARY`, Apple's `X-ABDATE`), once a day; the rest of
+       a card is dropped as it is read. CardDAV rather than the People API:
+       Online Accounts' token is GNOME's client's, which Evolution uses
+       over CardDAV; whether that client has the People API on is not
+       ours to know. To check on a real account (machine).
+     - Gmail: a small IMAP client of our own. `imap::allow::Command` has
+       variants only for `CAPABILITY`, `AUTHENTICATE XOAUTH2`, `LIST`,
+       `EXAMINE`, `UID SEARCH SINCE`, `UID FETCH` of `UID FLAGS
+       INTERNALDATE X-GM-MSGID BODY.PEEK[HEADER]` or `BODY.PEEK[]<0.1 MB>`,
+       `NOOP`, `LOGOUT`; `allow::check` then reads every line before it is
+       written and refuses anything else (and a mailbox name holding a
+       line break). Inbox and the `\Sent` mailbox, 30 days back; then from
+       each mailbox's last `UIDNEXT` (nothing fetched when it has not
+       moved), everything again when `UIDVALIDITY` changes
+       (`Event::Reset`). `imap::fetch` gets one mail by its id on demand.
+       TLS from the start; in clear only to this machine (tests). The
+       pointer opens the mail in Gmail (`#all/<X-GM-MSGID>`).
+     - Mail parsing: `mail-parser` (Apache-2.0 OR MIT); the text part (the
+       HTML one as text when alone), the attachments' names, never their
+       content.
+     - Redaction: noise first (quoted reply and its header, signature,
+       "Envoyé de mon iPhone", unsubscribe lines, tracking parameters,
+       long redirects named by their host), then pass 1 (below), each span
+       replaced by `[secret masqué — voir <pointer's label>]` ("voir le
+       mail de Free, 3 nov."), a `Mask` keeping its kind and place, never
+       the value. The tokens Online Accounts handed in the cycle are masked
+       wherever they appear. An item leaves as `Check::FirstPass`;
+       `Redacted::outbound` gives only its metadata and "peut contenir un
+       secret, pas encore vérifié" until `Redacted::second_pass` (lot 4's
+       hook, the `SecondPass` trait) has run.
+     - Facts: public holidays by region (Easter by the computus;
+       Alsace-Moselle; each overseas department's abolition day); school
+       holidays from the ministry's open data calendar
+       (`fr-en-calendrier-scolaire`, Licence Ouverte v2.0: the source is
+       named), fetched at most monthly and cached, the zone taught once by
+       its letter or an académie; free slots across several people's
+       calendars, weekends and holidays out; French dates ("jeudi
+       prochain" said early in the week is ambiguous and says so; "avant
+       vendredi" is a deadline). `facts::day` gathers a day's, and
+       `DayFacts::lines` says them as "[fait calculé] …" lines for the
+       context.
+     - Tests: fake Online Accounts on a private bus, the Calendar API,
+       CardDAV and an IMAP server that holds as a violation any other
+       command and any fetch that would set `\Seen`.
+     - **Follow-up**: wiring into `hocus-secretary` (lot 1) — its source
+       workers call `discover` then `cycle` on their schedule, store the
+       events, keep the consent book and cursors in its folder; AC14's
+       and AC19's recorder halves (that the model is never asked for a
+       holiday, that no request holds an attachment, a keyring secret or a
+       terminal's text) run once the requests exist (lot 4).
 4. **The models.**
    - The provider trait and the Anthropic adapter (caching, strict tools, streaming,
      batch).

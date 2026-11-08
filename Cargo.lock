@@ -1242,6 +1242,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
+name = "encodify"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e95d6e27686e1d6991a3077f4dbec9d33d18903466d234165ad86cd08c3ebc79"
+dependencies = [
+ "memchr",
+ "simdutf8",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1843,6 +1853,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashify"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04a037b1848eada162d6534c206770180e6bfc0eaa97292250c3e7179d8b1f73"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2141,6 +2162,29 @@ version = "1.0.0"
 dependencies = [
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "hocus-sources"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "hocus-day",
+ "jiff",
+ "mail-parser",
+ "quick-xml",
+ "regex",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "ureq",
+ "zbus 6.0.0",
 ]
 
 [[package]]
@@ -2951,6 +2995,18 @@ dependencies = [
  "float_next_after",
  "lyon_path",
  "num-traits",
+]
+
+[[package]]
+name = "mail-parser"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d4ea9311ef3ca6189aa85c5f984bd47b2f12079bcabae28917d900ab26c9ecc"
+dependencies = [
+ "encodify",
+ "hashify",
+ "memchr",
+ "simdutf8",
 ]
 
 [[package]]
