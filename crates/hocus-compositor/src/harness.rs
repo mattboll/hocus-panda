@@ -1662,6 +1662,12 @@ impl Headless {
             .collect()
     }
 
+    /// Window `id`'s title as the compositor has it, and tells the shell
+    /// (its application's id until its client gives one).
+    pub fn window_title(&self, id: WindowId) -> String {
+        crate::windows::title_of(&self.app.state, id)
+    }
+
     /// The desktop the first output shows (from 0), and where its strip is.
     pub fn desktop(&self) -> (usize, f64) {
         let state = &self.app.state;

@@ -3933,10 +3933,16 @@ fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<
         (y - (top + 4.0 + 46.0 + 4.0 + 24.0)).abs() < 0.6,
         "{y} under {top}"
     );
-    assert_eq!(
-        bed.surface().height,
-        (MINI_HEIGHT + MINI_WAITING + 10.0).ceil() as i32
-    );
+    // Taller by the panda's room, once the compositor takes the shell's
+    // commit: the shell logs its items as it draws, before that, and the
+    // panda's middle is already inside the item as it was.
+    let tall = (MINI_HEIGHT + MINI_WAITING + 10.0).ceil() as i32;
+    bed.hp.dispatch_until(WAIT, |hp| {
+        hp.agents_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.height == tall)
+    })?;
+    assert_eq!(bed.surface().height, tall);
     bed.click((x, y))?;
     let there = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (0, 0.0))?;
     anyhow::ensure!(there, "{:?}", bed.hp.desktop());
