@@ -564,3 +564,54 @@ fn her_memory_on_disk_is_sealed() -> anyhow::Result<()> {
     assert_eq!(store.find("nadia ferreira")?.len(), 1);
     Ok(())
 }
+
+/// Her socket's `graph` query (`hocus msg secretary graph`): the edges
+/// valid on the day asked, a node found by a folded name.
+#[test]
+fn her_socket_answers_the_graph_as_of_a_date() -> anyhow::Result<()> {
+    use hocus_secretary_link::{FromSecretary, GraphQuery, ToSecretary};
+    let c = chapito()?;
+    let mut driver = common::Driver::start(c.store, common::options(Vec::new()));
+    let asked = |as_of: &str| GraphQuery {
+        node: "chapito".to_owned(),
+        as_of: Some(as_of.to_owned()),
+        hops: 1,
+        notebook: None,
+    };
+    let FromSecretary::Graph { graph, .. } = driver.request(|id| ToSecretary::Graph {
+        id,
+        query: asked("2026-04-15"),
+    }) else {
+        panic!("a graph");
+    };
+    assert_eq!(graph.as_of, "2026-04-15");
+    let mut names: Vec<&str> = graph.nodes.iter().map(|n| n.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["Chapitô", "Nadia Ferreira", "Sophie"]);
+    assert!(
+        graph
+            .edges
+            .iter()
+            .all(|e| e.provenance != Provenance::Inferred)
+    );
+    let shipped = graph
+        .edges
+        .iter()
+        .find(|e| e.kind == "shipped_on")
+        .expect("the v2");
+    assert_eq!(shipped.pointer, "fixture-mail:release");
+    let unknown = driver.request(|id| ToSecretary::Graph {
+        id,
+        query: GraphQuery {
+            node: "Atlantis".to_owned(),
+            ..asked("2026-04-15")
+        },
+    });
+    assert!(
+        matches!(unknown, FromSecretary::Error { .. }),
+        "{unknown:?}"
+    );
+    driver.stop();
+    let _ = (c.marc, c.nadia, c.sophie, c.julie);
+    Ok(())
+}

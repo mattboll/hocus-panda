@@ -428,6 +428,7 @@ impl State {
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
+        self.secretary_shell_connected();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
         self.hand_kept_levels();

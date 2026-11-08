@@ -713,6 +713,25 @@ fn pandas_off_draws_dots_in_the_rows() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The secretary's switch (secretary.md §21): `[secretary] mode` written
+/// "assistant", then "classic" again, the compositor following.
+#[test]
+fn the_secretary_s_switch_writes_her_mode() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Machine::default())? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("control:secretary.mode")?;
+    bed.written(|t| t.contains("[secretary]") && t.contains("mode = \"assistant\""))?;
+    let followed = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.secretary.mode == hocus_compositor::SecretaryMode::Assistant
+    })?;
+    assert!(followed, "the compositor follows");
+    bed.click("control:secretary.mode")?;
+    bed.written(|t| t.contains("mode = \"classic\""))?;
+    Ok(())
+}
+
 #[test]
 fn no_tool_shows_the_dashed_line_and_the_command() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(Machine::default())? else {

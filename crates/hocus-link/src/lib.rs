@@ -667,6 +667,14 @@ pub enum ToShell {
     /// shows is joined, else the one starting next within 10 min; nothing
     /// without one. Written `join`.
     Join,
+    /// The secretary's process (docs/design/secretary.md §16): sent as the
+    /// shell connects and whenever it changes. The shell talks to her on
+    /// her own socket, on a thread of its own. Written `secretary off`,
+    /// `secretary unavailable`, or `secretary ready` and her socket's path.
+    Secretary(SecretaryShown),
+    /// A question put to her through the shell, as the drawer's field
+    /// will (lot 2): for tests until then. Written `secretary-ask TEXT`.
+    SecretaryAsk(String),
     /// The screens whose front window is full screen, which covers their
     /// bar (Day.6: a meeting's reminder then shows at the screen's edge):
     /// sent as the shell connects and when they change. Written
@@ -723,6 +731,17 @@ pub enum ToShell {
     /// The palette's target window went, or the session locks: it closes.
     /// Written `actions-end`.
     ActionsEnd,
+}
+
+/// The secretary's process as the compositor knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretaryShown {
+    /// `[secretary] mode = "classic"`: no process; the 4.6 secretary.
+    Off,
+    /// Ended, and not started again yet: her header says "indisponible".
+    Unavailable,
+    /// Started, listening (or about to) on this socket.
+    Ready(std::path::PathBuf),
 }
 
 /// What [`ToShell::Day`] asks.
@@ -2104,6 +2123,12 @@ impl fmt::Display for ToShell {
             }
             Self::EmojiInserted => f.write_str("emoji-inserted"),
             Self::Join => f.write_str("join"),
+            Self::Secretary(SecretaryShown::Off) => f.write_str("secretary off"),
+            Self::Secretary(SecretaryShown::Unavailable) => f.write_str("secretary unavailable"),
+            Self::Secretary(SecretaryShown::Ready(socket)) => {
+                write!(f, "secretary ready {}", one_line(&socket.to_string_lossy()))
+            }
+            Self::SecretaryAsk(text) => write!(f, "secretary-ask {}", one_line(text)),
             Self::SharedScreens(names) => {
                 f.write_str("shared-screens")?;
                 for name in names {
@@ -2211,6 +2236,19 @@ impl FromStr for ToShell {
         }
         if let Some(rest) = line.strip_prefix("leave ") {
             return LeaveShown::read(rest).map(Self::Leave);
+        }
+        if let Some(rest) = line.strip_prefix("secretary-ask ") {
+            return Ok(Self::SecretaryAsk(rest.to_owned()));
+        }
+        if let Some(rest) = line.strip_prefix("secretary ") {
+            return match rest.split_once(' ') {
+                None if rest == "off" => Ok(Self::Secretary(SecretaryShown::Off)),
+                None if rest == "unavailable" => Ok(Self::Secretary(SecretaryShown::Unavailable)),
+                Some(("ready", socket)) if !socket.is_empty() => Ok(Self::Secretary(
+                    SecretaryShown::Ready(std::path::PathBuf::from(socket)),
+                )),
+                _ => Err(BadLine(format!("secretary {rest}"))),
+            };
         }
         if let Some(rest) = line.strip_prefix("day ") {
             let (what, text) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -3346,6 +3384,12 @@ mod tests {
             ToShell::Day(DayAsk::Refresh),
             ToShell::Day(DayAsk::Slept(900)),
             ToShell::Join,
+            ToShell::Secretary(SecretaryShown::Off),
+            ToShell::Secretary(SecretaryShown::Unavailable),
+            ToShell::Secretary(SecretaryShown::Ready(
+                "/run/user/1000/hocus 0.secretary".into(),
+            )),
+            ToShell::SecretaryAsk("Qui relit les PR ?".into()),
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),

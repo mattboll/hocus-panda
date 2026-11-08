@@ -278,6 +278,8 @@ pub struct State {
     pub panel: crate::panel::Panel,
     /// The shell drawing them.
     pub shell: crate::shell::Shell,
+    /// The secretary's process, in assistant mode (secretary.md §21).
+    pub secretary: crate::secretary::Secretary,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
     /// The screens' settings, their trials and the Settings' lines (6.9).
@@ -512,6 +514,7 @@ impl State {
             session_restore: crate::session::restore::Restore::default(),
             panel,
             shell: crate::shell::Shell::default(),
+            secretary: crate::secretary::Secretary::default(),
             agents: crate::agents::Agents::default(),
             displays: crate::displays::Displays::default(),
             screen_sets,

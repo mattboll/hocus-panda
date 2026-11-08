@@ -1276,6 +1276,40 @@ impl Headless {
         names
     }
 
+    /// The secretary's process while it runs (assistant mode).
+    pub fn secretary_pid(&self) -> Option<u32> {
+        self.app.state.secretary_pid()
+    }
+
+    /// How many times the secretary was started.
+    pub fn secretary_starts(&self) -> u64 {
+        self.app.state.secretary.starts
+    }
+
+    /// What the shell was told last of the secretary.
+    pub fn secretary_told(&self) -> Option<hocus_link::SecretaryShown> {
+        self.app.state.secretary.told.clone()
+    }
+
+    /// Her socket's path.
+    pub fn secretary_socket(&self) -> Option<&Path> {
+        self.app.state.secretary.socket.as_deref()
+    }
+
+    /// Ends the secretary at once (`SIGKILL`), as a crash would: the
+    /// process the compositor started for the test.
+    pub fn kill_secretary(&self) -> anyhow::Result<()> {
+        use rustix::process::{Pid, Signal, kill_process};
+        let pid = self
+            .secretary_pid()
+            .and_then(|pid| i32::try_from(pid).ok())
+            .and_then(Pid::from_raw)
+            .context("no secretary")?;
+        kill_process(pid, Signal::KILL)
+            .with_context(|| format!("killing the secretary ({pid:?})"))?;
+        Ok(())
+    }
+
     /// The shell's process, as the compositor started it.
     pub fn shell_pid(&self) -> Option<i32> {
         // Not its connection's credentials: the compositor made that

@@ -65,6 +65,12 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     shell: Option<PathBuf>,
 
+    /// The secretary's program, started in `[secretary] mode =
+    /// "assistant"` only (docs/design/secretary.md). Default:
+    /// hocus-secretary next to this program, else in PATH.
+    #[arg(long, value_name = "PATH")]
+    secretary: Option<PathBuf>,
+
     /// Run as the user's session, as a display manager starts it
     /// (hocuspanda-session): on the virtual terminal unless --backend says
     /// otherwise, and once ready, the user's systemd and D-Bus are told
@@ -93,6 +99,8 @@ struct Args {
 
 /// The shell's program.
 const SHELL: &str = "hocuspanda-shell";
+/// The secretary's program.
+const SECRETARY: &str = "hocus-secretary";
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
@@ -163,15 +171,15 @@ fn main() -> ExitCode {
         .filter_map(|name| std::env::var(name).ok())
         .find(|value| !value.is_empty())
         .is_some_and(|locale| locale.starts_with("fr"));
-    let shell = (!args.no_shell).then(|| {
-        args.shell.unwrap_or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|exe| Some(exe.parent()?.join(SHELL)))
-                .filter(|path| path.exists())
-                .unwrap_or_else(|| PathBuf::from(SHELL))
-        })
-    });
+    let beside = |name: &str| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.join(name)))
+            .filter(|path| path.exists())
+            .unwrap_or_else(|| PathBuf::from(name))
+    };
+    config.secretary_program = Some(args.secretary.unwrap_or_else(|| beside(SECRETARY)));
+    let shell = (!args.no_shell).then(|| args.shell.unwrap_or_else(|| beside(SHELL)));
     let renderer = match args.renderer {
         RendererArg::Auto => RendererChoice::Auto,
         RendererArg::Gles => RendererChoice::Gles,

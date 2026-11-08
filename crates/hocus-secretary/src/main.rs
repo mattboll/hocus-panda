@@ -47,6 +47,10 @@ struct Args {
     /// per line: tests.
     #[arg(long, value_name = "FILE")]
     recorder: Option<PathBuf>,
+    /// Ends once standard input closes: the compositor holds that pipe,
+    /// which closes when it stops her or ends itself.
+    #[arg(long)]
+    until_stdin_closes: bool,
     /// A fixture source, from this TOML file (again for more): tests.
     #[arg(long, value_name = "FILE")]
     fixture: Vec<PathBuf>,
@@ -115,8 +119,22 @@ fn run(args: Args) -> Result<(), String> {
         },
     );
     server::serve(&socket, brain.sender()).map_err(|e| format!("{}: {e}", socket.display()))?;
+    if args.until_stdin_closes {
+        let stop = brain.sender();
+        std::thread::Builder::new()
+            .name("stdin".to_owned())
+            .spawn(move || {
+                // Nothing is ever written: a read returns at its end.
+                let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+                tracing::info!("standard input closed: the secretary ends");
+                let _ = stop.send(hocus_secretary::brain::Event::Stop);
+            })
+            .map_err(|e| format!("no thread for standard input: {e}"))?;
+    }
     tracing::info!(socket = %socket.display(), memory = %memory.display(), key = place.word(), "the secretary listens");
     brain.run();
+    // Her socket goes with her; a client connecting now finds none.
+    let _ = std::fs::remove_file(&socket);
     Ok(())
 }
 

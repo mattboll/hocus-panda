@@ -374,6 +374,8 @@ async fn resumes() {
         if let Ok(false) = message.body().deserialize::<bool>() {
             tracing::info!("resumed: the day read again");
             resumed();
+            // Her sources catch up too; she measures the sleep herself.
+            crate::secretary::resumed(None);
         }
     }
 }
