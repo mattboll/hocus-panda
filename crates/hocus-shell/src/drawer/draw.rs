@@ -31,7 +31,10 @@ use iced::{
     window,
 };
 
-use super::{Open, Tab, Target, Words};
+use super::{
+    Open, Tab, Target, Words,
+    select::{self, Hold, Selection, Source, Texts},
+};
 use crate::{
     agents::{self, Brief, Look as AgentLook},
     levels::draw::{MANROPE, MANROPE_BOLD},
@@ -248,6 +251,8 @@ pub struct Laid {
     /// controls, its footer, the toast, a confirmation); no composer.
     overlay: Vec<Shape>,
     pub knows: bool,
+    /// Her text, selectable (#757): the thread's or the queue's.
+    pub texts: Texts,
 }
 
 /// Her key's field in the band under her header (#752): masked, with
@@ -274,6 +279,26 @@ const KEY_FIELD: f32 = 30.0;
 fn width_of(text: &str, size: f32, bold: bool) -> f32 {
     measure(text, size, if bold { MANROPE_BOLD } else { MANROPE })
 }
+
+/// The font text is measured and drawn in.
+fn font(bold: bool) -> iced::Font {
+    if bold { MANROPE_BOLD } else { MANROPE }
+}
+
+/// `text` in lines as [`lines_of`] breaks them, each with its range.
+fn ranged(text: &str, size: f32, bold: bool, room: f32) -> Vec<(String, std::ops::Range<usize>)> {
+    select::wrap_ranged(text, room, |s| width_of(s, size, bold))
+}
+
+/// The lines alone.
+fn plain(lines: &[(String, std::ops::Range<usize>)]) -> Vec<String> {
+    lines.iter().map(|(l, _)| l.clone()).collect()
+}
+
+/// « Copier » on hover: its text, its padding, its height.
+const COPY_TEXT: f32 = 11.5;
+const COPY_X: f32 = 9.0;
+const COPY_H: f32 = 22.0;
 
 /// `text` in lines that fit `room`: its own lines, each broken.
 fn lines_of(text: &str, size: f32, bold: bool, room: f32) -> Vec<String> {
@@ -348,7 +373,8 @@ fn day_words(at: &str, words: Words) -> Option<String> {
 enum Entry<'a> {
     Day(String),
     Item(&'a Item),
-    Streaming(&'a str),
+    /// Her answer to this request as it streams.
+    Streaming(u64, &'a str),
     Typing(&'a str),
     /// Perso items hidden in a public moment: how many.
     Hidden(usize),
@@ -397,7 +423,7 @@ fn entries<'a>(c: &'a Conversation, words: Words, hide: bool) -> Vec<Entry<'a>> 
         if let Some(request) = item.request {
             let last = !c.items[n + 1..].iter().any(|i| i.request == Some(request));
             if last && let Some((_, said)) = c.streaming.iter().find(|(r, _)| *r == request) {
-                out.push(Entry::Streaming(said));
+                out.push(Entry::Streaming(request, said));
             }
         }
     }
@@ -419,7 +445,7 @@ fn entries<'a>(c: &'a Conversation, words: Words, hide: bool) -> Vec<Entry<'a>> 
 fn hers(entry: &Entry<'_>) -> bool {
     match entry {
         Entry::Item(item) => !matches!(item.body, Body::User { .. }),
-        Entry::Streaming(_) | Entry::Typing(_) => true,
+        Entry::Streaming(..) | Entry::Typing(_) => true,
         Entry::Day(_) | Entry::Hidden(_) => false,
     }
 }
@@ -599,6 +625,7 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
                 right,
                 &mut said_items,
             );
+            laid.texts = lines_as_texts(&laid.shapes, laid.thread);
         }
         (Tab::Talk, _) if open.point.is_some() => {
             let point = open.point.unwrap_or_default();
@@ -657,6 +684,41 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "search": open.search,
     });
     laid
+}
+
+/// The lines of text `shapes` draws whole within `within`, each a block
+/// of its own (the queue's view, #757): selectable and copied one a line.
+fn lines_as_texts(shapes: &[Shape], within: Rectangle) -> Texts {
+    let mut texts = Texts::default();
+    let mono = iced::Font::with_name("Martian Mono");
+    for shape in shapes {
+        let (line, font) = match shape {
+            Shape::Text(line) => (line, font(line.bold)),
+            Shape::Mono(line) => (line, mono),
+            _ => continue,
+        };
+        if line.text.trim().is_empty() {
+            continue;
+        }
+        let height = line.size * 1.45;
+        let top = line.at.y - height / 2.0;
+        if top < within.y - 0.5 || top + height > within.y + within.height + 0.5 {
+            continue;
+        }
+        let w = measure(&line.text, line.size, font);
+        let x = match line.align {
+            Alignment::Center => line.at.x - w / 2.0,
+            Alignment::Right => line.at.x - w,
+            _ => line.at.x,
+        };
+        let block = texts.block(Source::Queue(texts.blocks.len() as u32));
+        texts.blocks[block].rect = Rectangle::new(Point::new(x, top), Size::new(w, height));
+        let lines = [(line.text.clone(), 0..line.text.len())];
+        texts.put(
+            block, &line.text, &lines, x, top, height, line.size, font, &measure,
+        );
+    }
+    texts
 }
 
 /// Her key's band at `top` (#752): « Colle ta clé Anthropic », masked,
@@ -768,12 +830,15 @@ fn lay_out_thread(
     // Laid from y = 0, then moved to the bottom.
     let mut shapes: Vec<Shape> = Vec::new();
     let mut targets: Vec<(Target, Rectangle)> = Vec::new();
+    let mut texts = Texts::default();
     let mut y = THREAD_TOP;
     let list = entries(c, words, hide(open));
     let mut previous_hers = false;
     // Each entry's shapes (from this one), its top and its bottom: only
-    // whole entries are drawn (the CPU renderer does not clip).
+    // whole entries are drawn (the CPU renderer does not clip). Its text's
+    // lines and blocks from these.
     let mut spans: Vec<(usize, f32, f32)> = Vec::new();
+    let mut text_spans: Vec<(usize, usize)> = Vec::new();
     for (n, entry) in list.iter().enumerate() {
         if n > 0 {
             y += GAP;
@@ -782,6 +847,7 @@ fn lay_out_thread(
             last.2 = y - GAP;
         }
         spans.push((shapes.len(), y, y));
+        text_spans.push((texts.runs.len(), texts.blocks.len()));
         let first_hers = hers(entry) && !previous_hers;
         previous_hers = hers(entry);
         if first_hers {
@@ -809,10 +875,10 @@ fn lay_out_thread(
             }
             Entry::Item(item) => match &item.body {
                 Body::User { text } => {
-                    let lines = lines_of(text, BUBBLE, false, mine_room - 2.0 * BUBBLE_X);
+                    let lines = ranged(text, BUBBLE, false, mine_room - 2.0 * BUBBLE_X);
                     let w = lines
                         .iter()
-                        .map(|l| width_of(l, BUBBLE, false))
+                        .map(|(l, _)| width_of(l, BUBBLE, false))
                         .fold(0.0, f32::max)
                         + 2.0 * BUBBLE_X;
                     let h = lines.len() as f32 * BUBBLE_LINE + 2.0 * BUBBLE_Y;
@@ -825,9 +891,22 @@ fn lay_out_thread(
                         dashed: false,
                         sharp: Corner::BottomRight,
                     });
+                    let block = texts.block(Source::Item(item.id));
+                    texts.blocks[block].rect = rect;
+                    texts.put(
+                        block,
+                        text,
+                        &lines,
+                        rect.x + BUBBLE_X,
+                        y + BUBBLE_Y,
+                        BUBBLE_LINE,
+                        BUBBLE,
+                        font(false),
+                        &measure,
+                    );
                     push_lines(
                         &mut shapes,
-                        &lines,
+                        &plain(&lines),
                         rect.x + BUBBLE_X,
                         y + BUBBLE_Y,
                         BUBBLE,
@@ -843,7 +922,20 @@ fn lay_out_thread(
                     note,
                     assumed,
                 } => {
-                    y = her_bubble(&mut shapes, text, note.as_deref(), her_x, her_room, y);
+                    let block;
+                    (y, block) = her_bubble(
+                        &mut shapes,
+                        &mut texts,
+                        Source::Item(item.id),
+                        text,
+                        note.as_deref(),
+                        her_x,
+                        her_room,
+                        y,
+                    );
+                    if super::item_copy(item).is_some() {
+                        texts.blocks[block].copy = Some((item.id, Rectangle::default()));
+                    }
                     if *assumed {
                         let at = y + INNER_GAP;
                         let label = format!("{} · ", words.assumed());
@@ -885,10 +977,10 @@ fn lay_out_thread(
                 } => {
                     // Her question in bold amber, what she found under it.
                     let room = her_room - 2.0 * BUBBLE_X;
-                    let lines = lines_of(text, ASK, true, room);
+                    let lines = ranged(text, ASK, true, room);
                     let notes = note
                         .as_deref()
-                        .map(|n| lines_of(n, SMALL, false, room))
+                        .map(|n| ranged(n, SMALL, false, room))
                         .unwrap_or_default();
                     let h = lines.len() as f32 * ASK_LINE
                         + if notes.is_empty() {
@@ -899,9 +991,36 @@ fn lay_out_thread(
                         + 2.0 * BUBBLE_Y;
                     let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
                     her_box(&mut shapes, rect);
+                    let note_top = y + BUBBLE_Y + lines.len() as f32 * ASK_LINE + 3.0;
+                    let block = texts.block(Source::Item(item.id));
+                    texts.blocks[block].rect = rect;
+                    texts.put(
+                        block,
+                        text,
+                        &lines,
+                        her_x + BUBBLE_X,
+                        y + BUBBLE_Y,
+                        ASK_LINE,
+                        ASK,
+                        font(true),
+                        &measure,
+                    );
+                    if let Some(note) = note.as_deref() {
+                        texts.put(
+                            block,
+                            note,
+                            &notes,
+                            her_x + BUBBLE_X,
+                            note_top,
+                            SMALL_LINE,
+                            SMALL,
+                            font(false),
+                            &measure,
+                        );
+                    }
                     push_lines(
                         &mut shapes,
-                        &lines,
+                        &plain(&lines),
                         her_x + BUBBLE_X,
                         y + BUBBLE_Y,
                         ASK,
@@ -909,10 +1028,9 @@ fn lay_out_thread(
                         hex(0xFFE2A8),
                         true,
                     );
-                    let note_top = y + BUBBLE_Y + lines.len() as f32 * ASK_LINE + 3.0;
                     push_lines(
                         &mut shapes,
-                        &notes,
+                        &plain(&notes),
                         her_x + BUBBLE_X,
                         note_top,
                         SMALL,
@@ -981,6 +1099,7 @@ fn lay_out_thread(
                     y = lay_out_card(
                         &mut shapes,
                         &mut targets,
+                        &mut texts,
                         open,
                         item.id,
                         card,
@@ -1067,8 +1186,17 @@ fn lay_out_thread(
                     y += h;
                 }
             },
-            Entry::Streaming(text) => {
-                y = her_bubble(&mut shapes, text, None, her_x, her_room, y);
+            Entry::Streaming(request, text) => {
+                (y, _) = her_bubble(
+                    &mut shapes,
+                    &mut texts,
+                    Source::Streaming(*request),
+                    text,
+                    None,
+                    her_x,
+                    her_room,
+                    y,
+                );
                 said.push(format!("streaming:{text}"));
             }
             Entry::Hidden(n) => {
@@ -1137,6 +1265,32 @@ fn lay_out_thread(
             laid.shapes.push(moved(shape, shift));
         }
     }
+    // Her text as it shows: only whole entries' lines take the pointer.
+    let whole: Vec<bool> = spans
+        .iter()
+        .map(|(_, from, to)| from + shift >= top - 0.5 && to + shift <= top + room + 0.5)
+        .collect();
+    let span_of = |n: usize, part: fn(&(usize, usize)) -> usize| {
+        text_spans
+            .partition_point(|s| part(s) <= n)
+            .saturating_sub(1)
+    };
+    let mut runs = Vec::new();
+    for (n, mut run) in std::mem::take(&mut texts.runs).into_iter().enumerate() {
+        if whole.get(span_of(n, |s| s.0)).copied().unwrap_or(false) {
+            run.middle += shift;
+            runs.push(run);
+        }
+    }
+    texts.runs = runs;
+    for (n, block) in texts.blocks.iter_mut().enumerate() {
+        block.shown = whole.get(span_of(n, |s| s.1)).copied().unwrap_or(false);
+        block.rect.y += shift;
+        if let Some((_, button)) = &mut block.copy {
+            *button = copy_button(block.rect, right, top, words);
+        }
+    }
+    laid.texts = texts;
     for (target, rect) in targets {
         let rect = Rectangle::new(Point::new(rect.x, rect.y + shift), rect.size());
         // Only what shows takes a click.
@@ -1218,24 +1372,28 @@ fn push_lines(
     }
 }
 
-/// Her bubble at `y`: its bottom.
+/// Her bubble at `y`, its text a block of `texts` for `source`: its
+/// bottom, and that block.
+#[allow(clippy::too_many_arguments)]
 fn her_bubble(
     shapes: &mut Vec<Shape>,
+    texts: &mut Texts,
+    source: Source,
     text: &str,
     note: Option<&str>,
     x: f32,
     room: f32,
     y: f32,
-) -> f32 {
+) -> (f32, usize) {
     let inner = room - 2.0 * BUBBLE_X;
-    let lines = lines_of(text, BUBBLE, false, inner);
+    let lines = ranged(text, BUBBLE, false, inner);
     let notes = note
-        .map(|n| lines_of(n, SMALL, false, inner))
+        .map(|n| ranged(n, SMALL, false, inner))
         .unwrap_or_default();
     let w = lines
         .iter()
-        .map(|l| width_of(l, BUBBLE, false))
-        .chain(notes.iter().map(|l| width_of(l, SMALL, false)))
+        .map(|(l, _)| width_of(l, BUBBLE, false))
+        .chain(notes.iter().map(|(l, _)| width_of(l, SMALL, false)))
         .fold(0.0, f32::max)
         + 2.0 * BUBBLE_X;
     let h = lines.len() as f32 * BUBBLE_LINE
@@ -1247,9 +1405,36 @@ fn her_bubble(
         + 2.0 * BUBBLE_Y;
     let rect = Rectangle::new(Point::new(x, y), Size::new(w.min(room), h));
     her_box(shapes, rect);
+    let note_top = y + BUBBLE_Y + lines.len() as f32 * BUBBLE_LINE + 3.0;
+    let block = texts.block(source);
+    texts.blocks[block].rect = rect;
+    texts.put(
+        block,
+        text,
+        &lines,
+        x + BUBBLE_X,
+        y + BUBBLE_Y,
+        BUBBLE_LINE,
+        BUBBLE,
+        font(false),
+        &measure,
+    );
+    if let Some(note) = note {
+        texts.put(
+            block,
+            note,
+            &notes,
+            x + BUBBLE_X,
+            note_top,
+            SMALL_LINE,
+            SMALL,
+            font(false),
+            &measure,
+        );
+    }
     push_lines(
         shapes,
-        &lines,
+        &plain(&lines),
         x + BUBBLE_X,
         y + BUBBLE_Y,
         BUBBLE,
@@ -1257,10 +1442,9 @@ fn her_bubble(
         TEXT,
         false,
     );
-    let note_top = y + BUBBLE_Y + lines.len() as f32 * BUBBLE_LINE + 3.0;
     push_lines(
         shapes,
-        &notes,
+        &plain(&notes),
         x + BUBBLE_X,
         note_top,
         SMALL,
@@ -1268,7 +1452,25 @@ fn her_bubble(
         DIM,
         false,
     );
-    y + h
+    (y + h, block)
+}
+
+/// Where « Copier » shows for a block in `rect`: beside it on the right
+/// when there is room before `right`, else on its top right corner, under
+/// the thread's `top`.
+fn copy_button(rect: Rectangle, right: f32, top: f32, words: Words) -> Rectangle {
+    let w = width_of(words.copy(), COPY_TEXT, true) + 2.0 * COPY_X;
+    let size = Size::new(w, COPY_H);
+    if rect.x + rect.width + 6.0 + w <= right {
+        return Rectangle::new(Point::new(rect.x + rect.width + 6.0, rect.y), size);
+    }
+    Rectangle::new(
+        Point::new(
+            rect.x + rect.width - w - 6.0,
+            (rect.y - COPY_H / 2.0 + 2.0).max(top + 2.0),
+        ),
+        size,
+    )
 }
 
 /// A card at `y`: its label, its text, its lines, its buttons (at most
@@ -1277,6 +1479,7 @@ fn her_bubble(
 fn lay_out_card(
     shapes: &mut Vec<Shape>,
     targets: &mut Vec<(Target, Rectangle)>,
+    texts: &mut Texts,
     open: &Open,
     item: u64,
     card: &Card,
@@ -1301,11 +1504,25 @@ fn lay_out_card(
         align: Alignment::Left,
     }));
     at += CARD_LABEL * 1.4 + 4.0;
+    // Its text and its lines, selectable (#757); a draft's « Copier »
+    // copies the draft.
+    let block = texts.block(Source::Item(item));
     if !card.text.is_empty() {
-        let lines = lines_of(&card.text, CARD_TEXT, false, inner);
+        let lines = ranged(&card.text, CARD_TEXT, false, inner);
+        texts.put(
+            block,
+            &card.text,
+            &lines,
+            x + CARD_X,
+            at,
+            CARD_LINE,
+            CARD_TEXT,
+            font(false),
+            &measure,
+        );
         push_lines(
             &mut parts,
-            &lines,
+            &plain(&lines),
             x + CARD_X,
             at,
             CARD_TEXT,
@@ -1324,7 +1541,7 @@ fn lay_out_card(
         } else {
             (0.0, text.clone())
         };
-        let lines = lines_of(&shown, CARD_TEXT, false, inner - indent);
+        let lines = ranged(&shown, CARD_TEXT, false, inner - indent);
         let h = lines.len() as f32 * CARD_LINE;
         if draft {
             parts.push(Shape::Quote(Rectangle::new(
@@ -1333,9 +1550,20 @@ fn lay_out_card(
             )));
             at += 4.0;
         }
+        texts.put(
+            block,
+            &shown,
+            &lines,
+            x + CARD_X + indent,
+            at,
+            CARD_LINE,
+            CARD_TEXT,
+            font(false),
+            &measure,
+        );
         push_lines(
             &mut parts,
-            &lines,
+            &plain(&lines),
             x + CARD_X + indent,
             at,
             CARD_TEXT,
@@ -1409,6 +1637,10 @@ fn lay_out_card(
         }
     }
     at += CARD_BOTTOM;
+    texts.blocks[block].rect = Rectangle::new(Point::new(x, y), Size::new(room, at - y));
+    if draft && (!card.lines.is_empty() || !card.text.is_empty()) {
+        texts.blocks[block].copy = Some((item, Rectangle::default()));
+    }
     shapes.push(Shape::Box {
         rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
         radius: 12.0,
@@ -2430,6 +2662,7 @@ fn lay_out_point(
             y = lay_out_card(
                 &mut shapes,
                 &mut targets,
+                &mut Texts::default(),
                 open,
                 *card_id,
                 card,
@@ -2509,6 +2742,7 @@ pub struct State {
     laid: Option<(Key, Laid)>,
     logged: String,
     places: String,
+    texts: String,
 }
 
 /// What a layout is made for.
@@ -2567,12 +2801,50 @@ impl View {
             return false;
         };
         let said = laid.said.to_string();
+        // Her « Copier » buttons, which show on hover, with them.
         let places: Vec<String> = laid
             .targets
             .iter()
             .map(|(t, r)| format!("{}@{:.0},{:.0}", t.name(), r.center_x(), r.center_y()))
+            .chain(
+                laid.texts
+                    .blocks
+                    .iter()
+                    .filter(|b| b.shown)
+                    .filter_map(|b| {
+                        let (item, r) = b.copy?;
+                        Some(format!(
+                            "{}@{:.0},{:.0}",
+                            Target::Copy(item).name(),
+                            r.center_x(),
+                            r.center_y()
+                        ))
+                    }),
+            )
             .collect();
         let places = places.join(" ");
+        // Where her text's blocks start and end (the first line's start,
+        // the last's end), never what they say.
+        let texts: Vec<String> = laid
+            .texts
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.shown)
+            .filter_map(|(n, b)| {
+                let first = laid.texts.runs.iter().find(|r| r.block == n)?;
+                let last = laid.texts.runs.iter().rfind(|r| r.block == n)?;
+                Some(format!(
+                    "{:?}@{:.0},{:.0}>{:.0},{:.0}",
+                    b.source,
+                    first.x,
+                    first.middle,
+                    last.x + last.width,
+                    last.middle
+                ))
+            })
+            .collect();
+        let texts = texts.join(" ");
         let mood = laid.mood;
         if said != state.logged {
             tracing::debug!("the drawer shows {said}");
@@ -2581,6 +2853,10 @@ impl View {
         if places != state.places {
             tracing::debug!("the drawer's items {places}");
             state.places = places;
+        }
+        if texts != state.texts {
+            tracing::debug!("the drawer's texts {texts}");
+            state.texts = texts;
         }
         let now = Instant::now();
         super::with(|d| {
@@ -2848,6 +3124,13 @@ impl View {
             for shape in &laid.shapes {
                 draw_shape(f, shape, now);
             }
+            // Her text selected (#757); nothing at rest.
+            if let Some(selection) = open.selection.filter(|s| !s.is_empty()) {
+                for rect in laid.texts.highlights(&selection, &measure) {
+                    f.fill_rectangle(rect.position(), rect.size(), alpha(0x6CC287, 0.34));
+                }
+            }
+            self.draw_copy_button(f, laid, open);
         });
         if laid.knows {
             // In a layer of its own, as the list's is: it comes over it.
@@ -2935,7 +3218,154 @@ impl View {
             model.font = iced::Font::with_name("Martian Mono");
             f.fill_text(model);
         }
+        self.draw_copied(f, laid, open);
+        self.draw_menu(f, open, size);
     }
+
+    /// « Copier » on the answer or the draft the pointer is on (#757).
+    fn draw_copy_button(&self, f: &mut Frame, laid: &Laid, open: &Open) {
+        let Some(item) = open.over else {
+            return;
+        };
+        let Some(rect) = laid
+            .texts
+            .blocks
+            .iter()
+            .filter(|b| b.shown)
+            .find_map(|b| b.copy.filter(|(i, _)| *i == item).map(|(_, r)| r))
+        else {
+            return;
+        };
+        let hover = open.hover == Some(Target::Copy(item));
+        f.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), 7.0.into()),
+            if hover { hex(0x2A3247) } else { hex(0x20263A) },
+        );
+        f.stroke(
+            &Path::rounded_rectangle(
+                Point::new(rect.x + 0.5, rect.y + 0.5),
+                Size::new(rect.width - 1.0, rect.height - 1.0),
+                6.5.into(),
+            ),
+            Stroke::default()
+                .with_color(alpha(0xFFFFFF, if hover { 0.22 } else { 0.14 }))
+                .with_width(1.0),
+        );
+        f.fill_text(text(
+            self.words.copy(),
+            rect.center(),
+            COPY_TEXT,
+            if hover { MINT } else { hex(0xD5DBE5) },
+            true,
+            Alignment::Center,
+        ));
+    }
+
+    /// « Copié » over the thread's bottom while it shows.
+    fn draw_copied(&self, f: &mut Frame, laid: &Laid, open: &Open) {
+        if open.copied.is_none() {
+            return;
+        }
+        let said = self.words.copied();
+        let w = width_of(said, 12.5, true) + 2.0 * 14.0;
+        let h = 12.5 * 1.4 + 2.0 * 7.0;
+        let rect = Rectangle::new(
+            Point::new(
+                (laid.size.width - w) / 2.0,
+                laid.thread.y + laid.thread.height - h - 10.0,
+            ),
+            Size::new(w, h),
+        );
+        f.fill(
+            &Path::rounded_rectangle(rect.position(), rect.size(), (h / 2.0).into()),
+            Color::from_rgba8(14, 17, 28, 0.96),
+        );
+        f.stroke(
+            &Path::rounded_rectangle(
+                Point::new(rect.x + 0.5, rect.y + 0.5),
+                Size::new(rect.width - 1.0, rect.height - 1.0),
+                (h / 2.0 - 0.5).into(),
+            ),
+            Stroke::default()
+                .with_color(alpha(0x6CC287, 0.5))
+                .with_width(1.0),
+        );
+        f.fill_text(text(
+            said,
+            rect.center(),
+            12.5,
+            TEXT,
+            true,
+            Alignment::Center,
+        ));
+    }
+
+    /// The right click's menu: « Copier », and its shortcut.
+    fn draw_menu(&self, f: &mut Frame, open: &Open, size: Size) {
+        let Some(menu) = &open.menu else {
+            return;
+        };
+        let (outer, row) = menu_rects(menu.at, size, self.words);
+        f.fill(
+            &Path::rounded_rectangle(outer.position(), outer.size(), 9.0.into()),
+            hex(0x1A1F2E),
+        );
+        f.stroke(
+            &Path::rounded_rectangle(
+                Point::new(outer.x + 0.5, outer.y + 0.5),
+                Size::new(outer.width - 1.0, outer.height - 1.0),
+                8.5.into(),
+            ),
+            Stroke::default()
+                .with_color(alpha(0xFFFFFF, 0.16))
+                .with_width(1.0),
+        );
+        if open.hover == Some(Target::CopyMenu) {
+            f.fill(
+                &Path::rounded_rectangle(row.position(), row.size(), 6.0.into()),
+                alpha(0xFFFFFF, 0.09),
+            );
+        }
+        f.fill_text(text(
+            self.words.copy(),
+            Point::new(row.x + MENU_X, row.center_y()),
+            MENU_TEXT,
+            TEXT,
+            false,
+            Alignment::Left,
+        ));
+        f.fill_text(text(
+            MENU_KEYS,
+            Point::new(row.x + row.width - MENU_X, row.center_y()),
+            11.0,
+            FAINT,
+            false,
+            Alignment::Right,
+        ));
+    }
+}
+
+/// The right click's menu: its text, its row's padding, its shortcut.
+const MENU_TEXT: f32 = 13.0;
+const MENU_X: f32 = 10.0;
+const MENU_ROW: f32 = 28.0;
+const MENU_KEYS: &str = "Ctrl+C";
+
+/// The right click's menu at `at`, kept within `size`: its box and its
+/// « Copier » row.
+fn menu_rects(at: Point, size: Size, words: Words) -> (Rectangle, Rectangle) {
+    let w = (width_of(words.copy(), MENU_TEXT, false)
+        + width_of(MENU_KEYS, 11.0, false)
+        + 3.0 * MENU_X
+        + 16.0
+        + 8.0)
+        .max(140.0);
+    let h = MENU_ROW + 8.0;
+    let x = at.x.min(size.width - w - 4.0).max(4.0);
+    let y = at.y.min(size.height - h - 4.0).max(4.0);
+    let outer = Rectangle::new(Point::new(x, y), Size::new(w, h));
+    let row = Rectangle::new(Point::new(x + 4.0, y + 4.0), Size::new(w - 8.0, MENU_ROW));
+    (outer, row)
 }
 
 fn text(
@@ -3232,7 +3662,13 @@ impl<Message> canvas::Program<Message> for View {
                 let pressed = matches!(seen, mouse::Event::ButtonPressed(_))
                     && cursor.position_in(bounds).is_some()
                     && super::focused(self.id, true);
-                let action = self.mouse(state, seen, cursor.position_in(bounds), bounds.size());
+                // Where the pointer is even past its edges, as a drag that
+                // selects goes on there.
+                let raw = cursor
+                    .position()
+                    .map(|p| Point::new(p.x - bounds.x, p.y - bounds.y));
+                let action =
+                    self.mouse(state, seen, cursor.position_in(bounds), raw, bounds.size());
                 match action {
                     None if pressed => Some(canvas::Action::request_redraw()),
                     action => action,
@@ -3243,8 +3679,18 @@ impl<Message> canvas::Program<Message> for View {
                 modifiers,
                 text,
                 ..
-            }) => super::key_on(self.id, key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
+            }) => {
+                // Ctrl+C copies her text selected (#757), wherever the
+                // keyboard types.
+                if copies(key, *modifiers)
+                    && let Some(selected) = self.selected(state, bounds.size())
+                {
+                    super::copy(self.id, selected);
+                    return Some(canvas::Action::request_redraw().and_capture());
+                }
+                super::key_on(self.id, key, *modifiers, text.as_deref())
+                    .then(|| canvas::Action::request_redraw().and_capture())
+            }
             // The keyboard on the drawer or gone from it: its caret and
             // its ring follow (#752).
             iced::Event::Window(window::Event::Focused) => {
@@ -3293,41 +3739,65 @@ impl<Message> canvas::Program<Message> for View {
 
     fn mouse_interaction(
         &self,
-        _state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        state: &State,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        super::with(|d| match d.open_on(self.id).and_then(|o| o.hover) {
-            Some(Target::Field | Target::Search | Target::KeyField) => mouse::Interaction::Text,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
+        // Over her text, or selecting it: the text cursor.
+        let on_text = |selecting: bool| {
+            selecting
+                || cursor.position_in(bounds).is_some_and(|p| {
+                    state
+                        .laid
+                        .as_ref()
+                        .is_some_and(|(_, laid)| laid.texts.on_text(p))
+                })
+        };
+        super::with(|d| {
+            let Some(open) = d.open_on(self.id) else {
+                return mouse::Interaction::default();
+            };
+            let selecting = open.selection.is_some_and(|s| s.hold == Hold::Dragging);
+            match open.hover {
+                Some(Target::Field | Target::Search | Target::KeyField) => mouse::Interaction::Text,
+                Some(_) if !selecting => mouse::Interaction::Pointer,
+                _ if on_text(selecting) => mouse::Interaction::Text,
+                _ => mouse::Interaction::default(),
+            }
         })
     }
 }
 
+/// Whether `key` with `modifiers` asks to copy: `Ctrl+C`.
+fn copies(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> bool {
+    matches!(key, iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("c"))
+        && modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.logo()
+}
+
 impl View {
+    /// Her text selected now, if any.
+    fn selected(&self, state: &mut State, size: Size) -> Option<String> {
+        let laid = self.laid(state, size)?;
+        let selection = super::with(|d| d.open_on(self.id).and_then(|o| o.selection))?;
+        Some(laid.texts.selected(&selection)).filter(|t| !t.is_empty())
+    }
+
     fn mouse<Message>(
         &self,
         state: &mut State,
         seen: &mouse::Event,
         at: Option<Point>,
+        raw: Option<Point>,
         size: Size,
     ) -> Option<canvas::Action<Message>> {
-        let targets: Vec<(Target, Rectangle)> = self
-            .laid(state, size)
-            .map(|l| l.targets.clone())
-            .unwrap_or_default();
-        let content = state
-            .laid
-            .as_ref()
-            .map_or(0.0, |(_, l)| l.content - l.thread.height);
-        let target = at.and_then(|at| {
-            targets
-                .iter()
-                .rev()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| *t)
-        });
+        let laid = self.laid(state, size)?;
+        let content = laid.content - laid.thread.height;
+        // The answer or draft the pointer is on, for its « Copier ».
+        let over = at
+            .and_then(|p| laid.texts.block_at(p))
+            .and_then(|b| b.copy.map(|(item, _)| item));
         enum Then {
             Nothing,
             Draw,
@@ -3336,26 +3806,164 @@ impl View {
         let then = super::with(|d| {
             let open = d.open_mut(self.id)?;
             open.pointer = at;
+            // What takes a click there: the menu, her « Copier », the rest.
+            let target = at.and_then(|p| {
+                let menu = open
+                    .menu
+                    .as_ref()
+                    .filter(|m| menu_rects(m.at, size, self.words).1.contains(p))
+                    .map(|_| Target::CopyMenu);
+                let copy = laid.texts.blocks.iter().filter(|b| b.shown).find_map(|b| {
+                    b.copy
+                        .filter(|(item, r)| over == Some(*item) && r.contains(p))
+                        .map(|(item, _)| Target::Copy(item))
+                });
+                menu.or(copy).or_else(|| {
+                    laid.targets
+                        .iter()
+                        .rev()
+                        .find(|(_, r)| r.contains(p))
+                        .map(|(t, _)| *t)
+                })
+            });
             Some(match seen {
                 mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                    if open.hover == target {
-                        Then::Nothing
-                    } else {
+                    let mut draw = false;
+                    if open.hover != target {
                         open.hover = target;
-                        Then::Draw
+                        draw = true;
                     }
+                    if open.over != over {
+                        open.over = over;
+                        draw = true;
+                    }
+                    // A press on her text drags its selection.
+                    if let Some(selection) = &mut open.selection
+                        && selection.hold == Hold::Dragging
+                        && let Some(spot) = raw.and_then(|p| laid.texts.spot_at(p, &measure))
+                        && spot != selection.focus
+                    {
+                        selection.focus = spot;
+                        draw = true;
+                    }
+                    if draw { Then::Draw } else { Then::Nothing }
                 }
                 mouse::Event::CursorLeft => {
                     open.hover = None;
+                    open.over = None;
                     Then::Draw
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                    if target == Some(Target::CopyMenu) {
+                        open.pressed = target;
+                        return Some(Then::Nothing);
+                    }
+                    let had = open.menu.take().is_some() || open.selection.is_some();
                     open.pressed = target;
-                    Then::Nothing
+                    match target {
+                        // Her « Copier » leaves what is selected as it is.
+                        Some(Target::Copy(_)) => return Some(Then::Nothing),
+                        Some(_) => {
+                            open.selection = None;
+                            return Some(if had { Then::Draw } else { Then::Nothing });
+                        }
+                        None => {}
+                    }
+                    let Some(p) = at else {
+                        return Some(Then::Nothing);
+                    };
+                    // One, two or three presses in a row: a place, a word,
+                    // a paragraph.
+                    let now = Instant::now();
+                    let clicks = match open.clicks {
+                        Some((then, q, n))
+                            if now.duration_since(then) <= super::MULTI_CLICK
+                                && (q.x - p.x).abs() <= 4.0
+                                && (q.y - p.y).abs() <= 4.0 =>
+                        {
+                            n % 3 + 1
+                        }
+                        _ => 1,
+                    };
+                    open.clicks = Some((now, p, clicks));
+                    let spot = Some(p)
+                        .filter(|p| laid.thread.contains(*p))
+                        .and_then(|p| laid.texts.spot_at(p, &measure));
+                    open.selection = spot.and_then(|spot| {
+                        let (anchor, focus, hold) = match clicks {
+                            1 => (spot, spot, Hold::Dragging),
+                            2 => {
+                                let (a, b) = laid.texts.word_at(spot)?;
+                                (a, b, Hold::Done)
+                            }
+                            _ => {
+                                let (a, b) = laid.texts.paragraph_at(spot)?;
+                                (a, b, Hold::Done)
+                            }
+                        };
+                        Some(Selection {
+                            anchor,
+                            focus,
+                            hold,
+                        })
+                    });
+                    if clicks > 1 {
+                        log_selection(laid, open.selection.as_ref());
+                    }
+                    Then::Draw
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    if let Some(selection) = &mut open.selection
+                        && selection.hold == Hold::Dragging
+                    {
+                        selection.hold = Hold::Done;
+                        if selection.is_empty() {
+                            open.selection = None;
+                        }
+                        log_selection(laid, open.selection.as_ref());
+                    }
                     match open.pressed.take().filter(|p| Some(*p) == target) {
                         Some(target) => Then::Act(target),
+                        None => Then::Nothing,
+                    }
+                }
+                mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                    // « Copier » in a menu: what is selected, else the
+                    // answer (or the text) under the pointer.
+                    let Some(p) = at else {
+                        return Some(Then::Nothing);
+                    };
+                    if target.is_some() {
+                        return Some(Then::Nothing);
+                    }
+                    let selected = open
+                        .selection
+                        .map(|s| laid.texts.selected(&s))
+                        .filter(|t| !t.is_empty());
+                    let text = selected.or_else(|| {
+                        let block = laid.texts.block_at(p)?;
+                        let item = block.copy.and_then(|(item, _)| {
+                            crate::secretary::conversation(|c| {
+                                c.items
+                                    .iter()
+                                    .find(|i| i.id == item)
+                                    .and_then(super::item_copy)
+                            })
+                        });
+                        item.or_else(|| Some(block.text.clone()))
+                            .filter(|t| !t.is_empty())
+                    });
+                    match text {
+                        Some(text) => {
+                            open.menu = Some(super::Menu { at: p, text });
+                            let (_, row) = menu_rects(p, size, self.words);
+                            tracing::debug!(
+                                "the drawer's menu CopyMenu@{:.0},{:.0}",
+                                row.center_x(),
+                                row.center_y()
+                            );
+                            Then::Draw
+                        }
                         None => Then::Nothing,
                     }
                 }
@@ -3379,6 +3987,7 @@ impl View {
                     if (open.scroll - before).abs() < 0.5 {
                         return Some(Then::Nothing);
                     }
+                    open.menu = None;
                     open.rev += 1;
                     Then::Draw
                 }
@@ -3394,6 +4003,12 @@ impl View {
             }
         }
     }
+}
+
+/// What is selected, for the tests: how many characters, never which.
+fn log_selection(laid: &Laid, selection: Option<&Selection>) {
+    let chars = selection.map_or(0, |s| laid.texts.selected(s).chars().count());
+    tracing::debug!(chars, "the drawer's selection");
 }
 
 #[cfg(test)]
@@ -3442,7 +4057,7 @@ mod tests {
             .map(|e| match e {
                 Entry::Day(_) => "day",
                 Entry::Item(_) => "item",
-                Entry::Streaming(_) => "streaming",
+                Entry::Streaming(..) => "streaming",
                 Entry::Typing(_) => "typing",
                 Entry::Hidden(_) => "hidden",
             })

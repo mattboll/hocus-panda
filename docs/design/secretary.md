@@ -2612,3 +2612,44 @@ The maintainer's try of sprint 11 with #752.
   (a click in a window closes it, `Super+S` reopens it with what was typed
   and the answer written meanwhile; a click in the field gives it the
   keyboard back after a window took it).
+
+### #757: her text selected and copied
+
+The maintainer's try of sprint 11: nothing she wrote could be copied.
+
+- **Selectable** (`hocus-shell/src/drawer/select.rs`): what the thread
+  shows of her answers (as they stream too), the user's sentences, her
+  questions and cards' text and lines, and the queue view's lines are laid
+  out as blocks of text, each named by what it shows (an item, an answer
+  streaming, a queue line), so a selection holds while the drawer lays
+  itself out again (a hover, a word streamed, the wheel). A block's text is
+  what it shows: its wrapped lines joined by the space the break took, its
+  paragraphs by a line break; a masked span is its words
+  (« [secret masqué — voir …] »), never the secret.
+- **The pointer**: a press on her text and a drag select, within a bubble
+  and across bubbles (one line between blocks); a double click takes a
+  word, a triple click its paragraph (500 ms, 4 px apart). A press
+  elsewhere, or on a button, clears it. The text cursor shows over text.
+- **Copied** by `Ctrl+C` (wherever the keyboard types in the drawer;
+  never her key's field), by the right click's menu « Copier · Ctrl+C »
+  (what is selected, else the answer or text under the pointer; `Esc` or a
+  press elsewhere closes it), and by « Copier » on hover beside each of her
+  answers and on each draft card (her answer's text; the draft's lines).
+  The copy goes as the shell's copies go (`clip copy text …` to the
+  compositor, which offers it; the shell's own offers are not read back
+  into the clipboard's history), and « Copié » shows over the thread's
+  bottom for 1.5 s. Neither the text nor its length is logged: the
+  selection logs its number of characters only.
+- **At rest** the selection draws a tint behind its lines and nothing
+  moves; with nothing selected nothing is drawn. It is the open drawer's:
+  closed, it is gone (reopened, `Ctrl+C` copies nothing).
+- **Tests**: `hocus-shell` (`drawer::select`: wrapped lines keep their
+  ranges, a drag across lines and blocks, between lines and under them, a
+  word and a paragraph, nothing selected draws nothing), and
+  `hocus-compositor/tests/secretary_drawer.rs` with the real shell and her
+  process, the copy read from the test compositor's clipboard:
+  `her_text_is_selected_and_copied` (a drag, a double and a triple click,
+  across two bubbles, the right click's « Copier », no commit at rest,
+  nothing after it closed), `her_answers_and_drafts_copy_from_their_button`
+  (her answer, the draft, a masked secret as its mask) and
+  `the_queue_s_lines_are_copied_too`.
