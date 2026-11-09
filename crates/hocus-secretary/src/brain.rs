@@ -29,8 +29,15 @@
 //!
 //! **The conversation** (§5.4, lot 2) is [`conversation`]'s: the thread,
 //! her questions, her model's streamed answer, the proposals' cards.
+//!
+//! **Her speaking up** (§6, lot 5) is [`speaking`]'s: the briefings at a
+//! session's start, her requests to the shell's gate, her peek's answers,
+//! her reminders (her loop wakes for the next one), the commitments the
+//! triage finds in mails the user sent, and the effects of accepted cards
+//! ([`crate::effects`]).
 
 mod conversation;
+mod speaking;
 
 pub use conversation::Said;
 
@@ -99,6 +106,14 @@ pub enum Event {
         conn: u64,
         id: u64,
         role: Role,
+        items: Vec<String>,
+        started: Timestamp,
+        result: Result<Reply, String>,
+    },
+    /// Her model worded a briefing.
+    Briefed {
+        built: Box<crate::briefing::Built>,
+        away: bool,
         items: Vec<String>,
         started: Timestamp,
         result: Result<Reply, String>,
@@ -201,7 +216,8 @@ pub struct Brain {
     sleeps: Sleeps,
     key: String,
     talk: conversation::Talk,
-    effects: Option<Arc<Recorder>>,
+    speaking: speaking::Speaking,
+    effectors: crate::effects::Effectors,
     triager: Option<Arc<dyn Triager>>,
     queue: Queue,
     inbox: Inbox,
@@ -252,7 +268,8 @@ impl Brain {
             sleeps: Sleeps::now(),
             key: options.key,
             talk: conversation::Talk::default(),
-            effects: options.effects,
+            speaking: speaking::Speaking::default(),
+            effectors: crate::effects::Effectors::new(options.effects),
             triager: options.triage,
             queue: Queue::new(now),
             inbox: Inbox::default(),
@@ -279,6 +296,7 @@ impl Brain {
         loop {
             self.ask_due();
             self.triage_step();
+            self.speak_due();
             let triage = self.settings.current().triage;
             let next = self
                 .slots
@@ -286,6 +304,7 @@ impl Brain {
                 .filter(|s| !s.busy)
                 .map(|s| s.due)
                 .chain(self.queue.next(&triage))
+                .chain(self.speaking_next())
                 .min();
             let event = match next.and_then(|at| self.clock.wait_until(at)) {
                 Some(wait) => match self.events.recv_timeout(wait) {
@@ -367,16 +386,15 @@ impl Brain {
         };
         tracing::info!(?caught, "caught up");
         if away {
-            // Lot 5's briefing reads it: what arrived meanwhile is in the
+            // Told at the next session: what arrived meanwhile is in the
             // episodes since.
-            let hours = catching.gap.as_secs() / 3600;
+            let (gap, items) = (catching.gap, catching.items);
+            self.away_for(gap);
+            let hours = gap.as_secs() / 3600;
             let episode = NewEpisode {
                 at: self.clock.now(),
                 kind: "catch-up".to_owned(),
-                digest: format!(
-                    "absente {hours} h, {} éléments lus au retour",
-                    catching.items
-                ),
+                digest: format!("absente {hours} h, {items} éléments lus au retour"),
                 source: None,
                 pointer: format!("catch-up:{}", stamp(self.clock.now())),
                 notebook: hocus_secretary_link::Notebook::Pro,
@@ -387,6 +405,7 @@ impl Brain {
         }
         self.caught_up = Some(caught);
         self.catching = None;
+        self.try_brief();
     }
 
     /// Takes one event: whether to go on.
@@ -425,7 +444,17 @@ impl Brain {
                 pointer,
                 started,
                 result,
-            } => self.triaged(&pointer, started, result),
+            } => {
+                self.triaged(&pointer, started, result);
+                self.try_brief();
+            }
+            Event::Briefed {
+                built,
+                away,
+                items,
+                started,
+                result,
+            } => self.worded(*built, away, items, started, result),
             Event::Stop => return false,
         }
         true
@@ -505,7 +534,7 @@ impl Brain {
             ToSecretary::Drawer { open } => self.drawer(open),
             ToSecretary::Session { locked } => {
                 tracing::info!(locked, "the session's lock");
-                self.locked = locked;
+                self.session(conn, locked);
             }
             ToSecretary::Resumed { slept } => {
                 let now = Sleeps::now();
@@ -529,6 +558,18 @@ impl Brain {
                 }
             }
             ToSecretary::Notification(notification) => self.notified(notification),
+            ToSecretary::Spoken { speak, outcome } => self.spoken(speak, outcome),
+            ToSecretary::Peeked { id, speak, answer } => self.peeked(conn, id, speak, answer),
+            ToSecretary::Moment { moment } => {
+                tracing::info!(?moment, "the moment");
+                self.scope.moment = match moment {
+                    hocus_secretary_link::Moment::Quiet => context::Moment::Quiet,
+                    hocus_secretary_link::Moment::Meeting => context::Moment::Meeting,
+                    hocus_secretary_link::Moment::Sharing => context::Moment::Sharing,
+                    hocus_secretary_link::Moment::Camera => context::Moment::Camera,
+                };
+            }
+            ToSecretary::Effected { effect, ok, detail } => self.effected(effect, ok, &detail),
         }
     }
 
@@ -758,6 +799,7 @@ impl Brain {
                         pointer: pointer.clone(),
                         notebook,
                     };
+                    self.keep_day(&item, &pointer, notebook);
                     match self.store.add_episode(&episode, &mentions) {
                         Ok((episode, _)) => {
                             if let Some(text) = item.text {
@@ -793,6 +835,7 @@ impl Brain {
             catching.items += read;
         }
         self.catch_up_done_if_over();
+        self.try_brief();
         // A source failing, or answering again: her face says it.
         self.tell_look();
         if let Err(err) = self.store.prune_audit() {
@@ -950,6 +993,80 @@ impl Brain {
             && let Err(err) = triage::keep_digest(&mut self.store, episode, &digest)
         {
             tracing::warn!(pointer, %err, "could not keep the triage's digest");
+        }
+        let commitments: Vec<String> = verdict
+            .commitments
+            .iter()
+            .map(|c| self.redactor.mask_with(c, &quoted, &label))
+            .collect();
+        self.triaged_mail(pointer, &verdict, &commitments);
+    }
+
+    /// A source item's day record: an event's times and people, a mail's
+    /// headers (lot 5).
+    fn keep_day(
+        &mut self,
+        item: &crate::sources::Item,
+        pointer: &str,
+        notebook: hocus_secretary_link::Notebook,
+    ) {
+        let source = item
+            .from
+            .clone()
+            .or_else(|| pointer.split_once(':').map(|(s, _)| s.to_owned()));
+        if let Some(event) = &item.event {
+            let kept = crate::day::keep_event(
+                &self.store.conn,
+                &crate::day::Event {
+                    pointer: pointer.to_owned(),
+                    source,
+                    start: item.at,
+                    end: event.end,
+                    title: item.digest.clone(),
+                    calendar: event.calendar.clone(),
+                    attendees: event.attendees.clone(),
+                    organiser: event.organiser.clone(),
+                    presenter: event.presenter.clone(),
+                    busy: event.busy,
+                    notebook,
+                },
+            );
+            if let Err(err) = kept {
+                tracing::warn!(pointer, %err, "could not keep an event");
+            }
+        } else if item.kind == "mail" {
+            let info = item.mail.clone().unwrap_or_default();
+            let subject = item
+                .text
+                .as_ref()
+                .and_then(|t| match &t.item.content {
+                    hocus_sources::Content::Mail(m) => Some(m.subject.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    item.digest
+                        .split_once(" : ")
+                        .map_or(item.digest.clone(), |(_, s)| s.to_owned())
+                });
+            let kept = crate::day::keep_mail(
+                &self.store.conn,
+                &crate::day::Mail {
+                    pointer: pointer.to_owned(),
+                    source,
+                    at: item.at,
+                    sender: item.sender.clone().unwrap_or_default(),
+                    recipients: info.to,
+                    subject,
+                    message_id: info.message_id,
+                    in_reply_to: info.in_reply_to,
+                    sent: info.sent,
+                    notebook,
+                    ..Default::default()
+                },
+            );
+            if let Err(err) = kept {
+                tracing::warn!(pointer, %err, "could not keep a mail");
+            }
         }
     }
 }

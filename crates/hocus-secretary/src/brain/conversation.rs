@@ -26,11 +26,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use hocus_secretary_link::{
     Action, Body, Card, CardKind, Client, Decision, FromSecretary, Item, Look, Mood, Notebook, Tone,
 };
-use jiff::Timestamp;
 
 use super::{Brain, Event};
 use crate::{
     audit,
+    effects::{Kind, Proposal},
     fold::fold,
     graph::{NodeKind, Origin},
     model::{Message, Part, Piece, Reply, Role, ToolCall, ToolResult},
@@ -74,16 +74,6 @@ struct Pending {
     candidate: Candidate,
 }
 
-/// A card's outside effect, done only after "accept".
-#[derive(Debug)]
-struct Proposal {
-    /// `message`, `post`, `mail`, `invitation`, `event`, `file`, `task`,
-    /// `agent`, `delegation`.
-    effect: &'static str,
-    tool: String,
-    input: serde_json::Value,
-}
-
 /// The conversation's state, on her loop.
 #[derive(Debug, Default)]
 pub(super) struct Talk {
@@ -97,7 +87,7 @@ pub(super) struct Talk {
     pending: Option<Pending>,
     /// Folded words the user said were not the project she asked about.
     declined: HashSet<String>,
-    proposals: HashMap<u64, Proposal>,
+    pub(super) proposals: HashMap<u64, Proposal>,
     /// What "Annuler" undoes, by its item: the edits, the last first.
     kept: HashMap<u64, Vec<i64>>,
     drawer: bool,
@@ -110,11 +100,11 @@ pub(super) struct Talk {
 }
 
 impl Talk {
-    fn fr(&self) -> bool {
+    pub(super) fn fr(&self) -> bool {
         !self.english
     }
 
-    fn t(&self, fr: &'static str, en: &'static str) -> &'static str {
+    pub(super) fn t(&self, fr: &'static str, en: &'static str) -> &'static str {
         if self.english { en } else { fr }
     }
 }
@@ -128,6 +118,9 @@ impl Brain {
             let look = self.look();
             self.talk.told = Some(look.clone());
             self.send(conn, &FromSecretary::Look { look });
+        }
+        if matches!(client, Client::Shell | Client::Test) {
+            self.greeted_speaking(conn);
         }
     }
 
@@ -158,11 +151,22 @@ impl Brain {
     }
 
     fn add_item(&mut self, request: Option<u64>, body: Body) -> u64 {
+        self.add_item_in(request, body, None)
+    }
+
+    /// A thread item, in `notebook` when it is about one.
+    pub(super) fn add_item_in(
+        &mut self,
+        request: Option<u64>,
+        body: Body,
+        notebook: Option<Notebook>,
+    ) -> u64 {
         self.talk.next += 1;
         let item = Item {
             id: self.talk.next,
             at: self.clock.now().to_string(),
             request,
+            notebook,
             body,
         };
         self.talk.items.push(item.clone());
@@ -177,7 +181,7 @@ impl Brain {
         self.talk.next
     }
 
-    fn change_item(&mut self, id: u64, change: impl FnOnce(&mut Body)) {
+    pub(super) fn change_item(&mut self, id: u64, change: impl FnOnce(&mut Body)) {
         let Some(item) = self.talk.items.iter_mut().find(|i| i.id == id) else {
             return;
         };
@@ -187,7 +191,7 @@ impl Brain {
     }
 
     /// The end of what she says to request `id`.
-    fn done(&mut self, conn: u64, id: u64) {
+    pub(super) fn done(&mut self, conn: u64, id: u64) {
         self.tell_talkers(
             &FromSecretary::Answer {
                 id,
@@ -682,15 +686,23 @@ impl Brain {
                     },
                 );
             }
-            Some(Made::Card(card, effect)) => {
-                let item = self.add_item(Some(id), Body::Card { card });
+            Some(Made::Card(card, kind)) => {
+                let notebook = call
+                    .input
+                    .get("notebook")
+                    .and_then(|n| n.as_str())
+                    .and_then(Notebook::of)
+                    .unwrap_or(Notebook::Pro);
+                let item = self.add_item_in(Some(id), Body::Card { card }, Some(notebook));
+                let effect = kind.word();
                 tracing::info!(item, effect, tool = call.name, "she proposes");
                 self.talk.proposals.insert(
                     item,
                     Proposal {
-                        effect,
+                        kind,
                         tool: call.name.clone(),
                         input: call.input.clone(),
+                        notebook,
                     },
                 );
                 self.audited(audit::Entry {
@@ -704,7 +716,7 @@ impl Brain {
         }
     }
 
-    fn audited(&mut self, entry: audit::Entry) {
+    pub(super) fn audited(&mut self, entry: audit::Entry) {
         if let Err(err) = self.store.audit(entry) {
             tracing::warn!(%err, "could not audit");
         }
@@ -745,8 +757,8 @@ impl Brain {
                 return self.done(conn, id);
             }
             Decision::Reject => self.talk.t("Écarté.", "Dismissed.").to_owned(),
-            Decision::Accept => match self.talk.proposals.get(&item) {
-                Some(proposal) => self.carry_out(now, item, proposal),
+            Decision::Accept => match self.talk.proposals.get(&item).cloned() {
+                Some(proposal) => self.accepted(now, item, &proposal),
                 None => self.talk.t("Noté.", "Noted.").to_owned(),
             },
         };
@@ -771,25 +783,6 @@ impl Brain {
         });
         self.tell_look();
         self.done(conn, id);
-    }
-
-    /// The effect of an accepted card: through the effects' recorder
-    /// (tests); without it, nothing can act yet and she says so.
-    fn carry_out(&self, now: Timestamp, item: u64, proposal: &Proposal) -> String {
-        match &self.effects {
-            Some(effects) => {
-                let detail = format!("card:{item} {} {}", proposal.tool, proposal.input);
-                effects.effect(now, proposal.effect, &detail);
-                self.talk.t("Fait.", "Done.").to_owned()
-            }
-            None => self
-                .talk
-                .t(
-                    "Je ne sais pas encore le faire moi-même : rien n’est parti.",
-                    "I can’t do this myself yet: nothing was sent.",
-                )
-                .to_owned(),
-        }
     }
 
     /// The word of `sentence` she does not know that exactly one project's
@@ -929,7 +922,7 @@ enum Made {
         note: Option<String>,
         replies: Vec<String>,
     },
-    Card(Card, &'static str),
+    Card(Card, Kind),
 }
 
 /// A tool call's card or question; none for a tool she does not know.
@@ -959,20 +952,23 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
             replies: list("replies").into_iter().take(4).collect(),
         });
     }
-    let (effect, kind) = match name {
-        "propose_message" | "send_message" | "reply" => ("message", CardKind::Draft),
-        "propose_post" | "post" | "post_message" => ("post", CardKind::Draft),
-        "propose_mail" | "send_mail" | "send_email" => ("mail", CardKind::Draft),
+    let (kind_of, kind) = match name {
+        "propose_message" | "send_message" | "reply" => (Kind::Message, CardKind::Draft),
+        "propose_post" | "post" | "post_message" => (Kind::Post, CardKind::Draft),
+        "propose_mail" | "send_mail" | "send_email" => (Kind::Mail, CardKind::Draft),
         "propose_invitation_answer" | "answer_invitation" | "respond_to_event" => {
-            ("invitation", CardKind::Plan)
+            (Kind::Invitation, CardKind::Plan)
         }
-        "propose_event" | "create_event" => ("event", CardKind::Plan),
-        "propose_file" | "write_file" | "save_file" => ("file", CardKind::Plan),
-        "propose_task" | "add_task" | "create_task" | "propose_plan" => ("task", CardKind::Plan),
-        "propose_agent" | "start_agent" | "start_job" => ("agent", CardKind::Delegation),
-        "propose_delegation" | "delegate" => ("delegation", CardKind::Delegation),
+        "propose_event" | "create_event" => (Kind::Event, CardKind::Plan),
+        "propose_file" | "write_file" | "save_file" => (Kind::File, CardKind::Plan),
+        "propose_task" | "add_task" | "create_task" | "propose_plan" => {
+            (Kind::Task, CardKind::Plan)
+        }
+        "propose_agent" | "start_agent" | "start_job" => (Kind::Agent, CardKind::Delegation),
+        "propose_delegation" | "delegate" => (Kind::Delegation, CardKind::Delegation),
         _ => return None,
     };
+    let effect = kind_of.word();
     let to = field("to");
     let default_label = match (effect, to.as_deref()) {
         ("message", Some(to)) => w(&format!("Message à {to}"), &format!("Message to {to}")),
@@ -1015,7 +1011,7 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
             decided: None,
             outcome: None,
         },
-        effect,
+        kind_of,
     ))
 }
 
@@ -1157,7 +1153,7 @@ mod tests {
             let Some(Made::Card(card, made_effect)) = made(&call, true) else {
                 panic!("{name}: no card");
             };
-            assert_eq!(made_effect, effect);
+            assert_eq!(made_effect.word(), effect);
             assert!(card.actions.len() <= 3);
             assert_eq!(card.actions[0].decision, Decision::Accept);
         }

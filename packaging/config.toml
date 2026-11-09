@@ -411,6 +411,24 @@
 # unload-after = 120
 # pace = 2
 
+# [secretary.speak]
+# When she speaks up (docs/design/secretary.md §6). Her morning briefing
+# comes out once, at your first session (unlock or login) after morning;
+# "Pendant ton absence" after more than 4 h away. Her peek ("Fait",
+# "Plus tard") stays out `stays` seconds; at most `most` a day, `apart`
+# minutes apart (people you named as passing always aside). Never during a
+# meeting, do not disturb, a shared screen, the camera or the microphone
+# in use, a full-screen window, a locked screen; nothing in each notebook's
+# quiet hours (it waits for the next briefing), the pro notebook's
+# weekends too; nothing perso during a meeting, a share or a camera call.
+# morning = "07:00"
+# most = 6
+# apart = 30
+# quiet-pro = "19:00-08:00"
+# quiet-weekends = true
+# quiet-perso = "22:00-08:00"
+# stays = 12
+
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the
 # session is idle, in seconds, from 1 to 86400, or "off". Idle, every

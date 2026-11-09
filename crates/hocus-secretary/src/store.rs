@@ -516,6 +516,7 @@ impl Store {
             self.conn.execute_batch(&format!(
                 "BEGIN; {SCHEMA_SQL} INSERT INTO meta (key, value) VALUES ('schema', '{SCHEMA}'); COMMIT;"
             ))?;
+            self.conn.execute_batch(crate::day::SQL)?;
             return Ok(());
         }
         let version: i64 = self
@@ -530,6 +531,8 @@ impl Store {
                 "her memory's schema is {version}, this program reads {SCHEMA}"
             )));
         }
+        // Her day's records (lot 5): tables added beside, made if missing.
+        self.conn.execute_batch(crate::day::SQL)?;
         Ok(())
     }
 
@@ -768,7 +771,9 @@ impl Store {
     /// node.
     pub fn forget_notebook(&mut self, notebook: Notebook) -> Result<()> {
         let rows = self.rows_where("notebook = ?1", &[&notebook.word()])?;
-        self.purge(rows, &format!("the {} notebook", notebook.word()))
+        self.purge(rows, &format!("the {} notebook", notebook.word()))?;
+        crate::day::forget_notebook(&self.conn, notebook)?;
+        Ok(())
     }
 
     /// Forgets everything a source brought (its consent revoked), and
@@ -778,6 +783,7 @@ impl Store {
         self.purge(rows, "a source")?;
         self.conn
             .execute("DELETE FROM cursors WHERE source = ?1", [source])?;
+        crate::day::forget_source(&self.conn, source)?;
         Ok(())
     }
 

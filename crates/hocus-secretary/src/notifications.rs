@@ -165,6 +165,8 @@ impl Source for Notifications {
                 project: None,
                 sender: None,
                 body: None,
+                event: None,
+                mail: None,
                 text: Some(Box::new(redacted)),
                 summaries_only: grant.summaries_only(),
             });

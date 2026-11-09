@@ -143,10 +143,12 @@ fn run(args: Args) -> Result<(), String> {
         args.config.clone().or_else(settings::File::default_path),
     ));
     let (model, triage): Models = match &args.fake_model {
-        Some(script) => (
-            Some(Arc::new(Fake::from_file(script, recorder.clone())?)),
-            None,
-        ),
+        Some(script) => {
+            let fake = Arc::new(Fake::from_file(script, recorder.clone())?);
+            // Its `[[triage]]`, if any, is the local triage too.
+            let triage = fake.triages().then(|| fake.clone() as Arc<dyn Triager>);
+            (Some(fake), triage)
+        }
         None => {
             let router = Arc::new(Router::new(
                 settings.clone(),

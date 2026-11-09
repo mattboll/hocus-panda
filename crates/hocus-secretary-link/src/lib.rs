@@ -27,6 +27,17 @@
 //! ([`FromSecretary::Typing`]), her answer's text as it comes
 //! ([`FromSecretary::Answer`]), and her face and status line
 //! ([`FromSecretary::Look`]).
+//!
+//! **Version 3** brings her speaking up (§6, lot 5): she asks to speak
+//! ([`FromSecretary::Speak`]) and the shell's gate ([`gate`]) answers
+//! ([`ToSecretary::Spoken`]: shown, held or dropped) from the screen's
+//! state and her restraint ([`FromSecretary::Restraint`]); what the user
+//! does with her peek ([`ToSecretary::Peeked`]: "Fait", "Plus tard ▾",
+//! the bubble); the briefings as thread items ([`Body::Briefing`]); every
+//! item's notebook, so that the drawer hides perso in public moments;
+//! the moment itself ([`ToSecretary::Moment`]); and the outside effects
+//! the shell carries out for her ([`FromSecretary::Effect`], answered by
+//! [`ToSecretary::Effected`]): the first is a task in the To do list.
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -38,10 +49,11 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 pub mod consent;
+pub mod gate;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -88,9 +100,12 @@ pub enum Client {
 }
 
 /// The two notebooks every item of her memory is in (§7.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Notebook {
+    #[default]
     Pro,
     Perso,
 }
@@ -198,6 +213,109 @@ pub enum ToSecretary {
     /// do. Nothing goes back: no line of hers can invoke, close or mark a
     /// notification (Slack's would mark the channel read).
     Notification(Notification),
+    /// What the gate did with her request to speak `speak`
+    /// ([`FromSecretary::Speak`]).
+    Spoken { speak: u64, outcome: Spoken },
+    /// What the user did with her peek of `speak`.
+    Peeked {
+        id: u64,
+        speak: u64,
+        answer: PeekAnswer,
+    },
+    /// The moment the screen is in (§7.4), as it changes: in a public one
+    /// nothing perso is shown, and nothing perso goes to a model.
+    Moment { moment: Moment },
+    /// Effect `effect` carried out by the shell (`ok`), or not, and why.
+    Effected {
+        effect: u64,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        detail: String,
+    },
+}
+
+/// What the gate did with a request to speak (§6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Spoken {
+    /// Her peek came out.
+    Shown,
+    /// Held for now: shown when what holds it ends, if still actionable.
+    Held { why: gate::Why },
+    /// Not shown: it goes to her next briefing.
+    Dropped { why: gate::Why },
+}
+
+/// What the user did with her peek (§6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PeekAnswer {
+    /// "Fait": done.
+    Done,
+    /// "Plus tard ▾" and one of its choices.
+    Later { later: Later },
+    /// The bubble, or its action: the drawer opens on the item.
+    Open,
+}
+
+/// "Plus tard ▾"'s choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Later {
+    /// "Dans 1 heure".
+    Hour,
+    /// "Après ma prochaine réunion".
+    AfterMeeting,
+    /// "Cet après-midi".
+    Afternoon,
+    /// "Demain matin, dans le point".
+    Tomorrow,
+    /// "Ne plus me le dire".
+    Never,
+}
+
+impl Later {
+    pub const ALL: [Self; 5] = [
+        Self::Hour,
+        Self::AfterMeeting,
+        Self::Afternoon,
+        Self::Tomorrow,
+        Self::Never,
+    ];
+
+    /// Its words in the menu.
+    pub fn words(self, fr: bool) -> &'static str {
+        match (self, fr) {
+            (Self::Hour, true) => "Dans 1 heure",
+            (Self::Hour, false) => "In an hour",
+            (Self::AfterMeeting, true) => "Après ma prochaine réunion",
+            (Self::AfterMeeting, false) => "After my next meeting",
+            (Self::Afternoon, true) => "Cet après-midi",
+            (Self::Afternoon, false) => "This afternoon",
+            (Self::Tomorrow, true) => "Demain matin, dans le point",
+            (Self::Tomorrow, false) => "Tomorrow morning, in the briefing",
+            (Self::Never, true) => "Ne plus me le dire",
+            (Self::Never, false) => "Don’t tell me again",
+        }
+    }
+}
+
+/// The moment the screen is in (§7.4): a meeting taking time, the screen
+/// shared or recorded, the camera or the microphone in use are public.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Moment {
+    #[default]
+    Quiet,
+    Meeting,
+    Sharing,
+    Camera,
+}
+
+impl Moment {
+    pub const fn public(self) -> bool {
+        !matches!(self, Self::Quiet)
+    }
 }
 
 /// A notification forwarded to her ([`ToSecretary::Notification`]).
@@ -263,6 +381,22 @@ pub enum FromSecretary {
     Look {
         look: Look,
     },
+    /// She asks to speak (§6.2, §6.3): the shell's gate answers
+    /// [`ToSecretary::Spoken`].
+    Speak {
+        speak: Speak,
+    },
+    /// Her restraint's settings, for the shell's gate: on hello and as
+    /// they change.
+    Restraint {
+        restraint: gate::Restraint,
+    },
+    /// An outside effect the user accepted on a card, for the shell to
+    /// carry out (it owns what it touches): answered by
+    /// [`ToSecretary::Effected`].
+    Effect {
+        effect: Effect,
+    },
     Error {
         #[serde(default)]
         id: Option<u64>,
@@ -280,9 +414,13 @@ impl FromSecretary {
             | Self::Typing { id, .. }
             | Self::Thread { id, .. } => Some(*id),
             Self::Error { id, .. } => *id,
-            Self::Hello { .. } | Self::Refused { .. } | Self::Item { .. } | Self::Look { .. } => {
-                None
-            }
+            Self::Hello { .. }
+            | Self::Refused { .. }
+            | Self::Item { .. }
+            | Self::Look { .. }
+            | Self::Speak { .. }
+            | Self::Restraint { .. }
+            | Self::Effect { .. } => None,
         }
     }
 }
@@ -297,6 +435,10 @@ pub struct Item {
     /// The request it belongs to: the sentence it answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<u64>,
+    /// Its notebook, when it is about one: a perso item is hidden in a
+    /// public moment (§7.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notebook: Option<Notebook>,
     pub body: Body,
 }
 
@@ -333,6 +475,146 @@ pub enum Body {
         #[serde(default, skip_serializing_if = "is_false")]
         undone: bool,
     },
+    /// A briefing (§6.1): the morning's, folded on one line with "Ouvrir
+    /// le point"; "Pendant ton absence" (§3.10), shown whole.
+    Briefing { briefing: Briefing },
+}
+
+/// A briefing, its parts in order, each only when it has something.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Briefing {
+    pub kind: BriefingKind,
+    /// "Le point du matin", "Pendant ton absence · ven. 18 h → lun. 8 h 40".
+    pub title: String,
+    /// "Bonjour Alex"; the date; her sentence on the day.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hello: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub date: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sentence: String,
+    #[serde(default)]
+    pub sections: Vec<Section>,
+    /// What was read, and when.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub footer: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BriefingKind {
+    #[default]
+    Morning,
+    Absence,
+}
+
+/// A part of a briefing: "AUJOURD'HUI", "EN CONGÉS", "À RÉPONDRE"…
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Section {
+    /// Which part: `today`, `leaves`, `answer`, `rest`, `yesterday`,
+    /// `plan`, `reminders`, `away`, `perso`.
+    pub key: String,
+    /// Its spaced label ("EN CONGÉS"), and a word after it ("calendrier
+    /// « Congés »").
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    #[serde(default)]
+    pub lines: Vec<Line>,
+    /// A proposal card of the thread shown under it (the move of a
+    /// meeting whose presenter is away).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<u64>,
+}
+
+/// A line of a briefing.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Line {
+    /// "9 h 30", in Martian Mono.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub time: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    /// When, on the right ("hier 17 h 40").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub when: String,
+    /// Something needs the user: amber.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub attention: bool,
+    /// A plan's line: ticked or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
+    pub notebook: Notebook,
+}
+
+/// Her request to speak (§6.3's `speak(item, priority, deadline)`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Speak {
+    pub id: u64,
+    pub kind: SpeakKind,
+    /// What her bubble says, `**` around the key words.
+    pub text: String,
+    /// The action button's label, when it has one ("Ouvrir le point").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// The thread item it is about: the bubble opens the drawer on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<u64>,
+    pub notebook: Notebook,
+    /// Someone the user named as passing always (§3.7): past the counts,
+    /// never past a meeting.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub vip: bool,
+    /// Past this (RFC 3339), it can no longer be acted on: not shown, it
+    /// goes to the next briefing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpeakKind {
+    /// "Ton point est prêt".
+    Briefing,
+    /// "Pendant ton absence".
+    Absence,
+    /// A reminder come due (a commitment, a task's time).
+    Reminder,
+    /// Something to decide now (a meeting whose presenter is away).
+    Proposal,
+}
+
+impl SpeakKind {
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Briefing => "briefing",
+            Self::Absence => "absence",
+            Self::Reminder => "reminder",
+            Self::Proposal => "proposal",
+        }
+    }
+}
+
+/// An outside effect for the shell to carry out (§2.1: only after the
+/// user's click on that card).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Effect {
+    /// A task at the top of the To do list (Day.4).
+    Task {
+        id: u64,
+        title: String,
+        notebook: Notebook,
+    },
+}
+
+impl Effect {
+    pub const fn id(&self) -> u64 {
+        match self {
+            Self::Task { id, .. } => *id,
+        }
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -731,7 +1013,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":2,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":3,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });
@@ -776,6 +1058,7 @@ mod tests {
                 id: 4,
                 at: "2026-11-09T08:55:00Z".to_owned(),
                 request: Some(2),
+                notebook: None,
                 body: Body::Card {
                     card: Card {
                         kind: CardKind::Draft,
@@ -821,6 +1104,62 @@ mod tests {
         for mood in Mood::ALL {
             assert_eq!(Mood::of(mood.word()), Some(mood));
         }
+    }
+
+    #[test]
+    fn her_speaking_lines_read_back() {
+        let speak = FromSecretary::Speak {
+            speak: Speak {
+                id: 1,
+                kind: SpeakKind::Briefing,
+                text: "Ton point est prêt".to_owned(),
+                action: Some("Ouvrir le point".to_owned()),
+                item: Some(4),
+                notebook: Notebook::Pro,
+                vip: false,
+                deadline: None,
+            },
+        };
+        assert_eq!(read::<FromSecretary>(&line(&speak)), Ok(speak));
+        let spoken: ToSecretary =
+            read("{\"spoken\":{\"speak\":1,\"outcome\":{\"held\":{\"why\":\"dnd\"}}}}")
+                .expect("reads");
+        assert_eq!(
+            spoken,
+            ToSecretary::Spoken {
+                speak: 1,
+                outcome: Spoken::Held {
+                    why: gate::Why::Dnd
+                }
+            }
+        );
+        let later = ToSecretary::Peeked {
+            id: 2,
+            speak: 1,
+            answer: PeekAnswer::Later {
+                later: Later::AfterMeeting,
+            },
+        };
+        assert_eq!(read::<ToSecretary>(&line(&later)), Ok(later));
+        let effect = FromSecretary::Effect {
+            effect: Effect::Task {
+                id: 7,
+                title: "Envoyer le devis à Léa".to_owned(),
+                notebook: Notebook::Pro,
+            },
+        };
+        assert_eq!(read::<FromSecretary>(&line(&effect)), Ok(effect));
+        let restraint = FromSecretary::Restraint {
+            restraint: gate::Restraint::default(),
+        };
+        assert_eq!(read::<FromSecretary>(&line(&restraint)), Ok(restraint));
+        let moment: ToSecretary = read("{\"moment\":{\"moment\":\"sharing\"}}").expect("reads");
+        assert_eq!(
+            moment,
+            ToSecretary::Moment {
+                moment: Moment::Sharing
+            }
+        );
     }
 
     #[test]

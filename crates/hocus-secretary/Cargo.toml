@@ -38,6 +38,8 @@ unicode-normalization = "0.1.26"
 # Her sources (Google accounts of Online Accounts), redacted before
 # anything else sees them: one Notebook with her memory's.
 hocus-sources = { path = "../hocus-sources", version = "1.0.0" }
+# An event's times, as the sources give them.
+hocus-day = { path = "../hocus-day", version = "1.0.0" }
 # The models' HTTP (the Anthropic Messages API, OpenAI-compatible local
 # servers), blocking, on a call's worker thread; TLS by rustls on ring
 # against the system's certificates, as the sources do.

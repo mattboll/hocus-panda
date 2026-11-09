@@ -50,6 +50,14 @@ pub struct Item {
     pub sender: Option<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// An event's times and people (lot 5: today's meetings, leaves, free
+    /// slots).
+    #[serde(default)]
+    pub event: Option<EventInfo>,
+    /// A mail's headers (lot 5: what waits for an answer, what the user
+    /// promised).
+    #[serde(default)]
+    pub mail: Option<MailInfo>,
     /// Its text through the first pass, for the triage; never kept.
     #[serde(skip)]
     pub text: Option<Box<Redacted>>,
@@ -57,6 +65,46 @@ pub struct Item {
     /// ("Seuls des résumés locaux sortent", §14.1, 5).
     #[serde(skip)]
     pub summaries_only: bool,
+}
+
+/// An event's times and people.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventInfo {
+    /// Its end (its start is the item's time).
+    pub end: Timestamp,
+    /// Its calendar's name ("Congés").
+    #[serde(default)]
+    pub calendar: String,
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    #[serde(default)]
+    pub organiser: Option<String>,
+    /// Who presents it, when its description says so.
+    #[serde(default)]
+    pub presenter: Option<String>,
+    /// It takes time (not marked free, nor declined or cancelled).
+    #[serde(default = "yes")]
+    pub busy: bool,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+/// A mail's headers.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailInfo {
+    #[serde(default)]
+    pub to: Vec<String>,
+    /// In the sent mailbox: the user's own.
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
 }
 
 /// What a sync read.
@@ -123,9 +171,21 @@ impl Fixture {
         toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    /// An item's place in the sync's order: its time, then its id.
+    /// When the source has an item: its time; an event with its times
+    /// (`event`), as a calendar shows it, 30 days ahead.
+    fn arrives(item: &Item) -> Timestamp {
+        match item.event {
+            Some(_) => item
+                .at
+                .checked_sub(jiff::SignedDuration::from_hours(24 * 30))
+                .unwrap_or(item.at),
+            None => item.at,
+        }
+    }
+
+    /// An item's place in the sync's order: when it arrives, then its id.
     fn key(item: &Item) -> String {
-        format!("{}#{}", crate::store::stamp(item.at), item.id)
+        format!("{}#{}", crate::store::stamp(Self::arrives(item)), item.id)
     }
 }
 
@@ -146,7 +206,7 @@ impl Source for Fixture {
         let mut items: Vec<Item> = self
             .items
             .iter()
-            .filter(|i| i.at <= now && cursor.is_none_or(|c| Self::key(i).as_str() > c))
+            .filter(|i| Self::arrives(i) <= now && cursor.is_none_or(|c| Self::key(i).as_str() > c))
             .cloned()
             .collect();
         items.sort_by_key(Self::key);
@@ -181,10 +241,15 @@ impl Fixture {
     /// its body the text, both through the first pass.
     fn redact(&self, redactor: &Redactor, item: &Item, body: &str) -> Redacted {
         let source = SourceKey::new(&self.name, SourceKind::Mail);
+        let info = item.mail.clone().unwrap_or_default();
         let mail = Mail {
-            mailbox: "INBOX".to_owned(),
+            mailbox: if info.sent { "[Gmail]/Sent" } else { "INBOX" }.to_owned(),
+            sent: info.sent,
             from: item.sender.clone().unwrap_or_default(),
+            to: info.to,
             subject: item.digest.clone(),
+            message_id: info.message_id,
+            in_reply_to: info.in_reply_to,
             body: Some(body.to_owned()),
             ..Mail::default()
         };

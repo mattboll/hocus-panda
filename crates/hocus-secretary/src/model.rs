@@ -265,6 +265,15 @@ pub trait Model: Send + Sync + std::fmt::Debug {
 ///
 /// `name` at the top (optional) is the model's name the drawer shows
 /// (screenshots); else "fake · scripted".
+///
+/// `[[triage]]` makes it the local triage too (lot 5's tests): the
+/// verdict of the first whose words the item holds, else an empty one.
+///
+/// ```toml
+/// [[triage]]
+/// contains = ["devis"]
+/// verdict = { for_me = true, needs_reply = true, urgency = "high", digest = "…" }
+/// ```
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Script {
@@ -274,6 +283,17 @@ pub struct Script {
     pub reply: Vec<Scripted>,
     #[serde(default)]
     pub default: Option<Scripted>,
+    #[serde(default)]
+    pub triage: Vec<ScriptedTriage>,
+}
+
+/// A scripted triage's verdict, for the items holding all its words.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptedTriage {
+    #[serde(default)]
+    pub contains: Vec<String>,
+    pub verdict: crate::triage::Verdict,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -408,6 +428,34 @@ impl Model for Fake {
             .name
             .clone()
             .unwrap_or_else(|| "fake · scripted".to_owned())
+    }
+}
+
+impl Fake {
+    /// It triages too (its script has `[[triage]]`).
+    pub fn triages(&self) -> bool {
+        !self.script.triage.is_empty()
+    }
+}
+
+impl crate::triage::Triager for Fake {
+    fn endpoint(&self) -> (String, String) {
+        ("fake".to_owned(), "scripted-triage".to_owned())
+    }
+
+    fn triage(&self, input: &str) -> Result<(crate::triage::Verdict, u64, u64), String> {
+        let verdict = self
+            .script
+            .triage
+            .iter()
+            .find(|t| t.contains.iter().all(|w| input.contains(w.as_str())))
+            .map(|t| t.verdict.clone())
+            .unwrap_or_default();
+        Ok((verdict, words(input), 20))
+    }
+
+    fn unload(&self) -> Result<(), String> {
+        Ok(())
     }
 }
 
