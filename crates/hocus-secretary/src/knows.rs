@@ -228,7 +228,7 @@ fn said(store: &Store, w: &Words, edge: &Edge) -> String {
         ("client_of", false) => format!("client of {to}"),
         ("arrived", true) => format!("arrivée le {}", date(&to)),
         ("arrived", false) => format!("arrived on {}", date(&to)),
-        ("left", true) => format!("partie le {}", date(&to)),
+        ("left", true) => format!("parti·e le {}", date(&to)),
         ("left", false) => format!("left on {}", date(&to)),
         ("role", _) => to,
         ("likes", true) => format!("aime {to}"),
@@ -611,7 +611,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         let new = arrived.is_some_and(|d| d >= day_of(week_ago)) && left.is_none();
         if new {
             tags.push(Tag {
-                text: w.t("nouvelle·au", "new"),
+                text: w.t("nouvelle recrue", "new"),
                 tone: Tone::New,
             });
         }
@@ -845,6 +845,15 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             params![source, format!("{source}:%"), stamp(month)],
             |r| r.get(0),
         )?;
+        let ever: i64 = store.conn.query_row(
+            "SELECT count(*) FROM episodes WHERE source = ?1 OR source LIKE ?2",
+            params![source, format!("{source}:%")],
+            |r| r.get(0),
+        )?;
+        if ever == 0 {
+            // Connected, nothing read yet: not a tool of hers yet.
+            continue;
+        }
         let quiet = tool_rules.get(&fold(&shown)).is_some_and(|r| !r.is_empty());
         let level = if quiet || count <= 3 {
             w.t("à peine", "barely")
@@ -862,10 +871,6 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             item: format!("source:{source}"),
             title: shown.clone(),
             text: format!(" · {level}"),
-            tags: vec![Tag {
-                text: level,
-                tone: if quiet { Tone::Warn } else { Tone::Plain },
-            }],
             lines,
             origin: Origin {
                 provenance: None,

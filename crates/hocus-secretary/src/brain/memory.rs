@@ -421,8 +421,9 @@ impl Brain {
                         .talk
                         .t("Nouvelle personne · à confirmer", "New person · to confirm")
                         .to_owned(),
-                    text: String::new(),
-                    lines,
+                    // Its fields, one a line (lines would be steps).
+                    text: lines.join("\n"),
+                    lines: Vec::new(),
                     actions: vec![
                         action(self.talk.t("Ajouter", "Add"), Decision::Accept),
                         action(self.talk.t("Modifier", "Edit"), Decision::Edit),

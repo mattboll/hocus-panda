@@ -41,6 +41,7 @@ pub mod notifications;
 pub mod power;
 pub mod providers;
 pub mod retrieve;
+pub mod seed;
 pub mod server;
 pub mod settings;
 pub mod sources;

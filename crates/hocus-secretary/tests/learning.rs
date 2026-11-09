@@ -218,7 +218,7 @@ fn an_arrival_said_is_searched_proposed_kept_and_undone_within_ten_seconds() -> 
     let Body::Card { card: shown } = &card.body else {
         unreachable!()
     };
-    let lines = shown.lines.join(" | ");
+    let lines = shown.text.replace('\n', " | ");
     assert!(lines.contains("Julie Berthier"), "{lines}");
     assert!(lines.contains("Développeuse front"), "{lines}");
     assert!(
