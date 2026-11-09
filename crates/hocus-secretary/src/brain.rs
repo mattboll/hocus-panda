@@ -36,6 +36,7 @@
 //! triage finds in mails the user sent, and the effects of accepted cards
 //! ([`crate::effects`]).
 
+mod consent;
 mod conversation;
 mod memory;
 mod speaking;
@@ -131,6 +132,9 @@ pub enum Event {
         started: Timestamp,
         result: Result<Reply, String>,
     },
+    /// Whether the keyring gives her answers' provider's key: the
+    /// provider missing one, or none.
+    Keyed(Option<String>),
     Stop,
 }
 
@@ -159,6 +163,9 @@ pub struct Options {
     /// Where "Exporter" writes her memory (her folder's `exports`); none:
     /// no export (tests).
     pub exports: Option<std::path::PathBuf>,
+    /// Her consent book (her folder's `consents.json`), which her consent
+    /// cards write; none: no consent from the drawer.
+    pub consents: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -174,6 +181,7 @@ impl Default for Options {
             effects: None,
             notifications: None,
             exports: None,
+            consents: None,
         }
     }
 }
@@ -239,6 +247,12 @@ pub struct Brain {
     arrivals: Option<Arrivals>,
     /// "Ce qu'elle sait", what she learns, compaction (lot 6).
     memory: memory::Memory,
+    /// Her sources' consent in the drawer, her first run (#750).
+    consents: consent::Consents,
+    /// The provider whose key her answers need and the keyring does not
+    /// give; whether it is being asked.
+    key_missing: Option<String>,
+    key_asked: bool,
 }
 
 impl Brain {
@@ -292,7 +306,18 @@ impl Brain {
             redactor: Redactor::new(),
             arrivals: options.notifications,
             memory: memory::Memory::new(options.exports),
+            consents: consent::Consents {
+                book: options.consents,
+                ..consent::Consents::default()
+            },
+            key_missing: None,
+            key_asked: false,
         };
+        // What she kept across a restart: her thread, the items waiting
+        // for the triage (#750).
+        brain.restore();
+        brain.consents_restored();
+        brain.ask_key();
         if let Some(away) = away {
             brain.catch_up(away);
         }
@@ -310,6 +335,8 @@ impl Brain {
         loop {
             self.ask_due();
             self.triage_step();
+            // The triage paused, or going again: her status says it.
+            self.tell_look();
             self.speak_due();
             self.memory_due();
             let triage = self.settings.current().triage;
@@ -437,6 +464,7 @@ impl Brain {
         if changes {
             self.knows_refresh();
         }
+        self.keep_proposals();
         go_on
     }
 
@@ -492,6 +520,14 @@ impl Brain {
                 started,
                 result,
             } => self.compacted(*work, started, result),
+            Event::Keyed(missing) => {
+                self.key_asked = false;
+                if missing != self.key_missing {
+                    tracing::info!(missing = ?missing, "her answers' key");
+                    self.key_missing = missing;
+                    self.tell_look();
+                }
+            }
             Event::Stop => return false,
         }
         true
@@ -565,7 +601,16 @@ impl Brain {
             },
             ToSecretary::Ask { id, text } => self.sentence(conn, id, text),
             ToSecretary::Choose { id, item, choice } => self.choose(conn, id, item, choice),
-            ToSecretary::Decide { id, item, decision } => self.decide(conn, id, item, decision),
+            ToSecretary::Decide {
+                id,
+                item,
+                decision,
+                notebook,
+            } => {
+                if !self.consent_decide(conn, id, item, decision, notebook) {
+                    self.decide(conn, id, item, decision);
+                }
+            }
             ToSecretary::Undo { id, item } => {
                 if !self.too_late(conn, id, item) {
                     self.undo(conn, id, item);
@@ -811,11 +856,13 @@ impl Brain {
         };
         let (name, notebook) = (slot.name.clone(), slot.notebook);
         let mut read = 0;
+        let mut found = None;
         match result {
-            Ok(synced) => {
+            Ok(mut synced) => {
                 slot.error = None;
                 slot.items += synced.items.len() as u64;
                 read = synced.items.len() as u64;
+                found = synced.found.take();
                 for gone in &synced.forget {
                     tracing::info!(source = gone, "a source revoked: what came from it goes");
                     if let Err(err) = self.store.forget_source(gone) {
@@ -862,7 +909,14 @@ impl Brain {
                             // What it says of the team (lot 6): proposals.
                             self.seen_in_source(episode, &item.digest, item.at);
                             if let Some(text) = item.text {
-                                self.hold(pointer.clone(), *text, episode, item.summaries_only);
+                                let from = item.from.as_deref().unwrap_or(&name);
+                                self.hold(
+                                    pointer.clone(),
+                                    from,
+                                    *text,
+                                    episode,
+                                    item.summaries_only,
+                                );
                             }
                         }
                         Err(err) => tracing::warn!(source = name, %err, "could not keep an item"),
@@ -895,6 +949,9 @@ impl Brain {
         }
         self.catch_up_done_if_over();
         self.try_brief();
+        if let Some(accounts) = found {
+            self.accounts_found(accounts);
+        }
         // A source failing, or answering again: her face says it.
         self.tell_look();
         if let Err(err) = self.store.prune_audit() {
@@ -929,20 +986,113 @@ impl Brain {
         .map_err(|e| format!("her memory: {e}"))
     }
 
-    /// An item with its text, held and queued for the triage.
-    fn hold(&mut self, pointer: String, text: hocus_sources::Redacted, episode: i64, only: bool) {
-        self.inbox.hold(
-            pointer.clone(),
-            Held {
-                redacted: text,
-                episode,
-                summaries_only: only,
-                summary: None,
-                suspicious: false,
-            },
-        );
+    /// An item with its text, held and queued for the triage; its text
+    /// kept, encrypted, until the triage checked it (a restart loses
+    /// nothing, #750).
+    fn hold(
+        &mut self,
+        pointer: String,
+        source: &str,
+        text: hocus_sources::Redacted,
+        episode: i64,
+        only: bool,
+    ) {
+        let held = Held {
+            redacted: text,
+            episode,
+            summaries_only: only,
+            summary: None,
+            suspicious: false,
+        };
+        if held.redacted.check == hocus_sources::Check::FirstPass
+            && let Err(err) = crate::kept::keep_pending(&self.store.conn, &pointer, source, &held)
+        {
+            tracing::warn!(pointer, %err, "could not keep an item waiting for the triage");
+        }
+        self.inbox.hold(pointer.clone(), held);
         if self.triager.is_some() {
             self.queue.push(pointer);
+        }
+    }
+
+    /// What she kept across a restart: her thread (its cards' proposals
+    /// with it), and the items still waiting for the triage, queued again
+    /// with their text.
+    fn restore(&mut self) {
+        match crate::kept::thread(&self.store.conn) {
+            Ok(items) => {
+                for (mut item, proposal) in items {
+                    // Too late to take back what she kept before.
+                    if let hocus_secretary_link::Body::Learned { settled, .. } = &mut item.body {
+                        *settled = true;
+                    }
+                    self.talk.next = self.talk.next.max(item.id);
+                    if let Some(proposal) = proposal {
+                        self.talk.proposals.insert(item.id, proposal);
+                        self.talk.saved.insert(item.id);
+                    }
+                    self.talk.items.push(item);
+                }
+                if !self.talk.items.is_empty() {
+                    tracing::info!(items = self.talk.items.len(), "her thread kept");
+                }
+            }
+            Err(err) => tracing::warn!(%err, "her thread does not read"),
+        }
+        match crate::kept::pending(&self.store.conn) {
+            Ok(pending) => {
+                if !pending.is_empty() {
+                    tracing::info!(items = pending.len(), "items still waiting for the triage");
+                }
+                for (pointer, held) in pending {
+                    self.inbox.hold(pointer.clone(), held);
+                    if self.triager.is_some() {
+                        self.queue.push(pointer);
+                    }
+                }
+            }
+            Err(err) => tracing::warn!(%err, "the items waiting for the triage do not read"),
+        }
+    }
+
+    /// The proposals of cards not written with them yet, written.
+    fn keep_proposals(&mut self) {
+        let unsaved: Vec<u64> = self
+            .talk
+            .proposals
+            .keys()
+            .copied()
+            .filter(|i| !self.talk.saved.contains(i))
+            .collect();
+        for id in unsaved {
+            if let Some(item) = self.talk.items.iter().find(|i| i.id == id)
+                && let Err(err) =
+                    crate::kept::keep_item(&self.store.conn, item, self.talk.proposals.get(&id))
+            {
+                tracing::warn!(%err, "could not keep a card's proposal");
+            }
+            self.talk.saved.insert(id);
+        }
+    }
+
+    /// Whether the keyring gives her answers' key, asked on a thread.
+    fn ask_key(&mut self) {
+        let Some(model) = self.model.clone().filter(|m| m.needs_key()) else {
+            return;
+        };
+        if self.key_asked {
+            return;
+        }
+        self.key_asked = true;
+        let sender = self.sender.clone();
+        let spawned = std::thread::Builder::new()
+            .name("key".to_owned())
+            .spawn(move || {
+                let _ = sender.send(Event::Keyed(model.missing_key()));
+            });
+        if let Err(err) = spawned {
+            self.key_asked = false;
+            tracing::warn!(%err, "no thread to ask the keyring");
         }
     }
 
@@ -1052,6 +1202,10 @@ impl Brain {
         if let Err(err) = held.redacted.second_pass(&mut quoted) {
             tracing::warn!(pointer, %err, "the second pass failed: the item stays unchecked");
             return;
+        }
+        // Checked: its text is no longer kept on disk.
+        if let Err(err) = crate::kept::checked(&self.store.conn, pointer) {
+            tracing::warn!(pointer, %err, "could not let a checked item's text go");
         }
         let label = held.redacted.item.pointer.label.clone();
         let digest = self.redactor.mask_with(&verdict.digest, &quoted, &label);

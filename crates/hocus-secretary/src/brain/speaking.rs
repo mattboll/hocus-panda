@@ -487,6 +487,7 @@ impl Brain {
                 ],
                 decided: None,
                 outcome: None,
+                sheet: None,
             };
             let id = self.add_item_in(None, Body::Card { card }, Some(Notebook::Pro));
             self.talk.proposals.insert(
@@ -885,6 +886,7 @@ impl Brain {
             ],
             decided: None,
             outcome: None,
+            sheet: None,
         };
         let item = self.add_item_in(None, Body::Card { card }, Some(mail.notebook));
         let title = if to.is_empty() {
@@ -1023,6 +1025,7 @@ impl Brain {
             ],
             decided: None,
             outcome: None,
+            sheet: None,
         };
         let draft_item = self.add_item_in(None, Body::Card { card }, Some(proposal.notebook));
         self.talk.proposals.insert(

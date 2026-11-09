@@ -51,6 +51,7 @@ pub mod bluetooth;
 pub mod captures;
 pub mod desktops;
 pub mod devices;
+pub mod google_sources;
 pub mod keyboard;
 pub mod keys;
 pub mod lang;

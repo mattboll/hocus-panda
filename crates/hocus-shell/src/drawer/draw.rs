@@ -140,8 +140,21 @@ fn card_colours(kind: CardKind) -> (Color, Color, Color) {
         CardKind::Warning => (alpha(0xF2945B, 0.45), alpha(0xF2945B, 0.07), hex(0xF7A77A)),
         CardKind::Draft => (alpha(0xFFFFFF, 0.18), hex(0x0F1422), LABEL),
         CardKind::Delegation => (alpha(0xB39DFF, 0.45), alpha(0xB39DFF, 0.06), hex(0xD3C6FF)),
+        // The mockup's consent sheet: its glass, its rim.
+        CardKind::Consent => (alpha(0xFFFFFF, 0.12), hex(0x1B2130), LABEL),
     }
 }
+
+/// A consent sheet's sizes (the s11 mockup's sheet, in the thread).
+const SHEET_TITLE: f32 = 14.5;
+const SHEET_FROM: f32 = 11.5;
+const SHEET_TEXT: f32 = 12.5;
+const SHEET_LINE: f32 = SHEET_TEXT * 1.45;
+const SHEET_MARK: f32 = 16.0;
+/// The hint under her header (how to fix what her status says).
+const HINT: f32 = 11.5;
+const HINT_LINE: f32 = HINT * 1.4;
+const HINT_PAD: f32 = 7.0;
 
 // --- The layout -------------------------------------------------------------------------
 
@@ -209,6 +222,9 @@ pub struct Laid {
     pub status: String,
     pub tone: Option<Tone>,
     pub model: String,
+    /// How to fix what her status says, under her header, and its box.
+    pub hint: Vec<String>,
+    pub hint_rect: Option<Rectangle>,
     pub targets: Vec<(Target, Rectangle)>,
     pub tabs: Rectangle,
     pub tab_rects: Vec<(Tab, Rectangle)>,
@@ -418,8 +434,23 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     );
     laid.targets.push((Target::Gear, gear));
     laid.targets.push((Target::Close, close));
-    // The tabs.
-    let tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
+    // How to fix what her status says: a band under her header.
+    let mut tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
+    if let Some(hint) = look
+        .as_ref()
+        .map(|l| l.hint.as_str())
+        .filter(|h| !h.is_empty())
+        && open.tab == Tab::Talk
+    {
+        let lines = lines_of(hint, HINT, false, right - PAD - 2.0 * (HINT_PAD + 3.0));
+        let h = lines.len() as f32 * HINT_LINE + 2.0 * HINT_PAD;
+        laid.hint_rect = Some(Rectangle::new(
+            Point::new(PAD, tabs_top),
+            Size::new(right - PAD, h),
+        ));
+        laid.hint = lines;
+        tabs_top += h + 8.0;
+    }
     laid.tabs = Rectangle::new(
         Point::new(PAD, tabs_top),
         Size::new(right - PAD, TAB + 2.0 * TAB_PAD),
@@ -550,6 +581,7 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "height": size.height,
         "mood": mood.word(),
         "status": laid.status,
+        "hint": laid.hint.join(" "),
         "tab": match open.tab { Tab::Talk => "talk", Tab::Knows => "knows" },
         "briefing": open.briefing,
         "point": open.point,
@@ -583,10 +615,17 @@ fn lay_out_thread(
     let mut y = THREAD_TOP;
     let list = entries(c, words, hide(open));
     let mut previous_hers = false;
+    // Each entry's shapes (from this one), its top and its bottom: only
+    // whole entries are drawn (the CPU renderer does not clip).
+    let mut spans: Vec<(usize, f32, f32)> = Vec::new();
     for (n, entry) in list.iter().enumerate() {
         if n > 0 {
             y += GAP;
         }
+        if let Some(last) = spans.last_mut() {
+            last.2 = y - GAP;
+        }
+        spans.push((shapes.len(), y, y));
         let first_hers = hers(entry) && !previous_hers;
         previous_hers = hers(entry);
         if first_hers {
@@ -916,6 +955,9 @@ fn lay_out_thread(
             }
         }
     }
+    if let Some(last) = spans.last_mut() {
+        last.2 = y;
+    }
     y += THREAD_BOTTOM;
     let content = y;
     laid.content = content;
@@ -927,8 +969,17 @@ fn lay_out_thread(
     } else {
         shift
     };
-    for shape in shapes {
-        laid.shapes.push(moved(shape, shift));
+    let mut span = 0;
+    for (n, shape) in shapes.into_iter().enumerate() {
+        while spans.get(span + 1).is_some_and(|(from, _, _)| *from <= n) {
+            span += 1;
+        }
+        let whole = spans.get(span).is_none_or(|(_, from, to)| {
+            from + shift >= top - 0.5 && to + shift <= top + room + 0.5
+        });
+        if whole {
+            laid.shapes.push(moved(shape, shift));
+        }
     }
     for (target, rect) in targets {
         let rect = Rectangle::new(Point::new(rect.x, rect.y + shift), rect.size());
@@ -1077,6 +1128,9 @@ fn lay_out_card(
     room: f32,
     y: f32,
 ) -> f32 {
+    if let Some(sheet) = &card.sheet {
+        return lay_out_sheet(shapes, targets, open, item, card, sheet, x, room, y);
+    }
     let (rim, fill, label_colour) = card_colours(card.kind);
     let inner = room - 2.0 * CARD_X;
     let mut parts: Vec<Shape> = Vec::new();
@@ -1224,6 +1278,241 @@ fn lay_out_card(
             sharp: Corner::None,
         });
     }
+    shapes.extend(parts);
+    at
+}
+
+/// A consent card at `y` (§10.1, #750): the sheet's title and where it
+/// comes from, what she reads (✓), what she never does there (✕), what
+/// leaves the machine, the notebook to choose, "Autoriser" and "Pas
+/// maintenant"; once granted, what she reads and "Ne plus lire". Its
+/// bottom.
+#[allow(clippy::too_many_arguments)]
+fn lay_out_sheet(
+    shapes: &mut Vec<Shape>,
+    targets: &mut Vec<(Target, Rectangle)>,
+    open: &Open,
+    item: u64,
+    card: &Card,
+    sheet: &hocus_secretary_link::sheets::Sheet,
+    x: f32,
+    room: f32,
+    y: f32,
+) -> f32 {
+    use hocus_secretary_link::sheets::Mark;
+    let (rim, fill, _) = card_colours(CardKind::Consent);
+    let inner = room - 2.0 * CARD_X;
+    let mut parts: Vec<Shape> = Vec::new();
+    let mut at = y + CARD_TOP + 2.0;
+    let title = lines_of(&sheet.title, SHEET_TITLE, true, inner);
+    push_lines(
+        &mut parts,
+        &title,
+        x + CARD_X,
+        at,
+        SHEET_TITLE,
+        SHEET_TITLE * 1.35,
+        TEXT,
+        true,
+    );
+    at += title.len() as f32 * SHEET_TITLE * 1.35;
+    let from = lines_of(&sheet.from, SHEET_FROM, false, inner);
+    push_lines(
+        &mut parts,
+        &from,
+        x + CARD_X,
+        at,
+        SHEET_FROM,
+        SHEET_FROM * 1.4,
+        LABEL,
+        false,
+    );
+    at += from.len() as f32 * SHEET_FROM * 1.4;
+    let asking = card.outcome.is_none();
+    let granted = card.outcome.is_some() && card.decided.is_none();
+    // Granted, only what she reads stays shown; declined, nothing.
+    for section in sheet
+        .sections
+        .iter()
+        .filter(|s| asking || (granted && s.mark == Mark::Yes))
+    {
+        at += 8.0;
+        parts.push(Shape::Text(Line {
+            text: section.label.clone(),
+            at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
+            size: CARD_LABEL,
+            color: LABEL,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += CARD_LABEL * 1.4 + 2.0;
+        let (mark, colour) = match section.mark {
+            Mark::Yes => ("✓", MINT),
+            Mark::No => ("✕", hex(0xF7A77A)),
+            Mark::Plain => ("•", FAINT),
+        };
+        for text in &section.lines {
+            let lines = lines_of(text, SHEET_TEXT, false, inner - SHEET_MARK);
+            parts.push(Shape::Text(Line {
+                text: mark.to_owned(),
+                at: Point::new(x + CARD_X, at + SHEET_LINE / 2.0),
+                size: SHEET_TEXT,
+                color: colour,
+                bold: true,
+                align: Alignment::Left,
+            }));
+            push_lines(
+                &mut parts,
+                &lines,
+                x + CARD_X + SHEET_MARK,
+                at,
+                SHEET_TEXT,
+                SHEET_LINE,
+                hex(0xC9D0DC),
+                false,
+            );
+            at += lines.len() as f32 * SHEET_LINE + 2.0;
+        }
+    }
+    let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
+    if asking {
+        // The notebook: suggested by the account's domain, chosen here.
+        at += 8.0;
+        parts.push(Shape::Text(Line {
+            text: super::words().pick("CARNET", "NOTEBOOK").to_owned(),
+            at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
+            size: CARD_LABEL,
+            color: LABEL,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += CARD_LABEL * 1.4 + 4.0;
+        if let Some(ask) = &sheet.ask {
+            let lines = lines_of(ask, SMALL, true, inner);
+            push_lines(
+                &mut parts,
+                &lines,
+                x + CARD_X,
+                at,
+                SMALL,
+                SMALL_LINE,
+                hex(0xFFE2A8),
+                true,
+            );
+            at += lines.len() as f32 * SMALL_LINE + 4.0;
+        }
+        let chosen = open.notebooks.get(&item).copied().unwrap_or(sheet.notebook);
+        let mut px = x + CARD_X;
+        for (notebook, word) in [(Notebook::Pro, "Pro"), (Notebook::Perso, "Perso")] {
+            let w = width_of(word, PILL, true) + 2.0 * PILL_X;
+            let rect = Rectangle::new(Point::new(px, at), Size::new(w, button_h));
+            let on = chosen == notebook;
+            let target = Target::Pill { item, notebook };
+            let hover = open.hover == Some(target);
+            parts.push(Shape::Box {
+                rect,
+                radius: button_h / 2.0,
+                fill: if on {
+                    alpha(0x7EE0A0, 0.22)
+                } else if hover {
+                    alpha(0xFFFFFF, 0.12)
+                } else {
+                    alpha(0xFFFFFF, 0.06)
+                },
+                rim: Some(if on {
+                    alpha(0x7EE0A0, 0.6)
+                } else {
+                    alpha(0xFFFFFF, 0.14)
+                }),
+                dashed: false,
+                sharp: Corner::None,
+            });
+            parts.push(Shape::Text(Line {
+                text: word.to_owned(),
+                at: Point::new(px + w / 2.0, at + button_h / 2.0),
+                size: PILL,
+                color: if on { hex(0x9BEBB8) } else { hex(0xD5DBE5) },
+                bold: true,
+                align: Alignment::Center,
+            }));
+            targets.push((target, rect));
+            px += w + PILL_GAP;
+        }
+        at += button_h;
+    } else if let Some(outcome) = &card.outcome {
+        at += if granted { 10.0 } else { 6.0 };
+        let shown = if granted {
+            format!("✓ {outcome}")
+        } else {
+            outcome.clone()
+        };
+        let lines = lines_of(&shown, SMALL, granted, inner);
+        push_lines(
+            &mut parts,
+            &lines,
+            x + CARD_X,
+            at,
+            SMALL,
+            SMALL_LINE,
+            if granted { MINT } else { DIM },
+            granted,
+        );
+        at += lines.len() as f32 * SMALL_LINE;
+    }
+    if !card.actions.is_empty() && card.decided.is_none() {
+        at += BUTTON_TOP + 2.0;
+        // Right-aligned, the primary last (the mockup's sheet).
+        let widths: Vec<f32> = card
+            .actions
+            .iter()
+            .map(|a| width_of(&a.label, BUTTON, true) + 2.0 * BUTTON_X)
+            .collect();
+        let total: f32 = widths.iter().sum::<f32>() + 6.0 * (widths.len() as f32 - 1.0);
+        let mut bx = x + room - CARD_X - total;
+        for (n, action) in card.actions.iter().enumerate() {
+            let w = widths[n];
+            let rect = Rectangle::new(Point::new(bx, at), Size::new(w, button_h));
+            let target = Target::Button {
+                item,
+                decision: action.decision,
+            };
+            let hover = open.hover == Some(target);
+            let primary = n == 0 && asking;
+            parts.push(Shape::Box {
+                rect,
+                radius: 8.0,
+                fill: match (primary, hover) {
+                    (true, false) => GREEN,
+                    (true, true) => hex(0x7ED198),
+                    (false, false) => alpha(0xFFFFFF, 0.07),
+                    (false, true) => alpha(0xFFFFFF, 0.12),
+                },
+                rim: (!primary).then_some(alpha(0xFFFFFF, 0.14)),
+                dashed: false,
+                sharp: Corner::None,
+            });
+            parts.push(Shape::Text(Line {
+                text: action.label.clone(),
+                at: Point::new(bx + w / 2.0, at + button_h / 2.0),
+                size: BUTTON,
+                color: if primary { INK } else { hex(0xD5DBE5) },
+                bold: true,
+                align: Alignment::Center,
+            }));
+            targets.push((target, rect));
+            bx += w + 6.0;
+        }
+        at += button_h;
+    }
+    at += CARD_BOTTOM + 2.0;
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
+        radius: 14.0,
+        fill,
+        rim: Some(rim),
+        dashed: false,
+        sharp: Corner::None,
+    });
     shapes.extend(parts);
     at
 }
@@ -2167,6 +2456,36 @@ impl View {
             match target {
                 Target::Gear => gear(f, rect.center()),
                 _ => cross(f, rect.center()),
+            }
+        }
+        // The hint under her header.
+        if let Some(rect) = laid.hint_rect {
+            f.fill(
+                &Path::rounded_rectangle(rect.position(), rect.size(), 9.0.into()),
+                alpha(0xF5B44A, 0.08),
+            );
+            f.stroke(
+                &Path::rounded_rectangle(
+                    Point::new(rect.x + 0.5, rect.y + 0.5),
+                    Size::new(rect.width - 1.0, rect.height - 1.0),
+                    8.5.into(),
+                ),
+                Stroke::default()
+                    .with_color(alpha(0xF5B44A, 0.35))
+                    .with_width(1.0),
+            );
+            for (n, line) in laid.hint.iter().enumerate() {
+                f.fill_text(text(
+                    line,
+                    Point::new(
+                        rect.x + HINT_PAD + 3.0,
+                        rect.y + HINT_PAD + n as f32 * HINT_LINE + HINT_LINE / 2.0,
+                    ),
+                    HINT,
+                    hex(0xFFE2A8),
+                    false,
+                    Alignment::Left,
+                ));
             }
         }
         // The tabs.

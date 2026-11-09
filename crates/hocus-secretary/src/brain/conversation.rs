@@ -21,7 +21,10 @@
 //! to its own question. At rest nothing is sent: her face goes out only
 //! when it changes.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+};
 
 use hocus_secretary_link::{
     Action, Body, Card, CardKind, Client, Decision, FromSecretary, Item, Look, Mood, Notebook, Tone,
@@ -33,7 +36,7 @@ use crate::{
     effects::{Kind, Proposal},
     fold::fold,
     graph::{NodeKind, Origin},
-    model::{Message, Part, Piece, Reply, Role, ToolCall, ToolResult},
+    model::{Message, Model, Part, Piece, Reply, Role, ToolCall, ToolResult},
     store::{Item as Kept, Who},
     tools,
 };
@@ -54,7 +57,15 @@ struct Turn {
     /// What the call may hold: the pro notebook only for a work draft
     /// (§7.4, lot 6); none, her usual scope.
     scope: Option<crate::context::Scope>,
+    /// The model of the whole turn, chosen at its first call (#750): a
+    /// change of the settings meanwhile never sends one model's own
+    /// blocks to another.
+    model: Option<Arc<dyn Model>>,
 }
+
+/// The thread's latest items said again to her model, as plain text,
+/// before a sentence (§7.3's conversation part, which caps it).
+const HISTORY_MOST: usize = 12;
 
 /// A word she does not know, and the one project whose items hold it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +92,7 @@ struct Pending {
 #[derive(Debug, Default)]
 pub(super) struct Talk {
     pub(super) items: Vec<Item>,
-    next: u64,
+    pub(super) next: u64,
     /// The words she makes herself in French (the desktop's language, as
     /// the shell says it).
     english: bool,
@@ -100,6 +111,8 @@ pub(super) struct Talk {
     told: Option<Look>,
     /// The sentences her model is on, by request.
     turns: HashMap<u64, Turn>,
+    /// The cards whose proposal is written with them in her memory.
+    pub(super) saved: HashSet<u64>,
 }
 
 impl Talk {
@@ -118,17 +131,21 @@ impl Brain {
     pub(super) fn greeted(&mut self, conn: u64, client: Client, lang: Option<&str>) {
         if client == Client::Shell {
             self.talk.english = lang.is_some_and(|l| l.starts_with("en"));
+        }
+        if matches!(client, Client::Shell | Client::Test) {
             let look = self.look();
             self.talk.told = Some(look.clone());
             self.send(conn, &FromSecretary::Look { look });
         }
         if matches!(client, Client::Shell | Client::Test) {
             self.greeted_speaking(conn);
+            // Her first run, once she knows her accounts (#750).
+            self.first_run_step();
         }
     }
 
     /// Whether `conn` gets the thread: the shell's, and the tests'.
-    fn talker(&self, conn: u64) -> bool {
+    pub(super) fn talker(&self, conn: u64) -> bool {
         self.conns
             .get(&conn)
             .is_some_and(|c| matches!(c.client, Some(Client::Shell | Client::Test)))
@@ -178,8 +195,10 @@ impl Brain {
             for gone in self.talk.items.drain(..over) {
                 self.talk.proposals.remove(&gone.id);
                 self.talk.kept.remove(&gone.id);
+                self.talk.saved.remove(&gone.id);
             }
         }
+        self.keep_item(&item);
         self.tell_talkers(&FromSecretary::Item { item }, None);
         self.talk.next
     }
@@ -190,7 +209,63 @@ impl Brain {
         };
         change(&mut item.body);
         let item = item.clone();
+        self.keep_item(&item);
         self.tell_talkers(&FromSecretary::Item { item }, None);
+    }
+
+    /// A thread item written in her memory, encrypted: her thread
+    /// survives a restart (#750).
+    fn keep_item(&self, item: &Item) {
+        if let Err(err) = crate::kept::keep_item(&self.store.conn, item, None) {
+            tracing::warn!(%err, "could not keep a thread item");
+        }
+    }
+
+    /// Her thread before request `id`, as plain text turns: the user's
+    /// sentences and her words, never a model's own blocks. None in a
+    /// public moment or for a work draft: what was said in private stays
+    /// out of it.
+    fn history(
+        &self,
+        id: u64,
+        sentence: &str,
+        scope: Option<&crate::context::Scope>,
+    ) -> Vec<Message> {
+        if scope.is_some() || self.scope.moment.public() {
+            return Vec::new();
+        }
+        let said: Vec<Message> = self
+            .talk
+            .items
+            .iter()
+            .filter(|i| i.request != Some(id) && i.notebook != Some(Notebook::Perso))
+            .filter_map(|i| match &i.body {
+                Body::User { text } => Some(Message::user(text.clone())),
+                Body::Her { text, .. } => Some(Message::assistant(text.clone())),
+                _ => None,
+            })
+            .collect();
+        let mut turns: Vec<Message> = Vec::new();
+        for message in said.into_iter().rev().take(HISTORY_MOST).rev() {
+            match turns.last_mut() {
+                Some(last) if last.from == message.from => {
+                    last.text.push_str("\n\n");
+                    last.text.push_str(&message.text);
+                }
+                _ => turns.push(message),
+            }
+        }
+        // It opens with the user and ends with her: the sentence follows.
+        while turns.first().is_some_and(|m| m.from != "user") {
+            turns.remove(0);
+        }
+        while turns
+            .last()
+            .is_some_and(|m| m.from == "user" || m.text.trim() == sentence.trim())
+        {
+            turns.pop();
+        }
+        turns
     }
 
     /// The end of what she says to request `id`.
@@ -230,31 +305,96 @@ impl Brain {
         } else {
             Mood::Listen
         };
-        let (status, tone) = if let Some(name) = failing.first() {
+        let fr = self.talk.fr();
+        let waiting = self.queue.pending();
+        let paused = match &self.queue.state {
+            crate::triage::State::Paused { why, .. } if waiting > 0 => Some(*why),
+            _ => None,
+        };
+        let (status, tone, hint) = if let Some(provider) = &self.key_missing {
+            // Nothing she answers can be, without it.
+            let name = if provider == "anthropic" {
+                "Anthropic".to_owned()
+            } else {
+                provider.clone()
+            };
+            if fr {
+                (
+                    format!("Il me manque ma clé {name}"),
+                    Tone::Warn,
+                    format!(
+                        "Dans un terminal : hocus-secretary key {provider}, colle ta clé, puis Entrée."
+                    ),
+                )
+            } else {
+                (
+                    format!("I’m missing my {name} key"),
+                    Tone::Warn,
+                    format!(
+                        "In a terminal: hocus-secretary key {provider}, paste your key, then Enter."
+                    ),
+                )
+            }
+        } else if let Some(name) = failing.first() {
             let name = shown_source(name);
-            let status = if self.talk.fr() {
+            let status = if fr {
                 format!("{name} ne répond plus")
             } else {
                 format!("{name} is not answering")
             };
-            (status, Tone::Warn)
+            (status, Tone::Warn, String::new())
+        } else if let Some(why) = paused {
+            let n = waiting;
+            let (status, hint) = match (why, fr) {
+                (crate::triage::Pause::Unavailable, true) => (
+                    format!("Le tri sur cet ordinateur ne répond pas · {n} en attente"),
+                    "Rien n’est perdu : ils attendent. D’ici là, seuls l’expéditeur, l’objet et la date partent vers Claude.".to_owned(),
+                ),
+                (crate::triage::Pause::Unavailable, false) => (
+                    format!("The sorting on this computer is not answering · {n} waiting"),
+                    "Nothing is lost: they wait. Until then, only the sender, subject and date go to Claude.".to_owned(),
+                ),
+                (crate::triage::Pause::Battery(_), true) => (
+                    format!("Sur batterie : je trie les {n} nouveaux quand tu rebranches"),
+                    "D’ici là, seuls l’expéditeur, l’objet et la date partent vers Claude.".to_owned(),
+                ),
+                (crate::triage::Pause::Battery(_), false) => (
+                    format!("On battery: I’ll sort the {n} new ones once you plug in"),
+                    "Until then, only the sender, subject and date go to Claude.".to_owned(),
+                ),
+                (crate::triage::Pause::Heat(_), true) => (
+                    format!("L’ordinateur chauffe : le tri attend · {n} en attente"),
+                    "Je reprends quand il a refroidi.".to_owned(),
+                ),
+                (crate::triage::Pause::Heat(_), false) => (
+                    format!("The computer is hot: the sorting waits · {n} waiting"),
+                    "I’ll go on once it has cooled down.".to_owned(),
+                ),
+            };
+            (status, Tone::Warn, hint)
         } else if self.slots.is_empty() {
             (
                 self.talk
                     .t("Rien de branché", "Nothing connected")
                     .to_owned(),
                 Tone::Off,
+                String::new(),
             )
         } else {
             let names: Vec<String> = self.slots.iter().map(|s| shown_source(&s.name)).collect();
             let up = self.talk.t("à jour", "up to date");
-            (format!("{} {up}", names.join(" · ")), Tone::Ok)
+            (
+                format!("{} {up}", names.join(" · ")),
+                Tone::Ok,
+                String::new(),
+            )
         };
         Look {
             mood,
             status,
             tone,
             model: self.model.as_ref().map(|m| m.shown()).unwrap_or_default(),
+            hint,
         }
     }
 
@@ -276,6 +416,10 @@ impl Brain {
     pub(super) fn drawer(&mut self, open: bool) {
         tracing::debug!(open, "her drawer");
         self.talk.drawer = open;
+        // A key given meanwhile shows as the drawer opens.
+        if open && self.key_missing.is_some() {
+            self.ask_key();
+        }
     }
 
     /// A sentence of the user's.
@@ -497,22 +641,25 @@ impl Brain {
     /// answer comes in pieces ([`Event::Piece`]) on a worker thread.
     fn compose(&mut self, conn: u64, id: u64, sentence: String, facts: Vec<Part>) {
         let scope = self.work_scope(&sentence);
+        let mut messages = self.history(id, &sentence, scope.as_ref());
+        messages.push(Message::user(sentence));
         self.compose_turn(
             conn,
             id,
             Turn {
-                messages: vec![Message::user(sentence)],
+                messages,
                 facts,
                 round: 0,
                 scope,
+                model: None,
             },
         );
     }
 
     /// A turn of her model's: the conversation so far (her read tools'
     /// results after their calls), her context assembled for it.
-    fn compose_turn(&mut self, conn: u64, id: u64, turn: Turn) {
-        let Some(model) = self.model.clone() else {
+    fn compose_turn(&mut self, conn: u64, id: u64, mut turn: Turn) {
+        let Some(base) = self.model.clone() else {
             let none = self.talk.t(
                 "Je n’ai pas encore de modèle pour te répondre.",
                 "I have no model to answer with yet.",
@@ -527,6 +674,15 @@ impl Brain {
             );
             return self.error(conn, Some(id), "she has no model yet");
         };
+        // The turn's model, fixed at its first call.
+        let model = match turn.model.clone() {
+            Some(model) => model,
+            None => match base.pin(Role::Answer) {
+                Ok(pinned) => pinned.unwrap_or(base),
+                Err(err) => return self.replied(conn, id, Err(err)),
+            },
+        };
+        turn.model = Some(model.clone());
         let made = match &turn.scope {
             Some(scope) => self.request_in(Role::Answer, &turn.messages, scope),
             None => self.request(Role::Answer, &turn.messages),
@@ -599,6 +755,9 @@ impl Brain {
         if self.talk.composing == Some(id) {
             self.talk.composing = None;
         }
+        if result.is_ok() && self.key_missing.is_some() {
+            self.key_missing = None;
+        }
         if result.is_err() {
             self.talk.turns.remove(&id);
         }
@@ -663,10 +822,24 @@ impl Brain {
                 self.done(conn, id);
             }
             Err(err) => {
-                let failed = self.talk.t(
-                    "Je n’ai pas pu te répondre : le modèle ne répond pas.",
-                    "I couldn’t answer: the model is not responding.",
-                );
+                let no_key = err.starts_with("no key for ");
+                if no_key {
+                    self.key_missing = err
+                        .strip_prefix("no key for ")
+                        .and_then(|r| r.split(':').next())
+                        .map(str::to_owned);
+                }
+                let failed = if no_key {
+                    self.talk.t(
+                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, tape « hocus-secretary key anthropic », colle ta clé, puis Entrée ; je la garde dans ton trousseau.",
+                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, type “hocus-secretary key anthropic”, paste your key, then Enter; I keep it in your keyring.",
+                    )
+                } else {
+                    self.talk.t(
+                        "Je n’ai pas pu te répondre : le modèle ne répond pas.",
+                        "I couldn’t answer: the model is not responding.",
+                    )
+                };
                 self.add_item(
                     Some(id),
                     Body::Her {
@@ -1034,6 +1207,7 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
             ],
             decided: None,
             outcome: None,
+            sheet: None,
         },
         kind_of,
     ))

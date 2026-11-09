@@ -74,6 +74,10 @@ struct Args {
     /// Her Google accounts are not read, even with a bus.
     #[arg(long)]
     no_google: bool,
+    /// Google's services (the Calendar API, CardDAV, IMAP) at this
+    /// address of this machine instead: tests, never the network.
+    #[arg(long, value_name = "URL")]
+    google_at: Option<String>,
     /// People, projects, facts and rules written into an empty memory at
     /// her start, from this TOML file: tests, screenshots.
     #[arg(long, value_name = "FILE")]
@@ -180,10 +184,14 @@ fn run(args: Args) -> Result<(), String> {
             bus.to_owned()
         };
         if !address.is_empty() {
+            let mut env = hocus_sources::cycle::Env::google(&address);
+            if let Some(at) = &args.google_at {
+                env = google::at(env, at)?;
+            }
             sources.push(Box::new(Google::new(
                 address.clone(),
                 data.join(google::CONSENTS),
-                hocus_sources::cycle::Env::google(&address),
+                env,
             )));
         }
     }
@@ -205,6 +213,7 @@ fn run(args: Args) -> Result<(), String> {
             effects: recorder,
             notifications: Some(arrivals),
             exports: Some(data.join("exports")),
+            consents: Some(data.join(google::CONSENTS)),
             ..Options::default()
         },
     );
@@ -236,7 +245,10 @@ fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
         .bus
         .clone()
         .or_else(|| env(hocus_secretary_link::BUS_ENV))
-        .ok_or("no keyring: --bus ADDRESS (or session), or HOCUS_SECRETARY_BUS")?;
+        .ok_or(
+            "no keyring known: run it in a terminal of the Hocuspanda session \
+             (which sets HOCUS_SECRETARY_BUS), or give --bus session",
+        )?;
     let mut secret = String::new();
     std::io::stdin()
         .read_line(&mut secret)
@@ -247,6 +259,7 @@ fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
     }
     if key::keep_provider_key(&bus, provider, secret) {
         tracing::info!(provider, "the key is in the keyring");
+        println!("The {provider} key is in your keyring: she reads it at her next answer.");
         Ok(())
     } else {
         Err("the keyring did not keep it".to_owned())

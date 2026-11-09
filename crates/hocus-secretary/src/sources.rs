@@ -126,6 +126,9 @@ pub struct Synced {
     /// Parts of the source revoked since: what came from them is
     /// forgotten (their names, as [`Item::from`] gives them).
     pub forget: Vec<String>,
+    /// The Google accounts Online Accounts has, as her Google source
+    /// found them this time (her consent cards, her first run).
+    pub found: Option<Vec<hocus_secretary_link::goa::GoogleAccount>>,
 }
 
 /// A source: called on its worker thread, never on her loop; it may block
@@ -241,7 +244,7 @@ impl Source for Fixture {
         Ok(Synced {
             items,
             cursor,
-            forget: Vec::new(),
+            ..Synced::default()
         })
     }
 }

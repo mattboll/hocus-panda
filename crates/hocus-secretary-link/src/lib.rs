@@ -45,6 +45,13 @@
 //! the moment itself ([`ToSecretary::Moment`]); and the outside effects
 //! the shell carries out for her ([`FromSecretary::Effect`], answered by
 //! [`ToSecretary::Effected`]): the first is a task in the To do list.
+//!
+//! **Version 5** brings her first run and the sources' consent in the
+//! drawer (#750): a consent card ([`CardKind::Consent`]) carries its
+//! sheet ([`sheets::Sheet`]: what she reads, what she never does there,
+//! what leaves the machine, the notebook suggested), and "Autoriser" says
+//! the notebook chosen ([`ToSecretary::Decide`]'s `notebook`); her face
+//! has a second line, how to fix what her status says ([`Look::hint`]).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -57,11 +64,14 @@ use serde::{Deserialize, Serialize};
 
 pub mod consent;
 pub mod gate;
+#[cfg(feature = "goa")]
+pub mod goa;
 pub mod knows;
+pub mod sheets;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -197,6 +207,9 @@ pub enum ToSecretary {
         id: u64,
         item: u64,
         decision: Decision,
+        /// A consent card's "Autoriser": the notebook chosen on it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notebook: Option<Notebook>,
     },
     /// "Annuler" under what she kept (`item`, a [`Body::Learned`]).
     Undo { id: u64, item: u64 },
@@ -680,6 +693,10 @@ pub struct Card {
     /// What came of it ("Fait.", "Écarté."), under it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
+    /// A consent card's sheet: its sections and its notebook's choice.
+    /// Its buttons stay under its outcome ("Ne plus lire" once granted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<sheets::Sheet>,
 }
 
 /// A card's colour and meaning.
@@ -698,6 +715,9 @@ pub enum CardKind {
     Draft,
     /// Violet: work given to Claude Code (§12).
     Delegation,
+    /// A source's consent sheet (§10.1): nothing is read before its
+    /// "Autoriser".
+    Consent,
 }
 
 /// A card's button.
@@ -727,6 +747,10 @@ pub struct Look {
     /// without one.
     #[serde(default)]
     pub model: String,
+    /// Under the status, what the user can do about it ("Dans un
+    /// terminal : hocus-secretary key anthropic"); empty when all is well.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hint: String,
 }
 
 /// Her mood (§5.6).
@@ -1052,7 +1076,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":4,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":5,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });
@@ -1110,11 +1134,31 @@ mod tests {
                         }],
                         decided: None,
                         outcome: None,
+                        sheet: None,
                     },
                 },
             },
         };
         assert_eq!(read::<FromSecretary>(&line(&card)), Ok(card));
+        let consent = Body::Card {
+            card: Card {
+                kind: CardKind::Consent,
+                label: "Gmail · alex.martin@gmail.com".to_owned(),
+                text: String::new(),
+                lines: Vec::new(),
+                actions: Vec::new(),
+                decided: None,
+                outcome: None,
+                sheet: Some(sheets::google(
+                    "alex.martin@gmail.com",
+                    consent::SourceKind::Mail,
+                    Notebook::Perso,
+                    true,
+                )),
+            },
+        };
+        let said = serde_json::to_string(&consent).expect("writes");
+        assert_eq!(serde_json::from_str::<Body>(&said).ok(), Some(consent));
         let learned = "{\"item\":{\"item\":{\"id\":5,\"at\":\"2026-11-09T08:55:00Z\",\
                        \"body\":{\"learned\":{\"text\":\"Retenu\"}}}}}";
         assert!(matches!(
@@ -1133,9 +1177,21 @@ mod tests {
             ToSecretary::Decide {
                 id: 7,
                 item: 4,
-                decision: Decision::Accept
+                decision: Decision::Accept,
+                notebook: None,
             }
         );
+        let allowed: ToSecretary = read(
+            "{\"decide\":{\"id\":8,\"item\":5,\"decision\":\"accept\",\"notebook\":\"perso\"}}",
+        )
+        .expect("reads");
+        assert!(matches!(
+            allowed,
+            ToSecretary::Decide {
+                notebook: Some(Notebook::Perso),
+                ..
+            }
+        ));
         // A first version's hello still reads, and is refused by its number.
         let old: ToSecretary =
             read("{\"hello\":{\"version\":1,\"client\":\"cli\"}}").expect("reads");

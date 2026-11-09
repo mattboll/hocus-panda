@@ -262,3 +262,63 @@ fn a_provider_s_key_is_kept_and_read_in_the_keyring_of_the_bus_given() -> anyhow
     );
     Ok(())
 }
+
+/// `hocus-secretary key anthropic` typed in a terminal of the session
+/// (#750): the compositor tells its programs her bus
+/// (`HOCUS_SECRETARY_BUS`, as it tells her), so the key goes where she
+/// reads it; without one, it says how instead of guessing a keyring.
+#[test]
+fn the_key_command_keeps_the_key_in_the_keyring_of_her_bus() -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    use hocus_secretary::providers::{Keyring, Keys};
+    let dir = tempfile::tempdir()?;
+    let Some(bus) = PrivateBus::start(dir.path())? else {
+        return Ok(());
+    };
+    let held = Held::default();
+    let _keyring = keyring(&bus.address, &held)?;
+    let made_up = "sk-ant-test-made-up-from-a-terminal";
+    let run = |bus: Option<&str>| -> anyhow::Result<std::process::Output> {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_hocus-secretary"));
+        command
+            .args(["key", "anthropic"])
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove(hocus_secretary_link::BUS_ENV)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(bus) = bus {
+            command.env(hocus_secretary_link::BUS_ENV, bus);
+        }
+        let mut child = command.spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no stdin"))?
+            .write_all(format!("{made_up}\n").as_bytes())?;
+        Ok(child.wait_with_output()?)
+    };
+    let refused = run(None)?;
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("terminal of the Hocuspanda session"),
+        "{refused:?}"
+    );
+    assert!(
+        held.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+    );
+    let kept = run(Some(&bus.address))?;
+    assert!(kept.status.success(), "{kept:?}");
+    assert!(
+        !String::from_utf8_lossy(&kept.stdout).contains(made_up),
+        "never echoed"
+    );
+    let read = Keyring::new(Some(bus.address.clone()))
+        .key("anthropic")
+        .map_err(anyhow::Error::msg)?;
+    assert_eq!(read.as_ref().map(|k| k.expose()), Some(made_up));
+    Ok(())
+}

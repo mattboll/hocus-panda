@@ -323,11 +323,21 @@ it changes; `[secretary.triage]` paces the local triage. Without
 her bus holds, and the local model server the settings name: next to a
 live session, give her a configuration of your own, and never run a
 model on a laptop to try her. Her Google accounts are read on the bus
-given, unless `--fixture` or `--no-google`. Her tests fake both APIs on
-127.0.0.1 (`crates/hocus-secretary/tests/common/http.rs`):
+given, unless `--fixture` or `--no-google`; `--google-at
+http://127.0.0.1:PORT` puts Google's services on fakes of this machine,
+never the network. Her first run (one consent card a source, then « Dis-moi
+sur quoi tu travailles et avec qui ») needs a shell and those accounts;
+the Settings list them on the session's bus (Settings › Agents). Her
+tests fake both APIs on 127.0.0.1 (`crates/hocus-secretary/tests/common/http.rs`),
+and Online Accounts on a private bus (`tests/first_run.rs`). The
+user-facing steps are [docs/secretary.md](docs/secretary.md).
 
 ```sh
+# the compositor tells its programs her bus (HOCUS_SECRETARY_BUS): in a
+# terminal of a nested session, the key goes to that session's keyring
 printf '%s\n' "$KEY" | target/debug/hocus-secretary --bus "$ADDRESS" key anthropic
+HOCUS_DRAWER_SHOTS=DIR cargo nextest run -p hocus-compositor --test secretary_drawer first_run
+HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test settings_agents --run-ignored all google
 HOCUS_POWER_SUPPLY_DIR=… HOCUS_THERMAL_DIR=…        # the triage's power and heat (tests)
 cargo nextest run -p hocus-sources --test secrets_corpus --no-capture   # AC50's numbers
 ```

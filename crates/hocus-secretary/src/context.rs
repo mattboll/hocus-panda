@@ -171,6 +171,14 @@ impl Inbox {
         self.order.retain(|p| !p.starts_with(&prefix));
     }
 
+    /// Items of `notebook` go (it is forgotten).
+    pub fn forget_notebook(&mut self, notebook: Notebook) {
+        self.held
+            .retain(|_, h| h.redacted.item.notebook != notebook);
+        let held = &self.held;
+        self.order.retain(|p| held.contains_key(p));
+    }
+
     pub fn len(&self) -> usize {
         self.held.len()
     }

@@ -350,6 +350,8 @@ pub fn flush() {
 
 /// Reads every account again as the machine resumes: logind's
 /// `PrepareForSleep(false)` on the system bus, on a thread of its own.
+/// logind says it after a hibernate (and a hybrid sleep) as after a
+/// suspend: the secretary catches up the same way (#750).
 /// Without a system bus (tests), nothing is watched, and nothing retried.
 fn watch_resume() {
     let started = std::thread::Builder::new()

@@ -15,7 +15,8 @@ use jiff::Timestamp;
 use crate::model::Recorder;
 
 /// What a card proposes to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Kind {
     Message,
     Post,
@@ -49,7 +50,8 @@ impl Kind {
 }
 
 /// A card's proposal: its kind, the tool call that made it, its input.
-#[derive(Debug, Clone, PartialEq)]
+/// Kept with its card (her thread survives a restart).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Proposal {
     pub kind: Kind,
     pub tool: String,

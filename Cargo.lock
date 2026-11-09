@@ -2062,6 +2062,7 @@ name = "hocus-secretary"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "getrandom 0.3.4",
  "hocus-day",
@@ -2092,7 +2093,9 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
+ "zbus 6.0.0",
 ]
 
 [[package]]

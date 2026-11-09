@@ -560,7 +560,7 @@ impl Source for Accounts {
                 item("e1", "account_2:calendar", "Dîner chez Claire"),
             ],
             cursor: "1".to_owned(),
-            forget: Vec::new(),
+            ..Synced::default()
         })
     }
 }
@@ -590,4 +590,230 @@ fn a_source_s_items_reach_her_memory_by_their_part_and_a_revoked_part_is_forgott
     assert_eq!((triage(&status).held, triage(&status).pending), (0, 0));
     assert!(local.seen().is_empty() && anthropic.seen().is_empty());
     driver.stop();
+}
+
+/// Round 1 of a turn: Claude thinks (a signed block), then calls `graph`.
+const THINKS_THEN_LOOKS: &str = "event: message_start\n\
+data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":120}}}\n\n\
+data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Chapitô ?\"}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-sonnet\"}}\n\n\
+data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"graph\",\"input\":{}}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"node\\\":\\\"Chapitô\\\",\\\"hops\\\":2,\\\"as_of\\\":null}\"}}\n\n\
+data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":40}}\n\n\
+data: {\"type\":\"message_stop\"}\n\n";
+
+/// The blocks' types of a request's turns.
+fn block_types(seen: &Seen) -> Vec<String> {
+    seen.json()["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|m| m["content"].as_array().cloned().unwrap_or_default())
+        .filter_map(|b| b["type"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// One model per answer (#750): the router's choice holds for a whole
+/// turn, its tool loop included, so a change of the settings meanwhile
+/// never sends Claude Sonnet's signed thinking to another model; the next
+/// sentence takes the new choice, the earlier turns as plain text.
+#[test]
+fn a_turn_keeps_its_model_when_the_settings_change_meanwhile() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let config = dir.path().join("config.toml");
+    let switch: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+    let switched = switch.clone();
+    let written = config.clone();
+    let claude = Fake::start(move |_, n| {
+        if n == 0 {
+            // The user changes the answering model while Claude thinks.
+            let text = switched
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(text) = text {
+                std::fs::write(&written, text).expect("written");
+            }
+            return Answer {
+                status: 200,
+                content_type: "text/event-stream",
+                body: THINKS_THEN_LOOKS.to_owned(),
+            };
+        }
+        Answer::stream(if n == 1 { "Nadia et Sophie." } else { "Léa." })
+    });
+    let providers = format!(
+        "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{}\"\n",
+        claude.url
+    );
+    std::fs::write(
+        &config,
+        format!("[secretary]\nmode = \"assistant\"\n{providers}"),
+    )?;
+    *switch
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!(
+        "[secretary]\nmode = \"assistant\"\n[secretary.models]\n\
+         answer = \"anthropic/claude-opus-5-5\"\n{providers}"
+    ));
+    let router = Arc::new(Router::new(
+        Arc::new(settings::File::at(Some(config.clone()))),
+        keys(),
+    ));
+    let mut driver = common::Driver::start(
+        Store::in_memory(common::clock())?,
+        Options {
+            model: Some(router),
+            ..common::options(Vec::new())
+        },
+    );
+    driver.settle();
+    let answer = driver.answer_to("Qui est sur Chapitô ?");
+    assert_eq!(answer, "Nadia et Sophie.");
+    let seen = claude.seen();
+    assert_eq!(
+        seen.len(),
+        2,
+        "her turn: a look in her memory, then her answer"
+    );
+    let models: Vec<String> = seen
+        .iter()
+        .map(|s| s.json()["model"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        models,
+        ["claude-sonnet-5-5", "claude-sonnet-5-5"],
+        "the settings changed mid-turn: the turn stays on its model"
+    );
+    let replayed = seen[1].json()["messages"]
+        .as_array()
+        .and_then(|m| {
+            m.iter()
+                .find(|m| m["role"] == "assistant")
+                .map(|m| m["content"][0].clone())
+        })
+        .unwrap_or_default();
+    assert_eq!(replayed["type"], "thinking");
+    assert_eq!(
+        replayed["signature"], "sig-sonnet",
+        "replayed to the model that signed it"
+    );
+
+    // The next sentence: the new model, the turn before as plain text.
+    let answer = driver.answer_to("Et sur le site web ?");
+    assert_eq!(answer, "Léa.");
+    let next = claude.seen().pop().expect("a third request");
+    assert_eq!(next.json()["model"], "claude-opus-5-5");
+    let types = block_types(&next);
+    assert!(
+        !types
+            .iter()
+            .any(|t| t == "thinking" || t == "tool_use" || t == "tool_result"),
+        "no block of another model's: {types:?}"
+    );
+    let messages = next.json()["messages"].clone();
+    assert_eq!(messages[0]["role"], "user");
+    assert!(messages.to_string().contains("Qui est sur Chapitô ?"));
+    assert!(
+        messages.to_string().contains("Nadia et Sophie."),
+        "her last words, as text"
+    );
+    driver.stop();
+    Ok(())
+}
+
+/// A turn's blocks given by another model go as plain text (#750).
+#[test]
+fn another_model_s_blocks_go_as_plain_text() {
+    let (claude, local) = (anthropic(), local());
+    let router = Router::new(
+        Arc::new(settings::File::fixed(settings(&claude, &local))),
+        keys(),
+    );
+    let mut theirs = Message::assistant("Elle a lu le mail.");
+    theirs.native = Some(json!([
+        {"type": "thinking", "thinking": "…", "signature": "sig-other"},
+        {"type": "text", "text": "Elle a lu le mail."}
+    ]));
+    theirs.by = "anthropic/claude-opus-5-5".to_owned();
+    let request = Request {
+        role: Role::Answer,
+        system: "Tu es la secrétaire.".to_owned(),
+        messages: vec![
+            Message::user("Le mail de Free ?"),
+            theirs,
+            Message::user("Et ensuite ?"),
+        ],
+        ..Request::default()
+    };
+    router
+        .call(&request, &common::clock())
+        .expect("a reply from Sonnet");
+    let seen = claude.seen().pop().expect("a request");
+    assert_eq!(seen.json()["model"], "claude-sonnet-5-5");
+    assert_eq!(block_types(&seen), ["text", "text", "text"]);
+    assert!(!seen.body.contains("sig-other"));
+    // Its own blocks, by its own model: replayed as they were.
+    let mut own = request.clone();
+    own.messages[1].by = "anthropic/claude-sonnet-5-5".to_owned();
+    router.call(&own, &common::clock()).expect("a reply");
+    assert!(
+        claude
+            .seen()
+            .pop()
+            .expect("a request")
+            .body
+            .contains("sig-other")
+    );
+}
+
+/// Her answers' key missing (#750): her status says so, and how to give
+/// one; once in the keyring, the status goes back.
+#[test]
+fn a_missing_key_is_said_with_how_to_give_one() -> anyhow::Result<()> {
+    let (claude, local) = (anthropic(), local());
+    let router = Arc::new(Router::new(
+        Arc::new(settings::File::fixed(settings(&claude, &local))),
+        Arc::new(Given(BTreeMap::new())),
+    ));
+    let mut driver = common::Driver::start(
+        Store::in_memory(common::clock())?,
+        Options {
+            model: Some(router),
+            ..common::options(Vec::new())
+        },
+    );
+    let look = loop {
+        if let hocus_secretary_link::FromSecretary::Look { look } = driver.receive()
+            && look.tone == hocus_secretary_link::Tone::Warn
+        {
+            break look;
+        }
+    };
+    assert_eq!(look.status, "Il me manque ma clé Anthropic");
+    assert!(
+        look.hint.contains("hocus-secretary key anthropic"),
+        "{look:?}"
+    );
+    assert_eq!(look.tone, hocus_secretary_link::Tone::Warn);
+    assert_eq!(look.model, "Claude Sonnet 5.5");
+    driver.settle();
+    driver.send(&hocus_secretary_link::ToSecretary::Ask {
+        id: 7,
+        text: "Bonjour".to_owned(),
+    });
+    let said = loop {
+        if let hocus_secretary_link::FromSecretary::Item { item } = driver.receive()
+            && let hocus_secretary_link::Body::Her { text, .. } = item.body
+        {
+            break text;
+        }
+    };
+    assert!(said.contains("hocus-secretary key anthropic"), "{said}");
+    assert!(claude.seen().is_empty(), "nothing sent without a key");
+    driver.stop();
+    Ok(())
 }

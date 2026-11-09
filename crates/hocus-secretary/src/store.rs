@@ -549,6 +549,8 @@ impl Store {
         }
         // Her day's records (lot 5): tables added beside, made if missing.
         self.conn.execute_batch(crate::day::SQL)?;
+        // Her thread and the items waiting for the triage (#750).
+        self.conn.execute_batch(crate::kept::SQL)?;
         Ok(())
     }
 
@@ -891,6 +893,7 @@ impl Store {
         let rows = self.rows_where("notebook = ?1", &[&notebook.word()])?;
         self.purge(rows, &format!("the {} notebook", notebook.word()))?;
         crate::day::forget_notebook(&self.conn, notebook)?;
+        crate::kept::forget_notebook(&self.conn, notebook)?;
         Ok(())
     }
 
@@ -902,6 +905,7 @@ impl Store {
         self.conn
             .execute("DELETE FROM cursors WHERE source = ?1", [source])?;
         crate::day::forget_source(&self.conn, source)?;
+        crate::kept::forget_source(&self.conn, source)?;
         Ok(())
     }
 
