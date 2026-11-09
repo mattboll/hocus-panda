@@ -180,6 +180,25 @@ pub fn leave_out(
     book.save(path)
 }
 
+/// GNOME's Online Accounts panel's program (`gnome-control-center`) on
+/// the `PATH`, when it is installed: « Ajouter un compte Google » opens it
+/// (#752), as the shell's setup does. Blocking (the folders of the
+/// `PATH`).
+pub fn panel() -> Option<std::path::PathBuf> {
+    panel_in(&std::env::var_os("PATH")?)
+}
+
+/// The panel's program in the folders of `path`.
+fn panel_in(path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::env::split_paths(path)
+        .map(|dir| dir.join("gnome-control-center"))
+        .find(|file| {
+            std::fs::metadata(file)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
 /// The private notebook's quiet hours, as the configuration file says
 /// (`[secretary.speak] quiet-perso`), else hers by default: what « C'est
 /// privé » says. Blocking (a file).
@@ -254,6 +273,18 @@ mod tests {
             },
             suggested,
         }
+    }
+
+    #[test]
+    fn the_panel_is_found_on_the_path_or_none() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("a folder");
+        assert_eq!(panel_in(dir.path().as_os_str()), None, "not installed");
+        let program = dir.path().join("gnome-control-center");
+        std::fs::write(&program, "#!/bin/sh\n").expect("written");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        assert_eq!(panel_in(dir.path().as_os_str()), Some(program));
     }
 
     #[test]

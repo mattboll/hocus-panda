@@ -139,8 +139,10 @@ impl Brain {
         }
         if matches!(client, Client::Shell | Client::Test) {
             self.greeted_speaking(conn);
-            // Her first run, once she knows her accounts (#750).
+            // Her first run, once she knows her accounts (#750); an account
+            // added since (#752).
             self.first_run_step();
+            self.new_accounts_step();
         }
     }
 

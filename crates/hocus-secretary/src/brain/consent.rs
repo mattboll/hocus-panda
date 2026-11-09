@@ -38,6 +38,9 @@ const FIRST_RUN: &str = "first-run";
 const CARDS: &str = "consent-cards";
 /// Her Google source's name.
 const GOOGLE: &str = "google";
+/// Her memory's `meta` key of the accounts she knows of, once her first
+/// run is over: one found after is asked about (#752).
+const KNOWN: &str = "accounts-known";
 /// Her memory's `meta` key of each source's notebook as last filed.
 const NOTEBOOKS: &str = "source-notebooks";
 
@@ -197,6 +200,88 @@ impl Brain {
         self.consents.accounts = Some(accounts);
         self.cards_follow_the_book();
         self.first_run_step();
+        self.new_accounts_step();
+    }
+
+    /// An account added since her first run (#752): she says so, then
+    /// asks for each of its kinds, one source at a time, as at her first
+    /// run. The accounts there at its end are known from then on.
+    pub(super) fn new_accounts_step(&mut self) {
+        if self.consents.first_run != FirstRun::Done {
+            return;
+        }
+        let Some(accounts) = self.consents.accounts.clone() else {
+            return;
+        };
+        let mut known: Vec<String> = match self.store.meta(KNOWN).ok().flatten() {
+            Some(text) => serde_json::from_str(&text).unwrap_or_default(),
+            None => {
+                // Her first run just ended: these were asked about there.
+                let all: Vec<String> = accounts.iter().map(|a| a.id.clone()).collect();
+                self.keep_known(&all);
+                all
+            }
+        };
+        if !self.conns.keys().any(|c| self.talker(*c)) {
+            return;
+        }
+        let waiting = self.consents.cards.keys().any(|i| self.card_waits(*i));
+        if waiting {
+            return;
+        }
+        let book = self.book();
+        let new: Vec<&GoogleAccount> = accounts.iter().filter(|a| !known.contains(&a.id)).collect();
+        for account in new {
+            let next = account.kinds().into_iter().find(|kind| {
+                let source = SourceKey::new(&account.id, *kind);
+                !book.records().iter().any(|r| r.source == source)
+                    && !self.consents.later.contains(&source)
+            });
+            let Some(kind) = next else {
+                known.push(account.id.clone());
+                self.keep_known(&known);
+                continue;
+            };
+            let asked_before = self
+                .consents
+                .cards
+                .values()
+                .any(|a| a.source.account == account.id);
+            if !asked_before {
+                let said = if self.talk.fr() {
+                    format!(
+                        "J’ai trouvé un nouveau compte Google : {}. Je ne lis rien sans ton accord.",
+                        account.identity
+                    )
+                } else {
+                    format!(
+                        "I found a new Google account: {}. I read nothing without your consent.",
+                        account.identity
+                    )
+                };
+                self.add_item(
+                    None,
+                    Body::Her {
+                        text: said,
+                        note: None,
+                        assumed: false,
+                    },
+                );
+            }
+            tracing::info!(account = account.id, "a new account: she asks for it");
+            self.consent_card(account, kind);
+            self.tell_look();
+            return;
+        }
+    }
+
+    fn keep_known(&self, known: &[String]) {
+        let written = serde_json::to_string(known)
+            .map_err(|e| e.to_string())
+            .and_then(|t| self.store.set_meta(KNOWN, &t).map_err(|e| e.to_string()));
+        if let Err(err) = written {
+            tracing::warn!(%err, "could not keep the accounts known");
+        }
     }
 
     /// Her consent book changed (the Settings wrote it, #752): her cards
@@ -207,6 +292,7 @@ impl Brain {
         self.cards_follow_the_book();
         self.google_now();
         self.first_run_step();
+        self.new_accounts_step();
         self.tell_look();
     }
 
@@ -505,6 +591,7 @@ impl Brain {
             self.consents.first_run = FirstRun::Waiting;
             self.first_run_step();
         }
+        self.new_accounts_step();
         self.tell_look();
         self.done(conn, id);
         true

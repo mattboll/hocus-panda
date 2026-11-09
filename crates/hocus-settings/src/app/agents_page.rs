@@ -135,6 +135,10 @@ pub enum Msg {
     KeyErase,
     /// What she did with the key given.
     Keyed(Result<KeyOutcome, String>),
+    /// GNOME's Online Accounts panel, installed or not (#752).
+    Panel(Option<std::path::PathBuf>),
+    /// « Ajouter un compte Google »: the panel opens.
+    AddAccount,
     /// The sheet's calendar `n`, read or left out (#752).
     SheetCalendar(usize),
     /// Calendar `n` of the `i`th Google source's row (an Agenda granted),
@@ -246,6 +250,8 @@ pub struct State {
     /// The private notebook's quiet hours (`[secretary.speak]
     /// quiet-perso`), none before they are read: hers by default.
     quiet: Option<hocus_secretary_link::gate::Hours>,
+    /// GNOME's Online Accounts panel, when installed.
+    panel: Option<std::path::PathBuf>,
 }
 
 /// The "Clé Anthropic" row: what she says of her key, the field (never
@@ -583,6 +589,7 @@ impl App {
                     }
                 }
                 let _ = to.unbounded_send(Message::Agents(Msg::Quiet(google_sources::quiet())));
+                let _ = to.unbounded_send(Message::Agents(Msg::Panel(google_sources::panel())));
                 let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
             });
         if let Err(err) = started {
@@ -844,6 +851,40 @@ impl App {
                 };
                 self.agents_google_job(Some((source, None, Vec::new())));
                 self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::Panel(panel) => {
+                self.agents.panel = panel;
+                iced::Task::none()
+            }
+            Msg::AddAccount => {
+                let Some(panel) = self.agents.panel.clone() else {
+                    return iced::Task::none();
+                };
+                tracing::info!("Online Accounts' panel opens");
+                let to = self.agents.to.clone();
+                let started = std::thread::Builder::new()
+                    .name("online accounts".to_owned())
+                    .spawn(move || {
+                        let ran = std::process::Command::new(&panel)
+                            .arg("online-accounts")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status();
+                        if let Err(err) = ran {
+                            tracing::warn!(%err, "Online Accounts' panel does not run");
+                        }
+                        // Closed: an account added there shows as rows.
+                        if let Some(to) = to {
+                            let _ = to.unbounded_send(Message::Agents(Msg::Google(
+                                google_sources::read(),
+                            )));
+                        }
+                    });
+                if let Err(err) = started {
+                    tracing::warn!(%err, "Online Accounts' panel does not run");
+                }
+                iced::Task::none()
             }
             Msg::SheetCalendar(n) => {
                 if let Some(sheet) = &mut self.agents.google_sheet
@@ -1520,6 +1561,39 @@ impl App {
         }
         for (i, source) in self.agents.google.iter().enumerate() {
             body = body.push(divided(true, self.agents_google_row(i, source)));
+        }
+        // Another account, in GNOME's Online Accounts, when installed.
+        if self.agents.panel.is_some() {
+            body = body.push(divided(
+                true,
+                container(
+                    button(
+                        row![
+                            Self::agents_google_tile(20.0),
+                            t(
+                                self.say(w("Ajouter un compte Google ›", "Add a Google account ›")),
+                                13.0,
+                                MINT.get()
+                            )
+                            .font(BOLD),
+                        ]
+                        .spacing(10)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([4, 6])
+                    .on_press(Message::Agents(Msg::AddAccount))
+                    .style(|_, status| button::Style {
+                        background: matches!(status, button::Status::Hovered)
+                            .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                        text_color: TEXT.get(),
+                        border: border(7.0, 0.0, Color::TRANSPARENT),
+                        ..button::Style::default()
+                    }),
+                )
+                .padding([8, 10])
+                .id("agents:add-google".to_owned())
+                .into(),
+            ));
         }
         body.into()
     }
@@ -2850,6 +2924,7 @@ impl App {
                 "calendars": g.calendars.iter().map(|c| format!("{} {}", c.name, c.note(true)).trim().to_owned()).collect::<Vec<_>>(),
                 "left_out": g.left_out,
             })).collect::<Vec<_>>(),
+            "add_account": self.agents.panel.is_some(),
             "google_left_out": self.agents.google_sheet.as_ref().map(|g| g.left_out.iter().cloned().collect::<Vec<_>>()),
             "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
             "name": self.agents_name(),

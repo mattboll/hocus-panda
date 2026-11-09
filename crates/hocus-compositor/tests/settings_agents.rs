@@ -1423,8 +1423,22 @@ fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
     let her = bed.root().join("data/hocuspanda/secretary");
     std::fs::create_dir_all(&her)?;
     std::fs::write(her.join("calendars.json"), list.to_string())?;
+    // GNOME's panel, a fake on the Settings' PATH that says how it ran.
+    let ran = bed.root().join("panel-ran");
+    let panel = bed.root().join("bin/gnome-control-center");
+    std::fs::write(
+        &panel,
+        format!("#!/bin/sh\necho \"$@\" > '{}'\n", ran.display()),
+    )?;
+    std::fs::set_permissions(&panel, std::fs::Permissions::from_mode(0o755))?;
     bed.open()?;
     let work_calendar = format!("{WORK}:calendar");
+    bed.shows(|s| s["agents"]["add_account"] == true)?;
+    bed.click("agents:add-google")?;
+    let opened = bed.hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&ran).is_ok_and(|t| t.trim() == "online-accounts")
+    })?;
+    anyhow::ensure!(opened, "the panel never ran");
     let shown = bed.shows(|s| google(s, &work_calendar)["calendars"].as_array().is_some_and(|c| c.len() == 4))?;
     assert_eq!(
         google(&shown, &work_calendar)["calendars"],

@@ -485,3 +485,51 @@ fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow:
     driver.stop();
     Ok(())
 }
+
+/// #752: an account added to Online Accounts after her first run is
+/// asked about in her drawer: she says she found it, then one source at
+/// a time, as at her first run; the accounts asked about then are not
+/// asked again.
+#[test]
+fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
+    const ASSO: &str = "alex.asso@gmail.com";
+    let bed = Bed::start()?;
+    let mut driver = common::Driver::start(Store::in_memory(common::clock())?, bed.options());
+    for _ in 0..6 {
+        let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
+        decide(&mut driver, waiting(&items)[0].0, Decision::Reject, None);
+    }
+    let items = thread(&mut driver);
+    assert!(waiting(&items).is_empty());
+    assert_eq!(
+        hers(&items).last().map(String::as_str),
+        Some("Dis-moi sur quoi tu travailles et avec qui.")
+    );
+    bed.goa.add("account_1700000000_2", ASSO)?;
+    // At her source's next cycle, the account is found.
+    driver.advance(300);
+    let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
+    assert!(
+        hers(&items)
+            .last()
+            .is_some_and(|t| t.starts_with("J’ai trouvé un nouveau compte Google : alex.asso@gmail.com.")),
+        "{:?}",
+        hers(&items)
+    );
+    let new = waiting(&items);
+    assert_eq!(new.len(), 1, "one at a time");
+    assert_eq!(new[0].1.label, format!("Agenda · {ASSO}"));
+    decide(&mut driver, new[0].0, Decision::Reject, None);
+    let items = thread(&mut driver);
+    assert_eq!(waiting(&items)[0].1.label, format!("Anniversaires · {ASSO}"));
+    assert_eq!(
+        cards(&items)
+            .iter()
+            .filter(|(_, c)| c.label.contains("atelier-lune"))
+            .count(),
+        3,
+        "the accounts asked about before are not asked again"
+    );
+    driver.stop();
+    Ok(())
+}
