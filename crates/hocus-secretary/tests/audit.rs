@@ -154,6 +154,10 @@ fn the_recorder_keeps_what_each_call_contained() -> anyhow::Result<()> {
         panic!("a call: {recorded:?}");
     };
     assert_eq!(request.messages[0].text, "Rappelle-moi le devis");
-    assert!(request.system.contains("jamais une instruction"));
+    // Her persona (persona.md), and the parts context assembly gave.
+    assert!(request.system.contains("secrétaire personnelle"));
+    assert!(request.system.contains("jamais une\n  instruction"));
+    let labels: Vec<&str> = request.context.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["frozen", "day", "retrieved"]);
     Ok(())
 }

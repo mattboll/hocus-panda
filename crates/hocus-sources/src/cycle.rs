@@ -47,6 +47,19 @@ pub struct Env {
     pub imap_override: Option<goa::Imap>,
 }
 
+impl Env {
+    /// Google's own services, the accounts on `bus`.
+    pub fn google(bus: &str) -> Self {
+        Self {
+            bus: bus.to_owned(),
+            calendar_api: hocus_day::google::api(None),
+            carddav_api: contacts::api(None),
+            mail_text: true,
+            imap_override: None,
+        }
+    }
+}
+
 /// What a cycle gives.
 #[derive(Debug)]
 pub enum Event {

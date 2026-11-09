@@ -129,7 +129,7 @@ pub enum Found {
 pub fn find(bus: &str) -> Found {
     let found = run(bus, async |connection| {
         let session = open_session(&connection).await?;
-        find_in(&connection, &session).await
+        find_in(&connection, &session, attributes()).await
     });
     match found {
         Some(Some(bytes)) => match Key::try_from(bytes.as_slice()) {
@@ -149,7 +149,61 @@ pub fn keep(bus: &str, key: &Key) -> bool {
     let key = key.to_vec();
     run(bus, async move |connection| {
         let session = open_session(&connection).await?;
-        keep_in(&connection, &session, key).await
+        keep_in(
+            &connection,
+            &session,
+            attributes(),
+            "Hocuspanda: the secretary's memory",
+            key,
+        )
+        .await
+    })
+    .is_some()
+}
+
+/// A provider's API key's attributes in the keyring (§11.3).
+pub fn provider_attributes(provider: &str) -> HashMap<&str, &str> {
+    HashMap::from([
+        ("application", "hocuspanda"),
+        ("hocuspanda", "secretary-provider"),
+        ("provider", provider),
+    ])
+}
+
+/// `provider`'s API key in the keyring on `bus`: `Ok(None)` when it holds
+/// none, an error when it does not answer. Read on a model call's worker
+/// thread, never her loop.
+pub fn provider_key(bus: &str, provider: &str) -> Result<Option<String>, String> {
+    let provider = provider.to_owned();
+    let found = run(bus, async move |connection| {
+        let session = open_session(&connection).await?;
+        find_in(&connection, &session, provider_attributes(&provider)).await
+    })
+    .ok_or("the keyring does not answer")?;
+    found
+        .map(|bytes| {
+            String::from_utf8(bytes)
+                .map(|k| k.trim().to_owned())
+                .map_err(|_| "the keyring's key is not text".to_owned())
+        })
+        .transpose()
+}
+
+/// Keeps `secret` as `provider`'s API key in the keyring on `bus`:
+/// whether it did (`hocus-secretary key PROVIDER`, Settings).
+pub fn keep_provider_key(bus: &str, provider: &str, secret: &str) -> bool {
+    let (provider, secret) = (provider.to_owned(), secret.as_bytes().to_vec());
+    run(bus, async move |connection| {
+        let session = open_session(&connection).await?;
+        let label = format!("Hocuspanda: the secretary's {provider} key");
+        keep_in(
+            &connection,
+            &session,
+            provider_attributes(&provider),
+            &label,
+            secret,
+        )
+        .await
     })
     .is_some()
 }
@@ -218,8 +272,9 @@ fn attributes() -> HashMap<&'static str, &'static str> {
 async fn find_in(
     connection: &Connection,
     session: &OwnedObjectPath,
+    attributes: HashMap<&str, &str>,
 ) -> zbus::Result<Option<Vec<u8>>> {
-    let reply = call(connection, PATH, IFACE, "SearchItems", &(attributes(),)).await?;
+    let reply = call(connection, PATH, IFACE, "SearchItems", &(attributes,)).await?;
     let (unlocked, locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
         reply.body().deserialize()?;
     let item = match (unlocked.first(), locked.first()) {
@@ -242,6 +297,8 @@ async fn find_in(
 async fn keep_in(
     connection: &Connection,
     session: &OwnedObjectPath,
+    attributes: HashMap<&str, &str>,
+    label: &str,
     key: Vec<u8>,
 ) -> zbus::Result<()> {
     let reply = call(connection, PATH, IFACE, "ReadAlias", &("default",)).await?;
@@ -250,13 +307,10 @@ async fn keep_in(
         return Err(zbus::Error::Failure("no default collection".to_owned()));
     }
     let mut properties: HashMap<&str, Variant<'_>> = HashMap::new();
-    properties.insert(
-        "org.freedesktop.Secret.Item.Label",
-        Variant::from("Hocuspanda: the secretary's memory"),
-    );
+    properties.insert("org.freedesktop.Secret.Item.Label", Variant::from(label));
     properties.insert(
         "org.freedesktop.Secret.Item.Attributes",
-        Variant::from(attributes()),
+        Variant::from(attributes),
     );
     let secret = (
         ObjectPath::from(session.clone()),

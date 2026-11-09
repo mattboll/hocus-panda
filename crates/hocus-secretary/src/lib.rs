@@ -6,6 +6,14 @@
 //! and answers on her private socket ([`server`], the protocol in
 //! `hocus-secretary-link`).
 //!
+//! Her models (lot 4): the providers behind one request shape
+//! ([`model`], [`providers`]: the Anthropic Messages API, OpenAI-compatible
+//! local servers, each role as [`settings`] say), the local triage queue
+//! and the secrets' second pass ([`triage`]), context assembly within a
+//! budget ([`context`]) from hybrid retrieval over her graph
+//! ([`retrieve`]), and her read-only tools ([`tools`]). Her Google
+//! accounts are one source ([`google`]).
+//!
 //! The harness the next lots test with is here too: her own clock
 //! ([`clock`]), the scripted fake model and the recorder ([`model`]), and
 //! fixture sources ([`sources::Fixture`]).
@@ -13,13 +21,22 @@
 pub mod audit;
 pub mod brain;
 pub mod clock;
+pub mod context;
 pub mod fold;
+pub mod google;
 pub mod graph;
+mod http;
 pub mod key;
 pub mod model;
+pub mod power;
+pub mod providers;
+pub mod retrieve;
 pub mod server;
+pub mod settings;
 pub mod sources;
 pub mod store;
+pub mod tools;
+pub mod triage;
 
 /// Her memory's file, in her data folder.
 pub const MEMORY: &str = "memory.db";

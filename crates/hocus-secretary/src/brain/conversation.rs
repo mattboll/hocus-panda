@@ -33,26 +33,25 @@ use crate::{
     audit,
     fold::fold,
     graph::{NodeKind, Origin},
-    model::{Message, Part, Piece, Reply, Request, Role, ToolCall},
+    model::{Message, Part, Piece, Reply, Role, ToolCall, ToolResult},
     store::{Item as Kept, Who},
+    tools,
 };
 
 /// The thread's items she keeps (the newest).
 const THREAD_MOST: usize = 200;
 
-/// The tools offered to her model: each acting one only proposes.
-const TOOLS: [&str; 10] = [
-    "ask_user",
-    "propose_message",
-    "propose_post",
-    "propose_mail",
-    "propose_invitation_answer",
-    "propose_event",
-    "propose_file",
-    "propose_task",
-    "propose_agent",
-    "propose_delegation",
-];
+/// Her model's turns at most for one sentence: read tools, then her
+/// answer.
+const ROUNDS: u32 = 4;
+
+/// A sentence's conversation with her model so far.
+#[derive(Debug)]
+struct Turn {
+    messages: Vec<Message>,
+    facts: Vec<Part>,
+    round: u32,
+}
 
 /// A word she does not know, and the one project whose items hold it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +105,8 @@ pub(super) struct Talk {
     happy: bool,
     /// Her face as last sent.
     told: Option<Look>,
+    /// The sentences her model is on, by request.
+    turns: HashMap<u64, Turn>,
 }
 
 impl Talk {
@@ -474,6 +475,20 @@ impl Brain {
     /// The sentence to her model, `facts` computed in code with it; her
     /// answer comes in pieces ([`Event::Piece`]) on a worker thread.
     fn compose(&mut self, conn: u64, id: u64, sentence: String, facts: Vec<Part>) {
+        self.compose_turn(
+            conn,
+            id,
+            Turn {
+                messages: vec![Message::user(sentence)],
+                facts,
+                round: 0,
+            },
+        );
+    }
+
+    /// A turn of her model's: the conversation so far (her read tools'
+    /// results after their calls), her context assembled for it.
+    fn compose_turn(&mut self, conn: u64, id: u64, turn: Turn) {
         let Some(model) = self.model.clone() else {
             let none = self.talk.t(
                 "Je n’ai pas encore de modèle pour te répondre.",
@@ -489,16 +504,17 @@ impl Brain {
             );
             return self.error(conn, Some(id), "she has no model yet");
         };
-        let request = Request {
-            role: Role::Answer,
-            system: super::SYSTEM.to_owned(),
-            context: facts,
-            messages: vec![Message {
-                from: "user".to_owned(),
-                text: sentence,
-            }],
-            tools: TOOLS.iter().map(|t| (*t).to_owned()).collect(),
+        let mut request = match self.request(Role::Answer, &turn.messages) {
+            Ok(request) => request,
+            Err(err) => return self.error(conn, Some(id), err),
         };
+        // What code computed for this sentence, and the tools that only
+        // propose, beside her read tools.
+        request.context.extend(turn.facts.iter().cloned());
+        request
+            .tools
+            .extend(tools::TALK.iter().map(|t| (*t).to_owned()));
+        self.talk.turns.insert(id, turn);
         self.talk.composing = Some(id);
         self.tell_talkers(
             &FromSecretary::Typing {
@@ -514,7 +530,7 @@ impl Brain {
             .name("model call".to_owned())
             .spawn(move || {
                 let pieces = sender.clone();
-                let result = model.stream(&request, &clock, &mut |piece| {
+                let result = model.stream_pieces(&request, &clock, &mut |piece| {
                     let piece = match piece {
                         Piece::Doing(doing) => Said::Doing(doing.to_owned()),
                         Piece::Text(text) => Said::Text(text.to_owned()),
@@ -556,6 +572,9 @@ impl Brain {
         if self.talk.composing == Some(id) {
             self.talk.composing = None;
         }
+        if result.is_err() {
+            self.talk.turns.remove(&id);
+        }
         match result {
             Ok(reply) => {
                 if !reply.text.trim().is_empty() {
@@ -568,8 +587,48 @@ impl Brain {
                         },
                     );
                 }
+                // Her read tools run here, on her loop, which owns her
+                // memory; every other call only shows (a card, a
+                // question), and is told so.
+                let mut results = Vec::new();
+                let mut read = false;
                 for call in &reply.tool_calls {
-                    self.tool_call(id, call);
+                    if tools::READ.contains(&call.name.as_str()) {
+                        read = true;
+                        let ran = tools::run(&self.store, call, None);
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            error: ran.is_err(),
+                            text: ran.unwrap_or_else(|e| e),
+                        });
+                    } else {
+                        self.tool_call(id, call);
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            text: "Montré à l'utilisateur ; rien n'est fait avant son clic."
+                                .to_owned(),
+                            error: false,
+                        });
+                    }
+                }
+                let turn = self.talk.turns.remove(&id);
+                if let Some(mut turn) = turn.filter(|t| read && t.round < ROUNDS) {
+                    turn.messages.push(Message::replied(&reply));
+                    turn.messages.push(Message {
+                        from: "user".to_owned(),
+                        tool_results: results,
+                        ..Message::default()
+                    });
+                    turn.round += 1;
+                    let looking = self.talk.t("elle cherche dans sa mémoire", "she looks in her memory");
+                    self.tell_talkers(
+                        &FromSecretary::Typing {
+                            id,
+                            doing: looking.to_owned(),
+                        },
+                        Some(conn),
+                    );
+                    return self.compose_turn(conn, id, turn);
                 }
                 self.tell_look();
                 self.done(conn, id);
@@ -1088,6 +1147,7 @@ mod tests {
             let call = ToolCall {
                 name: name.to_owned(),
                 input: serde_json::json!({"to": "Léa", "draft": "Je regarde ça."}),
+                ..ToolCall::default()
             };
             let Some(Made::Card(card, made_effect)) = made(&call, true) else {
                 panic!("{name}: no card");
@@ -1099,6 +1159,7 @@ mod tests {
         let unknown = ToolCall {
             name: "rm_rf".to_owned(),
             input: serde_json::Value::Null,
+            ..ToolCall::default()
         };
         assert_eq!(made(&unknown, true), None);
     }

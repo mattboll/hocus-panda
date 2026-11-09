@@ -266,8 +266,8 @@
 # layouts that need it (AZERTY).
 # emoji = "Super+period"
 # The secretary's drawer, beside the bar of the focused window's screen;
-# again, it closes. In `[secretary] mode = "assistant"` only: in classic
-# mode the chord goes to the window (docs/design/secretary.md §4).
+# again, it closes. In the assistant mode of `[secretary]` only: in the
+# classic mode the chord goes to the window (docs/design/secretary.md §4).
 # secretary = "Super+S"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while
 # held; up stops at 100 %, brightness down at 5 %, so that the screen never
@@ -375,8 +375,39 @@
 # encrypted memory in ~/.local/share/hocuspanda/secretary (its key in the
 # keyring) and reads the sources you consent to. Followed live: back to
 # "classic", her process stops and her memory stays on disk until you ask
-# her to forget it. Her other keys (providers, models) come with her.
+# her to forget it.
 # mode = "classic"
+
+# [secretary.models]
+# Each role's provider and model, "PROVIDER/MODEL", applied at the next
+# request. Claude for what needs understanding; the local model only
+# triages (and points at secrets) what arrives.
+# answer = "anthropic/claude-sonnet-5-5"
+# briefing = "anthropic/claude-sonnet-5-5"
+# extraction = "anthropic/claude-sonnet-5-5"
+# compaction = "anthropic/claude-sonnet-5-5"
+# triage = "local/qwen3:8b"
+
+# [secretary.providers.anthropic]
+# No key here: it is in the keyring (hocus-secretary key anthropic).
+# kind = "anthropic"
+# url = "https://api.anthropic.com"
+
+# [secretary.providers.local]
+# A server you run on this machine (Ollama, llama.cpp); the desktop ships
+# no weights. "ollama" also unloads the model when the triage is idle;
+# "openai" is any OpenAI-compatible endpoint.
+# kind = "ollama"
+# url = "http://127.0.0.1:11434/v1"
+
+# [secretary.triage]
+# On battery, the triage runs only above this charge (%); it pauses while
+# the CPU package is above heat (°C); the model is unloaded after
+# unload-after idle seconds; pace seconds between two requests.
+# battery = 50
+# heat = 95
+# unload-after = 120
+# pace = 2
 
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the

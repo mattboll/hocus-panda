@@ -7,12 +7,8 @@ use jiff::{Timestamp, civil::Date};
 use serde::{Deserialize, Serialize};
 
 /// Pro or perso (§7.4): set by the account, as the user chose at consent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Notebook {
-    Pro,
-    Perso,
-}
+/// One definition for the sources and her memory: the protocol's.
+pub use hocus_secretary_link::Notebook;
 
 /// What of an account is read; each is consented on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
