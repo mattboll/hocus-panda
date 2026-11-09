@@ -732,19 +732,22 @@ impl App {
     fn handle(&mut self, message: Message) -> Task<Message> {
         // A desktop's name being changed is written as the pointer goes
         // elsewhere (6.14).
-        if self.desktops_editing()
-            && matches!(
-                message,
-                Message::Toggle(_)
-                    | Message::Menu(_)
-                    | Message::Section(_)
-                    | Message::Home
-                    | Message::Query(_)
-                    | Message::Close
-                    | Message::Result(_)
-            )
-        {
+        let elsewhere = matches!(
+            message,
+            Message::Toggle(_)
+                | Message::Menu(_)
+                | Message::Section(_)
+                | Message::Home
+                | Message::Query(_)
+                | Message::Close
+                | Message::Result(_)
+        );
+        if self.desktops_editing() && elsewhere {
             self.desktops_commit();
+        }
+        // Her name too (#752).
+        if self.agents_naming() && elsewhere {
+            self.agents_name_commit();
         }
         match message {
             Message::Window(id) => {
@@ -797,6 +800,10 @@ impl App {
                     && self.captures_escape()
                 {
                     return Task::none();
+                }
+                // Her name: `Tab` writes it (#752).
+                if self.agents_naming() && key.as_ref() == Key::Named(Named::Tab) {
+                    self.agents_name_commit();
                 }
                 // A desktop's name: `Esc` keeps the old one, `Tab` writes.
                 if self.desktops_editing() {

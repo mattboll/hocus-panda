@@ -52,6 +52,7 @@ pub mod sources;
 pub mod store;
 pub mod tools;
 pub mod triage;
+pub mod watch;
 
 /// Her memory's file, in her data folder.
 pub const MEMORY: &str = "memory.db";

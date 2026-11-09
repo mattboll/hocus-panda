@@ -217,6 +217,8 @@ enum Corner {
 #[derive(Debug, Clone, Default)]
 pub struct Laid {
     pub size: Size,
+    /// Her header's title: her name when she has one (#752).
+    pub title: String,
     pub head: Rectangle,
     pub mood: Option<Mood>,
     pub status: String,
@@ -436,6 +438,12 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         _ => (None, Mood::Sleep),
     };
     laid.mood = Some(mood);
+    laid.title = c
+        .look
+        .as_ref()
+        .map(|l| l.name.trim().to_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| words.title().to_owned());
     laid.status = match (&look, line) {
         (Some(look), _) => look.status.clone(),
         (None, Her::Ready) => words.connecting().to_owned(),
@@ -606,6 +614,7 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "width": width,
         "height": size.height,
         "mood": mood.word(),
+        "title": laid.title,
         "status": laid.status,
         "hint": laid.hint.join(" "),
         "tab": match open.tab { Tab::Talk => "talk", Tab::Knows => "knows" },
@@ -2528,7 +2537,7 @@ impl View {
         let text_x = laid.head.x + HEAD + HEAD_GAP;
         let middle = laid.head.center_y();
         f.fill_text(text(
-            words.title(),
+            &laid.title,
             Point::new(text_x, middle - 10.0),
             TITLE,
             TEXT,

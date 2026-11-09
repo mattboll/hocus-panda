@@ -300,11 +300,27 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
 }
 
 #[test]
-fn a_consent_given_in_the_settings_shows_on_her_card() -> anyhow::Result<()> {
+fn a_consent_given_in_the_settings_shows_on_her_card_at_once() -> anyhow::Result<()> {
     let bed = Bed::start()?;
-    let mut driver = common::Driver::start(Store::in_memory(common::clock())?, bed.options());
+    // Her name given (#752): she introduces herself by it.
+    let mut named = hocus_secretary::settings::Settings::default();
+    named.name = "Margot".to_owned();
+    let mut driver = common::Driver::start(
+        Store::in_memory(common::clock())?,
+        Options {
+            settings: std::sync::Arc::new(hocus_secretary::settings::File::fixed(named)),
+            ..bed.options()
+        },
+    );
     let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
+    assert!(
+        hers(&items)[0].starts_with("Bonjour, je suis Margot, ta secrétaire."),
+        "{:?}",
+        hers(&items)
+    );
     let (card_id, _) = waiting(&items)[0].clone();
+    driver.settle();
+    let asked_before = bed.api.asked().len();
     // The Settings' sheet writes the same book.
     let mut written = ConsentBook::default();
     written.allow(
@@ -314,8 +330,8 @@ fn a_consent_given_in_the_settings_shows_on_her_card() -> anyhow::Result<()> {
         jiff::Timestamp::UNIX_EPOCH,
     );
     written.save(&bed.book())?;
-    // At her source's next cycle.
-    driver.advance(300);
+    // At once (#752), not at her source's next cycle: her clock does not
+    // move.
     let items = thread_until(&mut driver, |items| {
         cards(items)
             .iter()
@@ -332,6 +348,15 @@ fn a_consent_given_in_the_settings_shows_on_her_card() -> anyhow::Result<()> {
     );
     // And the first run went on to the next source.
     assert_eq!(waiting(&items).len(), 1);
+    // Her source read the calendar at once too.
+    let start = std::time::Instant::now();
+    while bed.api.asked().len() == asked_before {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "the calendar is never read"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     driver.stop();
     Ok(())
 }

@@ -136,6 +136,9 @@ pub enum Event {
     /// Whether the keyring gives her answers' provider's key: the
     /// provider missing one, or none.
     Keyed(Option<String>),
+    /// A file of hers changed: her consent book, or the configuration
+    /// (#752).
+    Changed(crate::watch::Watched),
     /// A key given was checked and kept (or not).
     KeyDone {
         conn: u64,
@@ -322,6 +325,22 @@ impl Brain {
             key_missing: None,
             key_asked: false,
         };
+        // Her consent book and her settings watched: a change is taken at
+        // once (#752).
+        let watched: Vec<(crate::watch::Watched, std::path::PathBuf)> = brain
+            .consents
+            .book
+            .clone()
+            .map(|b| (crate::watch::Watched::Consents, b))
+            .into_iter()
+            .chain(
+                brain
+                    .settings
+                    .path()
+                    .map(|p| (crate::watch::Watched::Config, p.to_path_buf())),
+            )
+            .collect();
+        crate::watch::start(watched, brain.sender.clone(), Event::Changed);
         // What she kept across a restart: her thread, the items waiting
         // for the triage (#750).
         brain.restore();
@@ -542,6 +561,13 @@ impl Brain {
                     self.key_missing = missing;
                     self.tell_look();
                 }
+            }
+            Event::Changed(crate::watch::Watched::Consents) => self.consents_changed(),
+            Event::Changed(crate::watch::Watched::Config) => {
+                tracing::info!("her settings changed");
+                // Her name, her restraint, at once.
+                self.tell_look();
+                self.tell_restraint();
             }
             Event::KeyDone {
                 conn,
@@ -1010,7 +1036,7 @@ impl Brain {
         messages: &[Message],
         scope: &Scope,
     ) -> Result<Request, String> {
-        context::assemble(
+        let mut request = context::assemble(
             &self.store,
             &self.inbox,
             role,
@@ -1018,7 +1044,19 @@ impl Brain {
             scope,
             self.clock.now(),
         )
-        .map_err(|e| format!("her memory: {e}"))
+        .map_err(|e| format!("her memory: {e}"))?;
+        // Her name, as the user gave it (#752): the first line of her
+        // persona.
+        let name = self.settings.current().name;
+        let name = name.trim();
+        if !name.is_empty() {
+            let line = match scope.language {
+                context::Language::French => format!("Tu t'appelles {name}."),
+                context::Language::English => format!("Your name is {name}."),
+            };
+            request.system = format!("{line}\n{}", request.system);
+        }
+        Ok(request)
     }
 
     /// An item with its text, held and queued for the triage; its text

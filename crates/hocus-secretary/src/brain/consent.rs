@@ -137,6 +137,16 @@ impl Brain {
         self.first_run_step();
     }
 
+    /// Her consent book changed (the Settings wrote it, #752): her cards
+    /// say it now, her Google source reads it now, her first run goes on.
+    pub(super) fn consents_changed(&mut self) {
+        tracing::info!("her consent book changed");
+        self.cards_follow_the_book();
+        self.google_now();
+        self.first_run_step();
+        self.tell_look();
+    }
+
     /// Her Google source reads its book at once.
     fn google_now(&mut self) {
         let now = self.clock.now();
@@ -165,24 +175,32 @@ impl Brain {
         let begun = !self.consents.cards.is_empty()
             || self.store.meta(FIRST_RUN).ok().flatten().as_deref() == Some("begun");
         if !begun {
+            // Her name, when the user gave her one (#752).
+            let name = self.settings.current().name.trim().to_owned();
+            let me = match (name.is_empty(), fr) {
+                (true, true) => "ta secrétaire".to_owned(),
+                (true, false) => "your secretary".to_owned(),
+                (false, true) => format!("{name}, ta secrétaire"),
+                (false, false) => format!("{name}, your secretary"),
+            };
             let hello = match (accounts.is_empty(), fr) {
-                (false, true) => {
-                    "Bonjour, je suis ta secrétaire. Je ne lis rien sans ton accord : je te demande, une source à la fois."
-                }
-                (false, false) => {
-                    "Hello, I’m your secretary. I read nothing without your consent: I’ll ask you, one source at a time."
-                }
-                (true, true) => {
-                    "Bonjour, je suis ta secrétaire. Je n’ai trouvé aucun compte Google dans Comptes en ligne : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Agents."
-                }
-                (true, false) => {
-                    "Hello, I’m your secretary. I found no Google account in Online Accounts: once you add one, you can open it to me in Settings › Agents."
-                }
+                (false, true) => format!(
+                    "Bonjour, je suis {me}. Je ne lis rien sans ton accord : je te demande, une source à la fois."
+                ),
+                (false, false) => format!(
+                    "Hello, I’m {me}. I read nothing without your consent: I’ll ask you, one source at a time."
+                ),
+                (true, true) => format!(
+                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google dans Comptes en ligne : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Agents."
+                ),
+                (true, false) => format!(
+                    "Hello, I’m {me}. I found no Google account in Online Accounts: once you add one, you can open it to me in Settings › Agents."
+                ),
             };
             self.add_item(
                 None,
                 Body::Her {
-                    text: hello.to_owned(),
+                    text: hello,
                     note: None,
                     assumed: false,
                 },

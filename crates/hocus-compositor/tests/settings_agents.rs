@@ -1340,3 +1340,43 @@ fn her_key_is_given_through_her_and_never_shown() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// Her name (#752): a field in LA SECRÉTAIRE, « Ta secrétaire » greyed
+/// while empty; typed and `Enter`, `[secretary] name` written.
+#[test]
+fn her_name_is_typed_in_its_field_and_written() -> anyhow::Result<()> {
+    const KEY_M: u32 = 50;
+    const KEY_A: u32 = 30;
+    const KEY_R: u32 = 19;
+    const KEY_G: u32 = 34;
+    const KEY_O: u32 = 24;
+    const KEY_T: u32 = 20;
+    const KEY_ENTER: u32 = 28;
+    const KEY_LEFTSHIFT: u32 = 42;
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| s["agents"]["name"].is_string())?;
+    assert_eq!(shown["agents"]["name"], "");
+    bed.click("agents:name-field")?;
+    bed.hp.key(KEY_LEFTSHIFT, true);
+    bed.key(KEY_M)?;
+    bed.hp.key(KEY_LEFTSHIFT, false);
+    for code in [KEY_A, KEY_R, KEY_G, KEY_O, KEY_T] {
+        bed.key(code)?;
+    }
+    bed.shows(|s| s["agents"]["naming"] == "Margot")?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        std::fs::create_dir_all(&out)?;
+        save(&mut bed, &out, "settings-name.png")?;
+    }
+    bed.key(KEY_ENTER)?;
+    bed.written(|t| t.contains("name = \"Margot\""))?;
+    bed.shows(|s| s["agents"]["name"] == "Margot" && s["agents"]["naming"].is_null())?;
+    Ok(())
+}

@@ -56,8 +56,9 @@ use crate::{
 };
 use hocus_secretary_link::{KeyOutcome, Notebook, Secret};
 
-/// Her key's field (#752).
+/// Her key's field and her name's (#752).
 const KEY_FIELD: &str = "agents-key";
+const NAME_FIELD: &str = "agents-name";
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
 const WAVE: Duration = Duration::from_millis(600);
@@ -134,6 +135,10 @@ pub enum Msg {
     KeyErase,
     /// What she did with the key given.
     Keyed(Result<KeyOutcome, String>),
+    /// Her name's field, as typed (#752).
+    NameTyped(String),
+    /// Her name written (`Enter`, `Tab`, or the field left).
+    NameCommit,
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -222,6 +227,8 @@ pub struct State {
     google_sheet: Option<GoogleSheet>,
     /// Her answers' key (#752).
     key: KeyRow,
+    /// Her name as it is being typed, before it is written (#752).
+    name: Option<String>,
 }
 
 /// The "Clé Anthropic" row: what she says of her key, the field (never
@@ -346,6 +353,10 @@ impl App {
         }
         out.push(Control::Agents(Stop::Copy));
         for setting in crate::agents::settings() {
+            // Her name is a field of its own (#752), iced's to focus.
+            if setting.id == model::NAME {
+                continue;
+            }
             out.push(Control::Setting(Slot::of(setting, self.source)));
             if setting.id == model::REMIND {
                 out.push(Control::Agents(Stop::Preview));
@@ -373,6 +384,106 @@ impl App {
         self.agents_notifiers_job(None);
         self.agents_google_job(None);
         self.agents_key_job(None);
+    }
+
+    /// Her name as written in the file now.
+    fn agents_name(&self) -> String {
+        match self.agents_slot(model::NAME).and_then(|s| self.value(s)) {
+            Some(Value::Text(name)) => name,
+            _ => String::new(),
+        }
+    }
+
+    /// Her name being typed, written if it changed (#752).
+    pub(super) fn agents_name_commit(&mut self) {
+        let Some(typed) = self.agents.name.take() else {
+            return;
+        };
+        let name = typed.trim().to_owned();
+        if name == self.agents_name().trim() || !self.writable() {
+            return;
+        }
+        let Some(slot) = self.agents_slot(model::NAME) else {
+            return;
+        };
+        let said = match (self.lang, name.is_empty()) {
+            (Lang::French, false) => format!("Elle s’appelle {name}"),
+            (Lang::French, true) => "Elle redevient « Ta secrétaire »".to_owned(),
+            (Lang::English, false) => format!("Her name is {name}"),
+            (Lang::English, true) => "She is “Your secretary” again".to_owned(),
+        };
+        tracing::info!("her name written");
+        self.ask(
+            slot,
+            crate::store::Raw::Set(Value::Text(name)),
+            super::Doing::New,
+            None,
+            None,
+            Some(said),
+        );
+    }
+
+    /// Whether her name is being typed.
+    pub(super) fn agents_naming(&self) -> bool {
+        self.agents.name.is_some()
+    }
+
+    /// Her name's row: a field, her name or « Ta secrétaire » greyed.
+    fn agents_name_row<'a>(&'a self) -> El<'a> {
+        let lang = self.lang;
+        let Some(setting) = crate::model::setting(model::NAME) else {
+            return Space::new().into();
+        };
+        let value = self
+            .agents
+            .name
+            .clone()
+            .unwrap_or_else(|| self.agents_name());
+        let words = column![
+            t(setting.name.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+            t(
+                setting.line.map(|l| l.get(lang)).unwrap_or_default(),
+                12.5,
+                DIM.get()
+            ),
+        ]
+        .spacing(3)
+        .width(Length::Fill);
+        let field = text_input(self.say(w("Ta secrétaire", "Your secretary")), &value)
+            .id(NAME_FIELD)
+            .on_input(|typed| Message::Agents(Msg::NameTyped(typed)))
+            .on_submit(Message::Agents(Msg::NameCommit))
+            .size(13.5)
+            .width(200)
+            .padding([7, 10])
+            .style(|_: &Theme, status| {
+                let focused = matches!(status, text_input::Status::Focused { .. });
+                text_input::Style {
+                    background: Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.06))),
+                    border: border(
+                        8.0,
+                        if focused { 1.5 } else { 1.0 },
+                        if focused { ACCENT.get() } else { RIM_12.get() },
+                    ),
+                    icon: DIM.get(),
+                    placeholder: FAINT.get(),
+                    value: TEXT.get(),
+                    selection: crate::theme::Ink::Accent(0.35).get(),
+                }
+            });
+        container(
+            row![words, container(field).id("agents:name-field".to_owned())]
+                .spacing(12)
+                .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: 11.0,
+            right: 14.0,
+            bottom: 11.0,
+            left: 16.0,
+        })
+        .id(format!("row:{}", model::NAME))
+        .into()
     }
 
     /// Her key given (`Some(Some(key))`), erased (`Some(None)`), or only
@@ -664,6 +775,14 @@ impl App {
                 };
                 self.agents_google_job(Some((source, None)));
                 self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::NameTyped(typed) => {
+                self.agents.name = Some(typed.chars().take(40).collect());
+                iced::Task::none()
+            }
+            Msg::NameCommit => {
+                self.agents_name_commit();
+                iced::Task::none()
             }
             Msg::KeyState(state) => {
                 self.agents.key.state = state;
@@ -1214,6 +1333,7 @@ impl App {
         if !self.agents_assistant() {
             return body.into();
         }
+        body = body.push(divided(true, self.agents_name_row()));
         if self.agents.key.state.is_some() {
             body = body.push(divided(true, self.agents_key_row()));
         }
@@ -2481,6 +2601,8 @@ impl App {
                 "granted": g.granted.map(Notebook::word),
             })).collect::<Vec<_>>(),
             "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
+            "name": self.agents_name(),
+            "naming": self.agents.name.clone(),
             // Her key's row: never the key, nor its length.
             "key": self.agents.key.state.as_ref().map(|(provider, missing)| serde_json::json!({
                 "provider": provider,

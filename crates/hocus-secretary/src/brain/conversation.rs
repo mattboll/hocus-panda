@@ -396,7 +396,7 @@ impl Brain {
             model: self.model.as_ref().map(|m| m.shown()).unwrap_or_default(),
             hint,
             key: self.key_missing.clone(),
-            name: String::new(),
+            name: self.settings.current().name.trim().to_owned(),
         }
     }
 

@@ -169,10 +169,16 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
             } else {
                 "http://127.0.0.1:9".to_owned()
             };
+            // Her name, with the refusing API (#752).
+            let name = if setup.refusing_api {
+                "[secretary]\nname = \"Margot\"\n"
+            } else {
+                ""
+            };
             std::fs::write(
                 &config,
                 format!(
-                    "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{api}\"\n\
+                    "{name}[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{api}\"\n\
                      [secretary.providers.local]\nkind = \"ollama\"\nurl = \"http://127.0.0.1:9/v1\"\n"
                 ),
             )?;
@@ -1025,6 +1031,13 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
     bed.opened()?;
     let shown = bed.shows(|s| s["key_field"] == serde_json::json!(false))?;
     assert_eq!(shown["focus"], "key", "{shown}");
+    assert_eq!(shown["title"], "Margot", "her name in her header");
+    assert!(
+        shown["items"]
+            .to_string()
+            .contains("Bonjour, je suis Margot, ta secrétaire."),
+        "{shown}"
+    );
     assert!(
         shown["key_lines"]
             .as_str()

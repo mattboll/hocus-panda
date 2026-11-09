@@ -127,7 +127,7 @@ impl Brain {
     }
 
     /// Her restraint again, to the talkers, when her settings changed it.
-    fn tell_restraint(&mut self) {
+    pub(super) fn tell_restraint(&mut self) {
         let restraint = self.settings.current().speak.restraint();
         if self.speaking.told == Some(restraint) {
             return;

@@ -242,6 +242,10 @@ impl Default for Compaction {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Her name (`[secretary] name`, #752): in her drawer's header, her
+    /// peek, how she introduces herself, her persona. Empty: "ta
+    /// secrétaire".
+    pub name: String,
     pub models: Models,
     /// Added to, or replacing, the default `anthropic` and `local`.
     pub providers: BTreeMap<String, Provider>,
@@ -253,6 +257,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            name: String::new(),
             models: Models::default(),
             providers: default_providers(),
             triage: Triage::default(),

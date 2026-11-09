@@ -132,12 +132,19 @@ pub fn said(
     fr: bool,
     mut measure: impl FnMut(&str, f32, iced::Font) -> f32,
 ) -> Said {
-    let who = if fr {
-        "TA SECRÉTAIRE"
-    } else {
-        "YOUR SECRETARY"
-    }
-    .to_owned();
+    // Her name when the user gave her one (#752), spaced capitals as the
+    // label is.
+    let name = crate::secretary::conversation(|c| {
+        c.look
+            .as_ref()
+            .map(|l| l.name.trim().to_owned())
+            .filter(|n| !n.is_empty())
+    });
+    let who = match name {
+        Some(name) => name.to_uppercase(),
+        None if fr => "TA SECRÉTAIRE".to_owned(),
+        None => "YOUR SECRETARY".to_owned(),
+    };
     let room = BUBBLE - 2.0 * PAD_X;
     let mut y = PAD_Y + LABEL * 1.4 + 4.0;
     let line = TEXT * LINE;

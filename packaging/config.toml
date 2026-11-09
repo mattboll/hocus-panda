@@ -380,8 +380,10 @@
 # Accounts, an application's notifications, Slack's for one: in her drawer
 # the first time, and under Settings › Agents), kept in her folder's
 # consents.json. Her key: `hocus-secretary key anthropic` in a terminal of
-# the session (docs/secretary.md).
+# the session (docs/secretary.md). name is her name, in her drawer, her
+# bubble and when she introduces herself; empty, "Ta secrétaire".
 # mode = "classic"
+# name = ""
 
 # [secretary.models]
 # Each role's provider and model, "PROVIDER/MODEL", applied at the next
