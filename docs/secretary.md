@@ -9,10 +9,27 @@ is sent, written or answered without your click. Her design is
 
 ## 1. The switch
 
-Settings › Agents, last group "LA SECRÉTAIRE": "La secrétaire
-assistante". On, she starts at once (and with every session); off, she
-stops, and her memory stays on this computer until you ask her to forget
-it ("Ce qu'elle sait" › "Tout oublier…").
+Settings › Secretary (under TRAVAIL, after Agents; Agents keeps a line to
+it), first group "LA SECRÉTAIRE": "La secrétaire". On, she starts at once
+(and with every session); off, she stops, and her memory stays on this
+computer until you ask her to forget it ("Ce qu'elle sait" › "Tout
+oublier…"). Off, the page shows only that switch.
+
+Where things are on that page:
+
+- **LA SECRÉTAIRE**: her switch, « Son nom », « Clé Anthropic », and
+  « Ce qu'elle sait », which says where to see it (her drawer's tab of
+  that name; the page has no way into her drawer yet).
+- **CE QU'ELLE LIT**, by account: each Google account a line (its
+  address, « Travail | Privé ») with a switch for « Ton agenda » (and
+  « Choisir › », its calendars), « Tes mails » and « Les anniversaires de
+  tes contacts »; then each application that sent you a notification
+  (Slack, Signal…) with its switch, and « Travail | Privé » once she
+  reads it. « + Ajouter un compte Google › » above it.
+- **LE TRI SUR CET ORDINATEUR**: what the sorting is for and where it is
+  (« 21 en attente », « En pause : la batterie est à 32 % »), « Quand
+  trier » (`[secretary.triage] battery`), and « Le modèle » (who runs it,
+  where, and whether it answers).
 
 ## 2. Her key
 
@@ -20,8 +37,8 @@ She thinks with Claude, through the Anthropic API: she needs an API key
 of yours (from the Anthropic console; a Claude subscription is not an API
 key). Until she has one, her drawer says « Il me manque ma clé Anthropic »
 and shows a field: paste the key there (`Ctrl+V`), then « Enregistrer ».
-Settings › Agents › LA SECRÉTAIRE has the same field (« Clé Anthropic »),
-and once the key is saved, « Remplacer » and « Effacer ». She checks the
+Settings › Secretary has the same field (« Clé Anthropic »), and once the
+key is saved, « ✓ Enregistrée », « Remplacer » and « Effacer ». She checks the
 key with Anthropic (a request that costs nothing) and says plainly when it
 is refused or when there is no network; it goes to your keyring (the one
 the session unlocks), never to a file, and a copy of it leaves the
@@ -36,8 +53,8 @@ hocus-secretary key anthropic
 Enter, then paste the key when it asks (it is not shown), then Enter.
 Never put the key on the command line: your shell's history would keep it.
 
-Her name: Settings › Agents › « Son nom » (`[secretary] name`); empty, she
-is « Ta secrétaire ».
+Her name: Settings › Secretary › « Son nom » (`[secretary] name`); empty,
+she is « Ta secrétaire ».
 
 ## 3. The triage, on this computer (optional)
 
@@ -50,7 +67,8 @@ it hold a password or a code to mask. The desktop ships no model; with
 ollama pull qwen3:8b
 ```
 
-She uses it on mains (or above half battery), one item at a time, with
+She uses it on mains (or above half battery: Settings › Secretary ›
+« Quand trier » changes it), one item at a time, with
 an 8k context (`[secretary.triage] context`: Ollama's own default would
 not fit an 8 GB graphics card), and lets the model go after two idle
 minutes. She pauses when the computer stays hot: the processor's
@@ -87,24 +105,30 @@ nothing sent, no invitation answered) and what leaves the computer:
 
 - the first time you open her drawer, one source at a time ("Autoriser",
   or "Pas maintenant");
-- at any time in Settings › Agents, under "LA SECRÉTAIRE": "Autoriser",
-  or "Ne plus lire" (she then forgets what came from it).
+- at any time in Settings › Secretary, under "CE QU'ELLE LIT": its
+  switch. Turned on, its sheet opens, and nothing is read before its
+  "Autoriser"; turned off, she no longer reads it and forgets what came
+  from it (the toast's "Annuler", or `Ctrl+Z`, reads it again as it
+  was).
 
 Each sheet has a box « C'est privé », checked for a gmail.com account and
 not for a company's, with what it does: never shown during a meeting, a
 screen share or a call; never in a message or a task she drafts for work;
 she brings it up evenings and weekends too, never at night (22 h – 8 h).
-You can change it later on the source's row (« Privé »): what she already
-knows of it moves with it.
+You can change it later on the account's line (« Travail | Privé », for
+every kind she reads of it; on an account she reads nothing of yet, it is
+what its sheets will propose) or on an application's row: what she
+already knows of it moves with it.
 
 The agenda's sheet lists the calendars she will read, those others share
 with you and those you hid included; untick one to leave it out (later
-too, on its row). A calendar she cannot read is said in her status (« 2
+too: « Choisir › » on « Ton agenda », whose line says « Elle en lit 3 sur
+4 · Famille laissé de côté »). A calendar she cannot read is said in her status (« 2
 agendas illisibles »); the others are read all the same.
 
-What you allow or change in the Settings reaches her at once. Under the
-Google rows, « Ajouter un compte Google » opens GNOME's Online Accounts; a
-new account shows there, and she asks about it in her drawer.
+What you allow or change in the Settings reaches her at once.
+« + Ajouter un compte Google › » opens GNOME's Online Accounts; a new
+account shows there, and she asks about it in her drawer.
 
 Birthdays are read from your Google contacts over CardDAV, as Google
 documents it (a list of the cards, then the cards themselves), once a

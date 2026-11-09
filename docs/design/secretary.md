@@ -1452,7 +1452,7 @@ The secretary ships behind a setting, `[secretary] mode = "classic" | "assistant
 - **"classic"**: the 4.6 secretary as it is today. She heads the agents group and gives the briefing on the agents. Nothing starts `hocus-secretary`, nothing reads the sources, and no model is called.
 - **"assistant"**: the secretary of this spec.
 
-The setting is followed live, so switching back to "classic" stops the process and hides the drawer. Her memory stays on disk until the user asks her to forget it. The switch also sits on the Settings › Agents page.
+The setting is followed live, so switching back to "classic" stops the process and hides the drawer. Her memory stays on disk until the user asks her to forget it. The switch also sits on her own Settings page, Settings › Secretary (#759; on Settings › Agents before).
 
 ## 22. As built
 
@@ -2725,3 +2725,68 @@ The maintainer's try of sprint 11: nothing she wrote could be copied.
   nothing after it closed), `her_answers_and_drafts_copy_from_their_button`
   (her answer, the draft, a masked secret as its mask) and
   `the_queue_s_lines_are_copied_too`.
+
+### #759: her own Settings page, per account
+
+The approved mockup ux2 §6 (« Réglages › Agents › La secrétaire »), its
+audit's Settings items, and the first approved mockup's « Réglages ›
+Secrétaire » (§13): the group « LA SECRÉTAIRE » at the bottom of Settings
+› Agents became her own page, Settings › Secretary (`hocus settings
+secretary`), in TRAVAIL after Agents; Agents keeps one line to it.
+docs/design/settings.md "Secretary (#759)" has the page row by row.
+
+- **LA SECRÉTAIRE**: her switch (`[secretary] mode`, now named « La
+  secrétaire »; off, the page shows only it), « Son nom » (#752's field),
+  « Clé Anthropic » (« ✓ Enregistrée · Remplacer · Effacer », or the
+  masked field « … (sk-ant-…) »; « trousseau de ta session, avec tes mots
+  de passe »), « Ce qu'elle sait ».
+- **CE QU'ELLE LIT, by account**: each Google account of Online Accounts a
+  line (G, its address, « Google · déjà connecté à cet ordinateur »,
+  « Travail | Privé »), its kinds under it as switches, in the mockup's
+  order (« Ton agenda » with « Choisir › » and « Elle en lit 3 sur 4 ·
+  Famille laissé de côté », « Tes mails », « Les anniversaires de tes
+  contacts »); then the applications that notified (Slack first), each
+  with its switch and, once read, « Travail | Privé ». « + Ajouter un
+  compte Google › » in the group's head. The eight green « Autoriser »
+  buttons and the « Privé » boxes are gone.
+- **Switches**: on, the source's sheet as before (nothing written before
+  its « Autoriser »; its buttons now on the left, « Autoriser » first, as
+  the audit asks); off, a revocation at once, with « Annuler » (and
+  `Ctrl+Z`) reading it again as it was, without the sheet. A revoked
+  source switched on again opens its sheet again: "the first time" read
+  as "whenever it is not read".
+- **Travail | Privé** on the account's line writes the notebook of every
+  kind read of it (one record each, with « Annuler »); on an account she
+  reads nothing of, nothing is written and it becomes what its sheets
+  propose while the window is open.
+- **LE TRI SUR CET ORDINATEUR**: « Le tri de tes mails » (what it is for,
+  its state from her status in words, where its queue is), « Quand
+  trier » (`[secretary.triage] battery`: always, or on AC and above 20,
+  50, 80 %), « Le modèle » (« Ollama, sur cet ordinateur · qwen3:8b ·
+  prêt » / « ne répond pas »).
+- **Her words** that sent the user to Settings › Agents (a key refused, a
+  source to allow or leave out, her first run without an account) now say
+  Réglages › Secrétaire.
+- **Differences from the mockup**: « Ce qu'elle sait › Ouvrir » and « Voir
+  la file › » are not links: nothing outside her drawer can open it on a
+  tab or on its queue yet (only `Super+S` and her head, on its last
+  view), so the rows say where they are; « Le modèle › Changer » is not
+  there (the models are `[secretary.models]`); no count of what she knows
+  (« 30 choses ») nor time left on the queue (her status has neither; the
+  queue's view has the time left). The sheets still say « déjà dans
+  Comptes en ligne » (their words are shared with her drawer's cards,
+  `hocus-secretary-link::sheets`). Her drawer's gear still opens Settings
+  › Agents (the drawer's code, #758's).
+- **Tests**: `hocus-settings` (`secretary`: the search finds every row,
+  the battery menu's key, codec and choices, the triage's and the model's
+  words, an agenda's line; `app::secretary_page`: the kinds grouped and
+  ordered under their account), and
+  `hocus-compositor/tests/settings_secretary.rs` with the real window, a
+  fake Online Accounts, the shell's history and a fake of her socket:
+  her switch and the rows in assistant mode only, an application's switch
+  (sheet, grant, notebook, revocation, « Annuler »), each Google account's
+  line and kinds (the sheet's notebook from the account's, Travail |
+  Privé, `Ctrl+Z`), the agenda's calendars and « Choisir », her name, her
+  key, the triage's words and « Quand trier ». The bed they share with the
+  Agents page's tests is `tests/agents_bed/`; `settings_agents.rs` checks
+  the line to her page.
