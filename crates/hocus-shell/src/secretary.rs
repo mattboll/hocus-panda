@@ -3,7 +3,9 @@
 //! (`secretary ready PATH`). A thread of its own connects, writes and
 //! reconnects; another reads what she says. Nothing here runs on iced's
 //! loop or waits for her: a question she takes thirty seconds to answer
-//! holds no frame (AC3). Her drawer (lot 2) will read [`state`].
+//! holds no frame (AC3). Her drawer ([`crate::drawer`]) reads the
+//! conversation she sends ([`conversation`]) and is woken only while it
+//! is open.
 //!
 //! The shell tells her what she cannot see from her process: the session
 //! locked or not (she keeps working, and never speaks while locked) and
@@ -21,7 +23,9 @@ use std::{
 };
 
 use hocus_link::SecretaryShown;
-use hocus_secretary_link::{Client, FromSecretary, ToSecretary, VERSION, line, read};
+use hocus_secretary_link::{
+    Body, Client, Decision, FromSecretary, Item, Look, ToSecretary, VERSION, line, read,
+};
 
 /// The longest wait between two tries to connect.
 const RETRY_MOST: Duration = Duration::from_secs(2);
@@ -60,13 +64,110 @@ fn line_state() -> std::sync::MutexGuard<'static, Line> {
 }
 
 /// Where she is.
-#[allow(dead_code)]
 pub fn state() -> State {
     line_state().state
 }
 
+/// What her drawer shows of the conversation: the thread, her answer as
+/// it streams, her typing, her face.
+#[derive(Debug, Clone, Default)]
+pub struct Conversation {
+    pub items: Vec<Item>,
+    /// Her answer to a request as it comes, until its item replaces it.
+    pub streaming: Vec<(u64, String)>,
+    /// She composes an answer to a request: what she is doing.
+    pub typing: Option<(u64, String)>,
+    pub look: Option<Look>,
+    /// Bumped at each change: what the drawer lays out again for.
+    pub rev: u64,
+}
+
+static CONVERSATION: Mutex<Option<Conversation>> = Mutex::new(None);
+
+/// `with` on the conversation.
+pub fn conversation<T>(with: impl FnOnce(&Conversation) -> T) -> T {
+    let held = CONVERSATION.lock().unwrap_or_else(PoisonError::into_inner);
+    match held.as_ref() {
+        Some(c) => with(c),
+        None => with(&Conversation::default()),
+    }
+}
+
+fn converse(change: impl FnOnce(&mut Conversation)) {
+    {
+        let mut held = CONVERSATION.lock().unwrap_or_else(PoisonError::into_inner);
+        let c = held.get_or_insert_with(Conversation::default);
+        change(c);
+        c.rev += 1;
+    }
+    crate::drawer::changed();
+}
+
+/// What she sent, kept for the drawer.
+fn heard(message: FromSecretary) {
+    match message {
+        FromSecretary::Item { item } => converse(|c| {
+            // Her words whole replace her answer as it streamed.
+            if matches!(item.body, Body::Her { .. })
+                && let Some(request) = item.request
+            {
+                c.streaming.retain(|(r, _)| *r != request);
+            }
+            match c.items.iter_mut().find(|i| i.id == item.id) {
+                Some(kept) => *kept = item,
+                None => c.items.push(item),
+            }
+        }),
+        FromSecretary::Thread { items, .. } => converse(|c| {
+            c.items = items;
+            c.streaming.clear();
+        }),
+        FromSecretary::Typing { id, doing } => converse(|c| c.typing = Some((id, doing))),
+        FromSecretary::Answer { id, text, done } => converse(|c| {
+            if !text.is_empty() {
+                match c.streaming.iter_mut().find(|(r, _)| *r == id) {
+                    Some((_, said)) => said.push_str(&text),
+                    None => c.streaming.push((id, text)),
+                }
+            }
+            if done {
+                c.streaming.retain(|(r, _)| *r != id);
+                if c.typing.as_ref().is_some_and(|(r, _)| *r == id) {
+                    c.typing = None;
+                }
+            }
+        }),
+        FromSecretary::Look { look } => converse(|c| c.look = Some(look)),
+        FromSecretary::Error {
+            id: Some(id),
+            message,
+        } => {
+            tracing::info!(id, message, "the secretary said no");
+            converse(|c| {
+                if c.typing.as_ref().is_some_and(|(r, _)| *r == id) {
+                    c.typing = None;
+                }
+                c.streaming.retain(|(r, _)| *r != id);
+            });
+        }
+        other => tracing::debug!(?other, "the secretary said"),
+    }
+}
+
 /// What the compositor says of her process.
 pub fn told(shown: SecretaryShown) {
+    told_line(shown.clone());
+    match shown {
+        // Classic again: no drawer, nothing of her (§21).
+        SecretaryShown::Off => {
+            crate::drawer::close();
+            *CONVERSATION.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
+        SecretaryShown::Unavailable | SecretaryShown::Ready(_) => crate::drawer::changed(),
+    }
+}
+
+fn told_line(shown: SecretaryShown) {
     let mut line = line_state();
     match shown {
         SecretaryShown::Off => {
@@ -105,16 +206,48 @@ fn send(message: ToSecretary) {
     }
 }
 
-/// A question to her (the drawer's field, lot 2; tests until then).
+fn next_id() -> u64 {
+    let mut line = line_state();
+    let id = line.next_id;
+    line.next_id += 1;
+    id
+}
+
+/// A sentence to her: the drawer's field, or a test's line.
 pub fn ask(text: String) {
-    let id = {
-        let mut line = line_state();
-        let id = line.next_id;
-        line.next_id += 1;
-        id
-    };
-    tracing::info!(id, "a question to the secretary");
+    let id = next_id();
+    tracing::info!(id, "a sentence to the secretary");
     send(ToSecretary::Ask { id, text });
+}
+
+/// Quick reply `choice` of her question `item`.
+pub fn choose(item: u64, choice: u32) {
+    let id = next_id();
+    tracing::info!(id, item, choice, "a quick reply to the secretary");
+    send(ToSecretary::Choose { id, item, choice });
+}
+
+/// A card's button.
+pub fn decide(item: u64, decision: Decision) {
+    let id = next_id();
+    tracing::info!(id, item, ?decision, "a card's button");
+    send(ToSecretary::Decide { id, item, decision });
+}
+
+/// "Annuler" under what she kept.
+pub fn undo(item: u64) {
+    let id = next_id();
+    send(ToSecretary::Undo { id, item });
+}
+
+/// The drawer opened or closed: she is told; opened, the thread is asked
+/// for once (the shell may have started again since she began it).
+pub fn drawer(open: bool) {
+    send(ToSecretary::Drawer { open });
+    if open && conversation(|c| c.items.is_empty()) {
+        let id = next_id();
+        send(ToSecretary::Thread { id });
+    }
 }
 
 /// The session locked or unlocked.
@@ -219,22 +352,28 @@ fn listen(stream: UnixStream) {
             Ok(FromSecretary::Hello { version }) => {
                 tracing::info!(version, "the secretary is connected");
                 line_state().state = State::Ready;
+                crate::drawer::changed();
             }
             Ok(FromSecretary::Refused { reason }) => {
                 tracing::warn!(reason, "the secretary refused the shell");
             }
-            Ok(FromSecretary::Answer { id, done, .. }) => {
-                tracing::info!(id, done, "the secretary answered");
+            Ok(FromSecretary::Answer { id, text, done }) => {
+                if done {
+                    tracing::info!(id, "the secretary answered");
+                }
+                heard(FromSecretary::Answer { id, text, done });
             }
-            Ok(FromSecretary::Error { id, message }) => {
-                tracing::info!(?id, message, "the secretary said no");
+            Ok(FromSecretary::Error { id: None, message }) => {
+                tracing::info!(message, "the secretary said no");
             }
-            Ok(other) => tracing::debug!(?other, "the secretary said"),
+            Ok(message) => heard(message),
             Err(err) => tracing::warn!(%err, "a line from the secretary that does not read"),
         }
     }
     let mut line = line_state();
     if line.state == State::Ready {
         line.state = State::Unavailable;
+        drop(line);
+        crate::drawer::changed();
     }
 }

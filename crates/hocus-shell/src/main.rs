@@ -39,6 +39,7 @@ mod column;
 mod curtain;
 mod day;
 mod desktops;
+mod drawer;
 mod emoji;
 mod ending;
 mod footer;
@@ -881,6 +882,10 @@ impl Shell {
             }
             ToShell::SecretaryAsk(text) => {
                 secretary::ask(text);
+                Task::none()
+            }
+            ToShell::SecretaryDrawer { output, width } => {
+                drawer::toggle(&output, width);
                 Task::none()
             }
             ToShell::Fullscreen(screens) => {
@@ -1790,6 +1795,23 @@ impl Shell {
         )
     }
 
+    /// The secretary's drawer, if its surface is `id`.
+    fn drawer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !drawer::is_surface(id) {
+            return None;
+        }
+        Some(
+            canvas(drawer::draw::View {
+                id,
+                words: drawer::words(),
+                glass: self.look.glass,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        )
+    }
+
     /// The emoji picker, if its surface is `id`.
     fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !emoji::is_surface(id) {
@@ -2068,6 +2090,7 @@ impl Shell {
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.actions_view(id))
+                .or_else(|| self.drawer_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
@@ -2516,6 +2539,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::EmojiInserted) => {
                             emoji::inserted();
+                            continue;
+                        }
+                        // The secretary's drawer: its own surface
+                        // (secretary.md §5).
+                        Ok(ToShell::SecretaryDrawer { output, width }) => {
+                            drawer::toggle(&output, width);
                             continue;
                         }
                         // The actions palette: its own surface (#736).
