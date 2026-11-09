@@ -24,18 +24,25 @@
 //! "Montrer", which reveals them by a deliberate click, never while the
 //! screen is shared.
 //!
+//! Her text can be selected and copied ([`select`], #757): a drag, a
+//! double or triple click, `Ctrl+C`, the right click's « Copier », and
+//! « Copier » on hover beside her answers and draft cards.
+//!
 //! What she says reaches it from the shell's line to her
 //! ([`crate::secretary`]), off iced's loop: the drawer is woken only while
 //! it is open. Closed, nothing of hers draws.
 
 pub mod draw;
+pub mod select;
 
 use std::{
     sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
-use hocus_link::{DRAWER_CLOSE, DRAWER_WIDE, EDGE, SECRETARY_NAMESPACE, ToCompositor};
+use hocus_link::{
+    Clip, ClipKind, DRAWER_CLOSE, DRAWER_WIDE, EDGE, SECRETARY_NAMESPACE, ToCompositor,
+};
 use hocus_secretary_link::{
     Body, Decision, Mood, Notebook,
     knows::{Act, Do, Kind, Query},
@@ -255,6 +262,17 @@ impl Words {
     }
 
     /// "Modifier" from "Ce qu'elle sait": the field's start.
+    /// Her text's « Copier » (#757): on hover, and in the right click's
+    /// menu.
+    pub fn copy(self) -> &'static str {
+        self.pick("Copier", "Copy")
+    }
+
+    /// The toast once something is copied.
+    pub fn copied(self) -> &'static str {
+        self.pick("Copié", "Copied")
+    }
+
     pub fn about(self, title: &str) -> String {
         if self.fr {
             format!("À propos de « {title} » : ")
@@ -353,6 +371,10 @@ pub enum Target {
     /// The confirmation's buttons: forget, or keep.
     Confirm(bool),
     ToastUndo,
+    /// « Copier » on her answer or a draft card `item`, on hover (#757).
+    Copy(u64),
+    /// The right click's menu's « Copier ».
+    CopyMenu,
 }
 
 impl Target {
@@ -392,6 +414,8 @@ impl Target {
             Self::ForgetAll => "ForgetAll".to_owned(),
             Self::Confirm(yes) => format!("Confirm({yes})"),
             Self::ToastUndo => "ToastUndo".to_owned(),
+            Self::Copy(item) => format!("Copy({item})"),
+            Self::CopyMenu => "CopyMenu".to_owned(),
         }
     }
 }
@@ -454,7 +478,43 @@ pub struct Open {
     /// there rather than in the field (#752).
     pub key: String,
     pub key_focus: bool,
+    /// Her text selected (#757): gone as the drawer closes.
+    pub selection: Option<select::Selection>,
+    /// The last press on text: when, where, and how many in a row (a
+    /// double click takes a word, a triple its paragraph).
+    pub clicks: Option<(Instant, Point, u8)>,
+    /// The item whose « Copier » shows: the pointer is on it.
+    pub over: Option<u64>,
+    /// The right click's menu: where, and what its « Copier » copies.
+    pub menu: Option<Menu>,
+    /// Until when « Copié » shows.
+    pub copied: Option<Instant>,
 }
+
+/// The right click's menu over her text.
+#[derive(Clone)]
+pub struct Menu {
+    pub at: Point,
+    /// Never logged: it may be anything she said.
+    pub text: String,
+}
+
+impl std::fmt::Debug for Menu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Menu({:?}, {} chars)",
+            self.at,
+            self.text.chars().count()
+        )
+    }
+}
+
+/// How long « Copié » shows.
+pub const COPIED: Duration = Duration::from_millis(1500);
+/// Presses this close in time and place count as one double or triple
+/// click.
+pub const MULTI_CLICK: Duration = Duration::from_millis(500);
 
 impl Drop for Open {
     fn drop(&mut self) {
@@ -686,6 +746,11 @@ pub fn toggle(output: &str, screen: u32) {
             key_focus: crate::secretary::conversation(|c| {
                 c.look.as_ref().is_some_and(|l| l.key.is_some())
             }),
+            selection: None,
+            clicks: None,
+            over: None,
+            menu: None,
+            copied: None,
         }));
         (effects, true)
     });
@@ -793,10 +858,16 @@ pub fn deadline() -> Option<Instant> {
     } else {
         None
     };
-    with(|d| d.closing.iter().map(|(_, at)| *at).min())
-        .into_iter()
-        .chain(toast)
-        .min()
+    with(|d| {
+        let copied = match &d.phase {
+            Phase::Open(open) => open.copied,
+            Phase::Closed => None,
+        };
+        d.closing.iter().map(|(_, at)| *at).chain(copied).min()
+    })
+    .into_iter()
+    .chain(toast)
+    .min()
 }
 
 /// What is due at `now`: its surface faded out goes; her toast goes.
@@ -815,7 +886,14 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             !due
         });
-        if toast_over && matches!(d.phase, Phase::Open(_)) {
+        let copied_over = match &mut d.phase {
+            Phase::Open(open) if open.copied.is_some_and(|until| until <= now) => {
+                open.copied = None;
+                true
+            }
+            _ => false,
+        };
+        if (toast_over || copied_over) && matches!(d.phase, Phase::Open(_)) {
             effects.push(Effect::Wake(SECRETARY_NAMESPACE));
         }
         effects
@@ -860,6 +938,55 @@ pub fn unfolded(known: &hocus_secretary_link::knows::Known) -> String {
     format!("{}|{}", known.item, known.text)
 }
 
+/// What her « Copier » copies of thread item `item`: her answer's text, a
+/// draft card's draft (its lines, else its text); nothing for the rest.
+pub fn item_copy(item: &hocus_secretary_link::Item) -> Option<String> {
+    match &item.body {
+        Body::Her { text, .. } if !text.is_empty() => Some(text.clone()),
+        Body::Card { card }
+            if card.kind == hocus_secretary_link::CardKind::Draft && card.sheet.is_none() =>
+        {
+            let draft = if card.lines.is_empty() {
+                card.text.clone()
+            } else {
+                card.lines.join("\n")
+            };
+            (!draft.is_empty()).then_some(draft)
+        }
+        _ => None,
+    }
+}
+
+/// `text` copied from the drawer on `id` (#757): the clipboard takes it,
+/// as the compositor offers the shell's copies (never read back into the
+/// history), and « Copié » shows. Neither the text nor its words are
+/// logged.
+pub fn copy(id: window::Id, text: String) {
+    if text.is_empty() {
+        return;
+    }
+    let open = with(|d| match d.open_mut(id) {
+        Some(open) => {
+            open.copied = Some(Instant::now() + COPIED);
+            open.menu = None;
+            true
+        }
+        None => false,
+    });
+    if !open {
+        return;
+    }
+    tracing::info!(chars = text.chars().count(), "the drawer copies");
+    crate::popover::send(vec![Effect::Tell(ToCompositor::Clip {
+        paste: false,
+        clip: Clip {
+            kind: ClipKind::Text,
+            data: text.into_bytes(),
+        },
+    })]);
+    wake();
+}
+
 /// What `target` does, clicked on the drawer on `id`.
 pub fn act(id: window::Id, target: Target) {
     enum Then {
@@ -870,12 +997,24 @@ pub fn act(id: window::Id, target: Target) {
         Key(String, String),
         Effects(Vec<Effect>),
         Undo(Option<u64>),
+        Copy(String),
     }
     let then = with(|d| {
         let Some(open) = d.open_mut(id) else {
             return Then::Nothing;
         };
         match target {
+            Target::Copy(item) => {
+                let text = crate::secretary::conversation(|c| {
+                    c.items.iter().find(|i| i.id == item).and_then(item_copy)
+                });
+                tracing::info!(item, "her « Copier »");
+                Then::Copy(text.unwrap_or_default())
+            }
+            Target::CopyMenu => match open.menu.take() {
+                Some(menu) => Then::Copy(menu.text),
+                None => Then::Draw,
+            },
             Target::Close => Then::Close,
             Target::Gear => {
                 crate::popover::session::open_settings(Some("agents"));
@@ -1233,6 +1372,7 @@ pub fn act(id: window::Id, target: Target) {
     match then {
         Then::Nothing => {}
         Then::Draw => wake(),
+        Then::Copy(text) => copy(id, text),
         Then::Undo(token) => {
             if let Some(token) = token {
                 crate::secretary::memory(Do::Restore { token });
@@ -1449,6 +1589,10 @@ pub fn key_on(
     use keyboard::{Key, key::Named};
     let then = with(|d| {
         let open = d.open_mut(id)?;
+        // The right click's menu goes first.
+        if matches!(key, Key::Named(Named::Escape)) && open.menu.take().is_some() {
+            return Some(Then::Draw);
+        }
         if open.tab == Tab::Knows {
             return Some(search_key(open, key, modifiers, text));
         }

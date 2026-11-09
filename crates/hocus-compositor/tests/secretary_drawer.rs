@@ -20,6 +20,12 @@
 //!   travailles et avec qui. »; without a key in the keyring, her status
 //!   says so and how to give one.
 //!
+//! - Her text copied (#757): a drag selects within a bubble and across
+//!   bubbles, a double click a word, a triple click a paragraph; `Ctrl+C`
+//!   and the right click's « Copier » copy it; her answers and draft cards
+//!   have « Copier » on hover; a masked secret copies as its mask; the
+//!   selection goes as the drawer closes, and draws nothing at rest.
+//!
 //! Pixman, so the shell draws on the CPU, opaque and still, as in CI.
 //! With `HOCUS_DRAWER_SHOTS=DIR`, the tests leave PNGs of the drawer
 //! there (screenshots for review, never compared).
@@ -36,7 +42,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{KEY_ESC, KEY_LEFTMETA, WAIT, chord, wait};
+use common::{BTN_LEFT, KEY_ESC, KEY_LEFTCTRL, KEY_LEFTMETA, WAIT, chord, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, RendererChoice, SecretaryMode, model::Rect,
@@ -61,9 +67,15 @@ project = "Chapitô"
 "#;
 
 /// Her model: a reply that streams a word a second of her clock, one
-/// that proposes a message, one that takes its time.
+/// that proposes a message, one that takes its time, one that says a
+/// secret masked (first: the others' words are in its request's thread).
 const MODEL: &str = r#"
 name = "Claude Sonnet 5.5"
+
+[[reply]]
+role = "answer"
+contains = ["mot de passe du wifi"]
+text = "Le code du wifi : [secret masqué — voir le mail de Léa]."
 
 [[reply]]
 role = "answer"
@@ -1128,5 +1140,375 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
         common::logged(&bed.dir.path().join("secretary.log"))
     );
     assert!(!logs.contains("sk-ant-xx"), "the key in no log");
+    Ok(())
+}
+
+const KEY_C: u32 = 46;
+const BTN_RIGHT: u32 = 0x111;
+
+/// A block of her text as the drawer logged it: what it shows, where its
+/// first line starts and where its last ends, global.
+#[derive(Debug, Clone)]
+struct Block {
+    source: String,
+    start: (f64, f64),
+    end: (f64, f64),
+}
+
+impl Bed {
+    /// The blocks of text the drawer last logged, once there are `least`.
+    fn texts(&mut self, least: usize) -> anyhow::Result<Vec<Block>> {
+        let log = self.log.clone();
+        let parse = |text: &str| -> Option<Vec<Block>> {
+            let line = text
+                .lines()
+                .rev()
+                .find(|l| l.contains("the drawer's texts"))?;
+            let list = line.split("the drawer's texts").nth(1)?;
+            list.split_whitespace()
+                .map(|b| {
+                    let (source, at) = b.split_once('@')?;
+                    let (start, end) = at.split_once('>')?;
+                    let point = |p: &str| -> Option<(f64, f64)> {
+                        let (x, y) = p.split_once(',')?;
+                        Some((x.parse().ok()?, y.parse().ok()?))
+                    };
+                    Some(Block {
+                        source: source.to_owned(),
+                        start: point(start)?,
+                        end: point(end)?,
+                    })
+                })
+                .collect()
+        };
+        let done = self.hp.dispatch_until(WAIT, |_| {
+            parse(&common::logged(&log)).is_some_and(|b| b.len() >= least)
+        })?;
+        anyhow::ensure!(done, "never {least} blocks of text");
+        let r = self.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
+        let (x, y) = (f64::from(r.x), f64::from(r.y));
+        Ok(parse(&common::logged(&self.log))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| Block {
+                start: (b.start.0 + x, b.start.1 + y),
+                end: (b.end.0 + x, b.end.1 + y),
+                ..b
+            })
+            .collect())
+    }
+
+    /// How much of the log there is now, to read what comes after.
+    fn mark(&self) -> usize {
+        common::logged(&self.log).len()
+    }
+
+    /// The first line holding `text` logged after `mark`.
+    fn logged_after(&mut self, mark: usize, text: &str) -> anyhow::Result<String> {
+        let log = self.log.clone();
+        let find = |all: &str| {
+            all.get(mark..)
+                .and_then(|after| after.lines().find(|l| l.contains(text)))
+                .map(str::to_owned)
+        };
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| find(&common::logged(&log)).is_some())?;
+        anyhow::ensure!(done, "never logged: {text}");
+        Ok(find(&common::logged(&self.log)).unwrap_or_default())
+    }
+
+    /// A press at `from` dragged to `to`, then let go.
+    fn drag(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
+        common::over(&mut self.hp, from, hocus_link::SECRETARY_NAMESPACE)?;
+        self.hp.button(BTN_LEFT, true);
+        wait(&mut self.hp, Duration::from_millis(60))?;
+        for step in 1..=5 {
+            let t = f64::from(step) / 5.0;
+            self.hp
+                .pointer_move(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+            wait(&mut self.hp, Duration::from_millis(40))?;
+        }
+        self.hp.button(BTN_LEFT, false);
+        wait(&mut self.hp, Duration::from_millis(60))?;
+        Ok(())
+    }
+
+    /// `clicks` presses in a row at `at`.
+    fn clicks(&mut self, at: (f64, f64), clicks: usize) -> anyhow::Result<()> {
+        common::over(&mut self.hp, at, hocus_link::SECRETARY_NAMESPACE)?;
+        for _ in 0..clicks {
+            self.hp.button(BTN_LEFT, true);
+            self.hp.button(BTN_LEFT, false);
+        }
+        wait(&mut self.hp, Duration::from_millis(60))?;
+        Ok(())
+    }
+
+    /// What is selected, once the drawer says so after `mark`: how many
+    /// characters.
+    fn selected_after(&mut self, mark: usize) -> anyhow::Result<usize> {
+        let line = self.logged_after(mark, "the drawer's selection")?;
+        line.split("chars=")
+            .nth(1)
+            .and_then(|c| c.split_whitespace().next())
+            .and_then(|c| c.parse().ok())
+            .ok_or_else(|| anyhow::anyhow!("no count in {line}"))
+    }
+
+    fn ctrl_c(&mut self) {
+        chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_C]);
+    }
+
+    /// The clipboard, once it holds `want`.
+    fn clipboard_is(&mut self, want: &str) -> anyhow::Result<()> {
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.clipboard().as_deref() == Some(want))?;
+        anyhow::ensure!(
+            done,
+            "the clipboard holds {:?}, not {want:?}",
+            self.hp.clipboard()
+        );
+        Ok(())
+    }
+
+    /// The clipboard, once it holds something other than `not`.
+    fn clipboard_changed(&mut self, not: Option<&str>) -> anyhow::Result<String> {
+        let done = self.hp.dispatch_until(WAIT, |hp| {
+            hp.clipboard().is_some_and(|c| Some(c.as_str()) != not)
+        })?;
+        anyhow::ensure!(done, "the clipboard stays {not:?}");
+        Ok(self.hp.clipboard().unwrap_or_default())
+    }
+
+    /// The « Copier » buttons the drawer last logged, by name.
+    fn copy_buttons(&mut self) -> anyhow::Result<Vec<String>> {
+        let log = self.log.clone();
+        let find = |text: &str| -> Vec<String> {
+            text.lines()
+                .rev()
+                .find(|l| l.contains("the drawer's items"))
+                .map(|l| {
+                    l.split_whitespace()
+                        .filter(|w| w.starts_with("Copy("))
+                        .filter_map(|w| w.split('@').next())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| !find(&common::logged(&log)).is_empty())?;
+        anyhow::ensure!(done, "no « Copier » in the drawer");
+        Ok(find(&common::logged(&self.log)))
+    }
+}
+
+/// #757: her answer selected by a drag and copied with `Ctrl+C`; a
+/// double click takes a word, a triple click the paragraph; a drag across
+/// the user's bubble and hers takes both; the right click's « Copier »
+/// copies what is selected. Nothing draws at rest with a selection, and
+/// it goes as the drawer closes.
+#[test]
+fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
+    const HERS: &str = "Bien noté, je range ta journée.";
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    bed.hp
+        .tell_shell(ToShell::SecretaryAsk("bonjour".to_owned()));
+    bed.shows(|s| s["items"].to_string().contains("typing:"))?;
+    bed.advance(30)?;
+    // Her morning's briefing in too: nothing moves the thread after.
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains(&format!("her:{HERS}")) && items.contains("briefing:")
+    })?;
+    let blocks = bed.texts(2)?;
+    let n = blocks.len();
+    let (user, her) = (blocks[n - 2].clone(), blocks[n - 1].clone());
+    assert!(
+        user.start.0 > her.start.0,
+        "the user's on the right: {blocks:?}"
+    );
+    assert!(
+        user.source.starts_with("Item(") && her.source.starts_with("Item("),
+        "{blocks:?}"
+    );
+    // Dragged from before its first letter to past its last: all of it.
+    let mark = bed.mark();
+    bed.drag(
+        (her.start.0 + 1.0, her.start.1),
+        (her.end.0 + 30.0, her.end.1),
+    )?;
+    assert_eq!(bed.selected_after(mark)?, HERS.chars().count());
+    bed.shot("drawer-selection")?;
+    // Nothing draws at rest with a selection.
+    common::at_rest(&mut bed.hp)?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let commits = bed.hp.drawer_commits();
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert_eq!(bed.hp.drawer_commits(), commits, "nothing draws at rest");
+    let mark = bed.mark();
+    bed.ctrl_c();
+    bed.logged_after(mark, "the drawer copies")?;
+    bed.clipboard_is(HERS)?;
+    // A double click on her first line: a word.
+    let on_word = (her.start.0 + 40.0, her.start.1);
+    bed.clicks(on_word, 2)?;
+    bed.ctrl_c();
+    let word = bed.clipboard_changed(Some(HERS))?;
+    assert!(
+        !word.is_empty() && !word.contains(' ') && HERS.contains(&word),
+        "a word: {word:?}"
+    );
+    // A triple click, once the double's time is over: the paragraph.
+    wait(&mut bed.hp, Duration::from_millis(700))?;
+    bed.clicks(on_word, 3)?;
+    bed.ctrl_c();
+    bed.clipboard_is(HERS)?;
+    // Across the user's bubble and hers: both, a line between.
+    bed.drag(
+        (user.start.0 + 1.0, user.start.1),
+        (her.end.0 + 30.0, her.end.1),
+    )?;
+    bed.ctrl_c();
+    bed.clipboard_is(&format!("bonjour\n{HERS}"))?;
+    // A word selected, then the right click's « Copier ».
+    wait(&mut bed.hp, Duration::from_millis(700))?;
+    bed.clicks(on_word, 2)?;
+    let mark = bed.mark();
+    bed.hp.button(BTN_RIGHT, true);
+    bed.hp.button(BTN_RIGHT, false);
+    let menu = bed.logged_after(mark, "the drawer's menu CopyMenu@")?;
+    let at = menu
+        .split("CopyMenu@")
+        .nth(1)
+        .and_then(|a| a.split_whitespace().next())
+        .and_then(|a| a.split_once(','))
+        .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)))
+        .ok_or_else(|| anyhow::anyhow!("no menu's place in {menu}"))?;
+    let r = bed.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
+    bed.shot("drawer-menu")?;
+    bed.click((f64::from(r.x) + at.0, f64::from(r.y) + at.1))?;
+    bed.clipboard_is(&word)?;
+    // Closed and opened again: nothing is selected any more.
+    bed.type_keys(&[KEY_ESC]);
+    bed.closed()?;
+    bed.super_s();
+    bed.opened()?;
+    let mark = bed.mark();
+    bed.ctrl_c();
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert!(
+        !common::logged(&bed.log)[mark..].contains("the drawer copies"),
+        "nothing selected after it closed"
+    );
+    assert_eq!(bed.hp.clipboard().as_deref(), Some(word.as_str()));
+    Ok(())
+}
+
+/// #757: her answers and draft cards have « Copier » on hover: it copies
+/// the answer, or the draft, and « Copié » says so; a masked secret copies
+/// as its mask.
+#[test]
+fn her_answers_and_drafts_copy_from_their_button() -> anyhow::Result<()> {
+    const HERS: &str = "Je te propose ce message pour Léa.";
+    const DRAFT: &str = "Je relis ton article cet après-midi, je te dis vers 16 h.";
+    const MASKED: &str = "Le code du wifi : [secret masqué — voir le mail de Léa].";
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    // Her morning's briefing first, as her clock moves: nothing moves the
+    // thread after.
+    bed.advance(30)?;
+    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    bed.hp.tell_shell(ToShell::SecretaryAsk(
+        "prépare un message pour Léa sur son article".to_owned(),
+    ));
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains("card:Draft:Message à Léa") && items.contains(&format!("her:{HERS}"))
+    })?;
+    let buttons = bed.copy_buttons()?;
+    let mut copied = Vec::new();
+    for (n, button) in buttons.iter().enumerate() {
+        let at = bed.place(button)?;
+        common::point(&mut bed.hp, at)?;
+        if n == 0 {
+            bed.shot("drawer-copy-button")?;
+        }
+        let mark = bed.mark();
+        let before = bed.hp.clipboard();
+        bed.click(at)?;
+        bed.logged_after(mark, "the drawer copies")?;
+        copied.push(bed.clipboard_changed(before.as_deref())?);
+        if n == 0 {
+            bed.shot("drawer-copied")?;
+        }
+    }
+    assert!(
+        copied.iter().any(|c| c == HERS) && copied.iter().any(|c| c == DRAFT),
+        "her answer and the draft: {copied:?}"
+    );
+    // A secret she masked copies as she shows it.
+    bed.hp.tell_shell(ToShell::SecretaryAsk(
+        "le mot de passe du wifi ?".to_owned(),
+    ));
+    bed.shows(|s| s["items"].to_string().contains("user:le mot de passe"))?;
+    bed.advance(30)?;
+    bed.shows(|s| s["items"].to_string().contains(&format!("her:{MASKED}")))?;
+    let newest = bed
+        .copy_buttons()?
+        .into_iter()
+        .max_by_key(|b| {
+            b.trim_start_matches("Copy(")
+                .trim_end_matches(')')
+                .parse::<u64>()
+                .unwrap_or(0)
+        })
+        .ok_or_else(|| anyhow::anyhow!("no « Copier »"))?;
+    let at = bed.place(&newest)?;
+    bed.click(at)?;
+    bed.clipboard_is(MASKED)?;
+    Ok(())
+}
+
+/// #757: the queue's lines are selected and copied as her answers are: a
+/// triple click on what she does takes that line.
+#[test]
+fn the_queue_s_lines_are_copied_too() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    let status = bed.place("Status")?;
+    bed.click(status)?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("state:"))?;
+    let state = shown["items"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.as_str())
+                .find_map(|i| i.strip_prefix("state:"))
+        })
+        .and_then(|s| s.split(" | ").next())
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("no state in {shown}"))?;
+    // "‹ Discussion", the section's title, then what she does.
+    let blocks = bed.texts(3)?;
+    let line = &blocks[2];
+    assert!(line.source.starts_with("Queue("), "{blocks:?}");
+    bed.clicks(((line.start.0 + line.end.0) / 2.0, line.start.1), 3)?;
+    bed.ctrl_c();
+    bed.clipboard_is(&state)?;
     Ok(())
 }
