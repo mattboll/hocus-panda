@@ -13,11 +13,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Full debug info made target/ outgrow the runner's disk (run 41709913523,
-  # "No space left on device" during the tests). Line tables keep file and
-  # line in backtraces.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # Debug info: line tables only, set in Cargo.toml's profiles (full debug
+  # info made target/ outgrow the runner's disk, run 41709913523).
 
 jobs:
   fmt:
