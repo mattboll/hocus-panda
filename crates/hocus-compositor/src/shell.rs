@@ -538,6 +538,7 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::PeekClose => self.peek_closed(),
+            ToCompositor::SecretaryPeek { id, stays } => self.secretary_peek(id, stays),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {

@@ -44,6 +44,8 @@ pub struct Input {
     pub read: Vec<String>,
     /// The absence it covers, if one: from, to.
     pub away: Option<(Timestamp, Timestamp)>,
+    /// A public moment (§7.4): nothing perso goes to her model.
+    pub public: bool,
 }
 
 /// A meeting to move: its presenter or an invitee away.
@@ -116,6 +118,15 @@ pub fn date(day: Date, english: bool) -> String {
         format!("{weekday} {} {month}", day.day())
     } else {
         capital(&facts::french_date(day))
+    }
+}
+
+/// A day in a sentence: "mardi 10 novembre" / "Tuesday 10 November".
+pub fn day_in_sentence(day: Date, english: bool) -> String {
+    if english {
+        date(day, true)
+    } else {
+        facts::french_date(day)
     }
 }
 
@@ -340,10 +351,12 @@ fn line(title: impl Into<String>, notebook: Notebook) -> Line {
     }
 }
 
-/// The meetings of `day` that take time (not the leaves' calendar).
+/// The meetings of `day` that take time (not the leaves' calendar; the
+/// perso notebook's are CÔTÉ PERSO's).
 fn meetings(events: &[Event], leaves: Option<&str>) -> Vec<Event> {
     events
         .iter()
+        .filter(|e| e.notebook == Notebook::Pro)
         .filter(|e| e.busy && Some(e.calendar.as_str()) != leaves && e.end > e.start)
         .filter(|e| e.end.duration_since(e.start) < SignedDuration::from_hours(20))
         .cloned()
@@ -502,8 +515,10 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             let count = if received > 0 { received } else { arrived };
             let text = match (en, matter.len()) {
                 (false, 0) => format!("{count} arrivés, rien qui attende ta réponse"),
+                (false, 1) => format!("{count} arrivés, 1 qui compte"),
                 (false, n) => format!("{count} arrivés, {n} qui comptent"),
                 (true, 0) => format!("{count} came, nothing waiting for your answer"),
+                (true, 1) => format!("{count} came, 1 that matters"),
                 (true, n) => format!("{count} came, {n} that matter"),
             };
             lines.push(line(text, Notebook::Pro));
@@ -520,12 +535,6 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             l.attention = true;
             lines.push(l);
         }
-        // Events changed meanwhile: today's, read during the absence.
-        for e in episodes.iter().filter(|e| e.kind == "event") {
-            let mut l = line(e.digest.clone(), e.notebook);
-            l.detail = w(en, "à l’agenda", "on the calendar").to_owned();
-            lines.push(l);
-        }
         // Perso items that came: their digests.
         for e in episodes
             .iter()
@@ -535,7 +544,10 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             lines.push(line(e.digest.clone(), Notebook::Perso));
         }
         if !lines.is_empty() {
-            for l in &lines {
+            for l in lines
+                .iter()
+                .filter(|l| !(input.public && l.notebook == Notebook::Perso))
+            {
                 facts_lines.push(format!("[absence] {}", l.title));
             }
             sections.push(Section {
@@ -696,7 +708,9 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
                         .unwrap_or_default();
                     l.when = when(m.at, &here, en);
                     l.attention = true;
-                    facts_lines.push(format!("[à répondre] {} — {}", l.title, l.detail));
+                    if !(input.public && m.notebook == Notebook::Perso) {
+                        facts_lines.push(format!("[à répondre] {} — {}", l.title, l.detail));
+                    }
                     l
                 })
                 .collect();

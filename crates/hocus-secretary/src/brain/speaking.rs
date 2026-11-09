@@ -180,8 +180,10 @@ impl Brain {
             return;
         }
         let now = self.clock.now();
-        // Her catch-up and her triage first: what came is in it.
+        // Her catch-up, her sources' syncs under way and her triage
+        // first: what came is in it.
         let settling = self.catching.is_some()
+            || self.slots.iter().any(|s| s.busy)
             || (self.queue.pending() > 0
                 && !matches!(self.queue.state, crate::triage::State::Paused { .. }));
         if settling && now.duration_since(began) < SETTLE {
@@ -203,6 +205,7 @@ impl Brain {
             english: self.english(),
             read: self.read_words(),
             away,
+            public: self.scope.moment.public(),
         };
         let built = if morning_due {
             briefing::morning(&self.store, &input)
@@ -413,7 +416,7 @@ impl Brain {
             let start = slot.start.to_zoned(zone.clone());
             let when = format!(
                 "{} {}",
-                briefing::date(start.date(), en),
+                briefing::day_in_sentence(start.date(), en),
                 briefing::hour(&start, en)
             );
             let draft = if en {
@@ -806,7 +809,7 @@ impl Brain {
             let z = due.to_zoned(zone.clone());
             format!(
                 "{} {}",
-                briefing::date(z.date(), en),
+                briefing::day_in_sentence(z.date(), en),
                 briefing::hour(&z, en)
             )
         });

@@ -19,6 +19,13 @@
 //! would mark the channel read). Forwarded whatever the bubbles do: held
 //! while the screen is shared or not to be disturbed, they are still
 //! hers to read; when she may speak of them is hers to ask (§6.3).
+//!
+//! Her speaking up (lot 5): her requests to speak and her restraint go to
+//! the shell's speak gate ([`crate::speak`]), whose answers, and what the
+//! user does with her peek, go back to her; the moment too. The effects
+//! she asks for once a card is accepted are carried out here, on the
+//! reader's thread: a task goes to the To do list (Day.4), and she is
+//! told whether it went.
 
 use std::{
     collections::VecDeque,
@@ -34,7 +41,8 @@ use std::{
 
 use hocus_link::SecretaryShown;
 use hocus_secretary_link::{
-    Body, Client, Decision, FromSecretary, Item, Look, Notification, ToSecretary, VERSION,
+    Body, Client, Decision, Effect, FromSecretary, Item, Look, Moment, Notification, PeekAnswer,
+    Spoken, ToSecretary, VERSION,
     consent::{CONSENTS, ConsentBook},
     line, read,
 };
@@ -153,6 +161,9 @@ fn heard(message: FromSecretary) {
             }
         }),
         FromSecretary::Look { look } => converse(|c| c.look = Some(look)),
+        FromSecretary::Speak { speak } => crate::speak::asked(speak),
+        FromSecretary::Restraint { restraint } => crate::speak::restraint(restraint),
+        FromSecretary::Effect { effect } => carry_out(effect),
         FromSecretary::Error {
             id: Some(id),
             message,
@@ -176,6 +187,7 @@ pub fn told(shown: SecretaryShown) {
         // Classic again: no drawer, nothing of her (§21).
         SecretaryShown::Off => {
             crate::drawer::close();
+            crate::speak::off();
             *CONVERSATION.lock().unwrap_or_else(PoisonError::into_inner) = None;
         }
         SecretaryShown::Unavailable | SecretaryShown::Ready(_) => crate::drawer::changed(),
@@ -263,6 +275,39 @@ pub fn drawer(open: bool) {
         let id = next_id();
         send(ToSecretary::Thread { id });
     }
+}
+
+/// What the gate did with her request `speak`.
+pub fn spoken(speak: u64, outcome: Spoken) {
+    send(ToSecretary::Spoken { speak, outcome });
+}
+
+/// What the user did with her peek of `speak`.
+pub fn peeked(speak: u64, answer: PeekAnswer) {
+    let id = next_id();
+    send(ToSecretary::Peeked { id, speak, answer });
+}
+
+/// The moment the screen is in.
+pub fn moment(moment: Moment) {
+    send(ToSecretary::Moment { moment });
+}
+
+/// An effect she asks for, a card accepted: carried out, and she is told.
+fn carry_out(effect: Effect) {
+    let id = effect.id();
+    let (ok, detail) = match effect {
+        Effect::Task { title, .. } => match crate::day::add_task(title) {
+            Ok(()) => (true, String::new()),
+            Err(why) => (false, why),
+        },
+    };
+    tracing::info!(id, ok, "an effect for the secretary");
+    send(ToSecretary::Effected {
+        effect: id,
+        ok,
+        detail,
+    });
 }
 
 /// The session locked or unlocked.
