@@ -1035,6 +1035,10 @@ pub struct TriageStatus {
     pub given_up: u64,
     /// Items held with their text, checked or not.
     pub held: u64,
+    /// Where the local model is held, when its server says: « tri : sur la
+    /// carte graphique », « tri : en partie sur le processeur » (#752).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
 }
 
 /// How many of each her memory holds.

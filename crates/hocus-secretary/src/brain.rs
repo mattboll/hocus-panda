@@ -770,6 +770,7 @@ impl Brain {
                     done: self.queue.done,
                     given_up: self.queue.given_up,
                     held: self.inbox.len() as u64,
+                    placement: t.placement().map(|p| p.words(self.talk.fr()).to_owned()),
                 }
             }),
             key_provider: self

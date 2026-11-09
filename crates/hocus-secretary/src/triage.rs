@@ -45,6 +45,21 @@ récupération, mot de passe wifi ou jeton que tu vois : recopie exactement ses 
 text, rien autour, et son genre dans kind. Une description de secret sans sa valeur n'en est \
 pas un. Les « [secret masqué — voir …] » sont déjà masqués : ignore-les.";
 
+/// What the model reads of an item, cut to fit a context of `context`
+/// tokens (#752): its prompt, the schema and the answer take their share;
+/// a longer item keeps its start, and the request says it was cut. Never
+/// a failure. A token is counted as 3 characters, which French and code
+/// rarely go under.
+pub fn fitted(input: &str, context: u32) -> String {
+    const RESERVED: usize = 2048;
+    let room = (context as usize).saturating_sub(RESERVED).max(256) * 3;
+    if input.chars().count() <= room {
+        return input.to_owned();
+    }
+    let kept: String = input.chars().take(room).collect();
+    format!("{kept}\n[… coupé ici : l'élément est plus long, seul son début est lu]")
+}
+
 /// The triage's JSON schema.
 pub fn schema() -> Value {
     let text = json!({"type": "string"});
@@ -120,6 +135,10 @@ pub trait Triager: Send + Sync + std::fmt::Debug {
     fn triage(&self, input: &str) -> Result<(Verdict, u64, u64), String>;
     /// The model is let go (idle).
     fn unload(&self) -> Result<(), String>;
+    /// Where the local model is held, when its server says (Ollama).
+    fn placement(&self) -> Option<crate::providers::openai::Placement> {
+        None
+    }
 }
 
 /// Why the queue waits.

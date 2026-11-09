@@ -140,6 +140,10 @@ pub struct Triage {
     pub unload_after: u64,
     /// Seconds between two requests: one at a time, paced.
     pub pace: u64,
+    /// The local model's context, in tokens, asked of Ollama (its own
+    /// default, 40k, takes an 8B model past an 8 GB card): an item longer
+    /// is cut to fit (#752).
+    pub context: u32,
 }
 
 impl Default for Triage {
@@ -149,6 +153,7 @@ impl Default for Triage {
             heat: 95,
             unload_after: 120,
             pace: 2,
+            context: 8192,
         }
     }
 }

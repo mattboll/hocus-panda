@@ -408,11 +408,15 @@
 # [secretary.triage]
 # On battery, the triage runs only above this charge (%); it pauses while
 # the CPU package is above heat (°C); the model is unloaded after
-# unload-after idle seconds; pace seconds between two requests.
+# unload-after idle seconds; pace seconds between two requests. context is
+# the local model's context in tokens, asked of Ollama (its own default is
+# far larger, and takes an 8B model past an 8 GB graphics card); a longer
+# item is cut to fit, its start kept.
 # battery = 50
 # heat = 95
 # unload-after = 120
 # pace = 2
+# context = 8192
 
 # [secretary.speak]
 # When she speaks up (docs/design/secretary.md §6). Her morning briefing

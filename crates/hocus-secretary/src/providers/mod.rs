@@ -177,6 +177,8 @@ pub struct Router {
     /// The first wait before a retry (doubled each time), when the
     /// provider gives none.
     pub retry: Duration,
+    /// Where Ollama held the triage's model at its last answer.
+    placed: Mutex<Option<openai::Placement>>,
 }
 
 impl Router {
@@ -185,6 +187,7 @@ impl Router {
             settings,
             keys,
             retry: Duration::from_secs(1),
+            placed: Mutex::new(None),
         }
     }
 }
@@ -446,17 +449,31 @@ impl Triager for Router {
             url: &provider.url,
             key: key.as_ref(),
         };
-        let (content, tokens_in, tokens_out) = endpoint.chat(
-            &choice.model,
-            &[
-                ("system", triage::PROMPT.to_owned()),
-                ("user", input.to_owned()),
-            ],
-            Some(("triage", triage::schema())),
-        )?;
+        let context = settings.triage.context.max(1024);
+        let messages = [
+            ("system", triage::PROMPT.to_owned()),
+            ("user", triage::fitted(input, context)),
+        ];
+        let (content, tokens_in, tokens_out) = if provider.kind == Kind::Ollama {
+            let answer =
+                endpoint.ollama_chat(&choice.model, &messages, triage::schema(), context)?;
+            // Where the model is held, now that it is loaded: cheap, and
+            // only said in her status.
+            *self
+                .placed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = endpoint.ollama_placement(&choice.model);
+            answer
+        } else {
+            endpoint.chat(&choice.model, &messages, Some(("triage", triage::schema())))?
+        };
         let verdict = serde_json::from_str(&content)
             .map_err(|e| format!("the triage's answer is not its schema: {e}"))?;
         Ok((verdict, tokens_in, tokens_out))
+    }
+
+    fn placement(&self) -> Option<openai::Placement> {
+        *self.placed.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn unload(&self) -> Result<(), String> {

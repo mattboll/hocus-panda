@@ -66,6 +66,18 @@ fn verdict(seen: &Seen) -> serde_json::Value {
 fn local() -> Fake {
     Fake::start(|seen, _| match seen.path.as_str() {
         "/v1/chat/completions" => Answer::json(&verdict(seen)),
+        // Ollama's own API (#752): the same verdict, as it says it.
+        "/api/chat" => {
+            let v = verdict(seen);
+            Answer::json(&json!({
+                "message": v["choices"][0]["message"],
+                "prompt_eval_count": v["usage"]["prompt_tokens"],
+                "eval_count": v["usage"]["completion_tokens"],
+            }))
+        }
+        "/api/ps" => Answer::json(&json!({"models": [
+            {"name": "qwen3:8b", "model": "qwen3:8b", "size": 11_000_000_000_u64, "size_vram": 7_150_000_000_u64}
+        ]})),
         "/api/generate" => Answer::json(&json!({"done": true})),
         _ => Answer::status(404, "{}"),
     })
@@ -201,7 +213,11 @@ fn ac21_the_triage_runs_locally_paced_on_mains_and_unloads_when_idle() {
     s.driver.advance(60);
     s.driver
         .until("one item triaged", |st| triage(st).done == 1);
-    assert_eq!(s.local.seen().len(), 1, "one request, then a rest");
+    assert_eq!(
+        s.local.seen().iter().filter(|r| r.path == "/api/chat").count(),
+        1,
+        "one request, then a rest"
+    );
     s.driver.advance(2);
     let status = s.driver.until("both triaged", |st| triage(st).done == 2);
     assert_eq!(triage(&status).pending, 0);
@@ -221,26 +237,57 @@ fn ac21_the_triage_runs_locally_paced_on_mains_and_unloads_when_idle() {
         .find(|r| r.path == "/api/generate")
         .expect("an unload");
     assert_eq!(unload.json(), json!({"model": "qwen3:8b", "keep_alive": 0}));
-    let triages: Vec<&Seen> = seen
-        .iter()
-        .filter(|r| r.path == "/v1/chat/completions")
-        .collect();
+    // Ollama's own API: its context asked (#752), the schema in `format`.
+    let triages: Vec<&Seen> = seen.iter().filter(|r| r.path == "/api/chat").collect();
     assert_eq!(triages.len(), 2);
+    assert!(!seen.iter().any(|r| r.path == "/v1/chat/completions"));
     for request in triages {
         let body = request.json();
         assert_eq!(body["model"], "qwen3:8b");
-        assert_eq!(body["response_format"]["type"], "json_schema");
-        assert_eq!(
-            body["response_format"]["json_schema"]["schema"]["properties"]["secrets"]["type"],
-            "array"
-        );
+        assert_eq!(body["options"]["num_ctx"], 8192);
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["format"]["properties"]["secrets"]["type"], "array");
         assert!(body.get("tools").is_none(), "the triage has no tools");
         // What pass 1 masks, the local model never sees.
         assert!(!request.body.contains("chienchat"));
         assert!(!request.body.contains("ghp_0123456789"));
     }
     assert!(s.anthropic.seen().is_empty(), "no triage goes to Claude");
+    assert_eq!(
+        triage(&s.driver.status()).placement.as_deref(),
+        Some("tri : en partie sur le processeur"),
+        "11 GB, 7 of them on the card"
+    );
     s.driver.stop();
+}
+
+/// An OpenAI-compatible server (`kind = "openai"`) still gets the triage
+/// on `/v1`, its schema in `response_format`; an item longer than the
+/// context is cut, its start kept and the cut said, never a failure
+/// (#752).
+#[test]
+fn an_openai_server_triages_on_v1_and_a_long_item_is_cut_to_the_context() {
+    let local = local();
+    let settings = Settings::of_config(&format!(
+        "[secretary.models]\ntriage = \"lan/qwen3:8b\"\n\
+         [secretary.providers.lan]\nkind = \"openai\"\nurl = \"{}/v1\"\n\
+         [secretary.triage]\ncontext = 4096\n",
+        local.url
+    ))
+    .expect("settings");
+    let router = Router::new(Arc::new(settings::File::fixed(settings)), keys());
+    let long = format!("Mail\nObjet : Léa\n{}FIN-DU-MAIL", "bla ".repeat(5000));
+    router.triage(&long).expect("a verdict, cut or not");
+    let seen = local.seen().pop().expect("a request");
+    assert_eq!(seen.path, "/v1/chat/completions");
+    let body = seen.json();
+    assert_eq!(body["response_format"]["type"], "json_schema");
+    assert!(body.get("options").is_none());
+    let asked = body["messages"][1]["content"].as_str().unwrap_or_default();
+    assert!(asked.starts_with("Mail\nObjet : Léa"));
+    assert!(!asked.contains("FIN-DU-MAIL"), "its end cut");
+    assert!(asked.ends_with("seul son début est lu]"), "the cut said");
+    assert!(asked.chars().count() < 4096 * 3);
 }
 
 #[test]
