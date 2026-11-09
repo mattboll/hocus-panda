@@ -27,6 +27,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub mod consent;
+
 /// The protocol's version: a change that an older side would misread
 /// raises it.
 pub const VERSION: u32 = 1;
@@ -38,6 +40,18 @@ pub const SOCKET_ENV: &str = "HOCUS_SECRETARY_SOCKET";
 /// The environment variable naming the session bus whose keyring holds her
 /// memory's key: an address, or `session`; unset, the key is in a file.
 pub const BUS_ENV: &str = "HOCUS_SECRETARY_BUS";
+
+/// Her data folder: `$XDG_DATA_HOME/hocuspanda/secretary`, or under
+/// `~/.local/share`; `None` without an absolute one. Her memory and her
+/// consent book ([`consent::CONSENTS`]) are there.
+pub fn data_dir() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let data = var("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+    data.is_absolute()
+        .then(|| data.join("hocuspanda/secretary"))
+}
 
 /// Her socket's path next to the Wayland socket's.
 pub fn socket_path(wayland: &Path) -> PathBuf {
@@ -145,6 +159,29 @@ pub enum ToSecretary {
     /// Her clock moved on by `advance` seconds: only when she runs on a
     /// clock of her own (tests, `--virtual-clock`); refused otherwise.
     Clock { advance: u64 },
+    /// A notification of an application the user consented to, as the
+    /// shell's server received it (lot 7): what it says, never what it can
+    /// do. Nothing goes back: no line of hers can invoke, close or mark a
+    /// notification (Slack's would mark the channel read).
+    Notification(Notification),
+}
+
+/// A notification forwarded to her ([`ToSecretary::Notification`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notification {
+    /// The server's id for it (from 1 again when the shell starts).
+    pub id: u32,
+    /// Its application's name (`Slack`).
+    pub app: String,
+    /// Its application's desktop entry, when it names one.
+    #[serde(default)]
+    pub entry: Option<String>,
+    /// Its title (the specification's summary) and its text, markup out.
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    /// When it came, milliseconds since the epoch (the shell's wall clock).
+    pub at_ms: i64,
 }
 
 /// A line from her.
@@ -474,6 +511,21 @@ mod tests {
             }
         );
         assert!(read::<ToSecretary>("{\"fly\":{}}").is_err());
+        let slack: ToSecretary = read(
+            "{\"notification\":{\"id\":3,\"app\":\"Slack\",\"title\":\"Karim\",\"body\":\"tu as vu ?\",\"at_ms\":1794215520000}}",
+        )
+        .expect("reads");
+        assert_eq!(
+            slack,
+            ToSecretary::Notification(Notification {
+                id: 3,
+                app: "Slack".to_owned(),
+                entry: None,
+                title: "Karim".to_owned(),
+                body: "tu as vu ?".to_owned(),
+                at_ms: 1_794_215_520_000,
+            })
+        );
     }
 
     #[test]

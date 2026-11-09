@@ -12,7 +12,8 @@
 //! and the secrets' second pass ([`triage`]), context assembly within a
 //! budget ([`context`]) from hybrid retrieval over her graph
 //! ([`retrieve`]), and her read-only tools ([`tools`]). Her Google
-//! accounts are one source ([`google`]).
+//! accounts are one source ([`google`]); the applications' notifications
+//! the shell forwards, another ([`notifications`], lot 7).
 //!
 //! The harness the next lots test with is here too: her own clock
 //! ([`clock`]), the scripted fake model and the recorder ([`model`]), and
@@ -28,6 +29,7 @@ pub mod graph;
 mod http;
 pub mod key;
 pub mod model;
+pub mod notifications;
 pub mod power;
 pub mod providers;
 pub mod retrieve;
@@ -43,11 +45,4 @@ pub const MEMORY: &str = "memory.db";
 
 /// Her data folder: `$XDG_DATA_HOME/hocuspanda/secretary`, or under
 /// `~/.local/share`; `None` without an absolute one.
-pub fn data_dir() -> Option<std::path::PathBuf> {
-    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
-    let data = var("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| var("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
-    data.is_absolute()
-        .then(|| data.join("hocuspanda/secretary"))
-}
+pub use hocus_secretary_link::data_dir;

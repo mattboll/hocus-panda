@@ -146,7 +146,12 @@ impl Sources {
         now: &Zoned,
     ) -> Vec<Event> {
         let mut events = Vec::new();
-        for source in consents.revoked() {
+        // An application's notifications are her notifications' source's.
+        for source in consents
+            .revoked()
+            .into_iter()
+            .filter(|s| SourceKind::ALL.contains(&s.kind))
+        {
             if self.cursors.purged.insert(source.clone()) {
                 self.forget(&source);
                 events.push(Event::Purge(source));
@@ -164,6 +169,7 @@ impl Sources {
                     SourceKind::Calendar => account.calendar,
                     SourceKind::Birthdays => account.contacts,
                     SourceKind::Mail => account.mail,
+                    SourceKind::Notifications => false,
                 };
                 if !on {
                     continue;
@@ -205,6 +211,7 @@ impl Sources {
             SourceKind::Birthdays => {
                 self.cursors.birthdays.remove(account);
             }
+            SourceKind::Notifications => {}
         }
     }
 
@@ -274,6 +281,7 @@ impl Sources {
                 }
                 Ok(read.items)
             }
+            SourceKind::Notifications => Ok(Vec::new()),
         }
     }
 }

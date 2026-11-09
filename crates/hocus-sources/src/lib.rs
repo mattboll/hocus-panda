@@ -22,7 +22,6 @@
 //! worker thread of the `hocus-secretary` process, never a loop.
 
 pub mod calendar;
-pub mod consent;
 pub mod contacts;
 pub mod cycle;
 pub mod facts;
@@ -31,7 +30,12 @@ mod http;
 pub mod imap;
 pub mod item;
 pub mod mail;
+pub mod notification;
 pub mod redact;
+
+/// The consent book: her protocol's crate's, which the shell and the
+/// Settings read and write too.
+pub use hocus_secretary_link::consent;
 
 pub use crate::{
     consent::{Consent, ConsentBook, Grant},

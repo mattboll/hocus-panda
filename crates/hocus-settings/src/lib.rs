@@ -57,6 +57,7 @@ pub mod lang;
 pub mod model;
 pub mod mouse;
 pub mod network;
+pub mod notifiers;
 pub mod passwd;
 pub mod perf;
 pub mod portal;
