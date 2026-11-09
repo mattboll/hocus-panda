@@ -1407,6 +1407,7 @@ schedules: at most 1 wakeup a minute idle with Gmail IDLE and Slack notification
    - The Pro/Perso filter, "Oublier tout le perso".
    - Provenance shown as "d'où je le sais".
    - Covers AC27–30, AC32, AC39–40 and AC47–49.
+   - **As built (#748)**: see §22, lot 6.
 7. **Slack, through notifications.**
    - Consented applications' notifications forwarded by the shell.
    - Digests in the triage.
@@ -1888,3 +1889,155 @@ The setting is followed live, so switching back to "classic" stops the process a
   claims; the thread across her restarts (she keeps the last 200 items
   while she runs); `hocus secretary` from a terminal; the drawer's tree
   for screen readers.
+
+### Lot 6 (#748): "Ce qu'elle sait", taught rules and learned sources
+
+- **Sentences that teach her are read in code** (`learn.rs`, no model
+  call), French and a little English; anything else goes to her model:
+  - a **rule** in one sentence, compiled (§9.1) into the rule's
+    `compiled` column as JSON: `leave` ("les personnes en congés sont
+    notées dans le calendrier Congés"), `quiet` ("on se sert très peu de
+    Planka": attached to the tool's node, made if new), `files` ("…vont
+    dans F, nommés P"), `restraint` ("jamais de rappel pendant le
+    daily"), `urgent` ("les mails du cabinet Morel sont urgents…"), and
+    `ignore` (a calendar, from an observation). She checks what it names
+    (the leaves' calendar: found or not, its events, the people of hers
+    its titles name, "occupé" only said), restates it as a rule card ("Ce
+    que j'en fais"), keeps it told with "Retenu · règle n° N · Annuler",
+    and says today's and tomorrow's effect ("Aujourd'hui : Sophie
+    (jusqu'au 16)"). `learn::compiled` gives the rules that count, for
+    the lots that act on them (the briefing, the speak gate, the triage);
+  - **an arrival** ("Julie est arrivée lundi"): her sources of the last
+    thirty days searched for the name (a join first: "a rejoint",
+    "joined"), the full name, the role («…» or after a "·"), the team
+    guessed from a project's channel (`#site-web` → Le site web, said
+    "deviné"), the handle; a person card "Nouvelle personne · à
+    confirmer" (Ajouter · Modifier · Ce n'est pas ça). "Ajouter" keeps the
+    node, `arrived` (told), and the role, team and handle read in the
+    source (extracted, accepted by the click, pointing at the item);
+  - **a departure** ("Marc est parti vendredi", a weekday said in the
+    past is the last one): kept at once, a `left` edge (told) and every
+    edge of the tenure (`works_on`, `member_of`, `leads`, `reviews`,
+    `role`, `reports_to`, `replaces`, `client_of`) closed at that day:
+    nothing deleted, the history and an as-of graph still have them;
+    the core card and retrieval read only what holds now, so he is no
+    longer offered for a review or a meeting. Several people of that
+    name: one question;
+  - **a relation** ("Nadia dirige le site web depuis lundi"; also
+    "travaille sur", "relit", "remplace", "fait partie de"): a told edge
+    from that day, which closes the one it contradicts (lot 1's rule);
+    she says who it was before.
+- **"Annuler" settles after ten seconds** (§9.3): the item comes again
+  with `settled` (protocol 3) and its "Annuler" goes; an undo after is
+  refused ("too late"), the fix is in "Ce qu'elle sait". This holds for
+  lot 2's "Retenu" too.
+- **What sources say of the team** (§9.2): a Slack account deactivated,
+  "a quitté l'entreprise", for someone she knows, is an extracted `left`
+  edge, a proposal; a join in #général of someone she does not know, an
+  observation. `arrived`, `left` and `role` are now structural: extracted,
+  they wait for the user. Accepting a `left` closes the tenure.
+- **The triage's candidate facts** (§7.1, AC48) become proposals
+  (`learn::extract`): the relation's words mapped to an edge type, the
+  subject linked to a person or node, extracted with its quote and the
+  item's pointer; an unknown subject arriving is an observation (no node
+  before "Oui"). No model decides yet (the extraction role's step).
+- **Observations** (§10.2), made each night: a source connected three
+  weeks or more with three items or fewer in thirty days ("Planka : 0
+  élément en 30 jours. Je n'en parle que si tu demandes ?", a `quiet`
+  rule when accepted), a calendar of birthdays or holidays ("je
+  l'ignore ?"), and the arrivals above. Each is asked once in the thread
+  ("Oui · Non · Plus tard", a week later again) and listed in "Ce qu'elle
+  sait"; kept in her memory's `meta` until answered, it drives nothing.
+  Not yet: mails never answered, channels always answered at once (they
+  need the replies' and the notifications' timings).
+- **The rules' effects now**: who is away today and tomorrow, from the
+  leaves' rule's calendar, is a computed fact of the day's context
+  (never stored); a quiet tool's items leave the day's "Arrivé
+  aujourd'hui" (still found when asked).
+- **A work draft from the pro notebook only** (§7.4, AC39): a sentence
+  asking to write, answer, send, prepare a mail or a message, or hand a
+  job to someone is assembled with the pro notebook only, unless it
+  names someone of the perso notebook.
+- **Compaction** (`compaction.rs`, §7.2, AC32): due at `[secretary.
+  compaction] hour` (3) where the user is; on battery below `[secretary.
+  triage] battery` it waits, an hour at a time; once a night (`meta`
+  `compacted`), and a missed night runs at the next chance. Each day
+  since the last night (a week at most): each notebook's daily summary
+  from its episodes (her compaction role's model on a worker thread, a
+  list of digests without one or on failure), linked to its episodes
+  and their nodes; after a Sunday, the week's from its days; the
+  summaries a forget emptied rebuilt; duplicates merged first (a node
+  whose name is another's, or another's accepted alias, of the same kind
+  and notebook: its edges, aliases, rules and mentions move, its name
+  becomes an alias; one journaled edit, "Défaire" in "Ce qu'elle
+  sait"). The Batch API is not used: the calls are few.
+- **"Ce qu'elle sait"** (§8, `knows.rs`, protocol 3: `knows {id, query}`
+  answered `knows {id, view}` and sent again while the tab is open and
+  her memory changes, never at rest; `memory {id, act}`; `toast`). The
+  view is hers, the shell draws it: APPRIS CETTE SEMAINE (what was told
+  or accepted these seven days, Garder · Oublier; the proposals, C'est
+  vrai · Oublier; her observations, Oui · Non · Plus tard; the night's
+  merges, Garder · Défaire), PERSONNES (role, team, lead, tags: aliases,
+  "en congés jusqu'au 16" from the rule, "nouvelle recrue" for a week; a
+  timeline: arrival, leads, departure; departed dashed, "gardé pour
+  l'histoire · on ne te le propose plus"), PROJETS ET LEURS NOMS
+  (aliases, new ones blue a week; the people on it), RÈGLES, SES OUTILS
+  (each source read: how much in thirty days, its rules), TOI, PROCHES
+  (perso people, their tastes with their source), MAINTENANCE and
+  DOSSIERS PERSO (when there are any). Each item says "d'où je le
+  sais": "tu me l'as dit · 9 nov.", "lu dans Slack, 9 nov." with a link
+  to its item (an episode keeps what opens it, schema 2) and its quoted
+  words, "déduit de CHAP-412, accepté · 10 nov.", "proposé par elle,
+  accepté", "à confirmer". The filters (Tout · Pro · Perso, the chips
+  with their counts, the search over what shows) are hers too.
+- **Acts**: "Oublier" forgets at once (lot 1's forget: the item, what
+  hangs on it, its index lines, the summaries citing it emptied) and
+  keeps what went in her process only for five seconds: the toast's
+  "Annuler" puts the rows back (`Store::forget_kept`, `Store::restore`;
+  the journal says a restore happened, never what). A proposal's
+  "Oublier" rejects it. "N'est plus vrai" closes an edge or a rule at
+  today, and a person's tenure (a departure), with "Annuler" in the
+  toast. "Garder" takes it out of the week's list. "Modifier" puts
+  "À propos de « … » : " in the conversation's field: she is told the
+  fix. "Oublier tout le perso…" and "Tout oublier…" ask to confirm in the
+  drawer, then forget a notebook (or both) whole, observations included.
+  "Exporter" writes Markdown and JSON (`0600`) in her folder's
+  `exports`, on a thread.
+- **The drawer** (`hocus-shell/src/drawer/draw/knows.rs`): the tab at
+  720 px, no field: under the tabs the notebook switch, the search
+  field (the keyboard types there), the chips; the list scrolled by the
+  wheel, an item's click unfolding its provenance (quote, "d'où je le
+  sais", "Ouvrir la source ↗" through `xdg-open`); the footer; the toast
+  five seconds; the confirmation over it. Only whole items are drawn
+  (the CPU renderer does not clip, and a layer's text comes over the
+  next layer's shapes).
+- **A memory fixture** (`--memory-fixture FILE`, `seed.rs`): people,
+  projects, facts with their provenance and dates, rules, written into
+  an empty memory at her start (tests, screenshots).
+- **Memory schema 2**: an episode's `ends`, `open` and `calendar` (a
+  source item's `until`, `open`, `calendar`; the Google cycle gives them
+  for events and mails). A memory of schema 1 is migrated at its start.
+- **Tests**: `hocus-secretary/tests/learning.rs` (AC27: the card from a
+  Slack join, kept, undone within ten seconds and refused after; AC28;
+  AC30: a departure seen in Slack and a rule noticed, proposals that
+  change neither the graph nor the context until accepted; AC47; AC48
+  and AC49 with a scripted triage: proposals, the inferred edge out of
+  every prompt until accepted, the extracted one opening its mail, every
+  edge with a provenance and a pointer; a rule restated, checked and
+  applied), `tests/knows.rs` (AC29: forget from the view, gone from her
+  memory, the index, the next prompt and the journal, back within five
+  seconds only; "N'est plus vrai"; AC32: nothing on a low battery, once
+  on mains, one summary in her model's words, "Nad" merged into Nadia
+  Ferreira; AC39; AC40 with each notebook's summary),
+  `hocus-compositor/tests/secretary_knows.rs` (the real shell and her
+  process: the arrival's card and "Ajouter", the tab at 720 px and its
+  sections, an item unfolded, "Oublier" and its toast's "Annuler",
+  "Oublier tout le perso…" confirmed, her observation accepted;
+  `HOCUS_DRAWER_SHOTS=DIR` leaves its PNGs).
+- **Not yet**: perso hidden in public moments in the view (the moment is
+  lot 5's: `Knowledge::hidden` is there for it); "Ce que j'ai appris
+  cette semaine" in the Friday briefing (lot 5 reads the week's section);
+  editing in place (she is told instead); the extraction role deciding
+  which candidates to propose; the rules' effects that are other lots'
+  (restraint in the speak gate, urgent senders in the triage, file
+  names); the Batch API; the observations that need timings.
