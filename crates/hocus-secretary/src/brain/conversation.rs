@@ -1,0 +1,1105 @@
+//! The drawer's conversation (§5.4, lot 2): the thread she keeps, what she
+//! makes of a sentence, and the proposals' flow.
+//!
+//! - **A sentence** becomes the user's bubble, then either one question
+//!   computed in code (a word she does not know that one project's items
+//!   hold, §2.4: the candidates are code's, not the model's) with its
+//!   quick replies, or a call to her model, streamed: her typing and what
+//!   she is doing, then her words as they come.
+//! - **Her tool calls** never act (§2.1): each outside effect (a message,
+//!   a post, a mail, an invitation's answer, an event, a file, a task, an
+//!   agent, a job) becomes a card; it happens only after "accept" on that
+//!   card, and then only through the effects' recorder (tests) until the
+//!   lots that bring each effect. A model asking a question gives a
+//!   question with its quick replies.
+//! - **"Oui"** to her question keeps the alias as inferred and confirmed
+//!   by the user, says so ("Retenu : … · Annuler"), and the sentence goes
+//!   on to her model with that fact; a next mention is not asked again.
+//!
+//! Every connection of the shell's (and the tests') gets the thread's
+//! items, her typing and her face; a `hocus` command gets only the answer
+//! to its own question. At rest nothing is sent: her face goes out only
+//! when it changes.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use hocus_secretary_link::{
+    Action, Body, Card, CardKind, Client, Decision, FromSecretary, Item, Look, Mood, Notebook, Tone,
+};
+use jiff::Timestamp;
+
+use super::{Brain, Event};
+use crate::{
+    audit,
+    fold::fold,
+    graph::{NodeKind, Origin},
+    model::{Message, Part, Piece, Reply, Request, Role, ToolCall},
+    store::{Item as Kept, Who},
+};
+
+/// The thread's items she keeps (the newest).
+const THREAD_MOST: usize = 200;
+
+/// The tools offered to her model: each acting one only proposes.
+const TOOLS: [&str; 10] = [
+    "ask_user",
+    "propose_message",
+    "propose_post",
+    "propose_mail",
+    "propose_invitation_answer",
+    "propose_event",
+    "propose_file",
+    "propose_task",
+    "propose_agent",
+    "propose_delegation",
+];
+
+/// A word she does not know, and the one project whose items hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub term: String,
+    pub node: i64,
+    pub name: String,
+    /// The item's digest that holds it, and where it is.
+    pub quote: String,
+    pub pointer: String,
+    pub board: bool,
+    pub notebook: Notebook,
+}
+
+/// A sentence held until her question about it is answered.
+#[derive(Debug)]
+struct Pending {
+    question: u64,
+    sentence: String,
+    candidate: Candidate,
+}
+
+/// A card's outside effect, done only after "accept".
+#[derive(Debug)]
+struct Proposal {
+    /// `message`, `post`, `mail`, `invitation`, `event`, `file`, `task`,
+    /// `agent`, `delegation`.
+    effect: &'static str,
+    tool: String,
+    input: serde_json::Value,
+}
+
+/// The conversation's state, on her loop.
+#[derive(Debug, Default)]
+pub(super) struct Talk {
+    items: Vec<Item>,
+    next: u64,
+    /// The words she makes herself in French (the desktop's language, as
+    /// the shell says it).
+    english: bool,
+    /// The request she composes an answer to.
+    composing: Option<u64>,
+    pending: Option<Pending>,
+    /// Folded words the user said were not the project she asked about.
+    declined: HashSet<String>,
+    proposals: HashMap<u64, Proposal>,
+    /// What "Annuler" undoes, by its item: the edits, the last first.
+    kept: HashMap<u64, Vec<i64>>,
+    drawer: bool,
+    /// Something just kept: her face says so until the next sentence.
+    happy: bool,
+    /// Her face as last sent.
+    told: Option<Look>,
+}
+
+impl Talk {
+    fn fr(&self) -> bool {
+        !self.english
+    }
+
+    fn t(&self, fr: &'static str, en: &'static str) -> &'static str {
+        if self.english { en } else { fr }
+    }
+}
+
+impl Brain {
+    /// A connection said hello: a shell gets her face, and its language
+    /// is hers for the words she makes.
+    pub(super) fn greeted(&mut self, conn: u64, client: Client, lang: Option<&str>) {
+        if client == Client::Shell {
+            self.talk.english = lang.is_some_and(|l| l.starts_with("en"));
+            let look = self.look();
+            self.send(conn, &FromSecretary::Look { look });
+        }
+    }
+
+    /// Whether `conn` gets the thread: the shell's, and the tests'.
+    fn talker(&self, conn: u64) -> bool {
+        self.conns
+            .get(&conn)
+            .is_some_and(|c| matches!(c.client, Some(Client::Shell | Client::Test)))
+    }
+
+    /// `message` to every talker, and to `asker` (a `hocus` command's
+    /// question) besides.
+    fn tell_talkers(&mut self, message: &FromSecretary, asker: Option<u64>) {
+        let mut to: Vec<u64> = self
+            .conns
+            .keys()
+            .copied()
+            .filter(|c| self.talker(*c))
+            .collect();
+        if let Some(asker) = asker
+            && !to.contains(&asker)
+        {
+            to.push(asker);
+        }
+        for conn in to {
+            self.send(conn, message);
+        }
+    }
+
+    fn add_item(&mut self, request: Option<u64>, body: Body) -> u64 {
+        self.talk.next += 1;
+        let item = Item {
+            id: self.talk.next,
+            at: self.clock.now().to_string(),
+            request,
+            body,
+        };
+        self.talk.items.push(item.clone());
+        if self.talk.items.len() > THREAD_MOST {
+            let over = self.talk.items.len() - THREAD_MOST;
+            for gone in self.talk.items.drain(..over) {
+                self.talk.proposals.remove(&gone.id);
+                self.talk.kept.remove(&gone.id);
+            }
+        }
+        self.tell_talkers(&FromSecretary::Item { item }, None);
+        self.talk.next
+    }
+
+    fn change_item(&mut self, id: u64, change: impl FnOnce(&mut Body)) {
+        let Some(item) = self.talk.items.iter_mut().find(|i| i.id == id) else {
+            return;
+        };
+        change(&mut item.body);
+        let item = item.clone();
+        self.tell_talkers(&FromSecretary::Item { item }, None);
+    }
+
+    /// The end of what she says to request `id`.
+    fn done(&mut self, conn: u64, id: u64) {
+        self.tell_talkers(
+            &FromSecretary::Answer {
+                id,
+                text: String::new(),
+                done: true,
+            },
+            Some(conn),
+        );
+    }
+
+    /// Her face now.
+    pub(super) fn look(&self) -> Look {
+        let asking = self.talk.pending.is_some()
+            || self
+                .talk
+                .items
+                .last()
+                .is_some_and(|i| matches!(i.body, Body::Question { chosen: None, .. }));
+        let failing: Vec<&str> = self
+            .slots
+            .iter()
+            .filter(|s| s.error.is_some())
+            .map(|s| s.name.as_str())
+            .collect();
+        let mood = if self.talk.composing.is_some() {
+            Mood::Type
+        } else if asking {
+            Mood::Ask
+        } else if !failing.is_empty() {
+            Mood::Worry
+        } else if self.talk.happy {
+            Mood::Happy
+        } else {
+            Mood::Listen
+        };
+        let (status, tone) = if let Some(name) = failing.first() {
+            let name = shown_source(name);
+            let status = if self.talk.fr() {
+                format!("{name} ne répond plus")
+            } else {
+                format!("{name} is not answering")
+            };
+            (status, Tone::Warn)
+        } else if self.slots.is_empty() {
+            (
+                self.talk
+                    .t("Rien de branché", "Nothing connected")
+                    .to_owned(),
+                Tone::Off,
+            )
+        } else {
+            let names: Vec<String> = self.slots.iter().map(|s| shown_source(&s.name)).collect();
+            let up = self.talk.t("à jour", "up to date");
+            (format!("{} {up}", names.join(" · ")), Tone::Ok)
+        };
+        Look {
+            mood,
+            status,
+            tone,
+            model: self.model.as_ref().map(|m| m.shown()).unwrap_or_default(),
+        }
+    }
+
+    /// Her face to the talkers, when it changed.
+    pub(super) fn tell_look(&mut self) {
+        let look = self.look();
+        if self.talk.told.as_ref() == Some(&look) {
+            return;
+        }
+        self.talk.told = Some(look.clone());
+        self.tell_talkers(&FromSecretary::Look { look }, None);
+    }
+
+    pub(super) fn thread(&mut self, conn: u64, id: u64) {
+        let items = self.talk.items.clone();
+        self.send(conn, &FromSecretary::Thread { id, items });
+    }
+
+    pub(super) fn drawer(&mut self, open: bool) {
+        tracing::debug!(open, "her drawer");
+        self.talk.drawer = open;
+    }
+
+    /// A sentence of the user's.
+    pub(super) fn sentence(&mut self, conn: u64, id: u64, text: String) {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return self.error(conn, Some(id), "an empty sentence");
+        }
+        self.talk.happy = false;
+        self.add_item(Some(id), Body::User { text: text.clone() });
+        match self.candidate(&text) {
+            Some(candidate) => {
+                self.ask_about(id, text, candidate);
+                self.tell_look();
+                self.done(conn, id);
+            }
+            None => {
+                self.compose(conn, id, text, Vec::new());
+                self.tell_look();
+            }
+        }
+    }
+
+    /// Her question about a word she does not know.
+    fn ask_about(&mut self, id: u64, sentence: String, candidate: Candidate) {
+        let fr = self.talk.fr();
+        let (term, name) = (&candidate.term, &candidate.name);
+        let text = if fr {
+            format!("Une question avant de le ranger : « {term} », c’est pour {name} ?")
+        } else {
+            format!("One question before I file it: “{term}”, is that {name}?")
+        };
+        let quote = &candidate.quote;
+        let note = match (fr, candidate.board) {
+            (true, true) => format!(
+                "Je ne connais pas encore ce mot. Dans le tableau de {name}, il y a « {quote} »."
+            ),
+            (true, false) => {
+                format!("Je ne connais pas encore ce mot. J’ai lu « {quote} » ({name}).")
+            }
+            (false, true) => {
+                format!("I don’t know this word yet. {name}’s board has “{quote}”.")
+            }
+            (false, false) => format!("I don’t know this word yet. I read “{quote}” ({name})."),
+        };
+        let replies = if fr {
+            vec![
+                format!("Oui, {name}"),
+                "Non, autre chose".to_owned(),
+                "Je t’explique".to_owned(),
+            ]
+        } else {
+            vec![
+                format!("Yes, {name}"),
+                "No, something else".to_owned(),
+                "Let me explain".to_owned(),
+            ]
+        };
+        tracing::info!(
+            id,
+            node = candidate.node,
+            "she asks about a word she does not know"
+        );
+        let question = self.add_item(
+            Some(id),
+            Body::Question {
+                text,
+                note: Some(note),
+                replies,
+                chosen: None,
+            },
+        );
+        self.talk.pending = Some(Pending {
+            question,
+            sentence,
+            candidate,
+        });
+    }
+
+    /// Quick reply `choice` of question `item`.
+    pub(super) fn choose(&mut self, conn: u64, id: u64, item: u64, choice: u32) {
+        let Some(Body::Question {
+            replies, chosen, ..
+        }) = self
+            .talk
+            .items
+            .iter()
+            .find(|i| i.id == item)
+            .map(|i| i.body.clone())
+        else {
+            return self.error(conn, Some(id), "no such question");
+        };
+        if chosen.is_some() {
+            return self.error(conn, Some(id), "answered already");
+        }
+        let Some(reply) = replies.get(choice as usize).cloned() else {
+            return self.error(conn, Some(id), "no such reply");
+        };
+        self.change_item(item, |body| {
+            if let Body::Question { chosen, .. } = body {
+                *chosen = Some(choice);
+            }
+        });
+        self.talk.happy = false;
+        self.add_item(
+            Some(id),
+            Body::User {
+                text: reply.clone(),
+            },
+        );
+        let pending = self.talk.pending.take_if(|p| p.question == item);
+        match (pending, choice) {
+            (Some(pending), 0) => {
+                let fact = self.confirm(id, &pending.candidate);
+                self.compose(conn, id, pending.sentence, fact.into_iter().collect());
+            }
+            (Some(pending), 1) => {
+                self.talk.declined.insert(fold(&pending.candidate.term));
+                self.compose(conn, id, pending.sentence, Vec::new());
+            }
+            (Some(_), _) => {
+                let listen = self.talk.t("Je t’écoute.", "I’m listening.");
+                self.add_item(
+                    Some(id),
+                    Body::Her {
+                        text: listen.to_owned(),
+                        note: None,
+                        assumed: false,
+                    },
+                );
+                self.tell_look();
+                self.done(conn, id);
+                return;
+            }
+            // Her model's own question: the reply is a sentence.
+            (None, _) => self.compose(conn, id, reply, Vec::new()),
+        }
+        self.tell_look();
+    }
+
+    /// "Oui": the word kept as an alias of the project, inferred and
+    /// confirmed by the user; said with "Annuler". The fact for her model.
+    fn confirm(&mut self, id: u64, candidate: &Candidate) -> Option<Part> {
+        let origin = Origin::inferred(candidate.pointer.clone(), 0.9);
+        let added =
+            self.store
+                .add_alias(candidate.node, &candidate.term, &origin, candidate.notebook);
+        let edits = match added {
+            Ok((alias, added)) => match self.store.accept(Kept::Alias(alias)) {
+                Ok(accepted) => Some((alias, vec![accepted, added])),
+                Err(err) => {
+                    tracing::warn!(%err, "could not accept the alias");
+                    None
+                }
+            },
+            Err(err) => {
+                tracing::warn!(%err, "could not keep the alias");
+                None
+            }
+        };
+        let (alias, edits) = edits?;
+        let (term, name) = (&candidate.term, &candidate.name);
+        let text = if self.talk.fr() {
+            format!("Retenu : « {term} » → {name}")
+        } else {
+            format!("Kept: “{term}” → {name}")
+        };
+        let item = self.add_item(
+            Some(id),
+            Body::Learned {
+                text,
+                undone: false,
+            },
+        );
+        self.talk.kept.insert(item, edits);
+        self.talk.happy = true;
+        Some(Part {
+            label: "fait".to_owned(),
+            text: format!("« {term} » désigne {name} (déduit, confirmé par l’utilisateur)"),
+            items: vec![Kept::Alias(alias).word()],
+        })
+    }
+
+    /// "Annuler" under what she kept.
+    pub(super) fn undo(&mut self, conn: u64, id: u64, item: u64) {
+        let Some(edits) = self.talk.kept.remove(&item) else {
+            return self.error(conn, Some(id), "nothing to undo there");
+        };
+        for edit in edits {
+            if let Err(err) = self.store.undo(edit) {
+                tracing::warn!(%err, "could not undo");
+                return self.error(conn, Some(id), "could not undo");
+            }
+        }
+        self.change_item(item, |body| {
+            if let Body::Learned { undone, .. } = body {
+                *undone = true;
+            }
+        });
+        self.talk.happy = false;
+        self.tell_look();
+        self.done(conn, id);
+    }
+
+    /// The sentence to her model, `facts` computed in code with it; her
+    /// answer comes in pieces ([`Event::Piece`]) on a worker thread.
+    fn compose(&mut self, conn: u64, id: u64, sentence: String, facts: Vec<Part>) {
+        let Some(model) = self.model.clone() else {
+            let none = self.talk.t(
+                "Je n’ai pas encore de modèle pour te répondre.",
+                "I have no model to answer with yet.",
+            );
+            self.add_item(
+                Some(id),
+                Body::Her {
+                    text: none.to_owned(),
+                    note: None,
+                    assumed: false,
+                },
+            );
+            return self.error(conn, Some(id), "she has no model yet");
+        };
+        let request = Request {
+            role: Role::Answer,
+            system: super::SYSTEM.to_owned(),
+            context: facts,
+            messages: vec![Message {
+                from: "user".to_owned(),
+                text: sentence,
+            }],
+            tools: TOOLS.iter().map(|t| (*t).to_owned()).collect(),
+        };
+        self.talk.composing = Some(id);
+        self.tell_talkers(
+            &FromSecretary::Typing {
+                id,
+                doing: String::new(),
+            },
+            Some(conn),
+        );
+        let (sender, clock) = (self.sender.clone(), self.clock.clone());
+        let started = clock.now();
+        self.calls_running += 1;
+        let spawned = std::thread::Builder::new()
+            .name("model call".to_owned())
+            .spawn(move || {
+                let pieces = sender.clone();
+                let result = model.stream(&request, &clock, &mut |piece| {
+                    let piece = match piece {
+                        Piece::Doing(doing) => Said::Doing(doing.to_owned()),
+                        Piece::Text(text) => Said::Text(text.to_owned()),
+                    };
+                    let _ = pieces.send(Event::Piece { conn, id, piece });
+                });
+                let _ = sender.send(Event::Called {
+                    conn,
+                    id,
+                    role: request.role,
+                    items: request.items(),
+                    started,
+                    result,
+                });
+            });
+        if let Err(err) = spawned {
+            self.calls_running -= 1;
+            self.talk.composing = None;
+            self.error(conn, Some(id), format!("no thread for the call: {err}"));
+        }
+    }
+
+    /// A piece of her answer as it comes.
+    pub(super) fn piece(&mut self, conn: u64, id: u64, piece: Said) {
+        let message = match piece {
+            Said::Doing(doing) => FromSecretary::Typing { id, doing },
+            Said::Text(text) => FromSecretary::Answer {
+                id,
+                text,
+                done: false,
+            },
+        };
+        self.tell_talkers(&message, Some(conn));
+    }
+
+    /// Her model's reply whole: her words kept, each tool call a card or a
+    /// question, and the end of her answer.
+    pub(super) fn replied(&mut self, conn: u64, id: u64, result: Result<Reply, String>) {
+        if self.talk.composing == Some(id) {
+            self.talk.composing = None;
+        }
+        match result {
+            Ok(reply) => {
+                if !reply.text.trim().is_empty() {
+                    self.add_item(
+                        Some(id),
+                        Body::Her {
+                            text: reply.text.clone(),
+                            note: None,
+                            assumed: false,
+                        },
+                    );
+                }
+                for call in &reply.tool_calls {
+                    self.tool_call(id, call);
+                }
+                self.tell_look();
+                self.done(conn, id);
+            }
+            Err(err) => {
+                let failed = self.talk.t(
+                    "Je n’ai pas pu te répondre : le modèle ne répond pas.",
+                    "I couldn’t answer: the model is not responding.",
+                );
+                self.add_item(
+                    Some(id),
+                    Body::Her {
+                        text: failed.to_owned(),
+                        note: None,
+                        assumed: false,
+                    },
+                );
+                self.tell_look();
+                self.tell_talkers(
+                    &FromSecretary::Error {
+                        id: Some(id),
+                        message: err,
+                    },
+                    Some(conn),
+                );
+            }
+        }
+    }
+
+    /// A tool call: what it shows in the thread; it acts on nothing.
+    fn tool_call(&mut self, id: u64, call: &ToolCall) {
+        let fr = self.talk.fr();
+        match made(call, fr) {
+            Some(Made::Question {
+                text,
+                note,
+                replies,
+            }) => {
+                self.add_item(
+                    Some(id),
+                    Body::Question {
+                        text,
+                        note,
+                        replies,
+                        chosen: None,
+                    },
+                );
+            }
+            Some(Made::Card(card, effect)) => {
+                let item = self.add_item(Some(id), Body::Card { card });
+                tracing::info!(item, effect, tool = call.name, "she proposes");
+                self.talk.proposals.insert(
+                    item,
+                    Proposal {
+                        effect,
+                        tool: call.name.clone(),
+                        input: call.input.clone(),
+                    },
+                );
+                self.audited(audit::Entry {
+                    kind: audit::Kind::Proposal,
+                    what: effect.to_owned(),
+                    ids: vec![format!("card:{item}")],
+                    ..Default::default()
+                });
+            }
+            None => tracing::info!(tool = call.name, "a tool call she does not know: nothing"),
+        }
+    }
+
+    fn audited(&mut self, entry: audit::Entry) {
+        if let Err(err) = self.store.audit(entry) {
+            tracing::warn!(%err, "could not audit");
+        }
+    }
+
+    /// A card's button.
+    pub(super) fn decide(&mut self, conn: u64, id: u64, item: u64, decision: Decision) {
+        let Some(Body::Card { card }) = self
+            .talk
+            .items
+            .iter()
+            .find(|i| i.id == item)
+            .map(|i| i.body.clone())
+        else {
+            return self.error(conn, Some(id), "no such card");
+        };
+        if card.decided.is_some() {
+            return self.error(conn, Some(id), "decided already");
+        }
+        if !card.actions.iter().any(|a| a.decision == decision) {
+            return self.error(conn, Some(id), "no such button");
+        }
+        let now = self.clock.now();
+        let outcome = match decision {
+            Decision::Edit => {
+                let ask = self
+                    .talk
+                    .t("Dis-moi ce que je change.", "Tell me what to change.");
+                self.add_item(
+                    Some(id),
+                    Body::Her {
+                        text: ask.to_owned(),
+                        note: None,
+                        assumed: false,
+                    },
+                );
+                self.tell_look();
+                return self.done(conn, id);
+            }
+            Decision::Reject => self.talk.t("Écarté.", "Dismissed.").to_owned(),
+            Decision::Accept => match self.talk.proposals.get(&item) {
+                Some(proposal) => self.carry_out(now, item, proposal),
+                None => self.talk.t("Noté.", "Noted.").to_owned(),
+            },
+        };
+        let word = match decision {
+            Decision::Accept => "accepted",
+            Decision::Reject => "rejected",
+            Decision::Edit => "edit",
+        };
+        tracing::info!(item, word, "a card decided");
+        self.audited(audit::Entry {
+            kind: audit::Kind::Answer,
+            what: "card".to_owned(),
+            ids: vec![format!("card:{item}")],
+            outcome: Some(word.to_owned()),
+            ..Default::default()
+        });
+        self.change_item(item, |body| {
+            if let Body::Card { card } = body {
+                card.decided = Some(decision);
+                card.outcome = Some(outcome);
+            }
+        });
+        self.tell_look();
+        self.done(conn, id);
+    }
+
+    /// The effect of an accepted card: through the effects' recorder
+    /// (tests); without it, nothing can act yet and she says so.
+    fn carry_out(&self, now: Timestamp, item: u64, proposal: &Proposal) -> String {
+        match &self.effects {
+            Some(effects) => {
+                let detail = format!("card:{item} {} {}", proposal.tool, proposal.input);
+                effects.effect(now, proposal.effect, &detail);
+                self.talk.t("Fait.", "Done.").to_owned()
+            }
+            None => self
+                .talk
+                .t(
+                    "Je ne sais pas encore le faire moi-même : rien n’est parti.",
+                    "I can’t do this myself yet: nothing was sent.",
+                )
+                .to_owned(),
+        }
+    }
+
+    /// The word of `sentence` she does not know that exactly one project's
+    /// items hold, the first; none when every word is known, common, or
+    /// in several projects' items.
+    pub(super) fn candidate(&self, sentence: &str) -> Option<Candidate> {
+        for word in sentence
+            .split(|c: char| !(c.is_alphanumeric() || c == '-'))
+            .filter(|w| w.chars().count() >= 5 && w.chars().all(char::is_alphabetic))
+        {
+            let folded = fold(word);
+            if COMMON.contains(&folded.as_str()) || self.talk.declined.contains(&folded) {
+                continue;
+            }
+            if self.store.find(word).is_ok_and(|known| !known.is_empty()) {
+                continue;
+            }
+            let Ok(found) = self.store.search(word, None) else {
+                continue;
+            };
+            let mut projects: BTreeMap<i64, (String, String, String, Notebook)> = BTreeMap::new();
+            for episode in found.into_iter().filter_map(|i| match i {
+                Kept::Episode(id) => Some(id),
+                _ => None,
+            }) {
+                for (node, name, kind, digest, pointer, notebook) in self.projects_of(episode) {
+                    let _ = kind;
+                    projects
+                        .entry(node)
+                        .or_insert((name, digest, pointer, notebook));
+                }
+            }
+            if projects.len() != 1 {
+                continue;
+            }
+            let (node, (name, digest, pointer, notebook)) = projects.into_iter().next()?;
+            let board = self.episode_kind(&pointer).is_some_and(|k| {
+                matches!(k.as_str(), "ticket" | "card" | "task" | "board" | "issue")
+            });
+            return Some(Candidate {
+                term: word.to_lowercase(),
+                node,
+                name,
+                quote: digest,
+                pointer,
+                board,
+                notebook,
+            });
+        }
+        None
+    }
+
+    /// The project nodes episode `episode` mentions: their id and name,
+    /// the episode's kind, digest, pointer and notebook.
+    fn projects_of(&self, episode: i64) -> Vec<(i64, String, String, String, String, Notebook)> {
+        let query = "SELECT n.id, n.name, e.kind, e.digest, e.pointer, e.notebook
+                     FROM mentions m JOIN nodes n ON n.id = m.node JOIN episodes e ON e.id = m.episode
+                     WHERE m.episode = ?1 AND n.kind = 'project'";
+        let read = || -> rusqlite::Result<Vec<_>> {
+            let mut statement = self.store.conn.prepare(query)?;
+            let rows = statement.query_map([episode], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    Notebook::of(&r.get::<_, String>(5)?).unwrap_or(Notebook::Pro),
+                ))
+            })?;
+            rows.collect()
+        };
+        read().unwrap_or_else(|err| {
+            tracing::warn!(%err, "could not read an episode's projects");
+            Vec::new()
+        })
+    }
+
+    fn episode_kind(&self, pointer: &str) -> Option<String> {
+        self.store
+            .conn
+            .query_row(
+                "SELECT kind FROM episodes WHERE pointer = ?1",
+                [pointer],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
+    /// The node of project `name` a source's item belongs to: hers, or a
+    /// new one the source made.
+    pub(super) fn project_node(
+        &mut self,
+        name: &str,
+        notebook: Notebook,
+        source: &str,
+    ) -> Option<i64> {
+        let known = self.store.find(name).ok().unwrap_or_default();
+        for id in known {
+            if self
+                .store
+                .node(id)
+                .is_ok_and(|n| n.kind == NodeKind::Project)
+            {
+                return Some(id);
+            }
+        }
+        let made = self.store.add_node(
+            NodeKind::Project,
+            name,
+            notebook,
+            &Who::Source(source.to_owned()),
+            "a project its source names",
+        );
+        match made {
+            Ok((id, _)) => Some(id),
+            Err(err) => {
+                tracing::warn!(%err, "could not keep a project");
+                None
+            }
+        }
+    }
+}
+
+/// A piece of her answer, owned, on its way to her loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Said {
+    Doing(String),
+    Text(String),
+}
+
+/// What a tool call shows in the thread.
+#[derive(Debug, Clone, PartialEq)]
+enum Made {
+    Question {
+        text: String,
+        note: Option<String>,
+        replies: Vec<String>,
+    },
+    Card(Card, &'static str),
+}
+
+/// A tool call's card or question; none for a tool she does not know.
+/// The model has no tool that acts: a call named as one that would
+/// (`send_message`, `write_file`, `start_job`…) is a proposal all the
+/// same.
+fn made(call: &ToolCall, fr: bool) -> Option<Made> {
+    let input = &call.input;
+    let field = |name: &str| input.get(name).and_then(|v| v.as_str()).map(str::to_owned);
+    let list = |name: &str| -> Vec<String> {
+        input
+            .get(name)
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let w = |f: &str, e: &str| if fr { f.to_owned() } else { e.to_owned() };
+    let name = call.name.as_str();
+    if name == "ask_user" {
+        return Some(Made::Question {
+            text: field("question").or_else(|| field("text"))?,
+            note: field("note"),
+            replies: list("replies").into_iter().take(4).collect(),
+        });
+    }
+    let (effect, kind) = match name {
+        "propose_message" | "send_message" | "reply" => ("message", CardKind::Draft),
+        "propose_post" | "post" | "post_message" => ("post", CardKind::Draft),
+        "propose_mail" | "send_mail" | "send_email" => ("mail", CardKind::Draft),
+        "propose_invitation_answer" | "answer_invitation" | "respond_to_event" => {
+            ("invitation", CardKind::Plan)
+        }
+        "propose_event" | "create_event" => ("event", CardKind::Plan),
+        "propose_file" | "write_file" | "save_file" => ("file", CardKind::Plan),
+        "propose_task" | "add_task" | "create_task" | "propose_plan" => ("task", CardKind::Plan),
+        "propose_agent" | "start_agent" | "start_job" => ("agent", CardKind::Delegation),
+        "propose_delegation" | "delegate" => ("delegation", CardKind::Delegation),
+        _ => return None,
+    };
+    let to = field("to");
+    let default_label = match (effect, to.as_deref()) {
+        ("message", Some(to)) => w(&format!("Message à {to}"), &format!("Message to {to}")),
+        ("message", None) => w("Message", "Message"),
+        ("post", _) => w("Publication", "Post"),
+        ("mail", Some(to)) => w(&format!("Mail à {to}"), &format!("Mail to {to}")),
+        ("mail", None) => w("Mail", "Mail"),
+        ("invitation", _) => w("Réponse à l’invitation", "Answer to the invitation"),
+        ("event", _) => w("Un événement", "An event"),
+        ("file", _) => w("Un fichier", "A file"),
+        ("task", _) => w("À faire", "To do"),
+        _ => w("Confier à Claude Code", "Hand to Claude Code"),
+    };
+    let accept = match effect {
+        "message" | "post" | "mail" => w("Envoyer", "Send"),
+        "invitation" => w("Répondre", "Answer"),
+        "event" => w("Ajouter", "Add"),
+        "file" => w("Enregistrer", "Save"),
+        "task" => w("Mettre dans À faire", "Put in To do"),
+        _ => w("Lancer", "Start"),
+    };
+    let mut lines = list("lines");
+    if lines.is_empty()
+        && let Some(text) = field("draft").or_else(|| field("body"))
+    {
+        lines.push(text);
+    }
+    let action = |label: String, decision| Action { label, decision };
+    Some(Made::Card(
+        Card {
+            kind,
+            label: field("label").unwrap_or(default_label),
+            text: field("text").unwrap_or_default(),
+            lines,
+            actions: vec![
+                action(accept, Decision::Accept),
+                action(w("Modifier", "Edit"), Decision::Edit),
+                action(w("Annuler", "Cancel"), Decision::Reject),
+            ],
+            decided: None,
+            outcome: None,
+        },
+        effect,
+    ))
+}
+
+/// A source's name as her status line says it.
+fn shown_source(name: &str) -> String {
+    let lower = name.to_lowercase();
+    if lower.contains("slack") {
+        "Slack".to_owned()
+    } else if lower.contains("mail") {
+        "Gmail".to_owned()
+    } else if lower.contains("cal") || lower.contains("agenda") {
+        "Agenda".to_owned()
+    } else if lower.contains("board") || lower.contains("planka") {
+        "Planka".to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+/// Common words of five letters or more, folded, that are never a
+/// project's own word: what entity linking (lot 4) will know better.
+const COMMON: &[&str] = &[
+    "aujourd",
+    "demain",
+    "toujours",
+    "quelque",
+    "comment",
+    "pourquoi",
+    "avant",
+    "apres",
+    "cette",
+    "votre",
+    "notre",
+    "entre",
+    "aussi",
+    "encore",
+    "faire",
+    "finir",
+    "integrer",
+    "ticket",
+    "tickets",
+    "article",
+    "blog",
+    "reunion",
+    "reunions",
+    "matin",
+    "soir",
+    "semaine",
+    "journee",
+    "projet",
+    "projets",
+    "client",
+    "clients",
+    "equipe",
+    "point",
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+    "dimanche",
+    "merci",
+    "bonjour",
+    "bonsoir",
+    "rappelle",
+    "rappeler",
+    "envoie",
+    "envoyer",
+    "message",
+    "messages",
+    "mails",
+    "prepare",
+    "preparer",
+    "regarde",
+    "regarder",
+    "besoin",
+    "plutot",
+    "depuis",
+    "pendant",
+    "parce",
+    "alors",
+    "ensuite",
+    "today",
+    "tomorrow",
+    "morning",
+    "evening",
+    "meeting",
+    "meetings",
+    "please",
+    "thanks",
+    "should",
+    "would",
+    "could",
+    "about",
+    "after",
+    "before",
+    "their",
+    "there",
+    "these",
+    "those",
+    "which",
+    "where",
+    "while",
+    "write",
+    "remind",
+    "finish",
+    "project",
+    "projects",
+    "people",
+    "review",
+    "relire",
+    "relecture",
+    "tarifs",
+    "arrondis",
+    "travail",
+    "travaille",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_acting_tool_is_a_proposal_all_the_same() {
+        for (name, effect) in [
+            ("send_message", "message"),
+            ("post", "post"),
+            ("write_file", "file"),
+            ("add_task", "task"),
+            ("start_job", "agent"),
+            ("propose_delegation", "delegation"),
+        ] {
+            let call = ToolCall {
+                name: name.to_owned(),
+                input: serde_json::json!({"to": "Léa", "draft": "Je regarde ça."}),
+            };
+            let Some(Made::Card(card, made_effect)) = made(&call, true) else {
+                panic!("{name}: no card");
+            };
+            assert_eq!(made_effect, effect);
+            assert!(card.actions.len() <= 3);
+            assert_eq!(card.actions[0].decision, Decision::Accept);
+        }
+        let unknown = ToolCall {
+            name: "rm_rf".to_owned(),
+            input: serde_json::Value::Null,
+        };
+        assert_eq!(made(&unknown, true), None);
+    }
+}

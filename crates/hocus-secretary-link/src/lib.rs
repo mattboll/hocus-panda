@@ -17,6 +17,16 @@
 //!
 //! Neither side waits on the other on a loop: the shell writes and reads
 //! her lines on a thread of its own.
+//!
+//! **Version 2** brings the drawer's conversation (§5.4, lot 2): the
+//! user's sentences ([`ToSecretary::Ask`]), a quick reply chosen
+//! ([`ToSecretary::Choose`]), a card's button ([`ToSecretary::Decide`]),
+//! "Annuler" under what she kept ([`ToSecretary::Undo`]), the drawer open
+//! or closed; and from her, the thread's items ([`FromSecretary::Item`],
+//! the same id again when one changes), her typing
+//! ([`FromSecretary::Typing`]), her answer's text as it comes
+//! ([`FromSecretary::Answer`]), and her face and status line
+//! ([`FromSecretary::Look`]).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -29,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -123,16 +133,40 @@ impl Provenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToSecretary {
-    /// The first line of a connection.
-    Hello { version: u32, client: Client },
+    /// The first line of a connection; `lang`, the desktop's language
+    /// (`fr`, `en`), for the words she makes herself.
+    Hello {
+        version: u32,
+        client: Client,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lang: Option<String>,
+    },
     /// How she is: [`FromSecretary::Status`].
     Status { id: u64 },
     /// Her graph around a node, now or as of a date:
     /// [`FromSecretary::Graph`].
     Graph { id: u64, query: GraphQuery },
-    /// A question: her answer comes in [`FromSecretary::Answer`]s, the last
-    /// one `done`.
+    /// A sentence of the user's: her answer comes in
+    /// [`FromSecretary::Answer`]s, the last one `done`; to a shell, the
+    /// sentence and what she makes of it come as thread items too.
     Ask { id: u64, text: String },
+    /// Quick reply `choice` (from 0) of question `item` clicked: answered
+    /// as a sentence is.
+    Choose { id: u64, item: u64, choice: u32 },
+    /// A card's button: card `item` accepted, rejected, or to edit. An
+    /// outside effect happens only after an accept, on that exact card
+    /// (§2.1).
+    Decide {
+        id: u64,
+        item: u64,
+        decision: Decision,
+    },
+    /// "Annuler" under what she kept (`item`, a [`Body::Learned`]).
+    Undo { id: u64, item: u64 },
+    /// The thread so far: [`FromSecretary::Thread`].
+    Thread { id: u64 },
+    /// The drawer opened or closed.
+    Drawer { open: bool },
     /// The session locked or unlocked: she keeps working, and never speaks
     /// while locked (§3.10).
     Session { locked: bool },
@@ -172,6 +206,26 @@ pub enum FromSecretary {
         text: String,
         done: bool,
     },
+    /// She composes her answer to request `id`; `doing`, what she is
+    /// doing, from her tool calls ("elle regarde le tableau de Chapitô"),
+    /// empty while she only writes.
+    Typing {
+        id: u64,
+        doing: String,
+    },
+    /// A thread item, new, or changed when its id is known.
+    Item {
+        item: Item,
+    },
+    /// The thread so far, oldest first.
+    Thread {
+        id: u64,
+        items: Vec<Item>,
+    },
+    /// Her face and her status line, as they change.
+    Look {
+        look: Look,
+    },
     Error {
         #[serde(default)]
         id: Option<u64>,
@@ -183,11 +237,196 @@ impl FromSecretary {
     /// The request it answers.
     pub fn id(&self) -> Option<u64> {
         match self {
-            Self::Status { id, .. } | Self::Graph { id, .. } | Self::Answer { id, .. } => Some(*id),
+            Self::Status { id, .. }
+            | Self::Graph { id, .. }
+            | Self::Answer { id, .. }
+            | Self::Typing { id, .. }
+            | Self::Thread { id, .. } => Some(*id),
             Self::Error { id, .. } => *id,
-            Self::Hello { .. } | Self::Refused { .. } => None,
+            Self::Hello { .. } | Self::Refused { .. } | Self::Item { .. } | Self::Look { .. } => {
+                None
+            }
         }
     }
+}
+
+/// One item of the drawer's thread (§5.4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Item {
+    /// Hers, from 1; the same id again replaces it.
+    pub id: u64,
+    /// When, on her clock (RFC 3339).
+    pub at: String,
+    /// The request it belongs to: the sentence it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<u64>,
+    pub body: Body,
+}
+
+/// What a thread item shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Body {
+    /// The user's sentence: a bubble on the right.
+    User { text: String },
+    /// Her words: a bubble on the left (the streamed answer, once whole).
+    /// `note`, a small line under them; `assumed`, "Supposé · corriger".
+    Her {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        assumed: bool,
+    },
+    /// A question, one at a time, with its quick replies (pills); `chosen`
+    /// once one is clicked, the others greyed.
+    Question {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        replies: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chosen: Option<u32>,
+    },
+    /// A card: a proposal when it has actions.
+    Card { card: Card },
+    /// "Retenu : … · Annuler", once something is kept (§9.3).
+    Learned {
+        text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        undone: bool,
+    },
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// A card (§5.4): at most three buttons, the first the primary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Card {
+    pub kind: CardKind,
+    /// Its spaced label ("TA JOURNÉE · MARDI 10").
+    pub label: String,
+    #[serde(default)]
+    pub text: String,
+    /// Its lines (a plan's steps), or a draft's quoted text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<Action>,
+    /// What the user decided, once a button is clicked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided: Option<Decision>,
+    /// What came of it ("Fait.", "Écarté."), under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+}
+
+/// A card's colour and meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CardKind {
+    /// Green: a plan, a task, an event.
+    Plan,
+    /// Amber: a rule.
+    Rule,
+    /// Blue: a person.
+    Person,
+    /// Orange: a warning ("Je ne l'ai pas fait").
+    Warning,
+    /// A quoted draft: a message, a post, a mail.
+    Draft,
+    /// Violet: work given to Claude Code (§12).
+    Delegation,
+}
+
+/// A card's button.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Action {
+    pub label: String,
+    pub decision: Decision,
+}
+
+/// What a card's button says (§16: `accept`/`reject`/`edit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Decision {
+    Accept,
+    Edit,
+    Reject,
+}
+
+/// Her face (§5.6), and her header's status line (§5.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Look {
+    pub mood: Mood,
+    /// "Slack · Gmail · Agenda à jour", "Gmail ne répond plus"…
+    pub status: String,
+    pub tone: Tone,
+    /// The model that answers, under the field ("Claude Sonnet 5.5"); empty
+    /// without one.
+    #[serde(default)]
+    pub model: String,
+}
+
+/// Her mood (§5.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mood {
+    /// The drawer open, idle.
+    Listen,
+    /// Composing.
+    Type,
+    /// A question to the user.
+    Ask,
+    /// The peek, the briefing ready.
+    Nudge,
+    /// Something learned.
+    Happy,
+    /// A source error, a masked secret, a suspicious mail.
+    Worry,
+    /// Offline.
+    Sleep,
+}
+
+impl Mood {
+    pub const ALL: [Self; 7] = [
+        Self::Listen,
+        Self::Type,
+        Self::Ask,
+        Self::Nudge,
+        Self::Happy,
+        Self::Worry,
+        Self::Sleep,
+    ];
+
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Listen => "listen",
+            Self::Type => "type",
+            Self::Ask => "ask",
+            Self::Nudge => "nudge",
+            Self::Happy => "happy",
+            Self::Worry => "worry",
+            Self::Sleep => "sleep",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.word() == word)
+    }
+}
+
+/// The status line's dot: green, amber, orange, grey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Tone {
+    Ok,
+    Warn,
+    Bad,
+    Off,
 }
 
 /// How she is.
@@ -354,6 +593,7 @@ impl Connection {
         connection.send(&ToSecretary::Hello {
             version: VERSION,
             client,
+            lang: None,
         })?;
         match connection.receive()? {
             FromSecretary::Hello { .. } => Ok(connection),
@@ -432,9 +672,10 @@ mod tests {
         let hello = ToSecretary::Hello {
             version: VERSION,
             client: Client::Shell,
+            lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":1,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":2,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });
@@ -455,6 +696,60 @@ mod tests {
             }
         );
         assert!(read::<ToSecretary>("{\"fly\":{}}").is_err());
+    }
+
+    #[test]
+    fn the_drawers_lines_read_back() {
+        let card = FromSecretary::Item {
+            item: Item {
+                id: 4,
+                at: "2026-11-09T08:55:00Z".to_owned(),
+                request: Some(2),
+                body: Body::Card {
+                    card: Card {
+                        kind: CardKind::Draft,
+                        label: "Message à Léa".to_owned(),
+                        text: String::new(),
+                        lines: vec!["Je regarde ton article cet après-midi.".to_owned()],
+                        actions: vec![Action {
+                            label: "Envoyer".to_owned(),
+                            decision: Decision::Accept,
+                        }],
+                        decided: None,
+                        outcome: None,
+                    },
+                },
+            },
+        };
+        assert_eq!(read::<FromSecretary>(&line(&card)), Ok(card));
+        let learned = "{\"item\":{\"item\":{\"id\":5,\"at\":\"2026-11-09T08:55:00Z\",\
+                       \"body\":{\"learned\":{\"text\":\"Retenu\"}}}}}";
+        assert!(matches!(
+            read::<FromSecretary>(learned),
+            Ok(FromSecretary::Item {
+                item: Item {
+                    body: Body::Learned { undone: false, .. },
+                    ..
+                }
+            })
+        ));
+        let decide: ToSecretary =
+            read("{\"decide\":{\"id\":7,\"item\":4,\"decision\":\"accept\"}}").expect("reads");
+        assert_eq!(
+            decide,
+            ToSecretary::Decide {
+                id: 7,
+                item: 4,
+                decision: Decision::Accept
+            }
+        );
+        // A first version's hello still reads, and is refused by its number.
+        let old: ToSecretary =
+            read("{\"hello\":{\"version\":1,\"client\":\"cli\"}}").expect("reads");
+        assert!(matches!(old, ToSecretary::Hello { version: 1, .. }));
+        for mood in Mood::ALL {
+            assert_eq!(Mood::of(mood.word()), Some(mood));
+        }
     }
 
     #[test]

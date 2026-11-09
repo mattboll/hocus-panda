@@ -57,6 +57,7 @@ impl Driver {
         driver.send(&ToSecretary::Hello {
             version: VERSION,
             client: Client::Test,
+            lang: None,
         });
         assert!(matches!(driver.receive(), FromSecretary::Hello { .. }));
         driver
@@ -83,10 +84,23 @@ impl Driver {
         let id = self.next;
         self.next += 1;
         self.send(&make(id));
+        // Her typing and her answer's parts until the last, joined.
+        let mut parts = String::new();
         loop {
-            let message = self.receive();
-            if message.id() == Some(id) {
-                return message;
+            match self.receive() {
+                message if message.id() != Some(id) => {}
+                FromSecretary::Typing { .. } => {}
+                FromSecretary::Answer { text, done, .. } => {
+                    parts.push_str(&text);
+                    if done {
+                        return FromSecretary::Answer {
+                            id,
+                            text: parts,
+                            done,
+                        };
+                    }
+                }
+                message => return message,
             }
         }
     }
@@ -134,5 +148,6 @@ pub fn options(sources: Vec<Fixture>) -> Options {
             .map(|f| Box::new(f) as Box<dyn hocus_secretary::sources::Source>)
             .collect(),
         key: "file".to_owned(),
+        effects: None,
     }
 }

@@ -158,9 +158,14 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
             }
         };
         wait = Duration::from_millis(50);
+        let lang = match crate::clock::time::Lang::of_messages() {
+            crate::clock::time::Lang::French => "fr",
+            crate::clock::time::Lang::English => "en",
+        };
         let hello = ToSecretary::Hello {
             version: VERSION,
             client: Client::Shell,
+            lang: Some(lang.to_owned()),
         };
         let session = ToSecretary::Session {
             locked: locked || line_state().locked,

@@ -14,6 +14,13 @@
 //! `CLOCK_MONOTONIC`), and over four hours a "Pendant ton absence"
 //! briefing is due. At rest, with no source due, she sleeps until the
 //! next due sync: no wakeup in between.
+//!
+//! **The conversation** (§5.4, lot 2) is [`conversation`]'s: the thread,
+//! her questions, her model's streamed answer, the proposals' cards.
+
+mod conversation;
+
+pub use conversation::Said;
 
 use std::{
     collections::BTreeMap,
@@ -35,7 +42,7 @@ use crate::{
     audit,
     clock::{Clock, Sleeps},
     graph::{NewEpisode, Target},
-    model::{Message, Model, Reply, Request, Role},
+    model::{Model, Recorder, Reply, Role},
     sources::{Source, Synced},
     store::{Store, stamp, unstamp},
 };
@@ -68,6 +75,12 @@ pub enum Event {
         source: usize,
         result: Result<Synced, String>,
     },
+    /// A piece of her model's answer to request `id`, as it comes.
+    Piece {
+        conn: u64,
+        id: u64,
+        piece: Said,
+    },
     Called {
         conn: u64,
         id: u64,
@@ -86,6 +99,9 @@ pub struct Options {
     pub sources: Vec<Box<dyn Source>>,
     /// Where her memory's key is, for her status.
     pub key: String,
+    /// Where the outside effects of accepted cards are written (tests):
+    /// none, nothing can act yet.
+    pub effects: Option<Arc<Recorder>>,
 }
 
 #[derive(Debug)]
@@ -133,6 +149,8 @@ pub struct Brain {
     caught_up: Option<CatchUp>,
     sleeps: Sleeps,
     key: String,
+    talk: conversation::Talk,
+    effects: Option<Arc<Recorder>>,
 }
 
 impl Brain {
@@ -174,6 +192,8 @@ impl Brain {
             caught_up: None,
             sleeps: Sleeps::now(),
             key: options.key,
+            talk: conversation::Talk::default(),
+            effects: options.effects,
         };
         if let Some(away) = away {
             brain.catch_up(away);
@@ -317,6 +337,7 @@ impl Brain {
                 self.conns.remove(&conn);
             }
             Event::Synced { source, result } => self.synced(source, result),
+            Event::Piece { conn, id, piece } => self.piece(conn, id, piece),
             Event::Called {
                 conn,
                 id,
@@ -361,7 +382,11 @@ impl Brain {
         };
         let greeted = self.conns.get(&conn).is_some_and(|c| c.client.is_some());
         match message {
-            ToSecretary::Hello { version, client } => {
+            ToSecretary::Hello {
+                version,
+                client,
+                lang,
+            } => {
                 if version != VERSION {
                     self.send(
                         conn,
@@ -381,6 +406,7 @@ impl Brain {
                 }
                 tracing::info!(conn, ?client, "a client said hello");
                 self.send(conn, &FromSecretary::Hello { version: VERSION });
+                self.greeted(conn, client, lang.as_deref());
             }
             _ if !greeted => self.error(conn, None, "hello first"),
             ToSecretary::Status { id } => {
@@ -391,7 +417,12 @@ impl Brain {
                 Ok(graph) => self.send(conn, &FromSecretary::Graph { id, graph }),
                 Err(err) => self.error(conn, Some(id), err),
             },
-            ToSecretary::Ask { id, text } => self.ask(conn, id, text),
+            ToSecretary::Ask { id, text } => self.sentence(conn, id, text),
+            ToSecretary::Choose { id, item, choice } => self.choose(conn, id, item, choice),
+            ToSecretary::Decide { id, item, decision } => self.decide(conn, id, item, decision),
+            ToSecretary::Undo { id, item } => self.undo(conn, id, item),
+            ToSecretary::Thread { id } => self.thread(conn, id),
+            ToSecretary::Drawer { open } => self.drawer(open),
             ToSecretary::Session { locked } => {
                 tracing::info!(locked, "the session's lock");
                 self.locked = locked;
@@ -520,43 +551,6 @@ impl Brain {
         })
     }
 
-    /// A question: put to her model on a worker thread.
-    fn ask(&mut self, conn: u64, id: u64, text: String) {
-        let Some(model) = self.model.clone() else {
-            return self.error(conn, Some(id), "she has no model yet");
-        };
-        let request = Request {
-            role: Role::Answer,
-            system: SYSTEM.to_owned(),
-            context: Vec::new(),
-            messages: vec![Message {
-                from: "user".to_owned(),
-                text,
-            }],
-            tools: Vec::new(),
-        };
-        let (sender, clock) = (self.sender.clone(), self.clock.clone());
-        let started = clock.now();
-        self.calls_running += 1;
-        let spawned = std::thread::Builder::new()
-            .name("model call".to_owned())
-            .spawn(move || {
-                let result = model.call(&request, &clock);
-                let _ = sender.send(Event::Called {
-                    conn,
-                    id,
-                    role: request.role,
-                    items: request.items(),
-                    started,
-                    result,
-                });
-            });
-        if let Err(err) = spawned {
-            self.calls_running -= 1;
-            self.error(conn, Some(id), format!("no thread for the call: {err}"));
-        }
-    }
-
     fn called(
         &mut self,
         conn: u64,
@@ -587,17 +581,7 @@ impl Brain {
         if let Err(err) = self.store.audit(entry) {
             tracing::warn!(%err, "could not audit a call");
         }
-        match result {
-            Ok(reply) => self.send(
-                conn,
-                &FromSecretary::Answer {
-                    id,
-                    text: reply.text,
-                    done: true,
-                },
-            ),
-            Err(err) => self.error(conn, Some(id), err),
-        }
+        self.replied(conn, id, result);
     }
 
     /// What a source read: each item an episode, in its notebook; the
@@ -620,15 +604,23 @@ impl Brain {
                 let mut ids = Vec::new();
                 for item in &synced.items {
                     let pointer = format!("{name}:{}", item.id);
+                    let notebook = item.notebook.unwrap_or(notebook);
+                    // A board's card: linked to its project's node.
+                    let mentions: Vec<i64> = item
+                        .project
+                        .as_deref()
+                        .and_then(|p| self.project_node(p, notebook, &name))
+                        .into_iter()
+                        .collect();
                     let episode = NewEpisode {
                         at: item.at,
                         kind: item.kind.clone(),
                         digest: item.digest.clone(),
                         source: Some(name.clone()),
                         pointer: pointer.clone(),
-                        notebook: item.notebook.unwrap_or(notebook),
+                        notebook,
                     };
-                    if let Err(err) = self.store.add_episode(&episode, &[]) {
+                    if let Err(err) = self.store.add_episode(&episode, &mentions) {
                         tracing::warn!(source = name, %err, "could not keep an item");
                     }
                     ids.push(pointer);
@@ -658,6 +650,8 @@ impl Brain {
             catching.items += read;
         }
         self.catch_up_done_if_over();
+        // A source failing, or answering again: her face says it.
+        self.tell_look();
         if let Err(err) = self.store.prune_audit() {
             tracing::warn!(%err, "could not prune the audit log");
         }
