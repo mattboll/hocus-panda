@@ -82,6 +82,8 @@ impl Brain {
         match outcome {
             KeyOutcome::Kept if self.key_missing.as_deref() == Some(provider.as_str()) => {
                 self.key_missing = None;
+                // Her first run goes on to the accounts (#758).
+                self.first_run_step();
             }
             KeyOutcome::Erased => self.ask_key(),
             _ => {}

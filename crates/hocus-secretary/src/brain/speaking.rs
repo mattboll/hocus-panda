@@ -542,12 +542,17 @@ impl Brain {
             };
             (SpeakKind::Absence, text, self.talk.t("Voir", "See"))
         } else {
+            // What is in it, in her bubble (#758).
+            let text = match (en, built.peek.is_empty()) {
+                (false, true) => "**Ton point du matin est prêt.**".to_owned(),
+                (false, false) => format!("**Ton point du matin est prêt.** {}.", built.peek),
+                (true, true) => "**Your morning briefing is ready.**".to_owned(),
+                (true, false) => format!("**Your morning briefing is ready.** {}.", built.peek),
+            };
             (
                 SpeakKind::Briefing,
-                self.talk
-                    .t("**Ton point est prêt**", "**Your briefing is ready**")
-                    .to_owned(),
-                self.talk.t("Ouvrir le point", "Open the briefing"),
+                text,
+                self.talk.t("Voir le point", "See the briefing"),
             )
         };
         let _ = kind;
@@ -880,7 +885,7 @@ impl Brain {
                     decision: Decision::Accept,
                 },
                 Action {
-                    label: self.talk.t("Laisser", "Leave it").to_owned(),
+                    label: self.talk.t("Non merci", "No thanks").to_owned(),
                     decision: Decision::Reject,
                 },
             ],
@@ -916,6 +921,76 @@ impl Brain {
             ..Default::default()
         });
         tracing::info!(item, "a commitment proposed");
+    }
+
+    /// "Rappelle-le-moi" on a briefing's mail to answer (#758): a
+    /// reminder two hours from now, and the line says when.
+    pub(super) fn remind_me(&mut self, conn: u64, id: u64, item: u64, pointer: &str) {
+        let line = self
+            .talk
+            .items
+            .iter()
+            .find(|i| i.id == item)
+            .and_then(|i| match &i.body {
+                Body::Briefing { briefing } => briefing
+                    .sections
+                    .iter()
+                    .flat_map(|s| s.lines.iter())
+                    .find(|l| l.pointer == pointer && !pointer.is_empty())
+                    .cloned(),
+                _ => None,
+            });
+        let Some(line) = line else {
+            return self.error(conn, Some(id), "no such line");
+        };
+        if !line.reminded.is_empty() {
+            return self.done(conn, id);
+        }
+        let now = self.clock.now();
+        let due = now + SignedDuration::from_hours(2);
+        let en = self.english();
+        let text = if en {
+            format!("Answer {}", line.title)
+        } else {
+            format!("Répondre à {}", line.title)
+        };
+        let reminder = Reminder {
+            id: 0,
+            kind: "answer".to_owned(),
+            text,
+            due,
+            until: None,
+            next: None,
+            state: State::Open,
+            pointer: Some(pointer.to_owned()),
+            notebook: line.notebook,
+        };
+        let source = pointer.split_once(':').map(|(s, _)| s.to_owned());
+        if let Err(err) = day::remind(&self.store.conn, &reminder, source.as_deref(), now) {
+            tracing::warn!(%err, "could not keep a reminder");
+            return self.error(conn, Some(id), "the reminder is not kept");
+        }
+        let at = briefing::hour(&due.to_zoned(TimeZone::system()), en);
+        let said = if en {
+            format!("I’ll remind you at {at}")
+        } else {
+            format!("Je te le rappelle à {at}")
+        };
+        tracing::info!(item, "a mail to answer, to remind");
+        self.change_item(item, |body| {
+            if let Body::Briefing { briefing } = body {
+                for l in briefing
+                    .sections
+                    .iter_mut()
+                    .flat_map(|s| s.lines.iter_mut())
+                {
+                    if l.pointer == pointer {
+                        l.reminded.clone_from(&said);
+                    }
+                }
+            }
+        });
+        self.done(conn, id);
     }
 
     /// Card `item`'s proposal accepted: its effect, or what it prepares.
@@ -956,6 +1031,20 @@ impl Brain {
             .effectors
             .carry_out(now, item, proposal, self.english())
         {
+            // A message sent says where and when (#758).
+            Outcome::Done(_)
+                if matches!(proposal.kind, Kind::Message | Kind::Post | Kind::Mail) =>
+            {
+                let channel = super::conversation::Channel::of(
+                    proposal.input["channel"].as_str(),
+                    proposal.kind.word(),
+                );
+                let here = now.to_zoned(jiff::tz::TimeZone::system());
+                channel.sent(
+                    &crate::briefing::hour(&here, self.english()),
+                    !self.english(),
+                )
+            }
             Outcome::Done(text) | Outcome::Unable(text) => text,
             Outcome::Shell(effect) => {
                 let talkers: Vec<u64> = self
@@ -1003,9 +1092,9 @@ impl Brain {
         let card = Card {
             kind: CardKind::Draft,
             label: if self.english() {
-                format!("Message to {to}")
+                format!("Message · to {to}")
             } else {
-                format!("Message à {to}")
+                format!("Message · à {to}")
             },
             text: String::new(),
             lines: vec![draft.clone()],
@@ -1019,7 +1108,7 @@ impl Brain {
                     decision: Decision::Edit,
                 },
                 Action {
-                    label: self.talk.t("Annuler", "Cancel").to_owned(),
+                    label: self.talk.t("Ne pas envoyer", "Don’t send").to_owned(),
                     decision: Decision::Reject,
                 },
             ],

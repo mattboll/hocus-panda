@@ -266,14 +266,13 @@ impl Brain {
                 },
             },
         );
-        let count = learn::compiled(&self.store, self.today())
-            .map(|r| r.len())
-            .unwrap_or(1);
-        let text = match compiled {
-            Compiled::Quiet { tool } if fr => format!("Retenu · {tool}\u{a0}: à peine utilisé"),
-            Compiled::Quiet { tool } => format!("Kept · {tool}: barely used"),
-            _ if fr => format!("Retenu · règle n°\u{a0}{count}"),
-            _ => format!("Kept · rule no. {count}"),
+        let text = match &compiled {
+            Compiled::Quiet { tool } if fr => {
+                format!("Noté\u{a0}: {tool}, je n’en parle que si tu demandes.")
+            }
+            Compiled::Quiet { tool } => format!("Noted: {tool}, only when you ask."),
+            _ if fr => format!("Noté\u{a0}: {}", compiled.words(true).0),
+            _ => format!("Noted: {}", compiled.words(false).0),
         };
         self.learned(id, text, edits);
         tracing::info!(rule, "a rule taught");
@@ -511,7 +510,7 @@ impl Brain {
         };
         let text = if fr {
             format!(
-                "Retenu\u{a0}: {}, parti·e le {}",
+                "Noté\u{a0}: {} a quitté l’équipe le {}",
                 person.name,
                 weekday_short(day, true)
             )
@@ -617,9 +616,9 @@ impl Brain {
             format!("since {}", short(from, false))
         };
         let text = if fr {
-            format!("Retenu\u{a0}: {who} {verb} {what} {since}")
+            format!("Noté\u{a0}: {who} {verb} {what} {since}")
         } else {
-            format!("Kept: {who} {verb} {what} {since}")
+            format!("Noted: {who} {verb} {what} {since}")
         };
         self.learned(id, text, vec![edit]);
         if !before.is_empty() {
@@ -870,8 +869,12 @@ impl Brain {
         }
         let id = seen.iter().map(|s| s.id).max().unwrap_or(0) + 1;
         let (text, note) = noticed.question(self.fr());
+        let yes = match &noticed {
+            Noticed::Automated { .. } => self.talk.t("Oui, ne pas les trier", "Yes, leave them"),
+            _ => self.talk.t("Oui", "Yes"),
+        };
         let replies = vec![
-            self.talk.t("Oui", "Yes").to_owned(),
+            yes.to_owned(),
             self.talk.t("Non", "No").to_owned(),
             self.talk.t("Plus tard", "Later").to_owned(),
         ];
@@ -927,7 +930,7 @@ impl Brain {
                     }
                 }
                 seen.standing = Standing::Accepted;
-                if fr { "Retenu." } else { "Kept." }
+                if fr { "Noté." } else { "Noted." }
             }
             Act::Reject => {
                 seen.standing = Standing::Declined;

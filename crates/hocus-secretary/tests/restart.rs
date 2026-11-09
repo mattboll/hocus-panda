@@ -87,11 +87,7 @@ fn items_waiting_for_the_triage_keep_their_text_across_a_restart() -> anyhow::Re
             break look;
         }
     };
-    assert_eq!(
-        look.status,
-        "Le tri sur cet ordinateur ne répond pas · 1 en attente"
-    );
-    assert!(look.hint.contains("seuls l’expéditeur, l’objet et la date"));
+    assert_eq!(look.status, "Tri en pause : il ne répond pas");
     let status = driver.status();
     let triage = status.triage.clone().expect("her triage");
     assert!(triage.state.starts_with("paused"), "{triage:?}");
@@ -220,6 +216,7 @@ fn her_thread_survives_a_restart_and_its_perso_goes_with_oublier_tout_le_perso()
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     assert!(
         matches!(answer, FromSecretary::Answer { done: true, .. }),

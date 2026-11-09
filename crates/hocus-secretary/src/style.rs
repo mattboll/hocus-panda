@@ -200,10 +200,10 @@ impl Guard {
     pub fn why(self, fr: bool) -> &'static str {
         match (self, fr) {
             (Self::Propose, true) => {
-                "Ça, je ne peux pas le changer : je n’envoie, ne publie et ne réponds jamais rien sans ton clic. C’est une règle de mon code, pas une question de caractère."
+                "Ça, je ne peux pas le changer : je n’envoie, ne publie et ne réponds jamais rien sans ton clic, c’est une sécurité."
             }
             (Self::Propose, false) => {
-                "That I can’t change: I never send, post or answer anything without your click. It is a rule of my code, not a matter of character."
+                "That I can’t change: I never send, post or answer anything without your click, it is a safety."
             }
             (Self::Masking, true) => {
                 "Ça, je ne peux pas le changer : les mots de passe, codes et clés sont masqués avant même que je lise, et je ne les vois jamais. C’est le code qui le fait, pas moi."

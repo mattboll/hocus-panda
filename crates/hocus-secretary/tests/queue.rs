@@ -27,7 +27,7 @@ use hocus_secretary::{
 use hocus_secretary_link::{
     Body, FromSecretary, Item, ToSecretary,
     knows::{Act as KnownAct, Do, Knowledge, Query},
-    queue::{Act, View},
+    queue::{Act, Sender, View},
 };
 
 const MAIL: &str = r#"
@@ -172,6 +172,14 @@ fn group(view: &View, key: &str) -> u64 {
         .map_or(0, |g| g.count)
 }
 
+fn aside_since(view: &View, key: &str) -> String {
+    view.aside
+        .iter()
+        .find(|g| g.key == key)
+        .map(|g| g.since.clone())
+        .unwrap_or_default()
+}
+
 fn aside(view: &View, key: &str) -> u64 {
     view.aside
         .iter()
@@ -187,16 +195,27 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     driver.settle();
 
     // Her proposal: GitHub's three mails, sent by a machine.
-    let asked = question(&mut driver, "notifications@github.com");
-    let Body::Question { text, note, .. } = &asked.body else {
+    let asked = question(&mut driver, "GitHub t’a envoyé");
+    let Body::Question {
+        text,
+        note,
+        replies,
+        ..
+    } = &asked.body
+    else {
         unreachable!()
     };
-    assert!(text.contains("3 mails attendent le tri"), "{text}");
+    // Said plainly (#758): her name for the sender, no header's.
+    assert!(
+        text.starts_with("GitHub t’a envoyé 3 notifications automatiques. Je les laisse sans tri"),
+        "{text}"
+    );
     assert!(
         note.as_deref()
-            .is_some_and(|n| n.contains("X-GitHub-Reason")),
+            .is_some_and(|n| !n.contains("X-GitHub-Reason")),
         "{note:?}"
     );
+    assert_eq!(replies[0], "Oui, ne pas les trier");
 
     // The view, as the drawer asks for it.
     driver.send(&ToSecretary::Queue { id: 90, open: true });
@@ -206,13 +225,35 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(now.subject, "Le devis de Chapitô");
     assert_eq!(now.source, "Gmail");
     assert_eq!(view.state, "Je trie");
-    assert_eq!(view.waiting, 5);
+    // The mail read now counts with those waiting (#758): the same number
+    // in her header, her question and the view.
+    assert_eq!(view.waiting, 6);
     assert_eq!(view.groups[0].key, "notifications@github.com");
     assert_eq!(view.groups[0].count, 3);
     assert_eq!(view.groups[0].automated.as_deref(), Some("X-GitHub-Reason"));
     assert!(view.groups[0].can_aside);
-    assert_eq!(group(&view, "lea@atelier-lune.fr"), 1);
-    assert_eq!(group(&view, "lettre@exemple.fr"), 1);
+    // Grouped by what sends them (#758): a machine, a newsletter, a
+    // person, who is never offered to be left unsorted.
+    assert_eq!(view.groups[0].name, "GitHub");
+    assert_eq!(view.groups[0].sender, Sender::Machine);
+    assert!(!view.groups[0].note.contains("X-GitHub-Reason"));
+    let lea = view
+        .groups
+        .iter()
+        .find(|g| g.key == "lea@atelier-lune.fr")
+        .expect("Léa");
+    assert_eq!(
+        (lea.name.as_str(), lea.sender),
+        ("Léa Martin", Sender::Person)
+    );
+    assert!(!lea.can_aside);
+    let letter = view
+        .groups
+        .iter()
+        .find(|g| g.key == "lettre@exemple.fr")
+        .expect("the newsletter");
+    assert_eq!(letter.sender, Sender::Letter);
+    assert!(letter.can_aside);
     assert!(view.rate.is_empty(), "nothing measured yet");
     // Never more of an item than its sender, subject and date.
     let shown = serde_json::to_string(&view).expect("json");
@@ -228,6 +269,12 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(view.rate, "≈ 41 s par élément");
     assert_eq!(view.left_seconds, Some(41 * view.waiting));
     assert!(view.left.starts_with("encore ≈ "), "{}", view.left);
+    assert!(
+        view.pace.starts_with("Encore ")
+            && view.pace.ends_with("(41 s par mail sur cet ordinateur)."),
+        "{}",
+        view.pace
+    );
 
     // "Ne pas trier, chercher si besoin" on GitHub, from the view: her
     // question answered, a rule, its items apart.
@@ -243,7 +290,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(group(&view, "notifications@github.com"), 0, "{view:?}");
     assert_eq!(aside(&view, "notifications@github.com"), 3);
     assert_eq!(view.set_aside, 3);
-    assert!(view.counts.contains("3 mis de côté"), "{}", view.counts);
+    assert!(!aside_since(&view, "notifications@github.com").is_empty());
     let thread = match driver.request(|id| ToSecretary::Thread { id }) {
         FromSecretary::Thread { items, .. } => items,
         other => panic!("not her thread: {other:?}"),
@@ -293,7 +340,8 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
         },
     });
     let view = view_until(&driver, "brought back", |v| v.set_aside == 0);
-    assert_eq!(group(&view, "notifications@github.com"), 2);
+    // The one read now included.
+    assert_eq!(group(&view, "notifications@github.com"), 3);
 
     // Set aside again, and "Trier quand même".
     let view = match driver.request(|id| ToSecretary::QueueAct {
@@ -316,7 +364,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
         other => panic!("not the queue: {other:?}"),
     };
     assert_eq!(view.set_aside, 0);
-    assert_eq!(group(&view, "notifications@github.com"), 2);
+    assert_eq!(group(&view, "notifications@github.com"), 3);
 
     // Closed: nothing more is sent, whatever the queue does.
     driver.send(&ToSecretary::Queue {
@@ -456,7 +504,7 @@ fn on_the_graphics_card_the_cards_heat_pauses_it() {
     assert_eq!(
         view.pause.as_deref(),
         Some(
-            "La carte graphique chauffe : 90 °C en moyenne sur une minute, je reprends sous 77 °C."
+            "La carte graphique chauffe (90 °C). Je reprends quand elle redescend sous 77 °C\u{a0}; rien n’est perdu."
         )
     );
     driver.stop();
@@ -548,7 +596,9 @@ fn the_pause_says_why_heat_or_a_model_that_does_not_answer() {
     assert_eq!(view.state, "En pause");
     assert_eq!(
         view.pause.as_deref(),
-        Some("Le processeur chauffe : 100 °C en moyenne sur une minute, je reprends sous 90 °C.")
+        Some(
+            "L’ordinateur chauffe (100 °C). Je reprends quand il redescend sous 90 °C\u{a0}; rien n’est perdu."
+        )
     );
     assert!(view.now.is_none());
     assert!((1..6).contains(&view.waiting), "{}", view.waiting);

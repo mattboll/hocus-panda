@@ -102,7 +102,7 @@ fn a_key_given_to_her_is_checked_kept_and_never_said_back() -> anyhow::Result<()
     assert_eq!(outcome, KeyOutcome::Refused);
     assert_eq!(
         outcome.words("anthropic", true),
-        "Clé refusée par Anthropic."
+        "Anthropic refuse cette clé. Vérifie qu’elle est complète, ou crée-en une autre dans la console."
     );
     assert!(held.key("anthropic").map_err(anyhow::Error::msg)?.is_none());
     // The good one: one tiny request, kept, her face asks no more.

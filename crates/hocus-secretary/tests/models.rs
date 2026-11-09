@@ -898,8 +898,9 @@ fn a_missing_key_is_said_with_how_to_give_one() -> anyhow::Result<()> {
         }
     };
     assert_eq!(look.status, "Il me manque ma clé Anthropic");
+    // Her band says how (#758): no terminal command.
     assert!(
-        look.hint.contains("hocus-secretary key anthropic"),
+        look.key.as_deref() == Some("anthropic") && look.hint.is_empty(),
         "{look:?}"
     );
     assert_eq!(look.tone, hocus_secretary_link::Tone::Warn);

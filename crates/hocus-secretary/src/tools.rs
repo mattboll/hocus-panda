@@ -58,9 +58,10 @@ fn proposal(description: &'static str, name: &'static str) -> Spec {
         schema: json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["to", "label", "text", "draft", "lines"],
+            "required": ["to", "channel", "label", "text", "draft", "lines"],
             "properties": {
-                "to": {"type": "string", "description": "À qui, s'il y a quelqu'un ; sinon vide."},
+                "to": {"type": "string", "description": "À qui, son nom complet, s'il y a quelqu'un ; sinon vide."},
+                "channel": {"type": "string", "description": "Par où ça part : « slack » (en privé), « slack #canal », « mail », « sms » ; vide sinon."},
                 "label": {"type": "string", "description": "Le titre de la carte, court ; vide : le titre par défaut."},
                 "text": {"type": "string", "description": "Une phrase qui dit ce que c'est."},
                 "draft": {"type": "string", "description": "Le texte exact proposé, s'il y en a un ; sinon vide."},

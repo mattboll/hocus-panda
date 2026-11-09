@@ -87,7 +87,7 @@ pub mod sheets;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -260,8 +260,12 @@ impl KeyOutcome {
             }
             (Self::Malformed, true) => format!("Ce n’est pas une clé {name}."),
             (Self::Malformed, false) => format!("That is not a {name} key."),
-            (Self::Refused, true) => format!("Clé refusée par {name}."),
-            (Self::Refused, false) => format!("Key refused by {name}."),
+            (Self::Refused, true) => format!(
+                "{name} refuse cette clé. Vérifie qu’elle est complète, ou crée-en une autre dans la console."
+            ),
+            (Self::Refused, false) => format!(
+                "{name} refuses this key. Check it is whole, or create another one in the console."
+            ),
             (Self::Offline, true) => {
                 format!("Pas de réseau : {name} ne répond pas. Réessaie plus tard.")
             }
@@ -390,6 +394,10 @@ pub enum ToSecretary {
         /// on it, by their ids (version 6).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         left_out: Vec<String>,
+        /// An account's consent card's "Autoriser": the kinds switched
+        /// off on it, not granted (#758, version 8).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        off: Vec<consent::SourceKind>,
     },
     /// "Annuler" under what she kept (`item`, a [`Body::Learned`]).
     Undo { id: u64, item: u64 },
@@ -453,6 +461,9 @@ pub enum ToSecretary {
     Queue { id: u64, open: bool },
     /// Something done on the queue's view: answered by the view again.
     QueueAct { id: u64, act: queue::Act },
+    /// "Rappelle-le-moi" on line `pointer` of briefing `item` (#758): a
+    /// reminder, and the line says when.
+    RemindMe { id: u64, item: u64, pointer: String },
     /// Effect `effect` carried out by the shell (`ok`), or not, and why.
     Effected {
         effect: u64,
@@ -744,9 +755,31 @@ pub enum Body {
         #[serde(default, skip_serializing_if = "is_false")]
         settled: bool,
     },
-    /// A briefing (§6.1): the morning's, folded on one line with "Ouvrir
+    /// A briefing (§6.1): the morning's, folded on one line with "Voir
     /// le point"; "Pendant ton absence" (§3.10), shown whole.
     Briefing { briefing: Briefing },
+    /// Her first run's steps (#758): « POUR COMMENCER », each done, now
+    /// or to come.
+    Steps { steps: Vec<Step> },
+}
+
+/// A step of her first run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Step {
+    /// "Ma clé Anthropic".
+    pub title: String,
+    /// On the right: "enregistrée", "1 sur 2", "maintenant, ci-dessus".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub state: StepState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StepState {
+    Done,
+    Now,
+    Later,
 }
 
 /// A briefing, its parts in order, each only when it has something.
@@ -762,6 +795,16 @@ pub struct Briefing {
     pub date: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sentence: String,
+    /// What the day is like, and its free slot named (#758): "une journée
+    /// chargée ; ton seul créneau libre", "10 h – 11 h".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub busy: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub slot: String,
+    /// What is in it, in a line (#758): "3 réunions · 2 mails attendent
+    /// ta réponse · Sophie en congés jusqu'au 16".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
     #[serde(default)]
     pub sections: Vec<Section>,
     /// What was read, and when.
@@ -815,6 +858,15 @@ pub struct Line {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub done: Option<bool>,
     pub notebook: Notebook,
+    /// A mail to answer's (#758): what it is in her memory, for
+    /// "Rappelle-le-moi"; what opens it ("Ouvrir le mail ↗"), never
+    /// marking it read; once reminded, when ("Je te le rappelle à 11 h").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pointer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reminded: String,
 }
 
 /// Her request to speak (§6.3's `speak(item, priority, deadline)`).
@@ -975,6 +1027,19 @@ pub struct Look {
     /// Her name (`[secretary] name`): empty, "Ta secrétaire" (version 6).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// The mails waiting for her triage (#758): her header's « 21 mails
+    /// à trier › ».
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub to_sort: u64,
+    /// What she says in an empty drawer (#758): « Bonjour Alex. Je lis ton
+    /// agenda et tes mails ; dis-moi ce dont tu as besoin, ou essaie : ».
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub greeting: String,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Her mood (§5.6).
@@ -1317,7 +1382,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":7,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":8,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });
@@ -1422,6 +1487,7 @@ mod tests {
                 decision: Decision::Accept,
                 notebook: None,
                 left_out: Vec::new(),
+                off: Vec::new(),
             }
         );
         let allowed: ToSecretary = read(

@@ -1416,6 +1416,9 @@ pub enum Noticed {
     /// waiting for the triage (#754): set aside?
     Automated {
         sender: String,
+        /// How the sender names itself ("GitHub"), #758.
+        #[serde(default)]
+        name: String,
         count: u32,
         why: String,
         notebook: Notebook,
@@ -1473,26 +1476,25 @@ impl Noticed {
                 Self::Quiet {
                     tool, count, days, ..
                 },
-                true,
-            ) => (
-                format!(
-                    "{tool}\u{a0}: {count} élément{} en {days} jours. Je n’en parle que si tu demandes\u{a0}?",
-                    if *count > 1 { "s" } else { "" }
-                ),
-                "Tu t’en sers très peu\u{a0}; je le sortirais de ton point du matin.".to_owned(),
-            ),
-            (
-                Self::Quiet {
-                    tool, count, days, ..
-                },
-                false,
-            ) => (
-                format!(
-                    "{tool}: {count} item{} in {days} days. Shall I mention it only when you ask?",
-                    if *count > 1 { "s" } else { "" }
-                ),
-                "You barely use it; I would leave it out of your morning briefing.".to_owned(),
-            ),
+                fr,
+            ) => {
+                let things = quiet_things(tool, *count, *days, fr);
+                if fr {
+                    (
+                        format!(
+                            "{tool}\u{a0}: tu ne t’en sers presque pas ({things}). Je n’en parle que si tu me le demandes\u{a0}?"
+                        ),
+                        "Ce que j’ai remarqué".to_owned(),
+                    )
+                } else {
+                    (
+                        format!(
+                            "{tool}: you barely use it ({things}). Shall I mention it only when you ask?"
+                        ),
+                        "What I noticed".to_owned(),
+                    )
+                }
+            }
             (Self::Ignore { calendar, events }, true) => (
                 format!(
                     "Le calendrier «\u{a0}{calendar}\u{a0}» n’a jamais servi à tes réunions. Je l’ignore\u{a0}?"
@@ -1513,33 +1515,45 @@ impl Noticed {
             ),
             (
                 Self::Automated {
-                    sender, count, why, ..
+                    sender,
+                    name,
+                    count,
+                    why,
+                    ..
                 },
-                true,
-            ) => (
-                format!(
-                    "{sender}\u{a0}: {count} mail{s} attend{e} le tri, envoyé{s} par une machine. Je ne les trie pas, et je les cherche si besoin\u{a0}?",
-                    s = if *count > 1 { "s" } else { "" },
-                    e = if *count > 1 { "ent" } else { "" },
-                ),
-                format!(
-                    "Vu à «\u{a0}{why}\u{a0}». Je garde l’expéditeur, l’objet et la date\u{a0}; celui dont tu me parles, je le trie d’abord."
-                ),
-            ),
-            (
-                Self::Automated {
-                    sender, count, why, ..
-                },
-                false,
-            ) => (
-                format!(
-                    "{sender}: {count} mail{s} waiting for the sorting, sent by a machine. Shall I leave them unsorted and search them when needed?",
-                    s = if *count > 1 { "s" } else { "" },
-                ),
-                format!(
-                    "Seen in “{why}”. I keep the sender, subject and date; the one you ask me about, I sort first."
-                ),
-            ),
+                fr,
+            ) => {
+                let name = if name.is_empty() { sender } else { name };
+                let letter = why.eq_ignore_ascii_case("list-unsubscribe");
+                let n = *count;
+                let s = if n > 1 { "s" } else { "" };
+                match (letter, fr) {
+                    (false, true) => (
+                        format!(
+                            "{name} t’a envoyé {n} notification{s} automatique{s}. Je les laisse sans tri\u{a0}? Je les retrouverai si tu me les demandes."
+                        ),
+                        "Je garde leur expéditeur, leur objet et leur date\u{a0}; celle dont tu me parles, je la trie d’abord.".to_owned(),
+                    ),
+                    (true, true) => (
+                        format!(
+                            "{name} t’a envoyé {n} lettre{s} d’information. Je les laisse sans tri\u{a0}? Je les retrouverai si tu me les demandes."
+                        ),
+                        "Je garde leur expéditeur, leur objet et leur date\u{a0}; celle dont tu me parles, je la trie d’abord.".to_owned(),
+                    ),
+                    (false, false) => (
+                        format!(
+                            "{name} sent you {n} automatic notification{s}. Shall I leave them unsorted? I’ll find them if you ask me."
+                        ),
+                        "I keep their sender, subject and date; the one you ask me about, I sort first.".to_owned(),
+                    ),
+                    (true, false) => (
+                        format!(
+                            "{name} sent you {n} newsletter{s}. Shall I leave them unsorted? I’ll find them if you ask me."
+                        ),
+                        "I keep their sender, subject and date; the one you ask me about, I sort first.".to_owned(),
+                    ),
+                }
+            }
             (
                 Self::Arrival {
                     name,
@@ -1550,7 +1564,7 @@ impl Noticed {
                 },
                 true,
             ) => (
-                format!("{name} est arrivé·e\u{a0}? Je l’ajoute à l’équipe\u{a0}?"),
+                format!("{name} est dans l’équipe\u{a0}? Je l’y ajoute\u{a0}?"),
                 format!(
                     "Vu dans {}, {}{}.",
                     shown_source(source.as_deref().unwrap_or("une source")),
@@ -1956,5 +1970,41 @@ mod tests {
         assert_eq!(past_day("mercredi", wednesday), Some(wednesday));
         assert_eq!(past_day("hier", wednesday), Some(date(2026, 11, 10)));
         assert_eq!(past_day("", wednesday), None);
+    }
+}
+
+/// What a barely used tool held in `days` days, in its own words (#758):
+/// "aucune carte en 30 jours", "un seul rendez-vous en 30 jours".
+pub(crate) fn quiet_things(tool: &str, count: u32, days: u32, fr: bool) -> String {
+    let folded = fold(tool);
+    let (one, many, feminine) = match (fr, folded.as_str()) {
+        (true, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
+            ("carte", "cartes", true)
+        }
+        (true, t) if t.contains("agenda") || t.contains("calendar") => {
+            ("rendez-vous", "rendez-vous", false)
+        }
+        (true, t) if t.contains("mail") => ("mail", "mails", false),
+        (true, _) => ("message", "messages", false),
+        (false, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
+            ("card", "cards", false)
+        }
+        (false, t) if t.contains("agenda") || t.contains("calendar") => ("event", "events", false),
+        (false, t) if t.contains("mail") => ("mail", "mails", false),
+        (false, _) => ("message", "messages", false),
+    };
+    match (count, fr) {
+        (0, true) => format!(
+            "{} {one} en {days} jours",
+            if feminine { "aucune" } else { "aucun" }
+        ),
+        (1, true) => format!(
+            "{} {one} en {days} jours",
+            if feminine { "une seule" } else { "un seul" }
+        ),
+        (n, true) => format!("{n} {many} en {days} jours"),
+        (0, false) => format!("no {one} in {days} days"),
+        (1, false) => format!("a single {one} in {days} days"),
+        (n, false) => format!("{n} {many} in {days} days"),
     }
 }

@@ -36,17 +36,21 @@ pub enum Kind {
     Projects,
     Rules,
     Tools,
+    /// « Ma façon d'être »: what the user asked her to be (#753, a chip
+    /// of its own since #758).
+    Manner,
     You,
     Maintenance,
     PersoFiles,
 }
 
 impl Kind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::People,
         Self::Projects,
         Self::Rules,
         Self::Tools,
+        Self::Manner,
         Self::You,
         Self::Maintenance,
         Self::PersoFiles,
@@ -58,6 +62,7 @@ impl Kind {
             Self::Projects => "projects",
             Self::Rules => "rules",
             Self::Tools => "tools",
+            Self::Manner => "manner",
             Self::You => "you",
             Self::Maintenance => "maintenance",
             Self::PersoFiles => "perso-files",
@@ -71,7 +76,8 @@ impl Kind {
 pub struct Knowledge {
     /// The query it answers.
     pub query: Query,
-    /// The chips, "Tout" first (no kind), each with its count.
+    /// The chips, each with its count: none chosen shows everything
+    /// (#758: no « Tout »).
     pub chips: Vec<Chip>,
     pub sections: Vec<Section>,
     /// How many things she knows in all ("412 souvenirs").
@@ -95,11 +101,12 @@ pub struct Chip {
     pub count: u32,
 }
 
-/// A section: APPRIS CETTE SEMAINE, PERSONNES, PROJETS ET LEURS NOMS…
+/// A section: À CONFIRMER, APPRIS CETTE SEMAINE, PERSONNES…
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Section {
-    /// `week`, `people`, `projects`, `rules`, `tools`, `you`, `close`.
+    /// `confirm`, `week`, `people`, `projects`, `rules`, `tools`,
+    /// `style`, `you`, `close`.
     pub key: String,
     /// Its spaced title, upper case.
     pub title: String,

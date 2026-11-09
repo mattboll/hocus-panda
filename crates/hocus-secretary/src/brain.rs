@@ -718,6 +718,7 @@ impl Brain {
                 Err(err) => self.error(conn, Some(id), err),
             },
             ToSecretary::Ask { id, text } => self.sentence(conn, id, text),
+            ToSecretary::RemindMe { id, item, pointer } => self.remind_me(conn, id, item, &pointer),
             ToSecretary::Choose { id, item, choice } => self.choose(conn, id, item, choice),
             ToSecretary::Decide {
                 id,
@@ -725,8 +726,9 @@ impl Brain {
                 decision,
                 notebook,
                 left_out,
+                off,
             } => {
-                if !self.consent_decide(conn, id, item, decision, notebook, left_out) {
+                if !self.consent_decide(conn, id, item, decision, notebook, left_out, off) {
                     self.decide(conn, id, item, decision);
                 }
             }

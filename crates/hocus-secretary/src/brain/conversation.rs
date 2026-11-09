@@ -314,30 +314,21 @@ impl Brain {
             _ => None,
         };
         let unreadable = self.unreadable_calendars();
+        // Her status says a state, in words (#758): the sources she reads
+        // are in "Ce qu'elle sait › Outils", her key's band and the
+        // queue's view explain the rest.
         let (status, tone, hint) = if let Some(provider) = &self.key_missing {
-            // Nothing she answers can be, without it.
             let name = if provider == "anthropic" {
                 "Anthropic".to_owned()
             } else {
                 provider.clone()
             };
-            if fr {
-                (
-                    format!("Il me manque ma clé {name}"),
-                    Tone::Warn,
-                    format!(
-                        "Dans un terminal : hocus-secretary key {provider}, Entrée, puis colle ta clé."
-                    ),
-                )
+            let status = if fr {
+                format!("Il me manque ma clé {name}")
             } else {
-                (
-                    format!("I’m missing my {name} key"),
-                    Tone::Warn,
-                    format!(
-                        "In a terminal: hocus-secretary key {provider}, Enter, then paste your key."
-                    ),
-                )
-            }
+                format!("I’m missing my {name} key")
+            };
+            (status, Tone::Warn, String::new())
         } else if let Some(name) = failing.first() {
             let name = shown_source(name);
             let status = if fr {
@@ -347,61 +338,29 @@ impl Brain {
             };
             (status, Tone::Warn, String::new())
         } else if let Some(why) = paused {
-            let n = waiting;
-            let (status, hint) = match (why, fr) {
-                (crate::triage::Pause::Unavailable, true) => (
-                    format!("Le tri sur cet ordinateur ne répond pas · {n} en attente"),
-                    "Rien n’est perdu : ils attendent. D’ici là, seuls l’expéditeur, l’objet et la date partent vers Claude.".to_owned(),
+            let status = match why {
+                crate::triage::Pause::Unavailable => self.talk.t(
+                    "Tri en pause : il ne répond pas",
+                    "Sorting paused: it is not answering",
                 ),
-                (crate::triage::Pause::Unavailable, false) => (
-                    format!("The sorting on this computer is not answering · {n} waiting"),
-                    "Nothing is lost: they wait. Until then, only the sender, subject and date go to Claude.".to_owned(),
-                ),
-                (crate::triage::Pause::Battery(_), true) => (
-                    format!("Sur batterie : je trie les {n} nouveaux quand tu rebranches"),
-                    "D’ici là, seuls l’expéditeur, l’objet et la date partent vers Claude.".to_owned(),
-                ),
-                (crate::triage::Pause::Battery(_), false) => (
-                    format!("On battery: I’ll sort the {n} new ones once you plug in"),
-                    "Until then, only the sender, subject and date go to Claude.".to_owned(),
-                ),
-                (crate::triage::Pause::Heat(hot), true) => (
-                    format!(
-                        "{} chauffe : le tri attend · {n} en attente",
-                        match hot.gauge {
-                            crate::heat::Gauge::Cpu => "Le processeur",
-                            crate::heat::Gauge::Gpu => "La carte graphique",
-                        }
-                    ),
-                    format!(
-                        "{} °C en moyenne sur une minute : je reprends sous {} °C.",
-                        hot.average, hot.resume
-                    ),
-                ),
-                (crate::triage::Pause::Heat(hot), false) => (
-                    format!(
-                        "The {} is hot: the sorting waits · {n} waiting",
-                        hot.gauge.word()
-                    ),
-                    format!(
-                        "{} °C on average over a minute: I’ll go on below {} °C.",
-                        hot.average, hot.resume
-                    ),
+                crate::triage::Pause::Battery(_) => self
+                    .talk
+                    .t("Tri en pause : sur batterie", "Sorting paused: on battery"),
+                crate::triage::Pause::Heat(_) => self.talk.t(
+                    "Tri en pause : l’ordinateur chauffe",
+                    "Sorting paused: the computer is hot",
                 ),
             };
-            (status, Tone::Warn, hint)
+            (status.to_owned(), Tone::Warn, String::new())
         } else if !unreadable.is_empty() {
             // Some calendars could not be read (#752): the others are.
             let n = unreadable.len();
             let names: Vec<&str> = unreadable.iter().map(|c| c.name.as_str()).collect();
-            let up: Vec<String> = self.slots.iter().map(|s| shown_source(&s.name)).collect();
             let (status, hint) = if fr {
                 (
                     format!(
-                        "{} à jour · {n} agenda{} illisible{}",
-                        up.join(" · "),
-                        if n > 1 { "s" } else { "" },
-                        if n > 1 { "s" } else { "" }
+                        "{n} agenda{s} illisible{s}",
+                        s = if n > 1 { "s" } else { "" }
                     ),
                     format!(
                         "Je n’arrive pas à lire : {}. Je réessaie à chaque passage ; tu peux les laisser de côté dans Réglages › Agents.",
@@ -411,9 +370,8 @@ impl Brain {
             } else {
                 (
                     format!(
-                        "{} up to date · {n} calendar{} unreadable",
-                        up.join(" · "),
-                        if n > 1 { "s" } else { "" }
+                        "{n} calendar{s} unreadable",
+                        s = if n > 1 { "s" } else { "" }
                     ),
                     format!(
                         "I can’t read: {}. I try again each time; you can leave them out in Settings › Agents.",
@@ -425,16 +383,14 @@ impl Brain {
         } else if self.slots.is_empty() {
             (
                 self.talk
-                    .t("Rien de branché", "Nothing connected")
+                    .t("Je ne lis encore rien", "I read nothing yet")
                     .to_owned(),
                 Tone::Off,
                 String::new(),
             )
         } else {
-            let names: Vec<String> = self.slots.iter().map(|s| shown_source(&s.name)).collect();
-            let up = self.talk.t("à jour", "up to date");
             (
-                format!("{} {up}", names.join(" · ")),
+                self.talk.t("Tout est à jour", "All up to date").to_owned(),
                 Tone::Ok,
                 String::new(),
             )
@@ -447,6 +403,82 @@ impl Brain {
             hint,
             key: self.key_missing.clone(),
             name: self.settings.current().name.trim().to_owned(),
+            to_sort: self.mails_to_sort(),
+            greeting: self.greeting(),
+        }
+    }
+
+    /// The mails her triage has still to read, the one it reads now
+    /// included (#758).
+    fn mails_to_sort(&self) -> u64 {
+        let mail = |p: &str| {
+            self.inbox
+                .get(p)
+                .is_some_and(|h| matches!(h.redacted.item.content, hocus_sources::Content::Mail(_)))
+        };
+        let waiting = self.queue.waiting().filter(|p| mail(p)).count();
+        let running = self.queue.running().filter(|p| mail(p)).is_some();
+        (waiting + usize::from(running)) as u64
+    }
+
+    /// What she says in an empty drawer (#758): hello, what she reads,
+    /// and that she can be asked.
+    fn greeting(&self) -> String {
+        let fr = self.talk.fr();
+        let hello = match (crate::briefing::first_name(&self.store), fr) {
+            (Some(name), true) => format!("Bonjour {name}."),
+            (Some(name), false) => format!("Hello {name}."),
+            (None, true) => "Bonjour.".to_owned(),
+            (None, false) => "Hello.".to_owned(),
+        };
+        let mut reads: Vec<String> = Vec::new();
+        for slot in &self.slots {
+            let shown = shown_source(&slot.name);
+            let words = match (shown.as_str(), fr) {
+                ("Agenda", true) => "ton agenda".to_owned(),
+                ("Agenda", false) => "your calendar".to_owned(),
+                ("Gmail", true) => "tes mails".to_owned(),
+                ("Gmail", false) => "your mail".to_owned(),
+                _ if slot.name == "google" => {
+                    let kinds = self.granted_kinds();
+                    for (kind, f, e) in [
+                        (
+                            hocus_secretary_link::consent::SourceKind::Calendar,
+                            "ton agenda",
+                            "your calendar",
+                        ),
+                        (
+                            hocus_secretary_link::consent::SourceKind::Mail,
+                            "tes mails",
+                            "your mail",
+                        ),
+                    ] {
+                        let w = if fr { f } else { e }.to_owned();
+                        if kinds.contains(&kind) && !reads.contains(&w) {
+                            reads.push(w);
+                        }
+                    }
+                    continue;
+                }
+                _ => shown,
+            };
+            if !reads.contains(&words) {
+                reads.push(words);
+            }
+        }
+        let and = if fr { " et " } else { " and " };
+        let list = match reads.as_slice() {
+            [] => String::new(),
+            [one] => one.clone(),
+            [rest @ .., last] => format!("{}{and}{last}", rest.join(", ")),
+        };
+        match (list.is_empty(), fr) {
+            (true, true) => format!("{hello} Dis-moi ce dont tu as besoin, ou essaie :"),
+            (true, false) => format!("{hello} Tell me what you need, or try:"),
+            (false, true) => {
+                format!("{hello} Je lis {list} ; dis-moi ce dont tu as besoin, ou essaie :")
+            }
+            (false, false) => format!("{hello} I read {list}; tell me what you need, or try:"),
         }
     }
 
@@ -482,6 +514,8 @@ impl Brain {
         }
         self.talk.happy = false;
         self.add_item(Some(id), Body::User { text: text.clone() });
+        // Her first run's last step: told (#758).
+        self.steps_answered();
         // What teaches her is read in code (lot 6): no model call.
         if self.taught(conn, id, &text) {
             self.tell_look();
@@ -511,34 +545,34 @@ impl Brain {
         let (term, name) = (&candidate.term, &candidate.name);
         let text = if fr {
             format!(
-                "Une question avant de le ranger\u{a0}: «\u{a0}{term}\u{a0}», c’est pour {name}\u{a0}?"
+                "«\u{a0}{}\u{a0}», je ne connais pas ce mot. C’est pour {name}\u{a0}?",
+                upper_first(term)
             )
         } else {
-            format!("One question before I file it: “{term}”, is that {name}?")
+            format!(
+                "“{}”: I don’t know this word. Is it {name}?",
+                upper_first(term)
+            )
         };
         let quote = &candidate.quote;
         let note = match (fr, candidate.board) {
-            (true, true) => format!(
-                "Je ne connais pas encore ce mot. Dans le tableau de {name}, il y a «\u{a0}{quote}\u{a0}»."
-            ),
-            (true, false) => {
-                format!("Je ne connais pas encore ce mot. J’ai lu «\u{a0}{quote}\u{a0}» ({name}).")
+            (true, true) => {
+                format!("Dans le tableau de {name}, il y a «\u{a0}{quote}\u{a0}».")
             }
-            (false, true) => {
-                format!("I don’t know this word yet. {name}’s board has “{quote}”.")
-            }
-            (false, false) => format!("I don’t know this word yet. I read “{quote}” ({name})."),
+            (true, false) => format!("J’ai lu «\u{a0}{quote}\u{a0}» ({name})."),
+            (false, true) => format!("{name}’s board has “{quote}”."),
+            (false, false) => format!("I read “{quote}” ({name})."),
         };
         let replies = if fr {
             vec![
-                format!("Oui, {name}"),
-                "Non, autre chose".to_owned(),
+                format!("Oui, c’est {name}"),
+                "Non".to_owned(),
                 "Je t’explique".to_owned(),
             ]
         } else {
             vec![
-                format!("Yes, {name}"),
-                "No, something else".to_owned(),
+                format!("Yes, it’s {name}"),
+                "No".to_owned(),
                 "Let me explain".to_owned(),
             ]
         };
@@ -652,9 +686,9 @@ impl Brain {
         let (alias, edits) = edits?;
         let (term, name) = (&candidate.term, &candidate.name);
         let text = if self.talk.fr() {
-            format!("Retenu\u{a0}: «\u{a0}{term}\u{a0}» → {name}")
+            format!("Noté\u{a0}: «\u{a0}{term}\u{a0}», c’est {name}.")
         } else {
-            format!("Kept: “{term}” → {name}")
+            format!("Noted: “{term}” is {name}.")
         };
         let item = self.add_item(
             Some(id),
@@ -1246,12 +1280,11 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
     };
     let effect = kind_of.word();
     let to = field("to");
+    // By where it leaves, and to whom (#758): « Message Slack · à Léa
+    // Martin, en privé », « Message Slack · dans #général ».
+    let channel = Channel::of(field("channel").as_deref(), effect);
     let default_label = match (effect, to.as_deref()) {
-        ("message", Some(to)) => w(&format!("Message à {to}"), &format!("Message to {to}")),
-        ("message", None) => w("Message", "Message"),
-        ("post", _) => w("Publication", "Post"),
-        ("mail", Some(to)) => w(&format!("Mail à {to}"), &format!("Mail to {to}")),
-        ("mail", None) => w("Mail", "Mail"),
+        ("message" | "post" | "mail", to) => channel.label(effect, to, fr),
         ("invitation", _) => w("Réponse à l’invitation", "Answer to the invitation"),
         ("event", _) => w("Un événement", "An event"),
         ("file", _) => w("Un fichier", "A file"),
@@ -1259,7 +1292,14 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
         _ => w("Confier à Claude Code", "Hand to Claude Code"),
     };
     let accept = match effect {
-        "message" | "post" | "mail" => w("Envoyer", "Send"),
+        "message" | "post" | "mail" => match channel.service() {
+            Some(service) => w(
+                &format!("Envoyer sur {service}"),
+                &format!("Send on {service}"),
+            ),
+            None if effect == "mail" => w("Envoyer le mail", "Send the mail"),
+            None => w("Envoyer", "Send"),
+        },
         "invitation" => w("Répondre", "Answer"),
         "event" => w("Ajouter", "Add"),
         "file" => w("Enregistrer", "Save"),
@@ -1282,7 +1322,13 @@ fn made(call: &ToolCall, fr: bool) -> Option<Made> {
             actions: vec![
                 action(accept, Decision::Accept),
                 action(w("Modifier", "Edit"), Decision::Edit),
-                action(w("Annuler", "Cancel"), Decision::Reject),
+                action(
+                    match effect {
+                        "message" | "post" | "mail" => w("Ne pas envoyer", "Don’t send"),
+                        _ => w("Non merci", "No thanks"),
+                    },
+                    Decision::Reject,
+                ),
             ],
             decided: None,
             outcome: None,
@@ -1440,5 +1486,103 @@ mod tests {
             ..ToolCall::default()
         };
         assert_eq!(made(&unknown, true), None);
+    }
+}
+
+/// `text` with its first letter in capital: « Égaluantes ».
+fn upper_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// Where a message leaves by (#758), as its proposal says it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Channel {
+    /// Slack, to someone in private, or in a channel (`#général`).
+    Slack(Option<String>),
+    Mail,
+    Sms,
+    Unsaid,
+}
+
+impl Channel {
+    pub(super) fn of(said: Option<&str>, effect: &str) -> Self {
+        let Some(said) = said.map(str::trim).filter(|s| !s.is_empty()) else {
+            return if effect == "mail" {
+                Self::Mail
+            } else {
+                Self::Unsaid
+            };
+        };
+        let lower = said.to_lowercase();
+        if lower.contains("slack") || lower.starts_with('#') {
+            Self::Slack(
+                said.split_whitespace()
+                    .find(|w| w.starts_with('#'))
+                    .map(str::to_owned),
+            )
+        } else if lower.contains("mail") {
+            Self::Mail
+        } else if lower.contains("sms") || lower.contains("texto") {
+            Self::Sms
+        } else {
+            Self::Unsaid
+        }
+    }
+
+    /// Its service's name, for « Envoyer sur Slack ».
+    pub(super) fn service(&self) -> Option<&'static str> {
+        match self {
+            Self::Slack(_) => Some("Slack"),
+            Self::Sms => Some("SMS"),
+            Self::Mail | Self::Unsaid => None,
+        }
+    }
+
+    /// A draft card's label.
+    fn label(&self, effect: &str, to: Option<&str>, fr: bool) -> String {
+        let what = match (effect, self, fr) {
+            ("mail", _, _) | (_, Self::Mail, _) => "Mail".to_owned(),
+            ("post", Self::Slack(_), true) => "Publication Slack".to_owned(),
+            ("post", Self::Slack(_), false) => "Slack post".to_owned(),
+            ("post", _, true) => "Publication".to_owned(),
+            ("post", _, false) => "Post".to_owned(),
+            (_, Self::Slack(_), true) => "Message Slack".to_owned(),
+            (_, Self::Slack(_), false) => "Slack message".to_owned(),
+            (_, Self::Sms, _) => "SMS".to_owned(),
+            (_, _, _) => "Message".to_owned(),
+        };
+        let place = match (self, to, fr) {
+            (Self::Slack(Some(channel)), Some(to), true) => format!("dans {channel}, à {to}"),
+            (Self::Slack(Some(channel)), Some(to), false) => format!("in {channel}, to {to}"),
+            (Self::Slack(Some(channel)), None, true) => format!("dans {channel}"),
+            (Self::Slack(Some(channel)), None, false) => format!("in {channel}"),
+            (Self::Slack(None), Some(to), true) => format!("à {to}, en privé"),
+            (Self::Slack(None), Some(to), false) => format!("to {to}, in private"),
+            (_, Some(to), true) => format!("à {to}"),
+            (_, Some(to), false) => format!("to {to}"),
+            (_, None, _) => String::new(),
+        };
+        if place.is_empty() {
+            what
+        } else {
+            format!("{what} · {place}")
+        }
+    }
+
+    /// What a card says once sent at `at` (her clock's hour): « Envoyé sur
+    /// Slack à 9 h 12 ».
+    pub(super) fn sent(&self, at: &str, fr: bool) -> String {
+        match (self.service(), self, fr) {
+            (Some(service), _, true) => format!("Envoyé sur {service} à {at}"),
+            (Some(service), _, false) => format!("Sent on {service} at {at}"),
+            (None, Self::Mail, true) => format!("Mail envoyé à {at}"),
+            (None, Self::Mail, false) => format!("Mail sent at {at}"),
+            (None, _, true) => format!("Envoyé à {at}"),
+            (None, _, false) => format!("Sent at {at}"),
+        }
     }
 }
