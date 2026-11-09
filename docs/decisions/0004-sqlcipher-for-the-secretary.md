@@ -1,6 +1,6 @@
 # 0004 — SQLCipher for the secretary's memory
 
-Date: 2026-11-08 · Status: proposed (#743), for the maintainer to confirm
+Date: 2026-11-08 · Status: accepted (#743), the maintainer confirmed the license exception on 2026-11-09
 
 ## Context
 
