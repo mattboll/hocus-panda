@@ -218,7 +218,11 @@ fn super_alt_s_starts_the_screen_reader_and_stops_it() -> anyhow::Result<()> {
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_S]);
     let pid = hp.screen_reader().context("it did not start")?;
     let said = dir.path().join("started");
-    let started = hp.dispatch_until(WAIT, |_| said.exists())?;
+    // The shell's `>` makes the file before `echo` writes in it: wait for
+    // what it says, not for the file.
+    let started = hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&said).is_ok_and(|s| s.ends_with('\n'))
+    })?;
     assert!(started, "the program did not run");
     assert_eq!(std::fs::read_to_string(&said)?.trim(), "--replace");
 
