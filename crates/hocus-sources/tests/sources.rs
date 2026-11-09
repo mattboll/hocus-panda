@@ -530,17 +530,84 @@ fn birthdays_are_read_once_a_day_and_nothing_else_of_the_cards() -> anyhow::Resu
         !kept.contains("12A45") && !kept.contains("+33612345678"),
         "{kept}"
     );
-    assert_eq!(bed.carddav.asked().len(), 1);
-    assert!(
-        bed.carddav.asked()[0]
-            .starts_with("REPORT /principals/alex.martin@gmail.com/lists/default/")
+    // As Google's guide does it (#754): its cards listed, then asked
+    // for by a multiget; never the `addressbook-query` it refuses.
+    assert_eq!(
+        bed.carddav.asked(),
+        [
+            "PROPFIND /principals/alex.martin@gmail.com/lists/default/",
+            "REPORT /principals/alex.martin@gmail.com/lists/default/",
+        ]
     );
     assert!(
         bed.cycle()
             .iter()
             .all(|e| matches!(e, Event::Calendars { .. }))
     );
-    assert_eq!(bed.carddav.asked().len(), 1);
+    assert_eq!(bed.carddav.asked().len(), 2);
+    Ok(())
+}
+
+/// The request birthdays were read with until #754, a REPORT
+/// `addressbook-query`: Google's CardDAV answers it 400, as the fake does
+/// (the maintainer's log on a Workspace account); the new one reads.
+#[test]
+fn the_old_carddav_request_is_refused_as_google_refuses_it() -> anyhow::Result<()> {
+    let carddav = FakeCardDav::start(vec![(
+        "/carddav/v1/principals/alex@atelier-lune.fr/lists/default/claire.vcf".to_owned(),
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Claire Martin\r\nBDAY:1990-03-02\r\nEND:VCARD\r\n"
+            .to_owned(),
+    )])?;
+    let old = r#"<?xml version="1.0" encoding="utf-8"?>
+<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+  <D:prop><D:getetag/><C:address-data><C:prop name="BDAY"/></C:address-data></D:prop>
+</C:addressbook-query>"#;
+    let agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .allow_non_standard_methods(true)
+        .build()
+        .new_agent();
+    let url = format!(
+        "{}/principals/alex@atelier-lune.fr/lists/default/",
+        carddav.address
+    );
+    let request = ureq::http::Request::builder()
+        .method("REPORT")
+        .uri(&url)
+        .header("Depth", "1")
+        .header("Content-Type", "application/xml; charset=utf-8")
+        .body(old)?;
+    let answer = agent.run(request)?;
+    assert_eq!(answer.status().as_u16(), 400);
+
+    let source = hocus_sources::SourceKey::new("account_1", SourceKind::Birthdays);
+    let mut book = hocus_sources::consent::ConsentBook::default();
+    book.allow(
+        source.clone(),
+        "alex@atelier-lune.fr",
+        Notebook::Pro,
+        jiff::Timestamp::UNIX_EPOCH,
+    );
+    let grant = book.grant(&source).ok_or_else(|| anyhow::anyhow!("no grant"))?;
+    struct Token;
+    impl hocus_day::google::AccessToken for Token {
+        fn get(
+            &mut self,
+        ) -> hocus_sources::Result<(hocus_day::secrets::Token, std::time::Duration)> {
+            Ok((
+                hocus_day::secrets::Token::new("ya29.test"),
+                std::time::Duration::from_secs(3600),
+            ))
+        }
+    }
+    let read = hocus_sources::contacts::read(
+        &grant,
+        &mut Token,
+        &hocus_sources::contacts::api(Some(&carddav.address)),
+        jiff::civil::date(2026, 11, 9),
+    )?;
+    assert_eq!(read.len(), 1);
+    assert!(matches!(&read[0].content, Content::Birthday(b) if b.name == "Claire Martin"));
     Ok(())
 }
 

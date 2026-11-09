@@ -2,15 +2,22 @@
 //! (§10.1), over CardDAV with Online Accounts' token.
 //!
 //! Why CardDAV and not the People API: the token Online Accounts hands is
-//! for GNOME's own OAuth client, whose scopes include contacts; Evolution
-//! reads Google contacts with it over CardDAV. Whether the People API is
-//! enabled for that client is not ours to know, so CardDAV it is.
+//! for GNOME's own OAuth client, whose scopes include CardDAV's
+//! (`https://www.googleapis.com/auth/carddav`); Evolution reads Google
+//! contacts with it over CardDAV. Whether the People API is enabled for
+//! that client is not ours to know, so CardDAV it is.
 //!
-//! One `REPORT` (`addressbook-query`) on the default address book asks
-//! each card's `FN`, `N`, `BDAY`, `ANNIVERSARY` and Apple's dated labels
-//! (`X-ABDATE` with `X-ABLabel` `_$!<Anniversary>!$_`); a server that
-//! sends whole cards anyway has the rest dropped as it is read. Read once
-//! a day: birthdays change rarely.
+//! Google's CardDAV implements only some reports
+//! (developers.google.com/people/carddav): `addressbook-multiget` and
+//! `sync-collection`, not `addressbook-query`, which it answers `400`
+//! (#754: what a Google Workspace account said). So, as its guide does
+//! it: a `PROPFIND` of depth 1 on the default address book lists its
+//! cards (`getetag`), then `addressbook-multiget` `REPORT`s ask for them,
+//! a hundred at a time, whole (`address-data` with no `prop` in it: a
+//! server that would not sort the properties would refuse those too).
+//! Each card's `FN`, `N`, `BDAY`, `ANNIVERSARY` and Apple's dated labels
+//! (`X-ABDATE` with `X-ABLabel` `_$!<Anniversary>!$_`) are read; the rest
+//! is dropped as it is read. Read once a day: birthdays change rarely.
 
 use std::time::Duration;
 
@@ -35,21 +42,88 @@ pub fn api(test: Option<&str>) -> String {
     }
 }
 
-const QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+/// The address book's cards, by their `href` and `getetag`.
+pub const LIST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:">
   <D:prop>
     <D:getetag/>
-    <C:address-data>
-      <C:prop name="FN"/>
-      <C:prop name="N"/>
-      <C:prop name="BDAY"/>
-      <C:prop name="ANNIVERSARY"/>
-      <C:prop name="X-ANNIVERSARY"/>
-      <C:prop name="X-ABDATE"/>
-      <C:prop name="X-ABLABEL"/>
-    </C:address-data>
+    <D:resourcetype/>
   </D:prop>
-</C:addressbook-query>"#;
+</D:propfind>"#;
+
+/// How many cards one `addressbook-multiget` asks for.
+const BATCH: usize = 100;
+
+/// The `addressbook-multiget` body for `hrefs`, their cards whole.
+pub fn multiget(hrefs: &[String]) -> String {
+    let mut body = String::from(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+  <D:prop>
+    <D:getetag/>
+    <C:address-data/>
+  </D:prop>
+"#,
+    );
+    for href in hrefs {
+        let href = href
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        body.push_str(&format!("  <D:href>{href}</D:href>\n"));
+    }
+    body.push_str("</C:addressbook-multiget>");
+    body
+}
+
+/// One WebDAV request with the account's token, asked again once on a
+/// `401`: the answer's text.
+fn ask(
+    agent: &ureq::Agent,
+    tokens: &mut dyn AccessToken,
+    method: &str,
+    url: &str,
+    depth: &str,
+    body: &str,
+) -> Result<String> {
+    let mut asked_again = false;
+    loop {
+        let (token, _) = tokens.get()?;
+        let request = ureq::http::Request::builder()
+            .method(method)
+            .uri(url)
+            .header("Authorization", format!("Bearer {}", token.expose()))
+            .header("Depth", depth)
+            .header("Content-Type", "application/xml; charset=utf-8")
+            .body(body)
+            .map_err(|err| SourceError::Invalid(err.to_string()))?;
+        let (status, text) = crate::http::read(agent.run(request), "CardDAV", 32 * 1024 * 1024)?;
+        match status {
+            207 | 200 => return Ok(text),
+            401 if !asked_again => asked_again = true,
+            401 => {
+                return Err(SourceError::SignIn(
+                    "CardDAV refuses the account's token".to_owned(),
+                ));
+            }
+            429 | 500..=599 => {
+                return Err(SourceError::Offline(format!("CardDAV answers {status}")));
+            }
+            _ => {
+                return Err(SourceError::Refused(format!(
+                    "CardDAV answers {status} to {method}"
+                )));
+            }
+        }
+    }
+}
+
+/// The path of `url` (`https://host/a/b/` → `/a/b/`).
+fn path_of(url: &str) -> &str {
+    url.split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+        .unwrap_or(url)
+}
 
 /// `grant`'s account's birthdays, from CardDAV at `api`.
 pub fn read(
@@ -63,34 +137,25 @@ pub fn read(
         "{api}/principals/{}/lists/default/",
         crate::mail::segment(grant.identity())
     );
-    let mut asked_again = false;
-    let body = loop {
-        let (token, _) = tokens.get()?;
-        let request = ureq::http::Request::builder()
-            .method("REPORT")
-            .uri(&url)
-            .header("Authorization", format!("Bearer {}", token.expose()))
-            .header("Depth", "1")
-            .header("Content-Type", "application/xml; charset=utf-8")
-            .body(QUERY)
-            .map_err(|err| SourceError::Invalid(err.to_string()))?;
-        let (status, body) = crate::http::read(agent.run(request), "CardDAV", 32 * 1024 * 1024)?;
-        match status {
-            207 | 200 => break body,
-            401 if !asked_again => asked_again = true,
-            401 => {
-                return Err(SourceError::SignIn(
-                    "CardDAV refuses the account's token".to_owned(),
-                ));
-            }
-            429 | 500..=599 => {
-                return Err(SourceError::Offline(format!("CardDAV answers {status}")));
-            }
-            _ => return Err(SourceError::Refused(format!("CardDAV answers {status}"))),
-        }
-    };
+    let listed = ask(&agent, tokens, "PROPFIND", &url, "1", LIST)?;
+    let book = path_of(&url).trim_end_matches('/').to_owned();
+    // Its cards: every response but the address book's own.
+    let hrefs: Vec<String> = responses(&listed)
+        .into_iter()
+        .map(|(href, _)| href)
+        .filter(|href| {
+            !href.is_empty()
+                && !href.ends_with('/')
+                && path_of(href).trim_end_matches('/') != book
+        })
+        .collect();
+    let mut cards = Vec::new();
+    for batch in hrefs.chunks(BATCH) {
+        let body = ask(&agent, tokens, "REPORT", &url, "1", &multiget(batch))?;
+        cards.extend(multistatus(&body));
+    }
     let mut items = Vec::new();
-    for (href, card) in multistatus(&body) {
+    for (href, card) in cards {
         for (i, birthday) in birthdays(&card).into_iter().enumerate() {
             let at = birthday
                 .next(today)
@@ -112,8 +177,16 @@ pub fn read(
     Ok(items)
 }
 
-/// Each response's `href` and `address-data`.
+/// Each response's `href` and `address-data`, those with a card.
 pub fn multistatus(xml: &str) -> Vec<(String, String)> {
+    responses(xml)
+        .into_iter()
+        .filter(|(_, data)| !data.is_empty())
+        .collect()
+}
+
+/// Each response's `href` and `address-data` (empty without one).
+pub fn responses(xml: &str) -> Vec<(String, String)> {
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut out = Vec::new();
     let (mut href, mut data) = (String::new(), String::new());
@@ -131,7 +204,7 @@ pub fn multistatus(xml: &str) -> Vec<(String, String)> {
             },
             Ok(Xml::End(e)) => match e.local_name().as_ref() {
                 b"href" | b"address-data" => inside = None,
-                b"response" if !data.is_empty() => {
+                b"response" => {
                     out.push((href.trim().to_owned(), std::mem::take(&mut data)));
                 }
                 _ => {}
