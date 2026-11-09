@@ -323,7 +323,7 @@ impl Brain {
                     format!("Il me manque ma clé {name}"),
                     Tone::Warn,
                     format!(
-                        "Dans un terminal : hocus-secretary key {provider}, colle ta clé, puis Entrée."
+                        "Dans un terminal : hocus-secretary key {provider}, Entrée, puis colle ta clé."
                     ),
                 )
             } else {
@@ -331,7 +331,7 @@ impl Brain {
                     format!("I’m missing my {name} key"),
                     Tone::Warn,
                     format!(
-                        "In a terminal: hocus-secretary key {provider}, paste your key, then Enter."
+                        "In a terminal: hocus-secretary key {provider}, Enter, then paste your key."
                     ),
                 )
             }
@@ -831,8 +831,8 @@ impl Brain {
                 }
                 let failed = if no_key {
                     self.talk.t(
-                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, tape « hocus-secretary key anthropic », colle ta clé, puis Entrée ; je la garde dans ton trousseau.",
-                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, type “hocus-secretary key anthropic”, paste your key, then Enter; I keep it in your keyring.",
+                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, colle-la dans le champ en haut de mon tiroir, ou dans un terminal tape « hocus-secretary key anthropic », Entrée, puis colle ta clé ; je la garde dans ton trousseau.",
+                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, paste it in the field at the top of my drawer, or in a terminal type “hocus-secretary key anthropic”, Enter, then paste your key; I keep it in your keyring.",
                     )
                 } else {
                     self.talk.t(

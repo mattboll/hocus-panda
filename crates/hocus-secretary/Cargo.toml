@@ -31,8 +31,9 @@ getrandom = "0.3.4"
 # compositor names, on a thread that waits for it with a timeout.
 zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
 tokio = { version = "1.54.1", features = ["rt", "time"] }
-# How long the machine slept: CLOCK_BOOTTIME against CLOCK_MONOTONIC.
-rustix = { version = "1.1.6", features = ["time"] }
+# How long the machine slept: CLOCK_BOOTTIME against CLOCK_MONOTONIC; a
+# key typed on a terminal without its echo; her files watched (inotify).
+rustix = { version = "1.1.6", features = ["time", "termios", "fs"] }
 # Names and aliases folded: accents and case.
 unicode-normalization = "0.1.26"
 # What the user teaches her, read in code (rules, arrivals, departures).
@@ -57,6 +58,8 @@ anyhow = "1.0.104"
 # A fake Secret Service and a fake Online Accounts on a private bus.
 zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+# A terminal for `hocus-secretary key` (its prompt, its echo off).
+rustix = { version = "1.1.6", features = ["time", "termios", "fs", "pty"] }
 # The sources' fakes (a fake IMAP server's XOAUTH2), shared with
 # hocus-sources' tests.
 base64 = "0.22.1"
