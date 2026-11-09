@@ -359,3 +359,26 @@ fn ac31_the_context_stays_under_its_cap_with_a_big_memory() -> anyhow::Result<()
     );
     Ok(())
 }
+
+/// AC14's recorder half: a public holiday tomorrow is in the day's part
+/// as a computed fact; the model is never asked to find it.
+#[test]
+fn ac14_tomorrow_s_holiday_is_a_computed_fact_of_the_day() -> anyhow::Result<()> {
+    let store = Store::in_memory(common::clock())?;
+    let now: Timestamp = "2026-11-10T08:00:00Z".parse()?;
+    let request = context::assemble(
+        &store,
+        &Inbox::default(),
+        Role::Answer,
+        &[Message::user("Je peux caler la recette demain ?")],
+        &Scope::default(),
+        now,
+    )?;
+    let day = part(&request, context::DAY);
+    assert!(
+        day.contains("[fait calculé] mercredi 11 novembre : jour férié"),
+        "{day}"
+    );
+    assert!(day.contains("[fait calculé] mardi 10 novembre : pas un jour férié"));
+    Ok(())
+}
