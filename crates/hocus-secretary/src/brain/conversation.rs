@@ -1198,7 +1198,16 @@ enum Made {
 /// same.
 fn made(call: &ToolCall, fr: bool) -> Option<Made> {
     let input = &call.input;
-    let field = |name: &str| input.get(name).and_then(|v| v.as_str()).map(str::to_owned);
+    // An empty string is a field left out (the tools' schemas have no
+    // nullable fields, see tools.rs).
+    let field = |name: &str| {
+        input
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
     let list = |name: &str| -> Vec<String> {
         input
             .get(name)
