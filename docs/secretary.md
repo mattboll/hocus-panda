@@ -53,7 +53,14 @@ ollama pull qwen3:8b
 She uses it on mains (or above half battery), one item at a time, with
 an 8k context (`[secretary.triage] context`: Ollama's own default would
 not fit an 8 GB graphics card), and lets the model go after two idle
-minutes. Without it, nothing is lost:
+minutes. She pauses when the computer stays hot: the processor's
+temperature averaged over the last minute (a processor jumps to 100 °C on
+every burst, which is normal) reaching 100 °C, or its critical point
+minus 10, and she goes on below 90 °C; with the model on the graphics
+card, the card's temperature instead (near its slowdown point, 87 °C if
+its driver does not say), and Ollama runs it on two processor threads
+only. `heat`, `resume`, `gpu-heat`, `gpu-resume` and `threads` in
+`[secretary.triage]` change them. Without it, nothing is lost:
 what arrives waits, and until it is sorted only its sender, subject and
 date go to Claude. Her drawer says so (« Le tri sur cet ordinateur ne
 répond pas »). Another server: `[secretary.providers.local]` in the
