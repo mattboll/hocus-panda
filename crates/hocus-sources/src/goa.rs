@@ -239,6 +239,12 @@ pub fn sheet(account: &GoogleAccount, kind: SourceKind) -> Sheet {
             "Ta boîte de réception et tes envoyés, 30 jours en arrière, en lecture seule.",
             "Je ne marque rien comme lu, je n'envoie, ne supprime ni ne déplace rien.",
         ),
+        // An application's, not an account's: its sheet is the Settings'.
+        SourceKind::Notifications => (
+            "Notifications",
+            "Ce que l'application affiche dans ses notifications.",
+            "Je n'ouvre ni ne ferme aucune notification : rien n'est marqué lu.",
+        ),
     };
     Sheet {
         title: format!("{title} · {}", account.identity),

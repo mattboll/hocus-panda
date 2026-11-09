@@ -232,6 +232,13 @@ pub fn outbound(pointer: &str, held: &Held) -> String {
                 Content::Birthday(b) => {
                     format!("Anniversaire de {} : {}/{}", b.name, b.day, b.month)
                 }
+                Content::Notification(n) => format!(
+                    "Notification de {}\nTitre : {}\nDate : {}\n\n{}",
+                    n.app,
+                    n.title,
+                    day_of(item.at),
+                    n.body
+                ),
             };
             format!(
                 "<source id=\"{pointer}\" checked=\"yes\">\n{}\n</source>",

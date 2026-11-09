@@ -1,12 +1,19 @@
 //! Consent per source (§10.1, AC17): nothing is read before its consent
 //! sheet's "Autoriser". Each decision is a record (who: the user; when;
-//! the account; what of it; its notebook), kept in order and never
-//! rewritten: a revocation is a later record.
+//! the account, or the application; what of it; its notebook), kept in
+//! order and never rewritten: a revocation is a later record.
 //!
 //! The readers take a [`Grant`], which only [`ConsentBook::grant`] makes:
 //! a source without one cannot be read, by the types.
+//!
+//! The book is a file in her folder ([`CONSENTS`]): the Settings write
+//! it, she reads it, and so does the shell, which forwards her only the
+//! notifications of the applications consented to (lot 7). Here, in her
+//! protocol's crate, so that the shell and the Settings need nothing
+//! more of hers.
 
 use std::{
+    fmt,
     io::Write as _,
     path::{Path, PathBuf},
 };
@@ -14,7 +21,80 @@ use std::{
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::item::{Notebook, SourceKey, SourceKind};
+use crate::Notebook;
+
+/// The consent book's file, in her folder.
+pub const CONSENTS: &str = "consents.json";
+
+/// What of an account is read; each is consented on its own. And an
+/// application's notifications, consented per application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    /// Its calendars, hidden ones included.
+    Calendar,
+    /// Its contacts' birthdays and anniversaries, nothing else of them.
+    Birthdays,
+    /// Its mail (Gmail): inbox and sent, 30 days back, read-only.
+    Mail,
+    /// An application's notifications, as the shell's server receives
+    /// them (§10.1: Slack's by default): the account is the application
+    /// ([`app_key`]). Never an Online Accounts' account's.
+    Notifications,
+}
+
+impl SourceKind {
+    /// An Online Accounts' account's kinds.
+    pub const ALL: [Self; 3] = [Self::Calendar, Self::Birthdays, Self::Mail];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Calendar => "calendar",
+            Self::Birthdays => "birthdays",
+            Self::Mail => "mail",
+            Self::Notifications => "notifications",
+        }
+    }
+}
+
+/// One source: an account (Online Accounts' stable id for it, e.g.
+/// `account_1700000000_0`) and what of it is read; or an application
+/// ([`app_key`]) and its notifications.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SourceKey {
+    pub account: String,
+    pub kind: SourceKind,
+}
+
+impl SourceKey {
+    pub fn new(account: impl Into<String>, kind: SourceKind) -> Self {
+        Self {
+            account: account.into(),
+            kind,
+        }
+    }
+
+    /// An application's notifications ([`app_key`]).
+    pub fn notifications(app: &str, entry: Option<&str>) -> Self {
+        Self::new(app_key(app, entry), SourceKind::Notifications)
+    }
+}
+
+impl fmt::Display for SourceKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.account, self.kind.as_str())
+    }
+}
+
+/// An application's key in the book: its desktop entry when its
+/// notifications name one (`slack`, `com.slack.Slack`, without
+/// `.desktop`), else its name; lowercase.
+pub fn app_key(app: &str, entry: Option<&str>) -> String {
+    let entry = entry
+        .map(|e| e.trim().trim_end_matches(".desktop"))
+        .filter(|e| !e.is_empty());
+    entry.unwrap_or_else(|| app.trim()).to_lowercase()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,7 +200,7 @@ impl ConsentBook {
     }
 
     /// The user turns `source` off. What came from it is to be purged
-    /// ([`crate::cycle::Event::Purge`]).
+    /// (`hocus_sources::cycle::Event::Purge`, her notifications' source).
     pub fn revoke(&mut self, source: &SourceKey, at: Timestamp) {
         if let Some(last) = self.last(source).cloned() {
             self.records.push(Consent {
@@ -144,6 +224,32 @@ impl ConsentBook {
             notebook: last.notebook,
             summaries_only: last.summaries_only,
         })
+    }
+
+    /// The right to read the notifications of the application `app`
+    /// (its desktop entry `entry`), by either: a notification without its
+    /// entry is still its application's.
+    pub fn notifications(&self, app: &str, entry: Option<&str>) -> Option<Grant> {
+        let by_entry = SourceKey::notifications(app, entry);
+        self.grant(&by_entry).or_else(|| {
+            let by_name = SourceKey::notifications(app, None);
+            (by_name != by_entry)
+                .then(|| self.grant(&by_name))
+                .flatten()
+        })
+    }
+
+    /// The applications whose notifications are read now, by their keys.
+    pub fn notifying(&self) -> Vec<Grant> {
+        let mut keys: Vec<&SourceKey> = self
+            .records
+            .iter()
+            .map(|c| &c.source)
+            .filter(|k| k.kind == SourceKind::Notifications)
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys.into_iter().filter_map(|k| self.grant(k)).collect()
     }
 
     /// The sources whose last decision is a revocation.
@@ -183,7 +289,7 @@ impl ConsentBook {
 
 /// `bytes` written to `path` through a file beside it, renamed over it;
 /// readable by the user alone, its folder made if missing.
-pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new()
@@ -227,6 +333,43 @@ mod tests {
         assert_eq!(book.grant(&mail), None);
         assert_eq!(book.revoked(), [mail]);
         assert_eq!(book.records().len(), 3);
+    }
+
+    #[test]
+    fn an_application_s_notifications_are_granted_by_its_entry_or_its_name() {
+        let mut book = ConsentBook::default();
+        assert_eq!(
+            app_key("Slack", Some("com.slack.Slack.desktop")),
+            "com.slack.slack"
+        );
+        assert_eq!(app_key(" Signal ", None), "signal");
+        book.allow(
+            SourceKey::notifications("Slack", Some("slack")),
+            "Slack",
+            Notebook::Pro,
+            Timestamp::UNIX_EPOCH,
+        );
+        let slack = book.notifications("Slack", Some("slack")).expect("granted");
+        assert_eq!(slack.notebook(), Notebook::Pro);
+        assert_eq!(slack.source().to_string(), "slack:notifications");
+        assert!(book.notifications("Slack", None).is_some(), "by its name");
+        assert!(book.notifications("Signal", None).is_none());
+        assert_eq!(book.notifying().len(), 1);
+        // An account's kinds and an application's are apart.
+        assert!(
+            book.grant(&SourceKey::new("slack", SourceKind::Mail))
+                .is_none()
+        );
+        book.revoke(
+            &SourceKey::notifications("Slack", None),
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(book.notifications("Slack", Some("slack")).is_none());
+        assert!(book.notifying().is_empty());
+        assert_eq!(
+            book.revoked(),
+            [SourceKey::new("slack", SourceKind::Notifications)]
+        );
     }
 
     #[test]
