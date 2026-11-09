@@ -2106,6 +2106,7 @@ dependencies = [
  "hocus-network",
  "hocus-pandas",
  "hocus-perf",
+ "hocus-secretary-link",
  "hocus-sound",
  "hocus-xdg",
  "iced",
