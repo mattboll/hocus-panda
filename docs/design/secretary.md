@@ -1636,9 +1636,8 @@ The setting is followed live, so switching back to "classic" stops the process a
   "peut contenir un secret, pas encore vérifié". "Seuls des résumés locaux
   sortent" is a consent option (`ConsentBook::summaries_only`, a record
   like the others; `summaries-only = true` on a fixture): its items leave
-  as the local summary only. The pending queue is in memory: after a
-  restart, items not yet triaged keep their metadata only (a follow-up
-  could fetch them again by id).
+  as the local summary only. The pending queue is kept across a
+  restart since #750 (below).
 - **Context assembly** (`context.rs`, §7.3): four parts, each capped
   (frozen 8k, the day 5k, retrieved 8k, the conversation 4k; 25k in all,
   tokens counted high at a character in three), what does not fit said as
@@ -1697,7 +1696,7 @@ The setting is followed live, so switching back to "classic" stops the process a
 - **Not yet**: embeddings; the Batch API (with compaction, lot 6); tools
   for OpenAI-compatible answer models (lot 14); extraction's proposals
   from the triage's candidates (lot 6); the moment and quiet hours (lot
-  5); the pending queue across restarts; the banc d'essai (lot 8).
+  5); the banc d'essai (lot 8).
 
 ### Lot 7 (#749): Slack through its notifications
 
@@ -1887,9 +1886,8 @@ The setting is followed live, so switching back to "classic" stops the process a
 - **Not yet**: the peek and `nudge` from her (lot 5); "Ce qu'elle sait"
   (lot 6); effects that act (lots 5, 12, 13); "Modifier" puts nothing in
   the field yet (she asks what to change); provenance links under her
-  claims; the thread across her restarts (she keeps the last 200 items
-  while she runs); `hocus secretary` from a terminal; the drawer's tree
-  for screen readers.
+  claims; `hocus secretary` from a terminal; the drawer's tree for
+  screen readers. (Her thread survives a restart since #750.)
 
 ### Lot 6 (#748): "Ce qu'elle sait", taught rules and learned sources
 
@@ -2178,3 +2176,104 @@ The setting is followed live, so switching back to "classic" stops the process a
   thread and the briefings have it); the source items' `event` and lot
   6's `calendar`/`until` say the same twice, to fold into one; the
   drawer's tree for screen readers.
+
+### #750: her first run, Google's consent, what survives a restart
+
+- **Google's consent sheets** (§10.1): the sheets' words are
+  `hocus_secretary_link::sheets` (French and English: what she reads ✓,
+  what she never does there ✕, what leaves the machine, the notebook
+  suggested, "C'est ton compte perso ?" when perso is), shown alike in
+  the drawer and the Settings. Online Accounts' discovery moved to
+  `hocus_secretary_link::goa` (feature `goa`, which `hocus-sources`
+  re-exports with its tokens): the Settings list the accounts as her
+  source does, with nothing more of hers. A company's domain is
+  suggested pro, gmail.com perso (the first pro when all are gmail.com).
+- **Settings › Agents**, under "LA SECRÉTAIRE" after the applications'
+  notifications, in assistant mode only: a row per kind (Agenda,
+  Anniversaires, Gmail) of each Google account Online Accounts has on the
+  session's bus ("Agenda · alex@atelier-lune.fr", what she reads, its
+  notebook once granted, "Comptes en ligne demande de te reconnecter"),
+  "Autoriser" opening its sheet (the notebook pills, "Pas maintenant",
+  "Autoriser"), "Ne plus lire" a revocation, read and written on a thread
+  of the page's (`hocus-settings/src/google_sources.rs`). None found: a
+  line says so.
+- **Her first run** (§15, `brain/consent.rs`): her Google source says, at
+  each cycle, the accounts it found (none without Online Accounts on the
+  bus: not a failure). The first time a shell is there once she knows
+  them, she introduces herself, then asks **one source at a time**: a
+  consent card (`CardKind::Consent`, its sheet in `Card::sheet`, protocol
+  5) for each kind of each account with no decision in the book yet.
+  "Autoriser" (`decide` with the notebook chosen on the card's pills)
+  writes the grant and her Google source reads it **at once**; "Pas
+  maintenant" writes nothing ("tu pourras me l'ouvrir dans Réglages ›
+  Agents"); then the next. Once none is left: « Dis-moi sur quoi tu
+  travailles et avec qui. », and her memory's `meta` `first-run` is
+  `done`: never asked again. A granted card keeps "Ne plus lire" (a
+  revocation, forgotten at once). A consent given or taken back in the
+  Settings shows on her card at her next cycle (five minutes), and the
+  first run goes on.
+- **Her status says what keeps her from working** (`Look::hint`, a band
+  under her header with how to fix it): no key for her answers' provider
+  in the keyring (or a keyring that does not answer): « Il me manque ma
+  clé Anthropic », « Dans un terminal : hocus-secretary key anthropic,
+  colle ta clé, puis Entrée. » (asked on a thread at her start and as the
+  drawer opens while it is missing; a sentence then gets the same words
+  instead of a call); the triage paused with items waiting: the local
+  model not answering (« Le tri sur cet ordinateur ne répond pas · N en
+  attente », « Rien n'est perdu : ils attendent. D'ici là, seuls
+  l'expéditeur, l'objet et la date partent vers Claude. »), on battery,
+  or too hot. The model under the field is the one that answers now
+  ("Claude Sonnet 5.5").
+- **The key from a terminal**: the compositor tells the programs it
+  starts her bus (`HOCUS_SECRETARY_BUS`, `session` or the bus given), so
+  `hocus-secretary key anthropic` in a terminal of the session keeps the
+  key where she reads it; outside a session it says how instead of
+  guessing a keyring.
+- **What survives a restart** (`kept.rs`, tables beside the graph in her
+  encrypted memory): her thread's last 200 items with their notebooks,
+  and each card's proposal (its "Envoyer" still does what it said; a
+  "Retenu" is settled: too late to take back); the items not triaged
+  yet, with their text after the first pass, until the local model
+  checked them (then only the triage's digest stays). "Oublier tout le
+  perso" forgets the thread's perso items and the perso items waiting
+  (in her process and on disk); a source revoked, its items waiting.
+- **One model per answer** (§11.1): `Model::pin` gives a turn its model
+  at its first call (the router's provider and model as the settings say
+  then, `providers::Pinned`); the tool loop keeps it, so a change of the
+  settings mid-turn never sends one model's own blocks (its signed
+  thinking) to another; a turn's own blocks carry who gave them
+  (`Message::by`) and go to another model as plain text only. Between
+  sentences, the thread's latest turns (her words and the user's, never
+  a model's blocks) go as plain text within the conversation's 4k; none
+  in a public moment, for a work draft, or of the perso notebook.
+- **Hibernate** is a suspend to her: logind's `PrepareForSleep` says both,
+  the shell tells her `resumed` (the compositor's time slept when it has
+  it, else none: she measures `CLOCK_BOOTTIME` against
+  `CLOCK_MONOTONIC`, which a hibernate's resume moves on too), and every
+  source catches up from its cursor.
+- **Tests**: `hocus-secretary/tests/first_run.rs` (a fake Online Accounts
+  on a private bus, Google's services faked on this machine: one card at
+  a time, the grant and its notebook in the book, her source reading at
+  once, "Pas maintenant" writing nothing, perso suggested for gmail.com,
+  "Ne plus lire", never asked again after a restart; a consent given in
+  the Settings shown on her card), `tests/restart.rs` (an item waiting
+  for a triage that does not answer: her status says so, its text kept
+  encrypted, checked after a restart and leaving masked; the thread and a
+  card's effect after a restart, its perso forgotten), `tests/models.rs`
+  (a turn keeps its model when the settings change mid-turn, its signed
+  thinking replayed to it only, the next sentence on the new model with
+  the turn before as text; another model's blocks as text; a missing key
+  said with how to give one), `tests/keyring.rs` (`key anthropic` with
+  the session's bus), `tests/always_on.rs` (the catch-up after a
+  hibernate, told or measured), `hocus-compositor/tests/
+  secretary_drawer.rs` (the first run in the drawer with the real shell
+  and her real process, no key: its status and hint),
+  `tests/settings_agents.rs` (the Google rows, their sheet, a grant and a
+  revocation), unit tests of the sheets, the Settings' rows and the
+  programs' environment. `HOCUS_DRAWER_SHOTS=DIR` and `HOCUS_SHOTS=DIR`
+  leave their PNGs.
+- **Not yet**: Slack's notifications in her first run (they stay in
+  Settings › Agents); an account added later asked in the drawer (it
+  shows in the Settings); her own answers' notebook (a perso conversation
+  stays in the thread unless its items are perso); her consent cards for
+  a sign-in Online Accounts asks for.
