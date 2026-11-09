@@ -2065,9 +2065,11 @@ dependencies = [
  "clap",
  "getrandom 0.3.4",
  "hocus-secretary-link",
+ "hocus-sources",
  "jiff",
  "rusqlite",
  "rustix 1.1.6",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -2076,6 +2078,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
+ "ureq",
  "zbus 6.0.0",
 ]
 

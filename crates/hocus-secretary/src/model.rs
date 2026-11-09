@@ -1,5 +1,6 @@
-//! The models she calls (§11), behind one trait: the providers' adapters
-//! come in lot 4. This lot has the harness's **scripted fake model**: it
+//! The models she calls (§11), behind one trait and one request shape:
+//! the providers' adapters (`crate::providers`: Anthropic's Messages API,
+//! OpenAI-compatible servers) and the harness's **scripted fake model**: it
 //! answers from a script, keyed by the request's features (its role, the
 //! words it contains), after a delay on her clock if the script says so,
 //! and the **recorder** writes down what each call contained, so that a
@@ -18,27 +19,43 @@ use serde::{Deserialize, Serialize};
 use crate::clock::Clock;
 
 /// What a call is for (§11.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     /// The local model's triage of an item.
     Triage,
     /// An answer to the user.
+    #[default]
     Answer,
     /// The morning briefing.
     Briefing,
     /// The nightly compaction.
     Compaction,
+    /// Which of the triage's candidate facts become proposals (§7.1).
+    Extraction,
 }
 
 impl Role {
+    pub const ALL: [Self; 5] = [
+        Self::Triage,
+        Self::Answer,
+        Self::Briefing,
+        Self::Compaction,
+        Self::Extraction,
+    ];
+
     pub const fn word(self) -> &'static str {
         match self {
             Self::Triage => "triage",
             Self::Answer => "answer",
             Self::Briefing => "briefing",
             Self::Compaction => "compaction",
+            Self::Extraction => "extraction",
         }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.word() == word)
     }
 }
 
@@ -52,15 +69,64 @@ pub struct Part {
     pub items: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Message {
     /// `user` or `assistant`.
     pub from: String,
     pub text: String,
+    /// An assistant's turn: the tools it called.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// A user's turn after tool calls: what they gave.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<ToolResult>,
+    /// An assistant's turn as its provider gave it ([`Reply::native`]),
+    /// replayed unchanged to the same provider (its thinking blocks must
+    /// come back as they were).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<serde_json::Value>,
+}
+
+impl Message {
+    pub fn user(text: impl Into<String>) -> Self {
+        Self {
+            from: "user".to_owned(),
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn assistant(text: impl Into<String>) -> Self {
+        Self {
+            from: "assistant".to_owned(),
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+
+    /// A model's reply as the next request's assistant turn.
+    pub fn replied(reply: &Reply) -> Self {
+        Self {
+            from: "assistant".to_owned(),
+            text: reply.text.clone(),
+            tool_calls: reply.tool_calls.clone(),
+            tool_results: Vec::new(),
+            native: reply.native.clone(),
+        }
+    }
+}
+
+/// What a tool gave, for the call `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ToolResult {
+    pub id: String,
+    pub text: String,
+    #[serde(default)]
+    pub error: bool,
 }
 
 /// A call to a model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Request {
     pub role: Role,
     pub system: String,
@@ -76,8 +142,9 @@ impl Request {
         self.context.iter().flat_map(|p| p.items.clone()).collect()
     }
 
-    /// Everything a model would read of it, for the script's keys.
-    fn text(&self) -> String {
+    /// Everything a model would read of it: the script's keys, and what
+    /// tests search for a secret.
+    pub fn text(&self) -> String {
         let mut text = self.system.clone();
         for part in &self.context {
             text.push('\n');
@@ -91,8 +158,11 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// The provider's id for it, which its result repeats.
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     #[serde(default)]
     pub input: serde_json::Value,
@@ -105,6 +175,23 @@ pub struct Reply {
     pub tool_calls: Vec<ToolCall>,
     pub tokens_in: u64,
     pub tokens_out: u64,
+    /// Who answered: the provider and model the role was set to.
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub model: String,
+    /// Input tokens read from, and written to, the provider's cache.
+    #[serde(default)]
+    pub cache_read: u64,
+    #[serde(default)]
+    pub cache_written: u64,
+    /// Why it stopped, in the provider's word (`end_turn`, `tool_use`,
+    /// `max_tokens`, `refusal`).
+    #[serde(default)]
+    pub stop: String,
+    /// The reply's content as the provider gave it, for the next turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<serde_json::Value>,
 }
 
 /// A model: called on a worker thread, never on her loop.
@@ -112,6 +199,21 @@ pub trait Model: Send + Sync + std::fmt::Debug {
     fn provider(&self) -> &str;
     fn model(&self) -> &str;
     fn call(&self, request: &Request, clock: &Clock) -> Result<Reply, String>;
+
+    /// The same call, its text handed to `part` as it comes (the drawer's
+    /// streamed answer); a model that cannot stream gives it at once.
+    fn stream(
+        &self,
+        request: &Request,
+        clock: &Clock,
+        part: &mut dyn FnMut(&str),
+    ) -> Result<Reply, String> {
+        let reply = self.call(request, clock)?;
+        if !reply.text.is_empty() {
+            part(&reply.text);
+        }
+        Ok(reply)
+    }
 }
 
 /// The fake model's script, a TOML file:
@@ -216,6 +318,9 @@ impl Model for Fake {
             // A word is about a token and a half: enough for the counts.
             tokens_in: words(&text),
             tokens_out: words(&scripted.text),
+            provider: "fake".to_owned(),
+            model: "scripted".to_owned(),
+            ..Reply::default()
         })
     }
 }
@@ -266,7 +371,7 @@ impl Recorder {
         }
     }
 
-    fn call(&self, at: Timestamp, request: &Request, scripted: Option<usize>) {
+    pub fn call(&self, at: Timestamp, request: &Request, scripted: Option<usize>) {
         self.write(Recorded::Call {
             at: at.to_string(),
             request: request.clone(),
@@ -330,10 +435,7 @@ mod tests {
                 text: "Réunion à 14 h".to_owned(),
                 items: vec!["fixture-cal:e1".to_owned()],
             }],
-            messages: vec![Message {
-                from: "user".to_owned(),
-                text: text.to_owned(),
-            }],
+            messages: vec![Message::user(text)],
             tools: vec!["graph".to_owned()],
         }
     }

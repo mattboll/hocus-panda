@@ -173,7 +173,10 @@ impl Quoted {
     pub fn spans(&self, text: &str) -> Vec<Range<usize>> {
         self.quotes
             .iter()
-            .flat_map(|q| text.match_indices(q.as_str()).map(|(at, m)| at..at + m.len()))
+            .flat_map(|q| {
+                text.match_indices(q.as_str())
+                    .map(|(at, m)| at..at + m.len())
+            })
             .collect()
     }
 }

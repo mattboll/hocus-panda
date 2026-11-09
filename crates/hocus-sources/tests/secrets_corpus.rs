@@ -12,8 +12,7 @@
 //! with the detector's quotes, then what may leave (`outbound`).
 
 use hocus_sources::{
-    Content, Item, Notebook, Outbound, Pointer, Quoted, Redactor, SourceKey, SourceKind,
-    item::Mail,
+    Content, Item, Notebook, Outbound, Pointer, Quoted, Redactor, SourceKey, SourceKind, item::Mail,
 };
 use serde::Deserialize;
 
@@ -92,9 +91,7 @@ fn both_passes(redactor: &Redactor, detector: &Scripted, sentence: &str) -> Stri
         "no text leaves before the second pass"
     );
     let mut pass = detector.quotes(sentence);
-    redacted
-        .second_pass(&mut pass)
-        .expect("a recorded answer");
+    redacted.second_pass(&mut pass).expect("a recorded answer");
     match redacted.outbound() {
         Outbound::Checked(item) => match &item.content {
             Content::Mail(mail) => mail.body.clone().unwrap_or_default(),
@@ -177,9 +174,7 @@ fn the_first_pass_over_the_corpus() -> anyhow::Result<()> {
 fn both_passes_over_the_corpus() -> anyhow::Result<()> {
     let corpus: Corpus =
         toml::from_str(&include_str!("fixtures/secrets-corpus.toml").replace("{{}}", ""))?;
-    let detector = Scripted(toml::from_str(include_str!(
-        "fixtures/secrets-pass2.toml"
-    ))?);
+    let detector = Scripted(toml::from_str(include_str!("fixtures/secrets-pass2.toml"))?);
     let redactor = Redactor::new();
     let mut missed = Vec::new();
     let mut by_pass_2 = 0;
