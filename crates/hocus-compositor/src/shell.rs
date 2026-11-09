@@ -495,6 +495,7 @@ impl State {
                 self.popovers_closing(&namespace);
                 self.launcher_closing(&namespace);
             }
+            ToCompositor::SecretaryDrawer(output) => self.secretary_drawer_on(&output),
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),

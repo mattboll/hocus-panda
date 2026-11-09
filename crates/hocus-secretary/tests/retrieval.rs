@@ -59,7 +59,7 @@ fn asked(store: Store, question: &str) -> anyhow::Result<hocus_secretary::model:
     let mut options = common::options(Vec::new());
     options.model = Some(Arc::new(Fake::new(
         script,
-        Some(Recorder::to_file(file.clone())),
+        Some(std::sync::Arc::new(Recorder::to_file(file.clone()))),
     )));
     let mut driver = common::Driver::start(store, options);
     driver.answer_to(question);

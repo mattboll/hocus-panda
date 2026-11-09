@@ -147,6 +147,55 @@ fn played(
     }
 }
 
+/// The secretary in her drawer (docs/design/secretary.md §5.6), in
+/// `mood` at `now`: a frame of her motion moving for `window` since
+/// `since` while it plays (and the pandas are lively), else her still
+/// drawing.
+pub fn secretary(
+    mood: hocus_pandas::SecretaryMood,
+    since: Option<(Instant, Duration)>,
+    now: Instant,
+) -> (svg::Handle, bool) {
+    use hocus_pandas::SecretaryMood;
+    static STILL: OnceLock<Vec<svg::Handle>> = OnceLock::new();
+    type Frame = ((SecretaryMood, Duration, u32), svg::Handle);
+    static FRAMES: Mutex<Vec<Frame>> = Mutex::new(Vec::new());
+    const KEPT: usize = 8;
+    let still = || {
+        let stills = STILL.get_or_init(|| {
+            SecretaryMood::ALL
+                .iter()
+                .map(|m| svg::Handle::from_memory(m.still().as_bytes()))
+                .collect()
+        });
+        let at = SecretaryMood::ALL
+            .iter()
+            .position(|m| *m == mood)
+            .unwrap_or(0);
+        stills[at].clone()
+    };
+    let Some((since, window)) = since.filter(|_| lively()) else {
+        return (still(), false);
+    };
+    let t = now.saturating_duration_since(since);
+    let step = hocus_pandas::step(t);
+    let t = hocus_pandas::STEP * step;
+    let Some(svg) = hocus_pandas::secretary_frame(mood, window, t) else {
+        return (still(), false);
+    };
+    let key = (mood, window, step);
+    let mut frames = FRAMES.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, handle)) = frames.iter().find(|(k, _)| *k == key) {
+        return (handle.clone(), true);
+    }
+    let handle = svg::Handle::from_memory(svg.into_bytes());
+    if frames.len() >= KEPT {
+        frames.remove(0);
+    }
+    frames.push((key, handle.clone()));
+    (handle, true)
+}
+
 type Key = (Mood, (Duration, u32), Dress, Option<usize>);
 
 /// The last frames made, so that several bars drawing the same panda at

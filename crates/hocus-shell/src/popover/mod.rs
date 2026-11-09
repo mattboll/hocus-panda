@@ -698,6 +698,16 @@ pub enum Effect {
         id: window::Id,
         rects: Vec<Rectangle>,
     },
+    /// The secretary's drawer beside `bar` (docs/design/secretary.md
+    /// §5.1): `width` wide, its top and bottom on the bar's, its margins
+    /// from the screen's top right (top, right, bottom, left); it takes
+    /// the keyboard on demand.
+    Drawer {
+        id: window::Id,
+        bar: String,
+        width: u32,
+        margin: (i32, i32, i32, i32),
+    },
     /// The launcher's surface on `output` (5.1): over all of it, the bar
     /// too, holding the keyboard.
     Launcher {
@@ -2094,6 +2104,21 @@ pub fn with<T>(with: impl FnOnce(&mut Controller) -> T) -> T {
 /// What a surface saw; the effects go to [`effects`]' stream, and so does
 /// a new deadline, which the stream then waits for.
 pub fn event(event: Event) {
+    // In assistant mode, a click (or `Enter`) on her head opens her
+    // drawer, not the 4.6 briefing (docs/design/secretary.md §4).
+    if let Event::ItemPress {
+        item: Item::Secretary,
+        bar,
+        ..
+    } = &event
+        && crate::secretary::state() != crate::secretary::State::Off
+    {
+        crate::drawer::head_clicked(bar);
+        return;
+    }
+    if let Event::BarChanged { bar } = &event {
+        crate::drawer::bar_changed(bar);
+    }
     // The field to add a task, open, sees the presses elsewhere: it
     // closes when empty, else lets the keyboard go.
     if matches!(
@@ -2461,6 +2486,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
             let deadline = [
                 deadline,
                 crate::launcher::deadline(),
+                crate::drawer::deadline(),
                 crate::emoji::deadline(),
                 crate::actions::deadline(),
                 crate::capture::thumb::deadline(),
@@ -2482,6 +2508,7 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let now = Instant::now();
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
+                            due.extend(crate::drawer::tick(now));
                             due.extend(crate::emoji::tick(now));
                             due.extend(crate::actions::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
@@ -2719,6 +2746,33 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                     }
                 });
             vec![Message::SetInputRegion { id, callback }]
+        }
+        Effect::Drawer {
+            id,
+            bar,
+            width,
+            margin,
+        } => {
+            crate::side::opened(id);
+            vec![Message::NewLayerShell {
+                settings: NewLayerShellSettings {
+                    // As high as the bar: anchored top and bottom.
+                    size: Some((width, 0)),
+                    layer: Layer::Top,
+                    anchor: crate::side::anchor(Anchor::Top | Anchor::Bottom | Anchor::Right),
+                    exclusive_zone: Some(0),
+                    margin: Some(crate::side::margin(margin)),
+                    keyboard_interactivity: KeyboardInteractivity::OnDemand,
+                    output_option: if bar == crate::ALONE {
+                        OutputOption::Active
+                    } else {
+                        OutputOption::OutputName(bar)
+                    },
+                    events_transparent: false,
+                    namespace: Some(hocus_link::SECRETARY_NAMESPACE.to_owned()),
+                },
+                id,
+            }]
         }
         Effect::Launcher { id, output } => vec![Message::NewLayerShell {
             settings: NewLayerShellSettings {

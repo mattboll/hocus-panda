@@ -54,8 +54,9 @@ struct Args {
     /// The scripted fake model, from this TOML script: tests.
     #[arg(long, value_name = "SCRIPT")]
     fake_model: Option<PathBuf>,
-    /// Where the fake model records every call it gets, one JSON object
-    /// per line: tests.
+    /// Where the fake model records every call it gets, and where the
+    /// outside effects of accepted cards are written, one JSON object per
+    /// line: tests.
     #[arg(long, value_name = "FILE")]
     recorder: Option<PathBuf>,
     /// Ends once standard input closes: the compositor holds that pipe,
@@ -132,14 +133,20 @@ fn run(args: Args) -> Result<(), String> {
     let (key, place) = key::key(&data, bus.as_deref(), memory.exists())?;
     let store =
         Store::open(&memory, &key, clock).map_err(|e| format!("{}: {e}", memory.display()))?;
+    // The recorder writes down the fake model's calls and the outside
+    // effects of accepted cards alike.
+    let recorder = args
+        .recorder
+        .clone()
+        .map(|f| Arc::new(Recorder::to_file(f)));
     let settings = Arc::new(settings::File::at(
         args.config.clone().or_else(settings::File::default_path),
     ));
     let (model, triage): Models = match &args.fake_model {
-        Some(script) => {
-            let recorder = args.recorder.clone().map(Recorder::to_file);
-            (Some(Arc::new(Fake::from_file(script, recorder)?)), None)
-        }
+        Some(script) => (
+            Some(Arc::new(Fake::from_file(script, recorder.clone())?)),
+            None,
+        ),
         None => {
             let router = Arc::new(Router::new(
                 settings.clone(),
@@ -184,6 +191,7 @@ fn run(args: Args) -> Result<(), String> {
                 language: Language::of_env(),
                 ..Scope::default()
             },
+            effects: recorder,
             notifications: Some(arrivals),
             ..Options::default()
         },

@@ -135,6 +135,7 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
         digest,
         notebook: Some(source.notebook),
         from: Some(from.to_owned()),
+        project: None,
         sender: None,
         body: None,
         summaries_only,

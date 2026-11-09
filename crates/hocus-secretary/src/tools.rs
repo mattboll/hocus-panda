@@ -4,8 +4,10 @@
 //! optional one is nullable). They read her memory on her loop, which
 //! owns it: [`run`] is called there, with a call the model made.
 //!
-//! The `propose_*` tools and the rest of persona.md's list come with the
-//! conversation and the lots that act.
+//! The conversation's ([`TALK`], lot 2): `ask_user`, a question with its
+//! quick replies, and the `propose_*` tools, each a card in the drawer that
+//! acts only once the user clicks it (§2.1). They are never run here: the
+//! conversation shows them.
 
 use hocus_secretary_link::Notebook;
 use serde::Deserialize;
@@ -29,8 +31,94 @@ pub struct Spec {
 /// The read-only tools' names.
 pub const READ: [&str; 2] = ["graph", "search"];
 
+/// The conversation's tools: a question, and the proposals.
+pub const TALK: [&str; 10] = [
+    "ask_user",
+    "propose_message",
+    "propose_post",
+    "propose_mail",
+    "propose_invitation_answer",
+    "propose_event",
+    "propose_file",
+    "propose_task",
+    "propose_agent",
+    "propose_delegation",
+];
+
+/// A proposal's input: the card's words (every field required, nullable
+/// when it may be left out).
+fn proposal(description: &'static str, name: &'static str) -> Spec {
+    Spec {
+        name,
+        description,
+        schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["to", "label", "text", "draft", "lines"],
+            "properties": {
+                "to": {"type": ["string", "null"], "description": "À qui, s'il y a quelqu'un."},
+                "label": {"type": ["string", "null"], "description": "Le titre de la carte, court."},
+                "text": {"type": ["string", "null"], "description": "Une phrase qui dit ce que c'est."},
+                "draft": {"type": ["string", "null"], "description": "Le texte exact proposé, s'il y en a un."},
+                "lines": {"type": "array", "items": {"type": "string"}, "description": "Ses lignes : les étapes d'un plan, les tâches."}
+            }
+        }),
+    }
+}
+
 pub fn spec(name: &str) -> Option<Spec> {
     match name {
+        "ask_user" => Some(Spec {
+            name: "ask_user",
+            description: "Poser UNE question à l'utilisateur, avec ses réponses rapides (2 à 4, \
+                courtes). Ce qu'elle a trouvé va dans note.",
+            schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["question", "replies", "note"],
+                "properties": {
+                    "question": {"type": "string"},
+                    "replies": {"type": "array", "items": {"type": "string"}},
+                    "note": {"type": ["string", "null"]}
+                }
+            }),
+        }),
+        "propose_message" => Some(proposal(
+            "Proposer un message (Slack, SMS) : une carte, rien n'est envoyé avant le clic de l'utilisateur.",
+            "propose_message",
+        )),
+        "propose_post" => Some(proposal(
+            "Proposer une publication : une carte, rien n'est publié avant le clic.",
+            "propose_post",
+        )),
+        "propose_mail" => Some(proposal(
+            "Proposer un mail : une carte, rien n'est envoyé avant le clic.",
+            "propose_mail",
+        )),
+        "propose_invitation_answer" => Some(proposal(
+            "Proposer une réponse à une invitation : une carte, rien n'est répondu avant le clic.",
+            "propose_invitation_answer",
+        )),
+        "propose_event" => Some(proposal(
+            "Proposer un événement d'agenda : une carte, rien n'est créé avant le clic.",
+            "propose_event",
+        )),
+        "propose_file" => Some(proposal(
+            "Proposer d'écrire un fichier : une carte, rien n'est écrit avant le clic.",
+            "propose_file",
+        )),
+        "propose_task" => Some(proposal(
+            "Proposer des tâches ou un plan de la journée : une carte, rien n'est ajouté avant le clic.",
+            "propose_task",
+        )),
+        "propose_agent" => Some(proposal(
+            "Proposer de lancer un agent : une carte, rien n'est lancé avant le clic.",
+            "propose_agent",
+        )),
+        "propose_delegation" => Some(proposal(
+            "Proposer de confier un travail à Claude Code : une carte, rien n'est lancé avant le clic.",
+            "propose_delegation",
+        )),
         "graph" => Some(Spec {
             name: "graph",
             description: "Le graphe de sa mémoire autour d'une personne, d'un projet, d'un client \

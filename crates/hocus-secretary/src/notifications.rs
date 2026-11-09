@@ -162,6 +162,7 @@ impl Source for Notifications {
                 digest,
                 notebook: Some(grant.notebook()),
                 from: Some(grant.source().to_string()),
+                project: None,
                 sender: None,
                 body: None,
                 text: Some(Box::new(redacted)),

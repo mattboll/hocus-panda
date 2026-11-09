@@ -264,9 +264,16 @@ fn trailing_desk(query: &str) -> Option<(&str, u8)> {
     Some((rest.trim_end(), digit - 1)).filter(|(rest, _)| !rest.is_empty())
 }
 
+/// Whether the palette lists `def`: the secretary's drawer only in
+/// assistant mode (docs/design/secretary.md §21: classic shows nothing of
+/// her).
+pub fn listed(def: &Def) -> bool {
+    def.id != "secretary" || crate::secretary::state() != crate::secretary::State::Off
+}
+
 /// The list of actions for `query` (as typed).
 pub fn actions(query: &str, seen: &Seen) -> Vec<Row> {
-    let catalogue = actions::catalogue();
+    let catalogue: Vec<&'static Def> = actions::catalogue().iter().filter(|d| listed(d)).collect();
     let mut rows = Vec::new();
     if query.trim().is_empty() {
         let recent: Vec<&'static Def> = seen
@@ -284,6 +291,7 @@ pub fn actions(query: &str, seen: &Seen) -> Vec<Row> {
         for category in Category::ALL {
             let mut of = catalogue
                 .iter()
+                .copied()
                 .filter(|d| d.category == category)
                 .peekable();
             if of.peek().is_none() {
@@ -304,7 +312,7 @@ pub fn actions(query: &str, seen: &Seen) -> Vec<Row> {
             .position(|r| r == id)
             .unwrap_or(usize::MAX)
     };
-    for (order, def) in catalogue.iter().enumerate() {
+    for (order, def) in catalogue.iter().copied().enumerate() {
         // "envoyer 3": the action with its desktop, first.
         if let (Some((rest, index)), Some(Step::Desktop)) = (desk, def.step)
             && index < seen.desks.count

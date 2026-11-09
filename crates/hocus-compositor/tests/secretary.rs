@@ -364,6 +364,14 @@ fn she_holds_no_frame_of_the_shell_at_rest_nor_while_she_thinks() -> anyhow::Res
     let answered = status_until(&mut hp, &mut her, |s| {
         s.calls_running == 0 && sent_to_shell(s) > sent
     })?;
-    assert_eq!(sent_to_shell(&answered), sent + 1, "her answer, once");
+    // The thread's lines (the sentence, her typing, her words, her face,
+    // the end): what the drawer would show, and nothing draws for them
+    // while it is closed.
+    assert!(
+        sent_to_shell(&answered) > sent,
+        "her answer reached the shell"
+    );
+    common::wait(&mut hp, Duration::from_millis(500))?;
+    assert_eq!(shell_commits(&hp), thinking, "her drawer closed: no frame");
     Ok(())
 }

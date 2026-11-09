@@ -10,7 +10,7 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use jiff::{SignedDuration, Timestamp};
@@ -194,6 +194,17 @@ pub struct Reply {
     pub native: Option<serde_json::Value>,
 }
 
+/// A piece of a reply as it comes (§5.4: she shows what she is doing,
+/// then her answer streams).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Piece<'a> {
+    /// What she is doing, from a tool call ("elle regarde le tableau de
+    /// Chapitô").
+    Doing(&'a str),
+    /// The next words of her answer.
+    Text(&'a str),
+}
+
 /// A model: called on a worker thread, never on her loop.
 pub trait Model: Send + Sync + std::fmt::Debug {
     fn provider(&self) -> &str;
@@ -214,6 +225,23 @@ pub trait Model: Send + Sync + std::fmt::Debug {
         }
         Ok(reply)
     }
+
+    /// [`Model::stream`], with what she is doing too ([`Piece::Doing`]):
+    /// the drawer's typing line. A model that says nothing of it streams
+    /// its text alone.
+    fn stream_pieces(
+        &self,
+        request: &Request,
+        clock: &Clock,
+        piece: &mut dyn FnMut(Piece<'_>),
+    ) -> Result<Reply, String> {
+        self.stream(request, clock, &mut |text| piece(Piece::Text(text)))
+    }
+
+    /// Its name as the drawer shows it under the field.
+    fn shown(&self) -> String {
+        format!("{} · {}", self.provider(), self.model())
+    }
 }
 
 /// The fake model's script, a TOML file:
@@ -228,12 +256,20 @@ pub trait Model: Send + Sync + std::fmt::Debug {
 /// name = "graph"
 /// input = { node = "Chapitô" }
 ///
+/// pace = 1                   # optional: seconds on her clock between words
+/// doing = "elle regarde le tableau de Chapitô"   # optional: said before
+///
 /// [default]                  # optional: when no reply matches
 /// text = "D'accord."
 /// ```
+///
+/// `name` at the top (optional) is the model's name the drawer shows
+/// (screenshots); else "fake · scripted".
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Script {
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub reply: Vec<Scripted>,
     #[serde(default)]
@@ -251,6 +287,12 @@ pub struct Scripted {
     pub text: String,
     #[serde(default)]
     pub delay: u64,
+    /// Seconds on her clock between two words of the text as it streams.
+    #[serde(default)]
+    pub pace: u64,
+    /// What she says she is doing while she composes.
+    #[serde(default)]
+    pub doing: String,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
 }
@@ -266,15 +308,15 @@ impl Scripted {
 #[derive(Debug)]
 pub struct Fake {
     script: Script,
-    recorder: Option<Recorder>,
+    recorder: Option<Arc<Recorder>>,
 }
 
 impl Fake {
-    pub fn new(script: Script, recorder: Option<Recorder>) -> Self {
+    pub fn new(script: Script, recorder: Option<Arc<Recorder>>) -> Self {
         Self { script, recorder }
     }
 
-    pub fn from_file(path: &Path, recorder: Option<Recorder>) -> Result<Self, String> {
+    pub fn from_file(path: &Path, recorder: Option<Arc<Recorder>>) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let script = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self::new(script, recorder))
@@ -291,6 +333,28 @@ impl Model for Fake {
     }
 
     fn call(&self, request: &Request, clock: &Clock) -> Result<Reply, String> {
+        self.stream_pieces(request, clock, &mut |_| {})
+    }
+
+    fn stream(
+        &self,
+        request: &Request,
+        clock: &Clock,
+        part: &mut dyn FnMut(&str),
+    ) -> Result<Reply, String> {
+        self.stream_pieces(request, clock, &mut |piece| {
+            if let Piece::Text(text) = piece {
+                part(text);
+            }
+        })
+    }
+
+    fn stream_pieces(
+        &self,
+        request: &Request,
+        clock: &Clock,
+        piece: &mut dyn FnMut(Piece<'_>),
+    ) -> Result<Reply, String> {
         let started = clock.now();
         let text = request.text();
         let found = self
@@ -307,10 +371,25 @@ impl Model for Fake {
         let Some(scripted) = scripted else {
             return Err("the fake model has no reply for this request".to_owned());
         };
+        if !scripted.doing.is_empty() {
+            piece(Piece::Doing(&scripted.doing));
+        }
+        let mut at = started;
         if scripted.delay > 0 {
-            let delay =
-                SignedDuration::from_secs(i64::try_from(scripted.delay).unwrap_or(i64::MAX));
-            clock.sleep_until(started.checked_add(delay).unwrap_or(Timestamp::MAX));
+            at = at
+                .checked_add(seconds(scripted.delay))
+                .unwrap_or(Timestamp::MAX);
+            clock.sleep_until(at);
+        }
+        // Word by word, each with the spaces before it.
+        for (n, word) in words_of(&scripted.text).into_iter().enumerate() {
+            if n > 0 && scripted.pace > 0 {
+                at = at
+                    .checked_add(seconds(scripted.pace))
+                    .unwrap_or(Timestamp::MAX);
+                clock.sleep_until(at);
+            }
+            piece(Piece::Text(word));
         }
         Ok(Reply {
             text: scripted.text.clone(),
@@ -323,6 +402,45 @@ impl Model for Fake {
             ..Reply::default()
         })
     }
+
+    fn shown(&self) -> String {
+        self.script
+            .name
+            .clone()
+            .unwrap_or_else(|| "fake · scripted".to_owned())
+    }
+}
+
+fn seconds(n: u64) -> SignedDuration {
+    SignedDuration::from_secs(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// `text` cut before each word, the spaces before a word with it: the
+/// pieces join back into it.
+fn words_of(text: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let (mut start, mut cut) = (0, None);
+    let mut word = false;
+    for (at, c) in text.char_indices() {
+        if c.is_whitespace() {
+            if word {
+                cut = Some(at);
+            }
+            word = false;
+        } else {
+            if let Some(cut) = cut.take()
+                && cut > start
+            {
+                pieces.push(&text[start..cut]);
+                start = cut;
+            }
+            word = true;
+        }
+    }
+    if start < text.len() {
+        pieces.push(&text[start..]);
+    }
+    pieces
 }
 
 fn words(text: &str) -> u64 {
@@ -462,7 +580,7 @@ mod tests {
         )
         .expect("a script");
         let clock = Clock::virtual_at("2026-11-09T08:00:00Z".parse().expect("a time"));
-        let fake = Fake::new(script, Some(Recorder::in_memory()));
+        let fake = Fake::new(script, Some(Arc::new(Recorder::in_memory())));
         let reply = fake
             .call(&asked(Role::Answer, "Qui était là pour la v2 ?"), &clock)
             .expect("a reply");
@@ -487,5 +605,49 @@ mod tests {
         assert_eq!(*scripted, Some(0));
         assert_eq!(request.items(), ["fixture-cal:e1"]);
         assert!(matches!(&lines[1], Recorded::Call { scripted: None, .. }));
+    }
+
+    #[test]
+    fn a_reply_streams_word_by_word_at_its_pace() {
+        let script: Script = toml::from_str(
+            r#"
+            [[reply]]
+            text = "Bien noté, Alex."
+            pace = 2
+            doing = "elle regarde"
+            "#,
+        )
+        .expect("a script");
+        let clock = Clock::virtual_at("2026-11-09T08:00:00Z".parse().expect("a time"));
+        let fake = Arc::new(Fake::new(script, None));
+        let (pieces, read) = std::sync::mpsc::channel();
+        let (model, on) = (fake.clone(), clock.clone());
+        let call = std::thread::spawn(move || {
+            model.stream_pieces(&asked(Role::Answer, "x"), &on, &mut |p| {
+                let p = match p {
+                    Piece::Doing(d) => format!("doing:{d}"),
+                    Piece::Text(t) => t.to_owned(),
+                };
+                let _ = pieces.send(p);
+            })
+        });
+        let next = || {
+            read.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("a piece")
+        };
+        assert_eq!(next(), "doing:elle regarde");
+        assert_eq!(next(), "Bien");
+        // The next word waits for her clock.
+        assert!(
+            read.recv_timeout(std::time::Duration::from_millis(100))
+                .is_err()
+        );
+        clock.advance(std::time::Duration::from_secs(2));
+        assert_eq!(next(), " noté,");
+        clock.advance(std::time::Duration::from_secs(2));
+        assert_eq!(next(), " Alex.");
+        let reply = call.join().expect("the call").expect("a reply");
+        assert_eq!(reply.text, "Bien noté, Alex.");
+        assert_eq!(words_of("  a b"), ["  a", " b"]);
     }
 }

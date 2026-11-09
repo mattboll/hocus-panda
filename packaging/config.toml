@@ -265,6 +265,10 @@
 # (docs/design/emoji.md). The key is the one typing `.`, with Shift on
 # layouts that need it (AZERTY).
 # emoji = "Super+period"
+# The secretary's drawer, beside the bar of the focused window's screen;
+# again, it closes. In the assistant mode of `[secretary]` only: in the
+# classic mode the chord goes to the window (docs/design/secretary.md §4).
+# secretary = "Super+S"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while
 # held; up stops at 100 %, brightness down at 5 %, so that the screen never
 # goes black. A volume key unmutes. Only the bar's gauges show it.

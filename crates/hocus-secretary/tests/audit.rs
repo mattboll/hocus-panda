@@ -140,7 +140,7 @@ fn the_recorder_keeps_what_each_call_contained() -> anyhow::Result<()> {
     let mut options = common::options(Vec::new());
     options.model = Some(Arc::new(Fake::new(
         script,
-        Some(Recorder::to_file(file.clone())),
+        Some(std::sync::Arc::new(Recorder::to_file(file.clone()))),
     )));
     let mut driver = common::Driver::start(Store::in_memory(common::clock())?, options);
     driver.request(|id| ToSecretary::Ask {

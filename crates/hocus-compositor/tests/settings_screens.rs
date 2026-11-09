@@ -247,6 +247,7 @@ impl Bed {
     /// A model row's menu, its choice `n`.
     fn choose_model(&mut self, row: &str, n: usize) -> anyhow::Result<()> {
         self.click(&format!("control:{row}"))?;
+        self.shows(|s| s["menu"] == row)?;
         self.places_with(&format!("option:{n}"))?;
         self.click(&format!("option:{n}"))
     }
@@ -1037,6 +1038,11 @@ fn the_night_light_rows_write_its_section() -> anyhow::Result<()> {
     bed.click("control:screens.night-light")?;
     let text = bed.written(|t| t.contains("[night-light]"))?;
     assert_eq!(text, format!("{FILE}\n[night-light]\nenabled = true\n"));
+    // The file on disk is the worker's; the window reads it back after,
+    // and until then its hours are inert, as night light still off there:
+    // a click on them would open nothing. Its write taken back (it can
+    // be undone) says it has read it.
+    bed.shows(|s| s["undo"].as_u64() >= Some(1))?;
     let on = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.state().config.night_light.enabled)?;

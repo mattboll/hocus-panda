@@ -541,6 +541,7 @@ impl Source for Accounts {
             digest: digest.to_owned(),
             notebook: Some(hocus_secretary_link::Notebook::Perso),
             from: Some(from.to_owned()),
+            project: None,
             sender: None,
             body: None,
             text: None,

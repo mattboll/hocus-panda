@@ -37,6 +37,10 @@ pub struct Item {
     /// Its own notebook, when not its account's.
     #[serde(default)]
     pub notebook: Option<Notebook>,
+    /// The project it belongs to, when its source says (a board's card):
+    /// her memory links it to that project's node.
+    #[serde(default)]
+    pub project: Option<String>,
     /// The part of the source it came from, when a source gathers several
     /// (`account_1:mail`): its episodes' source, forgotten with it.
     #[serde(default)]
@@ -93,6 +97,7 @@ pub trait Source: Send + std::fmt::Debug {
 /// at = "2026-11-09T07:00:00Z"
 /// kind = "mail"
 /// digest = "Claire : la céramique"
+/// project = "Chapitô"          # optional: a board's card
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
