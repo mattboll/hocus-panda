@@ -3,7 +3,8 @@
 //!
 //! Why CardDAV and not the People API: the token Online Accounts hands is
 //! for GNOME's own OAuth client, whose scopes include CardDAV's
-//! (`https://www.googleapis.com/auth/carddav`); Evolution reads Google
+//! (`https://www.googleapis.com/auth/carddav`, since GNOME 3.10; without
+//! it Google answers `401`, not `400`); Evolution reads Google
 //! contacts with it over CardDAV. Whether the People API is enabled for
 //! that client is not ours to know, so CardDAV it is.
 //!
