@@ -59,7 +59,7 @@ name = "Claude Sonnet 5.5"
 
 [[reply]]
 role = "answer"
-contains = ["message"]
+contains = ["son article"]
 text = "Je te propose ce message pour Léa."
 [[reply.tool_calls]]
 name = "send_message"
@@ -67,7 +67,7 @@ input = { to = "Léa", draft = "Je relis ton article cet après-midi, je te dis 
 
 [[reply]]
 role = "answer"
-contains = ["long"]
+contains = ["réfléchis longuement"]
 text = "Voilà."
 delay = 60
 doing = "elle lit le fil de Léa"
@@ -651,7 +651,8 @@ fn a_word_on_one_projects_board_is_asked_once_with_quick_replies() -> anyhow::Re
     bed.click(at)?;
     bed.shows(|s| {
         let items = s["items"].to_string();
-        items.contains("learned:Retenu : « égaluantes » → Chapitô") && items.contains("chosen 0")
+        items.contains("learned:Retenu\u{a0}: «\u{a0}égaluantes\u{a0}» → Chapitô")
+            && items.contains("chosen 0")
     })?;
     bed.advance(30)?;
     bed.shows(|s| s["items"].to_string().contains("her:Bien noté"))?;

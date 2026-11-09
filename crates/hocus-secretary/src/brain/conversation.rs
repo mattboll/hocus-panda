@@ -126,6 +126,7 @@ impl Brain {
         if client == Client::Shell {
             self.talk.english = lang.is_some_and(|l| l.starts_with("en"));
             let look = self.look();
+            self.talk.told = Some(look.clone());
             self.send(conn, &FromSecretary::Look { look });
         }
     }
@@ -296,17 +297,19 @@ impl Brain {
         let fr = self.talk.fr();
         let (term, name) = (&candidate.term, &candidate.name);
         let text = if fr {
-            format!("Une question avant de le ranger : « {term} », c’est pour {name} ?")
+            format!(
+                "Une question avant de le ranger\u{a0}: «\u{a0}{term}\u{a0}», c’est pour {name}\u{a0}?"
+            )
         } else {
             format!("One question before I file it: “{term}”, is that {name}?")
         };
         let quote = &candidate.quote;
         let note = match (fr, candidate.board) {
             (true, true) => format!(
-                "Je ne connais pas encore ce mot. Dans le tableau de {name}, il y a « {quote} »."
+                "Je ne connais pas encore ce mot. Dans le tableau de {name}, il y a «\u{a0}{quote}\u{a0}»."
             ),
             (true, false) => {
-                format!("Je ne connais pas encore ce mot. J’ai lu « {quote} » ({name}).")
+                format!("Je ne connais pas encore ce mot. J’ai lu «\u{a0}{quote}\u{a0}» ({name}).")
             }
             (false, true) => {
                 format!("I don’t know this word yet. {name}’s board has “{quote}”.")
@@ -431,7 +434,7 @@ impl Brain {
         let (alias, edits) = edits?;
         let (term, name) = (&candidate.term, &candidate.name);
         let text = if self.talk.fr() {
-            format!("Retenu : « {term} » → {name}")
+            format!("Retenu\u{a0}: «\u{a0}{term}\u{a0}» → {name}")
         } else {
             format!("Kept: “{term}” → {name}")
         };
@@ -620,7 +623,9 @@ impl Brain {
                         ..Message::default()
                     });
                     turn.round += 1;
-                    let looking = self.talk.t("elle cherche dans sa mémoire", "she looks in her memory");
+                    let looking = self
+                        .talk
+                        .t("elle cherche dans sa mémoire", "she looks in her memory");
                     self.tell_talkers(
                         &FromSecretary::Typing {
                             id,

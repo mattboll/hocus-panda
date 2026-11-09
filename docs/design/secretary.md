@@ -1474,10 +1474,10 @@ The setting is followed live, so switching back to "classic" stops the process a
   `secretary ready PATH`; the bar works the same either way.
 - **The shell's line to her**: a thread connects (and again after each
   restart), says hello, the session's lock and, after a resume, the time
-  slept; another reads her lines. Nothing runs on iced's loop. Until the
-  drawer (lot 2), a question reaches her through the shell by the link's
-  `secretary-ask TEXT` (tests).
-- **The protocol** (version 1): one JSON object per line, each way, its
+  slept; another reads her lines. Nothing runs on iced's loop. A
+  sentence also reaches her through the shell by the link's
+  `secretary-ask TEXT` (tests); the drawer is lot 2's.
+- **The protocol** (version 1, version 2 since lot 2): one JSON object per line, each way, its
   kind its only key: `hello {version, client}` first (another version is
   `refused` and closed), then requests with an `id` that their answers
   repeat (`status`, `graph {node, as_of, hops, notebook}`, `ask {text}`,
@@ -1695,3 +1695,115 @@ The setting is followed live, so switching back to "classic" stops the process a
   for OpenAI-compatible answer models (lot 14); extraction's proposals
   from the triage's candidates (lot 6); the moment and quiet hours (lot
   5); the pending queue across restarts; the banc d'essai (lot 8).
+
+### Lot 2 (#744): the drawer and the conversation
+
+- **The protocol, version 2** (`hocus-secretary-link`): `hello` carries
+  the desktop's language (`lang`, for the words she makes herself); the
+  shell sends `ask {id, text}`, `choose {id, item, choice}` (a quick
+  reply), `decide {id, item, decision}` (`accept`, `edit`, `reject`: a
+  card's button), `undo {id, item}` ("Annuler"), `thread {id}` and
+  `drawer {open}`; she sends `item {item}` (a thread item, the same id
+  again when it changes: `user`, `her {text, note, assumed}`, `question
+  {text, note, replies, chosen}`, `card {kind, label, text, lines,
+  actions, decided, outcome}`, `learned {text, undone}`), `typing {id,
+  doing}`, `answer {id, text, done}` parts as her model streams, `thread
+  {id, items}` and `look {mood, status, tone, model}`. A first version's
+  hello is refused. The shell's and the tests' connections get the
+  thread; a `hocus` command only the answer to its own question. At rest
+  nothing is sent: her face only when it changes.
+- **A sentence** (`brain/conversation.rs`): the user's bubble, then either
+  one question computed in code, or her model's turn. The question: a word
+  of five letters or more, not common, that names no node nor accepted
+  alias, and that the items of exactly one project hold (a board's card:
+  fixture items carry `project`, which links their episode to the
+  project's node). "Une question avant de le ranger : « égaluantes »,
+  c'est pour Chapitô ?", what she found under it, and "Oui, Chapitô · Non,
+  autre chose · Je t'explique"; no model call meanwhile. "Oui" keeps the
+  word as an alias of the project, inferred and accepted ("déduit,
+  confirmé par toi"), says "Retenu : « égaluantes » → Chapitô · Annuler"
+  (undo plays both edits back), and the sentence goes on with that fact;
+  "Non" goes on without it and is not asked again this session. Entity
+  linking (lot 4's) will know common words better than her short list.
+- **Her model's turn**: the request is lot 4's assembled context with the
+  fact computed for the sentence, and her tools: the read ones and the
+  conversation's (`ask_user`, `propose_message`, `propose_post`,
+  `propose_mail`, `propose_invitation_answer`, `propose_event`,
+  `propose_file`, `propose_task`, `propose_agent`, `propose_delegation`,
+  strict schemas in `tools.rs`). Its text streams (`Model::stream_pieces`:
+  the text, and what she is doing for the typing line; the fake model's
+  script has `pace` and `doing`, and a `name` the drawer shows). A read
+  tool runs on her loop and the model is called again with its result,
+  four turns at most ("elle cherche dans sa mémoire"). Every other call
+  is shown and acts on nothing: `ask_user` is a question with its quick
+  replies; an acting call, whatever its name (`send_message`,
+  `write_file`, `start_job`…), is a proposal card (draft, plan or
+  delegation), at most three buttons, the first the primary. Its effect
+  happens only after `decide accept` on that card, once (audited as a
+  proposal and its answer, by `card:N`): with `--recorder`, the effect is
+  written there (tests); without, nothing can act yet and the card says
+  so ("Je ne sais pas encore le faire moi-même : rien n'est parti"). The
+  lots that act (5, 12, 13) plug their effects in there.
+- **Her face**: `type` while she composes, `ask` while a question waits,
+  `worry` while a source fails, `happy` once something is kept, else
+  `listen`; the shell shows `sleep` while she is away. Her status line:
+  her sources' names ("Gmail · Agenda à jour"), the one failing ("Gmail ne
+  répond plus", amber), "Rien de branché" (grey).
+- **Her drawing** (`hocus-pandas`): her seven moods built from her
+  drawing split into parts (head, body, eyes, lids, ear, paw, clipboard
+  line and dot) with each mood's marks (rings, "?", sparkles, "z", drop),
+  the ear in the mood's colour; `secretary_frame` moves the parts as the
+  mockup does. A mood plays 2.6 s after a change, and `type` while she
+  composes; nothing moves with reduced motion or a shell on the CPU.
+- **The drawer** (`hocus-shell/src/drawer`): a layer surface
+  (`hocus-secretary`, top layer, anchored top, bottom and to the bar's
+  side), 420 px, 360 under 1600 px of screen, 720 on "Ce qu'elle sait"
+  (which says, for now, that her memory will show there: lot 6), 8 px
+  from the bar, its top and bottom the bar's. `Super+S` (`[shortcuts]
+  secretary`, assistant mode only: in classic mode the chord goes to the
+  window, and the palette does not list it) asks the compositor, which
+  answers `secretary-drawer OUTPUT WIDTH` for the focused window's screen;
+  a click on her head asks it the same for its bar's screen
+  (`secretary-drawer OUTPUT` to the compositor) instead of opening the 4.6
+  briefing. The compositor moves it as a popover (in over 180 ms from
+  16 px, out over 140 ms; a fade only with reduced motion or a CPU shell),
+  blurs behind it, and gives it the keyboard as it first shows; it asks
+  for the keyboard on demand, so a window clicked takes it and the drawer
+  stays. `Esc` (the keyboard in it), ✕, `Super+S` or her head close it.
+  Classic again closes it and forgets the thread.
+- **What it draws**: her head (52 px) in her mood, "Ta secrétaire", her
+  status line and dot, the gear (Settings › Agents until Settings ›
+  Secrétaire, lot 8) and ✕; the tabs; the agents' line while a tool is
+  followed (the waiting and stuck agents' names and words, else 4.6's
+  line; the most urgent agent's panda; "N agents ›"), which unfolds her
+  briefing in the drawer (T'ATTEND, BLOQUÉ, À VOIR, AU TRAVAIL, AU REPOS),
+  a line going to its agent and closing the drawer; the thread from the
+  bottom, by day (her head on the first of her run, her bubbles, the
+  user's in green, questions and their pills, cards in their kind's
+  colours, "Retenu · Annuler", "Supposé · corriger", her typing's dots and
+  what she does, her answer growing as it streams), scrolled by the
+  wheel; the field ("Dis-lui quelque chose…", `Enter` sends,
+  `Shift+Enter` a new line, `↑` on an empty field the last sentence), and
+  under it "Entrée envoie · Échap ferme" and the model that answers. Laid
+  out once per change; her head alone draws again while her mood plays;
+  closed, nothing of hers draws. It logs what it shows and where its
+  controls are when they change (tests).
+- **Tests**: `hocus-secretary/tests/conversation.rs` (AC6, AC7 and AC24
+  on her side, through the fake model and the recorder), the protocol's
+  lines, the pandas' moods' marks, and
+  `hocus-compositor/tests/secretary_drawer.rs` with the real shell and
+  her process: AC4 (her head; 420 px against the full bar, 360 against
+  the mini one on 1366 px; no window moves; the field focused), AC5
+  (`Super+S`, `Esc`, a window focused; classic: nothing), AC6 (typed,
+  typing, streamed on her clock), AC7 (one question, its pills, "Oui",
+  not asked again), AC8 (the agents' line's words, her briefing, a line
+  going to a finished agent: seen), AC24 (a card, no effect before its
+  click, one after), AC35 (her ear's colour on the screen listening and
+  asking; with reduced motion no commit while a mood would play).
+  `HOCUS_DRAWER_SHOTS=DIR` leaves PNGs of the drawer.
+- **Not yet**: the peek and `nudge` from her (lot 5); "Ce qu'elle sait"
+  (lot 6); effects that act (lots 5, 12, 13); "Modifier" puts nothing in
+  the field yet (she asks what to change); provenance links under her
+  claims; the thread across her restarts (she keeps the last 200 items
+  while she runs); `hocus secretary` from a terminal; the drawer's tree
+  for screen readers.

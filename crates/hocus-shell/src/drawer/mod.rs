@@ -301,6 +301,21 @@ pub fn wake() {
     crate::popover::send(vec![Effect::Wake(SECRETARY_NAMESPACE)]);
 }
 
+/// The agents changed, bumped each time: the drawer's line and her
+/// briefing are laid out again.
+static AGENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many times the agents changed.
+pub fn agents_seen() -> u64 {
+    AGENTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The agents changed: an open drawer shows them.
+pub fn agents_changed() {
+    AGENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    changed();
+}
+
 /// What she says changed: an open drawer draws it; closed, nothing.
 pub fn changed() {
     if is_open() {

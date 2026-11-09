@@ -419,6 +419,7 @@ fn change(with: impl FnOnce(&mut Said)) {
     );
     draw::stale();
     popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
+    crate::drawer::agents_changed();
     popover::changed(Item::Sources);
     popover::changed(Item::Secretary);
     for tool in Tool::ALL {

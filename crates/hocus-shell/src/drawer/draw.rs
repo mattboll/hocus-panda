@@ -1272,17 +1272,21 @@ pub struct View {
 /// last logged.
 #[derive(Debug, Default)]
 pub struct State {
-    laid: Option<((u64, u64, u32, u32, Option<Target>, u8), Laid)>,
+    laid: Option<(Key, Laid)>,
     logged: String,
     places: String,
 }
 
-/// The key a layout is made for: the conversation's and the drawer's
-/// changes, its size, what the pointer is on, her line.
-fn key(open: &Open, c: &Conversation, size: Size) -> (u64, u64, u32, u32, Option<Target>, u8) {
+/// What a layout is made for.
+type Key = (u64, u64, u64, u32, u32, Option<Target>, u8);
+
+/// The key a layout is made for: the conversation's, the drawer's and the
+/// agents' changes, its size, what the pointer is on, her line.
+fn key(open: &Open, c: &Conversation, size: Size) -> Key {
     (
         c.rev,
         open.rev,
+        super::agents_seen(),
         size.width.to_bits(),
         size.height.to_bits(),
         open.hover,
@@ -1545,8 +1549,6 @@ impl View {
             Size::new(size.width, laid.thread.height - 1.0),
         );
         f.with_clip(clip, |f| {
-            // The frame is translated to the clip's corner.
-            f.translate(iced::Vector::new(0.0, -clip.y));
             for shape in &laid.shapes {
                 draw_shape(f, shape, now);
             }
@@ -1592,12 +1594,14 @@ impl View {
                 caret = Point::new(at.x + width_of(line, FIELD_TEXT, false) + 1.0, at.y);
             }
         }
-        // Its caret, still: nothing blinks at rest.
-        f.fill_rectangle(
-            Point::new(caret.x, caret.y - 8.0),
-            Size::new(1.5, 16.0),
-            MINT,
-        );
+        // Its caret, still (nothing blinks at rest), after what is typed.
+        if !empty {
+            f.fill_rectangle(
+                Point::new(caret.x, caret.y - 8.0),
+                Size::new(1.5, 16.0),
+                MINT,
+            );
+        }
         let send = laid.send;
         let hover = open.hover == Some(Target::Send);
         f.fill(
