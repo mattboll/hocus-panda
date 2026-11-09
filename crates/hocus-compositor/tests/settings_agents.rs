@@ -12,6 +12,12 @@
 //! it, its agents gone; the halo for a waiting agent only, the preview
 //! saying so; the peek never; the rows' pandas as dots; no tool at all.
 //! What the window shows is read from its log, never on a time.
+//!
+//! And the secretary's (secretary.md lot 7): in assistant mode only, the
+//! applications that notified (the shell's history, the test's) listed
+//! under her mode, Slack first; "Autoriser" writing nothing before its
+//! sheet's "Autoriser", then a grant in her consent book (the test's data
+//! folder), in the notebook chosen; "Ne plus lire", a revocation.
 
 mod common;
 mod settings_page;
@@ -47,6 +53,11 @@ struct Machine {
     codex_declined: bool,
     /// The window moves (else reduced motion, as the file says).
     motion: bool,
+    /// The secretary is the assistant, as the file says.
+    assistant: bool,
+    /// Slack and Signal notified (the shell's history), and an agents'
+    /// tool.
+    notified: bool,
 }
 
 struct Bed {
@@ -157,11 +168,25 @@ impl Bed {
         std::fs::create_dir_all(&mine)?;
         std::os::unix::fs::symlink(std::env::current_dir()?, mine.join("cwd"))?;
         let file = root.join("config/hocuspanda/config.toml");
-        let text = if machine.motion {
+        let mut text = if machine.motion {
             FILE.to_owned()
         } else {
             format!("{FILE}\n[appearance]\nreduced-motion = true\n")
         };
+        if machine.assistant {
+            text.push_str("\n[secretary]\nmode = \"assistant\"\n");
+        }
+        if machine.notified {
+            std::fs::write(
+                root.join("state/hocuspanda/notifications"),
+                [
+                    r#"{"app":"Signal","summary":"Claire","body":"Dimanche ?","agent":false,"at":1794215520000,"unseen":true}"#,
+                    r#"{"app":"Slack","entry":"slack","summary":"Karim (#prod-alertes)","body":"la prod est tombée","agent":false,"at":1794215500000,"unseen":true}"#,
+                    r#"{"app":"Claude Code","summary":"waiting for your input","agent":true,"at":1794215400000,"unseen":false}"#,
+                ]
+                .join("\n"),
+            )?;
+        }
         std::fs::write(&file, &text)?;
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
@@ -713,6 +738,138 @@ fn pandas_off_draws_dots_in_the_rows() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Her consent book, in the test's data folder.
+fn consents(bed: &Bed) -> String {
+    std::fs::read_to_string(bed.root().join("data/hocuspanda/secretary/consents.json"))
+        .unwrap_or_default()
+}
+
+fn notifier<'a>(shown: &'a Value, key: &str) -> &'a Value {
+    shown["agents"]["notifiers"]
+        .as_array()
+        .and_then(|n| n.iter().find(|n| n["key"] == key))
+        .unwrap_or(&Value::Null)
+}
+
+/// Lot 7: the applications that notified show under her mode in
+/// assistant mode only (an agents' tool's own left out), Slack first.
+#[test]
+fn the_notifying_applications_show_under_the_secretary_in_assistant_mode_only() -> anyhow::Result<()>
+{
+    let Some(mut bed) = Bed::start(Machine {
+        notified: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| {
+        s["agents"]["notifiers"]
+            .as_array()
+            .is_some_and(|n| n.len() == 2)
+    })?;
+    assert_eq!(shown["agents"]["assistant"], false);
+    let places = bed.places_with("control:secretary.mode")?;
+    assert!(places.get("notifier:slack").is_none(), "classic: no row");
+    bed.click("control:secretary.mode")?;
+    let shown = bed.shows(|s| s["agents"]["assistant"] == true)?;
+    let keys: Vec<&str> = shown["agents"]["notifiers"]
+        .as_array()
+        .map(|n| n.iter().filter_map(|n| n["key"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(keys, ["slack", "signal"]);
+    bed.place_of("notifier:slack")?;
+    assert!(consents(&bed).is_empty(), "nothing consented by itself");
+    Ok(())
+}
+
+/// Lot 7: "Autoriser" writes nothing before its sheet's "Autoriser",
+/// then a grant in her consent book, in the notebook chosen; "Pas
+/// maintenant" nothing; "Ne plus lire" a revocation.
+#[test]
+fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() -> anyhow::Result<()>
+{
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        notified: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| notifier(s, "slack")["granted"].is_null() && notifier(s, "signal").is_object())?;
+    bed.click("notifier:signal")?;
+    bed.shows(|s| s["agents"]["notify"] == "Signal")?;
+    bed.click("sheet:not-now")?;
+    bed.shows(|s| s["agents"]["notify"].is_null())?;
+    assert!(
+        consents(&bed).is_empty(),
+        "nothing before the sheet's Autoriser"
+    );
+
+    bed.click("notifier:slack")?;
+    let shown = bed.shows(|s| s["agents"]["notify"] == "Slack")?;
+    assert_eq!(shown["agents"]["notify_notebook"], "pro", "Slack's is pro");
+    assert!(consents(&bed).is_empty());
+    bed.click("sheet:allow")?;
+    bed.shows(|s| notifier(s, "slack")["granted"] == "pro")?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    let grant = book.notifications("Slack", Some("slack")).expect("granted");
+    assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
+    assert!(book.notifications("Signal", None).is_none());
+
+    bed.click("notifier:signal")?;
+    bed.shows(|s| s["agents"]["notify"] == "Signal")?;
+    bed.click("sheet:perso")?;
+    bed.shows(|s| s["agents"]["notify_notebook"] == "perso")?;
+    bed.click("sheet:allow")?;
+    bed.shows(|s| notifier(s, "signal")["granted"] == "perso")?;
+
+    bed.click("notifier:slack")?;
+    bed.shows(|s| notifier(s, "slack")["granted"].is_null())?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    assert!(book.notifications("Slack", None).is_none(), "revoked");
+    assert_eq!(
+        book.notifications("Signal", None).map(|g| g.notebook()),
+        Some(hocus_secretary_link::Notebook::Perso)
+    );
+    assert_eq!(book.records().len(), 3, "a revocation is a later record");
+    Ok(())
+}
+
+/// Lot 7's screenshots, into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_secretary_s_notifications() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(Machine {
+        claude: true,
+        assistant: true,
+        notified: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| notifier(s, "slack").is_object())?;
+    bed.reveal("row:agents.notifier.signal")?;
+    save(&mut bed, &out, "secretary-notifications.png")?;
+    bed.click("notifier:slack")?;
+    bed.shows(|s| s["agents"]["notify"] == "Slack")?;
+    save(&mut bed, &out, "secretary-notifications-sheet.png")?;
+    bed.click("sheet:allow")?;
+    bed.shows(|s| notifier(s, "slack")["granted"] == "pro")?;
+    bed.reveal("row:agents.notifier.signal")?;
+    save(&mut bed, &out, "secretary-notifications-allowed.png")?;
+    Ok(())
+}
+
 /// The secretary's switch (secretary.md §21): `[secretary] mode` written
 /// "assistant", then "classic" again, the compositor following.
 #[test]
@@ -828,6 +985,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         codex_declined: true,
         herdr: true,
         motion: true,
+        ..Machine::default()
     })?
     else {
         return Ok(());

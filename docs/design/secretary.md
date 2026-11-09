@@ -1412,6 +1412,7 @@ schedules: at most 1 wakeup a minute idle with Gmail IDLE and Slack notification
    - Digests in the triage.
    - Never invoking an action.
    - Covers AC16.
+   - **As built (#749)**: see §22, lot 7.
 
 ### Later lots
 
@@ -1695,6 +1696,86 @@ The setting is followed live, so switching back to "classic" stops the process a
   for OpenAI-compatible answer models (lot 14); extraction's proposals
   from the triage's candidates (lot 6); the moment and quiet hours (lot
   5); the pending queue across restarts; the banc d'essai (lot 8).
+
+### Lot 7 (#749): Slack through its notifications
+
+- **The consent book is shared** (§10.1): `hocus_secretary_link::consent`
+  (moved from `hocus-sources`, which re-exports it), so that the shell and
+  the Settings read and write the same records without her crates. Its
+  file is `consents.json` in her folder (`hocus_secretary_link::data_dir`).
+  A source is now an account's kind or an application's notifications
+  (`SourceKind::Notifications`, outside `SourceKind::ALL`: the Google
+  cycle neither reads nor purges them). An application is keyed by its
+  name, lowercase (`slack`); `ConsentBook::notifications(app, entry)`
+  grants a notification by its desktop entry or by its application's
+  name, so that one sent without its entry is still its application's.
+- **Consent, for now on Settings › Agents** (§13's "Connexions et accord"
+  is lot 8): under "LA SECRÉTAIRE", in assistant mode only, one row per
+  application found — those in the book, those that notified in the
+  shell's history (seven days; the agents' tools' own left out), and
+  Slack when a desktop entry of it is installed — Slack first.
+  "Autoriser" opens a sheet (§10.1): what she reads (for Slack, with the
+  mode's caveats: only what Slack notifies, often cut, nothing while it is
+  closed, not the user's replies), what she never does there (open, close
+  or answer a notification: nothing marked read; do what a message asks),
+  what leaves the machine, and the notebook, **pro by default** (§7.4:
+  Slack's is pro; another application's is chosen there). Nothing is
+  written before the sheet's "Autoriser"; then a grant record; "Ne plus
+  lire" writes a revocation. The book is read and written on a thread of
+  the page's. Slack's other modes (the official app, the user's session)
+  are lot 13.
+- **The shell forwards** (`hocus-shell/src/secretary.rs`): the server's
+  thread, as a notification comes (before the bubbles have it), reads the
+  book again when its file changed, and sends her `notification {id, app,
+  entry, title, body, at_ms}` only when its application is granted and
+  she is wanted (assistant mode; classic forwards nothing). What it says
+  only: its actions, default and hints are never sent. Forwarded whatever
+  the bubbles do: held while the screen is shared (5.11) or not to be
+  disturbed, a notification is still hers to read; whether she may speak
+  of it is the speak gate's (§6.3, lot 5), and perso items stay hidden in
+  public moments there. While she is not connected yet, what is queued
+  waits (100 at most, the oldest dropped); while she is down, nothing is
+  forwarded.
+- **Never an action** (§10.1, AC16): no line of hers reaches the
+  notifications. The protocol has no message from her about one; the
+  shell's forwarding does not touch the stack; her source keeps no
+  action. Slack is never asked anything in this mode.
+- **Her notifications' source** (`hocus-secretary/src/notifications.rs`):
+  her loop puts a forwarded notification in its queue (`Arrivals`, 500 at
+  most) and makes it due at once (again once a sync under way ends). Its
+  worker reads the book again: a notification not granted now is dropped
+  unread. Each one is an item (`hocus_sources::notification::item`,
+  `Content::Notification {app, title, body}`), its id
+  `<at_ms>-<server id>` (the shell numbers from 1 again when it starts),
+  its pointer `<app>:notifications`, labelled "la notification de Slack,
+  9 nov.", opening nothing; its notebook the grant's; through the first
+  pass (title and text; no denoising: it is not a mail); its digest
+  "Slack : <title>" kept, its text held for the triage (the second pass,
+  fail closed, "seuls des résumés locaux sortent" as a mail's) and never
+  written. A revoked application is forgotten at the source's next sync
+  (every five minutes, as her Google accounts'), once: its episodes, held
+  texts and queue.
+- **Tests**: `hocus-secretary/tests/notifications.rs` (a consented Slack
+  notification through pass 1 and the local triage, its metadata only to
+  Claude before the check, its text after, its token never; Thunderbird,
+  not consented, reaching nothing; no request but to the fake model
+  servers; Signal's in the perso notebook; Slack revoked: forgotten
+  within one cycle, its next notifications dropped);
+  `hocus-compositor/tests/secretary_notifications.rs` (AC16 with the real
+  shell on a private bus and her process: Slack's notification with
+  actions reaches her intake, Signal's does not; neither application hears
+  an `ActionInvoked` or a `NotificationClosed`, both bubbles stay);
+  `hocus-compositor/tests/settings_agents.rs` (the rows in assistant mode
+  only, Slack first; nothing written before the sheet's "Autoriser", then
+  a grant in the notebook chosen, "Ne plus lire" a revocation); unit
+  tests of the book, the item and its redaction, the source, the
+  Settings' discovery.
+- **Not yet**: her own consent flow in the drawer ("Slack t'envoie des
+  notifications sur le bureau. Je peux les lire ?", lot 2's thread, then
+  §13's page, lot 8); the rules learned from notifications ("#prod-alertes
+  : urgent", lot 6); grouping a conversation's notifications into one
+  thread; a notification's application icon on the Settings' row (its
+  letter tile for now).
 
 ### Lot 2 (#744): the drawer and the conversation
 

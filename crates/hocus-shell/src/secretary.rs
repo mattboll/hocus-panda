@@ -10,8 +10,18 @@
 //! The shell tells her what she cannot see from her process: the session
 //! locked or not (she keeps working, and never speaks while locked) and
 //! the machine resumed (her sources catch up).
+//!
+//! And the notifications of the applications the user consented to (lot
+//! 7, [`notified`]): her consent book, in her folder, says which; the
+//! server's thread reads it again when it changes, and forwards her what
+//! a notification says, never what it can do. Nothing of hers comes back
+//! to the notifications: she cannot invoke, close or mark one (Slack's
+//! would mark the channel read). Forwarded whatever the bubbles do: held
+//! while the screen is shared or not to be disturbed, they are still
+//! hers to read; when she may speak of them is hers to ask (§6.3).
 
 use std::{
+    collections::VecDeque,
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
@@ -19,16 +29,21 @@ use std::{
         Mutex, PoisonError,
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use hocus_link::SecretaryShown;
 use hocus_secretary_link::{
-    Body, Client, Decision, FromSecretary, Item, Look, ToSecretary, VERSION, line, read,
+    Body, Client, Decision, FromSecretary, Item, Look, Notification, ToSecretary, VERSION,
+    consent::{CONSENTS, ConsentBook},
+    line, read,
 };
 
 /// The longest wait between two tries to connect.
 const RETRY_MOST: Duration = Duration::from_secs(2);
+/// What waits for her while she does not listen yet, at most; the oldest
+/// go first.
+const PENDING_MOST: usize = 100;
 
 /// Where she is, as her drawer will say it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -267,11 +282,54 @@ pub fn resumed(slept: Option<u64>) {
     send(ToSecretary::Resumed { slept });
 }
 
+/// Her consent book as last read, and its file's time then.
+static BOOK: Mutex<Option<(Option<SystemTime>, ConsentBook)>> = Mutex::new(None);
+
+/// Her consent book, read again when its file changed: on the
+/// notifications' server's thread, never iced's.
+fn book() -> ConsentBook {
+    let Some(path) = hocus_secretary_link::data_dir().map(|d| d.join(CONSENTS)) else {
+        return ConsentBook::default();
+    };
+    let changed = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let mut kept = BOOK.lock().unwrap_or_else(PoisonError::into_inner);
+    match kept.as_ref() {
+        Some((at, book)) if *at == changed => book.clone(),
+        _ => {
+            let book = ConsentBook::load(&path);
+            *kept = Some((changed, book.clone()));
+            book
+        }
+    }
+}
+
+/// A notification the server received: forwarded to her, in assistant
+/// mode, when its application is consented to (lot 7). What it says only:
+/// its actions stay the bubbles'.
+pub fn notified(notification: Notification) {
+    if line_state().out.is_none() {
+        // Classic, or she is down: nothing is forwarded.
+        return;
+    }
+    if book()
+        .notifications(&notification.app, notification.entry.as_deref())
+        .is_none()
+    {
+        return;
+    }
+    tracing::debug!(
+        id = notification.id,
+        app = notification.app,
+        "a notification forwarded to the secretary"
+    );
+    send(ToSecretary::Notification(notification));
+}
+
 /// Connects (again, while she is wanted), says hello and the lock, then
 /// writes what is queued; a reader thread takes her lines.
 fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
     let mut wait = Duration::from_millis(50);
-    let mut pending: Option<ToSecretary> = None;
+    let mut pending: VecDeque<ToSecretary> = VecDeque::new();
     loop {
         let mut stream = match UnixStream::connect(socket) {
             Ok(stream) => stream,
@@ -280,8 +338,11 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
                 // meanwhile when the queue's sender goes.
                 match queue.recv_timeout(wait) {
                     Ok(message) => {
-                        // Kept for when she listens; the newest first.
-                        pending = Some(message);
+                        // Kept for when she listens.
+                        if pending.len() >= PENDING_MOST {
+                            pending.pop_front();
+                        }
+                        pending.push_back(message);
                     }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,
@@ -304,7 +365,7 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
             locked: locked || line_state().locked,
         };
         let mut first = vec![hello, session];
-        first.extend(pending.take());
+        first.extend(pending.drain(..));
         if first
             .iter()
             .any(|m| stream.write_all(line(m).as_bytes()).is_err())
@@ -329,7 +390,7 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
             match queue.recv() {
                 Ok(message) => {
                     if stream.write_all(line(&message).as_bytes()).is_err() {
-                        pending = Some(message);
+                        pending.push_back(message);
                         break;
                     }
                 }

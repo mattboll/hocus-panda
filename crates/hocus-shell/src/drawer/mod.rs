@@ -501,7 +501,7 @@ pub fn act(id: window::Id, target: Target) {
                     row: None,
                 })];
                 d.close(Instant::now(), &mut effects);
-                return Then::Effects(effects);
+                Then::Effects(effects)
             }
             Target::Reply { item, choice } => {
                 crate::secretary::choose(item, choice);

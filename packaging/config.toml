@@ -375,7 +375,9 @@
 # encrypted memory in ~/.local/share/hocuspanda/secretary (its key in the
 # keyring) and reads the sources you consent to. Followed live: back to
 # "classic", her process stops and her memory stays on disk until you ask
-# her to forget it.
+# her to forget it. What she reads is not listed here: each source is
+# consented to on its own (an application's notifications, Slack's for
+# one, under Settings › Agents), kept in her folder's consents.json.
 # mode = "classic"
 
 # [secretary.models]

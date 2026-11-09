@@ -1029,7 +1029,7 @@ fn lay_out_card(
             hex(0xE6EAF1),
             false,
         );
-        at += h + if draft { 4.0 } else { 4.0 };
+        at += h + 4.0;
     }
     match (&card.decided, &card.outcome) {
         (Some(_), outcome) | (None, outcome @ Some(_)) => {

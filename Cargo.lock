@@ -2086,8 +2086,11 @@ dependencies = [
 name = "hocus-secretary-link"
 version = "1.0.0"
 dependencies = [
+ "jiff",
  "serde",
  "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -2103,6 +2106,7 @@ dependencies = [
  "hocus-network",
  "hocus-pandas",
  "hocus-perf",
+ "hocus-secretary-link",
  "hocus-sound",
  "hocus-xdg",
  "iced",

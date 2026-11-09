@@ -23,7 +23,7 @@ use jiff::{Timestamp, tz::TimeZone};
 use crate::sources::{Item, Source, Synced};
 
 /// The consent book's file, in her folder.
-pub const CONSENTS: &str = "consents.json";
+pub const CONSENTS: &str = hocus_secretary_link::consent::CONSENTS;
 
 /// Her Google accounts.
 #[derive(Debug)]
@@ -125,6 +125,8 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
             format!("anniversaire de {} : {}/{}", b.name, b.day, b.month),
             false,
         ),
+        // Not an account's: her notifications' source's.
+        Content::Notification(n) => ("notification", format!("{} : {}", n.app, n.title), true),
     };
     Item {
         id: source.pointer.id.clone(),

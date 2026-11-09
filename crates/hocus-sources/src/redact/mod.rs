@@ -219,6 +219,7 @@ impl Redacted {
                     Content::Mail(mail) => (Some(mail.from.as_str()), mail.subject.as_str()),
                     Content::Event(event) => (None, event.title.as_str()),
                     Content::Birthday(birthday) => (None, birthday.name.as_str()),
+                    Content::Notification(n) => (Some(n.app.as_str()), n.title.as_str()),
                 };
                 Outbound::MetadataOnly {
                     pointer: &self.item.pointer,
@@ -423,6 +424,10 @@ fn texts(content: &mut Content) -> Vec<(Field, &mut String)> {
             }
         }
         Content::Birthday(birthday) => out.push((Field::Name, &mut birthday.name)),
+        Content::Notification(notification) => {
+            out.push((Field::Title, &mut notification.title));
+            out.push((Field::Body, &mut notification.body));
+        }
     }
     out
 }

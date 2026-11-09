@@ -1,5 +1,9 @@
 //! The "Agents" page (6.16, variant A, docs/design/settings.md "Agents"):
-//! the tools followed, the halo and its preview, the pandas.
+//! the tools followed, the halo and its preview, the pandas, and the
+//! secretary: her mode, and in assistant mode the applications whose
+//! notifications she reads (secretary.md lot 7, [`crate::notifiers`]),
+//! each consented to on a sheet that says what she reads, what she never
+//! does there and what leaves the machine, with its notebook.
 //!
 //! The tools are the compositor's (4.0): it says them on the Settings'
 //! line (`agent-tools`), and the page asks it to plug one in or out, or
@@ -43,9 +47,11 @@ use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
     lang::{Lang, w},
     model::{SectionId, Setting, Value},
+    notifiers::{self, Notifier},
     screens::Said,
     store::Slot,
 };
+use hocus_secretary_link::Notebook;
 
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
@@ -92,6 +98,16 @@ pub enum Msg {
     Pet(usize),
     /// What the tools' files and the state file say.
     Files(HashMap<Tool, Facts>),
+    /// The applications whose notifications she may read, as found.
+    Notifiers(Vec<Notifier>),
+    /// "Autoriser" on the `n`th application's row: its sheet opens.
+    Allow(usize),
+    /// The sheet's notebook.
+    Notebook(Notebook),
+    /// The sheet's "Autoriser" (`true`) or "Pas maintenant".
+    Allowed(bool),
+    /// "Ne plus lire" on the `n`th application's row.
+    Revoke(usize),
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -101,6 +117,8 @@ pub enum Stop {
     Action(Tool),
     Preview,
     Copy,
+    /// The `n`th application's button, under the secretary.
+    Notifier(usize),
 }
 
 /// A tool plugged in or out, herdr followed or not, for its undo.
@@ -127,6 +145,16 @@ struct Consent {
     on_plug: bool,
 }
 
+/// The notifications' consent sheet: for which application, into which
+/// notebook, and which button has the keyboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Notify {
+    name: String,
+    slack: bool,
+    notebook: Notebook,
+    on_allow: bool,
+}
+
 /// The page's state.
 #[derive(Debug, Default)]
 pub struct State {
@@ -149,6 +177,9 @@ pub struct State {
     seen: bool,
     /// The window's messages: what the files say comes back there.
     to: Option<iced::futures::channel::mpsc::UnboundedSender<Message>>,
+    /// The applications whose notifications she may read, as last read.
+    notifiers: Vec<Notifier>,
+    notify: Option<Notify>,
 }
 
 impl State {
@@ -263,7 +294,57 @@ impl App {
                 out.push(Control::Agents(Stop::Preview));
             }
         }
+        if self.agents_assistant() {
+            out.extend(
+                (0..self.agents.notifiers.len()).map(|i| Control::Agents(Stop::Notifier(i))),
+            );
+        }
         out
+    }
+
+    /// The secretary is the assistant (`[secretary] mode`): her rows show.
+    fn agents_assistant(&self) -> bool {
+        self.agents_slot(model::SECRETARY)
+            .and_then(|s| self.value(s))
+            .is_some_and(|v| v == Value::Bool(true))
+    }
+
+    /// The applications whose notifications she may read, found on a
+    /// thread, said back to the window.
+    fn agents_read_notifiers(&self) {
+        self.agents_notifiers_job(None);
+    }
+
+    /// `decision` written in her consent book (`(name, Some(notebook))`:
+    /// read; `None`: no longer), then the applications read again; on a
+    /// thread.
+    fn agents_notifiers_job(&self, decision: Option<(String, Option<Notebook>)>) {
+        let Some(to) = self.agents.to.clone() else {
+            return;
+        };
+        let started = std::thread::Builder::new()
+            .name("notifiers".to_owned())
+            .spawn(move || {
+                if let Some((name, notebook)) = decision {
+                    let written = notifiers::book_path()
+                        .ok_or_else(|| std::io::Error::other("no data folder"))
+                        .and_then(|path| {
+                            notifiers::decide(&path, &name, notebook, jiff::Timestamp::now())
+                        });
+                    match written {
+                        Ok(()) => tracing::info!(
+                            app = name,
+                            notebook = notebook.map(Notebook::word),
+                            "the secretary's consent to an application's notifications written"
+                        ),
+                        Err(err) => tracing::warn!(app = name, %err, "the consent is not written"),
+                    }
+                }
+                let _ = to.unbounded_send(Message::Agents(Msg::Notifiers(notifiers::read())));
+            });
+        if let Err(err) = started {
+            tracing::warn!(%err, "the notifying applications are not read");
+        }
     }
 
     fn agents_focused(&self, stop: Stop) -> bool {
@@ -357,6 +438,75 @@ impl App {
                 self.agents.files = files;
                 iced::Task::none()
             }
+            Msg::Notifiers(found) => {
+                self.agents.notifiers = found;
+                iced::Task::none()
+            }
+            Msg::Allow(i) => {
+                if let Some(n) = self.agents.notifiers.get(i)
+                    && n.granted.is_none()
+                    && self.agents_assistant()
+                {
+                    tracing::debug!(app = n.name, "the notifications' consent sheet opens");
+                    self.agents.notify = Some(Notify {
+                        name: n.name.clone(),
+                        slack: n.is_slack(),
+                        notebook: notifiers::proposed(n),
+                        on_allow: true,
+                    });
+                }
+                iced::Task::none()
+            }
+            Msg::Notebook(notebook) => {
+                if let Some(notify) = &mut self.agents.notify {
+                    notify.notebook = notebook;
+                }
+                iced::Task::none()
+            }
+            Msg::Allowed(yes) => {
+                let Some(notify) = self.agents.notify.take() else {
+                    return iced::Task::none();
+                };
+                if !yes {
+                    tracing::debug!(app = notify.name, "not read");
+                    return iced::Task::none();
+                }
+                self.agents_notifiers_job(Some((notify.name.clone(), Some(notify.notebook))));
+                let text = match self.lang {
+                    Lang::French => format!(
+                        "{} : elle lit ses notifications (carnet {})",
+                        notify.name,
+                        notify.notebook.word()
+                    ),
+                    Lang::English => format!(
+                        "{}: she reads its notifications ({} notebook)",
+                        notify.name,
+                        notify.notebook.word()
+                    ),
+                };
+                self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::Revoke(i) => {
+                let Some(name) = self
+                    .agents
+                    .notifiers
+                    .get(i)
+                    .filter(|n| n.granted.is_some())
+                    .map(|n| n.name.clone())
+                else {
+                    return iced::Task::none();
+                };
+                self.agents_notifiers_job(Some((name.clone(), None)));
+                let text = match self.lang {
+                    Lang::French => format!(
+                        "{name} : elle ne lit plus ses notifications et oublie ce qu’elle en savait"
+                    ),
+                    Lang::English => format!(
+                        "{name}: she no longer reads its notifications and forgets what she knew of them"
+                    ),
+                };
+                self.toast(text, ToastAction::None, TOAST)
+            }
         }
     }
 
@@ -435,6 +585,26 @@ impl App {
     /// The consent sheet takes the keyboard: `Esc` cancels, `Enter`
     /// acts, `Tab` and the arrows go from one button to the other.
     pub(super) fn agents_key_first(&mut self, key: &Key) -> Option<iced::Task<Message>> {
+        if let Some(notify) = self.agents.notify.as_mut() {
+            match key.as_ref() {
+                Key::Named(Named::Escape) => return Some(self.agents_update(Msg::Allowed(false))),
+                Key::Named(Named::Enter | Named::Space) => {
+                    let yes = notify.on_allow;
+                    return Some(self.agents_update(Msg::Allowed(yes)));
+                }
+                Key::Named(Named::Tab | Named::ArrowLeft | Named::ArrowRight) => {
+                    notify.on_allow = !notify.on_allow;
+                }
+                Key::Named(Named::ArrowUp | Named::ArrowDown) => {
+                    notify.notebook = match notify.notebook {
+                        Notebook::Pro => Notebook::Perso,
+                        Notebook::Perso => Notebook::Pro,
+                    };
+                }
+                _ => {}
+            }
+            return Some(iced::Task::none());
+        }
         let consent = self.agents.consent.as_mut()?;
         match key.as_ref() {
             Key::Named(Named::Escape) => return Some(self.agents_update(Msg::Consent(false))),
@@ -471,6 +641,11 @@ impl App {
                 Stop::Preview => {
                     self.agents_update(Msg::Play(self.agents.played.unwrap_or(Played::Waiting)))
                 }
+                Stop::Notifier(i) => match self.agents.notifiers.get(i).map(|n| n.granted) {
+                    Some(Some(_)) => self.agents_update(Msg::Revoke(i)),
+                    Some(None) => self.agents_update(Msg::Allow(i)),
+                    None => iced::Task::none(),
+                },
                 Stop::Action(tool) => {
                     let action = self
                         .agents
@@ -562,6 +737,7 @@ impl App {
             if self.agents.tools.is_some() {
                 self.agents_read_files();
             }
+            self.agents_read_notifiers();
             self.agents.hop = (!self.reduced_motion).then(Instant::now);
         }
         self.agents.seen = shows;
@@ -582,6 +758,9 @@ impl App {
                 self.agents.rise = motion.then(Instant::now);
             }
             (model::PANDAS, Value::Bool(true)) => self.agents.hop = motion.then(Instant::now),
+            // The assistant: the applications are read again for her rows.
+            (model::SECRETARY, Value::Bool(true)) => self.agents_read_notifiers(),
+            (model::SECRETARY, Value::Bool(false)) => self.agents.notify = None,
             _ => {}
         }
     }
@@ -725,10 +904,225 @@ impl App {
                     "Her memory stays on this computer",
                 ))
                 .to_owned(),
-                column![model_row(model::SECRETARY)].into(),
+                self.agents_secretary_rows(model_row(model::SECRETARY)),
             ),
         );
         container(page).id("page:agents".to_owned()).into()
+    }
+
+    /// The secretary's group: her mode's row, and in assistant mode the
+    /// applications whose notifications she may read.
+    fn agents_secretary_rows<'a>(&'a self, mode: El<'a>) -> El<'a> {
+        let mut body = column![mode];
+        if !self.agents_assistant() {
+            return body.into();
+        }
+        if self.agents.notifiers.is_empty() {
+            body = body.push(divided(
+                true,
+                container(t(
+                    self.say(w(
+                        "Aucune application ne t’a encore envoyé de notification : Slack, par exemple, apparaîtra ici dès qu’il en enverra une.",
+                        "No application has sent you a notification yet: Slack, for one, will show here as soon as it sends one.",
+                    )),
+                    12.5,
+                    DIM.get(),
+                ))
+                .padding([12, 16])
+                .id("agents:no-notifier".to_owned())
+                .into(),
+            ));
+        }
+        for (i, notifier) in self.agents.notifiers.iter().enumerate() {
+            body = body.push(divided(true, self.agents_notifier_row(i, notifier)));
+        }
+        body.into()
+    }
+
+    /// An application's mark: its first letter on the neutral tile the
+    /// notifications draw for an application without an icon.
+    fn agents_letter<'a>(name: &str, size: f32) -> El<'a> {
+        let letter: String = name
+            .chars()
+            .find(|c| c.is_alphanumeric())
+            .map(|c| c.to_uppercase().collect())
+            .unwrap_or_default();
+        container(
+            text(letter)
+                .size(size * 0.46)
+                .font(BOLD)
+                .color(Color::WHITE),
+        )
+        .width(size)
+        .height(size)
+        .center(size)
+        .style(boxed(rgb(0x5C6576), size * 0.28, None))
+        .into()
+    }
+
+    fn agents_notifier_row<'a>(&'a self, i: usize, notifier: &'a Notifier) -> El<'a> {
+        let lang = self.lang;
+        let focused = self.agents_focused(Stop::Notifier(i));
+        let title = match lang {
+            Lang::French => format!("Les notifications de {}", notifier.name),
+            Lang::English => format!("{}’s notifications", notifier.name),
+        };
+        let words = column![
+            t(title, 14.0, TEXT.get()).font(SEMIBOLD),
+            t(notifier.line(lang), 12.5, DIM.get()),
+        ]
+        .spacing(3)
+        .width(Length::Fill);
+        let action = if notifier.granted.is_some() {
+            self.agents_button(
+                self.say(w("Ne plus lire", "Stop reading")),
+                false,
+                focused,
+                Some(Message::Agents(Msg::Revoke(i))),
+            )
+        } else {
+            self.agents_button(
+                self.say(w("Autoriser", "Allow")),
+                true,
+                focused,
+                Some(Message::Agents(Msg::Allow(i))),
+            )
+        };
+        container(
+            row![
+                Self::agents_letter(&notifier.name, 28.0),
+                words,
+                container(action).id(format!("notifier:{}", notifier.key)),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: 11.0,
+            right: 14.0,
+            bottom: 11.0,
+            left: 16.0,
+        })
+        .id(format!("row:agents.notifier.{}", notifier.key))
+        .into()
+    }
+
+    /// The notifications' consent sheet (§10.1): what she reads, what she
+    /// never does there, what leaves the machine; the notebook.
+    fn agents_notify_sheet<'a>(&self, notify: &Notify) -> El<'a> {
+        let lang = self.lang;
+        let title = match lang {
+            Lang::French => format!("Lire les notifications de {} ?", notify.name),
+            Lang::English => format!("Read {}’s notifications?", notify.name),
+        };
+        let mut body = column![
+            row![
+                Self::agents_letter(&notify.name, 32.0),
+                text(title).size(17).font(BOLD).color(TEXT),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(14);
+        for (heading, said) in notifiers::sheet(&notify.name, notify.slack, lang) {
+            body = body.push(
+                column![
+                    t(heading.get(lang), 11.0, FAINT.get()).font(BOLD),
+                    t(said, 13.0, SOFT.get()).line_height(1.45),
+                ]
+                .spacing(5),
+            );
+        }
+        let pill = |notebook: Notebook, said: &'static str| -> El<'a> {
+            let on = notify.notebook == notebook;
+            container(
+                button(t(said, 12.5, if on { DEEP.get() } else { TEXT.get() }).font(BOLD))
+                    .padding([5, 14])
+                    .on_press(Message::Agents(Msg::Notebook(notebook)))
+                    .style(move |_, _| button::Style {
+                        background: Some(Background::Color(if on {
+                            ACCENT.get()
+                        } else {
+                            crate::theme::ink(rgba(255, 255, 255, 0.08))
+                        })),
+                        text_color: TEXT.get(),
+                        border: border(13.0, 0.0, Color::TRANSPARENT),
+                        ..button::Style::default()
+                    }),
+            )
+            .id(format!("sheet:{}", notebook.word()))
+            .into()
+        };
+        body = body.push(
+            column![
+                t(self.say(w("CARNET", "NOTEBOOK")), 11.0, FAINT.get()).font(BOLD),
+                row![
+                    pill(Notebook::Pro, self.say(w("Pro", "Work"))),
+                    pill(Notebook::Perso, self.say(w("Perso", "Personal"))),
+                    t(
+                        self.say(w(
+                            "Le perso ne se montre jamais pendant un partage d’écran.",
+                            "Personal items never show while the screen is shared.",
+                        )),
+                        12.0,
+                        DIM.get()
+                    ),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(6),
+        );
+        let buttons = row![
+            Space::new().width(Length::Fill),
+            container(self.agents_button(
+                self.say(w("Pas maintenant", "Not now")),
+                false,
+                !notify.on_allow,
+                Some(Message::Agents(Msg::Allowed(false))),
+            ))
+            .id("sheet:not-now".to_owned()),
+            container(self.agents_button(
+                self.say(w("Autoriser", "Allow")),
+                true,
+                notify.on_allow,
+                Some(Message::Agents(Msg::Allowed(true))),
+            ))
+            .id("sheet:allow".to_owned()),
+        ]
+        .spacing(8);
+        Self::agents_over(
+            container(column![body, buttons].spacing(20))
+                .width(440)
+                .padding(20)
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(rgb(0x1B2130))),
+                    border: border(14.0, 1.0, RIM_12.get()),
+                    shadow: shadow(),
+                    ..container::Style::default()
+                })
+                .id("sheet".to_owned())
+                .into(),
+        )
+    }
+
+    /// `sheet` over the window, its scrim taking the clicks.
+    fn agents_over(sheet: El<'_>) -> El<'_> {
+        stack![
+            mouse_area(
+                container(Space::new().width(Length::Fill).height(Length::Fill)).style(boxed(
+                    crate::theme::ink(rgba(0, 0, 0, 0.6)),
+                    0.0,
+                    None
+                ))
+            )
+            .on_press(Message::Nothing),
+            container(sheet)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center(Length::Fill),
+        ]
+        .into()
     }
 
     /// A tool's mark: a round in its colour, its letter.
@@ -1280,6 +1674,9 @@ impl App {
 
     /// The consent sheet, over the window at 60 %.
     pub(super) fn agents_sheet(&self) -> Option<El<'_>> {
+        if let Some(notify) = &self.agents.notify {
+            return Some(self.agents_notify_sheet(notify));
+        }
         let consent = self.agents.consent?;
         let lang = self.lang;
         let tool = consent.tool;
@@ -1429,6 +1826,15 @@ impl App {
             "remind_inert": self.agents_word(model::HALO) == "off",
             "pandas": self.agents_pandas(),
             "copied": self.agents.copied.is_some_and(|at| self.now.saturating_duration_since(at) < COPIED),
+            "assistant": self.agents_assistant(),
+            "notifiers": self.agents.notifiers.iter().map(|n| serde_json::json!({
+                "key": n.key,
+                "name": n.name,
+                "granted": n.granted.map(Notebook::word),
+            })).collect::<Vec<_>>(),
+            "notify": self.agents.notify.as_ref().map(|n| n.name.clone()),
+            "notify_notebook": self.agents.notify.as_ref().map(|n| n.notebook.word()),
+            "notify_on": self.agents.notify.as_ref().map(|n| if n.on_allow { "allow" } else { "not-now" }),
         })
     }
 }

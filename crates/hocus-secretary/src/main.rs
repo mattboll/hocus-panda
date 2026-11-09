@@ -22,6 +22,7 @@ use hocus_secretary::{
     google::{self, Google},
     key,
     model::{Fake, Model, Recorder},
+    notifications::Notifications,
     providers::{Keyring, Router},
     server, settings,
     sources::{Fixture, Source},
@@ -175,6 +176,9 @@ fn run(args: Args) -> Result<(), String> {
             )));
         }
     }
+    // The applications' notifications the shell forwards, as consented.
+    let (notifications, arrivals) = Notifications::new(data.join(google::CONSENTS));
+    sources.push(Box::new(notifications));
     let brain = Brain::new(
         store,
         Options {
@@ -188,6 +192,7 @@ fn run(args: Args) -> Result<(), String> {
                 ..Scope::default()
             },
             effects: recorder,
+            notifications: Some(arrivals),
             ..Options::default()
         },
     );

@@ -158,8 +158,8 @@ pub fn secretary(
 ) -> (svg::Handle, bool) {
     use hocus_pandas::SecretaryMood;
     static STILL: OnceLock<Vec<svg::Handle>> = OnceLock::new();
-    static FRAMES: Mutex<Vec<((SecretaryMood, Duration, u32), svg::Handle)>> =
-        Mutex::new(Vec::new());
+    type Frame = ((SecretaryMood, Duration, u32), svg::Handle);
+    static FRAMES: Mutex<Vec<Frame>> = Mutex::new(Vec::new());
     const KEPT: usize = 8;
     let still = || {
         let stills = STILL.get_or_init(|| {

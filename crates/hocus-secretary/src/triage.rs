@@ -379,6 +379,10 @@ pub fn input(item: &hocus_sources::Item) -> String {
             event.description.as_deref().unwrap_or_default()
         ),
         Content::Birthday(b) => format!("Anniversaire : {}", b.name),
+        Content::Notification(n) => format!(
+            "Notification\nApplication : {}\nTitre : {}\n\n{}",
+            n.app, n.title, n.body
+        ),
     }
 }
 

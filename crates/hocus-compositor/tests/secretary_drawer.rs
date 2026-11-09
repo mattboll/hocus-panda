@@ -586,7 +586,12 @@ fn a_sentence_shows_its_bubble_her_typing_then_her_answer_as_it_comes() -> anyho
     };
     bed.super_s();
     bed.opened()?;
-    bed.shows(|s| s["model"] == "Claude Sonnet 5.5" && s["status"] == "Planka à jour")?;
+    bed.shows(|s| {
+        s["model"] == "Claude Sonnet 5.5"
+            && s["status"]
+                .as_str()
+                .is_some_and(|t| t.starts_with("Planka") && t.ends_with("à jour"))
+    })?;
     // "bonjour", then Enter.
     bed.type_keys(&[48, 24, 49, 36, 24, 22, 19]);
     bed.shows(|s| s["field"] == 7)?;

@@ -22,6 +22,11 @@
 //! assembled within its budget from her memory and what may leave
 //! ([`context`]).
 //!
+//! **Notifications** (lot 7): what the shell forwards of the applications
+//! consented to goes to her notifications' source ([`Arrivals`]), due at
+//! once; it reads them on its worker like any source. Nothing of hers
+//! answers a notification: no line goes back to the shell about one.
+//!
 //! **The conversation** (§5.4, lot 2) is [`conversation`]'s: the thread,
 //! her questions, her model's streamed answer, the proposals' cards.
 
@@ -52,6 +57,7 @@ use crate::{
     context::{self, Held, Inbox, Scope},
     graph::{NewEpisode, Target},
     model::{Message, Model, Recorder, Reply, Request, Role},
+    notifications::{self, Arrivals},
     power::Sensors,
     settings,
     sources::{Source, Synced},
@@ -125,6 +131,9 @@ pub struct Options {
     pub sensors: Sensors,
     /// Her language, and what calls may hold.
     pub scope: Scope,
+    /// Where the notifications the shell forwards go: her notifications'
+    /// source's, among `sources`. None: they are dropped.
+    pub notifications: Option<Arrivals>,
 }
 
 impl Default for Options {
@@ -138,6 +147,7 @@ impl Default for Options {
             sensors: Sensors::default(),
             scope: Scope::default(),
             effects: None,
+            notifications: None,
         }
     }
 }
@@ -158,6 +168,9 @@ struct Slot {
     asks: Sender<Option<String>>,
     due: Timestamp,
     busy: bool,
+    /// Asked again as soon as its sync under way ends: something arrived
+    /// for it meanwhile.
+    again: bool,
     items: u64,
     error: Option<String>,
 }
@@ -196,6 +209,7 @@ pub struct Brain {
     sensors: Sensors,
     scope: Scope,
     redactor: Redactor,
+    arrivals: Option<Arrivals>,
 }
 
 impl Brain {
@@ -246,6 +260,7 @@ impl Brain {
             sensors: options.sensors,
             scope: options.scope,
             redactor: Redactor::new(),
+            arrivals: options.notifications,
         };
         if let Some(away) = away {
             brain.catch_up(away);
@@ -513,6 +528,29 @@ impl Brain {
                     self.error(conn, None, "she runs on the wall clock");
                 }
             }
+            ToSecretary::Notification(notification) => self.notified(notification),
+        }
+    }
+
+    /// A notification the shell forwarded: to her notifications' source,
+    /// which reads it now.
+    fn notified(&mut self, notification: hocus_secretary_link::Notification) {
+        let Some(arrivals) = &self.arrivals else {
+            tracing::debug!("a notification, and no source to read it: dropped");
+            return;
+        };
+        arrivals.push(notification);
+        let now = self.clock.now();
+        if let Some(slot) = self
+            .slots
+            .iter_mut()
+            .find(|s| s.name == notifications::NAME)
+        {
+            if slot.busy {
+                slot.again = true;
+            } else {
+                slot.due = slot.due.min(now);
+            }
         }
     }
 
@@ -680,7 +718,11 @@ impl Brain {
         };
         slot.busy = false;
         let every = SignedDuration::try_from(slot.every).unwrap_or(SignedDuration::MAX);
-        slot.due = now.checked_add(every).unwrap_or(Timestamp::MAX);
+        slot.due = if std::mem::take(&mut slot.again) {
+            now
+        } else {
+            now.checked_add(every).unwrap_or(Timestamp::MAX)
+        };
         let (name, notebook) = (slot.name.clone(), slot.notebook);
         let mut read = 0;
         match result {
@@ -928,6 +970,7 @@ fn spawn_source(
         asks,
         due: now,
         busy: false,
+        again: false,
         items: 0,
         error: None,
     };

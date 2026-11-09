@@ -1,8 +1,6 @@
 //! What a source gives: items, each with its notebook and a pointer to
 //! where it lives at its source (which only the user opens).
 
-use std::fmt;
-
 use jiff::{Timestamp, civil::Date};
 use serde::{Deserialize, Serialize};
 
@@ -10,52 +8,9 @@ use serde::{Deserialize, Serialize};
 /// One definition for the sources and her memory: the protocol's.
 pub use hocus_secretary_link::Notebook;
 
-/// What of an account is read; each is consented on its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceKind {
-    /// Its calendars, hidden ones included.
-    Calendar,
-    /// Its contacts' birthdays and anniversaries, nothing else of them.
-    Birthdays,
-    /// Its mail (Gmail): inbox and sent, 30 days back, read-only.
-    Mail,
-}
-
-impl SourceKind {
-    pub const ALL: [Self; 3] = [Self::Calendar, Self::Birthdays, Self::Mail];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Calendar => "calendar",
-            Self::Birthdays => "birthdays",
-            Self::Mail => "mail",
-        }
-    }
-}
-
-/// One source: an account (Online Accounts' stable id for it, e.g.
-/// `account_1700000000_0`) and what of it is read.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SourceKey {
-    pub account: String,
-    pub kind: SourceKind,
-}
-
-impl SourceKey {
-    pub fn new(account: impl Into<String>, kind: SourceKind) -> Self {
-        Self {
-            account: account.into(),
-            kind,
-        }
-    }
-}
-
-impl fmt::Display for SourceKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.account, self.kind.as_str())
-    }
-}
+/// What of an account is read, and an application's notifications; one
+/// definition with the consent book's.
+pub use hocus_secretary_link::consent::{SourceKey, SourceKind};
 
 /// Where an item lives at its source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +42,7 @@ pub enum Content {
     Mail(Mail),
     Event(Event),
     Birthday(Birthday),
+    Notification(Notification),
 }
 
 /// A mail's headers and, fetched on demand, its text. Never its
@@ -107,6 +63,18 @@ pub struct Mail {
     pub attachments: Vec<String>,
     /// The user has read it (its `\Seen` as it was; never changed by her).
     pub seen: bool,
+}
+
+/// An application's notification, as the shell's server received it
+/// (lot 7): what it says, nothing it can do. Its actions are not kept:
+/// invoking one (Slack's would mark the channel read) is never hers.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Notification {
+    /// The application's name, as it gives it (`Slack`).
+    pub app: String,
+    /// Its title: for a message, often who wrote it or where.
+    pub title: String,
+    pub body: String,
 }
 
 /// A calendar's event.
