@@ -8,7 +8,7 @@
 //! - **AUJOURD'HUI**: today's events that take time, amber when someone
 //!   in them is away.
 //! - **EN CONGÉS**: the events of the calendar the leaves rule names
-//!   (`{"leaves": {"calendar": "Congés"}}`, a rule's compiled form, lot
+//!   (`{"kind": "leave", "calendar": "Congés"}`, a rule's compiled form, lot
 //!   6's) that cover today, for people the user works with (known to her
 //!   graph, or invited to their meetings); an absent person invited to,
 //!   or presenting, one of today's meetings gives a proposal: the first
@@ -180,7 +180,7 @@ fn bounds(day: Date, zone: &TimeZone) -> (Timestamp, Timestamp) {
 }
 
 /// The calendar the leaves rule names, if one is taught (lot 6 compiles
-/// the rule; its compiled form `{"leaves": {"calendar": NAME}}`).
+/// the rule: [`crate::learn::Compiled::Leave`]).
 pub fn leaves_calendar(store: &Store) -> Option<String> {
     let mut statement = store
         .conn
@@ -194,10 +194,12 @@ pub fn leaves_calendar(store: &Store) -> Option<String> {
         .ok()?
         .filter_map(std::result::Result::ok)
         .collect();
-    compiled.into_iter().find_map(|text| {
-        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-        value["leaves"]["calendar"].as_str().map(str::to_owned)
-    })
+    compiled
+        .into_iter()
+        .find_map(|text| match serde_json::from_str(&text).ok()? {
+            crate::learn::Compiled::Leave { calendar } => Some(calendar),
+            _ => None,
+        })
 }
 
 /// Rule `rule`'s compiled form (lot 6 writes it; tests too).

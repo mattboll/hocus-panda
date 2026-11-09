@@ -292,7 +292,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         origin: Origin::told("conversation"),
         notebook: Notebook::Pro,
     })?;
-    briefing::compile_rule(&store, rule, r#"{"leaves": {"calendar": "Congés"}}"#)?;
+    briefing::compile_rule(&store, rule, r#"{"kind": "leave", "calendar": "Congés"}"#)?;
     let mut driver = common::Driver::start(store, options(MODEL, &[calendar], &recorder));
     driver.settle();
     driver.send(&ToSecretary::Session { locked: false });
