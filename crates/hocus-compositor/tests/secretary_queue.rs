@@ -137,7 +137,8 @@ fn start() -> anyhow::Result<Option<Bed>> {
         &her,
         format!(
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}' \
-             HOCUS_POWER_SUPPLY_DIR='{}' HOCUS_THERMAL_DIR='{}' TZ=Europe/Paris\n\
+             HOCUS_POWER_SUPPLY_DIR='{}' HOCUS_THERMAL_DIR='{}' \
+             HOCUS_HWMON_DIR=/nonexistent HOCUS_NVIDIA_SMI=/nonexistent TZ=Europe/Paris\n\
              exec '{}' --virtual-clock 2026-11-09T08:00:00Z --fake-model '{}' \
              --fixture '{}' \"$@\" 2>>'{}'\n",
             dir.path().join("data").display(),
@@ -397,15 +398,16 @@ fn her_queue_unfolds_from_her_status_and_a_sender_is_set_aside_by_a_click() -> a
         i.contains("group:notifications@github.com") && !i.contains("aside:")
     })?;
 
-    // Too hot: the pause and why.
+    // Steadily too hot (her sampler reads every five seconds of her clock,
+    // and averages the last minute): the pause and why.
     let zone = bed.power.join("thermal_zone0");
     std::fs::create_dir_all(&zone)?;
     std::fs::write(zone.join("type"), "x86_pkg_temp")?;
-    std::fs::write(zone.join("temp"), "97000")?;
+    std::fs::write(zone.join("temp"), "100000")?;
     bed.advance(45)?;
     bed.shows(|s| items(s).contains("state:Je souffle entre deux"))?;
     bed.advance(3)?;
-    bed.shows(|s| items(s).contains("pause:L’ordinateur chauffe (97 °C)"))?;
+    bed.shows(|s| items(s).contains("pause:Le processeur chauffe : 100 °C en moyenne"))?;
     bed.shot("queue-paused")?;
 
     // Back to the thread.

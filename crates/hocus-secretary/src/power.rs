@@ -1,11 +1,13 @@
 //! Whether the machine can afford the local model now (§11.1): on mains
-//! power, or a battery above the threshold, and a CPU package under the
-//! heat limit. Read from sysfs on her loop (a few small files), only when
-//! the triage has something to do.
+//! power, or a battery above the threshold, and not too hot. The power
+//! supplies are read from sysfs on her loop (a few small files), only when
+//! the triage has something to do; the heat is a steady reading, sampled
+//! off her loop ([`crate::heat`], #756).
 //!
-//! `HOCUS_POWER_SUPPLY_DIR` stands for `/sys/class/power_supply` and
-//! `HOCUS_THERMAL_DIR` for `/sys/class/thermal`, as for the Settings
-//! (tests).
+//! `HOCUS_POWER_SUPPLY_DIR` stands for `/sys/class/power_supply`,
+//! `HOCUS_THERMAL_DIR` for `/sys/class/thermal`, as for the Settings,
+//! `HOCUS_HWMON_DIR` for `/sys/class/hwmon` and `HOCUS_NVIDIA_SMI` for
+//! `nvidia-smi` (tests).
 
 use std::path::{Path, PathBuf};
 
@@ -16,8 +18,8 @@ pub struct Power {
     pub on_ac: bool,
     /// The battery's charge, in percent, when there is one.
     pub battery: Option<u8>,
-    /// The CPU package's temperature, in °C, when known.
-    pub heat: Option<u32>,
+    /// Too hot for the triage, as the steady reading says.
+    pub heat: Option<crate::heat::Hot>,
 }
 
 /// Where power and heat are read.
@@ -25,6 +27,10 @@ pub struct Power {
 pub struct Sensors {
     pub supplies: PathBuf,
     pub thermal: PathBuf,
+    /// The graphics cards' temperatures (amdgpu, nouveau, radeon).
+    pub hwmon: PathBuf,
+    /// The NVIDIA proprietary driver's tool, which has no hwmon.
+    pub nvidia_smi: PathBuf,
 }
 
 impl Default for Sensors {
@@ -37,11 +43,13 @@ impl Default for Sensors {
         Self {
             supplies: var("HOCUS_POWER_SUPPLY_DIR", "/sys/class/power_supply"),
             thermal: var("HOCUS_THERMAL_DIR", "/sys/class/thermal"),
+            hwmon: var("HOCUS_HWMON_DIR", "/sys/class/hwmon"),
+            nvidia_smi: var("HOCUS_NVIDIA_SMI", "nvidia-smi"),
         }
     }
 }
 
-fn read(path: &Path) -> Option<String> {
+pub(crate) fn read(path: &Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
         .map(|t| t.trim().to_owned())
@@ -73,22 +81,11 @@ impl Sensors {
                 }
             }
         }
-        let mut heat = None;
-        if let Ok(entries) = std::fs::read_dir(&self.thermal) {
-            for entry in entries.flatten() {
-                let dir = entry.path();
-                if read(&dir.join("type")).as_deref() == Some("x86_pkg_temp")
-                    && let Some(t) = read(&dir.join("temp")).and_then(|t| t.parse::<u32>().ok())
-                {
-                    heat = Some(heat.map_or(t / 1000, |h: u32| h.max(t / 1000)));
-                }
-            }
-        }
         Power {
             // Without a battery, a desktop: on mains.
             on_ac: battery.is_none() || mains.unwrap_or(false),
             battery,
-            heat,
+            heat: None,
         }
     }
 }

@@ -103,6 +103,8 @@ fn sensors(dir: &std::path::Path, heat: u32) -> hocus_secretary::power::Sensors 
     hocus_secretary::power::Sensors {
         supplies,
         thermal: dir.join("thermal"),
+        hwmon: dir.join("hwmon"),
+        nvidia_smi: dir.join("no-nvidia-smi"),
     }
 }
 
@@ -369,6 +371,97 @@ fn a_sender_set_aside_stays_aside_after_a_restart_and_later_mails_too() {
     driver.stop();
 }
 
+/// The scripted local model, held whole on the graphics card.
+#[derive(Debug)]
+struct OnCard(Arc<Fake>);
+
+impl Triager for OnCard {
+    fn endpoint(&self) -> (String, String) {
+        self.0.endpoint()
+    }
+
+    fn triage(&self, input: &str) -> Result<(Verdict, u64, u64), String> {
+        self.0.triage(input)
+    }
+
+    fn unload(&self) -> Result<(), String> {
+        self.0.unload()
+    }
+
+    fn placement(&self) -> Option<hocus_secretary::providers::openai::Placement> {
+        Some(hocus_secretary::providers::openai::Placement::Gpu)
+    }
+}
+
+/// The model whole on the graphics card (#756): the card's temperature is
+/// watched instead of the processor's, through `nvidia-smi` (a fake
+/// script: no GPU is touched), at most every ten seconds; over its
+/// slowdown point on average, the triage pauses and says the card's.
+#[test]
+fn on_the_graphics_card_the_cards_heat_pauses_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().expect("a folder");
+    let clock = common::clock();
+    let script: Script = toml::from_str(SCRIPT).expect("a script");
+    let fake = Arc::new(Fake::new(script, None).with_clock(clock.clone()));
+    let mut options = common::options(vec![common::fixture(MAIL)]);
+    options.model = Some(fake.clone());
+    options.triage = Some(Arc::new(OnCard(fake)));
+    // The processor cool; the card at 90 °C, its slowdown point 3 °C below.
+    options.sensors = sensors(dir.path(), 60);
+    let asked = dir.path().join("nvidia-smi.log");
+    let smi = dir.path().join("nvidia-smi");
+    std::fs::write(
+        &smi,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\necho '90, -3'\n",
+            asked.display()
+        ),
+    )
+    .expect("written");
+    std::fs::set_permissions(&smi, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    options.sensors.nvidia_smi = smi;
+    let store = Store::open(&dir.path().join("memory.db"), &[5u8; 32], clock).expect("her memory");
+    let mut driver = common::Driver::start(store, options);
+    driver.settle();
+    let mut waited: usize = 0;
+    let state = loop {
+        let state = driver.status().triage.map(|t| t.state).unwrap_or_default();
+        if state.starts_with("paused") {
+            break state;
+        }
+        assert!(waited < 600, "never paused: {state}");
+        driver.advance(5);
+        waited += 5;
+        // `nvidia-smi` runs on the wall clock: given its time.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(
+        state,
+        "paused: graphics card 90 °C on average, resumes below 77 °C"
+    );
+    let asked = std::fs::read_to_string(&asked).expect("nvidia-smi asked");
+    assert!(
+        asked.lines().all(|l| l
+            == "--query-gpu=temperature.gpu,temperature.gpu.tlimit --format=csv,noheader,nounits"),
+        "{asked}"
+    );
+    assert!(
+        asked.lines().count() <= waited / 10 + 1,
+        "{} times in {waited} s",
+        asked.lines().count()
+    );
+    driver.send(&ToSecretary::Queue { id: 8, open: true });
+    let view = view_until(&driver, "paused", |v| v.pause.is_some());
+    assert_eq!(
+        view.pause.as_deref(),
+        Some(
+            "La carte graphique chauffe : 90 °C en moyenne sur une minute, je reprends sous 77 °C."
+        )
+    );
+    driver.stop();
+}
+
 /// A local model that does not answer (Ollama not running).
 #[derive(Debug)]
 struct Down;
@@ -387,21 +480,83 @@ impl Triager for Down {
     }
 }
 
+/// Her clock moved on five seconds at a time until her triage's state
+/// says `done`: that state, and how long it took.
+fn advance_until(
+    driver: &mut common::Driver,
+    what: &str,
+    done: impl Fn(&str) -> bool,
+) -> (String, u64) {
+    let mut waited = 0;
+    loop {
+        let state = driver.status().triage.map(|t| t.state).unwrap_or_default();
+        if done(&state) {
+            return (state, waited);
+        }
+        assert!(waited < 600, "never {what}: {state}");
+        driver.advance(5);
+        waited += 5;
+    }
+}
+
+/// The package's temperature, in the folder [`sensors`] made.
+fn package_at(dir: &std::path::Path, heat: u32) {
+    std::fs::write(
+        dir.join("thermal/thermal_zone0/temp"),
+        format!("{}", heat * 1000),
+    )
+    .expect("written");
+}
+
+#[test]
+fn the_laptops_swinging_package_never_pauses_it() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let file = dir.path().join("memory.db");
+    let mut driver = start(dir.path(), &file, 64);
+    driver.settle();
+    // The package of #756, its samples five seconds apart, for as long as
+    // the six items take (39 s each and a rest).
+    let swing = [101, 100, 100, 89, 72, 65, 64, 80, 64, 100];
+    for heat in swing.iter().cycle().take(80) {
+        package_at(dir.path(), *heat);
+        let state = driver
+            .advance(5)
+            .triage
+            .map(|t| t.state)
+            .unwrap_or_default();
+        assert!(!state.starts_with("paused"), "{heat} °C: {state}");
+    }
+    assert_eq!(driver.status().triage.map(|t| t.done), Some(6));
+    driver.stop();
+}
+
 #[test]
 fn the_pause_says_why_heat_or_a_model_that_does_not_answer() {
     let dir = tempfile::tempdir().expect("a folder");
     let file = dir.path().join("memory.db");
-    let mut driver = start(dir.path(), &file, 97);
+    let mut driver = start(dir.path(), &file, 100);
     driver.settle();
+    // A steady 100 °C: paused once the minute's average says so, after the
+    // item under way.
+    let (state, _) = advance_until(&mut driver, "paused", |s| s.starts_with("paused"));
+    assert_eq!(
+        state,
+        "paused: processor 100 °C on average, resumes below 90 °C"
+    );
     driver.send(&ToSecretary::Queue { id: 5, open: true });
     let view = view_until(&driver, "paused", |v| v.pause.is_some());
     assert_eq!(view.state, "En pause");
     assert_eq!(
         view.pause.as_deref(),
-        Some("L’ordinateur chauffe (97 °C) : je reprends sous 95 °C.")
+        Some("Le processeur chauffe : 100 °C en moyenne sur une minute, je reprends sous 90 °C.")
     );
     assert!(view.now.is_none());
-    assert_eq!(view.waiting, 6);
+    assert!((1..6).contains(&view.waiting), "{}", view.waiting);
+    // 85 °C: it goes on once the average is below 90, not on the first
+    // cool sample.
+    package_at(dir.path(), 85);
+    let (_, waited) = advance_until(&mut driver, "going on", |s| !s.starts_with("paused"));
+    assert!(waited >= 40, "after {waited} s");
     driver.stop();
 
     let other = tempfile::tempdir().expect("a folder");

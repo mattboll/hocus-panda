@@ -26,8 +26,8 @@ pub struct View {
     pub state: String,
     /// The item the local model reads now.
     pub now: Option<Waiting>,
-    /// Why it waits, when it does: "L'ordinateur chauffe (97 °C) : je
-    /// reprends sous 95 °C".
+    /// Why it waits, when it does: "Le processeur chauffe : 101 °C en
+    /// moyenne sur une minute, je reprends sous 90 °C".
     pub pause: Option<String>,
     /// What slows it, when its server says ("Le modèle tourne en partie
     /// sur le processeur : c'est plus lent").

@@ -16,9 +16,10 @@
 //!   may leave ([`crate::context`]); an item the model could not read
 //!   goes back to the queue's head and the queue pauses.
 //! - **Paced**: one request at a time, a rest between two; only on mains
-//!   power or above the battery threshold, never over the heat limit
-//!   (rechecked each minute while paused); the model is told to unload
-//!   after two idle minutes.
+//!   power or above the battery threshold (rechecked each minute while
+//!   paused), never while too hot as the steady reading says
+//!   ([`crate::heat`]: going on as soon as it says cool again); the model
+//!   is told to unload after two idle minutes.
 //!
 //! - **Set aside** (#754): a sender's items the user (or a rule she
 //!   proposed) keeps out of the queue wait apart, with their metadata
@@ -157,8 +158,8 @@ pub trait Triager: Send + Sync + std::fmt::Debug {
 pub enum Pause {
     /// On battery, below the threshold (its charge).
     Battery(u8),
-    /// The CPU package over the limit (its °C).
-    Heat(u32),
+    /// Too hot, on average over the last minute (#756).
+    Heat(crate::heat::Hot),
     /// The model did not answer.
     Unavailable,
 }
@@ -167,7 +168,12 @@ impl Pause {
     pub fn word(self) -> String {
         match self {
             Self::Battery(c) => format!("battery {c} %"),
-            Self::Heat(t) => format!("heat {t} °C"),
+            Self::Heat(hot) => format!(
+                "{} {} °C on average, resumes below {} °C",
+                hot.gauge.word(),
+                hot.average,
+                hot.resume
+            ),
             Self::Unavailable => "model unavailable".to_owned(),
         }
     }
@@ -423,11 +429,9 @@ impl Queue {
             };
             return Step::Nothing;
         }
-        if let Some(heat) = power.heat
-            && heat > settings.heat
-        {
+        if let Some(hot) = power.heat {
             self.state = State::Paused {
-                why: Pause::Heat(heat),
+                why: Pause::Heat(hot),
                 until: after(now, RECHECK),
             };
             return Step::Nothing;
@@ -438,6 +442,19 @@ impl Queue {
         self.state = State::Running(pointer.clone());
         self.sent = Some(now);
         Step::Send(pointer)
+    }
+
+    /// The steady reading changed at `now`: a pause for heat says the new
+    /// one, or ends at once if it is cool again.
+    pub fn heat(&mut self, now: Timestamp, hot: Option<crate::heat::Hot>) {
+        if let State::Paused { why, until } = &mut self.state
+            && matches!(why, Pause::Heat(_))
+        {
+            match hot {
+                Some(hot) => *why = Pause::Heat(hot),
+                None => *until = now,
+            }
+        }
     }
 
     /// The request for `pointer` ended at `now`.
@@ -563,7 +580,7 @@ mod tests {
         let mains = Power {
             on_ac: true,
             battery: Some(20),
-            heat: Some(60),
+            heat: None,
         };
         assert_eq!(
             queue.step(at("2026-11-09T08:01:00Z"), mains, &settings),
@@ -601,27 +618,32 @@ mod tests {
         let settings = settings::Triage::default();
         let mut queue = Queue::new(at("2026-11-09T08:00:00Z"));
         queue.push("mail:m1".to_owned());
+        let package = crate::heat::Hot {
+            gauge: crate::heat::Gauge::Cpu,
+            average: 101,
+            resume: 90,
+        };
         let hot = Power {
             on_ac: true,
             battery: None,
-            heat: Some(101),
+            heat: Some(package),
         };
         assert_eq!(
             queue.step(at("2026-11-09T08:00:00Z"), hot, &settings),
             Step::Nothing
         );
-        assert!(matches!(
+        assert_eq!(
             queue.state,
             State::Paused {
-                why: Pause::Heat(101),
-                ..
+                why: Pause::Heat(package),
+                until: at("2026-11-09T08:01:00Z"),
             }
-        ));
-        let cool = Power {
-            heat: Some(70),
-            ..hot
-        };
-        let mut now = at("2026-11-09T08:01:00Z");
+        );
+        // Cool again before the minute's look: it goes on at once.
+        queue.heat(at("2026-11-09T08:00:20Z"), None);
+        assert_eq!(queue.next(&settings), Some(at("2026-11-09T08:00:20Z")));
+        let cool = Power { heat: None, ..hot };
+        let mut now = at("2026-11-09T08:00:20Z");
         for _ in 0..TRIES {
             assert_eq!(
                 queue.step(now, cool, &settings),

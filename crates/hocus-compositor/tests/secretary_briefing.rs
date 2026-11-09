@@ -236,6 +236,7 @@ fn start(her_clock: &str, shell_clock: &str, day_events: &str) -> anyhow::Result
         format!(
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{data}' TZ=UTC \
              HOCUS_POWER_SUPPLY_DIR=/nonexistent HOCUS_THERMAL_DIR=/nonexistent \
+             HOCUS_HWMON_DIR=/nonexistent HOCUS_NVIDIA_SMI=/nonexistent \
              RUST_LOG=hocus_secretary=info\n\
              exec '{secretary}' --virtual-clock {her_clock} --fake-model '{model}' \
              --recorder '{calls}' --config '{config}' {fixtures} \"$@\" 2>>'{log}'\n",

@@ -134,8 +134,23 @@ pub struct Provider {
 pub struct Triage {
     /// On battery, the queue runs only above this charge, in percent.
     pub battery: u8,
-    /// It pauses while the CPU package is above this, in °C.
-    pub heat: u32,
+    /// It pauses once the CPU package's temperature, averaged over the
+    /// last minute, reaches this, in °C; none: the package's critical
+    /// point minus 10, else 100 (#756).
+    pub heat: Option<u32>,
+    /// It goes on once that average is below this, in °C; none: 10 under
+    /// the pause point.
+    pub resume: Option<u32>,
+    /// The model whole on the graphics card, the card's temperature is
+    /// watched instead: it pauses at this, in °C; none: the card's
+    /// slowdown point as its driver says it, else 87.
+    pub gpu_heat: Option<u32>,
+    /// It goes on once the card's average is below this; none: 10 under
+    /// its pause point.
+    pub gpu_resume: Option<u32>,
+    /// The threads Ollama's runner is asked to use with the model whole on
+    /// the graphics card, so that it does not heat the processor.
+    pub threads: u32,
     /// Idle this long, in seconds, the local model is told to unload.
     pub unload_after: u64,
     /// Seconds between two requests: one at a time, paced.
@@ -150,7 +165,11 @@ impl Default for Triage {
     fn default() -> Self {
         Self {
             battery: 50,
-            heat: 95,
+            heat: None,
+            resume: None,
+            gpu_heat: None,
+            gpu_resume: None,
+            threads: 2,
             unload_after: 120,
             pace: 2,
             context: 8192,

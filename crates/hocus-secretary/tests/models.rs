@@ -62,9 +62,14 @@ fn verdict(seen: &Seen) -> serde_json::Value {
     })
 }
 
-/// The local model's server.
+/// The local model's server: 7 of the model's 11 GB on the card.
 fn local() -> Fake {
-    Fake::start(|seen, _| match seen.path.as_str() {
+    ollama(7_150_000_000)
+}
+
+/// Ollama, `vram` bytes of the model on the card.
+fn ollama(vram: u64) -> Fake {
+    Fake::start(move |seen, _| match seen.path.as_str() {
         "/v1/chat/completions" => Answer::json(&verdict(seen)),
         // Ollama's own API (#752): the same verdict, as it says it.
         "/api/chat" => {
@@ -76,7 +81,7 @@ fn local() -> Fake {
             }))
         }
         "/api/ps" => Answer::json(&json!({"models": [
-            {"name": "qwen3:8b", "model": "qwen3:8b", "size": 11_000_000_000_u64, "size_vram": 7_150_000_000_u64}
+            {"name": "qwen3:8b", "model": "qwen3:8b", "size": 11_000_000_000_u64, "size_vram": vram}
         ]})),
         "/api/generate" => Answer::json(&json!({"done": true})),
         _ => Answer::status(404, "{}"),
@@ -116,6 +121,8 @@ fn power(dir: &Path, online: bool, charge: u8) -> Sensors {
     Sensors {
         supplies,
         thermal: dir.join("thermal"),
+        hwmon: dir.join("hwmon"),
+        nvidia_smi: dir.join("no-nvidia-smi"),
     }
 }
 
@@ -263,6 +270,52 @@ fn ac21_the_triage_runs_locally_paced_on_mains_and_unloads_when_idle() {
         "11 GB, 7 of them on the card"
     );
     s.driver.stop();
+}
+
+/// The model whole on the graphics card (#756): once its placement says
+/// so, Ollama's runner is asked for `threads` threads (two by default), so
+/// that it does not heat the processor; the first request, the placement
+/// not known yet, goes without.
+#[test]
+fn on_the_graphics_card_its_runner_gets_two_threads() {
+    let (anthropic, local) = (anthropic(), ollama(11_000_000_000));
+    let router = Router::new(
+        Arc::new(settings::File::fixed(settings(&anthropic, &local))),
+        keys(),
+    );
+    for _ in 0..2 {
+        router.triage("Mail\nObjet : Léa").expect("a verdict");
+    }
+    assert_eq!(
+        router.placement(),
+        Some(hocus_secretary::providers::openai::Placement::Gpu)
+    );
+    let chats: Vec<Seen> = local
+        .seen()
+        .into_iter()
+        .filter(|r| r.path == "/api/chat")
+        .collect();
+    assert_eq!(chats.len(), 2);
+    assert!(chats[0].json()["options"].get("num_thread").is_none());
+    assert_eq!(chats[1].json()["options"]["num_thread"], 2);
+    assert_eq!(chats[1].json()["options"]["num_ctx"], 8192);
+
+    // Partly on the processor: all its threads.
+    let (anthropic, local) = (self::anthropic(), ollama(7_000_000_000));
+    let router = Router::new(
+        Arc::new(settings::File::fixed(settings(&anthropic, &local))),
+        keys(),
+    );
+    for _ in 0..2 {
+        router.triage("Mail\nObjet : Léa").expect("a verdict");
+    }
+    assert!(
+        local
+            .seen()
+            .iter()
+            .filter(|r| r.path == "/api/chat")
+            .all(|r| r.json()["options"].get("num_thread").is_none())
+    );
 }
 
 /// An OpenAI-compatible server (`kind = "openai"`) still gets the triage
