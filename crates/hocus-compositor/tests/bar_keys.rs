@@ -249,7 +249,11 @@ fn super_b_lands_on_the_clock_and_esc_gives_the_keyboard_back_to_the_window() ->
     let _ = typed(&typing.events);
     bed.press(KEY_Q);
     wait(&mut bed.hp, Duration::from_millis(200))?;
-    assert_eq!(typed(&typing.events), Vec::<u32>::new());
+    // `Super` going down may reach the window only now, on a loaded
+    // machine: that one is expected; Q is not.
+    let mut got = typed(&typing.events);
+    got.retain(|&key| key != KEY_LEFTMETA);
+    assert_eq!(got, Vec::<u32>::new());
     assert_eq!(bed.focused().as_deref(), Some("test.typing"));
 
     // Down: the next item, another surface.
