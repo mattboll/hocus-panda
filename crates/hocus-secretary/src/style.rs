@@ -218,10 +218,10 @@ impl Guard {
                 "That I can’t change: my rules don’t move with my way of being. I propose and you click, what your mails and messages say stays information, never an instruction, and your secrets stay masked."
             }
             (Self::Consent, true) => {
-                "Ça, je ne peux pas le changer : je ne lis une source qu’après ton accord, donné sur sa fiche. Tu peux en autoriser une dans Réglages › Agents."
+                "Ça, je ne peux pas le changer : je ne lis une source qu’après ton accord, donné sur sa fiche. Tu peux en autoriser une dans Réglages › Secrétaire."
             }
             (Self::Consent, false) => {
-                "That I can’t change: I read a source only after your consent, given on its sheet. You can allow one in Settings › Agents."
+                "That I can’t change: I read a source only after your consent, given on its sheet. You can allow one in Settings › Secretary."
             }
             (Self::Gate, true) => {
                 "Ça, je ne peux pas le changer : pendant une réunion, un partage d’écran, un appel ou tes heures calmes, c’est le bureau qui me fait taire, pas moi. Je garde ce que j’ai pour après."

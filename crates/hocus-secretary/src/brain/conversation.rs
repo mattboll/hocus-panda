@@ -404,7 +404,7 @@ impl Brain {
                         if n > 1 { "s" } else { "" }
                     ),
                     format!(
-                        "Je n’arrive pas à lire : {}. Je réessaie à chaque passage ; tu peux les laisser de côté dans Réglages › Agents.",
+                        "Je n’arrive pas à lire : {}. Je réessaie à chaque passage ; tu peux les laisser de côté dans Réglages › Secrétaire.",
                         names.join(", ")
                     ),
                 )
@@ -416,7 +416,7 @@ impl Brain {
                         if n > 1 { "s" } else { "" }
                     ),
                     format!(
-                        "I can’t read: {}. I try again each time; you can leave them out in Settings › Agents.",
+                        "I can’t read: {}. I try again each time; you can leave them out in Settings › Secretary.",
                         names.join(", ")
                     ),
                 )
