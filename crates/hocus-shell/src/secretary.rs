@@ -401,6 +401,12 @@ pub fn toast_gone() {
     converse(|c| c.toast = None);
 }
 
+/// Her item `item` unfolded ("Ouvrir le point"), for what she observes
+/// (#753).
+pub fn unfolded(item: u64) {
+    send(ToSecretary::Unfolded { item });
+}
+
 /// The drawer opened or closed: she is told; opened, the thread is asked
 /// for once (the shell may have started again since she began it).
 pub fn drawer(open: bool) {

@@ -297,6 +297,30 @@ pub fn persona(store: &Store, language: Language) -> String {
     text.replace("{user_name}", &user)
 }
 
+/// Her persona with the way of being the user asked for (#753) right
+/// after its own words, before what she knows: in the frozen part, so the
+/// cache holds both until one changes.
+pub fn persona_styled(store: &Store, language: Language, today: Date) -> String {
+    let persona = persona(store, language);
+    let Some(block) = crate::style::block(store, today, language, &user_name(store)) else {
+        return persona;
+    };
+    let mark = match language {
+        Language::French => "## Ce que tu sais maintenant",
+        Language::English => "## What you know now",
+    };
+    match persona.find(mark) {
+        Some(at) => format!(
+            "{}{block}
+
+{}",
+            &persona[..at],
+            &persona[at..]
+        ),
+        None => format!("{persona}\n\n{block}"),
+    }
+}
+
 fn user_name(store: &Store) -> String {
     store
         .conn
@@ -317,15 +341,30 @@ fn card(store: &Store, today: Date, scope: &Scope, most: usize) -> Result<(Strin
     let mut items = Vec::new();
     let mut lines = vec![format!("Utilisateur : {}", user_name(store))];
     let mut statement = store.conn.prepare(
-        "SELECT r.id, r.sentence, n.name FROM rules r LEFT JOIN nodes n ON n.id = r.node
+        "SELECT r.id, r.sentence, n.name, r.compiled FROM rules r LEFT JOIN nodes n ON n.id = r.node
          WHERE r.accepted_at IS NOT NULL AND (?1 IS NULL OR r.notebook = ?1)
            AND (r.valid_to IS NULL OR r.valid_to > ?2) ORDER BY r.id",
     )?;
     let rules: Vec<(i64, String, Option<String>)> = statement
         .query_map(rusqlite::params![filter, today.to_string()], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
         })?
-        .collect::<rusqlite::Result<_>>()?;
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        // Her way of being is in her persona's part, not here (#753).
+        .filter(|(.., compiled)| {
+            !compiled
+                .as_deref()
+                .and_then(crate::learn::Compiled::of)
+                .is_some_and(|c| matches!(c, crate::learn::Compiled::Style { .. }))
+        })
+        .map(|(id, sentence, node, _)| (id, sentence, node))
+        .collect();
     if !rules.is_empty() {
         lines.push("Règles apprises :".to_owned());
         for (id, sentence, node) in rules {
@@ -630,7 +669,7 @@ pub fn assemble(
     now: Timestamp,
 ) -> Result<Request> {
     let today = day_of(now);
-    let system = persona(store, scope.language);
+    let system = persona_styled(store, scope.language, today);
     let tools: Vec<String> = match role {
         Role::Answer | Role::Briefing => tools::READ.iter().map(|t| (*t).to_owned()).collect(),
         _ => Vec::new(),

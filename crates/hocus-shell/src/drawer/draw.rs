@@ -3226,8 +3226,17 @@ impl<Message> canvas::Program<Message> for View {
                 plays.then(canvas::Action::request_redraw)
             }
             iced::Event::Mouse(seen) => {
-                let at = cursor.position_in(bounds);
-                self.mouse(state, seen, at, bounds.size())
+                // A press on it gives it the keyboard (the compositor's
+                // on-demand rule, #755): the toolkit says no "Focused"
+                // when the pointer came in first, so it is taken here.
+                let pressed = matches!(seen, mouse::Event::ButtonPressed(_))
+                    && cursor.position_in(bounds).is_some()
+                    && super::focused(self.id, true);
+                let action = self.mouse(state, seen, cursor.position_in(bounds), bounds.size());
+                match action {
+                    None if pressed => Some(canvas::Action::request_redraw()),
+                    action => action,
+                }
             }
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key,

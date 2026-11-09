@@ -60,6 +60,8 @@ pub enum Compiled {
     Urgent { sender: String },
     /// `calendar C: ignored`.
     Ignore { calendar: String },
+    /// Her way of being (#753): `style S ⇒ every answer`, in her prompt.
+    Style { style: crate::style::Style },
     /// `triage: sender S ⇒ not triaged, searched when needed` (#754): its
     /// mails wait apart with their sender, subject and date; the one the
     /// user asks about is triaged first. `sender` is an address, or a
@@ -126,6 +128,14 @@ impl Compiled {
             (Self::Ignore { calendar }, false) => (
                 format!("The “{calendar}” calendar: ignored."),
                 "What I do with it: I no longer use it for your days.".to_owned(),
+            ),
+            (Self::Style { style }, true) => (
+                style.said(true),
+                "Ce que j’en fais\u{a0}: je m’y tiens dans chacune de mes réponses.".to_owned(),
+            ),
+            (Self::Style { style }, false) => (
+                style.said(false),
+                "What I do with it: I keep to it in every answer.".to_owned(),
             ),
             (Self::Aside { sender }, true) => (
                 format!("Les mails de {sender}\u{a0}: pas triés, cherchés si besoin."),
@@ -1113,6 +1123,126 @@ pub enum Change {
     Joined { name: String, role: Option<String> },
 }
 
+/// Words that are never someone (#755): what a calendar or a mail calls
+/// things, folded.
+const NOT_PEOPLE: &[&str] = &[
+    "evenement",
+    "evenements",
+    "reunion",
+    "reunions",
+    "rappel",
+    "rappels",
+    "invitation",
+    "rendez-vous",
+    "rdv",
+    "agenda",
+    "calendrier",
+    "mail",
+    "message",
+    "notification",
+    "tache",
+    "taches",
+    "projet",
+    "equipe",
+    "client",
+    "anniversaire",
+    "conge",
+    "conges",
+    "daily",
+    "standup",
+    "point",
+    "demo",
+    "revue",
+    "sprint",
+    "release",
+    "livraison",
+    "facture",
+    "devis",
+    "document",
+    "fichier",
+    "compte",
+    "nouveau",
+    "nouvelle",
+    "quelqu'un",
+    "personne",
+    "utilisateur",
+    "admin",
+    "bot",
+    "support",
+    "contact",
+    "service",
+    "groupe",
+    "canal",
+    "general",
+    "bonjour",
+    "salut",
+    "merci",
+    "bienvenue",
+    "aujourd'hui",
+    "demain",
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+    "dimanche",
+    "event",
+    "meeting",
+    "reminder",
+    "invite",
+    "update",
+    "team",
+    "user",
+    "someone",
+    "new",
+    "welcome",
+    "call",
+    "appel",
+    "visio",
+    "atelier",
+    "formation",
+    "seminaire",
+    "dejeuner",
+    "diner",
+    "occupe",
+    "busy",
+    "absent",
+    "absence",
+    "ferie",
+    "vacances",
+    "tableau",
+    "carte",
+    "ticket",
+];
+
+/// Whether `name`, said to have arrived in an item of `kind` whose digest
+/// is `digest`, can be a person (#755): never a common word nor a
+/// calendar's title; a name in the roster's form ("Prénom Nom"), a mail's
+/// sender, or a member a Slack join names (`joined`).
+pub fn person_like(name: &str, kind: &str, digest: &str, joined: bool) -> bool {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let shaped = !words.is_empty()
+        && words.len() <= 3
+        && words.iter().all(|w| {
+            w.chars().next().is_some_and(char::is_uppercase)
+                && w.chars()
+                    .all(|c| c.is_alphabetic() || c == '-' || c == '\'')
+        });
+    if !shaped || words.iter().any(|w| NOT_PEOPLE.contains(&fold(w).as_str())) {
+        return false;
+    }
+    if kind == "event" {
+        return false;
+    }
+    let sender = digest
+        .split([':', '<'])
+        .next()
+        .map(fold)
+        .unwrap_or_default();
+    joined || words.len() >= 2 || (!sender.is_empty() && sender.contains(&fold(name)))
+}
+
 /// What an item's digest says of the team, if anything.
 pub fn scan(store: &Store, digest: &str, at: Timestamp) -> Result<Option<Change>> {
     let digest = digest.replace('’', "'");
@@ -1130,6 +1260,7 @@ pub fn scan(store: &Store, digest: &str, at: Timestamp) -> Result<Option<Change>
     }
     if let Some(c) = JOINED_GENERAL.captures(&digest)
         && people_named(store, &c["name"])?.is_empty()
+        && person_like(&c["name"], "message", &digest, true)
     {
         let role = ROLE.captures(&digest).and_then(|r| {
             r.name("a")
@@ -1188,15 +1319,25 @@ pub fn extract(
     episode: i64,
     facts: &[Fact],
 ) -> Result<(Vec<i64>, Vec<Newcomer>)> {
-    let row: Option<(String, Option<String>, String, String)> = store
+    type Row = (String, Option<String>, String, String, String, String);
+    let row: Option<Row> = store
         .conn
         .query_row(
-            "SELECT pointer, source, notebook, at FROM episodes WHERE id = ?1",
+            "SELECT pointer, source, notebook, at, kind, digest FROM episodes WHERE id = ?1",
             [episode],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((pointer, source, notebook, at)) = row else {
+    let Some((pointer, source, notebook, at, kind_of, digest)) = row else {
         return Ok((Vec::new(), Vec::new()));
     };
     let notebook = Notebook::of(&notebook).unwrap_or(Notebook::Pro);
@@ -1217,8 +1358,16 @@ pub fn extract(
             .next()
             .or_else(|| node_named(store, &fact.subject).ok().flatten());
         let Some(subject) = subject else {
-            if kind == "arrived" || kind == "member_of" || kind == "role" {
+            if matches!(kind, "arrived" | "member_of" | "role")
+                && person_like(&fact.subject, &kind_of, &digest, false)
+            {
                 arrivals.push((fact.subject.clone(), None, fact.quote.clone()));
+            } else if kind == "arrived" {
+                tracing::info!(
+                    subject = fact.subject,
+                    kind = kind_of,
+                    "not someone: no arrival"
+                );
             }
             continue;
         };
@@ -1281,6 +1430,12 @@ pub enum Noticed {
         day: Date,
         notebook: Notebook,
     },
+    /// A way of being her own records suggest (#753).
+    Style {
+        style: crate::style::Style,
+        cause: crate::style::Cause,
+        count: u32,
+    },
 }
 
 impl Noticed {
@@ -1298,6 +1453,7 @@ impl Noticed {
             Self::Quiet { source, .. } => format!("quiet:{source}"),
             Self::Ignore { calendar, .. } => format!("ignore:{}", fold(calendar)),
             Self::Arrival { name, .. } => format!("arrival:{}", fold(name)),
+            Self::Style { style, .. } => format!("style:{}", style.aspect()),
             Self::Automated { sender, .. } => format!("aside:{}", sender.to_lowercase()),
         }
     }
@@ -1305,6 +1461,14 @@ impl Noticed {
     /// Her question, with its evidence.
     pub fn question(&self, fr: bool) -> (String, String) {
         match (self, fr) {
+            (
+                Self::Style {
+                    style,
+                    cause,
+                    count,
+                },
+                fr,
+            ) => crate::style::question(style, *cause, *count, fr),
             (
                 Self::Quiet {
                     tool, count, days, ..
@@ -1614,6 +1778,19 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
             };
             Ok(add_person(store, &found, pointer, true)?.1)
         }
+        Noticed::Style { style, .. } => {
+            let sentence = style.said(true);
+            match crate::style::keep(
+                store,
+                style,
+                &sentence,
+                &Origin::inferred(pointer, 0.8),
+                store.today(),
+            )? {
+                crate::style::Kept::New { edits, .. } => Ok(edits),
+                crate::style::Kept::Already { .. } => Ok(Vec::new()),
+            }
+        }
     }
 }
 
@@ -1621,6 +1798,70 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
 mod tests {
     use super::*;
     use jiff::civil::date;
+
+    /// #755: an arrival needs someone, never a common word or a
+    /// calendar's title.
+    #[test]
+    fn common_words_and_calendar_titles_are_not_arrivals() -> anyhow::Result<()> {
+        for word in ["Événement", "Réunion", "Rappel"] {
+            assert!(!person_like(word, "event", word, false), "{word}");
+            assert!(
+                !person_like(word, "mail", &format!("{word} : demain 10 h"), false),
+                "{word}"
+            );
+            assert!(!person_like(word, "message", "#général", true), "{word}");
+        }
+        assert!(!person_like(
+            "Julie Berthier",
+            "event",
+            "Julie Berthier",
+            false
+        ));
+        assert!(person_like(
+            "Julie Berthier",
+            "mail",
+            "Léa : nouvelle",
+            false
+        ));
+        assert!(person_like(
+            "Julie",
+            "mail",
+            "Julie <julie@x> : bonjour",
+            false
+        ));
+        assert!(!person_like("Julie", "mail", "Léa : Julie arrive", false));
+        assert!(person_like("Julie", "message", "#général", true));
+
+        let start: Timestamp = "2026-11-09T08:00:00Z".parse()?;
+        let mut store = Store::in_memory(crate::clock::Clock::virtual_at(start))?;
+        let (event, _) = store.add_episode(
+            &crate::graph::NewEpisode {
+                at: start,
+                kind: "event".to_owned(),
+                digest: "Événement".to_owned(),
+                source: Some("fixture-calendar".to_owned()),
+                pointer: "fixture-calendar:e1".to_owned(),
+                notebook: Notebook::Pro,
+            },
+            &[],
+        )?;
+        let facts: Vec<Fact> = ["Événement", "Réunion", "Rappel"]
+            .iter()
+            .map(|w| Fact {
+                subject: (*w).to_owned(),
+                relation: "est arrivé".to_owned(),
+                object: String::new(),
+                quote: (*w).to_owned(),
+            })
+            .collect();
+        let (_, arrivals) = extract(&mut store, event, &facts)?;
+        assert!(arrivals.is_empty(), "{arrivals:?}");
+        assert_eq!(
+            scan(&store, "Réunion a rejoint le canal #général", start)?,
+            None
+        );
+        Ok(())
+    }
 
     #[test]
     fn sentences_that_teach_her_are_read_in_code() {

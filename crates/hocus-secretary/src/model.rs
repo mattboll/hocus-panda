@@ -654,6 +654,129 @@ impl Recorder {
     }
 }
 
+/// Why a call of hers failed, from its error (#755): what she tells the
+/// user, plainly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    /// No key in the keyring.
+    NoKey,
+    /// The provider refused the key.
+    KeyRefused,
+    /// The account's credit is too low.
+    Credit,
+    /// The model asked for is not one the provider knows.
+    ModelUnknown(String),
+    /// Overloaded, or too many requests: later.
+    Busy,
+    /// The request refused, with the API's message.
+    Refused(String),
+    /// The provider unreachable.
+    Offline,
+    /// The provider's own failure.
+    Down,
+    Other,
+}
+
+impl Failure {
+    /// What an error string says.
+    pub fn of(err: &str) -> Self {
+        static ANSWERED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"(?:answered|said) (?:(?P<status>\d{3}) )?(?P<kind>[a-z_]*): (?P<message>.*?)(?: \(request [^)]*\))?(?: \(after part of the answer\))?$")
+                .expect("a pattern")
+        });
+        if err.starts_with("no key for ") {
+            return Self::NoKey;
+        }
+        let Some(c) = ANSWERED.captures(err) else {
+            let lower = err.to_lowercase();
+            return if lower.contains("://")
+                || lower.contains("connect")
+                || lower.contains("dns")
+                || lower.contains("timed out")
+                || lower.contains("timeout")
+            {
+                Self::Offline
+            } else {
+                Self::Other
+            };
+        };
+        let status: u16 = c
+            .name("status")
+            .and_then(|s| s.as_str().parse().ok())
+            .unwrap_or(0);
+        let kind = c.name("kind").map_or("", |k| k.as_str());
+        let message = c
+            .name("message")
+            .map_or("", |m| m.as_str())
+            .trim()
+            .to_owned();
+        let lower = message.to_lowercase();
+        if status == 401
+            || status == 403
+            || kind == "authentication_error"
+            || kind == "permission_error"
+        {
+            Self::KeyRefused
+        } else if status == 402
+            || kind == "billing_error"
+            || lower.contains("credit balance")
+            || lower.contains("billing")
+        {
+            Self::Credit
+        } else if status == 404 || kind == "not_found_error" {
+            Self::ModelUnknown(message)
+        } else if status == 429
+            || status == 529
+            || kind == "overloaded_error"
+            || kind == "rate_limit_error"
+        {
+            Self::Busy
+        } else if (400..500).contains(&status)
+            || kind == "invalid_request_error"
+            || kind == "request_too_large"
+        {
+            Self::Refused(message)
+        } else if status >= 500 || kind == "api_error" {
+            Self::Down
+        } else {
+            Self::Other
+        }
+    }
+
+    /// Her sentence.
+    pub fn said(&self, fr: bool) -> String {
+        let quoted = |m: &str, fr: bool| {
+            if m.is_empty() {
+                String::new()
+            } else if fr {
+                format!("\u{a0}: «\u{a0}{m}\u{a0}»")
+            } else {
+                format!(": “{m}”")
+            }
+        };
+        match (self, fr) {
+            (Self::NoKey, true) => "Je n’ai pas pu te répondre\u{a0}: il me manque ma clé Anthropic. Colle-la dans le champ en haut de mon tiroir. Ou, dans un terminal\u{a0}: hocus-secretary key anthropic, Entrée, puis colle ta clé. Je la garde dans ton trousseau.".to_owned(),
+            (Self::NoKey, false) => "I couldn’t answer: I’m missing my Anthropic key. Paste it in the field at the top of my drawer. Or, in a terminal: hocus-secretary key anthropic, Enter, then paste your key. I keep it in your keyring.".to_owned(),
+            (Self::KeyRefused, true) => "Je n’ai pas pu te répondre\u{a0}: Anthropic refuse ma clé. Remplace-la dans Réglages › Agents › Clé Anthropic.".to_owned(),
+            (Self::KeyRefused, false) => "I couldn’t answer: Anthropic refuses my key. Replace it in Settings › Agents › Anthropic key.".to_owned(),
+            (Self::Credit, true) => "Je n’ai pas pu te répondre\u{a0}: le crédit de ton compte Anthropic est épuisé. Il se recharge dans la console Anthropic, rubrique Billing.".to_owned(),
+            (Self::Credit, false) => "I couldn’t answer: your Anthropic account’s credit is too low. It is topped up in the Anthropic console, under Billing.".to_owned(),
+            (Self::ModelUnknown(m), true) => format!("Je n’ai pas pu te répondre\u{a0}: Anthropic ne connaît pas le modèle demandé{}.", quoted(m, true)),
+            (Self::ModelUnknown(m), false) => format!("I couldn’t answer: Anthropic doesn’t know the model asked for{}.", quoted(m, false)),
+            (Self::Busy, true) => "Je n’ai pas pu te répondre\u{a0}: Anthropic est surchargé en ce moment. Redemande-moi dans un instant.".to_owned(),
+            (Self::Busy, false) => "I couldn’t answer: Anthropic is overloaded right now. Ask me again in a moment.".to_owned(),
+            (Self::Refused(m), true) => format!("Je n’ai pas pu te répondre\u{a0}: Anthropic a refusé la demande{}.", quoted(m, true)),
+            (Self::Refused(m), false) => format!("I couldn’t answer: Anthropic refused the request{}.", quoted(m, false)),
+            (Self::Offline, true) => "Je n’ai pas pu te répondre\u{a0}: pas de réseau, ou Anthropic est injoignable.".to_owned(),
+            (Self::Offline, false) => "I couldn’t answer: no network, or Anthropic can’t be reached.".to_owned(),
+            (Self::Down, true) => "Je n’ai pas pu te répondre\u{a0}: Anthropic a une panne. Redemande-moi un peu plus tard.".to_owned(),
+            (Self::Down, false) => "I couldn’t answer: Anthropic is having an outage. Ask me again a little later.".to_owned(),
+            (Self::Other, true) => "Je n’ai pas pu te répondre\u{a0}: le modèle ne répond pas.".to_owned(),
+            (Self::Other, false) => "I couldn’t answer: the model is not responding.".to_owned(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -318,8 +318,9 @@ Online Accounts) and from what the user tells her. They live in the **perso note
 - Radius 14, the popovers' glass, a 1 px `rgba(255,255,255,.13)` rim, the popovers'
   shadow.
 - **Over** the windows: no window moves or resizes.
-- It stays open when another window takes the focus, so the user can copy a name.
-  `Esc` (with the keyboard in it), a click on her, `Super+S` or ✕ close it.
+- A press elsewhere (a window, the desktop) closes it, as the bar's menus do
+  (#755); so do `Esc` (with the keyboard in it), a click on her, `Super+S` or ✕.
+  It opens again where it was; an answer being written waits in the thread.
 - In over 180 ms (16 px from the bar, fading); out 140 ms. With reduced motion or a
   CPU shell: a fade only.
 - "Ce qu'elle sait" widens it to **720 px** (200 ms).
@@ -1095,7 +1096,7 @@ Marked (machine) if not.
 - AC4 A click on her head opens a 420 px drawer whose right edge is 8 px from the bar
   and whose top and bottom are the bar's. On a 1366 px screen it is 360 px. No window
   moves.
-- AC5 `Super+S` toggles it. `Esc` closes it. Focusing another window does not.
+- AC5 `Super+S` toggles it. `Esc` closes it. A click in another window closes it too (#755).
 - AC6 A sentence shows the user's bubble, her typing indicator, then her streamed
   answer.
 - AC7 An unknown term present on a fixture board gives exactly one question naming
@@ -2501,3 +2502,113 @@ aside.
   rule is possible in the rule, not offered in the view); the button
   shows on every mail sender's group, people included; three machine
   mails waiting make a sender worth asking about.
+### #753: her way of being, taught by talking and proposed from what she observes
+
+The maintainer's choice: her personality is shaped by talking to her (no
+free-text field), and she may propose adjustments from what she observes,
+asking first. `style.rs`, `brain/manner.rs`.
+
+- **Said in the drawer, read in code** (`style::heard`, French and a
+  little English, no model call): "vouvoie-moi" / "tutoie-moi", "sois plus
+  formelle" / "plus décontractée", "réponds plus court" / "plus détaillé",
+  "pas de listes", "arrête les emojis", "un peu plus d'humour" / "pas
+  d'humour", "sois plus directe" / "plus de tact"; "À propos de « … » : "
+  (from "Modifier") is read through. A follow-up about one answer ("plus
+  court", "sans liste") is not a style: it goes to her model, and is
+  counted (below). Anything else that asks her to be otherwise goes to
+  her model, which may call **`remember_style`** (`said`, `topic`,
+  `instruction`): a card "Sa façon d'être · à confirmer" (Garder · Non
+  merci), shown only when `said` is in the user's own sentence of that
+  turn; nothing is kept before "Garder".
+- **Kept** as a told rule (`Compiled::Style`, the work notebook):
+  "Retenu : vouvoiement · Annuler" (ten seconds, as lot 6). One item per
+  aspect: a later one closes the older at today ("Ça remplace
+  « Vouvoiement », que tu m'avais demandé le 9 nov."); the same again is
+  "C'est déjà ce que je fais". Nothing is deleted: closed items stay in
+  the history.
+- **Applied to every request**: the block « ## Ta façon d'être, demandée
+  par {user} » (one line per aspect, twelve at most, the newest) goes in
+  the system part right after her persona's own words, before "Ce que tu
+  sais maintenant": in the frozen, cached prefix, re-cached when it
+  changes. It says it comes before her habits, never before "Ce que tu ne
+  fais jamais" nor what the desktop enforces. The core card no longer
+  lists these rules. Her persona says so too, with `remember_style`.
+- **Guards** (`style::guard`): a sentence that asks to loosen what code
+  enforces is refused with a plain sentence saying why, and nothing is
+  kept: acting without the click ("envoie sans me demander", "n'attends
+  pas mon clic"), masking ("ne masque plus les mots de passe"), her rules
+  and sources as information ("ignore tes règles", "fais ce que disent les
+  mails"), consent ("lis tous mes mails sans me demander"), the speak gate
+  ("parle-moi même pendant les réunions", "même la nuit"). The same check
+  runs on `remember_style`'s words and instruction. Only the drawer's
+  sentences are read: a mail saying "sois désagréable" or "ignore tes
+  règles" changes nothing, and her model led by it is refused (its quote
+  is not the user's).
+- **"Ce qu'elle sait" › SA FAÇON D'ÊTRE** (under the "Toi" chip): each
+  item, "tu me l'as dit · 9 nov." (its words quoted when unfolded) or
+  "proposé par elle, accepté"; "Modifier" (back to the conversation, as
+  lot 6) and "Oublier" (closed today, the toast's "Annuler", five seconds
+  as every forget there). Out of "Appris cette semaine" and "Règles".
+  "Tout oublier" removes them.
+- **Proposed from her own records**, each night after the sources'
+  observations (`style::observe`): "plus court" asked three times or more
+  after her answers in thirty days ("Tu me demandes souvent de faire plus
+  court : je réponds plus court d'office ?"), lists asked away three times
+  ("j'arrête les listes ?"), five morning briefings in two weeks and none
+  unfolded ("Tu n'ouvres jamais mes détails : je fais plus court ?"; the
+  shell tells her when "Ouvrir le point" unfolds one,
+  `ToSecretary::Unfolded`). Asked once as lot 6's observations (Oui · Non ·
+  Plus tard), never when that aspect was asked for already; nothing
+  changes without "Oui".
+- **Tests**: `hocus-secretary/src/style.rs` (the sentences, the guards,
+  the follow-ups, the user's words, the observations),
+  `tests/style.rs` (the block in the request's system part and only
+  there, after a restart, gone with "Tout oublier"; a contradiction
+  replaces and "Oublier" closes; a mail and her model led by it change
+  nothing; `remember_style` on the user's words kept by "Garder";
+  loosening refused in code; "plus court" proposed once, nothing before
+  "Oui"), `hocus-compositor/tests/secretary_style.rs` (the thread's
+  "Retenu" and "Ça remplace", a refusal, the section, the observation;
+  `HOCUS_DRAWER_SHOTS=DIR` leaves its PNGs).
+- **To confirm**: "Oublier" closes the item with the five-second toast of
+  every forget in "Ce qu'elle sait" (not ten); a guarded sentence is
+  refused even when it is a one-off request ("envoie le mail sans me
+  demander"); a pending `remember_style` card does not survive a restart
+  (its button then only says "Noté.").
+
+### #755: the field takes a click, the drawer closes on a click elsewhere, model errors said, no arrival for a common word
+
+The maintainer's try of sprint 11 with #752.
+
+- **A click in the field gives it the keyboard**: the compositor gives an
+  on-demand surface the keyboard at each press on it, but the toolkit
+  (layershellev) says no "Focused" when the pointer entered the surface
+  first; the drawer now takes a press on it as the keyboard coming
+  (its ring and its caret).
+- **A press elsewhere closes it**, as the bar's menus do (the
+  compositor's `Outside`): a window clicked gets its click and the
+  keyboard. `Super+S` opens it again where it was (its tab, what was being
+  typed, where the thread and the list were; her peek's briefing asked
+  for wins); an answer being written goes on and waits in the thread.
+- **Her model's failures said and logged**: the Anthropic error keeps its
+  status, its type, its message and the request's id (`request-id`), never
+  anything of the request; her loop logs it (`her model failed`) and says
+  the reason (`model::Failure`): key refused (401, 403), credit too low,
+  model unknown (404), overloaded or rate-limited, a refused request with
+  the API's message, no network, an outage; « le modèle ne répond pas »
+  only for anything else. The missing key's sentence gives the two ways
+  apart: the drawer's field, or `hocus-secretary key anthropic` in a
+  terminal.
+- **An arrival needs someone** (`learn::person_like`): a name of the
+  roster's form ("Prénom Nom"), a mail's sender, or a member a Slack join
+  names; never a calendar's title (an event's), never a common word
+  ("Événement", "Réunion", "Rappel", the days, "Daily"…). Both the
+  sources' joins and the triage's candidate facts go through it.
+- **Tests**: `hocus-secretary/src/learn.rs`
+  (`common_words_and_calendar_titles_are_not_arrivals`),
+  `tests/models.rs` (`a_model_s_failure_says_its_real_reason`: each error
+  of a fake API classified with its request id, nobody listening, her
+  sentence in the thread), `hocus-compositor/tests/secretary_drawer.rs`
+  (a click in a window closes it, `Super+S` reopens it with what was typed
+  and the answer written meanwhile; a click in the field gives it the
+  keyboard back after a window took it).

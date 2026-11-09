@@ -472,6 +472,11 @@ impl Brain {
             self.tell_look();
             return;
         }
+        // How she should be (#753): read in code too.
+        if self.styled(conn, id, &text) {
+            self.tell_look();
+            return;
+        }
         match self.candidate(&text) {
             Some(candidate) => {
                 self.ask_about(id, text, candidate);
@@ -817,8 +822,24 @@ impl Brain {
                 // question), and is told so.
                 let mut results = Vec::new();
                 let mut read = false;
+                // The user's own sentence of this turn: what a way of
+                // being must quote (#753).
+                let asked = self.talk.turns.get(&id).and_then(|t| {
+                    t.messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.from == "user" && !m.text.is_empty())
+                        .map(|m| m.text.clone())
+                });
                 for call in &reply.tool_calls {
-                    if tools::READ.contains(&call.name.as_str()) {
+                    if call.name == "remember_style" {
+                        let text = self.style_called(id, call, asked.as_deref());
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            text,
+                            error: false,
+                        });
+                    } else if tools::READ.contains(&call.name.as_str()) {
                         read = true;
                         let ran = tools::run(&self.store, call, None);
                         results.push(ToolResult {
@@ -861,28 +882,21 @@ impl Brain {
                 self.done(conn, id);
             }
             Err(err) => {
-                let no_key = err.starts_with("no key for ");
-                if no_key {
+                let failure = crate::model::Failure::of(&err);
+                // Said in the journal (#755): the status, the API's error
+                // type and message, the request's id; never the request.
+                tracing::warn!(id, %err, ?failure, "her model failed");
+                if failure == crate::model::Failure::NoKey {
                     self.key_missing = err
                         .strip_prefix("no key for ")
                         .and_then(|r| r.split(':').next())
                         .map(str::to_owned);
                 }
-                let failed = if no_key {
-                    self.talk.t(
-                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, colle-la dans le champ en haut de mon tiroir, ou dans un terminal tape « hocus-secretary key anthropic », Entrée, puis colle ta clé ; je la garde dans ton trousseau.",
-                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, paste it in the field at the top of my drawer, or in a terminal type “hocus-secretary key anthropic”, Enter, then paste your key; I keep it in your keyring.",
-                    )
-                } else {
-                    self.talk.t(
-                        "Je n’ai pas pu te répondre : le modèle ne répond pas.",
-                        "I couldn’t answer: the model is not responding.",
-                    )
-                };
+                let failed = failure.said(self.talk.fr());
                 self.add_item(
                     Some(id),
                     Body::Her {
-                        text: failed.to_owned(),
+                        text: failed,
                         note: None,
                         assumed: false,
                     },
@@ -971,8 +985,10 @@ impl Brain {
         if !card.actions.iter().any(|a| a.decision == decision) {
             return self.error(conn, Some(id), "no such button");
         }
-        // Her own cards about her memory (lot 6).
-        if self.memory_decide(conn, id, item, decision) {
+        // Her own cards about her memory (lot 6), and her way of being.
+        if self.memory_decide(conn, id, item, decision)
+            || self.style_decide(conn, id, item, decision)
+        {
             return;
         }
         let now = self.clock.now();

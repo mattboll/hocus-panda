@@ -279,6 +279,12 @@ impl Call<'_> {
             .send(body.as_bytes())
             .map_err(|e| Failed::Again(format!("{url}: {e}"), None))?;
         let status = answer.status().as_u16();
+        let id = answer
+            .headers()
+            .get("request-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
         if status != 200 {
             let asked = answer
                 .headers()
@@ -293,11 +299,20 @@ impl Call<'_> {
                 .limit(64 * 1024)
                 .read_to_string()
                 .unwrap_or_default();
-            let kind = serde_json::from_str::<Value>(&text)
+            // The API's error, as it says it (#755): its type, its message
+            // and the request's id, never anything of the request.
+            let error = serde_json::from_str::<Value>(&text)
                 .ok()
-                .and_then(|v| v["error"]["type"].as_str().map(ToOwned::to_owned))
+                .map(|v| v["error"].clone())
                 .unwrap_or_default();
-            let err = format!("the API answered {status} {kind}");
+            let kind = error["type"].as_str().unwrap_or_default();
+            let message: String = error["message"]
+                .as_str()
+                .unwrap_or_default()
+                .chars()
+                .take(300)
+                .collect();
+            let err = format!("the API answered {status} {kind}: {message} (request {id})");
             return Err(match status {
                 408 | 409 | 429 | 500..=599 => Failed::Again(err, asked),
                 _ => Failed::Stop(err),
@@ -401,7 +416,13 @@ fn read_stream(reader: impl BufRead, part: &mut dyn FnMut(&str)) -> Result<Reply
             "message_stop" => ended = true,
             "error" => {
                 let kind = event["error"]["type"].as_str().unwrap_or_default();
-                let err = format!("the stream said {kind}");
+                let message: String = event["error"]["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(300)
+                    .collect();
+                let err = format!("the stream said {kind}: {message}");
                 return Err(match kind {
                     "overloaded_error" | "api_error" | "rate_limit_error" => {
                         Failed::Again(err, None)

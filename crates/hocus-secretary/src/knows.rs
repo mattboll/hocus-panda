@@ -13,8 +13,9 @@
 //! - **PROJETS ET LEURS NOMS**: aliases as tags, new ones blue for a
 //!   week; the people on them.
 //! - **RÈGLES**, **SES OUTILS** (a card per source, how much it is used,
-//!   its rules), **TOI**, **MAINTENANCE** and **DOSSIERS PERSO** (the
-//!   registers, later lots).
+//!   its rules), **TOI**, **SA FAÇON D'ÊTRE** (what the user asked her
+//!   to be, #753, under the "Toi" chip), **MAINTENANCE** and **DOSSIERS
+//!   PERSO** (the registers, later lots).
 //!
 //! Only what counts shows as known: a proposal shows as one, "à
 //! confirmer", and drives nothing.
@@ -499,9 +500,10 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             ..Known::default()
         });
     }
+    // Her way of being has its own section, the replaced items out.
     for rule in rules
         .iter()
-        .filter(|r| r.accepted_at.is_some_and(|t| t >= week_ago))
+        .filter(|r| r.accepted_at.is_some_and(|t| t >= week_ago) && !crate::style::is_style(r))
     {
         let item = format!("rule:{}", rule.id);
         if kept.contains(&item) {
@@ -792,10 +794,44 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         });
     }
 
+    // Her way of being (#753): what the user asked her to be, with the
+    // words they said; "Modifier" tells her, "Oublier" closes it.
+    let style_known: Vec<Known> = rules
+        .iter()
+        .filter(|r| {
+            crate::style::is_style(r)
+                && r.accepted_at.is_some()
+                && r.valid_to.is_none_or(|to| to > today)
+        })
+        .map(|r| {
+            let mut o = origin(
+                store,
+                &w,
+                r.provenance,
+                &r.pointer,
+                None,
+                r.recorded_at,
+                r.accepted_at,
+            );
+            if r.provenance == Provenance::Told && !r.sentence.is_empty() {
+                o.quote = Some(r.sentence.clone());
+            }
+            Known {
+                item: format!("rule:{}", r.id),
+                text: rule_text(r),
+                origin: o,
+                notebook: Some(r.notebook),
+                actions: vec![Act::Edit, Act::Forget],
+                ..Known::default()
+            }
+        })
+        .collect();
+
     // Rules that count.
     let rules_known: Vec<Known> = rules
         .iter()
         .filter(|r| r.accepted_at.is_some() && r.valid_to.is_none_or(|to| to > today))
+        .filter(|r| !crate::style::is_style(r))
         .map(|r| Known {
             item: format!("rule:{}", r.id),
             text: rule_text(r),
@@ -980,7 +1016,11 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         ),
         (Some(Kind::Rules), w.t("Règles", "Rules"), rules_known.len()),
         (Some(Kind::Tools), w.t("Outils", "Tools"), tools.len()),
-        (Some(Kind::You), w.t("Toi", "You"), you.len()),
+        (
+            Some(Kind::You),
+            w.t("Toi", "You"),
+            you.len() + style_known.len(),
+        ),
         (
             Some(Kind::Maintenance),
             w.t("Maintenance", "Maintenance"),
@@ -1062,6 +1102,17 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             w.t("TOI", "YOU"),
             you.len().to_string(),
             you,
+        ),
+        (
+            Some(Kind::You),
+            "style",
+            w.t("SA FAÇON D’ÊTRE", "HER WAY OF BEING"),
+            if w.fr {
+                format!("{} · ce que tu lui as demandé", style_known.len())
+            } else {
+                format!("{} · what you asked her", style_known.len())
+            },
+            style_known,
         ),
         (
             Some(Kind::People),

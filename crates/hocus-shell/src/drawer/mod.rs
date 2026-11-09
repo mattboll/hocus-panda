@@ -6,12 +6,15 @@
 //! ✕), its tabs, the agents' line (4.6's words, which unfold her briefing
 //! in it), the thread ([`draw`]) and the field.
 //!
-//! It stays open when a window takes the keyboard, so that the user can
-//! copy a name: `Esc` with the keyboard in it, `Super+S`, a click on her
-//! head or ✕ close it. Its surface ([`SECRETARY_NAMESPACE`]) asks for the
-//! keyboard on demand: the compositor gives it the keyboard as it first
-//! shows (its field is focused), a window clicked takes it back. The
-//! compositor moves it in and out and blurs behind it, as a popover.
+//! A press elsewhere (a window, the desktop) closes it, as the bar's
+//! menus do (#755); so do `Esc` with the keyboard in it, `Super+S`, a
+//! click on her head or ✕. It opens again where it was (its tab, what was
+//! being typed, where the thread was), and an answer being written goes
+//! on meanwhile and waits in the thread. Its surface
+//! ([`SECRETARY_NAMESPACE`]) asks for the keyboard on demand: the
+//! compositor gives it the keyboard as it first shows (its field is
+//! focused) and at each press on it. The compositor moves it in and out
+//! and blurs behind it, as a popover.
 //!
 //! Her briefings (lot 5) are thread items: the morning's folded on one
 //! card with "Ouvrir le point", which unfolds it in place of the thread
@@ -486,6 +489,24 @@ pub enum Phase {
 pub struct Drawer {
     pub phase: Phase,
     closing: Vec<(window::Id, Instant)>,
+    /// Where it was when it closed: it opens there again (#755).
+    kept: Option<Kept>,
+}
+
+/// What the drawer keeps from one opening to the next: its tab, what was
+/// being typed, where the thread and the list were.
+#[derive(Debug, Clone)]
+struct Kept {
+    tab: Tab,
+    field: String,
+    recall: Option<String>,
+    scroll: f32,
+    briefing: bool,
+    point: Option<u64>,
+    search: String,
+    book: Option<Notebook>,
+    kind: Option<Kind>,
+    knows_scroll: f32,
 }
 
 impl Drawer {
@@ -510,6 +531,18 @@ impl Drawer {
             return false;
         };
         tracing::info!("the secretary's drawer closes");
+        self.kept = Some(Kept {
+            tab: open.tab,
+            field: open.field.clone(),
+            recall: open.recall.clone(),
+            scroll: open.scroll,
+            briefing: open.briefing,
+            point: open.point,
+            search: open.search.clone(),
+            book: open.book,
+            kind: open.kind,
+            knows_scroll: open.knows_scroll,
+        });
         self.closing.push((open.surface, now + DRAWER_CLOSE));
         effects.push(Effect::Keyboard(open.surface, KeyboardInteractivity::None));
         effects.push(Effect::Tell(ToCompositor::Closing(
@@ -595,26 +628,43 @@ pub fn toggle(output: &str, screen: u32) {
         let base = hocus_link::drawer_width(screen);
         let margin = margins(&bar);
         let point = pending_point();
-        tracing::info!(bar, width = base, screen, "the secretary's drawer opens");
+        // Where it was (#755), unless her peek asks for a briefing.
+        let kept = d.kept.take().filter(|_| point.is_none()).unwrap_or(Kept {
+            tab: Tab::Talk,
+            field: String::new(),
+            recall: None,
+            scroll: if point.is_some() { f32::MAX } else { 0.0 },
+            briefing: false,
+            point,
+            search: String::new(),
+            book: None,
+            kind: None,
+            knows_scroll: 0.0,
+        });
+        let width = match kept.tab {
+            Tab::Talk => base,
+            Tab::Knows => DRAWER_WIDE,
+        };
+        tracing::info!(bar, width, screen, tab = ?kept.tab, "the secretary's drawer opens");
         effects.push(Effect::Drawer {
             id: surface,
             bar: bar.clone(),
-            width: base,
+            width,
             margin,
         });
         d.phase = Phase::Open(Box::new(Open {
             surface,
             bar,
             base,
-            width: base,
-            tab: Tab::Talk,
-            field: String::new(),
-            recall: None,
-            briefing: false,
-            point,
+            width,
+            tab: kept.tab,
+            field: kept.field,
+            recall: kept.recall,
+            briefing: kept.briefing,
+            point: kept.point,
             queue: false,
             reveal: false,
-            scroll: if point.is_some() { f32::MAX } else { 0.0 },
+            scroll: kept.scroll,
             hover: None,
             pressed: None,
             pointer: None,
@@ -622,11 +672,11 @@ pub fn toggle(output: &str, screen: u32) {
             opened: now,
             mood: None,
             rev: 0,
-            search: String::new(),
-            book: None,
-            kind: None,
+            search: kept.search,
+            book: kept.book,
+            kind: kept.kind,
             expanded: None,
-            knows_scroll: 0.0,
+            knows_scroll: kept.knows_scroll,
             confirm: None,
             notebooks: std::collections::HashMap::new(),
             left_out: std::collections::HashMap::new(),
@@ -644,7 +694,26 @@ pub fn toggle(output: &str, screen: u32) {
         crate::popover::event(crate::popover::Event::PressElsewhere);
     }
     crate::secretary::drawer(opened);
+    // Opened on "Ce qu'elle sait": she is asked for it again.
+    if opened
+        && let Some(query) = with(|d| match &d.phase {
+            Phase::Open(open) if open.tab == Tab::Knows => Some(open.query()),
+            _ => None,
+        })
+    {
+        crate::secretary::knows(Some(query));
+    }
     crate::popover::send(effects);
+}
+
+/// A press outside the shell (a window, the desktop): it closes, as the
+/// bar's menus do (#755). An answer being written goes on, and waits in
+/// the thread.
+pub fn outside() {
+    if is_open() {
+        tracing::info!("a press elsewhere: the drawer closes");
+        close();
+    }
 }
 
 /// The item her peek's bubble asked the drawer to open on.
@@ -891,6 +960,7 @@ pub fn act(id: window::Id, target: Target) {
             }
             Target::Point(item) => {
                 tracing::info!(item, "the drawer unfolds her briefing");
+                crate::secretary::unfolded(item);
                 if std::mem::take(&mut open.queue) {
                     crate::secretary::queue(false);
                 }
