@@ -274,6 +274,46 @@ impl State {
         self.tell_shell(ToShell::Secretary(shown));
     }
 
+    /// `Super+S` (§4): the shell opens her drawer beside the bar of the
+    /// focused window's screen (else the pointer's), as wide as that
+    /// screen allows; open, it closes. Assistant mode only: classic has no
+    /// drawer, and the chord is no shortcut there.
+    pub(crate) fn toggle_secretary_drawer(&mut self) {
+        if self.config.secretary.mode != SecretaryMode::Assistant {
+            return;
+        }
+        if !self.shell_linked() {
+            tracing::info!("no shell: no secretary's drawer");
+            return;
+        }
+        let Some(output) = self.bubbles_screen() else {
+            return;
+        };
+        self.tell_drawer(&output);
+    }
+
+    /// A click on her head on `output`'s bar: as `Super+S` there.
+    pub(crate) fn secretary_drawer_on(&mut self, output: &str) {
+        if self.config.secretary.mode != SecretaryMode::Assistant {
+            return;
+        }
+        let found = self.space.outputs().find(|o| o.name() == output).cloned();
+        if let Some(output) = found {
+            self.tell_drawer(&output);
+        }
+    }
+
+    fn tell_drawer(&mut self, output: &smithay::output::Output) {
+        let width = self
+            .space
+            .output_geometry(output)
+            .map_or(0, |g| u32::try_from(g.size.w).unwrap_or(0));
+        self.tell_shell(ToShell::SecretaryDrawer {
+            output: output.name(),
+            width,
+        });
+    }
+
     /// Her process while it runs (tests: killed as a crash would).
     pub fn secretary_pid(&self) -> Option<u32> {
         match self.secretary.phase {

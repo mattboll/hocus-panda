@@ -350,7 +350,7 @@ pub struct Action {
 }
 
 /// What a card's button says (§16: `accept`/`reject`/`edit`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Decision {
     Accept,

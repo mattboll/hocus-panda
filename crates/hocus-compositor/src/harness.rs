@@ -637,6 +637,17 @@ impl Headless {
         self.layer_rects(hocus_link::POPOVER_NAMESPACE)
     }
 
+    /// Commits of the secretary's drawer so far.
+    pub fn drawer_commits(&self) -> u64 {
+        self.app.state.panel.drawer_commits
+    }
+
+    /// The secretary's drawer as the shell placed it: its screen, and
+    /// where it is (global).
+    pub fn drawer_surfaces(&self) -> Vec<(String, Rect)> {
+        self.layer_rects(hocus_link::SECRETARY_NAMESPACE)
+    }
+
     /// Commits of the launcher's surfaces so far.
     pub fn launcher_commits(&self) -> u64 {
         self.app.state.panel.launcher_commits
