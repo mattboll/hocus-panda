@@ -63,6 +63,11 @@ pub struct Mail {
     pub attachments: Vec<String>,
     /// The user has read it (its `\Seen` as it was; never changed by her).
     pub seen: bool,
+    /// Why it looks sent by a machine (a list, a forge's notifications, a
+    /// no-reply address): the header that says so ("List-Unsubscribe",
+    /// "X-GitHub-Reason", "no-reply"), never its value (#754).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automated: Option<String>,
 }
 
 /// An application's notification, as the shell's server received it
