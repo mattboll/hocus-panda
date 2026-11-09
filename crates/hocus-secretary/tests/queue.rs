@@ -207,10 +207,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(view.waiting, 5);
     assert_eq!(view.groups[0].key, "notifications@github.com");
     assert_eq!(view.groups[0].count, 3);
-    assert_eq!(
-        view.groups[0].automated.as_deref(),
-        Some("X-GitHub-Reason")
-    );
+    assert_eq!(view.groups[0].automated.as_deref(), Some("X-GitHub-Reason"));
     assert!(view.groups[0].can_aside);
     assert_eq!(group(&view, "lea@atelier-lune.fr"), 1);
     assert_eq!(group(&view, "lettre@exemple.fr"), 1);
@@ -249,17 +246,24 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
         FromSecretary::Thread { items, .. } => items,
         other => panic!("not her thread: {other:?}"),
     };
-    let answered = thread.iter().find(|i| i.id == asked.id).expect("her question");
+    let answered = thread
+        .iter()
+        .find(|i| i.id == asked.id)
+        .expect("her question");
     assert!(
-        matches!(answered.body, Body::Question { chosen: Some(0), .. }),
+        matches!(
+            answered.body,
+            Body::Question {
+                chosen: Some(0),
+                ..
+            }
+        ),
         "answered Oui: {answered:?}"
     );
     let known = knows(&mut driver);
     let rule = known
         .items()
-        .find(|k| {
-            k.text.contains("notifications@github.com") && k.text.contains("pas triés")
-        })
+        .find(|k| k.text.contains("notifications@github.com") && k.text.contains("pas triés"))
         .unwrap_or_else(|| panic!("the rule: {known:?}"))
         .clone();
     assert!(rule.item.starts_with("rule:"), "{rule:?}");
@@ -271,9 +275,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(group(&view, "notifications@github.com"), 1);
     driver.send(&ToSecretary::Clock { advance: 41 });
     let view = view_until(&driver, "the next one", |v| {
-        v.now
-            .as_ref()
-            .is_some_and(|n| n.sender.contains("github"))
+        v.now.as_ref().is_some_and(|n| n.sender.contains("github"))
     });
     assert_eq!(
         view.now.as_ref().map(|n| n.subject.as_str()),
@@ -315,7 +317,10 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     assert_eq!(group(&view, "notifications@github.com"), 2);
 
     // Closed: nothing more is sent, whatever the queue does.
-    driver.send(&ToSecretary::Queue { id: 92, open: false });
+    driver.send(&ToSecretary::Queue {
+        id: 92,
+        open: false,
+    });
     // What was sent before it closed, read.
     let _ = driver.status();
     driver.send(&ToSecretary::Clock { advance: 41 });

@@ -317,6 +317,12 @@ pub enum Target {
     Correct(u64),
     /// "Ouvrir le point": briefing `item` unfolds in the drawer.
     Point(u64),
+    /// Her status line: her triage queue unfolds in the drawer (#754).
+    Status,
+    /// "Ne pas trier, chercher si besoin" on the queue's group `index`.
+    Aside(u32),
+    /// "Trier quand même" on the set-aside group `index`.
+    Unaside(u32),
     /// "Montrer": the perso items hidden in a public moment show.
     Reveal,
     Field,
@@ -364,6 +370,9 @@ impl Target {
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
             Self::Point(item) => format!("Point({item})"),
+            Self::Status => "Status".to_owned(),
+            Self::Aside(n) => format!("Aside({n})"),
+            Self::Unaside(n) => format!("Unaside({n})"),
             Self::Reveal => "Reveal".to_owned(),
             Self::Field => "Field".to_owned(),
             Self::Send => "Send".to_owned(),
@@ -402,6 +411,8 @@ pub struct Open {
     pub briefing: bool,
     /// Her briefing item `point` unfolded in place of the thread.
     pub point: Option<u64>,
+    /// Her triage queue unfolded in place of the thread (#754).
+    pub queue: bool,
     /// The perso items hidden in a public moment shown ("Montrer").
     pub reveal: bool,
     /// The thread scrolled up by this much from its bottom.
@@ -601,6 +612,7 @@ pub fn toggle(output: &str, screen: u32) {
             recall: None,
             briefing: false,
             point,
+            queue: false,
             reveal: false,
             scroll: if point.is_some() { f32::MAX } else { 0.0 },
             hover: None,
@@ -660,6 +672,9 @@ pub fn open_on_item(bar: &str, item: Option<u64>) {
         let point = pending_point();
         with(|d| {
             if let Phase::Open(open) = &mut d.phase {
+                if std::mem::take(&mut open.queue) {
+                    crate::secretary::queue(false);
+                }
                 open.tab = Tab::Talk;
                 open.point = point;
                 open.briefing = false;
@@ -749,6 +764,13 @@ pub fn knows_again() {
     }
 }
 
+/// She is connected again: an open queue's view asks her again.
+pub fn queue_again() {
+    if with(|d| matches!(&d.phase, Phase::Open(open) if open.queue)) {
+        crate::secretary::queue(true);
+    }
+}
+
 /// A bar changed form: the drawer follows its edge.
 pub fn bar_changed(bar: &str) {
     let effect = with(|d| match &d.phase {
@@ -794,6 +816,9 @@ pub fn act(id: window::Id, target: Target) {
                 open.tab = tab;
                 open.briefing = false;
                 open.point = None;
+                if std::mem::take(&mut open.queue) {
+                    crate::secretary::queue(false);
+                }
                 open.confirm = None;
                 open.expanded = None;
                 crate::secretary::knows(match tab {
@@ -814,6 +839,9 @@ pub fn act(id: window::Id, target: Target) {
             }
             Target::Tab(_) => Then::Nothing,
             Target::Agents => {
+                if std::mem::take(&mut open.queue) {
+                    crate::secretary::queue(false);
+                }
                 open.briefing = true;
                 open.changed();
                 Then::Draw
@@ -821,12 +849,51 @@ pub fn act(id: window::Id, target: Target) {
             Target::Back => {
                 open.briefing = false;
                 open.point = None;
+                if std::mem::take(&mut open.queue) {
+                    crate::secretary::queue(false);
+                }
                 open.scroll = 0.0;
                 open.changed();
                 Then::Draw
             }
+            Target::Status => {
+                if open.queue {
+                    open.queue = false;
+                    crate::secretary::queue(false);
+                } else {
+                    tracing::info!("the drawer unfolds her queue");
+                    open.tab = Tab::Talk;
+                    open.queue = true;
+                    open.point = None;
+                    open.briefing = false;
+                    open.scroll = f32::MAX;
+                    crate::secretary::queue(true);
+                }
+                open.changed();
+                Then::Draw
+            }
+            Target::Aside(index) | Target::Unaside(index) => {
+                let aside = matches!(target, Target::Aside(_));
+                let key = crate::secretary::conversation(|c| {
+                    c.queue.as_ref().and_then(|q| {
+                        let groups = if aside { &q.groups } else { &q.aside };
+                        groups.get(index as usize).map(|g| g.key.clone())
+                    })
+                });
+                if let Some(key) = key {
+                    crate::secretary::queue_act(if aside {
+                        hocus_secretary_link::queue::Act::Aside { key }
+                    } else {
+                        hocus_secretary_link::queue::Act::Back { key }
+                    });
+                }
+                Then::Nothing
+            }
             Target::Point(item) => {
                 tracing::info!(item, "the drawer unfolds her briefing");
+                if std::mem::take(&mut open.queue) {
+                    crate::secretary::queue(false);
+                }
                 open.point = Some(item);
                 open.briefing = false;
                 open.scroll = f32::MAX;

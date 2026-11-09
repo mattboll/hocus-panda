@@ -808,12 +808,15 @@ fn the_triage_s_facts_are_proposals_with_their_source() -> anyhow::Result<()> {
             FromSecretary::Thread { items, .. } => items,
             other => panic!("not her thread: {other:?}"),
         };
-        if thread.iter().any(|i| {
-            matches!(&i.body, Body::Question { text, .. } if text.contains("Julie Berthier"))
-        }) {
+        if thread.iter().any(
+            |i| matches!(&i.body, Body::Question { text, .. } if text.contains("Julie Berthier")),
+        ) {
             break;
         }
-        assert!(start.elapsed() < std::time::Duration::from_secs(20), "never asked");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "never asked"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let now = graph(&mut driver, "Sophie Marchand", None).expect("Sophie");

@@ -346,8 +346,7 @@ impl Queue {
     pub fn forget_source(&mut self, source: &str) {
         self.pending
             .retain(|p| !crate::context::of_source(p, source));
-        self.aside
-            .retain(|p| !crate::context::of_source(p, source));
+        self.aside.retain(|p| !crate::context::of_source(p, source));
     }
 
     /// The time an item takes, measured over the last requests, the rest
@@ -646,7 +645,10 @@ mod tests {
         queue.push("mail:gh1".to_owned());
         assert_eq!(queue.pending(), 1, "set aside, not queued again");
         assert!(queue.first("mail:gh2"));
-        assert_eq!(queue.waiting().collect::<Vec<_>>(), ["mail:gh2", "mail:lea"]);
+        assert_eq!(
+            queue.waiting().collect::<Vec<_>>(),
+            ["mail:gh2", "mail:lea"]
+        );
         assert_eq!(queue.back_where(|p| p.starts_with("mail:gh")), 1);
         assert_eq!(
             queue.waiting().collect::<Vec<_>>(),

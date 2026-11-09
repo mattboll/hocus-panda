@@ -340,8 +340,8 @@ impl Brain {
             placement: None,
         };
         // The senders set aside, before the items waiting come back.
-        brain.aside_rules = crate::learn::set_aside(&brain.store, brain.store.today())
-            .unwrap_or_default();
+        brain.aside_rules =
+            crate::learn::set_aside(&brain.store, brain.store.today()).unwrap_or_default();
         // Her consent book and her settings watched: a change is taken at
         // once (#752).
         let watched: Vec<(crate::watch::Watched, std::path::PathBuf)> = brain

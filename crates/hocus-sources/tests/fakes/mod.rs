@@ -280,7 +280,10 @@ fn carddav(mut stream: TcpStream, cards: &[(String, String)], asked: &Mutex<Vec<
         }
         "REPORT" if body.contains("addressbook-multiget") => {
             let mut xml = String::from(head);
-            for (href, card) in cards.iter().filter(|(h, _)| body.contains(&format!(">{h}<"))) {
+            for (href, card) in cards
+                .iter()
+                .filter(|(h, _)| body.contains(&format!(">{h}<")))
+            {
                 let card = card
                     .replace('&', "&amp;")
                     .replace('<', "&lt;")

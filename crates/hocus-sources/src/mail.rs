@@ -101,9 +101,15 @@ pub fn automated<'a>(
         .to_ascii_lowercase();
     let local = address.split('@').next().unwrap_or_default();
     let machine = local.replace(['-', '_', '.'], "");
-    if ["noreply", "donotreply", "notification", "notifications", "mailerdaemon"]
-        .iter()
-        .any(|w| machine == *w || machine.starts_with("noreply"))
+    if [
+        "noreply",
+        "donotreply",
+        "notification",
+        "notifications",
+        "mailerdaemon",
+    ]
+    .iter()
+    .any(|w| machine == *w || machine.starts_with("noreply"))
     {
         keep(6, "no-reply".to_owned());
     }
@@ -247,8 +253,14 @@ mod tests {
             automated([], "Free <no-reply@free.example>").as_deref(),
             Some("no-reply")
         );
-        assert_eq!(automated([], "noreply-billing@example.org").as_deref(), Some("no-reply"));
-        assert_eq!(automated([("Precedence", "first-class")], "léa@example.org"), None);
+        assert_eq!(
+            automated([], "noreply-billing@example.org").as_deref(),
+            Some("no-reply")
+        );
+        assert_eq!(
+            automated([("Precedence", "first-class")], "léa@example.org"),
+            None
+        );
     }
 
     #[test]

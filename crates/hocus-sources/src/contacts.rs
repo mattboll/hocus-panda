@@ -144,9 +144,7 @@ pub fn read(
         .into_iter()
         .map(|(href, _)| href)
         .filter(|href| {
-            !href.is_empty()
-                && !href.ends_with('/')
-                && path_of(href).trim_end_matches('/') != book
+            !href.is_empty() && !href.ends_with('/') && path_of(href).trim_end_matches('/') != book
         })
         .collect();
     let mut cards = Vec::new();

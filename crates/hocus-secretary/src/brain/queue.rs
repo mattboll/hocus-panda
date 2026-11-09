@@ -380,7 +380,9 @@ impl Brain {
                 Content::Mail(m) => (m.from.clone(), m.subject.clone()),
                 Content::Notification(n) => (n.app.clone(), n.title.clone()),
                 Content::Event(e) => (e.calendar_name.clone(), e.title.clone()),
-                Content::Birthday(b) => (t("Anniversaires", "Birthdays").to_owned(), b.name.clone()),
+                Content::Birthday(b) => {
+                    (t("Anniversaires", "Birthdays").to_owned(), b.name.clone())
+                }
             };
             let source = p.split_once(':').map_or(p, |(s, _)| s);
             Some(Waiting {
@@ -502,7 +504,9 @@ impl Brain {
         let state = match (&self.queue.state, waiting) {
             (State::Running(_), _) => t("Je trie", "Sorting"),
             (State::Paused { .. }, n) if n > 0 => t("En pause", "Paused"),
-            (State::Resting { .. }, n) if n > 0 => t("Je souffle entre deux", "Resting between two"),
+            (State::Resting { .. }, n) if n > 0 => {
+                t("Je souffle entre deux", "Resting between two")
+            }
             (_, 0) => t("Rien à trier", "Nothing to sort"),
             _ => t("Je m’y remets", "Getting back to it"),
         }
@@ -510,7 +514,11 @@ impl Brain {
         let mut counts = if fr {
             vec![
                 format!("{waiting} en attente"),
-                format!("{} trié{}", self.queue.done, if self.queue.done > 1 { "s" } else { "" }),
+                format!(
+                    "{} trié{}",
+                    self.queue.done,
+                    if self.queue.done > 1 { "s" } else { "" }
+                ),
             ]
         } else {
             vec![

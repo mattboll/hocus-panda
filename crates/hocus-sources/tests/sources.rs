@@ -588,7 +588,9 @@ fn the_old_carddav_request_is_refused_as_google_refuses_it() -> anyhow::Result<(
         Notebook::Pro,
         jiff::Timestamp::UNIX_EPOCH,
     );
-    let grant = book.grant(&source).ok_or_else(|| anyhow::anyhow!("no grant"))?;
+    let grant = book
+        .grant(&source)
+        .ok_or_else(|| anyhow::anyhow!("no grant"))?;
     struct Token;
     impl hocus_day::google::AccessToken for Token {
         fn get(

@@ -1697,7 +1697,10 @@ mod tests {
 
     #[test]
     fn a_sender_or_a_domain_covers_its_addresses() {
-        assert!(covers("notifications@github.com", "Notifications@GitHub.com"));
+        assert!(covers(
+            "notifications@github.com",
+            "Notifications@GitHub.com"
+        ));
         assert!(!covers("notifications@github.com", "noreply@github.com"));
         assert!(covers("gitlab.example.org", "gitlab@gitlab.example.org"));
         assert!(covers("example.org", "bot@ci.example.org"));
