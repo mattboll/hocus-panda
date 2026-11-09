@@ -880,28 +880,21 @@ impl Brain {
                 self.done(conn, id);
             }
             Err(err) => {
-                let no_key = err.starts_with("no key for ");
-                if no_key {
+                let failure = crate::model::Failure::of(&err);
+                // Said in the journal (#755): the status, the API's error
+                // type and message, the request's id; never the request.
+                tracing::warn!(id, %err, ?failure, "her model failed");
+                if failure == crate::model::Failure::NoKey {
                     self.key_missing = err
                         .strip_prefix("no key for ")
                         .and_then(|r| r.split(':').next())
                         .map(str::to_owned);
                 }
-                let failed = if no_key {
-                    self.talk.t(
-                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, colle-la dans le champ en haut de mon tiroir, ou dans un terminal tape « hocus-secretary key anthropic », Entrée, puis colle ta clé ; je la garde dans ton trousseau.",
-                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, paste it in the field at the top of my drawer, or in a terminal type “hocus-secretary key anthropic”, Enter, then paste your key; I keep it in your keyring.",
-                    )
-                } else {
-                    self.talk.t(
-                        "Je n’ai pas pu te répondre : le modèle ne répond pas.",
-                        "I couldn’t answer: the model is not responding.",
-                    )
-                };
+                let failed = failure.said(self.talk.fr());
                 self.add_item(
                     Some(id),
                     Body::Her {
-                        text: failed.to_owned(),
+                        text: failed,
                         note: None,
                         assumed: false,
                     },

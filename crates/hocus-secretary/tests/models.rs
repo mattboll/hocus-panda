@@ -868,3 +868,132 @@ fn a_missing_key_is_said_with_how_to_give_one() -> anyhow::Result<()> {
     driver.stop();
     Ok(())
 }
+
+/// #755: a failure of her model is logged with the API's status, error
+/// type, message and request id, and said plainly: the key refused, the
+/// credit too low, the model unknown, overloaded, a refused request with
+/// its message, no network.
+#[test]
+fn a_model_s_failure_says_its_real_reason() {
+    use hocus_secretary::model::Failure;
+    let error = |kind: &str, message: &str| {
+        json!({"type": "error", "error": {"type": kind, "message": message}}).to_string()
+    };
+    let request = Request {
+        system: "x".to_owned(),
+        messages: vec![Message::user("Bonjour")],
+        ..Request::default()
+    };
+    let local = local();
+    for (status, body, expected) in [
+        (
+            400,
+            error(
+                "invalid_request_error",
+                "Your credit balance is too low to access the Anthropic API.",
+            ),
+            Failure::Credit,
+        ),
+        (
+            401,
+            error("authentication_error", "invalid x-api-key"),
+            Failure::KeyRefused,
+        ),
+        (
+            404,
+            error("not_found_error", "model: claude-nope"),
+            Failure::ModelUnknown("model: claude-nope".to_owned()),
+        ),
+        (
+            400,
+            error("invalid_request_error", "max_tokens: 900000 > 64000"),
+            Failure::Refused("max_tokens: 900000 > 64000".to_owned()),
+        ),
+        (529, error("overloaded_error", "Overloaded"), Failure::Busy),
+    ] {
+        let fake = Fake::start(move |_, _| Answer::status(status, &body));
+        let mut router = Router::new(
+            Arc::new(settings::File::fixed(settings(&fake, &local))),
+            keys(),
+        );
+        router.retry = Duration::from_millis(1);
+        let err = router
+            .call(&request, &common::clock())
+            .expect_err("refused");
+        assert!(err.contains(&status.to_string()), "{err}");
+        assert!(
+            err.contains("(request req_fake_"),
+            "the request's id: {err}"
+        );
+        assert_eq!(Failure::of(&err), expected, "{err}");
+    }
+    // Nobody listening there.
+    let gone = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let url = format!("http://{}", listener.local_addr().expect("an address"));
+        drop(listener);
+        url
+    };
+    let text = format!(
+        "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{gone}\"\n\
+         [secretary.providers.local]\nkind = \"ollama\"\nurl = \"{}/v1\"\n",
+        local.url
+    );
+    let mut router = Router::new(
+        Arc::new(settings::File::fixed(
+            Settings::of_config(&text).expect("settings"),
+        )),
+        keys(),
+    );
+    router.retry = Duration::from_millis(1);
+    let err = router
+        .call(&request, &common::clock())
+        .expect_err("offline");
+    assert_eq!(Failure::of(&err), Failure::Offline, "{err}");
+    assert_eq!(
+        Failure::of("no key for anthropic: hocus-secretary key anthropic (or Settings)"),
+        Failure::NoKey
+    );
+
+    // In her thread: the real reason, plainly.
+    let credit = Fake::start(|_, _| {
+        Answer::status(
+            400,
+            &json!({"type": "error", "error": {"type": "invalid_request_error", "message": "Your credit balance is too low to access the Anthropic API."}}).to_string(),
+        )
+    });
+    let dir = tempfile::tempdir().expect("a folder");
+    let settings = Arc::new(settings::File::fixed(settings(&credit, &local)));
+    let mut router = Router::new(settings.clone(), keys());
+    router.retry = Duration::from_millis(1);
+    let driver = common::Driver::start(
+        Store::in_memory(common::clock()).expect("a store"),
+        Options {
+            model: Some(Arc::new(router)),
+            settings,
+            sensors: power(dir.path(), true, 90),
+            ..common::options(Vec::new())
+        },
+    );
+    driver.send(&hocus_secretary_link::ToSecretary::Ask {
+        id: 1,
+        text: "Bonjour".to_owned(),
+    });
+    let mut said = String::new();
+    loop {
+        match driver.receive() {
+            hocus_secretary_link::FromSecretary::Item { item } => {
+                if let hocus_secretary_link::Body::Her { text, .. } = item.body {
+                    said = text;
+                }
+            }
+            hocus_secretary_link::FromSecretary::Error { id: Some(1), .. } => break,
+            _ => {}
+        }
+    }
+    assert!(
+        said.contains("crédit de ton compte Anthropic est épuisé"),
+        "{said}"
+    );
+    driver.stop();
+}

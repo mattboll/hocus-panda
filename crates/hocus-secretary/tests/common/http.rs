@@ -176,7 +176,7 @@ fn serve(stream: TcpStream, kept: &Mutex<Vec<Seen>>, script: &Script) {
     let mut out = stream;
     let _ = write!(
         out,
-        "HTTP/1.1 {} X\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} X\r\ncontent-type: {}\r\ncontent-length: {}\r\nrequest-id: req_fake_{before}\r\nconnection: close\r\n\r\n{}",
         answer.status,
         answer.content_type,
         answer.body.len(),

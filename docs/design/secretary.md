@@ -318,8 +318,9 @@ Online Accounts) and from what the user tells her. They live in the **perso note
 - Radius 14, the popovers' glass, a 1 px `rgba(255,255,255,.13)` rim, the popovers'
   shadow.
 - **Over** the windows: no window moves or resizes.
-- It stays open when another window takes the focus, so the user can copy a name.
-  `Esc` (with the keyboard in it), a click on her, `Super+S` or ✕ close it.
+- A press elsewhere (a window, the desktop) closes it, as the bar's menus do
+  (#755); so do `Esc` (with the keyboard in it), a click on her, `Super+S` or ✕.
+  It opens again where it was; an answer being written waits in the thread.
 - In over 180 ms (16 px from the bar, fading); out 140 ms. With reduced motion or a
   CPU shell: a fade only.
 - "Ce qu'elle sait" widens it to **720 px** (200 ms).
@@ -1095,7 +1096,7 @@ Marked (machine) if not.
 - AC4 A click on her head opens a 420 px drawer whose right edge is 8 px from the bar
   and whose top and bottom are the bar's. On a 1366 px screen it is 360 px. No window
   moves.
-- AC5 `Super+S` toggles it. `Esc` closes it. Focusing another window does not.
+- AC5 `Super+S` toggles it. `Esc` closes it. A click in another window closes it too (#755).
 - AC6 A sentence shows the user's bubble, her typing indicator, then her streamed
   answer.
 - AC7 An unknown term present on a fixture board gives exactly one question naming
@@ -2479,3 +2480,40 @@ asking first. `style.rs`, `brain/manner.rs`.
   refused even when it is a one-off request ("envoie le mail sans me
   demander"); a pending `remember_style` card does not survive a restart
   (its button then only says "Noté.").
+
+### #755: the field takes a click, the drawer closes on a click elsewhere, model errors said, no arrival for a common word
+
+The maintainer's try of sprint 11 with #752.
+
+- **A click in the field gives it the keyboard**: the compositor gives an
+  on-demand surface the keyboard at each press on it, but the toolkit
+  (layershellev) says no "Focused" when the pointer entered the surface
+  first; the drawer now takes a press on it as the keyboard coming
+  (its ring and its caret).
+- **A press elsewhere closes it**, as the bar's menus do (the
+  compositor's `Outside`): a window clicked gets its click and the
+  keyboard. `Super+S` opens it again where it was (its tab, what was being
+  typed, where the thread and the list were; her peek's briefing asked
+  for wins); an answer being written goes on and waits in the thread.
+- **Her model's failures said and logged**: the Anthropic error keeps its
+  status, its type, its message and the request's id (`request-id`), never
+  anything of the request; her loop logs it (`her model failed`) and says
+  the reason (`model::Failure`): key refused (401, 403), credit too low,
+  model unknown (404), overloaded or rate-limited, a refused request with
+  the API's message, no network, an outage; « le modèle ne répond pas »
+  only for anything else. The missing key's sentence gives the two ways
+  apart: the drawer's field, or `hocus-secretary key anthropic` in a
+  terminal.
+- **An arrival needs someone** (`learn::person_like`): a name of the
+  roster's form ("Prénom Nom"), a mail's sender, or a member a Slack join
+  names; never a calendar's title (an event's), never a common word
+  ("Événement", "Réunion", "Rappel", the days, "Daily"…). Both the
+  sources' joins and the triage's candidate facts go through it.
+- **Tests**: `hocus-secretary/src/learn.rs`
+  (`common_words_and_calendar_titles_are_not_arrivals`),
+  `tests/models.rs` (`a_model_s_failure_says_its_real_reason`: each error
+  of a fake API classified with its request id, nobody listening, her
+  sentence in the thread), `hocus-compositor/tests/secretary_drawer.rs`
+  (a click in a window closes it, `Super+S` reopens it with what was typed
+  and the answer written meanwhile; a click in the field gives it the
+  keyboard back after a window took it).
