@@ -2171,6 +2171,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "hocus-day",
+ "hocus-secretary-link",
  "jiff",
  "mail-parser",
  "quick-xml",
