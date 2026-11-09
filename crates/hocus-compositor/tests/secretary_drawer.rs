@@ -1069,6 +1069,13 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
     bed.click(field)?;
     bed.shows(|s| s["focus"] == "field")?;
     bed.shot("field-focused")?;
+    // Its caret is still, as the shell's other fields': nothing draws at
+    // rest with the keyboard in it.
+    common::at_rest(&mut bed.hp)?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let commits = bed.hp.drawer_commits();
+    wait(&mut bed.hp, Duration::from_secs(1))?;
+    assert_eq!(bed.hp.drawer_commits(), commits, "no blink at rest");
     let logs = format!(
         "{}{}",
         common::logged(&bed.log),
