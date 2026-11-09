@@ -59,6 +59,18 @@ date go to Claude. Her drawer says so (« Le tri sur cet ordinateur ne
 répond pas »). Another server: `[secretary.providers.local]` in the
 configuration file.
 
+To see what waits, click her status line in her drawer: the sorting
+unfolds there, the mail read now, the rest by sender with their counts,
+how long an item takes and how long is left, and why it waits when it
+does (too hot, on battery, the model not answering). On a sender, « Ne
+pas trier, chercher si besoin » leaves its mails unsorted, those waiting
+and those to come: she keeps their sender, subject and date, finds them
+when you ask, and sorts the one you ask about first. She proposes it
+herself for a sender whose mails say they come from a machine (GitHub,
+GitLab, newsletters, no-reply addresses). It is a rule in « Ce qu’elle
+sait » › Règles: « N’est plus vrai » there, or « Trier quand même » in
+the sorting's view, and its mails are sorted again.
+
 ## 4. Your Google accounts
 
 She reads the Google accounts already in GNOME's Online Accounts. Each
@@ -86,6 +98,10 @@ agendas illisibles »); the others are read all the same.
 What you allow or change in the Settings reaches her at once. Under the
 Google rows, « Ajouter un compte Google » opens GNOME's Online Accounts; a
 new account shows there, and she asks about it in her drawer.
+
+Birthdays are read from your Google contacts over CardDAV, as Google
+documents it (a list of the cards, then the cards themselves), once a
+day: only each contact's name, birthday and anniversary.
 
 Then tell her what you work on, and with whom: she remembers it.
 

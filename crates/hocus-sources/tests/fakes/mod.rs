@@ -188,7 +188,12 @@ impl FakeGoa {
 
 // --- CardDAV ------------------------------------------------------------------------
 
-/// A CardDAV server on 127.0.0.1 answering every `REPORT` with `cards`.
+/// A CardDAV server on 127.0.0.1 that answers as Google's does
+/// (developers.google.com/people/carddav): a `PROPFIND` of depth 1 lists
+/// the address book's cards (their `href` and `getetag`, the address
+/// book first); an `addressbook-multiget` `REPORT` gives the cards it
+/// names; an `addressbook-query` `REPORT`, which Google does not
+/// implement, is answered `400` (#754).
 pub struct FakeCardDav {
     pub address: String,
     /// What it was asked: `METHOD path`.
@@ -230,39 +235,72 @@ fn carddav(mut stream: TcpStream, cards: &[(String, String)], asked: &Mutex<Vec<
     let mut words = line.split_whitespace();
     let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
     let mut length = 0usize;
+    let mut depth = String::new();
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header).is_err() || header.trim().is_empty() {
             break;
         }
-        if let Some((name, value)) = header.split_once(':')
-            && name.trim().eq_ignore_ascii_case("content-length")
-        {
-            length = value.trim().parse().unwrap_or(0);
+        if let Some((name, value)) = header.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                length = value.trim().parse().unwrap_or(0);
+            } else if name.trim().eq_ignore_ascii_case("depth") {
+                depth = value.trim().to_owned();
+            }
         }
     }
     let mut body = vec![0; length];
     let _ = reader.read_exact(&mut body);
+    let body = String::from_utf8_lossy(&body).into_owned();
     asked
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(format!("{method} {path}"));
-    let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">",
-    );
-    for (href, card) in cards {
-        let card = card
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        xml.push_str(&format!(
-            "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>\"1\"</d:getetag><card:address-data>{card}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
-        ));
+    let head = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">";
+    let answer = |stream: &mut TcpStream, status: &str, xml: &str| {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Type: application/xml; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{xml}",
+            xml.len()
+        );
+    };
+    match method {
+        "PROPFIND" if depth == "1" => {
+            let mut xml = String::from(head);
+            xml.push_str(&format!(
+                "<d:response><d:href>/carddav/v1{path}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+            ));
+            for (href, _) in cards {
+                xml.push_str(&format!(
+                    "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>\"1\"</d:getetag><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+                ));
+            }
+            xml.push_str("</d:multistatus>");
+            answer(&mut stream, "207 Multi-Status", &xml);
+        }
+        "REPORT" if body.contains("addressbook-multiget") => {
+            let mut xml = String::from(head);
+            for (href, card) in cards
+                .iter()
+                .filter(|(h, _)| body.contains(&format!(">{h}<")))
+            {
+                let card = card
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;");
+                xml.push_str(&format!(
+                    "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>\"1\"</d:getetag><card:address-data>{card}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+                ));
+            }
+            xml.push_str("</d:multistatus>");
+            answer(&mut stream, "207 Multi-Status", &xml);
+        }
+        // What Google answers a report it does not implement.
+        "REPORT" => answer(
+            &mut stream,
+            "400 Bad Request",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<errors xmlns=\"http://schemas.google.com/g/2005\"><error><domain>GData</domain><code>badRequest</code></error></errors>",
+        ),
+        _ => answer(&mut stream, "405 Method Not Allowed", ""),
     }
-    xml.push_str("</d:multistatus>");
-    let _ = write!(
-        stream,
-        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{xml}",
-        xml.len()
-    );
 }

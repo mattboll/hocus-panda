@@ -115,6 +115,10 @@ pub struct MailInfo {
     pub message_id: Option<String>,
     #[serde(default)]
     pub in_reply_to: Option<String>,
+    /// A fixture mail's header fields beyond these (`List-Unsubscribe`,
+    /// `X-GitHub-Reason`…): what says it was sent by a machine (#754).
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
 }
 
 /// What a sync read.
@@ -268,6 +272,10 @@ impl Fixture {
             message_id: info.message_id,
             in_reply_to: info.in_reply_to,
             body: Some(body.to_owned()),
+            automated: hocus_sources::mail::automated(
+                info.headers.iter().map(|(n, v)| (n.as_str(), v.as_str())),
+                item.sender.as_deref().unwrap_or_default(),
+            ),
             ..Mail::default()
         };
         redactor.redact(item::Item {

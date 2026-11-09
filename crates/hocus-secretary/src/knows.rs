@@ -267,10 +267,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
 
     // Observations, then proposals, then what was learned.
     for seen in context.seen.iter().filter(|s| s.open(context.now)) {
-        let notebook_of = match &seen.noticed {
-            learn::Noticed::Arrival { notebook, .. } => *notebook,
-            _ => Notebook::Pro,
-        };
+        let notebook_of = seen.noticed.notebook();
         if !in_book(notebook_of) {
             continue;
         }
@@ -861,7 +858,9 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             Some(learn::Compiled::Leave { .. } | learn::Compiled::Ignore { .. }) => {
                 "agenda".to_owned()
             }
-            Some(learn::Compiled::Urgent { .. }) => "gmail".to_owned(),
+            Some(learn::Compiled::Urgent { .. } | learn::Compiled::Aside { .. }) => {
+                "gmail".to_owned()
+            }
             _ => continue,
         };
         tool_rules.entry(key).or_default().push(format!(

@@ -314,6 +314,7 @@ pub trait Model: Send + Sync + std::fmt::Debug {
 /// [[triage]]
 /// contains = ["devis"]
 /// verdict = { for_me = true, needs_reply = true, urgency = "high", digest = "…" }
+/// delay = 39                 # optional: seconds on her clock (#754)
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -335,6 +336,9 @@ pub struct ScriptedTriage {
     #[serde(default)]
     pub contains: Vec<String>,
     pub verdict: crate::triage::Verdict,
+    /// Seconds it takes on her clock (its clock given, [`Fake::with_clock`]).
+    #[serde(default)]
+    pub delay: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -370,11 +374,24 @@ impl Scripted {
 pub struct Fake {
     script: Script,
     recorder: Option<Arc<Recorder>>,
+    /// Her clock, for a triage's delay.
+    clock: Option<Clock>,
 }
 
 impl Fake {
     pub fn new(script: Script, recorder: Option<Arc<Recorder>>) -> Self {
-        Self { script, recorder }
+        Self {
+            script,
+            recorder,
+            clock: None,
+        }
+    }
+
+    /// Its triages take their `delay` on `clock`.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = Some(clock);
+        self
     }
 
     pub fn from_file(path: &Path, recorder: Option<Arc<Recorder>>) -> Result<Self, String> {
@@ -485,13 +502,21 @@ impl crate::triage::Triager for Fake {
     }
 
     fn triage(&self, input: &str) -> Result<(crate::triage::Verdict, u64, u64), String> {
-        let verdict = self
+        let scripted = self
             .script
             .triage
             .iter()
-            .find(|t| t.contains.iter().all(|w| input.contains(w.as_str())))
-            .map(|t| t.verdict.clone())
-            .unwrap_or_default();
+            .find(|t| t.contains.iter().all(|w| input.contains(w.as_str())));
+        if let (Some(clock), Some(delay)) = (&self.clock, scripted.map(|t| t.delay))
+            && delay > 0
+        {
+            let until = clock
+                .now()
+                .checked_add(seconds(delay))
+                .unwrap_or(Timestamp::MAX);
+            clock.sleep_until(until);
+        }
+        let verdict = scripted.map(|t| t.verdict.clone()).unwrap_or_default();
         Ok((verdict, words(input), 20))
     }
 

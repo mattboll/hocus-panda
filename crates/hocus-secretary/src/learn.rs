@@ -62,6 +62,11 @@ pub enum Compiled {
     Ignore { calendar: String },
     /// Her way of being (#753): `style S ⇒ every answer`, in her prompt.
     Style { style: crate::style::Style },
+    /// `triage: sender S ⇒ not triaged, searched when needed` (#754): its
+    /// mails wait apart with their sender, subject and date; the one the
+    /// user asks about is triaged first. `sender` is an address, or a
+    /// domain for all its addresses.
+    Aside { sender: String },
 }
 
 impl Compiled {
@@ -132,6 +137,14 @@ impl Compiled {
                 style.said(false),
                 "What I do with it: I keep to it in every answer.".to_owned(),
             ),
+            (Self::Aside { sender }, true) => (
+                format!("Les mails de {sender}\u{a0}: pas triés, cherchés si besoin."),
+                "Ce que j’en fais\u{a0}: je ne les lis pas sur cet ordinateur\u{a0}; je garde l’expéditeur, l’objet et la date, et je trie celui dont tu me parles.".to_owned(),
+            ),
+            (Self::Aside { sender }, false) => (
+                format!("Mails from {sender}: not sorted, searched when needed."),
+                "What I do with it: I don’t read them on this computer; I keep the sender, subject and date, and sort the one you ask me about.".to_owned(),
+            ),
         }
     }
 
@@ -193,6 +206,30 @@ pub fn compiled(store: &Store, day: Date) -> Result<Vec<(i64, Compiled)>> {
         .filter(|r| r.accepted_at.is_some() && r.valid_to.is_none_or(|to| to > day))
         .filter_map(|r| r.compiled.map(|c| (r.id, c)))
         .collect())
+}
+
+/// The senders whose mails are set aside on `day` (#754), as their
+/// rules say them (lowercase).
+pub fn set_aside(store: &Store, day: Date) -> Result<Vec<String>> {
+    Ok(compiled(store, day)?
+        .into_iter()
+        .filter_map(|(_, c)| match c {
+            Compiled::Aside { sender } => Some(sender.to_lowercase()),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Whether a rule's `sender` (an address, or a domain) covers `address`.
+pub fn covers(sender: &str, address: &str) -> bool {
+    let (sender, address) = (sender.to_lowercase(), address.to_lowercase());
+    if sender.contains('@') {
+        return sender == address;
+    }
+    let sender = sender.trim_start_matches('.');
+    address
+        .rsplit_once('@')
+        .is_some_and(|(_, domain)| domain == sender || domain.ends_with(&format!(".{sender}")))
 }
 
 /// A rule kept with its compiled form: told, it counts at once; inferred
@@ -1375,6 +1412,14 @@ pub enum Noticed {
     },
     /// A calendar of birthdays or holidays never used for meetings.
     Ignore { calendar: String, events: u32 },
+    /// A sender whose mails look sent by a machine, `count` of them
+    /// waiting for the triage (#754): set aside?
+    Automated {
+        sender: String,
+        count: u32,
+        why: String,
+        notebook: Notebook,
+    },
     /// Someone she does not know joined, as a source says.
     Arrival {
         name: String,
@@ -1394,6 +1439,14 @@ pub enum Noticed {
 }
 
 impl Noticed {
+    /// The notebook it is about.
+    pub fn notebook(&self) -> Notebook {
+        match self {
+            Self::Arrival { notebook, .. } | Self::Automated { notebook, .. } => *notebook,
+            _ => Notebook::Pro,
+        }
+    }
+
     /// What makes two the same, asked once.
     pub fn key(&self) -> String {
         match self {
@@ -1401,6 +1454,7 @@ impl Noticed {
             Self::Ignore { calendar, .. } => format!("ignore:{}", fold(calendar)),
             Self::Arrival { name, .. } => format!("arrival:{}", fold(name)),
             Self::Style { style, .. } => format!("style:{}", style.aspect()),
+            Self::Automated { sender, .. } => format!("aside:{}", sender.to_lowercase()),
         }
     }
 
@@ -1455,6 +1509,35 @@ impl Noticed {
                 format!(
                     "{events} event{}, none with anyone.",
                     if *events > 1 { "s" } else { "" }
+                ),
+            ),
+            (
+                Self::Automated {
+                    sender, count, why, ..
+                },
+                true,
+            ) => (
+                format!(
+                    "{sender}\u{a0}: {count} mail{s} attend{e} le tri, envoyé{s} par une machine. Je ne les trie pas, et je les cherche si besoin\u{a0}?",
+                    s = if *count > 1 { "s" } else { "" },
+                    e = if *count > 1 { "ent" } else { "" },
+                ),
+                format!(
+                    "Vu à «\u{a0}{why}\u{a0}». Je garde l’expéditeur, l’objet et la date\u{a0}; celui dont tu me parles, je le trie d’abord."
+                ),
+            ),
+            (
+                Self::Automated {
+                    sender, count, why, ..
+                },
+                false,
+            ) => (
+                format!(
+                    "{sender}: {count} mail{s} waiting for the sorting, sent by a machine. Shall I leave them unsorted and search them when needed?",
+                    s = if *count > 1 { "s" } else { "" },
+                ),
+                format!(
+                    "Seen in “{why}”. I keep the sender, subject and date; the one you ask me about, I sort first."
                 ),
             ),
             (
@@ -1657,6 +1740,22 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
             edits.insert(0, store.accept(Item::Rule(id))?);
             Ok(edits)
         }
+        Noticed::Automated {
+            sender, notebook, ..
+        } => {
+            let compiled = Compiled::Aside {
+                sender: sender.to_lowercase(),
+            };
+            let (id, mut edits) = add_rule(
+                store,
+                &format!("les mails de {sender} : pas triés, cherchés si besoin"),
+                &compiled,
+                &Origin::inferred(pointer, 0.8),
+                *notebook,
+            )?;
+            edits.insert(0, store.accept(Item::Rule(id))?);
+            Ok(edits)
+        }
         Noticed::Arrival {
             name,
             role,
@@ -1835,6 +1934,18 @@ mod tests {
         );
         assert_eq!(taught("qui dirige le site web ?", monday), None);
         assert_eq!(taught("aujourd'hui je finis le devis", monday), None);
+    }
+
+    #[test]
+    fn a_sender_or_a_domain_covers_its_addresses() {
+        assert!(covers(
+            "notifications@github.com",
+            "Notifications@GitHub.com"
+        ));
+        assert!(!covers("notifications@github.com", "noreply@github.com"));
+        assert!(covers("gitlab.example.org", "gitlab@gitlab.example.org"));
+        assert!(covers("example.org", "bot@ci.example.org"));
+        assert!(!covers("example.org", "lea@notexample.org"));
     }
 
     #[test]

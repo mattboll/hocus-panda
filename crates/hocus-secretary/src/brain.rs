@@ -41,6 +41,7 @@ mod conversation;
 mod keys;
 mod manner;
 mod memory;
+mod queue;
 mod speaking;
 
 pub use conversation::Said;
@@ -122,11 +123,13 @@ pub enum Event {
         started: Timestamp,
         result: Result<Reply, String>,
     },
-    /// The local triage read an item.
+    /// The local triage read an item; where its server holds the model
+    /// now, when it says.
     Triaged {
         pointer: String,
         started: Timestamp,
         result: Result<(Verdict, u64, u64), String>,
+        placement: Option<crate::providers::openai::Placement>,
     },
     /// A summary's words came back from her compaction role's model.
     Compacted {
@@ -266,6 +269,14 @@ pub struct Brain {
     /// give; whether it is being asked.
     key_missing: Option<String>,
     key_asked: bool,
+    /// The senders whose mails are set aside, as her rules say (#754).
+    aside_rules: Vec<String>,
+    /// The connections with her queue's view open: its request, and the
+    /// view as last sent.
+    queue_watch: BTreeMap<u64, (u64, hocus_secretary_link::queue::View)>,
+    /// Where the local model was held after its last request (Ollama's
+    /// `/api/ps`, asked on the request's thread).
+    placement: Option<crate::providers::openai::Placement>,
 }
 
 impl Brain {
@@ -325,7 +336,13 @@ impl Brain {
             },
             key_missing: None,
             key_asked: false,
+            aside_rules: Vec::new(),
+            queue_watch: BTreeMap::new(),
+            placement: None,
         };
+        // The senders set aside, before the items waiting come back.
+        brain.aside_rules =
+            crate::learn::set_aside(&brain.store, brain.store.today()).unwrap_or_default();
         // Her consent book and her settings watched: a change is taken at
         // once (#752).
         let watched: Vec<(crate::watch::Watched, std::path::PathBuf)> = brain
@@ -366,8 +383,10 @@ impl Brain {
         loop {
             self.ask_due();
             self.triage_step();
-            // The triage paused, or going again: her status says it.
+            // The triage paused, or going again: her status says it, and
+            // her queue's view while open (#754).
             self.tell_look();
+            self.queue_refresh();
             self.speak_due();
             self.memory_due();
             let triage = self.settings.current().triage;
@@ -491,7 +510,12 @@ impl Brain {
                 | Event::Triaged { .. }
                 | Event::Compacted { .. }
         );
+        let line = matches!(event, Event::Line { .. });
         let go_on = self.take(event);
+        if line {
+            // A rule setting a sender aside, given or taken back (#754).
+            self.aside_again();
+        }
         if changes {
             self.knows_refresh();
         }
@@ -541,7 +565,11 @@ impl Brain {
                 pointer,
                 started,
                 result,
+                placement,
             } => {
+                if placement.is_some() {
+                    self.placement = placement;
+                }
                 self.triaged(&pointer, started, result);
                 self.try_brief();
             }
@@ -719,6 +747,8 @@ impl Brain {
             ToSecretary::Knows { id, query } => self.knows(conn, id, query),
             ToSecretary::Memory { id, act } => self.memory_act(conn, id, act),
             ToSecretary::Key { id, provider, key } => self.key_given(conn, id, provider, key),
+            ToSecretary::Queue { id, open } => self.queue_open(conn, id, open),
+            ToSecretary::QueueAct { id, act } => self.queue_act(conn, id, act),
         }
     }
 
@@ -801,7 +831,10 @@ impl Brain {
                     done: self.queue.done,
                     given_up: self.queue.given_up,
                     held: self.inbox.len() as u64,
-                    placement: t.placement().map(|p| p.words(self.talk.fr()).to_owned()),
+                    // As last asked, on the triage's thread: never on her
+                    // loop.
+                    placement: self.placement.map(|p| p.words(self.talk.fr()).to_owned()),
+                    set_aside: self.queue.aside_len() as u64,
                 }
             }),
             key_provider: self
@@ -1017,6 +1050,8 @@ impl Brain {
         }
         self.catch_up_done_if_over();
         self.try_brief();
+        // A sender that looks automated, its mails piling up (#754).
+        self.notice_automated();
         if let Some(calendars) = calendars {
             self.calendars_found(calendars);
         }
@@ -1093,9 +1128,7 @@ impl Brain {
             tracing::warn!(pointer, %err, "could not keep an item waiting for the triage");
         }
         self.inbox.hold(pointer.clone(), held);
-        if self.triager.is_some() {
-            self.queue.push(pointer);
-        }
+        self.enqueue(pointer);
     }
 
     /// What she kept across a restart: her thread (its cards' proposals
@@ -1129,9 +1162,7 @@ impl Brain {
                 }
                 for (pointer, held) in pending {
                     self.inbox.hold(pointer.clone(), held);
-                    if self.triager.is_some() {
-                        self.queue.push(pointer);
-                    }
+                    self.enqueue(pointer);
                 }
             }
             Err(err) => tracing::warn!(%err, "the items waiting for the triage do not read"),
@@ -1224,10 +1255,13 @@ impl Brain {
                         let pointer = pointer.clone();
                         move || {
                             let result = triager.triage(&input);
+                            // Where the model is held, while it is.
+                            let placement = triager.placement();
                             let _ = sender.send(Event::Triaged {
                                 pointer,
                                 started: now,
                                 result,
+                                placement,
                             });
                         }
                     });

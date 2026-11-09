@@ -116,6 +116,9 @@ pub struct Conversation {
     pub look: Option<Look>,
     /// "Ce qu'elle sait", as she last sent it (lot 6).
     pub knows: Option<Box<Knowledge>>,
+    /// Her triage queue, as she last sent it while its view is open
+    /// (#754).
+    pub queue: Option<Box<hocus_secretary_link::queue::View>>,
     pub toast: Option<Toast>,
     /// Her key given in the drawer: the request waiting for her answer,
     /// and what became of the last one (#752).
@@ -205,6 +208,7 @@ fn heard(message: FromSecretary) {
         FromSecretary::Restraint { restraint } => crate::speak::restraint(restraint),
         FromSecretary::Effect { effect } => carry_out(effect),
         FromSecretary::Knows { view, .. } => converse(|c| c.knows = Some(view)),
+        FromSecretary::Queue { view, .. } => converse(|c| c.queue = Some(view)),
         FromSecretary::Toast { text, undo, .. } => {
             tracing::info!(text, undo = undo.is_some(), "her toast");
             converse(|c| {
@@ -360,6 +364,31 @@ pub fn knows(query: Option<Query>) {
     send(ToSecretary::Knows { id, query });
 }
 
+/// Her triage queue's view, sent again while it changes (`open`), or no
+/// more (#754).
+pub fn queue(open: bool) {
+    let id = next_id();
+    tracing::info!(id, open, "her queue's view");
+    // Its last view goes, without waking the drawer: this is called from
+    // under the drawer's lock.
+    {
+        let mut held = CONVERSATION.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(c) = held.as_mut()
+            && c.queue.take().is_some()
+        {
+            c.rev += 1;
+        }
+    }
+    send(ToSecretary::Queue { id, open });
+}
+
+/// A group of the queue's view set aside, or brought back.
+pub fn queue_act(act: hocus_secretary_link::queue::Act) {
+    let id = next_id();
+    tracing::info!(id, ?act, "an act on her queue");
+    send(ToSecretary::QueueAct { id, act });
+}
+
 /// Something done in "Ce qu'elle sait".
 pub fn memory(act: Do) {
     let id = next_id();
@@ -387,6 +416,7 @@ pub fn drawer(open: bool) {
             id: next_id(),
             query: None,
         });
+        queue(false);
     }
     if open && conversation(|c| c.items.is_empty()) {
         let id = next_id();
@@ -584,8 +614,10 @@ fn listen(stream: UnixStream) {
                 tracing::info!(version, "the secretary is connected");
                 line_state().state = State::Ready;
                 crate::drawer::changed();
-                // Her watch on "Ce qu'elle sait" went with her last run.
+                // Her watch on "Ce qu'elle sait" went with her last run,
+                // and on her queue.
                 crate::drawer::knows_again();
+                crate::drawer::queue_again();
             }
             Ok(FromSecretary::Refused { reason }) => {
                 tracing::warn!(reason, "the secretary refused the shell");

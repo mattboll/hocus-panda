@@ -733,6 +733,8 @@ impl Brain {
             Ok(request) => request,
             Err(err) => return self.error(conn, Some(id), err),
         };
+        // Items set aside that the question is about: triaged first (#754).
+        self.asked_about(&request.items());
         // What code computed for this sentence, and the tools that only
         // propose, beside her read tools.
         request.context.extend(turn.facts.iter().cloned());
