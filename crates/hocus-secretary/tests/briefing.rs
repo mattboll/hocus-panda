@@ -75,6 +75,8 @@ fn options(script: &str, fixtures: &[String], recorder: &Arc<Recorder>) -> Optio
     options.sensors = hocus_secretary::power::Sensors {
         supplies: "/nonexistent".into(),
         thermal: "/nonexistent".into(),
+        hwmon: "/nonexistent".into(),
+        nvidia_smi: "/nonexistent".into(),
     };
     options.settings = Arc::new(settings::File::fixed(Settings {
         triage: Triage {

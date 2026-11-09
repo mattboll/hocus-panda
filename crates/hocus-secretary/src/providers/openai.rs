@@ -5,7 +5,9 @@
 //! (`response_format: json_schema`). Ollama's own API serves the triage
 //! instead (#752): `POST /api/chat` takes `options.num_ctx`, which `/v1`
 //! leaves out (Ollama's default context, 40k tokens, takes an 8B model
-//! past an 8 GB card), the schema in `format`; it unloads a model on
+//! past an 8 GB card), and `options.num_thread` (#756: with the model
+//! whole on the card, its runner need not heat the processor), the schema
+//! in `format`; it unloads a model on
 //! `POST /api/generate {"model", "keep_alive": 0}` and says where the
 //! models it holds are on `GET /api/ps`.
 
@@ -132,15 +134,21 @@ impl Endpoint<'_> {
         }
     }
 
-    /// A chat on Ollama's own API: its context `num_ctx` tokens, the
-    /// answer constrained to `schema`, at temperature 0.
+    /// A chat on Ollama's own API: its context `num_ctx` tokens, its
+    /// runner on `num_thread` threads when given, the answer constrained
+    /// to `schema`, at temperature 0.
     pub fn ollama_chat(
         &self,
         model: &str,
         messages: &[(&str, String)],
         schema: Value,
         num_ctx: u32,
+        num_thread: Option<u32>,
     ) -> Result<(String, u64, u64), String> {
+        let mut options = json!({"num_ctx": num_ctx, "temperature": 0});
+        if let Some(threads) = num_thread.filter(|t| *t > 0) {
+            options["num_thread"] = json!(threads);
+        }
         let body = json!({
             "model": model,
             "messages": messages
@@ -149,7 +157,7 @@ impl Endpoint<'_> {
                 .collect::<Vec<_>>(),
             "stream": false,
             "format": schema,
-            "options": {"num_ctx": num_ctx, "temperature": 0},
+            "options": options,
         });
         let (status, text) = self.native().post("/api/chat", &body)?;
         if status != 200 {

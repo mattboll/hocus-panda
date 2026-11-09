@@ -194,6 +194,14 @@ pub fn options(sources: Vec<Fixture>) -> Options {
             .map(|f| Box::new(f) as Box<dyn hocus_secretary::sources::Source>)
             .collect(),
         key: "file".to_owned(),
+        // Never the machine's: on mains, no heat known, no graphics card
+        // (no `nvidia-smi` run).
+        sensors: hocus_secretary::power::Sensors {
+            supplies: "/nonexistent".into(),
+            thermal: "/nonexistent".into(),
+            hwmon: "/nonexistent".into(),
+            nvidia_smi: "/nonexistent".into(),
+        },
         ..Options::default()
     }
 }

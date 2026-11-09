@@ -143,6 +143,8 @@ fn start(online: bool) -> Setup {
         sensors: Sensors {
             supplies: dir.path().join("power_supply"),
             thermal: dir.path().join("thermal"),
+            hwmon: dir.path().join("hwmon"),
+            nvidia_smi: dir.path().join("no-nvidia-smi"),
         },
         sources: vec![Box::new(source) as Box<dyn Source>],
         notifications: Some(arrivals),

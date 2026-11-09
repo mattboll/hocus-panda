@@ -45,6 +45,8 @@ fn options(
     options.sensors = Sensors {
         supplies: power.join("power_supply"),
         thermal: power.join("thermal"),
+        hwmon: power.join("hwmon"),
+        nvidia_smi: power.join("no-nvidia-smi"),
     };
     options
 }

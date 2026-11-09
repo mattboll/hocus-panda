@@ -408,17 +408,29 @@
 # url = "http://127.0.0.1:11434/v1"
 
 # [secretary.triage]
-# On battery, the triage runs only above this charge (%); it pauses while
-# the CPU package is above heat (°C); the model is unloaded after
-# unload-after idle seconds; pace seconds between two requests. context is
-# the local model's context in tokens, asked of Ollama (its own default is
-# far larger, and takes an 8B model past an 8 GB graphics card); a longer
-# item is cut to fit, its start kept.
+# On battery, the triage runs only above this charge (%); the model is
+# unloaded after unload-after idle seconds; pace seconds between two
+# requests. context is the local model's context in tokens, asked of
+# Ollama (its own default is far larger, and takes an 8B model past an
+# 8 GB graphics card); a longer item is cut to fit, its start kept.
+# threads: with the model whole on the graphics card, Ollama runs it on
+# this many processor threads, so that it does not heat the processor.
 # battery = 50
-# heat = 95
 # unload-after = 120
 # pace = 2
 # context = 8192
+# threads = 2
+# It pauses while the machine is too hot, on its temperature averaged
+# over the last minute (a processor jumps to 100 °C on every burst, which
+# says nothing): the processor's package at heat (°C), going on below
+# resume; with the model whole on the graphics card, the card's instead,
+# at gpu-heat, going on below gpu-resume. Unset, as here: the package's
+# critical point minus 10 (else 100), the card's slowdown point as its
+# driver says it (else 87), and each resume point 10 below; for example
+#   heat = 100
+#   resume = 90
+#   gpu-heat = 87
+#   gpu-resume = 77
 
 # [secretary.speak]
 # When she speaks up (docs/design/secretary.md §6). Her morning briefing
