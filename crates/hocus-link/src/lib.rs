@@ -708,6 +708,12 @@ pub enum ToShell {
     /// screen), `width` logical pixels wide, or closes. Written
     /// `secretary-drawer OUTPUT WIDTH`.
     SecretaryDrawer { output: String, width: u32 },
+    /// Her peek of request `ID` comes out (secretary.md §6.2), as the
+    /// shell asked ([`ToCompositor::SecretaryPeek`]), in place of a panda
+    /// out: the shell draws it beside each bar on [`PEEK_NAMESPACE`]
+    /// surfaces, which the compositor moves as an agent's; `no-peek` when
+    /// she is back. Written `secretary-peek ID`.
+    SecretaryPeek(u64),
     /// The screens whose front window is full screen, which covers their
     /// bar (Day.6: a meeting's reminder then shows at the screen's edge):
     /// sent as the shell connects and when they change. Written
@@ -1793,8 +1799,15 @@ pub enum ToCompositor {
     /// closed`.
     Briefing { open: bool },
     /// The user clicked the panda that says screens moved
-    /// ([`ToShell::ScreensMoved`]): it goes back. Written `peek-close`.
+    /// ([`ToShell::ScreensMoved`]), or answered her peek: it goes back.
+    /// Written `peek-close`.
     PeekClose,
+    /// The shell's speak gate lets her peek of request `id` out
+    /// (secretary.md §6.2, §6.3) for `stays` seconds: it comes out as an
+    /// agent's panda does, in place of one out, and none comes out while
+    /// it is; asked again while it is out, it stays `stays` more. Written
+    /// `secretary-peek ID STAYS`.
+    SecretaryPeek { id: u64, stays: u32 },
     /// How near the next meeting is (bar.md §6, Day.2), for the halo: in
     /// 10 min or less, in 2 min or less, or neither (none, further, in
     /// progress, or opened by the user). Written `meeting ten`, `meeting
@@ -2170,6 +2183,7 @@ impl fmt::Display for ToShell {
             Self::SecretaryDrawer { output, width } => {
                 write!(f, "secretary-drawer {output} {width}")
             }
+            Self::SecretaryPeek(id) => write!(f, "secretary-peek {id}"),
             Self::SharedScreens(names) => {
                 f.write_str("shared-screens")?;
                 for name in names {
@@ -2572,6 +2586,11 @@ impl FromStr for ToShell {
                     .parse()
                     .map_err(|e| BadLine(format!("width: {e}")))?,
             }),
+            Some("secretary-peek") => Ok(Self::SecretaryPeek(
+                word(&mut words, "peek")?
+                    .parse()
+                    .map_err(|e| BadLine(format!("peek: {e}")))?,
+            )),
             Some("clipboard-rules") => Ok(Self::ClipboardRules(ClipRules {
                 history: flag(words.next(), "on", "off")?,
                 keep: ClipKeep::of(word(&mut words, "keep")?)?,
@@ -2839,6 +2858,7 @@ impl fmt::Display for ToCompositor {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
             Self::PeekClose => f.write_str("peek-close"),
+            Self::SecretaryPeek { id, stays } => write!(f, "secretary-peek {id} {stays}"),
             Self::Meeting(near) => f.write_str(match near {
                 Some(MeetingNear::Ten) => "meeting ten",
                 Some(MeetingNear::Two) => "meeting two",
@@ -2936,6 +2956,18 @@ impl FromStr for ToCompositor {
                 open: flag(words.next(), "open", "closed")?,
             }),
             Some("peek-close") => Ok(Self::PeekClose),
+            Some("secretary-peek") => {
+                let mut number = |what: &str| -> Result<u64, BadLine> {
+                    word(&mut words, what)?
+                        .parse()
+                        .map_err(|e| BadLine(format!("{what}: {e}")))
+                };
+                Ok(Self::SecretaryPeek {
+                    id: number("peek")?,
+                    stays: u32::try_from(number("stays")?)
+                        .map_err(|e| BadLine(format!("stays: {e}")))?,
+                })
+            }
             Some("meeting") => match words.next() {
                 Some("ten") => Ok(Self::Meeting(Some(MeetingNear::Ten))),
                 Some("two") => Ok(Self::Meeting(Some(MeetingNear::Two))),
@@ -3445,6 +3477,7 @@ mod tests {
                 output: "eDP-1".into(),
                 width: 1366,
             },
+            ToShell::SecretaryPeek(3),
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
@@ -3642,6 +3675,7 @@ mod tests {
             ToCompositor::A11yEnd,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
+            ToCompositor::SecretaryPeek { id: 3, stays: 12 },
             ToCompositor::Ring(Row {
                 output: "eDP-1".into(),
                 x: -190,

@@ -403,6 +403,17 @@ fn card() -> bool {
     CARD.load(Ordering::Relaxed)
 }
 
+/// The shell draws on the CPU: a peek is a card (her peek's too).
+pub fn software() -> bool {
+    card()
+}
+
+/// Her row's middle beside bar `bar` in `form`: where her own peek comes
+/// out (secretary.md §6.2).
+pub fn middle_of(bar: &str, form: Form) -> f32 {
+    middle(bar, None, form)
+}
+
 fn out<T>(with: impl FnOnce(&mut Option<Out>) -> T) -> T {
     with(&mut OUT.lock().unwrap_or_else(PoisonError::into_inner))
 }

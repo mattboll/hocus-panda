@@ -26,9 +26,12 @@
 
 pub mod audit;
 pub mod brain;
+pub mod briefing;
 pub mod clock;
 pub mod compaction;
 pub mod context;
+pub mod day;
+pub mod effects;
 pub mod fold;
 pub mod google;
 pub mod graph;

@@ -13,6 +13,14 @@
 //! shows (its field is focused), a window clicked takes it back. The
 //! compositor moves it in and out and blurs behind it, as a popover.
 //!
+//! Her briefings (lot 5) are thread items: the morning's folded on one
+//! card with "Ouvrir le point", which unfolds it in place of the thread
+//! ([`Open::point`]), as her peek's bubble does. In a public moment (a
+//! meeting, a share, the camera, [`crate::speak::moment`]) no perso title
+//! shows, in the thread or a briefing: only how many are hidden, and
+//! "Montrer", which reveals them by a deliberate click, never while the
+//! screen is shared.
+//!
 //! What she says reaches it from the shell's line to her
 //! ([`crate::secretary`]), off iced's loop: the drawer is woken only while
 //! it is open. Closed, nothing of hers draws.
@@ -100,6 +108,27 @@ impl Words {
 
     pub fn back(self) -> &'static str {
         self.pick("‹ Discussion", "‹ Conversation")
+    }
+
+    pub fn open_point(self) -> &'static str {
+        self.pick("Ouvrir le point", "Open the briefing")
+    }
+
+    pub fn show(self) -> &'static str {
+        self.pick("Montrer", "Show")
+    }
+
+    pub fn hidden(self, n: usize) -> String {
+        match (self.fr, n) {
+            (true, 1) => "1 chose perso masquée".to_owned(),
+            (true, n) => format!("{n} choses perso masquées"),
+            (false, 1) => "1 personal thing hidden".to_owned(),
+            (false, n) => format!("{n} personal things hidden"),
+        }
+    }
+
+    pub fn night(self) -> &'static str {
+        self.pick("CETTE NUIT, TES AGENTS", "LAST NIGHT, YOUR AGENTS")
     }
 
     pub fn agents(self, n: usize) -> String {
@@ -276,6 +305,10 @@ pub enum Target {
     Undo(u64),
     /// "corriger" under an assumption: its sentence into the field.
     Correct(u64),
+    /// "Ouvrir le point": briefing `item` unfolds in the drawer.
+    Point(u64),
+    /// "Montrer": the perso items hidden in a public moment show.
+    Reveal,
     Field,
     Send,
     /// "Ce qu'elle sait": the notebook switch (0 Tout, 1 Pro, 2 Perso).
@@ -315,6 +348,8 @@ impl Target {
             Self::Button { item, decision } => format!("Button({item},{decision:?})"),
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
+            Self::Point(item) => format!("Point({item})"),
+            Self::Reveal => "Reveal".to_owned(),
             Self::Field => "Field".to_owned(),
             Self::Send => "Send".to_owned(),
             Self::Notebook(n) => format!("Notebook({n})"),
@@ -348,6 +383,10 @@ pub struct Open {
     pub recall: Option<String>,
     /// Her briefing unfolded in place of the thread.
     pub briefing: bool,
+    /// Her briefing item `point` unfolded in place of the thread.
+    pub point: Option<u64>,
+    /// The perso items hidden in a public moment shown ("Montrer").
+    pub reveal: bool,
     /// The thread scrolled up by this much from its bottom.
     pub scroll: f32,
     pub hover: Option<Target>,
@@ -508,6 +547,7 @@ pub fn toggle(output: &str, screen: u32) {
         let bar = crate::popover::bar_for(output);
         let base = hocus_link::drawer_width(screen);
         let margin = margins(&bar);
+        let point = pending_point();
         tracing::info!(bar, width = base, screen, "the secretary's drawer opens");
         effects.push(Effect::Drawer {
             id: surface,
@@ -524,7 +564,9 @@ pub fn toggle(output: &str, screen: u32) {
             field: String::new(),
             recall: None,
             briefing: false,
-            scroll: 0.0,
+            point,
+            reveal: false,
+            scroll: if point.is_some() { f32::MAX } else { 0.0 },
             hover: None,
             pressed: None,
             pointer: None,
@@ -547,6 +589,46 @@ pub fn toggle(output: &str, screen: u32) {
     }
     crate::secretary::drawer(opened);
     crate::popover::send(effects);
+}
+
+/// The item her peek's bubble asked the drawer to open on.
+static PENDING: Mutex<Option<u64>> = Mutex::new(None);
+
+/// The briefing to unfold as the drawer opens, if her peek asked for one.
+fn pending_point() -> Option<u64> {
+    let item = PENDING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()?;
+    crate::secretary::conversation(|c| {
+        c.items
+            .iter()
+            .any(|i| i.id == item && matches!(i.body, Body::Briefing { .. }))
+    })
+    .then_some(item)
+}
+
+/// Her peek's bubble clicked beside `bar`: the drawer opens there (or
+/// stays open) on `item`, a briefing unfolded.
+pub fn open_on_item(bar: &str, item: Option<u64>) {
+    *PENDING.lock().unwrap_or_else(PoisonError::into_inner) = item;
+    if is_open() {
+        let point = pending_point();
+        with(|d| {
+            if let Phase::Open(open) = &mut d.phase {
+                open.tab = Tab::Talk;
+                open.point = point;
+                open.briefing = false;
+                open.scroll = if point.is_some() { f32::MAX } else { 0.0 };
+                open.changed();
+            }
+        });
+        wake();
+        return;
+    }
+    crate::popover::send(vec![Effect::Tell(ToCompositor::SecretaryDrawer(
+        bar.to_owned(),
+    ))]);
 }
 
 /// A click on her head (assistant mode): the compositor is asked for her
@@ -666,6 +748,7 @@ pub fn act(id: window::Id, target: Target) {
             Target::Tab(tab) if tab != open.tab => {
                 open.tab = tab;
                 open.briefing = false;
+                open.point = None;
                 open.confirm = None;
                 open.expanded = None;
                 crate::secretary::knows(match tab {
@@ -692,7 +775,26 @@ pub fn act(id: window::Id, target: Target) {
             }
             Target::Back => {
                 open.briefing = false;
+                open.point = None;
+                open.scroll = 0.0;
                 open.changed();
+                Then::Draw
+            }
+            Target::Point(item) => {
+                tracing::info!(item, "the drawer unfolds her briefing");
+                open.point = Some(item);
+                open.briefing = false;
+                open.scroll = f32::MAX;
+                open.changed();
+                Then::Draw
+            }
+            Target::Reveal => {
+                // Never while the screen is shared.
+                if crate::speak::moment() != hocus_secretary_link::Moment::Sharing {
+                    tracing::info!("the perso items shown");
+                    open.reveal = true;
+                    open.changed();
+                }
                 Then::Draw
             }
             Target::Agent(agent) => {

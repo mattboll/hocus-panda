@@ -16,7 +16,9 @@ mod knows;
 
 use std::time::Instant;
 
-use hocus_secretary_link::{Body, Card, CardKind, Item, Mood, Tone};
+use hocus_secretary_link::{
+    Body, Briefing, BriefingKind, Card, CardKind, Item, Mood, Notebook, Tone,
+};
 use iced::{
     Color, Pixels, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -181,6 +183,12 @@ enum Shape {
     Quote(Rectangle),
     /// A day's divider: its two rules either side of its words.
     Rule(Rectangle),
+    /// A line in Martian Mono (a briefing's times).
+    Mono(Line),
+    /// Her head at a briefing's top, happy.
+    Her(Rectangle),
+    /// A plan's box, ticked or not.
+    Tick(Rectangle, bool),
     /// The search field's lens, 15 px, centred there.
     Lens(Point),
 }
@@ -301,12 +309,43 @@ enum Entry<'a> {
     Item(&'a Item),
     Streaming(&'a str),
     Typing(&'a str),
+    /// Perso items hidden in a public moment: how many.
+    Hidden(usize),
 }
 
-fn entries<'a>(c: &'a Conversation, words: Words) -> Vec<Entry<'a>> {
+/// Whether perso titles are hidden now: a public moment, not revealed.
+fn hide(open: &Open) -> bool {
+    crate::speak::moment().public()
+        && !(open.reveal && crate::speak::moment() != hocus_secretary_link::Moment::Sharing)
+}
+
+/// The cards a briefing shows under its sections: not in the thread.
+fn in_briefings(c: &Conversation) -> Vec<u64> {
+    c.items
+        .iter()
+        .filter_map(|i| match &i.body {
+            Body::Briefing { briefing } => {
+                Some(briefing.sections.iter().filter_map(|s| s.proposal))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn entries<'a>(c: &'a Conversation, words: Words, hide: bool) -> Vec<Entry<'a>> {
     let mut out = Vec::new();
     let mut day = None;
+    let mut hidden = 0;
+    let shown_in_briefings = in_briefings(c);
     for (n, item) in c.items.iter().enumerate() {
+        if hide && item.notebook == Some(Notebook::Perso) {
+            hidden += 1;
+            continue;
+        }
+        if shown_in_briefings.contains(&item.id) {
+            continue;
+        }
         let this = day_words(&item.at, words);
         if this.is_some() && this != day {
             out.push(Entry::Day(this.clone().unwrap_or_default()));
@@ -320,6 +359,9 @@ fn entries<'a>(c: &'a Conversation, words: Words) -> Vec<Entry<'a>> {
                 out.push(Entry::Streaming(said));
             }
         }
+    }
+    if hidden > 0 {
+        out.push(Entry::Hidden(hidden));
     }
     if let Some((request, doing)) = &c.typing
         && !c
@@ -337,7 +379,7 @@ fn hers(entry: &Entry<'_>) -> bool {
     match entry {
         Entry::Item(item) => !matches!(item.body, Body::User { .. }),
         Entry::Streaming(_) | Entry::Typing(_) => true,
-        Entry::Day(_) => false,
+        Entry::Day(_) | Entry::Hidden(_) => false,
     }
 }
 
@@ -469,6 +511,19 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     );
     let mut said_items = Vec::new();
     match (open.tab, open.briefing) {
+        (Tab::Talk, _) if open.point.is_some() => {
+            let point = open.point.unwrap_or_default();
+            lay_out_point(
+                &mut laid,
+                open,
+                c,
+                words,
+                top,
+                right,
+                point,
+                &mut said_items,
+            );
+        }
         (Tab::Knows, _) => {
             // No composer there: its controls and footer instead.
             laid.knows = true;
@@ -497,6 +552,8 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "status": laid.status,
         "tab": match open.tab { Tab::Talk => "talk", Tab::Knows => "knows" },
         "briefing": open.briefing,
+        "point": open.point,
+        "moment": format!("{:?}", crate::speak::moment()).to_lowercase(),
         "agents": laid.agents.as_ref().map(|(_, text, n, _)| format!("{text} | {n}")),
         "items": said_items,
         "field": open.field.chars().count(),
@@ -524,7 +581,7 @@ fn lay_out_thread(
     let mut shapes: Vec<Shape> = Vec::new();
     let mut targets: Vec<(Target, Rectangle)> = Vec::new();
     let mut y = THREAD_TOP;
-    let list = entries(c, words);
+    let list = entries(c, words, hide(open));
     let mut previous_hers = false;
     for (n, entry) in list.iter().enumerate() {
         if n > 0 {
@@ -750,6 +807,20 @@ fn lay_out_thread(
                             .map_or(String::new(), |o| format!(" → {o}"))
                     ));
                 }
+                Body::Briefing { briefing } => {
+                    y = lay_out_briefing_card(
+                        &mut shapes,
+                        &mut targets,
+                        open,
+                        item.id,
+                        briefing,
+                        her_x,
+                        her_room,
+                        y,
+                        words,
+                    );
+                    said.push(format!("briefing:{}", briefing.title));
+                }
                 Body::Learned { text, undone, .. } => {
                     let h = LEARNED * 1.4 + 10.0;
                     let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
@@ -804,6 +875,19 @@ fn lay_out_thread(
             Entry::Streaming(text) => {
                 y = her_bubble(&mut shapes, text, None, her_x, her_room, y);
                 said.push(format!("streaming:{text}"));
+            }
+            Entry::Hidden(n) => {
+                y = hidden_line(
+                    &mut shapes,
+                    &mut targets,
+                    open,
+                    *n,
+                    PAD,
+                    right - PAD,
+                    y,
+                    words,
+                );
+                said.push(format!("hidden:{n}"));
             }
             Entry::Typing(doing) => {
                 let h = 7.0 + 2.0 * 12.0;
@@ -883,6 +967,12 @@ fn moved(shape: Shape, dy: f32) -> Shape {
         Shape::Check(r) => Shape::Check(down(r)),
         Shape::Quote(r) => Shape::Quote(down(r)),
         Shape::Rule(r) => Shape::Rule(down(r)),
+        Shape::Mono(mut line) => {
+            line.at.y += dy;
+            Shape::Mono(line)
+        }
+        Shape::Her(r) => Shape::Her(down(r)),
+        Shape::Tick(r, done) => Shape::Tick(down(r), done),
         Shape::Lens(p) => Shape::Lens(Point::new(p.x, p.y + dy)),
     }
 }
@@ -1273,6 +1363,596 @@ fn lay_out_briefing(
     }
 }
 
+/// "N choses perso masquées · Montrer" at `y`, from `x`, `room` wide: its
+/// bottom. "Montrer" never while the screen is shared.
+#[allow(clippy::too_many_arguments)]
+fn hidden_line(
+    shapes: &mut Vec<Shape>,
+    targets: &mut Vec<(Target, Rectangle)>,
+    open: &Open,
+    n: usize,
+    x: f32,
+    room: f32,
+    y: f32,
+    words: Words,
+) -> f32 {
+    let h = SMALL * 1.4 + 10.0;
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, h)),
+        radius: 8.0,
+        fill: alpha(0xF29DB8, 0.06),
+        rim: Some(alpha(0xF29DB8, 0.35)),
+        dashed: true,
+        sharp: Corner::None,
+    });
+    shapes.push(Shape::Text(Line {
+        text: words.hidden(n),
+        at: Point::new(x + 10.0, y + h / 2.0),
+        size: SMALL,
+        color: hex(0xF4B6C9),
+        bold: false,
+        align: Alignment::Left,
+    }));
+    if crate::speak::moment() != hocus_secretary_link::Moment::Sharing {
+        let show = words.show();
+        let w = width_of(show, SMALL, true);
+        shapes.push(Shape::Text(Line {
+            text: show.to_owned(),
+            at: Point::new(x + room - 10.0, y + h / 2.0),
+            size: SMALL,
+            color: if open.hover == Some(Target::Reveal) {
+                hex(0x9BEBB8)
+            } else {
+                MINT
+            },
+            bold: true,
+            align: Alignment::Right,
+        }));
+        targets.push((
+            Target::Reveal,
+            Rectangle::new(
+                Point::new(x + room - 10.0 - w - 4.0, y + 2.0),
+                Size::new(w + 8.0, h - 4.0),
+            ),
+        ));
+    }
+    y + h
+}
+
+/// A briefing in the thread: its title, her sentence, the first lines of
+/// its first part (perso hidden in a public moment), and "Ouvrir le
+/// point"; its bottom.
+#[allow(clippy::too_many_arguments)]
+fn lay_out_briefing_card(
+    shapes: &mut Vec<Shape>,
+    targets: &mut Vec<(Target, Rectangle)>,
+    open: &Open,
+    item: u64,
+    briefing: &Briefing,
+    x: f32,
+    room: f32,
+    y: f32,
+    words: Words,
+) -> f32 {
+    let inner = room - 2.0 * CARD_X;
+    let mut parts = Vec::new();
+    let mut at = y + CARD_TOP;
+    let absence = briefing.kind == BriefingKind::Absence;
+    let label = briefing.title.to_uppercase();
+    for line in lines_of(&label, CARD_LABEL, true, inner) {
+        parts.push(Shape::Text(Line {
+            text: line,
+            at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
+            size: CARD_LABEL,
+            color: hex(0xB9CEFF),
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += CARD_LABEL * 1.4;
+    }
+    at += 4.0;
+    if !briefing.sentence.is_empty() {
+        let lines = lines_of(&briefing.sentence, CARD_TEXT, false, inner);
+        push_lines(
+            &mut parts,
+            &lines,
+            x + CARD_X,
+            at,
+            CARD_TEXT,
+            CARD_LINE,
+            TEXT,
+            false,
+        );
+        at += lines.len() as f32 * CARD_LINE + 2.0;
+    }
+    // "Pendant ton absence" says what came, there.
+    if absence && let Some(section) = briefing.sections.first() {
+        let hide = hide(open);
+        let mut hidden = 0;
+        for line in section.lines.iter().take(5) {
+            if hide && line.notebook == Notebook::Perso {
+                hidden += 1;
+                continue;
+            }
+            let shown = format!("· {}", line.title);
+            let lines = lines_of(&shown, CARD_TEXT, false, inner);
+            push_lines(
+                &mut parts,
+                &lines,
+                x + CARD_X,
+                at,
+                CARD_TEXT,
+                CARD_LINE,
+                hex(0xE6EAF1),
+                false,
+            );
+            at += lines.len() as f32 * CARD_LINE;
+        }
+        if hidden > 0 {
+            parts.push(Shape::Text(Line {
+                text: words.hidden(hidden),
+                at: Point::new(x + CARD_X, at + SMALL_LINE / 2.0),
+                size: SMALL,
+                color: hex(0xF4B6C9),
+                bold: false,
+                align: Alignment::Left,
+            }));
+            at += SMALL_LINE;
+        }
+    }
+    at += BUTTON_TOP;
+    let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
+    let label = words.open_point();
+    let w = width_of(label, BUTTON, true) + 2.0 * BUTTON_X;
+    let rect = Rectangle::new(Point::new(x + CARD_X, at), Size::new(w, button_h));
+    let target = Target::Point(item);
+    let hover = open.hover == Some(target);
+    parts.push(Shape::Box {
+        rect,
+        radius: 8.0,
+        fill: if hover { hex(0x7ED198) } else { GREEN },
+        rim: None,
+        dashed: false,
+        sharp: Corner::None,
+    });
+    parts.push(Shape::Text(Line {
+        text: label.to_owned(),
+        at: Point::new(rect.center_x(), rect.center_y()),
+        size: BUTTON,
+        color: INK,
+        bold: true,
+        align: Alignment::Center,
+    }));
+    targets.push((target, rect));
+    at += button_h + CARD_BOTTOM;
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
+        radius: 12.0,
+        fill: Color {
+            a: 1.0,
+            ..hex(0x121827)
+        },
+        rim: Some(alpha(0x8FB3FF, 0.45)),
+        dashed: false,
+        sharp: Corner::None,
+    });
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
+        radius: 12.0,
+        fill: alpha(0x8FB3FF, 0.08),
+        rim: None,
+        dashed: false,
+        sharp: Corner::None,
+    });
+    shapes.extend(parts);
+    at
+}
+
+/// A briefing's part as the drawer shows it: its key, label, note,
+/// lines, proposal.
+type Part = (
+    String,
+    String,
+    String,
+    Vec<hocus_secretary_link::Line>,
+    Option<u64>,
+);
+
+/// A section's label colour.
+fn section_colour(key: &str) -> Color {
+    match key {
+        "today" | "answer" | "reminders" => hex(0xF5C46E),
+        "leaves" => hex(0xF7A77A),
+        "away" => hex(0xB9CEFF),
+        "perso" => hex(0xF4B6C9),
+        "plan" | "yesterday" => MINT,
+        _ => LABEL,
+    }
+}
+
+/// Her briefing `point` unfolded in the drawer (§6.1): her head, "Bonjour
+/// Alex", the date and her sentence; each part with its lines (perso
+/// hidden in a public moment, only counted), the proposal under EN
+/// CONGÉS, the agents' night (the shell knows them), what was read. It
+/// scrolls under the wheel from its top.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn lay_out_point(
+    laid: &mut Laid,
+    open: &Open,
+    c: &Conversation,
+    words: Words,
+    top: f32,
+    right: f32,
+    point: u64,
+    said: &mut Vec<String>,
+) {
+    let mut shapes: Vec<Shape> = Vec::new();
+    let mut targets: Vec<(Target, Rectangle)> = Vec::new();
+    let mut y = THREAD_TOP;
+    let back = words.back();
+    let bw = width_of(back, SMALL, true);
+    shapes.push(Shape::Text(Line {
+        text: back.to_owned(),
+        at: Point::new(PAD, y + SMALL_LINE / 2.0),
+        size: SMALL,
+        color: MINT,
+        bold: true,
+        align: Alignment::Left,
+    }));
+    targets.push((
+        Target::Back,
+        Rectangle::new(
+            Point::new(PAD - 4.0, y - 2.0),
+            Size::new(bw + 8.0, SMALL_LINE + 4.0),
+        ),
+    ));
+    y += SMALL_LINE + GAP;
+    let briefing = c
+        .items
+        .iter()
+        .find(|i| i.id == point)
+        .and_then(|i| match &i.body {
+            Body::Briefing { briefing } => Some(briefing),
+            _ => None,
+        });
+    let Some(briefing) = briefing else {
+        laid.content = y;
+        laid.shapes
+            .extend(shapes.into_iter().map(|s| moved(s, top)));
+        for (t, r) in targets {
+            laid.targets
+                .push((t, Rectangle::new(Point::new(r.x, r.y + top), r.size())));
+        }
+        return;
+    };
+    said.push(format!("point:{}", briefing.title));
+    let room = right - PAD;
+    let hide = hide(open);
+    // Her head, her greeting.
+    let head = 96.0;
+    shapes.push(Shape::Her(Rectangle::new(
+        Point::new(PAD - 6.0, y),
+        Size::new(head, head),
+    )));
+    let tx = PAD + head + 4.0;
+    let troom = right - tx;
+    let mut ty = y + 14.0;
+    let hello = if briefing.hello.is_empty() {
+        briefing.title.clone()
+    } else {
+        briefing.hello.clone()
+    };
+    for line in lines_of(&hello, 17.0, true, troom) {
+        shapes.push(Shape::Text(Line {
+            text: line,
+            at: Point::new(tx, ty + 17.0 * 0.7),
+            size: 17.0,
+            color: TEXT,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        ty += 17.0 * 1.4;
+    }
+    for (text, size, colour) in [
+        (&briefing.date, 12.0, LABEL),
+        (&briefing.sentence, 13.0, DIM),
+    ] {
+        if text.is_empty() {
+            continue;
+        }
+        for line in lines_of(text, size, false, troom) {
+            shapes.push(Shape::Text(Line {
+                text: line,
+                at: Point::new(tx, ty + size * 0.72),
+                size,
+                color: colour,
+                bold: false,
+                align: Alignment::Left,
+            }));
+            ty += size * 1.45;
+        }
+    }
+    y = (y + head).max(ty) + 8.0;
+    let mut sections: Vec<Part> = briefing
+        .sections
+        .iter()
+        .map(|s| {
+            (
+                s.key.clone(),
+                s.label.clone(),
+                s.note.clone(),
+                s.lines.clone(),
+                s.proposal,
+            )
+        })
+        .collect();
+    // The agents' night, from the agents the shell follows: the most
+    // urgent first (4.6's words).
+    if briefing.kind == BriefingKind::Morning {
+        let brief = Brief::of(&agents::said().agents);
+        let agent_words = agents::Words::new(if words.fr {
+            crate::clock::time::Lang::French
+        } else {
+            crate::clock::time::Lang::English
+        });
+        let mut lines = Vec::new();
+        for (entries, word) in [
+            (&brief.waiting, words.pick("t’attend", "is waiting")),
+            (&brief.stuck, words.pick("bloqué", "stuck")),
+            (&brief.to_see, words.pick("a fini", "finished")),
+        ] {
+            for e in entries.iter() {
+                lines.push(hocus_secretary_link::Line {
+                    title: format!("{} {word}", e.name),
+                    detail: e
+                        .note
+                        .as_ref()
+                        .map(|n| agent_words.note(n))
+                        .unwrap_or_default(),
+                    attention: true,
+                    notebook: Notebook::Pro,
+                    ..Default::default()
+                });
+            }
+        }
+        if !brief.working.is_empty() || !brief.resting.is_empty() {
+            lines.push(hocus_secretary_link::Line {
+                title: if words.fr {
+                    format!(
+                        "{} au travail · {} au repos",
+                        brief.working.len(),
+                        brief.resting.len()
+                    )
+                } else {
+                    format!(
+                        "{} at work · {} resting",
+                        brief.working.len(),
+                        brief.resting.len()
+                    )
+                },
+                notebook: Notebook::Pro,
+                ..Default::default()
+            });
+        }
+        if !lines.is_empty() {
+            let at = sections
+                .iter()
+                .position(|s| s.0 == "perso")
+                .unwrap_or(sections.len());
+            sections.insert(
+                at,
+                (
+                    "agents".to_owned(),
+                    words.night().to_owned(),
+                    String::new(),
+                    lines,
+                    None,
+                ),
+            );
+        }
+    }
+    for (key, label, note, lines, proposal) in &sections {
+        let visible: Vec<&hocus_secretary_link::Line> = lines
+            .iter()
+            .filter(|l| !(hide && l.notebook == Notebook::Perso))
+            .collect();
+        let hidden = lines.len() - visible.len();
+        if visible.is_empty() && hidden == 0 && proposal.is_none() {
+            continue;
+        }
+        // Its label, spaced, and its note after it.
+        y += 6.0;
+        shapes.push(Shape::Text(Line {
+            text: label.clone(),
+            at: Point::new(PAD, y + 11.0 * 0.7),
+            size: 11.0,
+            color: section_colour(key),
+            bold: true,
+            align: Alignment::Left,
+        }));
+        if !note.is_empty() {
+            let lw = width_of(label, 11.0, true);
+            shapes.push(Shape::Text(Line {
+                text: note.clone(),
+                at: Point::new(PAD + lw + 8.0, y + 11.0 * 0.7),
+                size: 11.0,
+                color: FAINT,
+                bold: false,
+                align: Alignment::Left,
+            }));
+        }
+        y += 11.0 * 1.4 + 6.0;
+        let mut titles = Vec::new();
+        for line in visible {
+            let mut x = PAD;
+            let line_top = y;
+            if !line.time.is_empty() {
+                shapes.push(Shape::Mono(Line {
+                    text: line.time.clone(),
+                    at: Point::new(PAD, y + 13.0 * 0.72),
+                    size: 11.5,
+                    color: if line.attention { hex(0xF5C46E) } else { DIM },
+                    bold: false,
+                    align: Alignment::Left,
+                }));
+                x = PAD + 62.0;
+            } else if let Some(done) = line.done {
+                shapes.push(Shape::Tick(
+                    Rectangle::new(Point::new(PAD, y + 2.5), Size::new(14.0, 14.0)),
+                    done,
+                ));
+                x = PAD + 22.0;
+            }
+            let when_w = if line.when.is_empty() {
+                0.0
+            } else {
+                width_of(&line.when, 11.5, false) + 8.0
+            };
+            let title_room = right - x - when_w;
+            // The rest, in three lines, is prose: not bold.
+            let bold = key != "rest";
+            for (n, t) in lines_of(&line.title, 13.0, bold, title_room)
+                .into_iter()
+                .enumerate()
+            {
+                shapes.push(Shape::Text(Line {
+                    text: t,
+                    at: Point::new(x, y + 13.0 * 0.72),
+                    size: 13.0,
+                    color: if line.attention {
+                        hex(0xFFE2A8)
+                    } else if bold {
+                        TEXT
+                    } else {
+                        hex(0xD5DBE5)
+                    },
+                    bold,
+                    align: Alignment::Left,
+                }));
+                if n == 0 && !line.when.is_empty() {
+                    shapes.push(Shape::Text(Line {
+                        text: line.when.clone(),
+                        at: Point::new(right, y + 13.0 * 0.72),
+                        size: 11.5,
+                        color: LABEL,
+                        bold: false,
+                        align: Alignment::Right,
+                    }));
+                }
+                y += 13.0 * 1.4;
+            }
+            if !line.detail.is_empty() {
+                for d in lines_of(&line.detail, 12.0, false, right - x) {
+                    shapes.push(Shape::Text(Line {
+                        text: d,
+                        at: Point::new(x, y + 12.0 * 0.72),
+                        size: 12.0,
+                        color: DIM,
+                        bold: false,
+                        align: Alignment::Left,
+                    }));
+                    y += 12.0 * 1.4;
+                }
+            }
+            if line.attention {
+                shapes.insert(
+                    0,
+                    Shape::Box {
+                        rect: Rectangle::new(
+                            Point::new(PAD - 6.0, line_top - 3.0),
+                            Size::new(room + 12.0, y - line_top + 6.0),
+                        ),
+                        radius: 8.0,
+                        fill: alpha(0xF5B44A, 0.07),
+                        rim: None,
+                        dashed: false,
+                        sharp: Corner::None,
+                    },
+                );
+            }
+            titles.push(line.title.clone());
+            y += 6.0;
+        }
+        if hidden > 0 {
+            y = hidden_line(
+                &mut shapes,
+                &mut targets,
+                open,
+                hidden,
+                PAD,
+                room - PAD,
+                y,
+                words,
+            ) + 6.0;
+        }
+        if let Some(card_id) = proposal
+            && let Some(Body::Card { card }) =
+                c.items.iter().find(|i| i.id == *card_id).map(|i| &i.body)
+        {
+            y = lay_out_card(
+                &mut shapes,
+                &mut targets,
+                open,
+                *card_id,
+                card,
+                PAD,
+                room - PAD,
+                y,
+            ) + 6.0;
+            titles.push(format!(
+                "card:{}{}",
+                card.label,
+                card.outcome
+                    .as_deref()
+                    .map_or(String::new(), |o| format!(" → {o}"))
+            ));
+        }
+        said.push(format!(
+            "section:{key}:{}{}",
+            titles.join(" | "),
+            if hidden > 0 {
+                format!(" (+{hidden} hidden)")
+            } else {
+                String::new()
+            }
+        ));
+    }
+    if !briefing.footer.is_empty() {
+        y += 6.0;
+        shapes.push(Shape::Rule(Rectangle::new(
+            Point::new(PAD, y),
+            Size::new(room - PAD, 0.0),
+        )));
+        y += 8.0;
+        for line in lines_of(&briefing.footer, 11.5, false, room - PAD) {
+            shapes.push(Shape::Text(Line {
+                text: line,
+                at: Point::new(PAD, y + 11.5 * 0.72),
+                size: 11.5,
+                color: FAINT,
+                bold: false,
+                align: Alignment::Left,
+            }));
+            y += 11.5 * 1.4;
+        }
+    }
+    y += THREAD_BOTTOM;
+    laid.content = y;
+    let shown = laid.thread.height;
+    let most = (y - shown).max(0.0);
+    let scroll = open.scroll.clamp(0.0, most);
+    let shift = top - (most - scroll);
+    for shape in shapes {
+        laid.shapes.push(moved(shape, shift));
+    }
+    for (target, rect) in targets {
+        let rect = Rectangle::new(Point::new(rect.x, rect.y + shift), rect.size());
+        if rect.y + rect.height > top && rect.y < top + shown {
+            laid.targets.push((target, rect));
+        }
+    }
+}
+
 // --- Drawing --------------------------------------------------------------------------------
 
 /// The drawer on its surface.
@@ -1306,7 +1986,7 @@ fn key(open: &Open, c: &Conversation, size: Size) -> Key {
         size.width.to_bits(),
         size.height.to_bits(),
         open.hover,
-        crate::secretary::state() as u8,
+        crate::secretary::state() as u8 | (crate::speak::moment_key() << 4),
     )
 }
 
@@ -1322,6 +2002,13 @@ impl View {
                     return Some(None);
                 }
                 let laid = lay_out(open, c, crate::secretary::state(), self.words, size);
+                // A briefing unfolded scrolls from its top: its scroll kept
+                // within it.
+                if open.point.is_some() {
+                    open.scroll = open
+                        .scroll
+                        .clamp(0.0, (laid.content - laid.thread.height).max(0.0));
+                }
                 Some(Some((key, laid)))
             })
         });
@@ -1763,6 +2450,36 @@ fn draw_shape(f: &mut Frame, shape: &Shape, now: Instant) {
             f.stroke(&tick, Stroke::default().with_color(INK).with_width(2.0));
         }
         Shape::Quote(rect) => f.fill_rectangle(rect.position(), rect.size(), alpha(0x7EE0A0, 0.5)),
+        Shape::Mono(line) => {
+            let mut t = text(
+                &line.text, line.at, line.size, line.color, false, line.align,
+            );
+            t.font = iced::Font::with_name("Martian Mono");
+            f.fill_text(t);
+        }
+        Shape::Her(rect) => {
+            let (handle, _) = pandas::secretary(hocus_pandas::SecretaryMood::Happy, None, now);
+            f.draw_svg(*rect, svg::Svg::new(handle));
+        }
+        Shape::Tick(rect, done) => {
+            let path = Path::rounded_rectangle(rect.position(), rect.size(), 4.0.into());
+            if *done {
+                f.fill(&path, MINT);
+                let tick = Path::new(|p| {
+                    p.move_to(Point::new(rect.x + 3.5, rect.y + 7.5));
+                    p.line_to(Point::new(rect.x + 6.0, rect.y + 10.0));
+                    p.line_to(Point::new(rect.x + 10.5, rect.y + 4.5));
+                });
+                f.stroke(&tick, Stroke::default().with_color(INK).with_width(2.0));
+            } else {
+                f.stroke(
+                    &path,
+                    Stroke::default()
+                        .with_color(alpha(0xFFFFFF, 0.35))
+                        .with_width(1.5),
+                );
+            }
+        }
         Shape::Lens(c) => {
             let stroke = Stroke::default().with_color(FAINT).with_width(1.5);
             f.stroke(&Path::circle(Point::new(c.x - 1.5, c.y - 1.5), 5.0), stroke);
@@ -2014,6 +2731,7 @@ mod tests {
             id,
             at: "2026-11-09T08:00:00Z".to_owned(),
             request: Some(request),
+            notebook: None,
             body,
         };
         let c = Conversation {
@@ -2041,13 +2759,14 @@ mod tests {
             rev: 1,
         };
         let words = Words { fr: true };
-        let kinds: Vec<&str> = entries(&c, words)
+        let kinds: Vec<&str> = entries(&c, words, false)
             .iter()
             .map(|e| match e {
                 Entry::Day(_) => "day",
                 Entry::Item(_) => "item",
                 Entry::Streaming(_) => "streaming",
                 Entry::Typing(_) => "typing",
+                Entry::Hidden(_) => "hidden",
             })
             .collect();
         assert_eq!(kinds, ["day", "item", "streaming", "item", "typing"]);
@@ -2057,7 +2776,7 @@ mod tests {
             ..c
         };
         assert!(
-            !entries(&streaming, words)
+            !entries(&streaming, words, false)
                 .iter()
                 .any(|e| matches!(e, Entry::Typing(_)))
         );

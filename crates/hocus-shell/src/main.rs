@@ -65,6 +65,7 @@ mod secretary;
 mod setup;
 mod share;
 mod side;
+mod speak;
 mod tasks;
 mod theme;
 mod today;
@@ -642,6 +643,7 @@ impl Shell {
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
+                    speak::peek::forget(&bar.output);
                     footer::forget(&bar.output);
                     tasks::draw::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
@@ -756,6 +758,7 @@ impl Shell {
             }
             ToShell::NoPeek => {
                 agents::peek::back();
+                speak::peek::back();
                 Task::none()
             }
             ToShell::ScreensMoved(moved) => {
@@ -888,6 +891,10 @@ impl Shell {
                 drawer::toggle(&output, width);
                 Task::none()
             }
+            ToShell::SecretaryPeek(id) => {
+                speak::peek::show(id);
+                Task::none()
+            }
             ToShell::Fullscreen(screens) => {
                 reminder::set_fullscreen(screens);
                 Task::none()
@@ -898,6 +905,7 @@ impl Shell {
             }
             ToShell::Lock(shown) => {
                 secretary::locked(true);
+                speak::poke();
                 let screens = outputs::step();
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
@@ -909,14 +917,17 @@ impl Shell {
             ToShell::Unlocked => {
                 secretary::locked(false);
                 let effects = lock::end();
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
                 let effects = curtain::set(shown);
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
                 let effects = curtain::end();
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -1222,6 +1233,7 @@ impl Shell {
         let output = bar.output.clone();
         self.place_popovers(id);
         agents::peek::form(&output, form);
+        speak::peek::moved();
         self.fit(id)
     }
 
@@ -1741,6 +1753,14 @@ impl Shell {
 
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if let Some(bar) = speak::peek::bar_of(id) {
+            return Some(
+                canvas(speak::peek::View { bar })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
+            );
+        }
         let bar = agents::peek::bar_of(id)?;
         Some(
             canvas(agents::peek::View { bar })
@@ -2485,6 +2505,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            speak::peek::back();
+                            continue;
+                        }
+                        Ok(ToShell::SecretaryPeek(id)) => {
+                            speak::peek::show(id);
                             continue;
                         }
                         Ok(ToShell::ScreensMoved(moved)) => {

@@ -421,7 +421,8 @@ fn recorded(dir: &Path) -> (usize, Vec<String>) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        if value.get("call").is_some() {
+        // Her answers' calls: her morning briefing's (lot 5) aside.
+        if value.get("call").is_some() && value["call"]["request"]["role"] != "briefing" {
             calls += 1;
         }
         if let Some(kind) = value["effect"]["kind"].as_str() {

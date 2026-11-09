@@ -313,6 +313,22 @@ pub(super) fn lay_out(
         }
         Some(view) => {
             let mut index = 0u32;
+            // A public moment (§7.4): her perso items are not sent, only
+            // how many.
+            if view.hidden > 0 {
+                at += 8.0;
+                let n = view.hidden as usize;
+                shapes.push(text(
+                    &words.hidden(n),
+                    Point::new(PAD + 2.0, at + ITEM * 0.7),
+                    ITEM,
+                    hex(0xF4B6C9),
+                    false,
+                    Alignment::Left,
+                ));
+                said.push(format!("hidden:{n}"));
+                at += ITEM * 1.4;
+            }
             for section in &view.sections {
                 at += 8.0;
                 let first = shapes.len();

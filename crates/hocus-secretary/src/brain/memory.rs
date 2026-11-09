@@ -993,7 +993,42 @@ impl Brain {
                 .collect(),
             seen: learn::load_seen(&self.store),
         };
-        knows::view(&self.store, query, &context).map_err(|e| e.to_string())
+        let mut view = knows::view(&self.store, query, &context).map_err(|e| e.to_string())?;
+        // In a public moment (§7.4, lot 5): no perso item leaves her, only
+        // how many.
+        if self.scope.moment.public() {
+            let mut hidden = 0;
+            for section in &mut view.sections {
+                let before = section.items.len();
+                section
+                    .items
+                    .retain(|i| i.notebook != Some(hocus_secretary_link::Notebook::Perso));
+                hidden += before - section.items.len();
+            }
+            view.sections
+                .retain(|s| !s.items.is_empty() || s.key == "week");
+            view.hidden = u32::try_from(hidden).unwrap_or(u32::MAX);
+        }
+        Ok(view)
+    }
+
+    /// The week's digest ("Appris cette semaine", §9.3), for the Friday
+    /// briefing: what she learned these seven days, each line its notebook.
+    pub(super) fn week_learned(&self) -> Vec<hocus_secretary_link::Line> {
+        let Ok(view) = self.view(&Query::default()) else {
+            return Vec::new();
+        };
+        view.sections
+            .into_iter()
+            .filter(|s| s.key == "week")
+            .flat_map(|s| s.items)
+            .map(|k| hocus_secretary_link::Line {
+                title: format!("{}{}", k.title, k.text),
+                detail: k.origin.text,
+                notebook: k.notebook.unwrap_or_default(),
+                ..Default::default()
+            })
+            .collect()
     }
 
     /// The view to `conn` if it changed since it was last sent.

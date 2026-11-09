@@ -20,7 +20,7 @@ use hocus_sources::{
 };
 use jiff::{Timestamp, tz::TimeZone};
 
-use crate::sources::{Item, Source, Synced};
+use crate::sources::{EventInfo, Item, MailInfo, Source, Synced};
 
 /// The consent book's file, in her folder.
 pub const CONSENTS: &str = hocus_secretary_link::consent::CONSENTS;
@@ -135,6 +135,35 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
         // Not an account's: her notifications' source's.
         Content::Notification(n) => ("notification", format!("{} : {}", n.app, n.title), true),
     };
+    let (event, mail) = match &source.content {
+        Content::Event(e) => {
+            let end = match e.when {
+                hocus_day::model::When::Timed { end, .. } => Some(end),
+                _ => None,
+            };
+            (
+                end.map(|end| EventInfo {
+                    end,
+                    calendar: e.calendar_name.clone(),
+                    attendees: Vec::new(),
+                    organiser: None,
+                    presenter: None,
+                    busy: e.busy && !e.declined && !e.cancelled,
+                }),
+                None,
+            )
+        }
+        Content::Mail(m) => (
+            None,
+            Some(MailInfo {
+                to: m.to.clone(),
+                sent: m.sent,
+                message_id: m.message_id.clone(),
+                in_reply_to: m.in_reply_to.clone(),
+            }),
+        ),
+        _ => (None, None),
+    };
     Item {
         id: source.pointer.id.clone(),
         at: source.at,
@@ -143,8 +172,13 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
         notebook: Some(source.notebook),
         from: Some(from.to_owned()),
         project: None,
-        sender: None,
+        sender: match &source.content {
+            Content::Mail(m) => Some(m.from.clone()),
+            _ => None,
+        },
         body: None,
+        event,
+        mail,
         calendar,
         until,
         open: source.pointer.open.clone(),

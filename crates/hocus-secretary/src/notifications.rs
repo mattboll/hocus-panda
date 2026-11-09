@@ -165,6 +165,8 @@ impl Source for Notifications {
                 project: None,
                 sender: None,
                 body: None,
+                event: None,
+                mail: None,
                 calendar: None,
                 until: None,
                 open: None,

@@ -270,6 +270,7 @@ pub fn moved() {
     crate::tasks::draw::moved();
     agents::draw::moved();
     agents::peek::moved();
+    crate::speak::peek::moved();
 }
 
 #[cfg(test)]

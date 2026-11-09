@@ -1397,6 +1397,7 @@ schedules: at most 1 wakeup a minute idle with Gmail IDLE and Slack notification
    - Perso hidden in public moments; quiet hours per notebook; the "Pendant ton
      absence" briefing.
    - Covers AC9–13, AC38 and AC44.
+   - **As built (#747)**: see §22, lot 5.
 6. **"Ce qu'elle sait", rules and learned sources.**
    - The memory view.
    - Taught rules compiled (leaves calendar, barely-used tool, naming pattern,
@@ -2034,10 +2035,146 @@ The setting is followed live, so switching back to "classic" stops the process a
   sections, an item unfolded, "Oublier" and its toast's "Annuler",
   "Oublier tout le perso…" confirmed, her observation accepted;
   `HOCUS_DRAWER_SHOTS=DIR` leaves its PNGs).
-- **Not yet**: perso hidden in public moments in the view (the moment is
-  lot 5's: `Knowledge::hidden` is there for it); "Ce que j'ai appris
-  cette semaine" in the Friday briefing (lot 5 reads the week's section);
-  editing in place (she is told instead); the extraction role deciding
+- **Not yet**: editing in place (she is told instead); the extraction role deciding
   which candidates to propose; the rules' effects that are other lots'
   (restraint in the speak gate, urgent senders in the triage, file
   names); the Batch API; the observations that need timings.
+
+### Lot 5 (#747): the briefing and restraint
+
+- **The protocol, version 4** (`hocus-secretary-link`, on lot 6's 3): she sends `speak
+  {id, kind, text, action, item, notebook, vip, deadline}` (kinds
+  `briefing`, `absence`, `reminder`, `proposal`; `**` around the key
+  words), `restraint` (her `[secretary.speak]`, on hello and as it
+  changes) and `effect` (`task {id, title, notebook}`); the shell sends
+  `spoken {speak, outcome}` (`shown`, `held {why}`, `dropped {why}`),
+  `peeked {id, speak, answer}` (`done`, `later {later}`, `open`), `moment
+  {moment}` (`quiet`, `meeting`, `sharing`, `camera`) and `effected
+  {effect, ok, detail}`. Every thread item carries its `notebook` when it
+  has one; a briefing is a thread item (`briefing {kind, title, hello,
+  date, sentence, sections, footer}`, each section `{key, label, note,
+  lines, proposal}`, each line `{time, title, detail, when, attention,
+  done, notebook}`).
+- **The speak gate** (§6.3) is `hocus_secretary_link::gate`, a state
+  machine with no clock nor thread of its own, tested apart, which the
+  shell runs on a thread of its own (`hocus-shell/src/speak`). It reads
+  the screen from what the shell has when something changes (it is poked
+  by the in-use sign, do not disturb, the lock, the curtain, the
+  full-screen screens, the day) or at its next moment (a meeting's start
+  or end, the 30 min spacing, a deadline): a meeting of the featured
+  calendars taking time now, do not disturb, a share or a recording, the
+  camera or the microphone, the lock or the idle curtain, a full-screen
+  window on any screen; the quiet hours of the item's notebook; perso in
+  a public moment; six a day, 30 min apart (VIPs past those two, never
+  past a meeting); one at a time. Held items come out when what held them
+  ends, oldest first; past their deadline, or in quiet hours, they are
+  dropped and she lists them in her next briefing. Her briefings come at
+  the user's own session: quiet hours do not drop them. Typing (a key
+  within 20 s, held at most 10 min) is in the gate, but nothing tells it
+  yet: the compositor does not say when keys are typed.
+- **Her peek** (§6.2): the gate lets it out, the shell asks the
+  compositor (`secretary-peek ID STAYS`), which brings it out as an
+  agent's panda (`secretary-peek ID` to the shell, its peek surfaces, 12 s,
+  `no-peek` back): in place of a panda out, and no panda comes out while
+  hers is. Her drawing at 200 px in her `nudge`, her bubble on its left,
+  300 px, "TA SECRÉTAIRE", her words, and the action, "Plus tard ▾",
+  "Fait" (amber for a reminder). "Plus tard ▾" unfolds its five choices in
+  the bubble and she stays 12 s more; a choice or "Fait" sends her back
+  (`peek-close`) and tells her; the bubble or the action opens the drawer
+  on the item, a briefing unfolded. On the CPU, one opaque card.
+- **The morning briefing** (§6.1), built by her (`briefing.rs`) from her
+  day's records (`day.rs`, tables beside the graph in her memory: the
+  agenda's events with their end, calendar, invitees, organiser and
+  presenter; the mails' headers and the triage's verdict; reminders;
+  plans), at the first session of the day after `morning` (07:00): a
+  login (the shell's first `session` line, unlocked) or an unlock. She
+  waits for her catch-up and triage (two minutes at most), computes the
+  parts in code, asks the `briefing` role for one sentence and the rest in
+  three lines from those facts (without a model, code's words stand),
+  keeps it as a thread item and asks to speak once: "Ton point est prêt".
+  Parts: AUJOURD'HUI (pro events taking time, amber when someone in them
+  is away), EN CONGÉS (the events of the calendar the leaves rule names,
+  `{"leaves": {"calendar": NAME}}` in the rule's compiled form, which lot
+  6 writes; people known to her graph or invited; a meeting whose
+  presenter or invitee is away gives a proposal card under it with the
+  first slot free for every invitee from the next working day, holidays
+  out, computed by `hocus_sources::facts::slots`; "Proposer à <organiser>"
+  prepares a draft card, which sends only on its own "Envoyer"), À
+  RÉPONDRE (three at most: for the user, from a person, waiting for an
+  answer, nothing in Sent replying to it, the most urgent first), LE
+  RESTE (her model's lines, else the count and a holiday tomorrow), HIER,
+  TU VOULAIS and AUJOURD'HUI, TU M'AS DIT (the tasks put in To do through
+  her, by day; done or not is not known yet), À NE PAS OUBLIER (reminders
+  gone by unsaid, or kept for it), CÔTÉ PERSO (perso events, reminders,
+  birthdays 10 and 2 days ahead), and what was read. CETTE NUIT, TES
+  AGENTS is the drawer's to add: the shell knows the agents.
+- **"Pendant ton absence"** (§3.10): a catch-up over 4 h notes the
+  absence; at the next session she tells what came (how many, those that
+  wait for an answer, events read, perso items), the reminders that came
+  due and went meanwhile, once. When the morning briefing is due at the
+  same unlock, it is its first part: one peek, "Pendant ton absence".
+- **Reminders**: her loop wakes for the next one, and for nothing else.
+  Due, it is a thread item and a request to speak until its deadline;
+  past it (asleep, held), it is listed in the next briefing, never lost.
+  "Plus tard" asks again in an hour, after the next meeting (its end, 5
+  min after), at 14:30, or in the next briefing; "Ne plus me le dire"
+  sends that kind of reminder to the briefings only (the Friday's word on
+  it is not built).
+- **Commitments** (§3.3): what the triage finds promised in a mail the
+  user sent becomes a card, "Ta promesse": "Tu as écrit à Paul Durand :
+  « … ». Je le mets dans À faire, et je te le rappelle lundi 9 novembre
+  14 h ?", "Mettre dans À faire" / "Laisser". Its time is computed in
+  code ("avant 16 h": two hours before; "avant jeudi": the day before,
+  9 h to 18 h).
+- **Effects** (`effects.rs`): an `Effector` per kind of outside effect,
+  called on her loop after the click on that card, once; the recorder
+  writes every effect down (tests). Lot 5's is the To do list's: its
+  effect goes to the shell, which owns the tasks' account, adds the task
+  (Day.4's local list, or the configured one) and answers; the card says
+  "Mis dans À faire." or why not. A task with a time keeps her reminder;
+  a task added is the day's plan. The kinds without an effector still say
+  "Je ne sais pas encore le faire moi-même".
+- **The Friday briefing** has "CE QUE J'AI APPRIS CETTE SEMAINE": the
+  week section of "Ce qu'elle sait" (lot 6's digest), each line its
+  notebook, to keep or forget in the tab.
+- **Perso in public moments** (§7.4): the gate says the moment to her
+  (context assembly then reads the pro notebook only; "Ce qu'elle sait"
+  sends no perso item, only how many, `Knowledge::hidden`, which the tab
+  says) and to the drawer,
+  which shows no perso item of the thread nor perso line of a briefing,
+  only "N choses perso masquées" and "Montrer", which reveals them by a
+  click, never while the screen is shared; her peek holds perso items,
+  VIPs' too.
+- **The drawer**: a briefing in the thread is a card (its title, her
+  sentence, "Ouvrir le point"; "Pendant ton absence" lists what came);
+  "Ouvrir le point" (or her peek's bubble) unfolds it in place of the
+  thread: her head at 96 px, "Bonjour Alex", the date and her sentence,
+  each part with its label, times in Martian Mono, amber what needs the
+  user, the proposal under EN CONGÉS, the agents' night, what was read;
+  it scrolls from its top; "‹ Discussion" goes back.
+- **`[secretary.speak]`**: `morning`, `most`, `apart`, `quiet-pro`,
+  `quiet-weekends`, `quiet-perso`, `stays` (packaging/config.toml).
+- **Tests**: `hocus-secretary-link` (`gate::tests`: AC12 each condition,
+  held then out, dropped past its deadline or in quiet hours; AC13; AC38's
+  peek half; typing; quiet hours per notebook), `hocus-secretary/tests/
+  briefing.rs` through the fake model and its scripted triage (`[[triage]]`
+  in its script; `--fake-model` then triages too) on her clock: AC9, AC10,
+  AC11, AC44, a promise to To do, its reminder, "Plus tard", "Fait"; and
+  `hocus-compositor/tests/secretary_briefing.rs` with the real shell and
+  her process: AC9 (no peek at a login before 07:00, one at the first
+  unlock after, the drawer closed; its bubble unfolds the briefing; none
+  at a second unlock), AC44 (14 h asleep: nothing while locked, one
+  "Pendant ton absence" after the unlock), AC12 and AC38 during a
+  meeting of the shell's calendar (held; no perso title in the drawer nor
+  the briefing; "Montrer"), and a promise's card adding its task to the
+  local To do list. `HOCUS_DRAWER_SHOTS=DIR` leaves PNGs of her peek, the
+  briefing and "Pendant ton absence".
+- **Not yet**: typing (the compositor's keys); the Friday's word on what
+  she lowered; a briefing reopened saying what changed; done or not for
+  yesterday's plan (the To do list's ticks); À RÉPONDRE from Slack; the
+  other variants of her speaking (a bubble, the briefing only); VIPs (no
+  one is named yet: §3.7, lot 9); the peek's full screen held on any
+  screen rather than hers; "Montrer" in "Ce qu'elle sait" (only the
+  thread and the briefings have it); the source items' `event` and lot
+  6's `calendar`/`until` say the same twice, to fold into one; the
+  drawer's tree for screen readers.

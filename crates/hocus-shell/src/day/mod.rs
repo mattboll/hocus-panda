@@ -263,6 +263,27 @@ pub fn change(change: Change) {
     }
 }
 
+/// A task added to the To do list for the secretary (an accepted card,
+/// secretary.md §2.1): as the field's, at once, off the loop; `Err` when
+/// the day takes no task (none started, no tasks' account).
+pub fn add_task(title: String) -> Result<(), String> {
+    let Some(service) = SERVICE.get() else {
+        return Err("the day is not started".to_owned());
+    };
+    let id = service
+        .workers
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .change(Change::Add { title });
+    match id {
+        Some(id) => {
+            tracing::info!(id = id.0, "a task added for the secretary");
+            Ok(())
+        }
+        None => Err("no To do list".to_owned()),
+    }
+}
+
 /// The months of `months` (any of their days) outside the window, asked
 /// of the calendars' accounts, which read those they have not read yet
 /// off the loop (Day.5b). Never blocks.

@@ -2254,6 +2254,11 @@ impl Headless {
         self.app.state.peek.screens_out()
     }
 
+    /// The secretary's request whose peek is out, if hers is.
+    pub fn secretary_peek_out(&self) -> Option<u64> {
+        self.app.state.peek.secretary_out()
+    }
+
     /// Whether the panda out goes back.
     pub fn peek_going_back(&self) -> bool {
         self.app.state.peek.going_back()

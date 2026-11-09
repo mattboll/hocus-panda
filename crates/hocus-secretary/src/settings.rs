@@ -163,6 +163,61 @@ impl Triage {
     }
 }
 
+/// When she speaks up (§6, §13 PRENDRE LA PAROLE): `[secretary.speak]`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Speak {
+    /// The morning briefing comes at the first session after this time.
+    pub morning: String,
+    /// Peeks a day at most, and minutes between two (VIPs aside).
+    pub most: u32,
+    pub apart: u32,
+    /// Quiet hours of each notebook (`HH:MM-HH:MM`), the pro one's
+    /// weekends too.
+    pub quiet_pro: String,
+    pub quiet_weekends: bool,
+    pub quiet_perso: String,
+    /// Seconds her peek stays out.
+    pub stays: u32,
+}
+
+impl Default for Speak {
+    fn default() -> Self {
+        Self {
+            morning: "07:00".to_owned(),
+            most: 6,
+            apart: 30,
+            quiet_pro: "19:00-08:00".to_owned(),
+            quiet_weekends: true,
+            quiet_perso: "22:00-08:00".to_owned(),
+            stays: 12,
+        }
+    }
+}
+
+impl Speak {
+    /// The time the morning starts.
+    pub fn morning(&self) -> jiff::civil::Time {
+        self.morning
+            .parse()
+            .unwrap_or(jiff::civil::Time::constant(7, 0, 0, 0))
+    }
+
+    /// The shell's gate's settings.
+    pub fn restraint(&self) -> hocus_secretary_link::gate::Restraint {
+        use hocus_secretary_link::gate::{Hours, Restraint};
+        let fallback = Restraint::default();
+        Restraint {
+            most: self.most,
+            apart: self.apart,
+            pro: Hours::of(&self.quiet_pro).unwrap_or(fallback.pro),
+            pro_weekends: self.quiet_weekends,
+            perso: Hours::of(&self.quiet_perso).unwrap_or(fallback.perso),
+            stays: self.stays.clamp(4, 60),
+        }
+    }
+}
+
 /// The night's compaction (§7.2, lot 6).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -186,6 +241,7 @@ pub struct Settings {
     /// Added to, or replacing, the default `anthropic` and `local`.
     pub providers: BTreeMap<String, Provider>,
     pub triage: Triage,
+    pub speak: Speak,
     pub compaction: Compaction,
 }
 
@@ -195,6 +251,7 @@ impl Default for Settings {
             models: Models::default(),
             providers: default_providers(),
             triage: Triage::default(),
+            speak: Speak::default(),
             compaction: Compaction::default(),
         }
     }
