@@ -929,9 +929,15 @@ fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() 
 
     bed.click("notifier:signal")?;
     bed.shows(|s| s["agents"]["notify"] == "Signal")?;
-    bed.click("sheet:perso")?;
+    // « C'est privé » checked (#752).
+    bed.click("sheet:private")?;
     bed.shows(|s| s["agents"]["notify_notebook"] == "perso")?;
     bed.click("sheet:allow")?;
+    bed.shows(|s| notifier(s, "signal")["granted"] == "perso")?;
+    // Unchecked later on its row: work, still read.
+    bed.click("notifier-private:signal")?;
+    bed.shows(|s| notifier(s, "signal")["granted"] == "pro")?;
+    bed.click("notifier-private:signal")?;
     bed.shows(|s| notifier(s, "signal")["granted"] == "perso")?;
 
     bed.click("notifier:slack")?;
@@ -942,7 +948,11 @@ fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() 
         book.notifications("Signal", None).map(|g| g.notebook()),
         Some(hocus_secretary_link::Notebook::Perso)
     );
-    assert_eq!(book.records().len(), 3, "a revocation is a later record");
+    assert_eq!(
+        book.records().len(),
+        5,
+        "a revocation, a notebook changed: later records"
+    );
     Ok(())
 }
 
@@ -1026,6 +1036,11 @@ fn each_google_account_s_kind_is_consented_on_its_sheet() -> anyhow::Result<()> 
         .expect("granted");
     assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
     assert_eq!(grant.identity(), WORK);
+    // « Privé » checked on its row later (#752): a new record, perso.
+    bed.click(&format!("private:{work_calendar}"))?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "perso")?;
+    bed.click(&format!("private:{work_calendar}"))?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "pro")?;
 
     bed.click(&format!("google:{work_calendar}"))?;
     bed.shows(|s| google(s, &work_calendar)["granted"].is_null())?;

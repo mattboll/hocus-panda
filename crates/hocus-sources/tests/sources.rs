@@ -199,9 +199,11 @@ fn every_google_account_is_found_each_with_its_notebook_suggested() -> anyhow::R
         &accounts[1].identity,
         SourceKind::Mail,
         accounts[1].suggested,
+        hocus_secretary_link::gate::Restraint::default().perso,
         true,
     );
-    assert_eq!(sheet.ask.as_deref(), Some("C’est ton compte perso ?"));
+    assert_eq!(sheet.notebook, hocus_secretary_link::Notebook::Perso);
+    assert_eq!(sheet.private.label, "C’est privé");
     assert!(sheet.sections[1].lines[0].contains("lecture seule"));
     // Discovering asks no token.
     assert_eq!(bed.goa.given(), 0);

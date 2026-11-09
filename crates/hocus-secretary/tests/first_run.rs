@@ -217,7 +217,7 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
         .expect("the card");
     assert_eq!(
         granted.outcome.as_deref(),
-        Some("Je lis ton agenda · carnet pro")
+        Some("Je lis ton agenda · travail")
     );
     assert_eq!(granted.actions.len(), 1);
     assert_eq!(granted.actions[0].label, "Ne plus lire");
@@ -249,7 +249,7 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
     assert_eq!(perso[0].1.label, format!("Agenda · {PERSO}"));
     let sheet = perso[0].1.sheet.as_ref().expect("its sheet");
     assert_eq!(sheet.notebook, Notebook::Perso);
-    assert_eq!(sheet.ask.as_deref(), Some("C’est ton compte perso ?"));
+    assert_eq!(sheet.private.label, "C’est privé", "checked: gmail.com");
     decide(&mut driver, perso[0].0, Decision::Accept, None);
     assert_eq!(
         book(&bed.book())
@@ -344,7 +344,7 @@ fn a_consent_given_in_the_settings_shows_on_her_card_at_once() -> anyhow::Result
         .expect("the card");
     assert_eq!(
         card.outcome.as_deref(),
-        Some("Je lis ton agenda · carnet pro (autorisé dans les Réglages)")
+        Some("Je lis ton agenda · travail (autorisé dans les Réglages)")
     );
     // And the first run went on to the next source.
     assert_eq!(waiting(&items).len(), 1);

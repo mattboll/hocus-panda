@@ -284,6 +284,17 @@ impl Notebook {
         }
     }
 
+    /// As the user reads it (#752): "travail" or "privé", never pro or
+    /// perso.
+    pub const fn said(self, fr: bool) -> &'static str {
+        match (self, fr) {
+            (Self::Pro, true) => "travail",
+            (Self::Pro, false) => "work",
+            (Self::Perso, true) => "privé",
+            (Self::Perso, false) => "private",
+        }
+    }
+
     pub fn of(word: &str) -> Option<Self> {
         match word {
             "pro" => Some(Self::Pro),
@@ -1344,6 +1355,7 @@ mod tests {
                     "alex.martin@gmail.com",
                     consent::SourceKind::Mail,
                     Notebook::Perso,
+                    gate::Restraint::default().perso,
                     true,
                 )),
             },

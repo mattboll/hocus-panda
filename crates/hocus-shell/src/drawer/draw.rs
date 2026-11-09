@@ -1505,69 +1505,72 @@ fn lay_out_sheet(
     }
     let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
     if asking {
-        // The notebook: suggested by the account's domain, chosen here.
-        at += 8.0;
-        parts.push(Shape::Text(Line {
-            text: super::words().pick("CARNET", "NOTEBOOK").to_owned(),
-            at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
-            size: CARD_LABEL,
-            color: LABEL,
-            bold: true,
-            align: Alignment::Left,
-        }));
-        at += CARD_LABEL * 1.4 + 4.0;
-        if let Some(ask) = &sheet.ask {
-            let lines = lines_of(ask, SMALL, true, inner);
-            push_lines(
-                &mut parts,
-                &lines,
-                x + CARD_X,
-                at,
-                SMALL,
-                SMALL_LINE,
-                hex(0xFFE2A8),
-                true,
-            );
-            at += lines.len() as f32 * SMALL_LINE + 4.0;
-        }
+        // « C'est privé » (#752): checked for the private notebook (the
+        // account's domain suggests it), what it does under it.
+        at += 10.0;
         let chosen = open.notebooks.get(&item).copied().unwrap_or(sheet.notebook);
-        let mut px = x + CARD_X;
-        for (notebook, word) in [(Notebook::Pro, "Pro"), (Notebook::Perso, "Perso")] {
-            let w = width_of(word, PILL, true) + 2.0 * PILL_X;
-            let rect = Rectangle::new(Point::new(px, at), Size::new(w, button_h));
-            let on = chosen == notebook;
-            let target = Target::Pill { item, notebook };
-            let hover = open.hover == Some(target);
+        let on = chosen == Notebook::Perso;
+        let target = Target::Private { item };
+        let hover = open.hover == Some(target);
+        let size = 16.0;
+        let label_w = width_of(&sheet.private.label, SHEET_TEXT, true);
+        let rect = Rectangle::new(
+            Point::new(x + CARD_X - 3.0, at - 3.0),
+            Size::new(size + 8.0 + label_w + 6.0, size + 6.0),
+        );
+        if hover {
             parts.push(Shape::Box {
                 rect,
-                radius: button_h / 2.0,
-                fill: if on {
-                    alpha(0x7EE0A0, 0.22)
-                } else if hover {
-                    alpha(0xFFFFFF, 0.12)
-                } else {
-                    alpha(0xFFFFFF, 0.06)
-                },
-                rim: Some(if on {
-                    alpha(0x7EE0A0, 0.6)
-                } else {
-                    alpha(0xFFFFFF, 0.14)
-                }),
+                radius: 6.0,
+                fill: alpha(0xFFFFFF, 0.06),
+                rim: None,
                 dashed: false,
                 sharp: Corner::None,
             });
+        }
+        let check = Rectangle::new(Point::new(x + CARD_X, at), Size::new(size, size));
+        parts.push(Shape::Box {
+            rect: check,
+            radius: 4.5,
+            fill: if on { GREEN } else { alpha(0xFFFFFF, 0.04) },
+            rim: (!on).then_some(alpha(0xFFFFFF, 0.35)),
+            dashed: false,
+            sharp: Corner::None,
+        });
+        if on {
             parts.push(Shape::Text(Line {
-                text: word.to_owned(),
-                at: Point::new(px + w / 2.0, at + button_h / 2.0),
-                size: PILL,
-                color: if on { hex(0x9BEBB8) } else { hex(0xD5DBE5) },
+                text: "✓".to_owned(),
+                at: check.center(),
+                size: 12.0,
+                color: INK,
                 bold: true,
                 align: Alignment::Center,
             }));
-            targets.push((target, rect));
-            px += w + PILL_GAP;
         }
-        at += button_h;
+        parts.push(Shape::Text(Line {
+            text: sheet.private.label.clone(),
+            at: Point::new(x + CARD_X + size + 8.0, at + size / 2.0),
+            size: SHEET_TEXT,
+            color: TEXT,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        targets.push((target, rect));
+        at += size + 6.0;
+        for text in &sheet.private.lines {
+            let lines = lines_of(text, SMALL, false, inner - size - 8.0);
+            push_lines(
+                &mut parts,
+                &lines,
+                x + CARD_X + size + 8.0,
+                at,
+                SMALL,
+                SMALL_LINE,
+                if on { hex(0xC9D0DC) } else { DIM },
+                false,
+            );
+            at += lines.len() as f32 * SMALL_LINE + 1.0;
+        }
     } else if let Some(outcome) = &card.outcome {
         at += if granted { 10.0 } else { 6.0 };
         let shown = if granted {

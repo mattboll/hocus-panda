@@ -120,10 +120,10 @@ impl Words {
 
     pub fn hidden(self, n: usize) -> String {
         match (self.fr, n) {
-            (true, 1) => "1 chose perso masquée".to_owned(),
-            (true, n) => format!("{n} choses perso masquées"),
-            (false, 1) => "1 personal thing hidden".to_owned(),
-            (false, n) => format!("{n} personal things hidden"),
+            (true, 1) => "1 chose privée masquée".to_owned(),
+            (true, n) => format!("{n} choses privées masquées"),
+            (false, 1) => "1 private thing hidden".to_owned(),
+            (false, n) => format!("{n} private things hidden"),
         }
     }
 
@@ -175,9 +175,9 @@ impl Words {
 
     pub fn notebooks(self) -> [&'static str; 3] {
         if self.fr {
-            ["Tout", "Pro", "Perso"]
+            ["Tout", "Travail", "Privé"]
         } else {
-            ["All", "Work", "Perso"]
+            ["All", "Work", "Private"]
         }
     }
 
@@ -213,7 +213,7 @@ impl Words {
     }
 
     pub fn forget_perso(self) -> &'static str {
-        self.pick("Oublier tout le perso…", "Forget all perso…")
+        self.pick("Oublier tout le privé…", "Forget everything private…")
     }
 
     pub fn forget_all(self) -> &'static str {
@@ -229,18 +229,18 @@ impl Words {
     pub fn confirm(self, what: Confirm) -> (&'static str, &'static str, &'static str) {
         match what {
             Confirm::Perso => (
-                self.pick("Oublier tout le perso ?", "Forget all perso?"),
+                self.pick("Oublier tout le privé ?", "Forget everything private?"),
                 self.pick(
-                    "Tout ce qu’elle sait de ta vie perso — proches, dossiers, souvenirs — sera effacé de cette machine, résumés compris. Le pro reste. Ça ne s’annule pas.",
-                    "All she knows of your personal life — close ones, files, memories — will be erased from this machine, summaries included. Work stays. This cannot be undone.",
+                    "Tout ce qu’elle sait de ta vie privée — proches, dossiers, souvenirs — sera effacé de cette machine, résumés compris. Le travail reste. Ça ne s’annule pas.",
+                    "All she knows of your private life — close ones, files, memories — will be erased from this machine, summaries included. Work stays. This cannot be undone.",
                 ),
-                self.pick("Oublier tout le perso", "Forget all perso"),
+                self.pick("Oublier tout le privé", "Forget everything private"),
             ),
             Confirm::All => (
                 self.pick("Tout oublier ?", "Forget everything?"),
                 self.pick(
-                    "Tout ce qu’elle sait, pro et perso, sera effacé de cette machine. Ça ne s’annule pas.",
-                    "All she knows, work and perso, will be erased from this machine. This cannot be undone.",
+                    "Tout ce qu’elle sait, travail et privé, sera effacé de cette machine. Ça ne s’annule pas.",
+                    "All she knows, work and private, will be erased from this machine. This cannot be undone.",
                 ),
                 self.pick("Tout oublier", "Forget everything"),
             ),
@@ -301,10 +301,10 @@ pub enum Target {
         item: u64,
         decision: Decision,
     },
-    /// A consent card's notebook, chosen before its "Autoriser".
-    Pill {
+    /// A consent card's « C'est privé », checked or not before its
+    /// "Autoriser" (#752).
+    Private {
         item: u64,
-        notebook: Notebook,
     },
     /// "Annuler" under what she kept.
     Undo(u64),
@@ -354,7 +354,7 @@ impl Target {
             Self::Agent(id) => format!("Agent({id})"),
             Self::Reply { item, choice } => format!("Reply({item},{choice})"),
             Self::Button { item, decision } => format!("Button({item},{decision:?})"),
-            Self::Pill { item, notebook } => format!("Pill({item},{})", notebook.word()),
+            Self::Private { item } => format!("Private({item})"),
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
             Self::Point(item) => format!("Point({item})"),
@@ -861,13 +861,27 @@ pub fn act(id: window::Id, target: Target) {
                 crate::secretary::decide(item, decision, notebook);
                 Then::Nothing
             }
-            Target::Pill { item, notebook } => {
-                tracing::info!(
-                    item,
-                    notebook = notebook.word(),
-                    "a consent card's notebook"
-                );
-                open.notebooks.insert(item, notebook);
+            Target::Private { item } => {
+                let suggested = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => {
+                            card.sheet.as_ref().map(|s| s.notebook)
+                        }
+                        _ => None,
+                    })
+                });
+                let now = open
+                    .notebooks
+                    .get(&item)
+                    .copied()
+                    .or(suggested)
+                    .unwrap_or_default();
+                let next = match now {
+                    Notebook::Pro => Notebook::Perso,
+                    Notebook::Perso => Notebook::Pro,
+                };
+                tracing::info!(item, notebook = next.word(), "a consent card's « C'est privé »");
+                open.notebooks.insert(item, next);
                 open.changed();
                 Then::Draw
             }

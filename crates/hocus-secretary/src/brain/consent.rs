@@ -37,6 +37,8 @@ const FIRST_RUN: &str = "first-run";
 const CARDS: &str = "consent-cards";
 /// Her Google source's name.
 const GOOGLE: &str = "google";
+/// Her memory's `meta` key of each source's notebook as last filed.
+const NOTEBOOKS: &str = "source-notebooks";
 
 /// Where the first run is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -141,10 +143,59 @@ impl Brain {
     /// say it now, her Google source reads it now, her first run goes on.
     pub(super) fn consents_changed(&mut self) {
         tracing::info!("her consent book changed");
+        self.refile();
         self.cards_follow_the_book();
         self.google_now();
         self.first_run_step();
         self.tell_look();
+    }
+
+    /// A source's notebook changed in the book (« C'est privé » on its
+    /// row, #752): what came from it moves with it, in her memory and
+    /// what she holds. Each source's notebook as filed is kept in her
+    /// memory, so that a change made while she was away is taken at her
+    /// start.
+    pub(super) fn refile(&mut self) {
+        if self.consents.book.is_none() {
+            return;
+        }
+        let mut filed: std::collections::BTreeMap<String, Notebook> = self
+            .store
+            .meta(NOTEBOOKS)
+            .ok()
+            .flatten()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let mut changed = false;
+        for grant in self.book().granted() {
+            let source = grant.source().to_string();
+            let notebook = grant.notebook();
+            match filed.insert(source.clone(), notebook) {
+                Some(before) if before != notebook => {
+                    match self.store.refile_source(&source, notebook) {
+                        Ok(moved) => tracing::info!(
+                            source,
+                            notebook = notebook.word(),
+                            moved,
+                            "a source's notebook changed: what came from it moves"
+                        ),
+                        Err(err) => tracing::warn!(source, %err, "could not move a source's items"),
+                    }
+                    self.inbox.refile_source(&source, notebook);
+                    changed = true;
+                }
+                Some(_) => {}
+                None => changed = true,
+            }
+        }
+        if changed {
+            let kept = serde_json::to_string(&filed)
+                .map_err(|e| e.to_string())
+                .and_then(|t| self.store.set_meta(NOTEBOOKS, &t).map_err(|e| e.to_string()));
+            if let Err(err) = kept {
+                tracing::warn!(%err, "could not keep the sources' notebooks");
+            }
+        }
     }
 
     /// Her Google source reads its book at once.
@@ -249,7 +300,8 @@ impl Brain {
     /// A consent card for `account`'s `kind`, in its suggested notebook.
     fn consent_card(&mut self, account: &GoogleAccount, kind: SourceKind) -> u64 {
         let fr = self.talk.fr();
-        let sheet = sheets::google(&account.identity, kind, account.suggested, fr);
+        let quiet = self.settings.current().speak.restraint().perso;
+        let sheet = sheets::google(&account.identity, kind, account.suggested, quiet, fr);
         let card = Card {
             kind: CardKind::Consent,
             label: format!("{} · {}", sheets::kind_name(kind, fr), account.identity),
@@ -316,11 +368,7 @@ impl Brain {
                     .or_else(|| self.card_notebook(item))
                     .unwrap_or_default();
                 book.allow(asked.source.clone(), &asked.identity, notebook, now);
-                let said = if fr {
-                    format!("Je lis {what} · carnet {}", notebook.word())
-                } else {
-                    format!("I read {what} · {} notebook", notebook.word())
-                };
+                let said = format!("{} {what} · {}", self.talk.t("Je lis", "I read"), notebook.said(fr));
                 (said, vec![self.stop_reading()], None, true)
             }
             (Decision::Reject, Some(_)) => {
@@ -435,13 +483,13 @@ impl Brain {
                 Some(grant) if !shown_granted => {
                     let said = if fr {
                         format!(
-                            "Je lis {what} · carnet {} (autorisé dans les Réglages)",
-                            grant.notebook().word()
+                            "Je lis {what} · {} (autorisé dans les Réglages)",
+                            grant.notebook().said(true)
                         )
                     } else {
                         format!(
-                            "I read {what} · {} notebook (allowed in Settings)",
-                            grant.notebook().word()
+                            "I read {what} · {} (allowed in Settings)",
+                            grant.notebook().said(false)
                         )
                     };
                     let stop = self.stop_reading();

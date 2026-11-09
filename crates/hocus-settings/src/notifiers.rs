@@ -50,12 +50,12 @@ impl Notifier {
     pub fn line(&self, lang: Lang) -> String {
         match (self.granted, lang) {
             (Some(notebook), Lang::French) => format!(
-                "Elle lit ses notifications, carnet {} · elle n’en ouvre ni n’en ferme aucune : rien n’est marqué lu",
-                notebook.word()
+                "Elle lit ses notifications · {} · elle n’en ouvre ni n’en ferme aucune : rien n’est marqué lu",
+                notebook.said(true)
             ),
             (Some(notebook), Lang::English) => format!(
-                "She reads its notifications, {} notebook · she opens and closes none: nothing is marked read",
-                notebook.word()
+                "She reads its notifications · {} · she opens and closes none: nothing is marked read",
+                notebook.said(false)
             ),
             (None, _) if self.is_slack() => w(
                 "Ses notifications seulement : rien n’est marqué lu, rien ne sort de Slack",
@@ -200,6 +200,20 @@ pub fn decide(
     book.save(path)
 }
 
+/// « C'est privé » checked or not on `name`'s row (#752), written in the
+/// book at `path`. Blocking.
+pub fn set_notebook(
+    path: &Path,
+    name: &str,
+    notebook: Notebook,
+    at: Timestamp,
+) -> std::io::Result<()> {
+    let mut book = ConsentBook::load(path);
+    let source = SourceKey::notifications(name, None);
+    book.set_notebook(&source, notebook, at);
+    book.save(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,7 +247,7 @@ mod tests {
         );
         assert!(found[0].is_slack());
         assert_eq!(proposed(&found[0]), Notebook::Pro);
-        assert!(found[1].line(Lang::French).contains("carnet perso"));
+        assert!(found[1].line(Lang::French).contains("· privé ·"));
         assert!(found[0].line(Lang::French).contains("rien n’est marqué lu"));
         assert!(super::found(&ConsentBook::default(), "", &[]).is_empty());
     }

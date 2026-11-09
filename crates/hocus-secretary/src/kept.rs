@@ -157,7 +157,22 @@ pub fn waiting(store: &crate::store::Store) -> Result<Vec<(String, Held)>> {
 
 /// A source revoked: its items waiting for the triage go.
 pub fn forget_source(conn: &Connection, source: &str) -> Result<()> {
-    conn.execute("DELETE FROM pending WHERE source = ?1", [source])?;
+    conn.execute(
+        &format!("DELETE FROM pending WHERE source{}", crate::store::OF_SOURCE),
+        [source],
+    )?;
+    Ok(())
+}
+
+/// A source's items waiting move to `notebook` (#752).
+pub fn refile_source(conn: &Connection, source: &str, notebook: Notebook) -> Result<()> {
+    conn.execute(
+        &format!(
+            "UPDATE pending SET notebook = ?2 WHERE source{}",
+            crate::store::OF_SOURCE
+        ),
+        rusqlite::params![source, notebook.word()],
+    )?;
     Ok(())
 }
 

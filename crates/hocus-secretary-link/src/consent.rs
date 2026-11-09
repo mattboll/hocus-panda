@@ -184,6 +184,31 @@ impl ConsentBook {
         }
     }
 
+    /// « C'est privé » checked or not on a source's row, for a source
+    /// granted now (#752): a new record in `notebook`, the grant
+    /// otherwise as it was. What came from it before moves with it (her
+    /// memory's refile).
+    pub fn set_notebook(&mut self, source: &SourceKey, notebook: Notebook, at: Timestamp) {
+        if let Some(last) = self.last(source).cloned()
+            && last.decision == Decision::Granted
+            && last.notebook != notebook
+        {
+            self.records.push(Consent {
+                notebook,
+                at,
+                ..last
+            });
+        }
+    }
+
+    /// Every source granted now, with its grant.
+    pub fn granted(&self) -> Vec<Grant> {
+        let mut keys: Vec<&SourceKey> = self.records.iter().map(|c| &c.source).collect();
+        keys.sort();
+        keys.dedup();
+        keys.into_iter().filter_map(|k| self.grant(k)).collect()
+    }
+
     /// Every kind of an account at once, as its sheet's one "Autoriser"
     /// does.
     pub fn allow_account(
@@ -329,10 +354,17 @@ mod tests {
         assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(false));
         book.summaries_only(&mail, true, Timestamp::UNIX_EPOCH);
         assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(true));
+        // « C'est privé » on its row: the notebook moves, the rest stays.
+        book.set_notebook(&mail, Notebook::Perso, Timestamp::UNIX_EPOCH);
+        let grant = book.grant(&mail).expect("granted");
+        assert_eq!(grant.notebook(), Notebook::Perso);
+        assert!(grant.summaries_only());
+        assert_eq!(book.granted().len(), 1);
+        book.set_notebook(&mail, Notebook::Pro, Timestamp::UNIX_EPOCH);
         book.revoke(&mail, Timestamp::UNIX_EPOCH);
         assert_eq!(book.grant(&mail), None);
         assert_eq!(book.revoked(), [mail]);
-        assert_eq!(book.records().len(), 3);
+        assert_eq!(book.records().len(), 5);
     }
 
     #[test]

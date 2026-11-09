@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Notebook, consent::SourceKind};
+use crate::{Notebook, consent::SourceKind, gate::Hours};
 
 /// A consent sheet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,11 +18,58 @@ pub struct Sheet {
     pub from: String,
     pub sections: Vec<Section>,
     /// The notebook suggested (§7.4), which the user confirms or changes
-    /// before "Autoriser".
+    /// before "Autoriser": « C'est privé » checked for the perso one.
     pub notebook: Notebook,
-    /// "C'est ton compte perso ?", when perso is suggested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ask: Option<String>,
+    /// « C'est privé » and what it does (#752).
+    #[serde(default)]
+    pub private: Private,
+}
+
+/// « C'est privé »: its box's words, and what checking it does, as the
+/// code does it (the shell's speak gate, her quiet hours, her work drafts,
+/// "Oublier tout le privé").
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Private {
+    pub label: String,
+    pub lines: Vec<String>,
+}
+
+/// « C'est privé » and its consequences; `quiet`, the private notebook's
+/// quiet hours (`[secretary.speak] quiet-perso`).
+pub fn private(fr: bool, quiet: Hours) -> Private {
+    let hour = |t: jiff::civil::Time| {
+        if fr {
+            if t.minute() == 0 {
+                format!("{} h", t.hour())
+            } else {
+                format!("{} h {:02}", t.hour(), t.minute())
+            }
+        } else {
+            format!("{:02}:{:02}", t.hour(), t.minute())
+        }
+    };
+    let (from, to) = (hour(quiet.from), hour(quiet.to));
+    if fr {
+        Private {
+            label: "C’est privé".to_owned(),
+            lines: vec![
+                "Jamais montré pendant une réunion, un partage d’écran ou un appel.".to_owned(),
+                "Jamais dans un message ou une tâche qu’elle prépare pour le travail.".to_owned(),
+                format!("Elle t’en parle aussi le soir et le week-end, jamais entre {from} et {to}."),
+                "Ce qu’elle sait › « Oublier tout le privé » l’efface d’un coup.".to_owned(),
+            ],
+        }
+    } else {
+        Private {
+            label: "It’s private".to_owned(),
+            lines: vec![
+                "Never shown during a meeting, a screen share or a call.".to_owned(),
+                "Never in a message or a task she drafts for work.".to_owned(),
+                format!("She brings it up evenings and weekends too, never between {from} and {to}."),
+                "What she knows › “Forget everything private” erases it at once.".to_owned(),
+            ],
+        }
+    }
 }
 
 /// One part of a sheet: its spaced label and its lines.
@@ -73,8 +120,15 @@ pub fn kind_name(kind: SourceKind, fr: bool) -> &'static str {
 }
 
 /// The sheet of `identity`'s `kind` (a Google account of Online
-/// Accounts), `suggested` its notebook.
-pub fn google(identity: &str, kind: SourceKind, suggested: Notebook, fr: bool) -> Sheet {
+/// Accounts), `suggested` its notebook; `quiet`, the private notebook's
+/// quiet hours.
+pub fn google(
+    identity: &str,
+    kind: SourceKind,
+    suggested: Notebook,
+    quiet: Hours,
+    fr: bool,
+) -> Sheet {
     let lines = |list: &[&str]| list.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>();
     let (title, service, reads, never, leaves): (
         &str,
@@ -215,13 +269,7 @@ pub fn google(identity: &str, kind: SourceKind, suggested: Notebook, fr: bool) -
             },
         ],
         notebook: suggested,
-        ask: (suggested == Notebook::Perso).then(|| {
-            if fr {
-                "C’est ton compte perso ?".to_owned()
-            } else {
-                "Is it your personal account?".to_owned()
-            }
-        }),
+        private: private(fr, quiet),
     }
 }
 
@@ -231,23 +279,71 @@ mod tests {
 
     #[test]
     fn each_kind_says_what_she_reads_never_does_and_what_leaves_in_both_languages() {
+        let quiet = crate::gate::Restraint::default().perso;
         for kind in SourceKind::ALL {
             for fr in [true, false] {
-                let sheet = google("alex@atelier-lune.fr", kind, Notebook::Pro, fr);
+                let sheet = google("alex@atelier-lune.fr", kind, Notebook::Pro, quiet, fr);
                 assert_eq!(sheet.sections.len(), 3);
                 assert!(sheet.sections.iter().all(|s| !s.lines.is_empty()));
                 assert!(sheet.from.contains("alex@atelier-lune.fr"));
-                assert_eq!(sheet.ask, None);
+                assert_eq!(sheet.private.lines.len(), 4);
             }
         }
         let mail = google(
             "alex.martin@gmail.com",
             SourceKind::Mail,
             Notebook::Perso,
+            quiet,
             true,
         );
-        assert_eq!(mail.ask.as_deref(), Some("C’est ton compte perso ?"));
+        assert_eq!(mail.notebook, Notebook::Perso, "checked");
+        assert_eq!(mail.private.label, "C’est privé");
         assert!(mail.sections[1].lines[0].contains("lecture seule"));
         assert_eq!(mail.sections[1].mark, Mark::No);
+    }
+
+    /// What « C'est privé » says is what the code does: the speak gate
+    /// holds a private item in a meeting, a share or a call; work drafts
+    /// take the work notebook only; its quiet hours are the private
+    /// notebook's, whatever the file says.
+    #[test]
+    fn c_est_prive_says_what_the_code_does() {
+        use crate::gate::{Gate, Restraint, Screen, Verdict, Why};
+        let restraint = Restraint::default();
+        let fr = private(true, restraint.perso);
+        assert_eq!(
+            fr.lines[2],
+            "Elle t’en parle aussi le soir et le week-end, jamais entre 22 h et 8 h."
+        );
+        let late = private(true, Hours::new((21, 30), (7, 0)));
+        assert!(late.lines[2].contains("entre 21 h 30 et 7 h"));
+        let en = private(false, restraint.perso);
+        assert!(en.lines[2].contains("between 22:00 and 08:00"));
+        // A private item in a call is held; quiet at 23:00, not at 20:00
+        // nor on a Saturday afternoon.
+        let mut gate = Gate::new(restraint);
+        gate.screen = Screen {
+            camera: true,
+            ..Screen::default()
+        };
+        let now: jiff::Timestamp = "2026-11-10T14:00:00Z".parse().expect("a time");
+        let local = |t: &str| t.parse::<jiff::civil::DateTime>().expect("a time");
+        let speak = crate::Speak {
+            id: 1,
+            kind: crate::SpeakKind::Proposal,
+            text: "Claire : dimanche ?".to_owned(),
+            action: None,
+            item: None,
+            notebook: Notebook::Perso,
+            vip: false,
+            deadline: None,
+        };
+        assert_eq!(
+            gate.ask(speak, now, local("2026-11-10T14:00")),
+            Verdict::Held(Why::Camera)
+        );
+        assert!(restraint.quiet(Notebook::Perso, local("2026-11-10T23:00")));
+        assert!(!restraint.quiet(Notebook::Perso, local("2026-11-10T20:00")));
+        assert!(!restraint.quiet(Notebook::Perso, local("2026-11-14T15:00")));
     }
 }

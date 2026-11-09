@@ -135,6 +135,13 @@ pub enum Msg {
     KeyErase,
     /// What she did with the key given.
     Keyed(Result<KeyOutcome, String>),
+    /// « C'est privé » on the `n`th Google source's row, granted (#752).
+    GooglePrivate(usize),
+    /// « C'est privé » on the `n`th application's row, granted.
+    NotifierPrivate(usize),
+    /// The private notebook's quiet hours, as the file says: what « C'est
+    /// privé » says.
+    Quiet(hocus_secretary_link::gate::Hours),
     /// Her name's field, as typed (#752).
     NameTyped(String),
     /// Her name written (`Enter`, `Tab`, or the field left).
@@ -229,6 +236,9 @@ pub struct State {
     key: KeyRow,
     /// Her name as it is being typed, before it is written (#752).
     name: Option<String>,
+    /// The private notebook's quiet hours (`[secretary.speak]
+    /// quiet-perso`), none before they are read: hers by default.
+    quiet: Option<hocus_secretary_link::gate::Hours>,
 }
 
 /// The "Clé Anthropic" row: what she says of her key, the field (never
@@ -252,6 +262,14 @@ impl State {
             to: Some(to.clone()),
             ..Self::default()
         }
+    }
+}
+
+/// The other notebook: « C'est privé » checked or not.
+fn other(notebook: Notebook) -> Notebook {
+    match notebook {
+        Notebook::Pro => Notebook::Perso,
+        Notebook::Perso => Notebook::Pro,
     }
 }
 
@@ -556,11 +574,52 @@ impl App {
                         }
                     }
                 }
+                let _ = to.unbounded_send(Message::Agents(Msg::Quiet(google_sources::quiet())));
                 let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
             });
         if let Err(err) = started {
             tracing::warn!(%err, "the Google accounts are not read");
         }
+    }
+
+    /// « C'est privé » checked (`Perso`) or not on a granted source's row
+    /// (#752): written in her book on a thread, the rows read again. She
+    /// takes it at once and moves what came from it.
+    fn agents_private_job(&self, source: hocus_secretary_link::consent::SourceKey, notebook: Notebook) {
+        let Some(to) = self.agents.to.clone() else {
+            return;
+        };
+        let started = std::thread::Builder::new()
+            .name("a source's notebook".to_owned())
+            .spawn(move || {
+                let written = notifiers::book_path()
+                    .ok_or_else(|| std::io::Error::other("no data folder"))
+                    .and_then(|path| {
+                        let mut book = hocus_secretary_link::consent::ConsentBook::load(&path);
+                        book.set_notebook(&source, notebook, jiff::Timestamp::now());
+                        book.save(&path)
+                    });
+                match written {
+                    Ok(()) => tracing::info!(
+                        source = %source,
+                        notebook = notebook.word(),
+                        "a source's notebook written"
+                    ),
+                    Err(err) => tracing::warn!(source = %source, %err, "the notebook is not written"),
+                }
+                let _ = to.unbounded_send(Message::Agents(Msg::Notifiers(notifiers::read())));
+                let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
+            });
+        if let Err(err) = started {
+            tracing::warn!(%err, "a source's notebook is not written");
+        }
+    }
+
+    /// The private notebook's quiet hours, as last read.
+    fn agents_quiet(&self) -> hocus_secretary_link::gate::Hours {
+        self.agents
+            .quiet
+            .unwrap_or(hocus_secretary_link::gate::Restraint::default().perso)
     }
 
     /// `decision` written in her consent book (`(name, Some(notebook))`:
@@ -745,10 +804,10 @@ impl App {
                 let title = sheet.source.title(self.lang);
                 let text = match self.lang {
                     Lang::French => {
-                        format!("{title} : elle le lit (carnet {})", sheet.notebook.word())
+                        format!("{title} : elle le lit ({})", sheet.notebook.said(true))
                     }
                     Lang::English => {
-                        format!("{title}: she reads it ({} notebook)", sheet.notebook.word())
+                        format!("{title}: she reads it ({})", sheet.notebook.said(false))
                     }
                 };
                 self.agents_google_job(Some((sheet.source, Some(sheet.notebook))));
@@ -775,6 +834,37 @@ impl App {
                 };
                 self.agents_google_job(Some((source, None)));
                 self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::Quiet(hours) => {
+                self.agents.quiet = Some(hours);
+                iced::Task::none()
+            }
+            Msg::GooglePrivate(i) => {
+                let Some((key, now)) = self
+                    .agents
+                    .google
+                    .get(i)
+                    .and_then(|s| s.granted.map(|n| (s.key(), n)))
+                else {
+                    return iced::Task::none();
+                };
+                let next = other(now);
+                self.agents_private_job(key, next);
+                iced::Task::none()
+            }
+            Msg::NotifierPrivate(i) => {
+                let Some((key, now)) = self.agents.notifiers.get(i).and_then(|n| {
+                    n.granted.map(|g| {
+                        (
+                            hocus_secretary_link::consent::SourceKey::notifications(&n.name, None),
+                            g,
+                        )
+                    })
+                }) else {
+                    return iced::Task::none();
+                };
+                self.agents_private_job(key, other(now));
+                iced::Task::none()
             }
             Msg::NameTyped(typed) => {
                 self.agents.name = Some(typed.chars().take(40).collect());
@@ -852,14 +942,14 @@ impl App {
                 self.agents_notifiers_job(Some((notify.name.clone(), Some(notify.notebook))));
                 let text = match self.lang {
                     Lang::French => format!(
-                        "{} : elle lit ses notifications (carnet {})",
+                        "{} : elle lit ses notifications ({})",
                         notify.name,
-                        notify.notebook.word()
+                        notify.notebook.said(true)
                     ),
                     Lang::English => format!(
-                        "{}: she reads its notifications ({} notebook)",
+                        "{}: she reads its notifications ({})",
                         notify.name,
-                        notify.notebook.word()
+                        notify.notebook.said(false)
                     ),
                 };
                 self.toast(text, ToastAction::None, TOAST)
@@ -1547,15 +1637,18 @@ impl App {
                 Some(Message::Agents(Msg::GoogleAllow(i))),
             )
         };
-        container(
-            row![
-                Self::agents_google_tile(28.0),
-                words,
-                container(action).id(format!("google:{}", source.word())),
-            ]
+        let mut line = row![Self::agents_google_tile(28.0), words]
             .spacing(12)
-            .align_y(Alignment::Center),
-        )
+            .align_y(Alignment::Center);
+        if let Some(notebook) = source.granted {
+            line = line.push(self.agents_row_private(
+                notebook,
+                Message::Agents(Msg::GooglePrivate(i)),
+                format!("private:{}", source.word()),
+            ));
+        }
+        line = line.push(container(action).id(format!("google:{}", source.word())));
+        container(line)
         .padding(Padding {
             top: 11.0,
             right: 14.0,
@@ -1582,7 +1675,7 @@ impl App {
     fn agents_google_sheet<'a>(&self, sheet: &GoogleSheet) -> El<'a> {
         use hocus_secretary_link::sheets::Mark;
         let lang = self.lang;
-        let words = sheet.source.sheet(lang);
+        let words = sheet.source.sheet(lang, self.agents_quiet());
         let mut body = column![
             row![
                 Self::agents_google_tile(32.0),
@@ -1620,48 +1713,7 @@ impl App {
                 .spacing(5),
             );
         }
-        let pill = |notebook: Notebook, said: &'static str| -> El<'a> {
-            let on = sheet.notebook == notebook;
-            container(
-                button(t(said, 12.5, if on { DEEP.get() } else { TEXT.get() }).font(BOLD))
-                    .padding([5, 14])
-                    .on_press(Message::Agents(Msg::Notebook(notebook)))
-                    .style(move |_, _| button::Style {
-                        background: Some(Background::Color(if on {
-                            ACCENT.get()
-                        } else {
-                            crate::theme::ink(rgba(255, 255, 255, 0.08))
-                        })),
-                        text_color: TEXT.get(),
-                        border: border(13.0, 0.0, Color::TRANSPARENT),
-                        ..button::Style::default()
-                    }),
-            )
-            .id(format!("sheet:{}", notebook.word()))
-            .into()
-        };
-        let mut notebook =
-            column![t(self.say(w("CARNET", "NOTEBOOK")), 11.0, FAINT.get()).font(BOLD)].spacing(6);
-        if let Some(ask) = &words.ask {
-            notebook = notebook.push(t(ask.clone(), 12.5, rgb(0xFFE2A8)).font(SEMIBOLD));
-        }
-        notebook = notebook.push(
-            row![
-                pill(Notebook::Pro, self.say(w("Pro", "Work"))),
-                pill(Notebook::Perso, self.say(w("Perso", "Personal"))),
-                t(
-                    self.say(w(
-                        "Le perso ne se montre jamais pendant un partage d’écran.",
-                        "Personal items never show while the screen is shared.",
-                    )),
-                    12.0,
-                    DIM.get()
-                ),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        );
-        body = body.push(notebook);
+        body = body.push(self.agents_private(sheet.notebook, &words.private));
         let buttons = row![
             Space::new().width(Length::Fill),
             container(self.agents_button(
@@ -1693,6 +1745,107 @@ impl App {
                 .id("sheet".to_owned())
                 .into(),
         )
+    }
+
+    /// « C'est privé » on a sheet (#752): its box, checked for the private
+    /// notebook, and what it does under it.
+    fn agents_private<'a>(
+        &self,
+        notebook: Notebook,
+        private: &hocus_secretary_link::sheets::Private,
+    ) -> El<'a> {
+        let on = notebook == Notebook::Perso;
+        let check = Self::agents_check(on, 18.0);
+        let label = button(
+            row![
+                check,
+                t(private.label.clone(), 13.5, TEXT.get()).font(SEMIBOLD)
+            ]
+            .spacing(9)
+            .align_y(Alignment::Center),
+        )
+        .padding([3, 4])
+        .on_press(Message::Agents(Msg::Notebook(other(notebook))))
+        .style(|_, status| button::Style {
+            background: matches!(status, button::Status::Hovered)
+                .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+            text_color: TEXT.get(),
+            border: border(6.0, 0.0, Color::TRANSPARENT),
+            ..button::Style::default()
+        });
+        let mut lines = column![].spacing(3).padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 31.0,
+        });
+        for line in &private.lines {
+            lines = lines.push(
+                t(
+                    line.clone(),
+                    12.5,
+                    if on { SOFT.get() } else { DIM.get() },
+                )
+                .line_height(1.4),
+            );
+        }
+        column![container(label).id("sheet:private".to_owned()), lines]
+            .spacing(4)
+            .into()
+    }
+
+    /// A check box, ticked or not.
+    fn agents_check<'a>(on: bool, size: f32) -> El<'a> {
+        let mark: El<'a> = if on {
+            text("✓").size(size * 0.72).font(BOLD).color(DEEP.get()).into()
+        } else {
+            Space::new().into()
+        };
+        container(mark)
+            .width(size)
+            .height(size)
+            .center(size)
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(if on {
+                    ACCENT.get()
+                } else {
+                    crate::theme::ink(rgba(255, 255, 255, 0.04))
+                })),
+                border: border(
+                    5.0,
+                    if on { 0.0 } else { 1.5 },
+                    crate::theme::ink(rgba(255, 255, 255, 0.35)),
+                ),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    /// « Privé » on a granted row, checked or not: a click changes it
+    /// (#752).
+    fn agents_row_private<'a>(&self, notebook: Notebook, press: Message, id: String) -> El<'a> {
+        let on = notebook == Notebook::Perso;
+        container(
+            button(
+                row![
+                    Self::agents_check(on, 16.0),
+                    t(self.say(w("Privé", "Private")), 13.0, TEXT.get())
+                ]
+                .spacing(7)
+                .align_y(Alignment::Center),
+            )
+            .padding([5, 8])
+            .on_press(press)
+            .style(|_, status| button::Style {
+                background: matches!(status, button::Status::Hovered)
+                    .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                text_color: TEXT.get(),
+                border: border(7.0, 0.0, Color::TRANSPARENT),
+                ..button::Style::default()
+            }),
+        )
+        .id(id)
+        .into()
     }
 
     /// An application's mark: its first letter on the neutral tile the
@@ -1744,15 +1897,18 @@ impl App {
                 Some(Message::Agents(Msg::Allow(i))),
             )
         };
-        container(
-            row![
-                Self::agents_letter(&notifier.name, 28.0),
-                words,
-                container(action).id(format!("notifier:{}", notifier.key)),
-            ]
+        let mut line = row![Self::agents_letter(&notifier.name, 28.0), words]
             .spacing(12)
-            .align_y(Alignment::Center),
-        )
+            .align_y(Alignment::Center);
+        if let Some(notebook) = notifier.granted {
+            line = line.push(self.agents_row_private(
+                notebook,
+                Message::Agents(Msg::NotifierPrivate(i)),
+                format!("notifier-private:{}", notifier.key),
+            ));
+        }
+        line = line.push(container(action).id(format!("notifier:{}", notifier.key)));
+        container(line)
         .padding(Padding {
             top: 11.0,
             right: 14.0,
@@ -1789,46 +1945,11 @@ impl App {
                 .spacing(5),
             );
         }
-        let pill = |notebook: Notebook, said: &'static str| -> El<'a> {
-            let on = notify.notebook == notebook;
-            container(
-                button(t(said, 12.5, if on { DEEP.get() } else { TEXT.get() }).font(BOLD))
-                    .padding([5, 14])
-                    .on_press(Message::Agents(Msg::Notebook(notebook)))
-                    .style(move |_, _| button::Style {
-                        background: Some(Background::Color(if on {
-                            ACCENT.get()
-                        } else {
-                            crate::theme::ink(rgba(255, 255, 255, 0.08))
-                        })),
-                        text_color: TEXT.get(),
-                        border: border(13.0, 0.0, Color::TRANSPARENT),
-                        ..button::Style::default()
-                    }),
-            )
-            .id(format!("sheet:{}", notebook.word()))
-            .into()
-        };
-        body = body.push(
-            column![
-                t(self.say(w("CARNET", "NOTEBOOK")), 11.0, FAINT.get()).font(BOLD),
-                row![
-                    pill(Notebook::Pro, self.say(w("Pro", "Work"))),
-                    pill(Notebook::Perso, self.say(w("Perso", "Personal"))),
-                    t(
-                        self.say(w(
-                            "Le perso ne se montre jamais pendant un partage d’écran.",
-                            "Personal items never show while the screen is shared.",
-                        )),
-                        12.0,
-                        DIM.get()
-                    ),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-            ]
-            .spacing(6),
+        let private = hocus_secretary_link::sheets::private(
+            self.lang == Lang::French,
+            self.agents_quiet(),
         );
+        body = body.push(self.agents_private(notify.notebook, &private));
         let buttons = row![
             Space::new().width(Length::Fill),
             container(self.agents_button(

@@ -20,6 +20,7 @@ use std::path::Path;
 use hocus_secretary_link::{
     Notebook,
     consent::{ConsentBook, SourceKey, SourceKind},
+    gate::{Hours, Restraint},
     goa::{self, GoogleAccount},
     sheets,
 };
@@ -82,8 +83,8 @@ impl Source {
             (_, false) => "Your contacts’ birthdays, nothing else of their cards",
         };
         let mut line = match (self.granted, fr) {
-            (Some(notebook), true) => format!("Elle lit · carnet {} · {what}", notebook.word()),
-            (Some(notebook), false) => format!("She reads · {} notebook · {what}", notebook.word()),
+            (Some(notebook), true) => format!("Elle lit · {} · {what}", notebook.said(true)),
+            (Some(notebook), false) => format!("She reads · {} · {what}", notebook.said(false)),
             (None, _) => what.to_owned(),
         };
         if self.attention {
@@ -96,12 +97,13 @@ impl Source {
         line
     }
 
-    /// Its consent sheet.
-    pub fn sheet(&self, lang: Lang) -> sheets::Sheet {
+    /// Its consent sheet; `quiet`, the private notebook's quiet hours.
+    pub fn sheet(&self, lang: Lang, quiet: Hours) -> sheets::Sheet {
         sheets::google(
             &self.identity,
             self.kind,
             self.suggested,
+            quiet,
             lang == Lang::French,
         )
     }
@@ -148,6 +150,40 @@ pub fn read() -> Vec<Source> {
         .map(|p| ConsentBook::load(&p))
         .unwrap_or_default();
     found(&accounts, &book)
+}
+
+/// The private notebook's quiet hours, as the configuration file says
+/// (`[secretary.speak] quiet-perso`), else hers by default: what « C'est
+/// privé » says. Blocking (a file).
+pub fn quiet() -> Hours {
+    let fallback = Restraint::default().perso;
+    let Some(file) = hocus_config::file() else {
+        return fallback;
+    };
+    let text = std::fs::read_to_string(file).unwrap_or_default();
+    text.parse::<toml_edit::DocumentMut>()
+        .ok()
+        .and_then(|doc| {
+            doc.get("secretary")?
+                .get("speak")?
+                .get("quiet-perso")?
+                .as_str()
+                .and_then(Hours::of)
+        })
+        .unwrap_or(fallback)
+}
+
+/// « C'est privé » checked or not on `source`'s row (#752), written in
+/// the book at `path`. Blocking.
+pub fn set_notebook(
+    path: &Path,
+    source: &SourceKey,
+    notebook: Notebook,
+    at: Timestamp,
+) -> std::io::Result<()> {
+    let mut book = ConsentBook::load(path);
+    book.set_notebook(source, notebook, at);
+    book.save(path)
 }
 
 /// The user's decision on `source`: read into `notebook` ("Autoriser"),
@@ -215,7 +251,8 @@ mod tests {
             rows[2].title(Lang::French),
             "Agenda · alex.martin@gmail.com"
         );
-        assert_eq!(rows[2].sheet(Lang::French).notebook, Notebook::Perso);
+        let quiet = Restraint::default().perso;
+        assert_eq!(rows[2].sheet(Lang::French, quiet).notebook, Notebook::Perso);
         decide(
             &path,
             &rows[2].key(),
@@ -229,7 +266,17 @@ mod tests {
         assert!(
             rows[2]
                 .line(Lang::French)
-                .starts_with("Elle lit · carnet perso")
+                .starts_with("Elle lit · privé")
+        );
+        // « C'est privé » unchecked on its row: work, still read.
+        set_notebook(&path, &rows[2].key(), Notebook::Pro, Timestamp::UNIX_EPOCH)
+            .expect("written");
+        let rows_after = found(&accounts, &ConsentBook::load(&path));
+        assert_eq!(rows_after[2].granted, Some(Notebook::Pro));
+        assert!(
+            rows_after[2]
+                .line(Lang::French)
+                .starts_with("Elle lit · travail")
         );
         decide(
             &path,

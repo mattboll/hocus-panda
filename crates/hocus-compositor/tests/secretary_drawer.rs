@@ -948,7 +948,13 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
         "{shown}"
     );
     bed.shot("first-run-consent")?;
-    // "Autoriser": the grant, pro; the next source.
+    // « C'est privé » checked on it (#752), then "Autoriser": the grant,
+    // perso; the next source.
+    let private = bed.place_starting("Private(")?;
+    let at = bed.place(&private)?;
+    bed.click(at)?;
+    bed.shows(|_| true)?;
+    wait(&mut bed.hp, Duration::from_millis(200))?;
     let allow = button_of(&mut bed, "Accept")?;
     bed.click(allow)?;
     let shown = bed.shows(|s| {
@@ -959,7 +965,7 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
     assert!(
         shown["items"]
             .to_string()
-            .contains("Je lis ton agenda · carnet pro"),
+            .contains("Je lis ton agenda · privé"),
         "{shown}"
     );
     let book = std::fs::read_to_string(
@@ -975,7 +981,7 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
             hocus_secretary_link::consent::SourceKind::Calendar,
         ))
         .expect("the work calendar granted");
-    assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
+    assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Perso);
     bed.shot("first-run-granted")?;
     // "Pas maintenant" on the rest, the gmail.com account perso.
     for n in 0..5 {

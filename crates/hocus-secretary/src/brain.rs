@@ -345,6 +345,8 @@ impl Brain {
         // for the triage (#750).
         brain.restore();
         brain.consents_restored();
+        // A source's notebook changed while she was away (#752).
+        brain.refile();
         brain.ask_key();
         if let Some(away) = away {
             brain.catch_up(away);

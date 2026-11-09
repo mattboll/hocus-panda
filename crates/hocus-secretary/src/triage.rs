@@ -244,8 +244,8 @@ impl Queue {
 
     /// Items of `source` go (a revocation).
     pub fn forget_source(&mut self, source: &str) {
-        let prefix = format!("{source}:");
-        self.pending.retain(|p| !p.starts_with(&prefix));
+        self.pending
+            .retain(|p| !crate::context::of_source(p, source));
     }
 
     /// When the loop must look at the queue again: none, only when

@@ -75,6 +75,14 @@ impl Language {
     }
 }
 
+/// Whether `pointer` (`SOURCE:ID`) is `source`'s, or one of its parts'
+/// (`SOURCE#PART:ID`).
+pub fn of_source(pointer: &str, source: &str) -> bool {
+    pointer
+        .strip_prefix(source)
+        .is_some_and(|rest| rest.starts_with(':') || rest.starts_with('#'))
+}
+
 /// What the screen shows now (§7.4): in a public moment, perso stays
 /// out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -166,9 +174,18 @@ impl Inbox {
 
     /// What came from `source` goes (a revocation).
     pub fn forget_source(&mut self, source: &str) {
-        let prefix = format!("{source}:");
-        self.held.retain(|p, _| !p.starts_with(&prefix));
-        self.order.retain(|p| !p.starts_with(&prefix));
+        let of = |p: &str| of_source(p, source);
+        self.held.retain(|p, _| !of(p));
+        self.order.retain(|p| !of(p));
+    }
+
+    /// What came from `source` moves to `notebook` (#752).
+    pub fn refile_source(&mut self, source: &str, notebook: Notebook) {
+        for (pointer, held) in &mut self.held {
+            if of_source(pointer, source) {
+                held.redacted.item.notebook = notebook;
+            }
+        }
     }
 
     /// Items of `notebook` go (it is forgotten).
