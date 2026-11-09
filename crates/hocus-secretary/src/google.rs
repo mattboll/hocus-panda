@@ -209,6 +209,7 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
                 sent: m.sent,
                 message_id: m.message_id.clone(),
                 in_reply_to: m.in_reply_to.clone(),
+                headers: std::collections::BTreeMap::new(),
             }),
         ),
         _ => (None, None),

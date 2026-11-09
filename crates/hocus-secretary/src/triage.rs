@@ -20,10 +20,21 @@
 //!   (rechecked each minute while paused); the model is told to unload
 //!   after two idle minutes.
 //!
+//! - **Set aside** (#754): a sender's items the user (or a rule she
+//!   proposed) keeps out of the queue wait apart, with their metadata
+//!   only; one the user asks about goes first in the queue
+//!   ([`Queue::first`]).
+//! - **Measured**: each request's time is kept (the last
+//!   [`Queue::MEASURED`]), for the pace the drawer shows and the time
+//!   left.
+//!
 //! [`Queue`] is the queue's state machine, on her loop; the requests run
 //! on worker threads through a [`Triager`].
 
-use std::{collections::VecDeque, time::Duration};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    time::Duration,
+};
 
 use jiff::{SignedDuration, Timestamp};
 use serde::Deserialize;
@@ -210,18 +221,28 @@ fn after(at: Timestamp, wait: Duration) -> Timestamp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Queue {
     pending: VecDeque<String>,
+    /// Items waiting apart, not triaged unless asked about (#754).
+    aside: BTreeSet<String>,
     pub state: State,
     /// Items checked so far.
     pub done: u64,
     /// Items left unchecked after failures.
     pub given_up: u64,
     failures: u32,
+    /// When the request under way was sent.
+    sent: Option<Timestamp>,
+    /// How long the last requests took, the latest last.
+    took: VecDeque<Duration>,
 }
 
 impl Queue {
+    /// How many requests the pace is measured over.
+    pub const MEASURED: usize = 10;
+
     pub fn new(now: Timestamp) -> Self {
         Self {
             pending: VecDeque::new(),
+            aside: BTreeSet::new(),
             state: State::Idle {
                 since: now,
                 loaded: false,
@@ -229,23 +250,115 @@ impl Queue {
             done: 0,
             given_up: 0,
             failures: 0,
+            sent: None,
+            took: VecDeque::new(),
         }
     }
 
     pub fn push(&mut self, pointer: String) {
-        if !self.pending.contains(&pointer) {
+        if !self.pending.contains(&pointer) && !self.aside.contains(&pointer) {
             self.pending.push_back(pointer);
         }
+    }
+
+    /// An item kept apart from its arrival: its sender is set aside.
+    pub fn put_aside(&mut self, pointer: String) {
+        self.pending.retain(|p| *p != pointer);
+        self.aside.insert(pointer);
     }
 
     pub fn pending(&self) -> usize {
         self.pending.len()
     }
 
+    /// What waits, in its order.
+    pub fn waiting(&self) -> impl Iterator<Item = &String> {
+        self.pending.iter()
+    }
+
+    /// What is set aside.
+    pub fn set_aside(&self) -> impl Iterator<Item = &String> {
+        self.aside.iter()
+    }
+
+    pub fn aside_len(&self) -> usize {
+        self.aside.len()
+    }
+
+    pub fn is_aside(&self, pointer: &str) -> bool {
+        self.aside.contains(pointer)
+    }
+
+    /// The item the model reads now.
+    pub fn running(&self) -> Option<&str> {
+        match &self.state {
+            State::Running(pointer) => Some(pointer),
+            _ => None,
+        }
+    }
+
+    /// The waiting items `which` says go apart: how many.
+    pub fn aside_where(&mut self, which: impl Fn(&str) -> bool) -> usize {
+        let before = self.pending.len();
+        let mut moved = Vec::new();
+        self.pending.retain(|p| {
+            let goes = which(p);
+            if goes {
+                moved.push(p.clone());
+            }
+            !goes
+        });
+        self.aside.extend(moved);
+        before - self.pending.len()
+    }
+
+    /// The items set aside `which` says come back, at the queue's end:
+    /// how many.
+    pub fn back_where(&mut self, which: impl Fn(&str) -> bool) -> usize {
+        let back: Vec<String> = self.aside.iter().filter(|p| which(p)).cloned().collect();
+        for pointer in &back {
+            self.aside.remove(pointer);
+            if !self.pending.contains(pointer) {
+                self.pending.push_back(pointer.clone());
+            }
+        }
+        back.len()
+    }
+
+    /// `pointer` is asked about: triaged next, set aside or not. Whether
+    /// it was waiting.
+    pub fn first(&mut self, pointer: &str) -> bool {
+        let was = self.aside.remove(pointer) || self.pending.contains(&pointer.to_owned());
+        if was {
+            self.pending.retain(|p| p != pointer);
+            self.pending.push_front(pointer.to_owned());
+        }
+        was
+    }
+
+    /// Only the items `keep` says stay, waiting or set aside.
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.pending.retain(|p| keep(p));
+        self.aside.retain(|p| keep(p));
+    }
+
     /// Items of `source` go (a revocation).
     pub fn forget_source(&mut self, source: &str) {
         self.pending
             .retain(|p| !crate::context::of_source(p, source));
+        self.aside
+            .retain(|p| !crate::context::of_source(p, source));
+    }
+
+    /// The time an item takes, measured over the last requests, the rest
+    /// between two included; none before one is measured.
+    pub fn pace(&self, settings: &settings::Triage) -> Option<Duration> {
+        if self.took.is_empty() {
+            return None;
+        }
+        let sum: Duration = self.took.iter().sum();
+        let mean = sum / u32::try_from(self.took.len()).unwrap_or(1);
+        Some(mean + settings.pace())
     }
 
     /// When the loop must look at the queue again: none, only when
@@ -324,6 +437,7 @@ impl Queue {
             return Step::Nothing;
         };
         self.state = State::Running(pointer.clone());
+        self.sent = Some(now);
         Step::Send(pointer)
     }
 
@@ -335,6 +449,16 @@ impl Queue {
         ok: bool,
         settings: &settings::Triage,
     ) {
+        if let Some(sent) = self.sent.take()
+            && ok
+            && let Ok(took) = Duration::try_from(now.duration_since(sent))
+            && !took.is_zero()
+        {
+            self.took.push_back(took);
+            while self.took.len() > Self::MEASURED {
+                self.took.pop_front();
+            }
+        }
         if ok {
             self.done += 1;
             self.failures = 0;
@@ -508,6 +632,46 @@ mod tests {
             now = after(now, UNAVAILABLE);
         }
         assert_eq!((queue.done, queue.given_up, queue.pending()), (0, 1, 0));
+    }
+
+    #[test]
+    fn a_sender_set_aside_waits_apart_comes_back_and_goes_first_when_asked() {
+        let settings = settings::Triage::default();
+        let mut queue = Queue::new(at("2026-11-09T08:00:00Z"));
+        for p in ["mail:gh1", "mail:lea", "mail:gh2"] {
+            queue.push(p.to_owned());
+        }
+        assert_eq!(queue.aside_where(|p| p.starts_with("mail:gh")), 2);
+        assert_eq!(queue.waiting().collect::<Vec<_>>(), ["mail:lea"]);
+        queue.push("mail:gh1".to_owned());
+        assert_eq!(queue.pending(), 1, "set aside, not queued again");
+        assert!(queue.first("mail:gh2"));
+        assert_eq!(queue.waiting().collect::<Vec<_>>(), ["mail:gh2", "mail:lea"]);
+        assert_eq!(queue.back_where(|p| p.starts_with("mail:gh")), 1);
+        assert_eq!(
+            queue.waiting().collect::<Vec<_>>(),
+            ["mail:gh2", "mail:lea", "mail:gh1"]
+        );
+        // The pace: each request measured, the rest added.
+        let mains = Power {
+            on_ac: true,
+            battery: None,
+            heat: None,
+        };
+        assert_eq!(queue.pace(&settings), None);
+        let mut now = at("2026-11-09T08:00:00Z");
+        for took in [30, 40] {
+            let Step::Send(p) = queue.step(now, mains, &settings) else {
+                panic!("an item sent");
+            };
+            now = after(now, Duration::from_secs(took));
+            queue.finished(&p, now, true, &settings);
+            now = after(now, settings.pace());
+        }
+        assert_eq!(
+            queue.pace(&settings),
+            Some(Duration::from_secs(35) + settings.pace())
+        );
     }
 
     #[test]

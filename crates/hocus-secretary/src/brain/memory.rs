@@ -859,7 +859,7 @@ impl Brain {
     }
 
     /// Something noticed: kept and asked once.
-    fn notice(&mut self, noticed: Noticed) {
+    pub(super) fn notice(&mut self, noticed: Noticed) {
         let mut seen = learn::load_seen(&self.store);
         let key = noticed.key();
         if seen.iter().any(|s| s.noticed.key() == key) {
@@ -899,6 +899,12 @@ impl Brain {
             ..Default::default()
         });
         tracing::info!(id, key, "she noticed something");
+    }
+
+    /// An observation answered from elsewhere (the queue's view, #754):
+    /// what she says of it.
+    pub(super) fn answer_seen_by(&mut self, id: u64, act: Act) -> Option<String> {
+        self.answer_seen(id, act, None)
     }
 
     /// An observation answered, from her question or from "Ce qu'elle
@@ -1126,10 +1132,16 @@ impl Brain {
                     self.tell_talkers(&FromSecretary::Thread { id: 0, items }, None);
                     // Its items waiting for the triage.
                     self.inbox.forget_notebook(notebook);
+                    let inbox = &self.inbox;
+                    self.queue.retain(|p| inbox.get(p).is_some());
                     // Her observations of that notebook go with it.
                     let mut seen = learn::load_seen(&self.store);
                     seen.retain(|s| {
-                        !matches!(&s.noticed, Noticed::Arrival { notebook: n, .. } if *n == notebook)
+                        !matches!(
+                            &s.noticed,
+                            Noticed::Arrival { notebook: n, .. }
+                                | Noticed::Automated { notebook: n, .. } if *n == notebook
+                        )
                     });
                     let _ = learn::save_seen(&self.store, &seen);
                     let text = match (notebook, fr) {
