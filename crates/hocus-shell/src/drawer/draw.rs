@@ -12,6 +12,8 @@
 //! What it shows and where its controls are go to the log when they
 //! change (`the drawer shows`, `the drawer's items`): the tests read them.
 
+mod knows;
+
 use std::time::Instant;
 
 use hocus_secretary_link::{Body, Card, CardKind, Item, Mood, Tone};
@@ -179,6 +181,8 @@ enum Shape {
     Quote(Rectangle),
     /// A day's divider: its two rules either side of its words.
     Rule(Rectangle),
+    /// The search field's lens, 15 px, centred there.
+    Lens(Point),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,6 +215,10 @@ pub struct Laid {
     pub foot: f32,
     /// What it shows, for the log.
     pub said: serde_json::Value,
+    /// "Ce qu'elle sait": what is drawn over the list, unclipped (its
+    /// controls, its footer, the toast, a confirmation); no composer.
+    overlay: Vec<Shape>,
+    pub knows: bool,
 }
 
 /// The measures of text, at a size, in a weight.
@@ -354,6 +362,9 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         (None, _) => words.unavailable().to_owned(),
     };
     laid.tone = look.as_ref().map(|l| l.tone);
+    if open.tab == Tab::Knows && line == Her::Ready {
+        laid.status = words.knows_subtitle().to_owned();
+    }
     laid.model = look.as_ref().map(|l| l.model.clone()).unwrap_or_default();
     // The header.
     laid.head = Rectangle::new(Point::new(PAD, HEAD_TOP), Size::new(HEAD, HEAD));
@@ -459,19 +470,20 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     let mut said_items = Vec::new();
     match (open.tab, open.briefing) {
         (Tab::Knows, _) => {
-            let room = right - PAD - 2.0 * PAD;
-            let mut y = top + 40.0;
-            for text in lines_of(words.knows_soon(), BUBBLE, false, room) {
-                laid.shapes.push(Shape::Text(Line {
-                    text,
-                    at: Point::new(width / 2.0, y),
-                    size: BUBBLE,
-                    color: DIM,
-                    bold: false,
-                    align: Alignment::Center,
-                }));
-                y += BUBBLE_LINE;
-            }
+            // No composer there: its controls and footer instead.
+            laid.knows = true;
+            laid.targets
+                .retain(|(t, _)| !matches!(t, Target::Send | Target::Field));
+            knows::lay_out(
+                &mut laid,
+                open,
+                c.knows.as_deref(),
+                c.toast.as_ref(),
+                words,
+                top,
+                right,
+                &mut said_items,
+            );
         }
         (Tab::Talk, true) => lay_out_briefing(&mut laid, &said.agents, words, top, right),
         (Tab::Talk, false) => {
@@ -489,6 +501,7 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "items": said_items,
         "field": open.field.chars().count(),
         "model": laid.model,
+        "search": open.search,
     });
     laid
 }
@@ -737,7 +750,7 @@ fn lay_out_thread(
                             .map_or(String::new(), |o| format!(" → {o}"))
                     ));
                 }
-                Body::Learned { text, undone } => {
+                Body::Learned { text, undone, .. } => {
                     let h = LEARNED * 1.4 + 10.0;
                     let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
                     shapes.push(Shape::Box {
@@ -870,6 +883,7 @@ fn moved(shape: Shape, dy: f32) -> Shape {
         Shape::Check(r) => Shape::Check(down(r)),
         Shape::Quote(r) => Shape::Quote(down(r)),
         Shape::Rule(r) => Shape::Rule(down(r)),
+        Shape::Lens(p) => Shape::Lens(Point::new(p.x, p.y + dy)),
     }
 }
 
@@ -1048,6 +1062,8 @@ fn lay_out_card(
             );
             at += lines.len() as f32 * SMALL_LINE;
         }
+        // A card that only says (a rule kept): no buttons.
+        (None, None) if card.actions.is_empty() => {}
         (None, None) => {
             at += BUTTON_TOP;
             let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
@@ -1553,6 +1569,15 @@ impl View {
                 draw_shape(f, shape, now);
             }
         });
+        if laid.knows {
+            // In a layer of its own, as the list's is: it comes over it.
+            f.with_clip(Rectangle::new(Point::ORIGIN, size), |f| {
+                for shape in &laid.overlay {
+                    draw_shape(f, shape, now);
+                }
+            });
+            return;
+        }
         // The composer.
         f.fill_rectangle(
             Point::new(1.0, laid.field.y - COMPOSER_TOP),
@@ -1738,6 +1763,15 @@ fn draw_shape(f: &mut Frame, shape: &Shape, now: Instant) {
             f.stroke(&tick, Stroke::default().with_color(INK).with_width(2.0));
         }
         Shape::Quote(rect) => f.fill_rectangle(rect.position(), rect.size(), alpha(0x7EE0A0, 0.5)),
+        Shape::Lens(c) => {
+            let stroke = Stroke::default().with_color(FAINT).with_width(1.5);
+            f.stroke(&Path::circle(Point::new(c.x - 1.5, c.y - 1.5), 5.0), stroke);
+            let handle = Path::new(|p| {
+                p.move_to(Point::new(c.x + 2.2, c.y + 2.2));
+                p.line_to(Point::new(c.x + 6.0, c.y + 6.0));
+            });
+            f.stroke(&handle, stroke);
+        }
         Shape::Rule(rect) => {
             // Either side of the words, centred on the drawer.
             let middle = rect.x + rect.width / 2.0;
@@ -1872,7 +1906,7 @@ impl<Message> canvas::Program<Message> for View {
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         super::with(|d| match d.open_on(self.id).and_then(|o| o.hover) {
-            Some(Target::Field) => mouse::Interaction::Text,
+            Some(Target::Field | Target::Search) => mouse::Interaction::Text,
             Some(_) => mouse::Interaction::Pointer,
             None => mouse::Interaction::default(),
         })
@@ -1938,6 +1972,16 @@ impl View {
                         mouse::ScrollDelta::Lines { y, .. } => y * 40.0,
                         mouse::ScrollDelta::Pixels { y, .. } => *y,
                     };
+                    if open.tab == super::Tab::Knows {
+                        // A list from its top: the wheel up goes up.
+                        let before = open.knows_scroll;
+                        open.knows_scroll = (open.knows_scroll - step).clamp(0.0, content.max(0.0));
+                        if (open.knows_scroll - before).abs() < 0.5 {
+                            return Some(Then::Nothing);
+                        }
+                        open.rev += 1;
+                        return Some(Then::Draw);
+                    }
                     let before = open.scroll;
                     open.scroll = (open.scroll + step).clamp(0.0, content.max(0.0));
                     if (open.scroll - before).abs() < 0.5 {
@@ -1992,6 +2036,8 @@ mod tests {
             streaming: vec![(1, "Bien".to_owned())],
             typing: Some((2, String::new())),
             look: None,
+            knows: None,
+            toast: None,
             rev: 1,
         };
         let words = Words { fr: true };

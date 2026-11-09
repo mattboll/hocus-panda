@@ -102,11 +102,21 @@ fn exclusive(kind: &str) -> Exclusive {
 }
 
 /// Whether an extracted edge of this type changes people, projects or
-/// rules: then it is a proposal until accepted (§7.1).
+/// rules: then it is a proposal until accepted (§7.1). An arrival, a
+/// departure and a role are (lot 6).
 pub fn structural(kind: &str) -> bool {
     matches!(
         kind,
-        "works_on" | "member_of" | "leads" | "reports_to" | "client_of" | "replaces" | "reviews"
+        "works_on"
+            | "member_of"
+            | "leads"
+            | "reports_to"
+            | "client_of"
+            | "replaces"
+            | "reviews"
+            | "arrived"
+            | "left"
+            | "role"
     )
 }
 
@@ -645,6 +655,22 @@ impl Store {
         }
         let (edit, _) = e.commit(&who, "seen", Some(&episode.pointer), "add-episode")?;
         Ok((id, edit))
+    }
+
+    /// What a source said of an episode besides its digest: when it ends
+    /// (an event), what opens it (for the user's click), its calendar.
+    pub fn set_episode_extras(
+        &self,
+        id: i64,
+        ends: Option<Timestamp>,
+        open: Option<&str>,
+        calendar: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE episodes SET ends = ?1, open = ?2, calendar = ?3 WHERE id = ?4",
+            params![ends.map(stamp), open, calendar, id],
+        )?;
+        Ok(())
     }
 
     /// A summary of episodes (compaction's, lot 6), and the nodes it

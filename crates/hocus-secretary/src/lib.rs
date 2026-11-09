@@ -15,6 +15,11 @@
 //! accounts are one source ([`google`]); the applications' notifications
 //! the shell forwards, another ([`notifications`], lot 7).
 //!
+//! What she learns (lot 6): the sentences that teach her and the rules
+//! they compile to, what her sources say of the team, what she notices
+//! ([`learn`]); "Ce qu'elle sait" ([`knows`]); the night's compaction
+//! ([`compaction`]).
+//!
 //! The harness the next lots test with is here too: her own clock
 //! ([`clock`]), the scripted fake model and the recorder ([`model`]), and
 //! fixture sources ([`sources::Fixture`]).
@@ -22,17 +27,21 @@
 pub mod audit;
 pub mod brain;
 pub mod clock;
+pub mod compaction;
 pub mod context;
 pub mod fold;
 pub mod google;
 pub mod graph;
 mod http;
 pub mod key;
+pub mod knows;
+pub mod learn;
 pub mod model;
 pub mod notifications;
 pub mod power;
 pub mod providers;
 pub mod retrieve;
+pub mod seed;
 pub mod server;
 pub mod settings;
 pub mod sources;
