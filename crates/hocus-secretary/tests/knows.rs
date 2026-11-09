@@ -455,7 +455,7 @@ fn forgetting_the_perso_notebook_leaves_the_pro_one() -> anyhow::Result<()> {
         },
     }) {
         FromSecretary::Toast { text, undo, .. } => {
-            assert!(text.contains("perso"), "{text}");
+            assert!(text.contains("privé"), "{text}");
             assert!(undo.is_none(), "confirmed before, not taken back");
         }
         other => panic!("no toast: {other:?}"),

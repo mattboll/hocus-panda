@@ -217,6 +217,7 @@ fn her_thread_survives_a_restart_and_its_perso_goes_with_oublier_tout_le_perso()
         item: message,
         decision: Decision::Accept,
         notebook: None,
+        left_out: Vec::new(),
     });
     assert!(
         matches!(answer, FromSecretary::Answer { done: true, .. }),

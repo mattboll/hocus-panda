@@ -322,3 +322,114 @@ fn the_key_command_keeps_the_key_in_the_keyring_of_her_bus() -> anyhow::Result<(
     assert_eq!(read.as_ref().map(|k| k.expose()), Some(made_up));
     Ok(())
 }
+
+/// On a terminal, `hocus-secretary key anthropic` asks for the key
+/// (« Colle ta clé Anthropic puis Entrée : ») with the echo off: what is
+/// pasted never shows on the screen, and the terminal echoes again after.
+#[test]
+fn on_a_terminal_the_key_command_asks_with_the_echo_off() -> anyhow::Result<()> {
+    use std::{
+        ffi::OsStr,
+        io::{Read as _, Write as _},
+        os::unix::{ffi::OsStrExt as _, fs::OpenOptionsExt as _},
+    };
+
+    use hocus_secretary::providers::{Keyring, Keys};
+    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    let dir = tempfile::tempdir()?;
+    let Some(bus) = PrivateBus::start(dir.path())? else {
+        return Ok(());
+    };
+    let held = Held::default();
+    let _keyring = keyring(&bus.address, &held)?;
+    let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+    grantpt(&master)?;
+    unlockpt(&master)?;
+    let name = ptsname(&master, Vec::new())?;
+    let terminal = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(rustix::fs::OFlags::NOCTTY.bits() as i32)
+        .open(OsStr::from_bytes(name.as_bytes()))?;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hocus-secretary"))
+        .args(["key", "anthropic"])
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
+        .env(hocus_secretary_link::BUS_ENV, &bus.address)
+        .env("LANG", "fr_FR.UTF-8")
+        .env("RUST_LOG", "off")
+        .stdin(Stdio::from(terminal.try_clone()?))
+        .stdout(Stdio::from(terminal.try_clone()?))
+        .stderr(Stdio::from(terminal.try_clone()?))
+        .spawn()?;
+    let mut master = std::fs::File::from(master);
+    // What the terminal shows, read on a thread until the program ends.
+    let (shown_to, shown) = mpsc::channel::<Vec<u8>>();
+    let mut reader = master.try_clone()?;
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 1024];
+        while let Ok(n) = reader.read(&mut buffer) {
+            if n == 0 || shown_to.send(buffer[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    let mut screen = String::new();
+    let prompt = "Colle ta clé Anthropic puis Entrée : ";
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !screen.contains(prompt) {
+        let wait = deadline.saturating_duration_since(std::time::Instant::now());
+        let piece = shown.recv_timeout(wait)?;
+        screen.push_str(&String::from_utf8_lossy(&piece));
+    }
+    let made_up = "sk-ant-test-pasted-on-a-terminal";
+    master.write_all(format!("{made_up}\n").as_bytes())?;
+    let status = child.wait()?;
+    let modes = rustix::termios::tcgetattr(&terminal)?;
+    drop(terminal);
+    while let Ok(piece) = shown.recv_timeout(Duration::from_millis(500)) {
+        screen.push_str(&String::from_utf8_lossy(&piece));
+    }
+    assert!(status.success(), "{screen}");
+    assert!(!screen.contains(made_up), "never on the screen: {screen}");
+    assert!(
+        modes
+            .local_modes
+            .contains(rustix::termios::LocalModes::ECHO),
+        "the echo is back"
+    );
+    let read = Keyring::new(Some(bus.address.clone()))
+        .key("anthropic")
+        .map_err(anyhow::Error::msg)?;
+    assert_eq!(read.as_ref().map(|k| k.expose()), Some(made_up));
+    Ok(())
+}
+
+/// A key put on the command line (after the provider, or in its place)
+/// is refused and never printed back: the message says to paste it once
+/// asked, and that the shell's history may keep it.
+#[test]
+fn a_key_on_the_command_line_is_refused_and_never_printed_back() -> anyhow::Result<()> {
+    let made_up = "sk-ant-test-typed-on-the-line-by-mistake";
+    for args in [vec!["key", "anthropic", made_up], vec!["key", made_up]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_hocus-secretary"))
+            .args(&args)
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove(hocus_secretary_link::BUS_ENV)
+            .stdin(Stdio::null())
+            .output()?;
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.status.success(), "{said}");
+        assert!(!said.contains(made_up), "never printed back: {said}");
+        assert!(
+            said.contains("ne se met pas sur la ligne de commande"),
+            "{said}"
+        );
+        assert!(said.contains("never goes on the command line"), "{said}");
+        assert!(said.contains("history"), "{said}");
+    }
+    Ok(())
+}

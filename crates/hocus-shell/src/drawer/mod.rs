@@ -120,10 +120,10 @@ impl Words {
 
     pub fn hidden(self, n: usize) -> String {
         match (self.fr, n) {
-            (true, 1) => "1 chose perso masquée".to_owned(),
-            (true, n) => format!("{n} choses perso masquées"),
-            (false, 1) => "1 personal thing hidden".to_owned(),
-            (false, n) => format!("{n} personal things hidden"),
+            (true, 1) => "1 chose privée masquée".to_owned(),
+            (true, n) => format!("{n} choses privées masquées"),
+            (false, 1) => "1 private thing hidden".to_owned(),
+            (false, n) => format!("{n} private things hidden"),
         }
     }
 
@@ -175,9 +175,9 @@ impl Words {
 
     pub fn notebooks(self) -> [&'static str; 3] {
         if self.fr {
-            ["Tout", "Pro", "Perso"]
+            ["Tout", "Travail", "Privé"]
         } else {
-            ["All", "Work", "Perso"]
+            ["All", "Work", "Private"]
         }
     }
 
@@ -213,7 +213,7 @@ impl Words {
     }
 
     pub fn forget_perso(self) -> &'static str {
-        self.pick("Oublier tout le perso…", "Forget all perso…")
+        self.pick("Oublier tout le privé…", "Forget everything private…")
     }
 
     pub fn forget_all(self) -> &'static str {
@@ -229,18 +229,18 @@ impl Words {
     pub fn confirm(self, what: Confirm) -> (&'static str, &'static str, &'static str) {
         match what {
             Confirm::Perso => (
-                self.pick("Oublier tout le perso ?", "Forget all perso?"),
+                self.pick("Oublier tout le privé ?", "Forget everything private?"),
                 self.pick(
-                    "Tout ce qu’elle sait de ta vie perso — proches, dossiers, souvenirs — sera effacé de cette machine, résumés compris. Le pro reste. Ça ne s’annule pas.",
-                    "All she knows of your personal life — close ones, files, memories — will be erased from this machine, summaries included. Work stays. This cannot be undone.",
+                    "Tout ce qu’elle sait de ta vie privée — proches, dossiers, souvenirs — sera effacé de cette machine, résumés compris. Le travail reste. Ça ne s’annule pas.",
+                    "All she knows of your private life — close ones, files, memories — will be erased from this machine, summaries included. Work stays. This cannot be undone.",
                 ),
-                self.pick("Oublier tout le perso", "Forget all perso"),
+                self.pick("Oublier tout le privé", "Forget everything private"),
             ),
             Confirm::All => (
                 self.pick("Tout oublier ?", "Forget everything?"),
                 self.pick(
-                    "Tout ce qu’elle sait, pro et perso, sera effacé de cette machine. Ça ne s’annule pas.",
-                    "All she knows, work and perso, will be erased from this machine. This cannot be undone.",
+                    "Tout ce qu’elle sait, travail et privé, sera effacé de cette machine. Ça ne s’annule pas.",
+                    "All she knows, work and private, will be erased from this machine. This cannot be undone.",
                 ),
                 self.pick("Tout oublier", "Forget everything"),
             ),
@@ -301,10 +301,15 @@ pub enum Target {
         item: u64,
         decision: Decision,
     },
-    /// A consent card's notebook, chosen before its "Autoriser".
-    Pill {
+    /// A consent card's « C'est privé », checked or not before its
+    /// "Autoriser" (#752).
+    Private {
         item: u64,
-        notebook: Notebook,
+    },
+    /// An Agenda's consent card's calendar `index`, read or left out.
+    Calendar {
+        item: u64,
+        index: u32,
     },
     /// "Annuler" under what she kept.
     Undo(u64),
@@ -316,6 +321,9 @@ pub enum Target {
     Reveal,
     Field,
     Send,
+    /// Her key's field and its "Enregistrer" (#752).
+    KeyField,
+    KeySave,
     /// "Ce qu'elle sait": the notebook switch (0 Tout, 1 Pro, 2 Perso).
     Notebook(u8),
     /// A filter chip, by its place.
@@ -351,13 +359,16 @@ impl Target {
             Self::Agent(id) => format!("Agent({id})"),
             Self::Reply { item, choice } => format!("Reply({item},{choice})"),
             Self::Button { item, decision } => format!("Button({item},{decision:?})"),
-            Self::Pill { item, notebook } => format!("Pill({item},{})", notebook.word()),
+            Self::Private { item } => format!("Private({item})"),
+            Self::Calendar { item, index } => format!("Calendar({item},{index})"),
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
             Self::Point(item) => format!("Point({item})"),
             Self::Reveal => "Reveal".to_owned(),
             Self::Field => "Field".to_owned(),
             Self::Send => "Send".to_owned(),
+            Self::KeyField => "KeyField".to_owned(),
+            Self::KeySave => "KeySave".to_owned(),
             Self::Notebook(n) => format!("Notebook({n})"),
             Self::Chip(n) => format!("Chip({n})"),
             Self::Search => "Search".to_owned(),
@@ -419,6 +430,22 @@ pub struct Open {
     /// The notebook chosen on each consent card, before its "Autoriser"
     /// (none: the one it suggests).
     pub notebooks: std::collections::HashMap<u64, Notebook>,
+    /// The calendars left out on each Agenda's consent card, by their ids.
+    pub left_out: std::collections::HashMap<u64, std::collections::BTreeSet<String>>,
+    /// The keyboard is on the drawer (it is given it as it first shows; a
+    /// window clicked takes it back).
+    pub focused: bool,
+    /// Her key as it is pasted or typed in her band (never drawn, never
+    /// logged; overwritten once sent), and whether the keyboard types
+    /// there rather than in the field (#752).
+    pub key: String,
+    pub key_focus: bool,
+}
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        hocus_secretary_link::wipe(&mut self.key);
+    }
 }
 
 impl Open {
@@ -590,6 +617,13 @@ pub fn toggle(output: &str, screen: u32) {
             knows_scroll: 0.0,
             confirm: None,
             notebooks: std::collections::HashMap::new(),
+            left_out: std::collections::HashMap::new(),
+            focused: true,
+            key: String::new(),
+            // Her key missing: the keyboard types in its field first.
+            key_focus: crate::secretary::conversation(|c| {
+                c.look.as_ref().is_some_and(|l| l.key.is_some())
+            }),
         }));
         (effects, true)
     });
@@ -742,6 +776,7 @@ pub fn act(id: window::Id, target: Target) {
         Draw,
         Close,
         Send(String),
+        Key(String, String),
         Effects(Vec<Effect>),
         Undo(Option<u64>),
     }
@@ -832,16 +867,65 @@ pub fn act(id: window::Id, target: Target) {
                     })
                 });
                 let notebook = suggested.map(|n| open.notebooks.get(&item).copied().unwrap_or(n));
-                crate::secretary::decide(item, decision, notebook);
+                let left_out = open
+                    .left_out
+                    .get(&item)
+                    .map(|l| l.iter().cloned().collect())
+                    .unwrap_or_default();
+                crate::secretary::decide(item, decision, notebook, left_out);
                 Then::Nothing
             }
-            Target::Pill { item, notebook } => {
+            Target::Calendar { item, index } => {
+                let id = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => card
+                            .sheet
+                            .as_ref()
+                            .and_then(|s| s.calendars.get(index as usize))
+                            .map(|c| c.id.clone()),
+                        _ => None,
+                    })
+                });
+                if let Some(id) = id {
+                    let left = open.left_out.entry(item).or_default();
+                    if !left.remove(&id) {
+                        left.insert(id);
+                    }
+                    tracing::info!(
+                        item,
+                        index,
+                        left_out = left.len(),
+                        "a consent card's calendar"
+                    );
+                    open.changed();
+                }
+                Then::Draw
+            }
+            Target::Private { item } => {
+                let suggested = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => {
+                            card.sheet.as_ref().map(|s| s.notebook)
+                        }
+                        _ => None,
+                    })
+                });
+                let now = open
+                    .notebooks
+                    .get(&item)
+                    .copied()
+                    .or(suggested)
+                    .unwrap_or_default();
+                let next = match now {
+                    Notebook::Pro => Notebook::Perso,
+                    Notebook::Perso => Notebook::Pro,
+                };
                 tracing::info!(
                     item,
-                    notebook = notebook.word(),
-                    "a consent card's notebook"
+                    notebook = next.word(),
+                    "a consent card's « C'est privé »"
                 );
-                open.notebooks.insert(item, notebook);
+                open.notebooks.insert(item, next);
                 open.changed();
                 Then::Draw
             }
@@ -989,7 +1073,20 @@ pub fn act(id: window::Id, target: Target) {
                 // Out of the drawer's lock: the toast's going wakes it.
                 Then::Undo(token)
             }
-            Target::Field => Then::Nothing,
+            Target::Field => {
+                open.key_focus = false;
+                open.changed();
+                Then::Draw
+            }
+            Target::KeyField => {
+                open.key_focus = true;
+                open.changed();
+                Then::Draw
+            }
+            Target::KeySave => match send_key(open) {
+                Some((provider, key)) => Then::Key(provider, key),
+                None => Then::Draw,
+            },
             Target::Send => match sentence(open) {
                 Some(text) => Then::Send(text),
                 None => Then::Nothing,
@@ -1010,6 +1107,10 @@ pub fn act(id: window::Id, target: Target) {
             crate::secretary::ask(text);
             wake();
         }
+        Then::Key(provider, key) => {
+            crate::secretary::give_key(provider, key);
+            wake();
+        }
         Then::Effects(effects) => {
             let closed = effects
                 .iter()
@@ -1022,6 +1123,114 @@ pub fn act(id: window::Id, target: Target) {
         }
     }
 }
+
+/// Whether her drawer shows her key's field now.
+fn key_band() -> Option<String> {
+    crate::secretary::conversation(|c| c.look.as_ref().and_then(|l| l.key.clone()))
+}
+
+/// Her key's field taken to be sent to her (#752), out of the drawer's
+/// lock: it empties, its text overwritten.
+fn send_key(open: &mut Open) -> Option<(String, String)> {
+    let provider = key_band()?;
+    let key = open.key.trim().to_owned();
+    hocus_secretary_link::wipe(&mut open.key);
+    open.changed();
+    if key.is_empty() || crate::secretary::conversation(|c| c.key_asked.is_some()) {
+        return None;
+    }
+    Some((provider, key))
+}
+
+/// The keyboard came to the drawer on `id`, or left it: whether it
+/// changed.
+pub fn focused(id: window::Id, on: bool) -> bool {
+    with(|d| {
+        let Some(open) = d.open_mut(id) else {
+            return false;
+        };
+        if open.focused == on {
+            return false;
+        }
+        open.focused = on;
+        open.changed();
+        true
+    })
+}
+
+/// A key in her key's field: `Enter` sends it, `Ctrl+V` pastes, nothing
+/// copies it out; `Esc` closes, `Tab` goes to the field.
+fn key_field_key(
+    id: window::Id,
+    open: &mut Open,
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+    text: Option<&str>,
+) -> Then {
+    use keyboard::{Key, key::Named};
+    match key {
+        Key::Named(Named::Escape) => Then::Close,
+        Key::Named(Named::Enter) => match send_key(open) {
+            Some((provider, key)) => Then::Key(provider, key),
+            None => Then::Draw,
+        },
+        Key::Named(Named::Tab) => {
+            open.key_focus = false;
+            open.changed();
+            Then::Draw
+        }
+        Key::Named(Named::Backspace) => {
+            if modifiers.control() {
+                hocus_secretary_link::wipe(&mut open.key);
+            } else {
+                open.key.pop();
+            }
+            open.changed();
+            Then::Draw
+        }
+        _ if crate::paste::asks(key, modifiers) => {
+            let asked = crate::paste::request(crate::paste::Clean::Dropped, move |pasted| {
+                let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+                    return;
+                };
+                let took = with(|d| match d.open_mut(id) {
+                    Some(open) if open.key_focus && open.key.len() + pasted.len() <= KEY_MOST => {
+                        open.key.push_str(pasted.trim());
+                        open.changed();
+                        true
+                    }
+                    _ => false,
+                });
+                if took {
+                    tracing::debug!("a key pasted into her key's field");
+                    wake();
+                }
+            });
+            if !asked {
+                tracing::debug!("nothing to paste into her key's field");
+            }
+            Then::Nothing
+        }
+        _ => match text {
+            Some(typed)
+                if !modifiers.control()
+                    && !modifiers.alt()
+                    && !modifiers.logo()
+                    && !typed.is_empty()
+                    && !typed.chars().any(char::is_control)
+                    && open.key.len() + typed.len() <= KEY_MOST =>
+            {
+                open.key.push_str(typed);
+                open.changed();
+                Then::Draw
+            }
+            _ => Then::Nothing,
+        },
+    }
+}
+
+/// The longest key her field takes.
+const KEY_MOST: usize = 512;
 
 /// The field's sentence sent: it empties, and `↑` brings it back.
 fn sentence(open: &mut Open) -> Option<String> {
@@ -1040,6 +1249,8 @@ enum Then {
     Nothing,
     Close,
     Send(String),
+    /// Her key, for this provider, to give her.
+    Key(String, String),
     Draw,
 }
 
@@ -1104,6 +1315,9 @@ pub fn key_on(
         if open.tab == Tab::Knows {
             return Some(search_key(open, key, modifiers, text));
         }
+        if open.key_focus && key_band().is_some() {
+            return Some(key_field_key(id, open, key, modifiers, text));
+        }
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) if modifiers.shift() => {
@@ -1164,6 +1378,10 @@ pub fn key_on(
         }
         Some(Then::Send(text)) => {
             crate::secretary::ask(text);
+            true
+        }
+        Some(Then::Key(provider, key)) => {
+            crate::secretary::give_key(provider, key);
             true
         }
         Some(Then::Draw) => true,

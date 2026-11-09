@@ -161,6 +161,74 @@ pub fn keep(bus: &str, key: &Key) -> bool {
     .is_some()
 }
 
+/// Said when a key follows `hocus-secretary key PROVIDER` on its line
+/// (or takes PROVIDER's place): never the argument itself.
+pub const ON_THE_LINE: &str = "La clé ne se met pas sur la ligne de commande : lance « hocus-secretary key anthropic », Entrée, puis colle-la quand elle te la demande. Ta clé est peut-être restée dans l’historique de ton terminal : tu peux l’en retirer (sous bash : history -d, sous zsh : en éditant ~/.zsh_history).\n\
+The key never goes on the command line: run “hocus-secretary key anthropic”, Enter, then paste it when asked. Your key may have stayed in your shell’s history: you may want to remove it from there (bash: history -d; zsh: edit ~/.zsh_history).";
+
+/// Whether `word` looks like an API key rather than a provider's name
+/// (`hocus-secretary key sk-ant-…`).
+pub fn looks_like_a_key(word: &str) -> bool {
+    word.starts_with("sk-") || word.len() > 40
+}
+
+/// A provider's name as the user reads it.
+pub fn provider_name(provider: &str) -> String {
+    match provider {
+        "anthropic" => "Anthropic".to_owned(),
+        "openai" => "OpenAI".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+/// What the terminal says before the key is pasted.
+pub fn prompt(provider: &str, fr: bool) -> String {
+    let name = provider_name(provider);
+    if fr {
+        format!("Colle ta clé {name} puis Entrée : ")
+    } else {
+        format!("Paste your {name} key, then Enter: ")
+    }
+}
+
+/// A line of standard input: on a terminal, after `prompt` (on standard
+/// error) and with the echo off, back on after, whatever happened; else
+/// read as it comes, silently.
+pub fn read_secret(prompt: &str) -> std::io::Result<String> {
+    use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+    use std::io::{BufRead as _, IsTerminal as _};
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    if !stdin.is_terminal() {
+        stdin.lock().read_line(&mut line)?;
+        return Ok(line);
+    }
+    let before = tcgetattr(&stdin)?;
+    let mut quiet = before.clone();
+    quiet.local_modes.remove(LocalModes::ECHO);
+    // The Enter typed still moves to the next line.
+    quiet.local_modes.insert(LocalModes::ECHONL);
+    tcsetattr(&stdin, OptionalActions::Flush, &quiet)?;
+    let mut err = std::io::stderr();
+    let read = err
+        .write_all(prompt.as_bytes())
+        .and_then(|()| err.flush())
+        .and_then(|()| stdin.lock().read_line(&mut line));
+    let restored = tcsetattr(&stdin, OptionalActions::Now, &before);
+    read?;
+    restored?;
+    Ok(line)
+}
+
+/// `secret`'s bytes overwritten with zeros, then emptied: what held a key
+/// does not keep it in memory once it is used.
+pub fn wipe(secret: &mut String) {
+    let mut bytes = std::mem::take(secret).into_bytes();
+    bytes.fill(0);
+    // The zeros are read back, so that the write is not left out.
+    std::hint::black_box(&bytes);
+}
+
 /// A provider's API key's attributes in the keyring (§11.3).
 pub fn provider_attributes(provider: &str) -> HashMap<&str, &str> {
     HashMap::from([
@@ -204,6 +272,31 @@ pub fn keep_provider_key(bus: &str, provider: &str, secret: &str) -> bool {
             secret,
         )
         .await
+    })
+    .is_some()
+}
+
+/// Takes `provider`'s API key out of the keyring on `bus`: whether it
+/// answered (a keyring holding none answers too).
+pub fn erase_provider_key(bus: &str, provider: &str) -> bool {
+    let provider = provider.to_owned();
+    run(bus, async move |connection| {
+        let reply = call(
+            &connection,
+            PATH,
+            IFACE,
+            "SearchItems",
+            &(provider_attributes(&provider),),
+        )
+        .await?;
+        let (unlocked, locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
+            reply.body().deserialize()?;
+        for item in unlocked.iter().chain(&locked) {
+            let reply = call(&connection, item.as_str(), ITEM, "Delete", &()).await?;
+            let prompt: OwnedObjectPath = reply.body().deserialize()?;
+            prompted(&connection, &prompt).await?;
+        }
+        Ok(())
     })
     .is_some()
 }

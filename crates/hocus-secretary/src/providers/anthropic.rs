@@ -35,6 +35,34 @@ const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 const TRIES: u32 = 4;
 const TIMEOUT: Duration = Duration::from_secs(600);
 
+/// A key pasted by the user, checked with the smallest request there is
+/// (the models' list, one of them): no tokens spent. Blocking.
+pub fn check(url: &str, key: &str) -> Result<(), hocus_secretary_link::KeyOutcome> {
+    use hocus_secretary_link::KeyOutcome;
+    if !crate::http::allowed(url) {
+        return Err(KeyOutcome::Failed);
+    }
+    let url = format!("{}/v1/models", url.trim_end_matches('/'));
+    let answer = crate::http::agent(Duration::from_secs(20))
+        .get(&url)
+        .query("limit", "1")
+        .header("x-api-key", key)
+        .header("anthropic-version", VERSION)
+        .call();
+    match answer.map(|a| a.status().as_u16()) {
+        Ok(200..=299) => Ok(()),
+        Ok(401 | 403) => Err(KeyOutcome::Refused),
+        Ok(status) => {
+            tracing::info!(status, "the provider did not check the key");
+            Err(KeyOutcome::Failed)
+        }
+        Err(err) => {
+            tracing::info!(%err, "the provider is not reached");
+            Err(KeyOutcome::Offline)
+        }
+    }
+}
+
 /// The models that take the API's own refusal fallback.
 fn falls_back(model: &str) -> bool {
     matches!(

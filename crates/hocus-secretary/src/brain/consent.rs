@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use hocus_secretary_link::{
     Action, Body, Card, CardKind, Decision, Notebook,
+    calendars::{CALENDARS, CalendarInfo, Calendars},
     consent::{ConsentBook, SourceKey, SourceKind},
     goa::GoogleAccount,
     sheets,
@@ -37,6 +38,11 @@ const FIRST_RUN: &str = "first-run";
 const CARDS: &str = "consent-cards";
 /// Her Google source's name.
 const GOOGLE: &str = "google";
+/// Her memory's `meta` key of the accounts she knows of, once her first
+/// run is over: one found after is asked about (#752).
+const KNOWN: &str = "accounts-known";
+/// Her memory's `meta` key of each source's notebook as last filed.
+const NOTEBOOKS: &str = "source-notebooks";
 
 /// Where the first run is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -68,6 +74,8 @@ pub(super) struct Consents {
     /// "Pas maintenant" this run.
     pub later: HashSet<SourceKey>,
     pub first_run: FirstRun,
+    /// Each account's calendars, as her source last listed them (#752).
+    pub calendars: std::collections::BTreeMap<String, Vec<CalendarInfo>>,
 }
 
 impl Brain {
@@ -129,12 +137,220 @@ impl Brain {
             .unwrap_or_default()
     }
 
+    /// Her Google source listed these accounts' calendars (#752): kept in
+    /// her folder for the Settings' Agenda rows, shown on an Agenda's
+    /// card still waiting, and those she could not read said in her
+    /// status.
+    pub(super) fn calendars_found(
+        &mut self,
+        found: std::collections::BTreeMap<String, Vec<CalendarInfo>>,
+    ) {
+        if self.consents.calendars == found {
+            return;
+        }
+        self.consents.calendars = found;
+        if let Some(path) = self
+            .consents
+            .book
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(|d| d.join(CALENDARS))
+            && let Err(err) = Calendars(self.consents.calendars.clone()).save(&path)
+        {
+            tracing::warn!(%err, "could not keep the calendars' list");
+        }
+        let cards: Vec<(u64, Asked)> = self
+            .consents
+            .cards
+            .iter()
+            .filter(|(_, a)| a.source.kind == SourceKind::Calendar)
+            .map(|(i, a)| (*i, a.clone()))
+            .collect();
+        for (item, asked) in cards {
+            let list = self
+                .consents
+                .calendars
+                .get(&asked.source.account)
+                .cloned()
+                .unwrap_or_default();
+            self.change_item(item, |body| {
+                if let Body::Card { card } = body
+                    && let Some(sheet) = &mut card.sheet
+                {
+                    sheet.calendars = list;
+                }
+            });
+        }
+        self.tell_look();
+    }
+
+    /// The calendars she could not read at her last cycle.
+    pub(super) fn unreadable_calendars(&self) -> Vec<&CalendarInfo> {
+        let book = self.book();
+        self.consents
+            .calendars
+            .iter()
+            .filter(|(account, _)| {
+                book.grant(&SourceKey::new(account.as_str(), SourceKind::Calendar))
+                    .is_some()
+            })
+            .flat_map(|(_, list)| list)
+            .filter(|c| c.unreadable.is_some())
+            .collect()
+    }
+
     /// Her Google source found these accounts: the cards follow the book,
     /// and the first run goes on.
     pub(super) fn accounts_found(&mut self, accounts: Vec<GoogleAccount>) {
         self.consents.accounts = Some(accounts);
         self.cards_follow_the_book();
         self.first_run_step();
+        self.new_accounts_step();
+    }
+
+    /// An account added since her first run (#752): she says so, then
+    /// asks for each of its kinds, one source at a time, as at her first
+    /// run. The accounts there at its end are known from then on.
+    pub(super) fn new_accounts_step(&mut self) {
+        if self.consents.first_run != FirstRun::Done {
+            return;
+        }
+        let Some(accounts) = self.consents.accounts.clone() else {
+            return;
+        };
+        let mut known: Vec<String> = match self.store.meta(KNOWN).ok().flatten() {
+            Some(text) => serde_json::from_str(&text).unwrap_or_default(),
+            None => {
+                // Her first run just ended: these were asked about there.
+                let all: Vec<String> = accounts.iter().map(|a| a.id.clone()).collect();
+                self.keep_known(&all);
+                all
+            }
+        };
+        if !self.conns.keys().any(|c| self.talker(*c)) {
+            return;
+        }
+        let waiting = self.consents.cards.keys().any(|i| self.card_waits(*i));
+        if waiting {
+            return;
+        }
+        let book = self.book();
+        let new: Vec<&GoogleAccount> = accounts.iter().filter(|a| !known.contains(&a.id)).collect();
+        for account in new {
+            let next = account.kinds().into_iter().find(|kind| {
+                let source = SourceKey::new(&account.id, *kind);
+                !book.records().iter().any(|r| r.source == source)
+                    && !self.consents.later.contains(&source)
+            });
+            let Some(kind) = next else {
+                known.push(account.id.clone());
+                self.keep_known(&known);
+                continue;
+            };
+            let asked_before = self
+                .consents
+                .cards
+                .values()
+                .any(|a| a.source.account == account.id);
+            if !asked_before {
+                let said = if self.talk.fr() {
+                    format!(
+                        "J’ai trouvé un nouveau compte Google : {}. Je ne lis rien sans ton accord.",
+                        account.identity
+                    )
+                } else {
+                    format!(
+                        "I found a new Google account: {}. I read nothing without your consent.",
+                        account.identity
+                    )
+                };
+                self.add_item(
+                    None,
+                    Body::Her {
+                        text: said,
+                        note: None,
+                        assumed: false,
+                    },
+                );
+            }
+            tracing::info!(account = account.id, "a new account: she asks for it");
+            self.consent_card(account, kind);
+            self.tell_look();
+            return;
+        }
+    }
+
+    fn keep_known(&self, known: &[String]) {
+        let written = serde_json::to_string(known)
+            .map_err(|e| e.to_string())
+            .and_then(|t| self.store.set_meta(KNOWN, &t).map_err(|e| e.to_string()));
+        if let Err(err) = written {
+            tracing::warn!(%err, "could not keep the accounts known");
+        }
+    }
+
+    /// Her consent book changed (the Settings wrote it, #752): her cards
+    /// say it now, her Google source reads it now, her first run goes on.
+    pub(super) fn consents_changed(&mut self) {
+        tracing::info!("her consent book changed");
+        self.refile();
+        self.cards_follow_the_book();
+        self.google_now();
+        self.first_run_step();
+        self.new_accounts_step();
+        self.tell_look();
+    }
+
+    /// A source's notebook changed in the book (« C'est privé » on its
+    /// row, #752): what came from it moves with it, in her memory and
+    /// what she holds. Each source's notebook as filed is kept in her
+    /// memory, so that a change made while she was away is taken at her
+    /// start.
+    pub(super) fn refile(&mut self) {
+        if self.consents.book.is_none() {
+            return;
+        }
+        let mut filed: std::collections::BTreeMap<String, Notebook> = self
+            .store
+            .meta(NOTEBOOKS)
+            .ok()
+            .flatten()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let mut changed = false;
+        for grant in self.book().granted() {
+            let source = grant.source().to_string();
+            let notebook = grant.notebook();
+            match filed.insert(source.clone(), notebook) {
+                Some(before) if before != notebook => {
+                    match self.store.refile_source(&source, notebook) {
+                        Ok(moved) => tracing::info!(
+                            source,
+                            notebook = notebook.word(),
+                            moved,
+                            "a source's notebook changed: what came from it moves"
+                        ),
+                        Err(err) => tracing::warn!(source, %err, "could not move a source's items"),
+                    }
+                    self.inbox.refile_source(&source, notebook);
+                    changed = true;
+                }
+                Some(_) => {}
+                None => changed = true,
+            }
+        }
+        if changed {
+            let kept = serde_json::to_string(&filed)
+                .map_err(|e| e.to_string())
+                .and_then(|t| {
+                    self.store
+                        .set_meta(NOTEBOOKS, &t)
+                        .map_err(|e| e.to_string())
+                });
+            if let Err(err) = kept {
+                tracing::warn!(%err, "could not keep the sources' notebooks");
+            }
+        }
     }
 
     /// Her Google source reads its book at once.
@@ -165,24 +381,32 @@ impl Brain {
         let begun = !self.consents.cards.is_empty()
             || self.store.meta(FIRST_RUN).ok().flatten().as_deref() == Some("begun");
         if !begun {
+            // Her name, when the user gave her one (#752).
+            let name = self.settings.current().name.trim().to_owned();
+            let me = match (name.is_empty(), fr) {
+                (true, true) => "ta secrétaire".to_owned(),
+                (true, false) => "your secretary".to_owned(),
+                (false, true) => format!("{name}, ta secrétaire"),
+                (false, false) => format!("{name}, your secretary"),
+            };
             let hello = match (accounts.is_empty(), fr) {
-                (false, true) => {
-                    "Bonjour, je suis ta secrétaire. Je ne lis rien sans ton accord : je te demande, une source à la fois."
-                }
-                (false, false) => {
-                    "Hello, I’m your secretary. I read nothing without your consent: I’ll ask you, one source at a time."
-                }
-                (true, true) => {
-                    "Bonjour, je suis ta secrétaire. Je n’ai trouvé aucun compte Google dans Comptes en ligne : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Agents."
-                }
-                (true, false) => {
-                    "Hello, I’m your secretary. I found no Google account in Online Accounts: once you add one, you can open it to me in Settings › Agents."
-                }
+                (false, true) => format!(
+                    "Bonjour, je suis {me}. Je ne lis rien sans ton accord : je te demande, une source à la fois."
+                ),
+                (false, false) => format!(
+                    "Hello, I’m {me}. I read nothing without your consent: I’ll ask you, one source at a time."
+                ),
+                (true, true) => format!(
+                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google dans Comptes en ligne : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Agents."
+                ),
+                (true, false) => format!(
+                    "Hello, I’m {me}. I found no Google account in Online Accounts: once you add one, you can open it to me in Settings › Agents."
+                ),
             };
             self.add_item(
                 None,
                 Body::Her {
-                    text: hello.to_owned(),
+                    text: hello,
                     note: None,
                     assumed: false,
                 },
@@ -231,7 +455,16 @@ impl Brain {
     /// A consent card for `account`'s `kind`, in its suggested notebook.
     fn consent_card(&mut self, account: &GoogleAccount, kind: SourceKind) -> u64 {
         let fr = self.talk.fr();
-        let sheet = sheets::google(&account.identity, kind, account.suggested, fr);
+        let quiet = self.settings.current().speak.restraint().perso;
+        let mut sheet = sheets::google(&account.identity, kind, account.suggested, quiet, fr);
+        if kind == SourceKind::Calendar {
+            sheet.calendars = self
+                .consents
+                .calendars
+                .get(&account.id)
+                .cloned()
+                .unwrap_or_default();
+        }
         let card = Card {
             kind: CardKind::Consent,
             label: format!("{} · {}", sheets::kind_name(kind, fr), account.identity),
@@ -249,7 +482,7 @@ impl Brain {
             ],
             decided: None,
             outcome: None,
-            sheet: Some(sheet),
+            sheet: Some(Box::new(sheet)),
         };
         let item = self.add_item(None, Body::Card { card });
         tracing::info!(
@@ -279,6 +512,7 @@ impl Brain {
         item: u64,
         decision: Decision,
         notebook: Option<Notebook>,
+        left_out: Vec<String>,
     ) -> bool {
         let Some(asked) = self.consents.cards.get(&item).cloned() else {
             return false;
@@ -297,12 +531,18 @@ impl Brain {
                 let notebook = notebook
                     .or_else(|| self.card_notebook(item))
                     .unwrap_or_default();
-                book.allow(asked.source.clone(), &asked.identity, notebook, now);
-                let said = if fr {
-                    format!("Je lis {what} · carnet {}", notebook.word())
-                } else {
-                    format!("I read {what} · {} notebook", notebook.word())
-                };
+                book.allow_leaving_out(
+                    asked.source.clone(),
+                    &asked.identity,
+                    notebook,
+                    left_out,
+                    now,
+                );
+                let said = format!(
+                    "{} {what} · {}",
+                    self.talk.t("Je lis", "I read"),
+                    notebook.said(fr)
+                );
                 (said, vec![self.stop_reading()], None, true)
             }
             (Decision::Reject, Some(_)) => {
@@ -364,6 +604,7 @@ impl Brain {
             self.consents.first_run = FirstRun::Waiting;
             self.first_run_step();
         }
+        self.new_accounts_step();
         self.tell_look();
         self.done(conn, id);
         true
@@ -417,13 +658,13 @@ impl Brain {
                 Some(grant) if !shown_granted => {
                     let said = if fr {
                         format!(
-                            "Je lis {what} · carnet {} (autorisé dans les Réglages)",
-                            grant.notebook().word()
+                            "Je lis {what} · {} (autorisé dans les Réglages)",
+                            grant.notebook().said(true)
                         )
                     } else {
                         format!(
-                            "I read {what} · {} notebook (allowed in Settings)",
-                            grant.notebook().word()
+                            "I read {what} · {} (allowed in Settings)",
+                            grant.notebook().said(false)
                         )
                     };
                     let stop = self.stop_reading();

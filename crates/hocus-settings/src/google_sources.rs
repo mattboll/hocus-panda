@@ -19,7 +19,9 @@ use std::path::Path;
 
 use hocus_secretary_link::{
     Notebook,
+    calendars::{CALENDARS, CalendarInfo, Calendars},
     consent::{ConsentBook, SourceKey, SourceKind},
+    gate::{Hours, Restraint},
     goa::{self, GoogleAccount},
     sheets,
 };
@@ -41,6 +43,10 @@ pub struct Source {
     pub attention: bool,
     /// Read now, into this notebook.
     pub granted: Option<Notebook>,
+    /// An Agenda's calendars, as she last listed them (#752).
+    pub calendars: Vec<CalendarInfo>,
+    /// Those left out of its consent, by their ids.
+    pub left_out: Vec<String>,
 }
 
 impl Source {
@@ -67,10 +73,10 @@ impl Source {
         let fr = lang == Lang::French;
         let what = match (self.kind, fr) {
             (SourceKind::Calendar, true) => {
-                "Tous tes agendas, masqués compris ; elle ne répond à aucune invitation"
+                "Tes agendas, masqués et partagés compris ; elle ne répond à aucune invitation"
             }
             (SourceKind::Calendar, false) => {
-                "All your calendars, hidden ones included; she answers no invitation"
+                "Your calendars, hidden and shared ones included; she answers no invitation"
             }
             (SourceKind::Mail, true) => {
                 "Ta boîte et tes envois, 30 jours, en lecture seule : rien n’est marqué lu"
@@ -82,8 +88,8 @@ impl Source {
             (_, false) => "Your contacts’ birthdays, nothing else of their cards",
         };
         let mut line = match (self.granted, fr) {
-            (Some(notebook), true) => format!("Elle lit · carnet {} · {what}", notebook.word()),
-            (Some(notebook), false) => format!("She reads · {} notebook · {what}", notebook.word()),
+            (Some(notebook), true) => format!("Elle lit · {} · {what}", notebook.said(true)),
+            (Some(notebook), false) => format!("She reads · {} · {what}", notebook.said(false)),
             (None, _) => what.to_owned(),
         };
         if self.attention {
@@ -96,12 +102,13 @@ impl Source {
         line
     }
 
-    /// Its consent sheet.
-    pub fn sheet(&self, lang: Lang) -> sheets::Sheet {
+    /// Its consent sheet; `quiet`, the private notebook's quiet hours.
+    pub fn sheet(&self, lang: Lang, quiet: Hours) -> sheets::Sheet {
         sheets::google(
             &self.identity,
             self.kind,
             self.suggested,
+            quiet,
             lang == Lang::French,
         )
     }
@@ -109,20 +116,27 @@ impl Source {
 
 /// Each kind each account has on, as `book` has it; accounts in Online
 /// Accounts' order, kinds as their sheets come (calendar, birthdays,
-/// mail).
-pub fn found(accounts: &[GoogleAccount], book: &ConsentBook) -> Vec<Source> {
+/// mail); an Agenda with its calendars as `calendars` lists them.
+pub fn found(accounts: &[GoogleAccount], book: &ConsentBook, calendars: &Calendars) -> Vec<Source> {
     accounts
         .iter()
         .flat_map(|account| {
-            account.kinds().into_iter().map(|kind| Source {
-                account: account.id.clone(),
-                identity: account.identity.clone(),
-                kind,
-                suggested: account.suggested,
-                attention: account.attention,
-                granted: book
-                    .grant(&SourceKey::new(&account.id, kind))
-                    .map(|g| g.notebook()),
+            account.kinds().into_iter().map(|kind| {
+                let grant = book.grant(&SourceKey::new(&account.id, kind));
+                Source {
+                    account: account.id.clone(),
+                    identity: account.identity.clone(),
+                    kind,
+                    suggested: account.suggested,
+                    attention: account.attention,
+                    granted: grant.as_ref().map(|g| g.notebook()),
+                    calendars: if kind == SourceKind::Calendar {
+                        calendars.of(&account.id).to_vec()
+                    } else {
+                        Vec::new()
+                    },
+                    left_out: grant.map(|g| g.left_out().to_vec()).unwrap_or_default(),
+                }
             })
         })
         .collect()
@@ -147,7 +161,76 @@ pub fn read() -> Vec<Source> {
     let book = crate::notifiers::book_path()
         .map(|p| ConsentBook::load(&p))
         .unwrap_or_default();
-    found(&accounts, &book)
+    let calendars = hocus_secretary_link::data_dir()
+        .map(|d| Calendars::load(&d.join(CALENDARS)))
+        .unwrap_or_default();
+    found(&accounts, &book, &calendars)
+}
+
+/// An Agenda's calendars left out, as its row now says (#752), written
+/// in the book at `path`. Blocking.
+pub fn leave_out(
+    path: &Path,
+    source: &SourceKey,
+    left_out: Vec<String>,
+    at: Timestamp,
+) -> std::io::Result<()> {
+    let mut book = ConsentBook::load(path);
+    book.leave_out(source, left_out, at);
+    book.save(path)
+}
+
+/// GNOME's Online Accounts panel's program (`gnome-control-center`) on
+/// the `PATH`, when it is installed: « Ajouter un compte Google » opens it
+/// (#752), as the shell's setup does. Blocking (the folders of the
+/// `PATH`).
+pub fn panel() -> Option<std::path::PathBuf> {
+    panel_in(&std::env::var_os("PATH")?)
+}
+
+/// The panel's program in the folders of `path`.
+fn panel_in(path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::env::split_paths(path)
+        .map(|dir| dir.join("gnome-control-center"))
+        .find(|file| {
+            std::fs::metadata(file)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
+/// The private notebook's quiet hours, as the configuration file says
+/// (`[secretary.speak] quiet-perso`), else hers by default: what « C'est
+/// privé » says. Blocking (a file).
+pub fn quiet() -> Hours {
+    let fallback = Restraint::default().perso;
+    let Some(file) = hocus_config::file() else {
+        return fallback;
+    };
+    let text = std::fs::read_to_string(file).unwrap_or_default();
+    text.parse::<toml_edit::DocumentMut>()
+        .ok()
+        .and_then(|doc| {
+            doc.get("secretary")?
+                .get("speak")?
+                .get("quiet-perso")?
+                .as_str()
+                .and_then(Hours::of)
+        })
+        .unwrap_or(fallback)
+}
+
+/// « C'est privé » checked or not on `source`'s row (#752), written in
+/// the book at `path`. Blocking.
+pub fn set_notebook(
+    path: &Path,
+    source: &SourceKey,
+    notebook: Notebook,
+    at: Timestamp,
+) -> std::io::Result<()> {
+    let mut book = ConsentBook::load(path);
+    book.set_notebook(source, notebook, at);
+    book.save(path)
 }
 
 /// The user's decision on `source`: read into `notebook` ("Autoriser"),
@@ -158,11 +241,12 @@ pub fn decide(
     source: &SourceKey,
     identity: &str,
     notebook: Option<Notebook>,
+    left_out: Vec<String>,
     at: Timestamp,
 ) -> std::io::Result<()> {
     let mut book = ConsentBook::load(path);
     match notebook {
-        Some(notebook) => book.allow(source.clone(), identity, notebook, at),
+        Some(notebook) => book.allow_leaving_out(source.clone(), identity, notebook, left_out, at),
         None => book.revoke(source, at),
     }
     book.save(path)
@@ -192,6 +276,18 @@ mod tests {
     }
 
     #[test]
+    fn the_panel_is_found_on_the_path_or_none() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("a folder");
+        assert_eq!(panel_in(dir.path().as_os_str()), None, "not installed");
+        let program = dir.path().join("gnome-control-center");
+        std::fs::write(&program, "#!/bin/sh\n").expect("written");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        assert_eq!(panel_in(dir.path().as_os_str()), Some(program));
+    }
+
+    #[test]
     fn each_kind_on_is_a_row_and_autoriser_writes_a_grant_ne_plus_lire_a_revocation() {
         let dir = tempfile::tempdir().expect("a folder");
         let path = dir.path().join("secretary/consents.json");
@@ -199,7 +295,7 @@ mod tests {
             account("account_1", "alex@atelier-lune.fr", Notebook::Pro),
             account("account_2", "alex.martin@gmail.com", Notebook::Perso),
         ];
-        let rows = found(&accounts, &ConsentBook::load(&path));
+        let rows = found(&accounts, &ConsentBook::load(&path), &Calendars::default());
         let words: Vec<String> = rows.iter().map(Source::word).collect();
         assert_eq!(
             words,
@@ -215,32 +311,44 @@ mod tests {
             rows[2].title(Lang::French),
             "Agenda · alex.martin@gmail.com"
         );
-        assert_eq!(rows[2].sheet(Lang::French).notebook, Notebook::Perso);
+        let quiet = Restraint::default().perso;
+        assert_eq!(rows[2].sheet(Lang::French, quiet).notebook, Notebook::Perso);
         decide(
             &path,
             &rows[2].key(),
             &rows[2].identity,
             Some(Notebook::Perso),
+            vec!["conges@group.calendar.google.com".to_owned()],
             Timestamp::UNIX_EPOCH,
         )
         .expect("written");
-        let rows = found(&accounts, &ConsentBook::load(&path));
+        let rows = found(&accounts, &ConsentBook::load(&path), &Calendars::default());
+        assert_eq!(rows[2].left_out, ["conges@group.calendar.google.com"]);
         assert_eq!(rows[2].granted, Some(Notebook::Perso));
+        assert!(rows[2].line(Lang::French).starts_with("Elle lit · privé"));
+        // « C'est privé » unchecked on its row: work, still read.
+        set_notebook(&path, &rows[2].key(), Notebook::Pro, Timestamp::UNIX_EPOCH).expect("written");
+        let rows_after = found(&accounts, &ConsentBook::load(&path), &Calendars::default());
+        assert_eq!(rows_after[2].granted, Some(Notebook::Pro));
         assert!(
-            rows[2]
+            rows_after[2]
                 .line(Lang::French)
-                .starts_with("Elle lit · carnet perso")
+                .starts_with("Elle lit · travail")
         );
         decide(
             &path,
             &rows[2].key(),
             &rows[2].identity,
             None,
+            Vec::new(),
             Timestamp::UNIX_EPOCH,
         )
         .expect("written");
         let book = ConsentBook::load(&path);
         assert_eq!(book.revoked(), [rows[2].key()]);
-        assert_eq!(found(&accounts, &book)[2].granted, None);
+        assert_eq!(
+            found(&accounts, &book, &Calendars::default())[2].granted,
+            None
+        );
     }
 }

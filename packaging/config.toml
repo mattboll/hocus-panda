@@ -380,8 +380,10 @@
 # Accounts, an application's notifications, Slack's for one: in her drawer
 # the first time, and under Settings › Agents), kept in her folder's
 # consents.json. Her key: `hocus-secretary key anthropic` in a terminal of
-# the session (docs/secretary.md).
+# the session (docs/secretary.md). name is her name, in her drawer, her
+# bubble and when she introduces herself; empty, "Ta secrétaire".
 # mode = "classic"
+# name = ""
 
 # [secretary.models]
 # Each role's provider and model, "PROVIDER/MODEL", applied at the next
@@ -408,11 +410,15 @@
 # [secretary.triage]
 # On battery, the triage runs only above this charge (%); it pauses while
 # the CPU package is above heat (°C); the model is unloaded after
-# unload-after idle seconds; pace seconds between two requests.
+# unload-after idle seconds; pace seconds between two requests. context is
+# the local model's context in tokens, asked of Ollama (its own default is
+# far larger, and takes an 8B model past an 8 GB graphics card); a longer
+# item is cut to fit, its start kept.
 # battery = 50
 # heat = 95
 # unload-after = 120
 # pace = 2
+# context = 8192
 
 # [secretary.speak]
 # When she speaks up (docs/design/secretary.md §6). Her morning briefing

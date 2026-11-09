@@ -119,6 +119,9 @@ pub struct Consent {
     /// model's summary of each item ever reaches Claude, never its text.
     #[serde(default, rename = "summaries-only")]
     pub summaries_only: bool,
+    /// An account's calendars not to read, by their ids (#752).
+    #[serde(default, rename = "left-out", skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<String>,
 }
 
 /// The right to read a source, as consented now.
@@ -128,6 +131,7 @@ pub struct Grant {
     identity: String,
     notebook: Notebook,
     summaries_only: bool,
+    left_out: Vec<String>,
 }
 
 impl Grant {
@@ -146,6 +150,11 @@ impl Grant {
     /// Only local summaries of its items may leave the machine.
     pub fn summaries_only(&self) -> bool {
         self.summaries_only
+    }
+
+    /// The calendars not to read, by their ids.
+    pub fn left_out(&self) -> &[String] {
+        &self.left_out
     }
 }
 
@@ -166,7 +175,40 @@ impl ConsentBook {
             decision: Decision::Granted,
             at,
             summaries_only: false,
+            left_out: Vec::new(),
         });
+    }
+
+    /// "Autoriser" on an Agenda's sheet, some of its calendars left out.
+    pub fn allow_leaving_out(
+        &mut self,
+        source: SourceKey,
+        identity: &str,
+        notebook: Notebook,
+        left_out: Vec<String>,
+        at: Timestamp,
+    ) {
+        self.allow(source, identity, notebook, at);
+        if let Some(last) = self.records.last_mut() {
+            last.left_out = left_out;
+        }
+    }
+
+    /// A granted source's calendars left out, as its row now says
+    /// (#752): a new record, the grant otherwise as it was.
+    pub fn leave_out(&mut self, source: &SourceKey, mut left_out: Vec<String>, at: Timestamp) {
+        left_out.sort();
+        left_out.dedup();
+        if let Some(last) = self.last(source).cloned()
+            && last.decision == Decision::Granted
+            && last.left_out != left_out
+        {
+            self.records.push(Consent {
+                left_out,
+                at,
+                ..last
+            });
+        }
     }
 
     /// The per-source option "Seuls des résumés locaux sortent", on or
@@ -182,6 +224,31 @@ impl ConsentBook {
                 ..last
             });
         }
+    }
+
+    /// « C'est privé » checked or not on a source's row, for a source
+    /// granted now (#752): a new record in `notebook`, the grant
+    /// otherwise as it was. What came from it before moves with it (her
+    /// memory's refile).
+    pub fn set_notebook(&mut self, source: &SourceKey, notebook: Notebook, at: Timestamp) {
+        if let Some(last) = self.last(source).cloned()
+            && last.decision == Decision::Granted
+            && last.notebook != notebook
+        {
+            self.records.push(Consent {
+                notebook,
+                at,
+                ..last
+            });
+        }
+    }
+
+    /// Every source granted now, with its grant.
+    pub fn granted(&self) -> Vec<Grant> {
+        let mut keys: Vec<&SourceKey> = self.records.iter().map(|c| &c.source).collect();
+        keys.sort();
+        keys.dedup();
+        keys.into_iter().filter_map(|k| self.grant(k)).collect()
     }
 
     /// Every kind of an account at once, as its sheet's one "Autoriser"
@@ -223,6 +290,7 @@ impl ConsentBook {
             identity: last.identity.clone(),
             notebook: last.notebook,
             summaries_only: last.summaries_only,
+            left_out: last.left_out.clone(),
         })
     }
 
@@ -329,10 +397,17 @@ mod tests {
         assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(false));
         book.summaries_only(&mail, true, Timestamp::UNIX_EPOCH);
         assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(true));
+        // « C'est privé » on its row: the notebook moves, the rest stays.
+        book.set_notebook(&mail, Notebook::Perso, Timestamp::UNIX_EPOCH);
+        let grant = book.grant(&mail).expect("granted");
+        assert_eq!(grant.notebook(), Notebook::Perso);
+        assert!(grant.summaries_only());
+        assert_eq!(book.granted().len(), 1);
+        book.set_notebook(&mail, Notebook::Pro, Timestamp::UNIX_EPOCH);
         book.revoke(&mail, Timestamp::UNIX_EPOCH);
         assert_eq!(book.grant(&mail), None);
         assert_eq!(book.revoked(), [mail]);
-        assert_eq!(book.records().len(), 3);
+        assert_eq!(book.records().len(), 5);
     }
 
     #[test]
@@ -370,6 +445,31 @@ mod tests {
             book.revoked(),
             [SourceKey::new("slack", SourceKind::Notifications)]
         );
+    }
+
+    #[test]
+    fn a_calendar_left_out_is_a_later_record() {
+        let mut book = ConsentBook::default();
+        let calendar = SourceKey::new("account_1", SourceKind::Calendar);
+        book.allow_leaving_out(
+            calendar.clone(),
+            "alex@example.org",
+            Notebook::Pro,
+            vec!["conges".to_owned()],
+            Timestamp::UNIX_EPOCH,
+        );
+        assert_eq!(
+            book.grant(&calendar).expect("granted").left_out(),
+            ["conges"]
+        );
+        book.leave_out(&calendar, Vec::new(), Timestamp::UNIX_EPOCH);
+        assert!(
+            book.grant(&calendar)
+                .expect("granted")
+                .left_out()
+                .is_empty()
+        );
+        assert_eq!(book.records().len(), 2);
     }
 
     #[test]

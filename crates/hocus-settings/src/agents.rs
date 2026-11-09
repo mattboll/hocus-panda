@@ -41,6 +41,8 @@ pub const PEEK: &str = "agents.peek";
 pub const PANDAS: &str = "agents.pandas";
 /// `[secretary] mode` (docs/design/secretary.md §21).
 pub const SECRETARY: &str = "secretary.mode";
+/// `[secretary] name` (#752): her name, empty for "ta secrétaire".
+pub const NAME: &str = "secretary.name";
 /// The page's own rows, for the search and the lit row.
 pub const TOOLS_ROW: &str = "agents.tools";
 pub const PREVIEW: &str = "agents.preview";
@@ -705,6 +707,21 @@ pub fn settings() -> &'static [Setting] {
                     },
                     Value::Bool(false),
                 ),
+            ),
+            setting(
+                NAME,
+                SECRETARY_GROUP,
+                w("Son nom", "Her name"),
+                w(
+                    "Dans son tiroir, sa bulle, et quand elle se présente. Vide : « Ta secrétaire ».",
+                    "In her drawer, her bubble, and when she introduces herself. Empty: “Your secretary”.",
+                ),
+                (
+                    &["secrétaire", "nom", "prénom", "appelle"],
+                    &["secretary", "name", "called"],
+                ),
+                Kind::Text,
+                one(&["secretary", "name"], Codec::Text, Value::Text(String::new())),
             ),
         ]
     })

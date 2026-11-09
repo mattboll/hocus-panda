@@ -19,7 +19,7 @@
 //! - **HIER, TU VOULAIS** and **AUJOURD'HUI, TU M'AS DIT**: the tasks put
 //!   in To do through her, by day.
 //! - **À NE PAS OUBLIER**: reminders gone by unsaid, or kept for here.
-//! - **CÔTÉ PERSO**: perso events, reminders and birthdays ahead.
+//! - **EN PRIVÉ**: perso events, reminders and birthdays ahead.
 //!
 //! Every line carries its notebook: the drawer shows no perso title in a
 //! public moment, only how many are hidden (§7.4). The agents' night is
@@ -354,7 +354,7 @@ fn line(title: impl Into<String>, notebook: Notebook) -> Line {
 }
 
 /// The meetings of `day` that take time (not the leaves' calendar; the
-/// perso notebook's are CÔTÉ PERSO's).
+/// perso notebook's are EN PRIVÉ's).
 fn meetings(events: &[Event], leaves: Option<&str>) -> Vec<Event> {
     events
         .iter()
@@ -815,7 +815,7 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
         });
     }
     if kind == BriefingKind::Morning {
-        // CÔTÉ PERSO: today's perso events, perso reminders ahead,
+        // EN PRIVÉ: today's perso events, perso reminders ahead,
         // birthdays in 10 or 2 days.
         let mut lines = Vec::new();
         for e in events.iter().filter(|e| e.notebook == Notebook::Perso) {
@@ -836,7 +836,7 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
         if !lines.is_empty() {
             sections.push(Section {
                 key: "perso".to_owned(),
-                label: w(en, "CÔTÉ PERSO", "PERSONAL").to_owned(),
+                label: w(en, "EN PRIVÉ", "PRIVATE").to_owned(),
                 note: String::new(),
                 lines,
                 proposal: None,

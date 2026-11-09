@@ -38,6 +38,7 @@
 
 mod consent;
 mod conversation;
+mod keys;
 mod memory;
 mod speaking;
 
@@ -135,6 +136,17 @@ pub enum Event {
     /// Whether the keyring gives her answers' provider's key: the
     /// provider missing one, or none.
     Keyed(Option<String>),
+    /// A file of hers changed: her consent book, or the configuration
+    /// (#752).
+    Changed(crate::watch::Watched),
+    /// A key given was checked and kept (or not).
+    KeyDone {
+        conn: u64,
+        id: u64,
+        provider: String,
+        outcome: hocus_secretary_link::KeyOutcome,
+        digest: Option<u64>,
+    },
     Stop,
 }
 
@@ -313,10 +325,28 @@ impl Brain {
             key_missing: None,
             key_asked: false,
         };
+        // Her consent book and her settings watched: a change is taken at
+        // once (#752).
+        let watched: Vec<(crate::watch::Watched, std::path::PathBuf)> = brain
+            .consents
+            .book
+            .clone()
+            .map(|b| (crate::watch::Watched::Consents, b))
+            .into_iter()
+            .chain(
+                brain
+                    .settings
+                    .path()
+                    .map(|p| (crate::watch::Watched::Config, p.to_path_buf())),
+            )
+            .collect();
+        crate::watch::start(watched, brain.sender.clone(), Event::Changed);
         // What she kept across a restart: her thread, the items waiting
         // for the triage (#750).
         brain.restore();
         brain.consents_restored();
+        // A source's notebook changed while she was away (#752).
+        brain.refile();
         brain.ask_key();
         if let Some(away) = away {
             brain.catch_up(away);
@@ -486,7 +516,13 @@ impl Brain {
                     },
                 );
             }
-            Event::Line { conn, line } => self.said(conn, &line),
+            Event::Line { conn, mut line } => {
+                self.said(conn, &line);
+                // A line may hold a key (#752): not kept in memory.
+                if line.contains("\"key\"") {
+                    hocus_secretary_link::wipe(&mut line);
+                }
+            }
             Event::Closed { conn } => {
                 self.conns.remove(&conn);
             }
@@ -528,6 +564,20 @@ impl Brain {
                     self.tell_look();
                 }
             }
+            Event::Changed(crate::watch::Watched::Consents) => self.consents_changed(),
+            Event::Changed(crate::watch::Watched::Config) => {
+                tracing::info!("her settings changed");
+                // Her name, her restraint, at once.
+                self.tell_look();
+                self.tell_restraint();
+            }
+            Event::KeyDone {
+                conn,
+                id,
+                provider,
+                outcome,
+                digest,
+            } => self.key_done(conn, id, provider, outcome, digest),
             Event::Stop => return false,
         }
         true
@@ -557,6 +607,11 @@ impl Brain {
     fn said(&mut self, conn: u64, text: &str) {
         let message = match read::<ToSecretary>(text) {
             Ok(message) => message,
+            // A key's line never said back, even in part.
+            Err(_) if text.contains("\"key\"") => {
+                tracing::info!(conn, "a key's line that does not read");
+                return self.error(conn, None, "a key's line that does not read");
+            }
             Err(err) => {
                 tracing::info!(conn, %err, "a line that does not read");
                 return self.error(conn, None, format!("a line that does not read: {err}"));
@@ -606,8 +661,9 @@ impl Brain {
                 item,
                 decision,
                 notebook,
+                left_out,
             } => {
-                if !self.consent_decide(conn, id, item, decision, notebook) {
+                if !self.consent_decide(conn, id, item, decision, notebook, left_out) {
                     self.decide(conn, id, item, decision);
                 }
             }
@@ -660,6 +716,7 @@ impl Brain {
             ToSecretary::Effected { effect, ok, detail } => self.effected(effect, ok, &detail),
             ToSecretary::Knows { id, query } => self.knows(conn, id, query),
             ToSecretary::Memory { id, act } => self.memory_act(conn, id, act),
+            ToSecretary::Key { id, provider, key } => self.key_given(conn, id, provider, key),
         }
     }
 
@@ -742,8 +799,15 @@ impl Brain {
                     done: self.queue.done,
                     given_up: self.queue.given_up,
                     held: self.inbox.len() as u64,
+                    placement: t.placement().map(|p| p.words(self.talk.fr()).to_owned()),
                 }
             }),
+            key_provider: self
+                .model
+                .as_ref()
+                .filter(|m| m.needs_key())
+                .and_then(|m| m.key_provider()),
+            key_missing: self.key_missing.is_some(),
         }
     }
 
@@ -857,12 +921,14 @@ impl Brain {
         let (name, notebook) = (slot.name.clone(), slot.notebook);
         let mut read = 0;
         let mut found = None;
+        let mut calendars = None;
         match result {
             Ok(mut synced) => {
                 slot.error = None;
                 slot.items += synced.items.len() as u64;
                 read = synced.items.len() as u64;
                 found = synced.found.take();
+                calendars = synced.calendars.take();
                 for gone in &synced.forget {
                     tracing::info!(source = gone, "a source revoked: what came from it goes");
                     if let Err(err) = self.store.forget_source(gone) {
@@ -949,6 +1015,9 @@ impl Brain {
         }
         self.catch_up_done_if_over();
         self.try_brief();
+        if let Some(calendars) = calendars {
+            self.calendars_found(calendars);
+        }
         if let Some(accounts) = found {
             self.accounts_found(accounts);
         }
@@ -975,7 +1044,7 @@ impl Brain {
         messages: &[Message],
         scope: &Scope,
     ) -> Result<Request, String> {
-        context::assemble(
+        let mut request = context::assemble(
             &self.store,
             &self.inbox,
             role,
@@ -983,7 +1052,19 @@ impl Brain {
             scope,
             self.clock.now(),
         )
-        .map_err(|e| format!("her memory: {e}"))
+        .map_err(|e| format!("her memory: {e}"))?;
+        // Her name, as the user gave it (#752): the first line of her
+        // persona.
+        let name = self.settings.current().name;
+        let name = name.trim();
+        if !name.is_empty() {
+            let line = match scope.language {
+                context::Language::French => format!("Tu t'appelles {name}."),
+                context::Language::English => format!("Your name is {name}."),
+            };
+            request.system = format!("{line}\n{}", request.system);
+        }
+        Ok(request)
     }
 
     /// An item with its text, held and queued for the triage; its text

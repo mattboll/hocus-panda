@@ -117,6 +117,10 @@ pub struct Conversation {
     /// "Ce qu'elle sait", as she last sent it (lot 6).
     pub knows: Option<Box<Knowledge>>,
     pub toast: Option<Toast>,
+    /// Her key given in the drawer: the request waiting for her answer,
+    /// and what became of the last one (#752).
+    pub key_asked: Option<u64>,
+    pub key_said: Option<(String, hocus_secretary_link::KeyOutcome)>,
     /// Bumped at each change: what the drawer lays out again for.
     pub rev: u64,
 }
@@ -176,7 +180,27 @@ fn heard(message: FromSecretary) {
                 }
             }
         }),
-        FromSecretary::Look { look } => converse(|c| c.look = Some(look)),
+        FromSecretary::Look { look } => converse(|c| {
+            // The key given elsewhere (the Settings): its field goes.
+            if look.key.is_none() {
+                c.key_asked = None;
+            }
+            c.look = Some(look);
+        }),
+        FromSecretary::Keyed {
+            id,
+            provider,
+            outcome,
+        } => {
+            tracing::info!(id, provider, ?outcome, "her key");
+            converse(|c| {
+                if c.key_asked == Some(id) {
+                    c.key_asked = None;
+                }
+                c.key_said = Some((provider, outcome));
+            });
+        }
+        FromSecretary::ClipSecret { digest } => crate::clipboard::forget_secret(digest),
         FromSecretary::Speak { speak } => crate::speak::asked(speak),
         FromSecretary::Restraint { restraint } => crate::speak::restraint(restraint),
         FromSecretary::Effect { effect } => carry_out(effect),
@@ -274,6 +298,22 @@ pub fn ask(text: String) {
     send(ToSecretary::Ask { id, text });
 }
 
+/// `key`, pasted in her drawer, for `provider`: she checks it and keeps
+/// it in her keyring. The text is overwritten once written to her.
+pub fn give_key(provider: String, key: String) {
+    let id = next_id();
+    tracing::info!(id, provider, "her key, given in the drawer");
+    converse(|c| {
+        c.key_asked = Some(id);
+        c.key_said = None;
+    });
+    send(ToSecretary::Key {
+        id,
+        provider,
+        key: Some(hocus_secretary_link::Secret::new(key)),
+    });
+}
+
 /// Quick reply `choice` of her question `item`.
 pub fn choose(item: u64, choice: u32) {
     let id = next_id();
@@ -282,15 +322,28 @@ pub fn choose(item: u64, choice: u32) {
 }
 
 /// A card's button; a consent card's "Autoriser" with the notebook
-/// chosen on it.
-pub fn decide(item: u64, decision: Decision, notebook: Option<hocus_secretary_link::Notebook>) {
+/// chosen on it, and the calendars left out on it.
+pub fn decide(
+    item: u64,
+    decision: Decision,
+    notebook: Option<hocus_secretary_link::Notebook>,
+    left_out: Vec<String>,
+) {
     let id = next_id();
-    tracing::info!(id, item, ?decision, ?notebook, "a card's button");
+    tracing::info!(
+        id,
+        item,
+        ?decision,
+        ?notebook,
+        left_out = left_out.len(),
+        "a card's button"
+    );
     send(ToSecretary::Decide {
         id,
         item,
         decision,
         notebook,
+        left_out,
     });
 }
 
@@ -469,10 +522,7 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
         };
         let mut first = vec![hello, session];
         first.extend(pending.drain(..));
-        if first
-            .iter()
-            .any(|m| stream.write_all(line(m).as_bytes()).is_err())
-        {
+        if first.iter().any(|m| !write_to(&mut stream, m)) {
             continue;
         }
         let reader = match stream.try_clone() {
@@ -492,7 +542,7 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
         loop {
             match queue.recv() {
                 Ok(message) => {
-                    if stream.write_all(line(&message).as_bytes()).is_err() {
+                    if !write_to(&mut stream, &message) {
                         pending.push_back(message);
                         break;
                     }
@@ -504,6 +554,17 @@ fn talk(socket: &std::path::Path, queue: &Receiver<ToSecretary>, locked: bool) {
             }
         }
     }
+}
+
+/// `message` written to her: whether it went. A key's line is overwritten
+/// once written.
+fn write_to(stream: &mut UnixStream, message: &ToSecretary) -> bool {
+    let mut text = line(message);
+    let wrote = stream.write_all(text.as_bytes()).is_ok();
+    if matches!(message, ToSecretary::Key { .. }) {
+        hocus_secretary_link::wipe(&mut text);
+    }
+    wrote
 }
 
 /// Her lines, until the connection ends.

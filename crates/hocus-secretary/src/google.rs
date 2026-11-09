@@ -130,6 +130,16 @@ fn gather(events: Vec<Event>, consents: &ConsentBook) -> Synced {
                 );
             }
             Event::Purge(source) => synced.forget.push(source.to_string()),
+            Event::PurgePart { source, part } => {
+                tracing::info!(%source, part, "a calendar left out: what came from it goes");
+                synced.forget.push(format!("{source}#{part}"));
+            }
+            Event::Calendars { account, list } => {
+                synced
+                    .calendars
+                    .get_or_insert_with(Default::default)
+                    .insert(account, list);
+            }
             Event::Removed { source, ids } => {
                 tracing::info!(%source, removed = ids.len(), "items gone at their source");
             }
@@ -203,13 +213,19 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
         ),
         _ => (None, None),
     };
+    // An event is its calendar's: forgotten with it when it is left out
+    // (#752), with its account's Agenda when that is revoked.
+    let from = match &source.content {
+        Content::Event(e) => format!("{from}#{}", e.calendar),
+        _ => from.to_owned(),
+    };
     Item {
         id: source.pointer.id.clone(),
         at: source.at,
         kind: kind.to_owned(),
         digest,
         notebook: Some(source.notebook),
-        from: Some(from.to_owned()),
+        from: Some(from),
         project: None,
         sender: match &source.content {
             Content::Mail(m) => Some(m.from.clone()),

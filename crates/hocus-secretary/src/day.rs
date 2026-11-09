@@ -474,7 +474,27 @@ pub fn plans(conn: &Connection, day: jiff::civil::Date) -> Result<Vec<Plan>> {
 /// A source revoked: what it brought goes.
 pub fn forget_source(conn: &Connection, source: &str) -> Result<()> {
     for table in ["agenda", "mails", "reminders", "plans"] {
-        conn.execute(&format!("DELETE FROM {table} WHERE source = ?1"), [source])?;
+        conn.execute(
+            &format!(
+                "DELETE FROM {table} WHERE source{}",
+                crate::store::OF_SOURCE
+            ),
+            [source],
+        )?;
+    }
+    Ok(())
+}
+
+/// A source's records move to `notebook` (#752).
+pub fn refile_source(conn: &Connection, source: &str, notebook: Notebook) -> Result<()> {
+    for table in ["agenda", "mails", "reminders", "plans"] {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET notebook = ?2 WHERE source{}",
+                crate::store::OF_SOURCE
+            ),
+            rusqlite::params![source, notebook.word()],
+        )?;
     }
     Ok(())
 }

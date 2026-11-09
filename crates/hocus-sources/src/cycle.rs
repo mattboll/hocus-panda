@@ -2,9 +2,12 @@
 //! run it (§16): for each Google account Online Accounts has, and each of
 //! its kinds the user allowed, what is new, redacted (the first pass) and
 //! tagged with the notebook chosen at consent. A source not allowed is
-//! not touched (no token asked, no connection). A source revoked since
-//! the last cycle is not read again and its items are to be purged
-//! ([`Event::Purge`], once).
+//! not read (no event, no mail, no contact); only an Agenda not decided
+//! yet has its calendars listed, their names and who shares them, for its
+//! consent sheet to show (#752, [`Event::Calendars`]). A source revoked
+//! since the last cycle is not touched again and its items are to be
+//! purged ([`Event::Purge`], once); a calendar left out since, its items
+//! ([`Event::PurgePart`]).
 //!
 //! Items come out as [`crate::Redacted`]: never raw. The tokens Online
 //! Accounts handed during the cycle are given to the redactor as known
@@ -75,6 +78,15 @@ pub enum Event {
     /// The source was revoked: everything that came from it is to be
     /// forgotten (its digests, index lines, episodes).
     Purge(SourceKey),
+    /// An account's calendars as listed (its Agenda's sheet and row),
+    /// each failing one said.
+    Calendars {
+        account: String,
+        list: Vec<hocus_secretary_link::calendars::CalendarInfo>,
+    },
+    /// A part of a source left out since (a calendar of an account): what
+    /// came from it is to be forgotten.
+    PurgePart { source: SourceKey, part: String },
     /// It could not be read this time; what was read stays.
     Failed {
         source: SourceKey,
@@ -162,6 +174,20 @@ impl Sources {
             for kind in SourceKind::ALL {
                 let source = SourceKey::new(&account.id, kind);
                 let Some(grant) = consents.grant(&source) else {
+                    // An Agenda not decided yet: its calendars listed for
+                    // its sheet, nothing of them read.
+                    let undecided = !consents.records().iter().any(|r| r.source == source);
+                    if kind == SourceKind::Calendar && account.calendar && undecided {
+                        match self.list_calendars(account, &seen) {
+                            Ok(list) => events.push(Event::Calendars {
+                                account: account.id.clone(),
+                                list,
+                            }),
+                            Err(error) => {
+                                tracing::info!(%source, %error, "the calendars are not listed");
+                            }
+                        }
+                    }
                     continue;
                 };
                 self.cursors.purged.remove(&source);
@@ -197,6 +223,30 @@ impl Sources {
             }
         }
         events
+    }
+
+    /// An account's calendars, listed only.
+    fn list_calendars(
+        &self,
+        account: &GoogleAccount,
+        seen: &Arc<Mutex<Vec<String>>>,
+    ) -> Result<Vec<hocus_secretary_link::calendars::CalendarInfo>> {
+        let source = SourceKey::new(&account.id, SourceKind::Calendar);
+        // No grant yet: a reader made for listing only.
+        let mut book = ConsentBook::default();
+        book.allow(
+            source.clone(),
+            &account.identity,
+            account.suggested,
+            jiff::Timestamp::UNIX_EPOCH,
+        );
+        let grant = book.grant(&source).ok_or(SourceError::Gone)?;
+        let mut reader = Reader::new(
+            &grant,
+            self.tokens(account, seen)?,
+            self.env.calendar_api.clone(),
+        );
+        reader.list()
     }
 
     fn forget(&mut self, source: &SourceKey) {
@@ -238,6 +288,24 @@ impl Sources {
                     .entry(account.id.clone())
                     .or_default();
                 let read = reader.read(grant, Range::window(now), cursor, &zone)?;
+                for calendar in read.unreadable() {
+                    tracing::info!(
+                        %source,
+                        calendar = calendar.name,
+                        why = calendar.unreadable.as_deref().unwrap_or_default(),
+                        "a calendar could not be read"
+                    );
+                }
+                events.push(Event::Calendars {
+                    account: account.id.clone(),
+                    list: read.listed,
+                });
+                for part in read.left {
+                    events.push(Event::PurgePart {
+                        source: source.clone(),
+                        part,
+                    });
+                }
                 if !read.removed.is_empty() {
                     events.push(Event::Removed {
                         source,

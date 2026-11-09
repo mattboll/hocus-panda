@@ -7,7 +7,7 @@
 //!   words, its source to open).
 //! - AC29 by the clicks: "Oublier" with its toast "Oublié · Annuler";
 //!   "Annuler" brings it back.
-//! - AC40 by the clicks: "Oublier tout le perso…" asks to confirm, then the
+//! - AC40 by the clicks: "Oublier tout le privé…" asks to confirm, then the
 //!   perso notebook is gone and the pro one stays.
 //! - AC27 and AC30 by the clicks: an arrival's card in the thread, kept by
 //!   "Ajouter"; her observation of a board barely used, a proposal, kept by
@@ -455,7 +455,7 @@ impl Bed {
 }
 
 /// The tab: 720 px, its sections, "d'où je le sais"; an item unfolds its
-/// provenance; "Oublier" and its "Annuler"; "Oublier tout le perso…"
+/// provenance; "Oublier" and its "Annuler"; "Oublier tout le privé…"
 /// confirmed; her observation accepted.
 #[test]
 fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Result<()> {
@@ -538,12 +538,12 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
     bed.shows(|s| s["items"].to_string().contains("toast:Oublié · Annuler"))?;
     bed.shot("knows-forgotten")?;
 
-    // "Oublier tout le perso…", confirmed.
+    // "Oublier tout le privé…", confirmed.
     bed.click("ForgetPerso")?;
     bed.shows(|s| {
         s["items"]
             .to_string()
-            .contains("confirm:Oublier tout le perso ?")
+            .contains("confirm:Oublier tout le privé ?")
     })?;
     bed.shot("knows-forget-perso")?;
     bed.click("Confirm(true)")?;

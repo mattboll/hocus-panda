@@ -1133,10 +1133,10 @@ impl Brain {
                     });
                     let _ = learn::save_seen(&self.store, &seen);
                     let text = match (notebook, fr) {
-                        (Notebook::Perso, true) => "Tout le perso est oublié. Le pro reste.",
-                        (Notebook::Pro, true) => "Tout le pro est oublié. Le perso reste.",
-                        (Notebook::Perso, false) => "Everything perso is forgotten. Work stays.",
-                        (Notebook::Pro, false) => "Everything work is forgotten. Perso stays.",
+                        (Notebook::Perso, true) => "Tout le privé est oublié. Le travail reste.",
+                        (Notebook::Pro, true) => "Tout le travail est oublié. Le privé reste.",
+                        (Notebook::Perso, false) => "Everything private is forgotten. Work stays.",
+                        (Notebook::Pro, false) => "Everything work is forgotten. Private stays.",
                     };
                     self.toast(conn, id, text, None);
                 }

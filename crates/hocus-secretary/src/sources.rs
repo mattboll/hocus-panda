@@ -129,6 +129,10 @@ pub struct Synced {
     /// The Google accounts Online Accounts has, as her Google source
     /// found them this time (her consent cards, her first run).
     pub found: Option<Vec<hocus_secretary_link::goa::GoogleAccount>>,
+    /// Each account's calendars as listed this time, by account (#752).
+    pub calendars: Option<
+        std::collections::BTreeMap<String, Vec<hocus_secretary_link::calendars::CalendarInfo>>,
+    >,
 }
 
 /// A source: called on its worker thread, never on her loop; it may block

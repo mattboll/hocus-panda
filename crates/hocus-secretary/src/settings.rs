@@ -140,6 +140,10 @@ pub struct Triage {
     pub unload_after: u64,
     /// Seconds between two requests: one at a time, paced.
     pub pace: u64,
+    /// The local model's context, in tokens, asked of Ollama (its own
+    /// default, 40k, takes an 8B model past an 8 GB card): an item longer
+    /// is cut to fit (#752).
+    pub context: u32,
 }
 
 impl Default for Triage {
@@ -149,6 +153,7 @@ impl Default for Triage {
             heat: 95,
             unload_after: 120,
             pace: 2,
+            context: 8192,
         }
     }
 }
@@ -237,6 +242,10 @@ impl Default for Compaction {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Her name (`[secretary] name`, #752): in her drawer's header, her
+    /// peek, how she introduces herself, her persona. Empty: "ta
+    /// secrétaire".
+    pub name: String,
     pub models: Models,
     /// Added to, or replacing, the default `anthropic` and `local`.
     pub providers: BTreeMap<String, Provider>,
@@ -248,6 +257,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            name: String::new(),
             models: Models::default(),
             providers: default_providers(),
             triage: Triage::default(),

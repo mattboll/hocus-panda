@@ -617,7 +617,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         }
         if node.notebook == Notebook::Perso && notebook.is_none() {
             tags.push(Tag {
-                text: "perso".to_owned(),
+                text: w.t("privé", "private"),
                 tone: Tone::Perso,
             });
         }
@@ -989,7 +989,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         ),
         (
             Some(Kind::PersoFiles),
-            w.t("Dossiers perso", "Perso files"),
+            w.t("Dossiers privés", "Private files"),
             perso_files.len(),
         ),
     ];

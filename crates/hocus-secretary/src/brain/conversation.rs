@@ -139,8 +139,10 @@ impl Brain {
         }
         if matches!(client, Client::Shell | Client::Test) {
             self.greeted_speaking(conn);
-            // Her first run, once she knows her accounts (#750).
+            // Her first run, once she knows her accounts (#750); an account
+            // added since (#752).
             self.first_run_step();
+            self.new_accounts_step();
         }
     }
 
@@ -311,6 +313,7 @@ impl Brain {
             crate::triage::State::Paused { why, .. } if waiting > 0 => Some(*why),
             _ => None,
         };
+        let unreadable = self.unreadable_calendars();
         let (status, tone, hint) = if let Some(provider) = &self.key_missing {
             // Nothing she answers can be, without it.
             let name = if provider == "anthropic" {
@@ -323,7 +326,7 @@ impl Brain {
                     format!("Il me manque ma clé {name}"),
                     Tone::Warn,
                     format!(
-                        "Dans un terminal : hocus-secretary key {provider}, colle ta clé, puis Entrée."
+                        "Dans un terminal : hocus-secretary key {provider}, Entrée, puis colle ta clé."
                     ),
                 )
             } else {
@@ -331,7 +334,7 @@ impl Brain {
                     format!("I’m missing my {name} key"),
                     Tone::Warn,
                     format!(
-                        "In a terminal: hocus-secretary key {provider}, paste your key, then Enter."
+                        "In a terminal: hocus-secretary key {provider}, Enter, then paste your key."
                     ),
                 )
             }
@@ -372,6 +375,38 @@ impl Brain {
                 ),
             };
             (status, Tone::Warn, hint)
+        } else if !unreadable.is_empty() {
+            // Some calendars could not be read (#752): the others are.
+            let n = unreadable.len();
+            let names: Vec<&str> = unreadable.iter().map(|c| c.name.as_str()).collect();
+            let up: Vec<String> = self.slots.iter().map(|s| shown_source(&s.name)).collect();
+            let (status, hint) = if fr {
+                (
+                    format!(
+                        "{} à jour · {n} agenda{} illisible{}",
+                        up.join(" · "),
+                        if n > 1 { "s" } else { "" },
+                        if n > 1 { "s" } else { "" }
+                    ),
+                    format!(
+                        "Je n’arrive pas à lire : {}. Je réessaie à chaque passage ; tu peux les laisser de côté dans Réglages › Agents.",
+                        names.join(", ")
+                    ),
+                )
+            } else {
+                (
+                    format!(
+                        "{} up to date · {n} calendar{} unreadable",
+                        up.join(" · "),
+                        if n > 1 { "s" } else { "" }
+                    ),
+                    format!(
+                        "I can’t read: {}. I try again each time; you can leave them out in Settings › Agents.",
+                        names.join(", ")
+                    ),
+                )
+            };
+            (status, Tone::Warn, hint)
         } else if self.slots.is_empty() {
             (
                 self.talk
@@ -395,6 +430,8 @@ impl Brain {
             tone,
             model: self.model.as_ref().map(|m| m.shown()).unwrap_or_default(),
             hint,
+            key: self.key_missing.clone(),
+            name: self.settings.current().name.trim().to_owned(),
         }
     }
 
@@ -831,8 +868,8 @@ impl Brain {
                 }
                 let failed = if no_key {
                     self.talk.t(
-                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, tape « hocus-secretary key anthropic », colle ta clé, puis Entrée ; je la garde dans ton trousseau.",
-                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, type “hocus-secretary key anthropic”, paste your key, then Enter; I keep it in your keyring.",
+                        "Je n’ai pas pu te répondre : il me manque ma clé Anthropic. Dans un terminal, colle-la dans le champ en haut de mon tiroir, ou dans un terminal tape « hocus-secretary key anthropic », Entrée, puis colle ta clé ; je la garde dans ton trousseau.",
+                        "I couldn’t answer: I’m missing my Anthropic key. In a terminal, paste it in the field at the top of my drawer, or in a terminal type “hocus-secretary key anthropic”, Enter, then paste your key; I keep it in your keyring.",
                     )
                 } else {
                     self.talk.t(

@@ -25,6 +25,11 @@ use serde_json::{Map, Value as Json, json};
 use crate::clock::Clock;
 
 /// The schema's version, in `meta`.
+/// A row of `?1`'s, or of one of its parts (`?1#…`): what a source
+/// brought.
+pub(crate) const OF_SOURCE: &str =
+    " IS NOT NULL AND (source = ?1 OR substr(source, 1, length(?1) + 1) = ?1 || '#')";
+
 const SCHEMA: i64 = 2;
 
 /// What takes a memory from each version to the next: version 2 (lot 6)
@@ -898,15 +903,45 @@ impl Store {
     }
 
     /// Forgets everything a source brought (its consent revoked), and
-    /// where it was in its sync.
+    /// where it was in its sync: its parts too (`account_1:calendar#…`, a
+    /// calendar of it).
     pub fn forget_source(&mut self, source: &str) -> Result<()> {
-        let rows = self.rows_where("source = ?1", &[&source])?;
+        let rows = self.rows_where(&format!("source{OF_SOURCE}"), &[&source])?;
         self.purge(rows, "a source")?;
         self.conn
             .execute("DELETE FROM cursors WHERE source = ?1", [source])?;
         crate::day::forget_source(&self.conn, source)?;
         crate::kept::forget_source(&self.conn, source)?;
         Ok(())
+    }
+
+    /// What a source brought moves to `notebook` (« C'est privé » checked
+    /// or not on its row, #752), its parts too: its episodes, what was
+    /// learned from them, the day's records, the items waiting; the
+    /// summaries citing them are made again. How many rows moved.
+    pub fn refile_source(&mut self, source: &str, notebook: Notebook) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let mut moved = 0;
+        for table in ["nodes", "aliases", "edges", "rules", "episodes"] {
+            moved += tx.execute(
+                &format!(
+                    "UPDATE {table} SET notebook = ?2 WHERE source{OF_SOURCE} AND notebook <> ?2"
+                ),
+                params![source, notebook.word()],
+            )?;
+        }
+        tx.execute(
+            &format!(
+                "UPDATE summaries SET text = '', stale = 1 WHERE id IN (
+                    SELECT summary FROM summary_episodes JOIN episodes ON episodes.id = episode
+                    WHERE episodes.source{OF_SOURCE})"
+            ),
+            [source],
+        )?;
+        crate::day::refile_source(&tx, source, notebook)?;
+        crate::kept::refile_source(&tx, source, notebook)?;
+        tx.commit()?;
+        Ok(moved)
     }
 
     /// The items' rows matching `filter` in every table of items.

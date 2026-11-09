@@ -3,8 +3,10 @@
 //! (`HOCUS_SECRETARY_SOCKET`) and the bus whose keyring holds her memory's
 //! key (`HOCUS_SECRETARY_BUS`), and starts it again when it ends.
 //!
-//! `hocus-secretary key PROVIDER` keeps a provider's API key, read on
-//! standard input, in the keyring of that bus (§11.3).
+//! `hocus-secretary key PROVIDER` keeps a provider's API key in the
+//! keyring of that bus (§11.3): asked for on the terminal, never echoed
+//! (else read on standard input); never taken from its command line, which
+//! a shell's history keeps.
 
 use std::{
     os::unix::fs::DirBuilderExt,
@@ -88,9 +90,16 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Keeps PROVIDER's API key, read on standard input, in the keyring
-    /// of the bus (--bus or $HOCUS_SECRETARY_BUS).
-    Key { provider: String },
+    /// Keeps PROVIDER's API key in the keyring of the bus (--bus or
+    /// $HOCUS_SECRETARY_BUS): pasted once it asks, never echoed (or read on
+    /// standard input).
+    Key {
+        provider: String,
+        /// A key put on the command line by mistake: refused, never
+        /// printed back.
+        #[arg(hide = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        extra: Vec<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -103,7 +112,14 @@ fn main() -> ExitCode {
         .init();
     let args = Args::parse();
     let ran = match &args.command {
-        Some(Command::Key { provider }) => keep_key(&args, provider),
+        Some(Command::Key { provider, extra }) => {
+            if !extra.is_empty() || key::looks_like_a_key(provider) {
+                // Never the argument itself: it may be the key.
+                eprintln!("{}", key::ON_THE_LINE);
+                return ExitCode::FAILURE;
+            }
+            keep_key(&args, provider)
+        }
         None => run(args),
     };
     match ran {
@@ -237,8 +253,9 @@ fn run(args: Args) -> Result<(), String> {
     Ok(())
 }
 
-/// `hocus-secretary key PROVIDER`: the key on standard input, into the
-/// keyring; never echoed, never in a file.
+/// `hocus-secretary key PROVIDER`: the key asked for on the terminal (or
+/// read on standard input), into the keyring; never echoed, never in a
+/// file.
 fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let bus = args
@@ -249,15 +266,18 @@ fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
             "no keyring known: run it in a terminal of the Hocuspanda session \
              (which sets HOCUS_SECRETARY_BUS), or give --bus session",
         )?;
-    let mut secret = String::new();
-    std::io::stdin()
-        .read_line(&mut secret)
-        .map_err(|e| format!("standard input: {e}"))?;
-    let secret = secret.trim();
+    let fr = Language::of_env() == Language::French;
+    let mut read =
+        key::read_secret(&key::prompt(provider, fr)).map_err(|e| format!("standard input: {e}"))?;
+    let secret = read.trim().to_owned();
+    key::wipe(&mut read);
     if secret.is_empty() {
         return Err("no key on standard input".to_owned());
     }
-    if key::keep_provider_key(&bus, provider, secret) {
+    let mut secret = secret;
+    let kept = key::keep_provider_key(&bus, provider, &secret);
+    key::wipe(&mut secret);
+    if kept {
         tracing::info!(provider, "the key is in the keyring");
         println!("The {provider} key is in your keyring: she reads it at her next answer.");
         Ok(())

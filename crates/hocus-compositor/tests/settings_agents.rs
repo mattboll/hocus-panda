@@ -65,6 +65,77 @@ struct Machine {
     /// the Settings take for the session's): a company's and a gmail.com
     /// one.
     google: bool,
+    /// Her socket, a fake of the test's (#752): her key missing until one
+    /// is given, `sk-ant-good` taken, any other refused.
+    her: bool,
+}
+
+/// What the fake secretary was given: each key line's key (none: erase).
+type Given = std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>;
+
+/// Her socket at `path`, faked: hello, her status (her key missing or
+/// not), and her key given or erased.
+fn fake_her(path: &Path, given: Given) -> anyhow::Result<()> {
+    use hocus_secretary_link::{FromSecretary, KeyOutcome, Status, ToSecretary, line, read};
+    let listener = UnixListener::bind(path)?;
+    let missing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let (given, missing) = (given.clone(), missing.clone());
+            std::thread::spawn(move || {
+                let Ok(reader) = stream.try_clone() else {
+                    return;
+                };
+                let mut out = stream;
+                for text in BufReader::new(reader).lines() {
+                    let Ok(text) = text else {
+                        return;
+                    };
+                    let answer = match read::<ToSecretary>(&text) {
+                        Ok(ToSecretary::Hello { .. }) => FromSecretary::Hello {
+                            version: hocus_secretary_link::VERSION,
+                        },
+                        Ok(ToSecretary::Status { id }) => FromSecretary::Status {
+                            id,
+                            status: Box::new(Status {
+                                key_provider: Some("anthropic".to_owned()),
+                                key_missing: missing.load(std::sync::atomic::Ordering::SeqCst),
+                                ..Status::default()
+                            }),
+                        },
+                        Ok(ToSecretary::Key { id, provider, key }) => {
+                            let key = key.map(|k| k.expose().to_owned());
+                            let outcome = match key.as_deref() {
+                                None => {
+                                    missing.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    KeyOutcome::Erased
+                                }
+                                Some("sk-ant-good") => {
+                                    missing.store(false, std::sync::atomic::Ordering::SeqCst);
+                                    KeyOutcome::Kept
+                                }
+                                Some(_) => KeyOutcome::Refused,
+                            };
+                            given
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .push(key);
+                            FromSecretary::Keyed {
+                                id,
+                                provider,
+                                outcome,
+                            }
+                        }
+                        _ => continue,
+                    };
+                    if out.write_all(line(&answer).as_bytes()).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    Ok(())
 }
 
 struct Bed {
@@ -75,6 +146,8 @@ struct Bed {
     hocus: PathBuf,
     _herdr: Option<std::thread::JoinHandle<()>>,
     _google: Option<(fakes::FakeGoa, fakes::PrivateBus)>,
+    /// What her fake socket was given.
+    given: Given,
 }
 
 /// A fake herdr on `socket`: one workspace, one tab, one Claude Code
@@ -205,10 +278,21 @@ impl Bed {
         } else {
             None
         };
-        let session_bus = google.as_ref().map_or_else(
+        let mut session_bus = google.as_ref().map_or_else(
             || "unset DBUS_SESSION_BUS_ADDRESS".to_owned(),
             |(_, bus)| format!("export DBUS_SESSION_BUS_ADDRESS='{}'", bus.address),
         );
+        let given = Given::default();
+        let her = root.join("her.sock");
+        if machine.her {
+            fake_her(&her, given.clone())?;
+        }
+        // Her socket: the fake, or one where nothing listens.
+        session_bus.push_str(&format!(
+            "\nexport {}='{}'",
+            hocus_secretary_link::SOCKET_ENV,
+            her.display()
+        ));
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
         let at = |sub: &str| root.join(sub).display().to_string();
@@ -266,6 +350,7 @@ impl Bed {
             hocus,
             _herdr: herdr,
             _google: google,
+            given,
         }))
     }
 
@@ -844,9 +929,15 @@ fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() 
 
     bed.click("notifier:signal")?;
     bed.shows(|s| s["agents"]["notify"] == "Signal")?;
-    bed.click("sheet:perso")?;
+    // « C'est privé » checked (#752).
+    bed.click("sheet:private")?;
     bed.shows(|s| s["agents"]["notify_notebook"] == "perso")?;
     bed.click("sheet:allow")?;
+    bed.shows(|s| notifier(s, "signal")["granted"] == "perso")?;
+    // Unchecked later on its row: work, still read.
+    bed.click("notifier-private:signal")?;
+    bed.shows(|s| notifier(s, "signal")["granted"] == "pro")?;
+    bed.click("notifier-private:signal")?;
     bed.shows(|s| notifier(s, "signal")["granted"] == "perso")?;
 
     bed.click("notifier:slack")?;
@@ -857,7 +948,11 @@ fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() 
         book.notifications("Signal", None).map(|g| g.notebook()),
         Some(hocus_secretary_link::Notebook::Perso)
     );
-    assert_eq!(book.records().len(), 3, "a revocation is a later record");
+    assert_eq!(
+        book.records().len(),
+        5,
+        "a revocation, a notebook changed: later records"
+    );
     Ok(())
 }
 
@@ -941,6 +1036,11 @@ fn each_google_account_s_kind_is_consented_on_its_sheet() -> anyhow::Result<()> 
         .expect("granted");
     assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
     assert_eq!(grant.identity(), WORK);
+    // « Privé » checked on its row later (#752): a new record, perso.
+    bed.click(&format!("private:{work_calendar}"))?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "perso")?;
+    bed.click(&format!("private:{work_calendar}"))?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "pro")?;
 
     bed.click(&format!("google:{work_calendar}"))?;
     bed.shows(|s| google(s, &work_calendar)["granted"].is_null())?;
@@ -1175,5 +1275,220 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     none.open()?;
     none.shows(|s| s["agents"]["none"] == true)?;
     save(&mut none, &out, "agents-none.png")?;
+    Ok(())
+}
+
+/// Her key in the Settings (#752): « Clé Anthropic », a masked field while
+/// she misses it; « Enregistrer » gives it to her over her socket, which
+/// says it refused or kept; kept, « Enregistrée » with « Remplacer » and
+/// « Effacer », never the key; « Effacer » erases it. The key in no log.
+#[test]
+fn her_key_is_given_through_her_and_never_shown() -> anyhow::Result<()> {
+    const KEY_S: u32 = 31;
+    const KEY_K: u32 = 37;
+    const KEY_MINUS: u32 = 12;
+    const KEY_A: u32 = 30;
+    const KEY_N: u32 = 49;
+    const KEY_T: u32 = 20;
+    const KEY_G: u32 = 34;
+    const KEY_O: u32 = 24;
+    const KEY_D: u32 = 32;
+    const KEY_X: u32 = 45;
+    const KEY_ENTER: u32 = 28;
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        her: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| s["agents"]["key"]["field"] == true)?;
+    assert_eq!(shown["agents"]["key"]["kept"], false);
+    let shots = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from);
+    if let Some(out) = &shots {
+        std::fs::create_dir_all(out)?;
+        bed.reveal("row:agents.key")?;
+        save(&mut bed, out, "settings-key-missing.png")?;
+    }
+    let prefix = [KEY_S, KEY_K, KEY_MINUS, KEY_A, KEY_N, KEY_T, KEY_MINUS];
+    bed.click("agents:key-field")?;
+    for code in prefix.iter().chain(&[KEY_X, KEY_X]) {
+        bed.key(*code)?;
+    }
+    bed.shows(|s| s["agents"]["key"]["typed"] == true)?;
+    bed.key(KEY_ENTER)?;
+    let shown = bed.shows(|s| s["agents"]["key"]["said"].is_string())?;
+    assert_eq!(shown["agents"]["key"]["said"], "Clé refusée par Anthropic.");
+    assert_eq!(shown["agents"]["key"]["typed"], false, "the field emptied");
+    bed.click("agents:key-field")?;
+    for code in prefix.iter().chain(&[KEY_G, KEY_O, KEY_O, KEY_D]) {
+        bed.key(*code)?;
+    }
+    bed.shows(|s| s["agents"]["key"]["typed"] == true)?;
+    bed.click("agents:key-save")?;
+    bed.shows(|s| s["agents"]["key"]["kept"] == true && s["agents"]["key"]["field"] == false)?;
+    if let Some(out) = &shots {
+        bed.reveal("row:agents.key")?;
+        save(&mut bed, out, "settings-key-kept.png")?;
+    }
+    bed.click("agents:key-erase")?;
+    bed.shows(|s| s["agents"]["key"]["kept"] == false)?;
+    let given = bed
+        .given
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert_eq!(
+        given,
+        [
+            Some("sk-ant-xx".to_owned()),
+            Some("sk-ant-good".to_owned()),
+            None
+        ]
+    );
+    let log = common::logged(&bed.log);
+    assert!(
+        !log.contains("sk-ant-xx") && !log.contains("sk-ant-good"),
+        "the key in no log"
+    );
+    Ok(())
+}
+
+/// Her name (#752): a field in LA SECRÉTAIRE, « Ta secrétaire » greyed
+/// while empty; typed and `Enter`, `[secretary] name` written.
+#[test]
+fn her_name_is_typed_in_its_field_and_written() -> anyhow::Result<()> {
+    const KEY_M: u32 = 50;
+    const KEY_A: u32 = 30;
+    const KEY_R: u32 = 19;
+    const KEY_G: u32 = 34;
+    const KEY_O: u32 = 24;
+    const KEY_T: u32 = 20;
+    const KEY_ENTER: u32 = 28;
+    const KEY_LEFTSHIFT: u32 = 42;
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| s["agents"]["name"].is_string())?;
+    assert_eq!(shown["agents"]["name"], "");
+    bed.click("agents:name-field")?;
+    bed.hp.key(KEY_LEFTSHIFT, true);
+    bed.key(KEY_M)?;
+    bed.hp.key(KEY_LEFTSHIFT, false);
+    for code in [KEY_A, KEY_R, KEY_G, KEY_O, KEY_T] {
+        bed.key(code)?;
+    }
+    bed.shows(|s| s["agents"]["naming"] == "Margot")?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        std::fs::create_dir_all(&out)?;
+        save(&mut bed, &out, "settings-name.png")?;
+    }
+    bed.key(KEY_ENTER)?;
+    bed.written(|t| t.contains("name = \"Margot\""))?;
+    bed.shows(|s| s["agents"]["name"] == "Margot" && s["agents"]["naming"].is_null())?;
+    Ok(())
+}
+
+/// #752: the Agenda's sheet lists the calendars she will read (as she
+/// listed them, in her folder): who shares one, hidden ones; one left out
+/// there is written with the consent; on the granted row, each can be
+/// left out again or taken back. Under the Google rows, « Ajouter un
+/// compte Google » when GNOME's Online Accounts panel is installed.
+#[test]
+fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
+    const WORK: &str = "alex@atelier-lune.fr";
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        google: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    // Her list of the work account's calendars (the fake's id is the
+    // e-mail).
+    let list = serde_json::json!({ WORK: [
+        {"id": WORK, "name": "Travail"},
+        {"id": "design@group.calendar.google.com", "name": "Équipe design", "shared_by": "lea@atelier-lune.fr"},
+        {"id": "claire@atelier-lune.fr", "name": "Claire Dubois", "shared_by": "claire@atelier-lune.fr", "busy_only": true},
+        {"id": "famille@group.calendar.google.com", "name": "Famille", "shared": true, "hidden": true},
+    ]});
+    let her = bed.root().join("data/hocuspanda/secretary");
+    std::fs::create_dir_all(&her)?;
+    std::fs::write(her.join("calendars.json"), list.to_string())?;
+    // GNOME's panel, a fake on the Settings' PATH that says how it ran.
+    let ran = bed.root().join("panel-ran");
+    let panel = bed.root().join("bin/gnome-control-center");
+    std::fs::write(
+        &panel,
+        format!("#!/bin/sh\necho \"$@\" > '{}'\n", ran.display()),
+    )?;
+    std::fs::set_permissions(&panel, std::fs::Permissions::from_mode(0o755))?;
+    bed.open()?;
+    let work_calendar = format!("{WORK}:calendar");
+    bed.shows(|s| s["agents"]["add_account"] == true)?;
+    bed.click("agents:add-google")?;
+    let opened = bed.hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&ran).is_ok_and(|t| t.trim() == "online-accounts")
+    })?;
+    anyhow::ensure!(opened, "the panel never ran");
+    let shown = bed.shows(|s| {
+        google(s, &work_calendar)["calendars"]
+            .as_array()
+            .is_some_and(|c| c.len() == 4)
+    })?;
+    assert_eq!(
+        google(&shown, &work_calendar)["calendars"],
+        serde_json::json!([
+            "Travail",
+            "Équipe design partagé par lea@atelier-lune.fr",
+            "Claire Dubois partagé par claire@atelier-lune.fr · ses heures occupées seulement",
+            "Famille partagé · masqué",
+        ])
+    );
+    bed.click(&format!("google:{work_calendar}"))?;
+    bed.shows(|s| s["agents"]["google_sheet"] == work_calendar.as_str())?;
+    bed.click("sheet:calendar:3")?;
+    bed.shows(|s| {
+        s["agents"]["google_left_out"] == serde_json::json!(["famille@group.calendar.google.com"])
+    })?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        std::fs::create_dir_all(&out)?;
+        save(&mut bed, &out, "settings-agenda-sheet.png")?;
+    }
+    bed.click("sheet:allow")?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "pro")?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    let source = hocus_secretary_link::consent::SourceKey::new(
+        WORK,
+        hocus_secretary_link::consent::SourceKind::Calendar,
+    );
+    assert_eq!(
+        book.grant(&source).expect("granted").left_out(),
+        ["famille@group.calendar.google.com"]
+    );
+    // On its row: Équipe design left out too, Famille taken back.
+    bed.click(&format!("calendar:{work_calendar}:1"))?;
+    bed.shows(|s| {
+        google(s, &work_calendar)["left_out"]
+            .as_array()
+            .is_some_and(|l| l.len() == 2)
+    })?;
+    bed.click(&format!("calendar:{work_calendar}:3"))?;
+    bed.shows(|s| {
+        google(s, &work_calendar)["left_out"]
+            == serde_json::json!(["design@group.calendar.google.com"])
+    })?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        bed.reveal(&format!("row:agents.google.{work_calendar}"))?;
+        save(&mut bed, &out, "settings-agenda-row.png")?;
+    }
     Ok(())
 }

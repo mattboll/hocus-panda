@@ -57,6 +57,18 @@ fn verdict(seen: &Seen) -> serde_json::Value {
 fn local() -> Fake {
     Fake::start(|seen, _| match seen.path.as_str() {
         "/v1/chat/completions" => Answer::json(&verdict(seen)),
+        // Ollama's own API (#752): the same verdict, as it says it.
+        "/api/chat" => {
+            let v = verdict(seen);
+            Answer::json(&json!({
+                "message": v["choices"][0]["message"],
+                "prompt_eval_count": v["usage"]["prompt_tokens"],
+                "eval_count": v["usage"]["completion_tokens"],
+            }))
+        }
+        "/api/ps" => Answer::json(&json!({"models": [
+            {"name": "qwen3:8b", "model": "qwen3:8b", "size": 11_000_000_000_u64, "size_vram": 7_150_000_000_u64}
+        ]})),
         "/api/generate" => Answer::json(&json!({"done": true})),
         _ => Answer::status(404, "{}"),
     })
@@ -221,10 +233,7 @@ fn a_consented_application_s_notification_goes_through_redaction_and_the_triage(
     s.driver.advance(60);
     s.driver.until("checked", |st| triage(st).done == 1);
     let triaged = s.local.seen();
-    let triaged: Vec<&Seen> = triaged
-        .iter()
-        .filter(|r| r.path == "/v1/chat/completions")
-        .collect();
+    let triaged: Vec<&Seen> = triaged.iter().filter(|r| r.path == "/api/chat").collect();
     assert_eq!(triaged.len(), 1);
     assert!(
         triaged[0].body.contains("Notification"),
@@ -256,7 +265,7 @@ fn a_consented_application_s_notification_goes_through_redaction_and_the_triage(
     }
     for seen in s.local.seen() {
         assert!(
-            ["/v1/chat/completions", "/api/generate"].contains(&seen.path.as_str()),
+            ["/api/chat", "/api/ps", "/api/generate"].contains(&seen.path.as_str()),
             "{}",
             seen.path
         );
