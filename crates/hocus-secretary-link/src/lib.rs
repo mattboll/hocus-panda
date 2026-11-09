@@ -61,6 +61,11 @@
 //! a consent sheet's "C'est privé" and the calendars it lists
 //! ([`sheets::Sheet`]), and the calendars left out of a consent card's
 //! "Autoriser" ([`ToSecretary::Decide`]'s `left_out`).
+//!
+//! **Version 7** brings #754: her triage queue shown in the drawer
+//! ([`ToSecretary::Queue`], answered and sent again while open by
+//! [`FromSecretary::Queue`], [`queue`]) and a sender's items set aside or
+//! brought back ([`ToSecretary::QueueAct`]).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -77,11 +82,12 @@ pub mod gate;
 #[cfg(feature = "goa")]
 pub mod goa;
 pub mod knows;
+pub mod queue;
 pub mod sheets;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -439,6 +445,11 @@ pub enum ToSecretary {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         key: Option<Secret>,
     },
+    /// Her triage queue (#754): the view, sent again while it changes;
+    /// `open: false` stops it (the view left, the drawer closed).
+    Queue { id: u64, open: bool },
+    /// Something done on the queue's view: answered by the view again.
+    QueueAct { id: u64, act: queue::Act },
     /// Effect `effect` carried out by the shell (`ok`), or not, and why.
     Effected {
         effect: u64,
@@ -601,6 +612,12 @@ pub enum FromSecretary {
         id: u64,
         view: Box<knows::Knowledge>,
     },
+    /// Her triage queue for the connection's last [`ToSecretary::Queue`],
+    /// `id` that request's.
+    Queue {
+        id: u64,
+        view: Box<queue::View>,
+    },
     /// A short word at the bottom of the tab for five seconds ("Oublié"),
     /// with "Annuler" when `undo` is a token to give back
     /// ([`knows::Do::Restore`]).
@@ -654,6 +671,7 @@ impl FromSecretary {
             | Self::Typing { id, .. }
             | Self::Thread { id, .. }
             | Self::Knows { id, .. }
+            | Self::Queue { id, .. }
             | Self::Toast { id, .. }
             | Self::Keyed { id, .. } => Some(*id),
             Self::Error { id, .. } => *id,
@@ -1065,6 +1083,9 @@ pub struct TriageStatus {
     /// carte graphique », « tri : en partie sur le processeur » (#752).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placement: Option<String>,
+    /// Items set aside, not triaged unless asked about (#754).
+    #[serde(default)]
+    pub set_aside: u64,
 }
 
 /// How many of each her memory holds.
@@ -1293,7 +1314,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":6,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":7,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });

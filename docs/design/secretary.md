@@ -2405,3 +2405,99 @@ The maintainer's feedback after installing sprint 11.
   private item within the work notebook's working hours); the caret is
   steady, as every field of the shell's, rather than blinking.
 
+
+### #754: the triage queue shown, senders set aside, birthdays read
+
+The maintainer saw « le tri attend · 987 en attente » with no way to know
+what waited, at about 39 s an item on the laptop. The order is not
+changed: the queue is shown, and what need not be triaged can be set
+aside.
+
+- **The queue shown** (protocol 7, `hocus_secretary_link::queue`): her
+  status line in the drawer's header is a link (a chevron after it); a
+  click unfolds her queue in place of the thread (`ToSecretary::Queue
+  {open}`), "‹ Discussion" or the status again folds it. She sends the
+  view whole (`FromSecretary::Queue`), made from what her loop holds (the
+  queue and the items held), no read of her memory and no request: what
+  she does (« Je trie », « Je souffle entre deux », « En pause », « Rien à
+  trier »), the counts (« 21 en attente · 1 trié · 11 mis de côté »), the
+  local model, the item read now (EN COURS: its sender, subject, source
+  and date), the pace measured over the last ten requests with the rest
+  between two (« ≈ 41 s par élément ») and the time left at that pace
+  (« encore ≈ 14 min »), the pause and its reason (« L’ordinateur chauffe
+  (97 °C) : je reprends sous 95 °C. », on battery with the threshold, the
+  local model not answering), what slows it (Ollama's `/api/ps`: « Le
+  modèle tourne en partie sur le processeur »), then EN ATTENTE by sender
+  (a mail's address, an application's name, a calendar), the most first,
+  forty at most and the rest summed up, each with its count (amber when
+  sent by a machine) and its small line (« Gmail · envoyé par une machine ·
+  X-GitHub-Reason »), and MIS DE CÔTÉ. Sent again after each event that
+  changes it, only while open and only when it changed; closed (the view
+  left, the tab changed, the drawer closed), nothing. Of an item it never
+  says more than its sender, subject (through the first pass) and date.
+  Where the model is held is now asked on the triage's thread after each
+  request, never on her loop (her status read it there before).
+- **Set aside** (`learn::Compiled::Aside {sender}`, an address, or a
+  domain for all its addresses): « Ne pas trier, chercher si besoin » on a
+  mail sender's group writes the rule (told, « les mails de X : pas
+  triés, cherchés si besoin »), shown in « Ce qu’elle sait » › RÈGLES and
+  under Gmail in SES OUTILS. Its waiting items leave the queue and wait
+  apart (`triage::Queue`'s set aside), its later ones too: they keep their
+  episode (sender, subject, date: found by retrieval), their text stays
+  held, encrypted on disk as before, for the triage; until checked, only
+  their metadata leaves (fail closed, unchanged). A question whose
+  retrieval names one puts it first in the queue (`Queue::first`): it is
+  triaged next, and her next answer has it. The rules are read again
+  after each line of a connection: « N’est plus vrai » or « Oublier » in
+  « Ce qu’elle sait » (or its toast's « Annuler »), or « Trier quand même »
+  on the group in MIS DE CÔTÉ (which ends the rule today), brings its
+  items back at the queue's end. Kept across a restart: the items waiting
+  come back and the rule sets them aside again.
+- **Her proposal** (`learn::Noticed::Automated`, lot 6's observations):
+  a mail says which header shows it was sent by a machine
+  (`hocus_sources::mail::automated`: `X-GitHub-Reason`, any `X-GitLab-*`,
+  `Auto-Submitted` other than `no`, `List-Unsubscribe`, `List-Id`,
+  `Precedence: bulk|list|junk`, a no-reply address), the name of the
+  header only. The IMAP fetch already kept the whole header
+  (`BODY.PEEK[HEADER]` or the message's start); nothing more is fetched.
+  After each sync, a sender with three such mails waiting or more is asked
+  about once, the most first, one question at a time: «
+  notifications@github.com : 12 mails attendent le tri, envoyés par une
+  machine. Je ne les trie pas, et je les cherche si besoin ? », « Vu à «
+  X-GitHub-Reason ». … » (Oui · Non · Plus tard). « Oui » is the rule
+  (inferred, accepted); « Non » is never asked again; the view's button
+  on that sender answers her question « Oui ». Fixture mails take
+  `mail.headers`.
+- **Birthdays**: Google's CardDAV implements only `addressbook-multiget`
+  and `sync-collection` reports (developers.google.com/people/carddav);
+  the `addressbook-query` REPORT sent until now is answered `400`, which
+  is what the Workspace account logged. Now, as Google's guide does it: a
+  `PROPFIND` of depth 1 on `…/principals/EMAIL/lists/default/` lists the
+  cards (`getetag`), then `addressbook-multiget` REPORTs ask for them a
+  hundred at a time, whole (`address-data` without `prop` filters); the
+  birthdays and anniversaries are read and the rest dropped as before.
+  The token's scope was not the cause: a token without CardDAV's scope is
+  answered `401`, naming the scopes it allows, not `400`; Online Accounts'
+  Google provider has asked for `https://www.googleapis.com/auth/carddav`
+  since GNOME 3.10. So the People API is not needed.
+- **Tests**: `hocus-secretary/tests/queue.rs` (the view: the item now,
+  the groups by count, never an item's text; the pace after 39 s and the
+  time left; her proposal with its count and header; « Ne pas trier »
+  from the view answering it, the rule in « Ce qu’elle sait », an item
+  asked about triaged first; the rule ended there bringing the items
+  back; « Trier quand même »; nothing sent once closed; set aside across
+  a restart; the pause for heat and for a model that does not answer),
+  `hocus-sources/tests/sources.rs` (the fake CardDAV answers as Google:
+  `400` to the old `addressbook-query`, the cards to `PROPFIND` then
+  `addressbook-multiget`), unit tests of the headers, the queue's set
+  aside and pace, a rule covering an address or a domain; and
+  `hocus-compositor/tests/secretary_queue.rs` with the real shell and her
+  process (her proposal in the thread, the status clicked, the groups, the
+  pace, « Ne pas trier » and « Trier quand même » clicked, the pause, back
+  to the thread). `HOCUS_DRAWER_SHOTS=DIR` leaves `queue-proposal`,
+  `queue-view`, `queue-set-aside` and `queue-paused`.
+- **To confirm**: an item asked about is triaged first, but the answer
+  under way does not wait for it (39 s); groups are by address (a domain
+  rule is possible in the rule, not offered in the view); the button
+  shows on every mail sender's group, people included; three machine
+  mails waiting make a sender worth asking about.

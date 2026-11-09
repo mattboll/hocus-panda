@@ -61,6 +61,61 @@ fn sender_name(list: Option<AddressList<'_>>) -> String {
         .unwrap_or_else(|| "inconnu".to_owned())
 }
 
+/// Why a mail looks sent by a machine, from its header fields and its
+/// sender (#754): a mailing list or a newsletter (`List-Unsubscribe`,
+/// `List-Id`, `Precedence: bulk` or `list`), an automatic answer or
+/// notification (`Auto-Submitted` other than `no`), a forge's
+/// (`X-GitHub-Reason`, any `X-GitLab-*`), a no-reply address. The name of
+/// what says so, never its value; none for a person's mail.
+pub fn automated<'a>(
+    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
+    from: &str,
+) -> Option<String> {
+    let mut found: Option<(u8, String)> = None;
+    let mut keep = |rank: u8, word: String| {
+        if found.as_ref().is_none_or(|(r, _)| rank < *r) {
+            found = Some((rank, word));
+        }
+    };
+    for (name, value) in headers {
+        let lower = name.to_ascii_lowercase();
+        let value = value.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "x-github-reason" => keep(0, "X-GitHub-Reason".to_owned()),
+            n if n.starts_with("x-gitlab-") => keep(1, name.to_owned()),
+            "auto-submitted" if !value.is_empty() && value != "no" => {
+                keep(2, format!("Auto-Submitted: {value}"));
+            }
+            "list-unsubscribe" => keep(3, "List-Unsubscribe".to_owned()),
+            "list-id" => keep(4, "List-Id".to_owned()),
+            "precedence" if matches!(value.as_str(), "bulk" | "list" | "junk") => {
+                keep(5, format!("Precedence: {value}"));
+            }
+            _ => {}
+        }
+    }
+    let address = from
+        .rsplit_once('<')
+        .map_or(from, |(_, a)| a.trim_end_matches('>'))
+        .trim()
+        .to_ascii_lowercase();
+    let local = address.split('@').next().unwrap_or_default();
+    let machine = local.replace(['-', '_', '.'], "");
+    if [
+        "noreply",
+        "donotreply",
+        "notification",
+        "notifications",
+        "mailerdaemon",
+    ]
+    .iter()
+    .any(|w| machine == *w || machine.starts_with("noreply"))
+    {
+        keep(6, "no-reply".to_owned());
+    }
+    found.map(|(_, word)| word)
+}
+
 /// Where a mail is, at its source.
 #[derive(Debug, Clone)]
 pub struct Place<'a> {
@@ -110,6 +165,20 @@ pub fn item(grant: &Grant, place: &Place<'_>, raw: &[u8], zone: &jiff::tz::TimeZ
             .attachments()
             .map(|a| a.attachment_name().unwrap_or("pièce jointe").to_owned())
             .collect();
+        let headers: Vec<(String, String)> = message
+            .headers()
+            .iter()
+            .map(|h| {
+                (
+                    h.raw_name().to_owned(),
+                    String::from_utf8_lossy(h.raw_value()).trim().to_owned(),
+                )
+            })
+            .collect();
+        mail.automated = automated(
+            headers.iter().map(|(n, v)| (n.as_str(), v.as_str())),
+            &mail.from,
+        );
     }
     let at = at.unwrap_or(Timestamp::UNIX_EPOCH);
     let day = short_date(at.to_zoned(zone.clone()).date());
@@ -139,6 +208,60 @@ pub fn item(grant: &Grant, place: &Place<'_>, raw: &[u8], zone: &jiff::tz::TimeZ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_machine_s_mail_says_why_and_a_person_s_does_not() {
+        let raw = b"From: GitHub <notifications@github.com>\r\nTo: alex@example.org\r\nSubject: [hocus] Re: the drawer (#754)\r\nList-Unsubscribe: <https://github.com/notifications/unsubscribe/XYZ>\r\nX-GitHub-Reason: subscribed\r\nPrecedence: list\r\n\r\nA comment.\r\n";
+        let source = crate::SourceKey::new("account_1", crate::SourceKind::Mail);
+        let mut book = crate::consent::ConsentBook::default();
+        book.allow(
+            source.clone(),
+            "alex@example.org",
+            crate::Notebook::Pro,
+            Timestamp::UNIX_EPOCH,
+        );
+        let grant = book.grant(&source).expect("a grant");
+        let place = Place {
+            mailbox: "INBOX",
+            sent: false,
+            uidvalidity: 1,
+            uid: 7,
+            gmail_id: None,
+            seen: false,
+            internal_date: None,
+        };
+        let zone = jiff::tz::TimeZone::UTC;
+        let Content::Mail(mail) = item(&grant, &place, raw, &zone).content else {
+            panic!("a mail");
+        };
+        assert_eq!(mail.automated.as_deref(), Some("X-GitHub-Reason"));
+        let person = b"From: =?utf-8?q?L=C3=A9a?= <lea@atelier-lune.fr>\r\nSubject: Le devis\r\n\r\nTu peux regarder ?\r\n";
+        let Content::Mail(mail) = item(&grant, &place, person, &zone).content else {
+            panic!("a mail");
+        };
+        assert_eq!(mail.automated, None);
+        assert_eq!(
+            automated([("X-GitLab-Project", "hocus")], "gitlab@git.example.org").as_deref(),
+            Some("X-GitLab-Project")
+        );
+        assert_eq!(
+            automated([("Auto-Submitted", "auto-generated")], "a@b.c").as_deref(),
+            Some("Auto-Submitted: auto-generated")
+        );
+        assert_eq!(automated([("Auto-Submitted", "no")], "a@b.c"), None);
+        assert_eq!(
+            automated([], "Free <no-reply@free.example>").as_deref(),
+            Some("no-reply")
+        );
+        assert_eq!(
+            automated([], "noreply-billing@example.org").as_deref(),
+            Some("no-reply")
+        );
+        assert_eq!(
+            automated([("Precedence", "first-class")], "léa@example.org"),
+            None
+        );
+    }
 
     #[test]
     fn short_dates_are_french() {

@@ -13,6 +13,7 @@
 //! change (`the drawer shows`, `the drawer's items`): the tests read them.
 
 mod knows;
+mod queue;
 
 use std::time::Instant;
 
@@ -464,6 +465,18 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     );
     laid.targets.push((Target::Gear, gear));
     laid.targets.push((Target::Close, close));
+    // Her status line: her triage queue unfolds (#754).
+    if line == Her::Ready && look.is_some() && open.tab == Tab::Talk {
+        let x = laid.head.x + HEAD + HEAD_GAP;
+        let y = laid.head.center_y() + 11.0 - 9.0;
+        laid.targets.push((
+            Target::Status,
+            Rectangle::new(
+                Point::new(x, y),
+                Size::new((gear.x - 8.0 - x).max(0.0), 18.0),
+            ),
+        ));
+    }
     // How to fix what her status says: a band under her header.
     let mut tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
     if let Some(provider) = look.as_ref().and_then(|l| l.key.clone())
@@ -576,6 +589,17 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     );
     let mut said_items = Vec::new();
     match (open.tab, open.briefing) {
+        (Tab::Talk, _) if open.queue => {
+            queue::lay_out(
+                &mut laid,
+                open,
+                c.queue.as_deref(),
+                words,
+                top,
+                right,
+                &mut said_items,
+            );
+        }
         (Tab::Talk, _) if open.point.is_some() => {
             let point = open.point.unwrap_or_default();
             lay_out_point(
@@ -620,6 +644,7 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "tab": match open.tab { Tab::Talk => "talk", Tab::Knows => "knows" },
         "briefing": open.briefing,
         "point": open.point,
+        "queue": open.queue,
         "moment": format!("{:?}", crate::speak::moment()).to_lowercase(),
         "agents": laid.agents.as_ref().map(|(_, text, n, _)| format!("{text} | {n}")),
         "items": said_items,
@@ -2659,15 +2684,37 @@ impl View {
             - DOT
             - 6.0
             - 8.0;
+        // Clickable: a chevron after it, brighter under the pointer (#754).
+        let clickable = laid.targets.iter().any(|(t, _)| *t == Target::Status);
+        let chevron = if open.queue { " ‹" } else { " ›" };
+        let room = if clickable {
+            room - width_of(chevron, STATUS, true)
+        } else {
+            room
+        };
         let status = crate::popover::kit::elide(&laid.status, room, |s| width_of(s, STATUS, false));
+        let hover = open.hover == Some(Target::Status);
         f.fill_text(text(
             &status,
             Point::new(text_x + DOT + 6.0, status_y),
             STATUS,
-            DIM,
+            if hover { TEXT } else { DIM },
             false,
             Alignment::Left,
         ));
+        if clickable {
+            f.fill_text(text(
+                chevron,
+                Point::new(
+                    text_x + DOT + 6.0 + width_of(&status, STATUS, false),
+                    status_y,
+                ),
+                STATUS,
+                if hover { MINT } else { FAINT },
+                true,
+                Alignment::Left,
+            ));
+        }
         for (target, rect) in &laid.targets {
             if !matches!(target, Target::Gear | Target::Close) {
                 continue;
@@ -3374,6 +3421,7 @@ mod tests {
             typing: Some((2, String::new())),
             look: None,
             knows: None,
+            queue: None,
             toast: None,
             key_asked: None,
             key_said: None,

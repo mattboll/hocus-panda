@@ -800,12 +800,25 @@ fn the_triage_s_facts_are_proposals_with_their_source() -> anyhow::Result<()> {
     ])));
     let mut driver = common::Driver::start(store, options);
     driver.settle();
-    // The triage runs; Julie, unknown, is asked about.
-    let asked = until(
-        &driver,
-        |l| matches!(l, FromSecretary::Item { item } if matches!(&item.body, Body::Question { text, .. } if text.contains("Julie Berthier"))),
-    );
-    assert!(!asked.is_empty());
+    // The triage runs; Julie, unknown, is asked about (in her thread: the
+    // item itself may come while `settle` waits for her status).
+    let start = std::time::Instant::now();
+    loop {
+        let thread = match driver.request(|id| ToSecretary::Thread { id }) {
+            FromSecretary::Thread { items, .. } => items,
+            other => panic!("not her thread: {other:?}"),
+        };
+        if thread.iter().any(
+            |i| matches!(&i.body, Body::Question { text, .. } if text.contains("Julie Berthier")),
+        ) {
+            break;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "never asked"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     let now = graph(&mut driver, "Sophie Marchand", None).expect("Sophie");
     assert!(
         now.edges.iter().all(|e| e.kind != "works_on"),
