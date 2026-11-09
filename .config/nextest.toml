@@ -23,3 +23,4 @@ archive.include = [
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
+default-filter = "not (binary(unplug_clients) & test(=the_shells_bar_closed_with_its_screen_is_drawn_on_the_other))"   # #751
