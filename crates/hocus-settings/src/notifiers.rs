@@ -1,6 +1,6 @@
 //! The applications whose notifications the secretary may read
-//! (docs/design/secretary.md §10.1, §20 lot 7), on the Agents page under
-//! "LA SECRÉTAIRE" until her own page (lot 8): Slack through its
+//! (docs/design/secretary.md §10.1, §20 lot 7), on her own page (#759)
+//! under "CE QU'ELLE LIT": Slack through its
 //! notifications, and any other application that notifies, each consented
 //! to on its own, its items going to the notebook chosen then.
 //!

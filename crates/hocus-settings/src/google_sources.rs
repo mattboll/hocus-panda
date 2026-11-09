@@ -1,6 +1,6 @@
 //! The secretary's Google sources (docs/design/secretary.md §10.1, #750),
-//! on the Agents page under "LA SECRÉTAIRE" beside the applications'
-//! notifications, until her own page (lot 8): each kind (calendar,
+//! on her own page (#759) under "CE QU'ELLE LIT", by account, beside the
+//! applications' notifications: each kind (calendar,
 //! birthdays, mail) of each Google account of GNOME Online Accounts,
 //! consented to on its own sheet (the same words as her card in the
 //! drawer, `hocus_secretary_link::sheets`), its notebook suggested by the
@@ -9,9 +9,10 @@
 //!
 //! What the page lists is found, not configured: the accounts Online
 //! Accounts has on the session's bus (the one the compositor gives its
-//! programs), each with what it has on. "Autoriser" writes a grant in her
-//! consent book, "Ne plus lire" a revocation; her Google source reads the
-//! book at its next cycle and forgets what came from a source revoked.
+//! programs), each with what it has on. A switch turned on writes a grant
+//! in her consent book (from its sheet's "Autoriser"), turned off a
+//! revocation; her Google source reads the book at its next cycle and
+//! forgets what came from a source revoked.
 //!
 //! Read and written on a thread of the page's, never the window's.
 
