@@ -612,38 +612,83 @@ fn on_a_1366_px_screen_it_is_360_px() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// AC5: `Super+S` toggles it; a window focused leaves it open; `Esc`
-/// closes it.
+/// AC5: `Super+S` toggles it; a click in a window closes it, as the bar's
+/// menus do (#755), and the window takes the keyboard; `Super+S` opens it
+/// again where it was, an answer written meanwhile in its thread; a click
+/// in its field gives it the keyboard back; `Esc` closes it.
 #[test]
-fn super_s_toggles_it_esc_closes_it_and_a_window_focused_leaves_it() -> anyhow::Result<()> {
+fn super_s_toggles_it_a_click_elsewhere_closes_it_and_esc_closes_it() -> anyhow::Result<()> {
+    const KEY_O: u32 = 24;
+    const KEY_U: u32 = 22;
+    const KEY_I: u32 = 23;
     let Some(mut bed) = start(Setup::default())? else {
         return Ok(());
     };
     let window = common::open(&mut bed.hp, "drawer.test", (600, 400))?;
     bed.super_s();
     bed.opened()?;
-    // A click in the window: it takes the keyboard, the drawer stays.
+    // A long answer asked, and something typed in the field.
+    bed.hp
+        .tell_shell(ToShell::SecretaryAsk("réfléchis longuement".to_owned()));
+    bed.shows(|s| s["items"].to_string().contains("réfléchis longuement"))?;
+    bed.type_keys(&[KEY_O, KEY_U, KEY_I]);
+    bed.shows(|s| s["field"] == 3)?;
+    // A click in the window: the drawer closes, the window has the keyboard.
     let inside = (f64::from(window.x) + 50.0, f64::from(window.y) + 50.0);
     common::click(&mut bed.hp, inside)?;
+    bed.closed()?;
     let moved = bed.hp.dispatch_until(WAIT, |hp| {
         hp.keyboard_layer().as_deref() != Some(hocus_link::SECRETARY_NAMESPACE)
     })?;
     assert!(moved, "the window took the keyboard");
+    // Her answer comes while it is closed.
+    bed.advance(61)?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
-    assert!(
-        bed.drawer().is_some(),
-        "focusing a window does not close it"
-    );
-    bed.super_s();
-    bed.closed()?;
     bed.super_s();
     bed.opened()?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("Voilà."))?;
+    assert_eq!(shown["field"], 3, "what was typed, kept: {shown}");
+    assert_eq!(shown["tab"], "talk");
     let focused = bed.hp.dispatch_until(WAIT, |hp| {
         hp.keyboard_layer().as_deref() == Some(hocus_link::SECRETARY_NAMESPACE)
     })?;
     assert!(focused);
     chord(&mut bed.hp, &[KEY_ESC]);
-    bed.closed()
+    bed.closed()?;
+    bed.super_s();
+    bed.opened()?;
+    Ok(())
+}
+
+/// #755: with the keyboard gone to a window while the drawer is open (a
+/// window that opens takes it), a click in the field gives it back: its
+/// ring and its caret.
+#[test]
+fn a_click_in_the_field_gives_it_the_keyboard() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    bed.shows(|s| s["focus"] == "field")?;
+    // The pointer over the drawer first (the toolkit then says nothing of
+    // the keyboard coming back), then a window opens and takes it.
+    let field = bed.place(" Field")?;
+    common::point(&mut bed.hp, field)?;
+    common::open(&mut bed.hp, "drawer.test", (600, 400))?;
+    let moved = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() != Some(hocus_link::SECRETARY_NAMESPACE)
+    })?;
+    assert!(moved, "the window took the keyboard");
+    bed.shows(|s| s["focus"] == "none")?;
+    bed.click(field)?;
+    bed.shows(|s| s["focus"] == "field")?;
+    let focused = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some(hocus_link::SECRETARY_NAMESPACE)
+    })?;
+    assert!(focused, "the keyboard is the drawer's");
+    bed.shot("field-clicked")?;
+    Ok(())
 }
 
 /// §21: in classic mode `Super+S` opens nothing.

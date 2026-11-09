@@ -691,6 +691,7 @@ impl Shell {
                 launcher::outside();
                 emoji::outside();
                 actions::close();
+                drawer::outside();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -2412,6 +2413,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             launcher::outside();
                             emoji::outside();
                             actions::close();
+                            drawer::outside();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
