@@ -35,6 +35,10 @@ pub struct Consent {
     pub notebook: Notebook,
     pub decision: Decision,
     pub at: Timestamp,
+    /// "Seuls des résumés locaux sortent" (§14.1, 5): only the local
+    /// model's summary of each item ever reaches Claude, never its text.
+    #[serde(default, rename = "summaries-only")]
+    pub summaries_only: bool,
 }
 
 /// The right to read a source, as consented now.
@@ -43,6 +47,7 @@ pub struct Grant {
     source: SourceKey,
     identity: String,
     notebook: Notebook,
+    summaries_only: bool,
 }
 
 impl Grant {
@@ -56,6 +61,11 @@ impl Grant {
 
     pub fn notebook(&self) -> Notebook {
         self.notebook
+    }
+
+    /// Only local summaries of its items may leave the machine.
+    pub fn summaries_only(&self) -> bool {
+        self.summaries_only
     }
 }
 
@@ -75,7 +85,23 @@ impl ConsentBook {
             notebook,
             decision: Decision::Granted,
             at,
+            summaries_only: false,
         });
+    }
+
+    /// The per-source option "Seuls des résumés locaux sortent", on or
+    /// off, for a source granted now: a new record, the grant otherwise
+    /// as it was.
+    pub fn summaries_only(&mut self, source: &SourceKey, on: bool, at: Timestamp) {
+        if let Some(last) = self.last(source).cloned()
+            && last.decision == Decision::Granted
+        {
+            self.records.push(Consent {
+                summaries_only: on,
+                at,
+                ..last
+            });
+        }
     }
 
     /// Every kind of an account at once, as its sheet's one "Autoriser"
@@ -116,6 +142,7 @@ impl ConsentBook {
             source: last.source.clone(),
             identity: last.identity.clone(),
             notebook: last.notebook,
+            summaries_only: last.summaries_only,
         })
     }
 
@@ -193,10 +220,13 @@ mod tests {
             Timestamp::UNIX_EPOCH,
         );
         assert_eq!(book.grant(&mail).map(|g| g.notebook()), Some(Notebook::Pro));
+        assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(false));
+        book.summaries_only(&mail, true, Timestamp::UNIX_EPOCH);
+        assert_eq!(book.grant(&mail).map(|g| g.summaries_only()), Some(true));
         book.revoke(&mail, Timestamp::UNIX_EPOCH);
         assert_eq!(book.grant(&mail), None);
         assert_eq!(book.revoked(), [mail]);
-        assert_eq!(book.records().len(), 2);
+        assert_eq!(book.records().len(), 3);
     }
 
     #[test]

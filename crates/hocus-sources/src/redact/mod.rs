@@ -142,6 +142,48 @@ pub trait SecondPass {
     fn secrets(&mut self, text: &str) -> Result<Vec<Range<usize>>, String>;
 }
 
+/// The second pass's answer as the local model gives it: the secrets'
+/// exact characters, never their offsets (a model miscounts bytes; code
+/// does not). It points; code finds every place each one is and masks it,
+/// in every text of the item.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Quoted {
+    quotes: Vec<String>,
+}
+
+impl Quoted {
+    /// Shorter than two characters, a quote would mask letters at random:
+    /// left out.
+    pub fn new(quotes: impl IntoIterator<Item = String>) -> Self {
+        let mut quotes: Vec<String> = quotes
+            .into_iter()
+            .map(|q| q.trim().to_owned())
+            .filter(|q| q.chars().count() >= 2)
+            .collect();
+        quotes.sort();
+        quotes.dedup();
+        Self { quotes }
+    }
+
+    pub fn quotes(&self) -> &[String] {
+        &self.quotes
+    }
+
+    /// Every place of every quote in `text`.
+    pub fn spans(&self, text: &str) -> Vec<Range<usize>> {
+        self.quotes
+            .iter()
+            .flat_map(|q| text.match_indices(q.as_str()).map(|(at, m)| at..at + m.len()))
+            .collect()
+    }
+}
+
+impl SecondPass for Quoted {
+    fn secrets(&mut self, text: &str) -> Result<Vec<Range<usize>>, String> {
+        Ok(self.spans(text))
+    }
+}
+
 impl Redacted {
     /// The second pass over every text, masking what it points at. On an
     /// error the item stays [`Check::FirstPass`].
@@ -314,6 +356,21 @@ impl Redactor {
     /// `text` with its secrets masked, each saying to look at `source`.
     pub fn mask_text(&self, text: &str, source: &str) -> String {
         mask(text, self.find(text), Field::Body, source).0
+    }
+
+    /// `text` (what a model wrote of an item: its digest, a commitment)
+    /// with the first pass's secrets and the second pass's `quoted` ones
+    /// masked: what the local model was shown never leaves through what
+    /// it wrote.
+    pub fn mask_with(&self, text: &str, quoted: &Quoted, source: &str) -> String {
+        let mut found = self.find(text);
+        found.extend(
+            quoted
+                .spans(text)
+                .into_iter()
+                .map(|r| Found::new(r.start, r.end, SecretKind::Model)),
+        );
+        mask(text, merge(found), Field::Body, source).0
     }
 
     /// `item` denoised (a mail's body) and masked, every text of it.
