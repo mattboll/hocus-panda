@@ -117,6 +117,9 @@ struct Setup {
     /// fixture board, her real providers (on nothing, with no key)
     /// instead of the fake model.
     google: bool,
+    /// With `google`: her Anthropic API a fake on this machine that
+    /// refuses every key (#752), instead of nothing.
+    refusing_api: bool,
 }
 
 impl Default for Setup {
@@ -126,6 +129,7 @@ impl Default for Setup {
             mode: SecretaryMode::Assistant,
             reduced_motion: false,
             google: false,
+            refusing_api: false,
         }
     }
 }
@@ -160,10 +164,17 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
         // keyring: nothing reaches a model or the network.
         Some((_, bus)) => {
             let config = dir.path().join("secretary.toml");
+            let api = if setup.refusing_api {
+                refusing_api()?
+            } else {
+                "http://127.0.0.1:9".to_owned()
+            };
             std::fs::write(
                 &config,
-                "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"http://127.0.0.1:9\"\n\
-                 [secretary.providers.local]\nkind = \"ollama\"\nurl = \"http://127.0.0.1:9/v1\"\n",
+                format!(
+                    "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{api}\"\n\
+                     [secretary.providers.local]\nkind = \"ollama\"\nurl = \"http://127.0.0.1:9/v1\"\n"
+                ),
             )?;
             format!(
                 "--bus '{}' --google-at http://127.0.0.1:9 --config '{}'",
@@ -252,6 +263,28 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
         her,
         _google: google,
     }))
+}
+
+/// An Anthropic API on this machine that refuses every key with a `401`,
+/// until the test ends: its address.
+fn refusing_api() -> anyhow::Result<String> {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let url = format!("http://{}", listener.local_addr()?);
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let body = r#"{"type":"error","error":{"type":"authentication_error"}}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 401 X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    Ok(url)
 }
 
 fn connect(hp: &mut Headless) -> anyhow::Result<Connection> {
@@ -903,7 +936,7 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
     );
     assert_eq!(shown["status"], "Il me manque ma clé Anthropic");
     assert!(
-        shown["hint"]
+        shown["key_lines"]
             .as_str()
             .is_some_and(|h| h.contains("hocus-secretary key anthropic")),
         "{shown}"
@@ -964,5 +997,64 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
         6
     );
     bed.shot("first-run-done")?;
+    Ok(())
+}
+
+/// Her key missing (#752): her band is a masked field « Colle ta clé
+/// Anthropic » with « Enregistrer », the keyboard in it; what is typed
+/// shows as dots, never in a log; a key the API refuses is said so. The
+/// field « Dis-lui quelque chose… » clicked takes the keyboard: its ring
+/// and its caret show.
+#[test]
+fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::Result<()> {
+    const KEY_K: u32 = 37;
+    const KEY_MINUS: u32 = 12;
+    const KEY_A: u32 = 30;
+    const KEY_N: u32 = 49;
+    const KEY_T: u32 = 20;
+    const KEY_X: u32 = 45;
+    let Some(mut bed) = start(Setup {
+        google: true,
+        refusing_api: true,
+        ..Setup::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    let shown = bed.shows(|s| s["key_field"] == serde_json::json!(false))?;
+    assert_eq!(shown["focus"], "key", "{shown}");
+    assert!(
+        shown["key_lines"]
+            .as_str()
+            .is_some_and(|l| l.contains("Elle va dans ton trousseau, jamais dans un fichier.")
+                && l.contains("hocus-secretary key anthropic, Entrée, puis colle ta clé.")),
+        "{shown}"
+    );
+    bed.shot("key-band")?;
+    bed.type_keys(&[KEY_S, KEY_K, KEY_MINUS, KEY_A, KEY_N, KEY_T, KEY_MINUS, KEY_X, KEY_X]);
+    bed.shows(|s| s["key_field"] == serde_json::json!(true))?;
+    bed.shot("key-band-typed")?;
+    bed.type_keys(&[KEY_ENTER]);
+    let shown = bed.shows(|s| {
+        s["key_lines"]
+            .as_str()
+            .is_some_and(|l| l.contains("Clé refusée par Anthropic."))
+    })?;
+    assert_eq!(shown["key_field"], serde_json::json!(false), "it empties");
+    bed.shot("key-band-refused")?;
+    // The composer clicked: the keyboard types there.
+    // " Field", not "KeyField".
+    let field = bed.place(" Field")?;
+    bed.click(field)?;
+    bed.shows(|s| s["focus"] == "field")?;
+    bed.shot("field-focused")?;
+    let logs = format!(
+        "{}{}",
+        common::logged(&bed.log),
+        common::logged(&bed.dir.path().join("secretary.log"))
+    );
+    assert!(!logs.contains("sk-ant-xx"), "the key in no log");
     Ok(())
 }

@@ -276,6 +276,31 @@ pub fn keep_provider_key(bus: &str, provider: &str, secret: &str) -> bool {
     .is_some()
 }
 
+/// Takes `provider`'s API key out of the keyring on `bus`: whether it
+/// answered (a keyring holding none answers too).
+pub fn erase_provider_key(bus: &str, provider: &str) -> bool {
+    let provider = provider.to_owned();
+    run(bus, async move |connection| {
+        let reply = call(
+            &connection,
+            PATH,
+            IFACE,
+            "SearchItems",
+            &(provider_attributes(&provider),),
+        )
+        .await?;
+        let (unlocked, locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
+            reply.body().deserialize()?;
+        for item in unlocked.iter().chain(&locked) {
+            let reply = call(&connection, item.as_str(), ITEM, "Delete", &()).await?;
+            let prompt: OwnedObjectPath = reply.body().deserialize()?;
+            prompted(&connection, &prompt).await?;
+        }
+        Ok(())
+    })
+    .is_some()
+}
+
 fn run<T>(bus: &str, work: impl AsyncFnOnce(Connection) -> zbus::Result<T>) -> Option<T> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

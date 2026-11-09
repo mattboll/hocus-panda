@@ -36,7 +36,7 @@ use iced::{
     mouse,
     widget::{
         Space, button, canvas, column, container, mouse_area, rich_text, row, span, stack, svg,
-        text,
+        text, text_input,
     },
 };
 
@@ -54,8 +54,10 @@ use crate::{
     screens::Said,
     store::Slot,
 };
-use hocus_secretary_link::Notebook;
+use hocus_secretary_link::{KeyOutcome, Notebook, Secret};
 
+/// Her key's field (#752).
+const KEY_FIELD: &str = "agents-key";
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
 const WAVE: Duration = Duration::from_millis(600);
@@ -119,6 +121,19 @@ pub enum Msg {
     GoogleAllowed(bool),
     /// "Ne plus lire" on the `n`th Google source's row.
     GoogleRevoke(usize),
+    /// Her answers' key as she says it: its provider and whether her
+    /// keyring misses it; none: she does not answer (#752).
+    KeyState(Option<(String, bool)>),
+    /// Her key's field, as typed or pasted.
+    KeyTyped(Secret),
+    /// "Enregistrer": the key goes to her.
+    KeySave,
+    /// "Remplacer": the field shows; "Annuler" hides it again.
+    KeyReplace(bool),
+    /// "Effacer".
+    KeyErase,
+    /// What she did with the key given.
+    Keyed(Result<KeyOutcome, String>),
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -205,6 +220,23 @@ pub struct State {
     /// Her Google sources, as last read.
     google: Vec<GoogleSource>,
     google_sheet: Option<GoogleSheet>,
+    /// Her answers' key (#752).
+    key: KeyRow,
+}
+
+/// The "Clé Anthropic" row: what she says of her key, the field (never
+/// drawn as it is, overwritten once sent), what became of the last one.
+#[derive(Debug, Default)]
+struct KeyRow {
+    /// Her answers' provider and whether her keyring misses its key; none
+    /// before she answered, or when she does not.
+    state: Option<(String, bool)>,
+    field: Secret,
+    /// "Remplacer" clicked: the field shows over a key kept.
+    replacing: bool,
+    /// The key is with her, being checked.
+    busy: bool,
+    said: Option<Result<KeyOutcome, String>>,
 }
 
 impl State {
@@ -340,6 +372,44 @@ impl App {
     fn agents_read_notifiers(&self) {
         self.agents_notifiers_job(None);
         self.agents_google_job(None);
+        self.agents_key_job(None);
+    }
+
+    /// Her key given (`Some(Some(key))`), erased (`Some(None)`), or only
+    /// asked about, on her socket from a thread; then what she says of it.
+    fn agents_key_job(&self, give: Option<Option<Secret>>) {
+        let Some(to) = self.agents.to.clone() else {
+            return;
+        };
+        let Some(socket) = hocus_secretary_link::session_socket() else {
+            return;
+        };
+        let started = std::thread::Builder::new()
+            .name("her key".to_owned())
+            .spawn(move || {
+                use hocus_secretary_link::{Client, Connection};
+                if let Some(key) = give {
+                    let provider = Connection::open(&socket, Client::Settings, Duration::from_secs(5))
+                        .and_then(|mut c| c.status())
+                        .ok()
+                        .and_then(|s| s.key_provider)
+                        .unwrap_or_else(|| "anthropic".to_owned());
+                    let outcome =
+                        hocus_secretary_link::give_key(&socket, Client::Settings, &provider, key);
+                    if let Err(err) = &outcome {
+                        tracing::info!(%err, "her key could not be given");
+                    }
+                    let _ = to.unbounded_send(Message::Agents(Msg::Keyed(outcome)));
+                }
+                let state = Connection::open(&socket, Client::Settings, Duration::from_secs(5))
+                    .and_then(|mut c| c.status())
+                    .ok()
+                    .and_then(|s| s.key_provider.map(|p| (p, s.key_missing)));
+                let _ = to.unbounded_send(Message::Agents(Msg::KeyState(state)));
+            });
+        if let Err(err) = started {
+            tracing::warn!(%err, "her key is not asked about");
+        }
     }
 
     /// `decision` on a Google source written in her consent book
@@ -595,6 +665,63 @@ impl App {
                 self.agents_google_job(Some((source, None)));
                 self.toast(text, ToastAction::None, TOAST)
             }
+            Msg::KeyState(state) => {
+                self.agents.key.state = state;
+                iced::Task::none()
+            }
+            Msg::KeyTyped(typed) => {
+                // The text before goes, overwritten (Secret's drop).
+                self.agents.key.field = typed;
+                iced::Task::none()
+            }
+            Msg::KeySave => {
+                let typed = std::mem::take(&mut self.agents.key.field);
+                if typed.expose().trim().is_empty() || self.agents.key.busy {
+                    return iced::Task::none();
+                }
+                tracing::info!("her key given in the Settings");
+                self.agents.key.busy = true;
+                self.agents.key.said = None;
+                self.agents_key_job(Some(Some(typed)));
+                iced::Task::none()
+            }
+            Msg::KeyReplace(on) => {
+                self.agents.key.replacing = on;
+                self.agents.key.field = Secret::default();
+                self.agents.key.said = None;
+                if on {
+                    iced::widget::operation::focus(KEY_FIELD)
+                } else {
+                    iced::Task::none()
+                }
+            }
+            Msg::KeyErase => {
+                if self.agents.key.busy {
+                    return iced::Task::none();
+                }
+                tracing::info!("her key erased in the Settings");
+                self.agents.key.busy = true;
+                self.agents.key.said = None;
+                self.agents_key_job(Some(None));
+                iced::Task::none()
+            }
+            Msg::Keyed(outcome) => {
+                self.agents.key.busy = false;
+                if matches!(outcome, Ok(KeyOutcome::Kept | KeyOutcome::Erased)) {
+                    self.agents.key.replacing = false;
+                }
+                let toast = match &outcome {
+                    Ok(o @ (KeyOutcome::Kept | KeyOutcome::Erased)) => {
+                        Some(o.words("anthropic", self.lang == Lang::French))
+                    }
+                    _ => None,
+                };
+                self.agents.key.said = Some(outcome);
+                match toast {
+                    Some(text) => self.toast(text, ToastAction::None, TOAST),
+                    None => iced::Task::none(),
+                }
+            }
             Msg::Allowed(yes) => {
                 let Some(notify) = self.agents.notify.take() else {
                     return iced::Task::none();
@@ -717,6 +844,14 @@ impl App {
     /// The consent sheet takes the keyboard: `Esc` cancels, `Enter`
     /// acts, `Tab` and the arrows go from one button to the other.
     pub(super) fn agents_key_first(&mut self, key: &Key) -> Option<iced::Task<Message>> {
+        // Her key's field being typed in: `Esc` empties it (#752).
+        if !self.agents.key.field.expose().is_empty()
+            && key.as_ref() == Key::Named(Named::Escape)
+        {
+            self.agents.key.field = Secret::default();
+            self.agents.key.replacing = false;
+            return Some(iced::widget::operation::focus("nothing"));
+        }
         if let Some(sheet) = self.agents.google_sheet.as_mut() {
             match key.as_ref() {
                 Key::Named(Named::Escape) => {
@@ -1079,6 +1214,9 @@ impl App {
         if !self.agents_assistant() {
             return body.into();
         }
+        if self.agents.key.state.is_some() {
+            body = body.push(divided(true, self.agents_key_row()));
+        }
         if self.agents.notifiers.is_empty() {
             body = body.push(divided(
                 true,
@@ -1118,6 +1256,149 @@ impl App {
             body = body.push(divided(true, self.agents_google_row(i, source)));
         }
         body.into()
+    }
+
+    /// "Clé Anthropic" (#752): « enregistrée » with « Remplacer » and
+    /// « Effacer », never the key; or, missing (or being replaced), a
+    /// masked field and « Enregistrer ». What became of the last one under
+    /// it, said plainly.
+    fn agents_key_row<'a>(&'a self) -> El<'a> {
+        let fr = self.lang == Lang::French;
+        let key = &self.agents.key;
+        let Some((provider, missing)) = key.state.clone() else {
+            return Space::new().into();
+        };
+        let name = if provider == "anthropic" {
+            "Anthropic".to_owned()
+        } else {
+            provider.clone()
+        };
+        let title = if fr {
+            format!("Clé {name}")
+        } else {
+            format!("{name} key")
+        };
+        let field_shown = missing || key.replacing;
+        let mut words = column![t(title, 14.0, TEXT.get()).font(SEMIBOLD)].spacing(3);
+        let line = match (field_shown, key.busy) {
+            (_, true) => self.say(w("Elle la vérifie…", "She is checking it…")),
+            (true, false) => self.say(w(
+                "Elle va dans ton trousseau, jamais dans un fichier.",
+                "It goes to your keyring, never to a file.",
+            )),
+            (false, false) => self.say(w(
+                "Enregistrée dans ton trousseau",
+                "Saved in your keyring",
+            )),
+        };
+        words = words.push(t(line, 12.5, DIM.get()));
+        if let Some(said) = &key.said {
+            let (text, colour) = match said {
+                Ok(KeyOutcome::Kept | KeyOutcome::Erased) => (String::new(), DIM.get()),
+                Ok(outcome) => (outcome.words(&provider, fr), rgb(0xF7A77A)),
+                Err(_) => (
+                    self.say(w(
+                        "Elle ne répond pas : réessaie dans un instant.",
+                        "She does not answer: try again in a moment.",
+                    ))
+                    .to_owned(),
+                    rgb(0xF7A77A),
+                ),
+            };
+            if !text.is_empty() {
+                words = words.push(t(text, 12.5, colour));
+            }
+        }
+        let actions: El<'a> = if field_shown {
+            let placeholder = if fr {
+                format!("Colle ta clé {name}")
+            } else {
+                format!("Paste your {name} key")
+            };
+            let mut input = text_input(&placeholder, key.field.expose())
+                .id(KEY_FIELD)
+                .secure(true)
+                .size(13.0)
+                .width(230)
+                .padding([7, 10])
+                .style(|_: &Theme, status| {
+                    let focused = matches!(status, text_input::Status::Focused { .. });
+                    text_input::Style {
+                        background: Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.06))),
+                        border: border(
+                            8.0,
+                            if focused { 1.5 } else { 1.0 },
+                            if focused { ACCENT.get() } else { RIM_12.get() },
+                        ),
+                        icon: DIM.get(),
+                        placeholder: FAINT.get(),
+                        value: TEXT.get(),
+                        selection: crate::theme::Ink::Accent(0.35).get(),
+                    }
+                });
+            if !key.busy {
+                input = input
+                    .on_input(|typed| Message::Agents(Msg::KeyTyped(Secret::new(typed))))
+                    .on_submit(Message::Agents(Msg::KeySave));
+            }
+            let ready = !key.busy && !key.field.expose().trim().is_empty();
+            let mut row = row![
+                container(input).id("agents:key-field".to_owned()),
+                container(self.agents_button(
+                    self.say(w("Enregistrer", "Save")),
+                    true,
+                    false,
+                    ready.then_some(Message::Agents(Msg::KeySave)),
+                ))
+                .id("agents:key-save".to_owned()),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            if key.replacing && !missing {
+                row = row.push(
+                    container(self.agents_button(
+                        self.say(w("Annuler", "Cancel")),
+                        false,
+                        false,
+                        Some(Message::Agents(Msg::KeyReplace(false))),
+                    ))
+                    .id("agents:key-cancel".to_owned()),
+                );
+            }
+            row.into()
+        } else {
+            row![
+                container(self.agents_button(
+                    self.say(w("Remplacer", "Replace")),
+                    false,
+                    false,
+                    (!key.busy).then_some(Message::Agents(Msg::KeyReplace(true))),
+                ))
+                .id("agents:key-replace".to_owned()),
+                container(self.agents_button(
+                    self.say(w("Effacer", "Erase")),
+                    false,
+                    false,
+                    (!key.busy).then_some(Message::Agents(Msg::KeyErase)),
+                ))
+                .id("agents:key-erase".to_owned()),
+            ]
+            .spacing(8)
+            .into()
+        };
+        container(
+            row![words.width(Length::Fill), actions]
+                .spacing(12)
+                .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: 11.0,
+            right: 14.0,
+            bottom: 11.0,
+            left: 16.0,
+        })
+        .id("row:agents.key".to_owned())
+        .into()
     }
 
     /// A Google source's row: the account's kind, what she reads of it,
@@ -2200,6 +2481,18 @@ impl App {
                 "granted": g.granted.map(Notebook::word),
             })).collect::<Vec<_>>(),
             "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
+            // Her key's row: never the key, nor its length.
+            "key": self.agents.key.state.as_ref().map(|(provider, missing)| serde_json::json!({
+                "provider": provider,
+                "kept": !missing,
+                "field": *missing || self.agents.key.replacing,
+                "typed": !self.agents.key.field.expose().is_empty(),
+                "busy": self.agents.key.busy,
+                "said": self.agents.key.said.as_ref().map(|s| match s {
+                    Ok(o) => o.words(provider, true),
+                    Err(_) => "no answer".to_owned(),
+                }),
+            })),
             "google_notebook": self.agents.google_sheet.as_ref().map(|g| g.notebook.word()),
         })
     }

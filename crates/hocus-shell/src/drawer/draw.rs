@@ -225,6 +225,8 @@ pub struct Laid {
     /// How to fix what her status says, under her header, and its box.
     pub hint: Vec<String>,
     pub hint_rect: Option<Rectangle>,
+    /// Her key's field in the band, when she misses one (#752).
+    pub key_band: Option<KeyBand>,
     pub targets: Vec<(Target, Rectangle)>,
     pub tabs: Rectangle,
     pub tab_rects: Vec<(Tab, Rectangle)>,
@@ -244,6 +246,26 @@ pub struct Laid {
     overlay: Vec<Shape>,
     pub knows: bool,
 }
+
+/// Her key's field in the band under her header (#752): masked, with
+/// "Enregistrer", and its lines under it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyBand {
+    pub field: Rectangle,
+    pub save: Rectangle,
+    /// What is typed, as dots (never the key), or the placeholder.
+    pub shown: String,
+    pub placeholder: bool,
+    /// The keyboard types there.
+    pub focused: bool,
+    /// Its lines under it, each with its colour.
+    pub lines: Vec<(String, Color, Point)>,
+}
+
+/// The dots a key shows as, at most this many: its length is not drawn
+/// past it.
+const KEY_DOTS: usize = 32;
+const KEY_FIELD: f32 = 30.0;
 
 /// The measures of text, at a size, in a weight.
 fn width_of(text: &str, size: f32, bold: bool) -> f32 {
@@ -436,7 +458,11 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     laid.targets.push((Target::Close, close));
     // How to fix what her status says: a band under her header.
     let mut tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
-    if let Some(hint) = look
+    if let Some(provider) = look.as_ref().and_then(|l| l.key.clone())
+        && open.tab == Tab::Talk
+    {
+        tabs_top = lay_out_key(&mut laid, open, c, words, &provider, tabs_top, right);
+    } else if let Some(hint) = look
         .as_ref()
         .map(|l| l.hint.as_str())
         .filter(|h| !h.is_empty())
@@ -589,10 +615,104 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "agents": laid.agents.as_ref().map(|(_, text, n, _)| format!("{text} | {n}")),
         "items": said_items,
         "field": open.field.chars().count(),
+        // Whether a key is being typed: never what, nor its length.
+        "key_field": laid.key_band.as_ref().map(|k| !k.placeholder),
+        "key_lines": laid.key_band.as_ref().map(|k| k.lines.iter().map(|(l, _, _)| l.clone()).collect::<Vec<_>>().join(" ")),
+        "focus": if !open.focused { "none" } else if laid.key_band.is_some() && open.key_focus { "key" } else { "field" },
         "model": laid.model,
         "search": open.search,
     });
     laid
+}
+
+/// Her key's band at `top` (#752): « Colle ta clé Anthropic », masked,
+/// « Enregistrer », « Elle va dans ton trousseau, jamais dans un
+/// fichier. », what became of the last key given, and the terminal's way.
+/// The tabs' top under it.
+fn lay_out_key(
+    laid: &mut Laid,
+    open: &Open,
+    c: &Conversation,
+    words: Words,
+    provider: &str,
+    top: f32,
+    right: f32,
+) -> f32 {
+    let inner_x = PAD + HINT_PAD + 3.0;
+    let inner = right - inner_x - HINT_PAD - 3.0;
+    let mut at = top + HINT_PAD + 2.0;
+    let save_label = words.pick("Enregistrer", "Save");
+    let save_w = width_of(save_label, BUTTON, true) + 2.0 * BUTTON_X;
+    let field = Rectangle::new(
+        Point::new(inner_x, at),
+        Size::new(inner - save_w - 6.0, KEY_FIELD),
+    );
+    let save = Rectangle::new(
+        Point::new(inner_x + inner - save_w, at),
+        Size::new(save_w, KEY_FIELD),
+    );
+    at += KEY_FIELD + 6.0;
+    let name = match provider {
+        "anthropic" => "Anthropic",
+        other => other,
+    };
+    let (shown, placeholder) = if open.key.is_empty() {
+        (
+            if words.fr {
+                format!("Colle ta clé {name}")
+            } else {
+                format!("Paste your {name} key")
+            },
+            true,
+        )
+    } else {
+        ("•".repeat(open.key.chars().count().min(KEY_DOTS)), false)
+    };
+    let mut said: Vec<(String, Color)> = vec![(
+        words
+            .pick(
+                "Elle va dans ton trousseau, jamais dans un fichier.",
+                "It goes to your keyring, never to a file.",
+            )
+            .to_owned(),
+        hex(0xFFE2A8),
+    )];
+    if c.key_asked.is_some() {
+        said.push((
+            words.pick("Je la vérifie…", "Checking it…").to_owned(),
+            DIM,
+        ));
+    } else if let Some((given, outcome)) = &c.key_said
+        && *outcome != hocus_secretary_link::KeyOutcome::Kept
+    {
+        said.push((outcome.words(given, words.fr), ORANGE));
+    }
+    if let Some(hint) = c.look.as_ref().map(|l| l.hint.clone()).filter(|h| !h.is_empty()) {
+        said.push((hint, FAINT));
+    }
+    let mut lines = Vec::new();
+    for (text, colour) in said {
+        for line in lines_of(&text, HINT, false, inner) {
+            lines.push((line, colour, Point::new(inner_x, at + HINT_LINE / 2.0)));
+            at += HINT_LINE;
+        }
+    }
+    let bottom = at + HINT_PAD;
+    laid.hint_rect = Some(Rectangle::new(
+        Point::new(PAD, top),
+        Size::new(right - PAD, bottom - top),
+    ));
+    laid.targets.push((Target::KeySave, save));
+    laid.targets.push((Target::KeyField, field));
+    laid.key_band = Some(KeyBand {
+        field,
+        save,
+        shown,
+        placeholder,
+        focused: open.focused && open.key_focus,
+        lines,
+    });
+    bottom + 8.0
 }
 
 /// The thread laid out from its bottom, scrolled up by `open.scroll`.
@@ -2488,6 +2608,9 @@ impl View {
                 ));
             }
         }
+        if let Some(band) = &laid.key_band {
+            draw_key_band(f, band, open);
+        }
         // The tabs.
         f.fill(
             &Path::rounded_rectangle(laid.tabs.position(), laid.tabs.size(), 9.0.into()),
@@ -2595,6 +2718,8 @@ impl View {
             &Path::rounded_rectangle(field.position(), field.size(), 12.0.into()),
             alpha(0xFFFFFF, 0.05),
         );
+        // Its ring in the accent while the keyboard types there (#752).
+        let typing_here = open.focused && laid.key_band.as_ref().is_none_or(|_| !open.key_focus);
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(field.x + 0.5, field.y + 0.5),
@@ -2602,8 +2727,8 @@ impl View {
                 11.5.into(),
             ),
             Stroke::default()
-                .with_color(alpha(0x6CC287, 0.45))
-                .with_width(1.0),
+                .with_color(alpha(0x6CC287, if typing_here { 0.9 } else { 0.3 }))
+                .with_width(if typing_here { 1.5 } else { 1.0 }),
         );
         let empty = open.field.is_empty();
         let lines_top = field.y + (field.height - laid.field_lines.len() as f32 * FIELD_LINE) / 2.0;
@@ -2625,13 +2750,12 @@ impl View {
                 caret = Point::new(at.x + width_of(line, FIELD_TEXT, false) + 1.0, at.y);
             }
         }
-        // Its caret, still (nothing blinks at rest), after what is typed.
-        if !empty {
-            f.fill_rectangle(
-                Point::new(caret.x, caret.y - 8.0),
-                Size::new(1.5, 16.0),
-                MINT,
-            );
+        // Its caret while the keyboard types there, still as the shell's
+        // other fields' (nothing blinks at rest): after what is typed,
+        // else just before the placeholder's first letter (#752).
+        if typing_here {
+            let x = if empty { caret.x - 2.0 } else { caret.x };
+            f.fill_rectangle(Point::new(x, caret.y - 8.0), Size::new(1.5, 16.0), MINT);
         }
         let send = laid.send;
         let hover = open.hover == Some(Target::Send);
@@ -2871,6 +2995,70 @@ fn arrow(f: &mut Frame, c: Point) {
     f.stroke(&path, Stroke::default().with_color(INK).with_width(2.0));
 }
 
+/// Her key's field, masked, its caret while it has the keyboard, and
+/// "Enregistrer".
+fn draw_key_band(f: &mut Frame, band: &KeyBand, open: &Open) {
+    let field = band.field;
+    f.fill(
+        &Path::rounded_rectangle(field.position(), field.size(), 8.0.into()),
+        alpha(0x000000, 0.25),
+    );
+    f.stroke(
+        &Path::rounded_rectangle(
+            Point::new(field.x + 0.5, field.y + 0.5),
+            Size::new(field.width - 1.0, field.height - 1.0),
+            7.5.into(),
+        ),
+        Stroke::default()
+            .with_color(if band.focused {
+                alpha(0x6CC287, 0.85)
+            } else {
+                alpha(0xFFFFFF, 0.16)
+            })
+            .with_width(if band.focused { 1.5 } else { 1.0 }),
+    );
+    let x = field.x + 10.0;
+    let y = field.center_y();
+    f.fill_text(text(
+        &band.shown,
+        Point::new(x, y),
+        if band.placeholder { 12.5 } else { 13.0 },
+        if band.placeholder { FAINT } else { TEXT },
+        !band.placeholder,
+        Alignment::Left,
+    ));
+    if band.focused {
+        let caret_x = if band.placeholder {
+            x - 2.0
+        } else {
+            x + width_of(&band.shown, 13.0, true) + 1.0
+        };
+        f.fill_rectangle(Point::new(caret_x, y - 8.0), Size::new(1.5, 16.0), MINT);
+    }
+    let save = band.save;
+    let hover = open.hover == Some(Target::KeySave);
+    let ready = !band.placeholder;
+    f.fill(
+        &Path::rounded_rectangle(save.position(), save.size(), 8.0.into()),
+        match (ready, hover) {
+            (true, false) => GREEN,
+            (true, true) => hex(0x7ED198),
+            (false, _) => alpha(0xFFFFFF, 0.07),
+        },
+    );
+    f.fill_text(text(
+        super::words().pick("Enregistrer", "Save"),
+        save.center(),
+        BUTTON,
+        if ready { INK } else { DIM },
+        true,
+        Alignment::Center,
+    ));
+    for (line, colour, at) in &band.lines {
+        f.fill_text(text(line, *at, HINT, *colour, false, Alignment::Left));
+    }
+}
+
 impl<Message> canvas::Program<Message> for View {
     type State = State;
 
@@ -2897,6 +3085,14 @@ impl<Message> canvas::Program<Message> for View {
                 ..
             }) => super::key_on(self.id, key, *modifiers, text.as_deref())
                 .then(|| canvas::Action::request_redraw().and_capture()),
+            // The keyboard on the drawer or gone from it: its caret and
+            // its ring follow (#752).
+            iced::Event::Window(window::Event::Focused) => {
+                super::focused(self.id, true).then(canvas::Action::request_redraw)
+            }
+            iced::Event::Window(window::Event::Unfocused) => {
+                super::focused(self.id, false).then(canvas::Action::request_redraw)
+            }
             _ => None,
         }
     }
@@ -2942,7 +3138,7 @@ impl<Message> canvas::Program<Message> for View {
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         super::with(|d| match d.open_on(self.id).and_then(|o| o.hover) {
-            Some(Target::Field | Target::Search) => mouse::Interaction::Text,
+            Some(Target::Field | Target::Search | Target::KeyField) => mouse::Interaction::Text,
             Some(_) => mouse::Interaction::Pointer,
             None => mouse::Interaction::default(),
         })
@@ -3075,6 +3271,8 @@ mod tests {
             look: None,
             knows: None,
             toast: None,
+            key_asked: None,
+            key_said: None,
             rev: 1,
         };
         let words = Words { fr: true };

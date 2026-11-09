@@ -38,6 +38,7 @@
 
 mod consent;
 mod conversation;
+mod keys;
 mod memory;
 mod speaking;
 
@@ -135,6 +136,14 @@ pub enum Event {
     /// Whether the keyring gives her answers' provider's key: the
     /// provider missing one, or none.
     Keyed(Option<String>),
+    /// A key given was checked and kept (or not).
+    KeyDone {
+        conn: u64,
+        id: u64,
+        provider: String,
+        outcome: hocus_secretary_link::KeyOutcome,
+        digest: Option<u64>,
+    },
     Stop,
 }
 
@@ -486,7 +495,13 @@ impl Brain {
                     },
                 );
             }
-            Event::Line { conn, line } => self.said(conn, &line),
+            Event::Line { conn, mut line } => {
+                self.said(conn, &line);
+                // A line may hold a key (#752): not kept in memory.
+                if line.contains("\"key\"") {
+                    hocus_secretary_link::wipe(&mut line);
+                }
+            }
             Event::Closed { conn } => {
                 self.conns.remove(&conn);
             }
@@ -528,6 +543,13 @@ impl Brain {
                     self.tell_look();
                 }
             }
+            Event::KeyDone {
+                conn,
+                id,
+                provider,
+                outcome,
+                digest,
+            } => self.key_done(conn, id, provider, outcome, digest),
             Event::Stop => return false,
         }
         true
@@ -557,6 +579,11 @@ impl Brain {
     fn said(&mut self, conn: u64, text: &str) {
         let message = match read::<ToSecretary>(text) {
             Ok(message) => message,
+            // A key's line never said back, even in part.
+            Err(_) if text.contains("\"key\"") => {
+                tracing::info!(conn, "a key's line that does not read");
+                return self.error(conn, None, "a key's line that does not read");
+            }
             Err(err) => {
                 tracing::info!(conn, %err, "a line that does not read");
                 return self.error(conn, None, format!("a line that does not read: {err}"));
@@ -660,6 +687,7 @@ impl Brain {
             ToSecretary::Effected { effect, ok, detail } => self.effected(effect, ok, &detail),
             ToSecretary::Knows { id, query } => self.knows(conn, id, query),
             ToSecretary::Memory { id, act } => self.memory_act(conn, id, act),
+            ToSecretary::Key { id, provider, key } => self.key_given(conn, id, provider, key),
         }
     }
 
@@ -744,6 +772,12 @@ impl Brain {
                     held: self.inbox.len() as u64,
                 }
             }),
+            key_provider: self
+                .model
+                .as_ref()
+                .filter(|m| m.needs_key())
+                .and_then(|m| m.key_provider()),
+            key_missing: self.key_missing.is_some(),
         }
     }
 

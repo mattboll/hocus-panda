@@ -50,6 +50,17 @@ impl fmt::Debug for Secret {
 pub trait Keys: Send + Sync + fmt::Debug {
     /// `provider`'s key; `Ok(None)`: it has none.
     fn key(&self, provider: &str) -> Result<Option<Secret>, String>;
+
+    /// `key` kept as `provider`'s, from then on (her drawer, the
+    /// Settings, #752).
+    fn keep(&self, _provider: &str, _key: &Secret) -> Result<(), String> {
+        Err("these keys are fixed".to_owned())
+    }
+
+    /// `provider`'s key taken out.
+    fn erase(&self, _provider: &str) -> Result<(), String> {
+        Err("these keys are fixed".to_owned())
+    }
 }
 
 /// The keyring on the bus she was given (§11.3); without a bus, no key.
@@ -89,6 +100,62 @@ impl Keys for Keyring {
                 .insert(provider.to_owned(), key.clone());
         }
         Ok(found)
+    }
+
+    fn keep(&self, provider: &str, key: &Secret) -> Result<(), String> {
+        let bus = self.bus.as_deref().ok_or("no keyring known")?;
+        if !crate::key::keep_provider_key(bus, provider, key.expose()) {
+            return Err("the keyring did not keep it".to_owned());
+        }
+        self.read
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(provider.to_owned(), key.clone());
+        Ok(())
+    }
+
+    fn erase(&self, provider: &str) -> Result<(), String> {
+        let bus = self.bus.as_deref().ok_or("no keyring known")?;
+        self.read
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(provider);
+        if crate::key::erase_provider_key(bus, provider) {
+            Ok(())
+        } else {
+            Err("the keyring does not answer".to_owned())
+        }
+    }
+}
+
+/// Keys kept in memory only (tests): given, kept and erased.
+#[derive(Debug, Default)]
+pub struct Held(pub Mutex<BTreeMap<String, Secret>>);
+
+impl Keys for Held {
+    fn key(&self, provider: &str) -> Result<Option<Secret>, String> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(provider)
+            .cloned())
+    }
+
+    fn keep(&self, provider: &str, key: &Secret) -> Result<(), String> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(provider.to_owned(), key.clone());
+        Ok(())
+    }
+
+    fn erase(&self, provider: &str) -> Result<(), String> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(provider);
+        Ok(())
     }
 }
 
@@ -174,6 +241,50 @@ impl Model for Router {
 
     fn needs_key(&self) -> bool {
         true
+    }
+
+    fn key_provider(&self) -> Option<String> {
+        let pinned = self.pinned(Role::Answer).ok()?;
+        (pinned.provider.kind == Kind::Anthropic).then_some(pinned.choice.provider)
+    }
+
+    fn keep_key(
+        &self,
+        provider: &str,
+        key: Option<&hocus_secretary_link::Secret>,
+    ) -> hocus_secretary_link::KeyOutcome {
+        use hocus_secretary_link::KeyOutcome;
+        let settings = self.settings.current();
+        let Some(known) = settings.providers.get(provider) else {
+            return KeyOutcome::Failed;
+        };
+        let Some(key) = key else {
+            return match self.keys.erase(provider) {
+                Ok(()) => KeyOutcome::Erased,
+                Err(err) => {
+                    tracing::info!(provider, %err, "the key is not erased");
+                    KeyOutcome::NoKeyring
+                }
+            };
+        };
+        let text = key.expose().trim();
+        let anthropic = known.kind == Kind::Anthropic;
+        if text.is_empty()
+            || text.chars().any(|c| c.is_whitespace() || c.is_control())
+            || (anthropic && !text.starts_with("sk-ant-"))
+        {
+            return KeyOutcome::Malformed;
+        }
+        if anthropic && let Err(outcome) = anthropic::check(&known.url, text) {
+            return outcome;
+        }
+        match self.keys.keep(provider, &Secret::new(text)) {
+            Ok(()) => KeyOutcome::Kept,
+            Err(err) => {
+                tracing::info!(provider, %err, "the key is not kept");
+                KeyOutcome::NoKeyring
+            }
+        }
     }
 
     fn missing_key(&self) -> Option<String> {

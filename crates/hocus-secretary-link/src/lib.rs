@@ -52,6 +52,15 @@
 //! what leaves the machine, the notebook suggested), and "Autoriser" says
 //! the notebook chosen ([`ToSecretary::Decide`]'s `notebook`); her face
 //! has a second line, how to fix what her status says ([`Look::hint`]).
+//!
+//! **Version 6** brings #752: her key given in the drawer or the Settings
+//! ([`ToSecretary::Key`], answered by [`FromSecretary::Keyed`]; the
+//! Settings connect as [`Client::Settings`]), a copy of it taken out of
+//! the clipboard's history ([`FromSecretary::ClipSecret`]), her name and
+//! the key her drawer asks for in her face ([`Look::name`], [`Look::key`]),
+//! a consent sheet's "C'est privé" and the calendars it lists
+//! ([`sheets::Sheet`]), and the calendars left out of a consent card's
+//! "Autoriser" ([`ToSecretary::Decide`]'s `left_out`).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -71,7 +80,7 @@ pub mod sheets;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -91,6 +100,43 @@ pub fn data_dir() -> Option<PathBuf> {
         .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
     data.is_absolute()
         .then(|| data.join("hocuspanda/secretary"))
+}
+
+/// Her socket in this session: [`SOCKET_ENV`], else beside the Wayland
+/// socket (`$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.secretary`).
+pub fn session_socket() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    if let Some(path) = var(SOCKET_ENV) {
+        return Some(PathBuf::from(path));
+    }
+    let display = PathBuf::from(var("WAYLAND_DISPLAY")?);
+    let wayland = if display.is_absolute() {
+        display
+    } else {
+        PathBuf::from(var("XDG_RUNTIME_DIR")?).join(display)
+    };
+    Some(socket_path(&wayland))
+}
+
+/// `key` given to her for `provider` (none: erased), over her socket at
+/// `path`, as the Settings do: what became of it. Blocking (her check
+/// with the provider and her keyring take their time).
+pub fn give_key(
+    path: &Path,
+    client: Client,
+    provider: &str,
+    key: Option<Secret>,
+) -> Result<KeyOutcome, String> {
+    let mut her = Connection::open(path, client, Duration::from_secs(60))?;
+    match her.request(|id| ToSecretary::Key {
+        id,
+        provider: provider.to_owned(),
+        key,
+    })? {
+        FromSecretary::Keyed { outcome, .. } => Ok(outcome),
+        FromSecretary::Error { message, .. } => Err(message),
+        _ => Err("an unexpected answer".to_owned()),
+    }
 }
 
 /// Her socket's path next to the Wayland socket's.
@@ -115,6 +161,108 @@ pub enum Client {
     Shell,
     Cli,
     Test,
+    /// The Settings (her key, version 6).
+    Settings,
+}
+
+/// An API key on its way to her keyring: never printed, its bytes
+/// overwritten with zeros when it goes.
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(text: String) -> Self {
+        Self(text)
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(…)")
+    }
+}
+
+impl Drop for Secret {
+    fn drop(&mut self) {
+        wipe(&mut self.0);
+    }
+}
+
+/// `text`'s bytes overwritten with zeros, then emptied: what held a key
+/// does not keep it in memory once it is used.
+pub fn wipe(text: &mut String) {
+    let mut bytes = std::mem::take(text).into_bytes();
+    bytes.fill(0);
+    // The zeros are read back, so that the write is not left out.
+    std::hint::black_box(&bytes);
+}
+
+/// The clipboard history's digest of a text (FNV-1a, the shell's): what
+/// she gives the shell of a key she kept, so that a copy of it leaves the
+/// history, without the key itself.
+pub fn clip_digest(text: &str) -> u64 {
+    text.trim()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        })
+}
+
+/// What became of a key given to her ([`ToSecretary::Key`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KeyOutcome {
+    /// Checked by the provider, kept in the keyring.
+    Kept,
+    /// Taken out of the keyring.
+    Erased,
+    /// Not a key of that provider's (empty, spaces, the wrong prefix).
+    Malformed,
+    /// The provider refuses it.
+    Refused,
+    /// The provider could not be reached.
+    Offline,
+    /// The provider answered something else.
+    Failed,
+    /// The keyring did not keep it (or does not answer).
+    NoKeyring,
+}
+
+impl KeyOutcome {
+    /// What the user reads.
+    pub fn words(self, provider: &str, fr: bool) -> String {
+        let name = match provider {
+            "anthropic" => "Anthropic",
+            other => other,
+        };
+        match (self, fr) {
+            (Self::Kept, true) => format!("Clé {name} enregistrée dans ton trousseau."),
+            (Self::Kept, false) => format!("{name} key saved in your keyring."),
+            (Self::Erased, true) => format!("Clé {name} effacée de ton trousseau."),
+            (Self::Erased, false) => format!("{name} key erased from your keyring."),
+            (Self::Malformed, true) if provider == "anthropic" => {
+                "Ce n’est pas une clé Anthropic : elle commence par sk-ant-.".to_owned()
+            }
+            (Self::Malformed, false) if provider == "anthropic" => {
+                "That is not an Anthropic key: it starts with sk-ant-.".to_owned()
+            }
+            (Self::Malformed, true) => format!("Ce n’est pas une clé {name}."),
+            (Self::Malformed, false) => format!("That is not a {name} key."),
+            (Self::Refused, true) => format!("Clé refusée par {name}."),
+            (Self::Refused, false) => format!("Key refused by {name}."),
+            (Self::Offline, true) => format!("Pas de réseau : {name} ne répond pas. Réessaie plus tard."),
+            (Self::Offline, false) => format!("No network: {name} does not answer. Try again later."),
+            (Self::Failed, true) => format!("{name} n’a pas pu vérifier la clé. Réessaie plus tard."),
+            (Self::Failed, false) => format!("{name} could not check the key. Try again later."),
+            (Self::NoKeyring, true) => "Ton trousseau ne répond pas : la clé n’est pas enregistrée.".to_owned(),
+            (Self::NoKeyring, false) => "Your keyring does not answer: the key is not saved.".to_owned(),
+        }
+    }
 }
 
 /// The two notebooks every item of her memory is in (§7.4).
@@ -256,6 +404,15 @@ pub enum ToSecretary {
     /// The moment the screen is in (§7.4), as it changes: in a public one
     /// nothing perso is shown, and nothing perso goes to a model.
     Moment { moment: Moment },
+    /// `provider`'s API key, pasted in her drawer or the Settings: she
+    /// checks it with the provider and keeps it in her keyring; none
+    /// erases it. Answered by [`FromSecretary::Keyed`].
+    Key {
+        id: u64,
+        provider: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<Secret>,
+    },
     /// Effect `effect` carried out by the shell (`ok`), or not, and why.
     Effected {
         effect: u64,
@@ -443,6 +600,17 @@ pub enum FromSecretary {
     Effect {
         effect: Effect,
     },
+    /// What became of [`ToSecretary::Key`] `id`.
+    Keyed {
+        id: u64,
+        provider: String,
+        outcome: KeyOutcome,
+    },
+    /// A key she kept: a copy of it leaves the clipboard's history (its
+    /// [`clip_digest`]), to the shells.
+    ClipSecret {
+        digest: u64,
+    },
     Error {
         #[serde(default)]
         id: Option<u64>,
@@ -460,7 +628,8 @@ impl FromSecretary {
             | Self::Typing { id, .. }
             | Self::Thread { id, .. }
             | Self::Knows { id, .. }
-            | Self::Toast { id, .. } => Some(*id),
+            | Self::Toast { id, .. }
+            | Self::Keyed { id, .. } => Some(*id),
             Self::Error { id, .. } => *id,
             Self::Hello { .. }
             | Self::Refused { .. }
@@ -468,6 +637,7 @@ impl FromSecretary {
             | Self::Look { .. }
             | Self::Speak { .. }
             | Self::Restraint { .. }
+            | Self::ClipSecret { .. }
             | Self::Effect { .. } => None,
         }
     }
@@ -751,6 +921,13 @@ pub struct Look {
     /// terminal : hocus-secretary key anthropic"); empty when all is well.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub hint: String,
+    /// The provider whose key she misses: her drawer shows its field
+    /// (version 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Her name (`[secretary] name`): empty, "Ta secrétaire" (version 6).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
 }
 
 /// Her mood (§5.6).
@@ -837,6 +1014,10 @@ pub struct Status {
     pub calls_running: u32,
     /// The local triage's queue, when she has one.
     pub triage: Option<TriageStatus>,
+    /// The provider whose key her answers need, and whether her keyring
+    /// misses it (as last asked): the Settings' "Clé Anthropic" row.
+    pub key_provider: Option<String>,
+    pub key_missing: bool,
 }
 
 /// The local triage's queue (§11.1).
@@ -1011,9 +1192,15 @@ impl Connection {
     }
 
     pub fn send(&mut self, message: &ToSecretary) -> Result<(), String> {
-        self.writer
-            .write_all(line(message).as_bytes())
-            .map_err(|e| e.to_string())
+        let mut text = line(message);
+        let wrote = self
+            .writer
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string());
+        if matches!(message, ToSecretary::Key { .. }) {
+            wipe(&mut text);
+        }
+        wrote
     }
 
     pub fn receive(&mut self) -> Result<FromSecretary, String> {
@@ -1076,7 +1263,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":5,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":6,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });

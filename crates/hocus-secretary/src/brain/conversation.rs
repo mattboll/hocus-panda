@@ -395,6 +395,8 @@ impl Brain {
             tone,
             model: self.model.as_ref().map(|m| m.shown()).unwrap_or_default(),
             hint,
+            key: self.key_missing.clone(),
+            name: String::new(),
         }
     }
 

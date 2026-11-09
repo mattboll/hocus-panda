@@ -268,6 +268,21 @@ pub trait Model: Send + Sync + std::fmt::Debug {
     fn missing_key(&self) -> Option<String> {
         None
     }
+
+    /// The provider whose key her answers use, when it needs one.
+    fn key_provider(&self) -> Option<String> {
+        None
+    }
+
+    /// `key` checked with `provider` and kept in her keyring (none:
+    /// erased), on a worker thread: blocking (#752).
+    fn keep_key(
+        &self,
+        _provider: &str,
+        _key: Option<&hocus_secretary_link::Secret>,
+    ) -> hocus_secretary_link::KeyOutcome {
+        hocus_secretary_link::KeyOutcome::NoKeyring
+    }
 }
 
 /// The fake model's script, a TOML file:
