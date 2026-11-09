@@ -195,8 +195,8 @@ pub fn prompt(provider: &str, fr: bool) -> String {
 /// error) and with the echo off, back on after, whatever happened; else
 /// read as it comes, silently.
 pub fn read_secret(prompt: &str) -> std::io::Result<String> {
-    use std::io::{BufRead as _, IsTerminal as _};
     use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+    use std::io::{BufRead as _, IsTerminal as _};
     let stdin = std::io::stdin();
     let mut line = String::new();
     if !stdin.is_terminal() {

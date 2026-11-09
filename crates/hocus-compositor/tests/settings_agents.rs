@@ -1439,7 +1439,11 @@ fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
         std::fs::read_to_string(&ran).is_ok_and(|t| t.trim() == "online-accounts")
     })?;
     anyhow::ensure!(opened, "the panel never ran");
-    let shown = bed.shows(|s| google(s, &work_calendar)["calendars"].as_array().is_some_and(|c| c.len() == 4))?;
+    let shown = bed.shows(|s| {
+        google(s, &work_calendar)["calendars"]
+            .as_array()
+            .is_some_and(|c| c.len() == 4)
+    })?;
     assert_eq!(
         google(&shown, &work_calendar)["calendars"],
         serde_json::json!([
@@ -1452,7 +1456,9 @@ fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
     bed.click(&format!("google:{work_calendar}"))?;
     bed.shows(|s| s["agents"]["google_sheet"] == work_calendar.as_str())?;
     bed.click("sheet:calendar:3")?;
-    bed.shows(|s| s["agents"]["google_left_out"] == serde_json::json!(["famille@group.calendar.google.com"]))?;
+    bed.shows(|s| {
+        s["agents"]["google_left_out"] == serde_json::json!(["famille@group.calendar.google.com"])
+    })?;
     if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
         std::fs::create_dir_all(&out)?;
         save(&mut bed, &out, "settings-agenda-sheet.png")?;
@@ -1470,9 +1476,16 @@ fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
     );
     // On its row: Équipe design left out too, Famille taken back.
     bed.click(&format!("calendar:{work_calendar}:1"))?;
-    bed.shows(|s| google(s, &work_calendar)["left_out"].as_array().is_some_and(|l| l.len() == 2))?;
+    bed.shows(|s| {
+        google(s, &work_calendar)["left_out"]
+            .as_array()
+            .is_some_and(|l| l.len() == 2)
+    })?;
     bed.click(&format!("calendar:{work_calendar}:3"))?;
-    bed.shows(|s| google(s, &work_calendar)["left_out"] == serde_json::json!(["design@group.calendar.google.com"]))?;
+    bed.shows(|s| {
+        google(s, &work_calendar)["left_out"]
+            == serde_json::json!(["design@group.calendar.google.com"])
+    })?;
     if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
         bed.reveal(&format!("row:agents.google.{work_calendar}"))?;
         save(&mut bed, &out, "settings-agenda-row.png")?;

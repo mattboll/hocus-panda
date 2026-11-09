@@ -304,8 +304,10 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
 fn a_consent_given_in_the_settings_shows_on_her_card_at_once() -> anyhow::Result<()> {
     let bed = Bed::start()?;
     // Her name given (#752): she introduces herself by it.
-    let mut named = hocus_secretary::settings::Settings::default();
-    named.name = "Margot".to_owned();
+    let named = hocus_secretary::settings::Settings {
+        name: "Margot".to_owned(),
+        ..Default::default()
+    };
     let mut driver = common::Driver::start(
         Store::in_memory(common::clock())?,
         Options {
@@ -399,15 +401,24 @@ fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow:
         api.calendars = vec![own, design, famille, broken];
         api.events.insert(
             WORK.to_owned(),
-            (vec![event("e1", "Point Chapitô", "10:00", "11:00")], "s-w".to_owned()),
+            (
+                vec![event("e1", "Point Chapitô", "10:00", "11:00")],
+                "s-w".to_owned(),
+            ),
         );
         api.events.insert(
             "design@group.calendar.google.com".to_owned(),
-            (vec![event("d1", "Revue", "14:00", "15:00")], "s-d".to_owned()),
+            (
+                vec![event("d1", "Revue", "14:00", "15:00")],
+                "s-d".to_owned(),
+            ),
         );
         api.events.insert(
             "famille@group.calendar.google.com".to_owned(),
-            (vec![event("f1", "Kiné", "18:00", "19:00")], "s-f".to_owned()),
+            (
+                vec![event("f1", "Kiné", "18:00", "19:00")],
+                "s-f".to_owned(),
+            ),
         );
     });
     let mut driver = common::Driver::start(Store::in_memory(common::clock())?, bed.options());
@@ -459,10 +470,18 @@ fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow:
             break look;
         }
     };
-    assert!(look.status.ends_with("1 agenda illisible"), "{}", look.status);
+    assert!(
+        look.status.ends_with("1 agenda illisible"),
+        "{}",
+        look.status
+    );
     assert!(look.hint.contains("Salles"), "{}", look.hint);
     let asked = bed.api.asked();
-    assert!(asked.iter().any(|a| a.path == format!("/calendars/{WORK}/events")));
+    assert!(
+        asked
+            .iter()
+            .any(|a| a.path == format!("/calendars/{WORK}/events"))
+    );
     assert!(
         asked
             .iter()
@@ -474,7 +493,9 @@ fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow:
         "Famille left out: never read"
     );
     let kept = hocus_secretary_link::calendars::Calendars::load(
-        &bed.dir.path().join(hocus_secretary_link::calendars::CALENDARS),
+        &bed.dir
+            .path()
+            .join(hocus_secretary_link::calendars::CALENDARS),
     );
     let salles = kept
         .of(WORK_ID)
@@ -510,9 +531,9 @@ fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
     driver.advance(300);
     let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
     assert!(
-        hers(&items)
-            .last()
-            .is_some_and(|t| t.starts_with("J’ai trouvé un nouveau compte Google : alex.asso@gmail.com.")),
+        hers(&items).last().is_some_and(
+            |t| t.starts_with("J’ai trouvé un nouveau compte Google : alex.asso@gmail.com.")
+        ),
         "{:?}",
         hers(&items)
     );
@@ -521,7 +542,10 @@ fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
     assert_eq!(new[0].1.label, format!("Agenda · {ASSO}"));
     decide(&mut driver, new[0].0, Decision::Reject, None);
     let items = thread(&mut driver);
-    assert_eq!(waiting(&items)[0].1.label, format!("Anniversaires · {ASSO}"));
+    assert_eq!(
+        waiting(&items)[0].1.label,
+        format!("Anniversaires · {ASSO}")
+    );
     assert_eq!(
         cards(&items)
             .iter()

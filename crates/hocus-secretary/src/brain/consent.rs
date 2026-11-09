@@ -167,7 +167,12 @@ impl Brain {
             .map(|(i, a)| (*i, a.clone()))
             .collect();
         for (item, asked) in cards {
-            let list = self.consents.calendars.get(&asked.source.account).cloned().unwrap_or_default();
+            let list = self
+                .consents
+                .calendars
+                .get(&asked.source.account)
+                .cloned()
+                .unwrap_or_default();
             self.change_item(item, |body| {
                 if let Body::Card { card } = body
                     && let Some(sheet) = &mut card.sheet
@@ -337,7 +342,11 @@ impl Brain {
         if changed {
             let kept = serde_json::to_string(&filed)
                 .map_err(|e| e.to_string())
-                .and_then(|t| self.store.set_meta(NOTEBOOKS, &t).map_err(|e| e.to_string()));
+                .and_then(|t| {
+                    self.store
+                        .set_meta(NOTEBOOKS, &t)
+                        .map_err(|e| e.to_string())
+                });
             if let Err(err) = kept {
                 tracing::warn!(%err, "could not keep the sources' notebooks");
             }
@@ -473,7 +482,7 @@ impl Brain {
             ],
             decided: None,
             outcome: None,
-            sheet: Some(sheet),
+            sheet: Some(Box::new(sheet)),
         };
         let item = self.add_item(None, Body::Card { card });
         tracing::info!(
@@ -529,7 +538,11 @@ impl Brain {
                     left_out,
                     now,
                 );
-                let said = format!("{} {what} · {}", self.talk.t("Je lis", "I read"), notebook.said(fr));
+                let said = format!(
+                    "{} {what} · {}",
+                    self.talk.t("Je lis", "I read"),
+                    notebook.said(fr)
+                );
                 (said, vec![self.stop_reading()], None, true)
             }
             (Decision::Reject, Some(_)) => {

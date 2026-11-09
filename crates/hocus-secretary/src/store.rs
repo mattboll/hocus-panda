@@ -27,7 +27,8 @@ use crate::clock::Clock;
 /// The schema's version, in `meta`.
 /// A row of `?1`'s, or of one of its parts (`?1#…`): what a source
 /// brought.
-pub(crate) const OF_SOURCE: &str = " IS NOT NULL AND (source = ?1 OR substr(source, 1, length(?1) + 1) = ?1 || '#')";
+pub(crate) const OF_SOURCE: &str =
+    " IS NOT NULL AND (source = ?1 OR substr(source, 1, length(?1) + 1) = ?1 || '#')";
 
 const SCHEMA: i64 = 2;
 
@@ -923,7 +924,9 @@ impl Store {
         let mut moved = 0;
         for table in ["nodes", "aliases", "edges", "rules", "episodes"] {
             moved += tx.execute(
-                &format!("UPDATE {table} SET notebook = ?2 WHERE source{OF_SOURCE} AND notebook <> ?2"),
+                &format!(
+                    "UPDATE {table} SET notebook = ?2 WHERE source{OF_SOURCE} AND notebook <> ?2"
+                ),
                 params![source, notebook.word()],
             )?;
         }

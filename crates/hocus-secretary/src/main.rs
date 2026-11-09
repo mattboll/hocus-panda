@@ -267,8 +267,8 @@ fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
              (which sets HOCUS_SECRETARY_BUS), or give --bus session",
         )?;
     let fr = Language::of_env() == Language::French;
-    let mut read = key::read_secret(&key::prompt(provider, fr))
-        .map_err(|e| format!("standard input: {e}"))?;
+    let mut read =
+        key::read_secret(&key::prompt(provider, fr)).map_err(|e| format!("standard input: {e}"))?;
     let secret = read.trim().to_owned();
     key::wipe(&mut read);
     if secret.is_empty() {

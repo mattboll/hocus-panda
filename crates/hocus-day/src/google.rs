@@ -141,7 +141,11 @@ impl GoogleCalendar {
 
     /// `calendar`'s busy blocks within `range` (`POST /freeBusy`): a
     /// calendar shared as free/busy only.
-    pub fn busy(&mut self, calendar: &CalendarId, range: Range) -> Result<Vec<(Timestamp, Timestamp)>> {
+    pub fn busy(
+        &mut self,
+        calendar: &CalendarId,
+        range: Range,
+    ) -> Result<Vec<(Timestamp, Timestamp)>> {
         let body = serde_json::json!({
             "timeMin": range.from.to_string(),
             "timeMax": range.to.to_string(),

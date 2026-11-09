@@ -256,12 +256,22 @@ impl KeyOutcome {
             (Self::Malformed, false) => format!("That is not a {name} key."),
             (Self::Refused, true) => format!("Clé refusée par {name}."),
             (Self::Refused, false) => format!("Key refused by {name}."),
-            (Self::Offline, true) => format!("Pas de réseau : {name} ne répond pas. Réessaie plus tard."),
-            (Self::Offline, false) => format!("No network: {name} does not answer. Try again later."),
-            (Self::Failed, true) => format!("{name} n’a pas pu vérifier la clé. Réessaie plus tard."),
+            (Self::Offline, true) => {
+                format!("Pas de réseau : {name} ne répond pas. Réessaie plus tard.")
+            }
+            (Self::Offline, false) => {
+                format!("No network: {name} does not answer. Try again later.")
+            }
+            (Self::Failed, true) => {
+                format!("{name} n’a pas pu vérifier la clé. Réessaie plus tard.")
+            }
             (Self::Failed, false) => format!("{name} could not check the key. Try again later."),
-            (Self::NoKeyring, true) => "Ton trousseau ne répond pas : la clé n’est pas enregistrée.".to_owned(),
-            (Self::NoKeyring, false) => "Your keyring does not answer: the key is not saved.".to_owned(),
+            (Self::NoKeyring, true) => {
+                "Ton trousseau ne répond pas : la clé n’est pas enregistrée.".to_owned()
+            }
+            (Self::NoKeyring, false) => {
+                "Your keyring does not answer: the key is not saved.".to_owned()
+            }
         }
     }
 }
@@ -882,7 +892,7 @@ pub struct Card {
     /// A consent card's sheet: its sections and its notebook's choice.
     /// Its buttons stay under its outcome ("Ne plus lire" once granted).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sheet: Option<sheets::Sheet>,
+    pub sheet: Option<Box<sheets::Sheet>>,
 }
 
 /// A card's colour and meaning.
@@ -1356,13 +1366,13 @@ mod tests {
                 actions: Vec::new(),
                 decided: None,
                 outcome: None,
-                sheet: Some(sheets::google(
+                sheet: Some(Box::new(sheets::google(
                     "alex.martin@gmail.com",
                     consent::SourceKind::Mail,
                     Notebook::Perso,
                     gate::Restraint::default().perso,
                     true,
-                )),
+                ))),
             },
         };
         let said = serde_json::to_string(&consent).expect("writes");

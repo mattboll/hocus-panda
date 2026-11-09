@@ -214,7 +214,11 @@ fn ac21_the_triage_runs_locally_paced_on_mains_and_unloads_when_idle() {
     s.driver
         .until("one item triaged", |st| triage(st).done == 1);
     assert_eq!(
-        s.local.seen().iter().filter(|r| r.path == "/api/chat").count(),
+        s.local
+            .seen()
+            .iter()
+            .filter(|r| r.path == "/api/chat")
+            .count(),
         1,
         "one request, then a rest"
     );

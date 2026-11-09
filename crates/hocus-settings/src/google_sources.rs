@@ -325,14 +325,9 @@ mod tests {
         let rows = found(&accounts, &ConsentBook::load(&path), &Calendars::default());
         assert_eq!(rows[2].left_out, ["conges@group.calendar.google.com"]);
         assert_eq!(rows[2].granted, Some(Notebook::Perso));
-        assert!(
-            rows[2]
-                .line(Lang::French)
-                .starts_with("Elle lit · privé")
-        );
+        assert!(rows[2].line(Lang::French).starts_with("Elle lit · privé"));
         // « C'est privé » unchecked on its row: work, still read.
-        set_notebook(&path, &rows[2].key(), Notebook::Pro, Timestamp::UNIX_EPOCH)
-            .expect("written");
+        set_notebook(&path, &rows[2].key(), Notebook::Pro, Timestamp::UNIX_EPOCH).expect("written");
         let rows_after = found(&accounts, &ConsentBook::load(&path), &Calendars::default());
         assert_eq!(rows_after[2].granted, Some(Notebook::Pro));
         assert!(
@@ -351,6 +346,9 @@ mod tests {
         .expect("written");
         let book = ConsentBook::load(&path);
         assert_eq!(book.revoked(), [rows[2].key()]);
-        assert_eq!(found(&accounts, &book, &Calendars::default())[2].granted, None);
+        assert_eq!(
+            found(&accounts, &book, &Calendars::default())[2].granted,
+            None
+        );
     }
 }

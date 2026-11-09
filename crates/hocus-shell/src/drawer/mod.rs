@@ -891,7 +891,12 @@ pub fn act(id: window::Id, target: Target) {
                     if !left.remove(&id) {
                         left.insert(id);
                     }
-                    tracing::info!(item, index, left_out = left.len(), "a consent card's calendar");
+                    tracing::info!(
+                        item,
+                        index,
+                        left_out = left.len(),
+                        "a consent card's calendar"
+                    );
                     open.changed();
                 }
                 Then::Draw
@@ -915,7 +920,11 @@ pub fn act(id: window::Id, target: Target) {
                     Notebook::Pro => Notebook::Perso,
                     Notebook::Perso => Notebook::Pro,
                 };
-                tracing::info!(item, notebook = next.word(), "a consent card's « C'est privé »");
+                tracing::info!(
+                    item,
+                    notebook = next.word(),
+                    "a consent card's « C'est privé »"
+                );
                 open.notebooks.insert(item, next);
                 open.changed();
                 Then::Draw

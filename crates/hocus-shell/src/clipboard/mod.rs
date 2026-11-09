@@ -463,7 +463,10 @@ pub fn pin(key: u64) {
 pub fn forget_secret(digest: u64) {
     let gone = with(|h| h.forget_secret(digest));
     if !gone.is_empty() {
-        tracing::info!(gone = gone.len(), "a key's copy leaves the clipboard's history");
+        tracing::info!(
+            gone = gone.len(),
+            "a key's copy leaves the clipboard's history"
+        );
         store::ask(store::Ask::Remove(gone));
         changed();
     }

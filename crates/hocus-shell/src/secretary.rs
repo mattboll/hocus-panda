@@ -330,7 +330,14 @@ pub fn decide(
     left_out: Vec<String>,
 ) {
     let id = next_id();
-    tracing::info!(id, item, ?decision, ?notebook, left_out = left_out.len(), "a card's button");
+    tracing::info!(
+        id,
+        item,
+        ?decision,
+        ?notebook,
+        left_out = left_out.len(),
+        "a card's button"
+    );
     send(ToSecretary::Decide {
         id,
         item,

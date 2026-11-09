@@ -531,11 +531,12 @@ impl App {
             .spawn(move || {
                 use hocus_secretary_link::{Client, Connection};
                 if let Some(key) = give {
-                    let provider = Connection::open(&socket, Client::Settings, Duration::from_secs(5))
-                        .and_then(|mut c| c.status())
-                        .ok()
-                        .and_then(|s| s.key_provider)
-                        .unwrap_or_else(|| "anthropic".to_owned());
+                    let provider =
+                        Connection::open(&socket, Client::Settings, Duration::from_secs(5))
+                            .and_then(|mut c| c.status())
+                            .ok()
+                            .and_then(|s| s.key_provider)
+                            .unwrap_or_else(|| "anthropic".to_owned());
                     let outcome =
                         hocus_secretary_link::give_key(&socket, Client::Settings, &provider, key);
                     if let Err(err) = &outcome {
@@ -600,7 +601,11 @@ impl App {
     /// « C'est privé » checked (`Perso`) or not on a granted source's row
     /// (#752): written in her book on a thread, the rows read again. She
     /// takes it at once and moves what came from it.
-    fn agents_private_job(&self, source: hocus_secretary_link::consent::SourceKey, notebook: Notebook) {
+    fn agents_private_job(
+        &self,
+        source: hocus_secretary_link::consent::SourceKey,
+        notebook: Notebook,
+    ) {
         let Some(to) = self.agents.to.clone() else {
             return;
         };
@@ -620,7 +625,9 @@ impl App {
                         notebook = notebook.word(),
                         "a source's notebook written"
                     ),
-                    Err(err) => tracing::warn!(source = %source, %err, "the notebook is not written"),
+                    Err(err) => {
+                        tracing::warn!(source = %source, %err, "the notebook is not written")
+                    }
                 }
                 let _ = to.unbounded_send(Message::Agents(Msg::Notifiers(notifiers::read())));
                 let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
@@ -1151,9 +1158,7 @@ impl App {
     /// acts, `Tab` and the arrows go from one button to the other.
     pub(super) fn agents_key_first(&mut self, key: &Key) -> Option<iced::Task<Message>> {
         // Her key's field being typed in: `Esc` empties it (#752).
-        if !self.agents.key.field.expose().is_empty()
-            && key.as_ref() == Key::Named(Named::Escape)
-        {
+        if !self.agents.key.field.expose().is_empty() && key.as_ref() == Key::Named(Named::Escape) {
             self.agents.key.field = Secret::default();
             self.agents.key.replacing = false;
             return Some(iced::widget::operation::focus("nothing"));
@@ -1583,8 +1588,9 @@ impl App {
                     .padding([4, 6])
                     .on_press(Message::Agents(Msg::AddAccount))
                     .style(|_, status| button::Style {
-                        background: matches!(status, button::Status::Hovered)
-                            .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                        background: matches!(status, button::Status::Hovered).then(|| {
+                            Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))
+                        }),
                         text_color: TEXT.get(),
                         border: border(7.0, 0.0, Color::TRANSPARENT),
                         ..button::Style::default()
@@ -1626,10 +1632,9 @@ impl App {
                 "Elle va dans ton trousseau, jamais dans un fichier.",
                 "It goes to your keyring, never to a file.",
             )),
-            (false, false) => self.say(w(
-                "Enregistrée dans ton trousseau",
-                "Saved in your keyring",
-            )),
+            (false, false) => {
+                self.say(w("Enregistrée dans ton trousseau", "Saved in your keyring"))
+            }
         };
         words = words.push(t(line, 12.5, DIM.get()));
         if let Some(said) = &key.said {
@@ -1792,14 +1797,14 @@ impl App {
         }
         line = line.push(container(action).id(format!("google:{}", source.word())));
         container(line)
-        .padding(Padding {
-            top: 11.0,
-            right: 14.0,
-            bottom: 11.0,
-            left: 16.0,
-        })
-        .id(format!("row:agents.google.{}", source.word()))
-        .into()
+            .padding(Padding {
+                top: 11.0,
+                right: 14.0,
+                bottom: 11.0,
+                left: 16.0,
+            })
+            .id(format!("row:agents.google.{}", source.word()))
+            .into()
     }
 
     /// A Google account's mark: its letter on a blue tile (no brand
@@ -1859,7 +1864,12 @@ impl App {
         if !sheet.source.calendars.is_empty() {
             let fr = lang == Lang::French;
             let mut list = column![
-                t(hocus_secretary_link::sheets::calendars_label(fr), 11.0, FAINT.get()).font(BOLD)
+                t(
+                    hocus_secretary_link::sheets::calendars_label(fr),
+                    11.0,
+                    FAINT.get()
+                )
+                .font(BOLD)
             ]
             .spacing(4);
             for (n, calendar) in sheet.source.calendars.iter().enumerate() {
@@ -1941,12 +1951,7 @@ impl App {
         });
         for line in &private.lines {
             lines = lines.push(
-                t(
-                    line.clone(),
-                    12.5,
-                    if on { SOFT.get() } else { DIM.get() },
-                )
-                .line_height(1.4),
+                t(line.clone(), 12.5, if on { SOFT.get() } else { DIM.get() }).line_height(1.4),
             );
         }
         column![container(label).id("sheet:private".to_owned()), lines]
@@ -1964,12 +1969,14 @@ impl App {
         id: String,
     ) -> El<'a> {
         let note = calendar.note(self.lang == Lang::French);
-        let mut words = row![t(
-            calendar.name.clone(),
-            13.0,
-            if read { TEXT.get() } else { DIM.get() }
-        )
-        .font(SEMIBOLD)]
+        let mut words = row![
+            t(
+                calendar.name.clone(),
+                13.0,
+                if read { TEXT.get() } else { DIM.get() }
+            )
+            .font(SEMIBOLD)
+        ]
         .spacing(8)
         .align_y(Alignment::Center);
         if !note.is_empty() {
@@ -1998,7 +2005,11 @@ impl App {
     /// A check box, ticked or not.
     fn agents_check<'a>(on: bool, size: f32) -> El<'a> {
         let mark: El<'a> = if on {
-            text("✓").size(size * 0.72).font(BOLD).color(DEEP.get()).into()
+            text("✓")
+                .size(size * 0.72)
+                .font(BOLD)
+                .color(DEEP.get())
+                .into()
         } else {
             Space::new().into()
         };
@@ -2110,14 +2121,14 @@ impl App {
         }
         line = line.push(container(action).id(format!("notifier:{}", notifier.key)));
         container(line)
-        .padding(Padding {
-            top: 11.0,
-            right: 14.0,
-            bottom: 11.0,
-            left: 16.0,
-        })
-        .id(format!("row:agents.notifier.{}", notifier.key))
-        .into()
+            .padding(Padding {
+                top: 11.0,
+                right: 14.0,
+                bottom: 11.0,
+                left: 16.0,
+            })
+            .id(format!("row:agents.notifier.{}", notifier.key))
+            .into()
     }
 
     /// The notifications' consent sheet (§10.1): what she reads, what she
@@ -2146,10 +2157,8 @@ impl App {
                 .spacing(5),
             );
         }
-        let private = hocus_secretary_link::sheets::private(
-            self.lang == Lang::French,
-            self.agents_quiet(),
-        );
+        let private =
+            hocus_secretary_link::sheets::private(self.lang == Lang::French, self.agents_quiet());
         body = body.push(self.agents_private(notify.notebook, &private));
         let buttons = row![
             Space::new().width(Length::Fill),

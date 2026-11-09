@@ -91,7 +91,11 @@ impl Reader {
     }
 
     fn info(&self, calendar: &Calendar) -> CalendarInfo {
-        let access = self.google.access(&calendar.id).cloned().unwrap_or_default();
+        let access = self
+            .google
+            .access(&calendar.id)
+            .cloned()
+            .unwrap_or_default();
         CalendarInfo {
             id: calendar.id.as_str().to_owned(),
             name: calendar.name.clone(),
@@ -183,7 +187,11 @@ impl Reader {
                 // A token some calendars refuse (or no longer take): the
                 // window listed again.
                 Err(SourceError::Refused(why)) => {
-                    tracing::info!(calendar = calendar.name, why, "its sync token is refused: listed again");
+                    tracing::info!(
+                        calendar = calendar.name,
+                        why,
+                        "its sync token is refused: listed again"
+                    );
                     None
                 }
                 Err(err) => return Err(err),
@@ -207,7 +215,8 @@ impl Reader {
                 .map(|id| event_id(&calendar.id, id.as_str())),
         );
         for event in events {
-            read.items.push(item(grant, calendar, info.hidden, event, zone));
+            read.items
+                .push(item(grant, calendar, info.hidden, event, zone));
         }
         Ok(())
     }

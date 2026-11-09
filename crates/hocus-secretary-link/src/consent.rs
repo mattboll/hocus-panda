@@ -458,9 +458,17 @@ mod tests {
             vec!["conges".to_owned()],
             Timestamp::UNIX_EPOCH,
         );
-        assert_eq!(book.grant(&calendar).expect("granted").left_out(), ["conges"]);
+        assert_eq!(
+            book.grant(&calendar).expect("granted").left_out(),
+            ["conges"]
+        );
         book.leave_out(&calendar, Vec::new(), Timestamp::UNIX_EPOCH);
-        assert!(book.grant(&calendar).expect("granted").left_out().is_empty());
+        assert!(
+            book.grant(&calendar)
+                .expect("granted")
+                .left_out()
+                .is_empty()
+        );
         assert_eq!(book.records().len(), 2);
     }
 

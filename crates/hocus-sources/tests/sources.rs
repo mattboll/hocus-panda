@@ -382,13 +382,21 @@ fn shared_free_busy_and_failing_calendars_never_stop_the_others() -> anyhow::Res
         api.events.insert(
             DESIGN.to_owned(),
             (
-                vec![fakes::day::event("d1", "Revue des maquettes", "14:00", "15:00")],
+                vec![fakes::day::event(
+                    "d1",
+                    "Revue des maquettes",
+                    "14:00",
+                    "15:00",
+                )],
                 "sync-design-1".to_owned(),
             ),
         );
         api.busy.insert(
             CLAIRE.to_owned(),
-            vec![("2026-11-12T09:00:00Z".to_owned(), "2026-11-12T10:30:00Z".to_owned())],
+            vec![(
+                "2026-11-12T09:00:00Z".to_owned(),
+                "2026-11-12T10:30:00Z".to_owned(),
+            )],
         );
     });
     bed.allow(
@@ -442,7 +450,10 @@ fn shared_free_busy_and_failing_calendars_never_stop_the_others() -> anyhow::Res
         notes,
         [
             ("Travail".to_owned(), String::new()),
-            ("Équipe design".to_owned(), "partagé par lea@atelier-lune.fr".to_owned()),
+            (
+                "Équipe design".to_owned(),
+                "partagé par lea@atelier-lune.fr".to_owned()
+            ),
             (
                 "Claire Dubois".to_owned(),
                 "partagé par claire@atelier-lune.fr · ses heures occupées seulement".to_owned()
@@ -470,7 +481,9 @@ fn shared_free_busy_and_failing_calendars_never_stop_the_others() -> anyhow::Res
     let before = bed.api.asked().len();
     let events = bed.cycle();
     assert!(
-        events.iter().any(|e| matches!(e, Event::PurgePart { part, .. } if part == CONGES)),
+        events
+            .iter()
+            .any(|e| matches!(e, Event::PurgePart { part, .. } if part == CONGES)),
         "{events:?}"
     );
     assert!(

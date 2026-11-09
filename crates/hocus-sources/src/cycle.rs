@@ -240,7 +240,7 @@ impl Sources {
             account.suggested,
             jiff::Timestamp::UNIX_EPOCH,
         );
-        let grant = book.grant(&source).ok_or_else(|| SourceError::Gone)?;
+        let grant = book.grant(&source).ok_or(SourceError::Gone)?;
         let mut reader = Reader::new(
             &grant,
             self.tokens(account, seen)?,

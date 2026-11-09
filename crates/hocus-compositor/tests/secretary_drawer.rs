@@ -1045,14 +1045,15 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
         "{shown}"
     );
     assert!(
-        shown["key_lines"]
-            .as_str()
-            .is_some_and(|l| l.contains("Elle va dans ton trousseau, jamais dans un fichier.")
-                && l.contains("hocus-secretary key anthropic, Entrée, puis colle ta clé.")),
+        shown["key_lines"].as_str().is_some_and(|l| l
+            .contains("Elle va dans ton trousseau, jamais dans un fichier.")
+            && l.contains("hocus-secretary key anthropic, Entrée, puis colle ta clé.")),
         "{shown}"
     );
     bed.shot("key-band")?;
-    bed.type_keys(&[KEY_S, KEY_K, KEY_MINUS, KEY_A, KEY_N, KEY_T, KEY_MINUS, KEY_X, KEY_X]);
+    bed.type_keys(&[
+        KEY_S, KEY_K, KEY_MINUS, KEY_A, KEY_N, KEY_T, KEY_MINUS, KEY_X, KEY_X,
+    ]);
     bed.shows(|s| s["key_field"] == serde_json::json!(true))?;
     bed.shot("key-band-typed")?;
     bed.type_keys(&[KEY_ENTER]);

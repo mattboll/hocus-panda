@@ -459,10 +459,8 @@ impl Triager for Router {
                 endpoint.ollama_chat(&choice.model, &messages, triage::schema(), context)?;
             // Where the model is held, now that it is loaded: cheap, and
             // only said in her status.
-            *self
-                .placed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = endpoint.ollama_placement(&choice.model);
+            *self.placed.lock().unwrap_or_else(PoisonError::into_inner) =
+                endpoint.ollama_placement(&choice.model);
             answer
         } else {
             endpoint.chat(&choice.model, &messages, Some(("triage", triage::schema())))?

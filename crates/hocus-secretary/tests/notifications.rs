@@ -233,10 +233,7 @@ fn a_consented_application_s_notification_goes_through_redaction_and_the_triage(
     s.driver.advance(60);
     s.driver.until("checked", |st| triage(st).done == 1);
     let triaged = s.local.seen();
-    let triaged: Vec<&Seen> = triaged
-        .iter()
-        .filter(|r| r.path == "/api/chat")
-        .collect();
+    let triaged: Vec<&Seen> = triaged.iter().filter(|r| r.path == "/api/chat").collect();
     assert_eq!(triaged.len(), 1);
     assert!(
         triaged[0].body.contains("Notification"),

@@ -158,7 +158,10 @@ pub fn waiting(store: &crate::store::Store) -> Result<Vec<(String, Held)>> {
 /// A source revoked: its items waiting for the triage go.
 pub fn forget_source(conn: &Connection, source: &str) -> Result<()> {
     conn.execute(
-        &format!("DELETE FROM pending WHERE source{}", crate::store::OF_SOURCE),
+        &format!(
+            "DELETE FROM pending WHERE source{}",
+            crate::store::OF_SOURCE
+        ),
         [source],
     )?;
     Ok(())

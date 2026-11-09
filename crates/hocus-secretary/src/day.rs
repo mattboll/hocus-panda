@@ -475,7 +475,10 @@ pub fn plans(conn: &Connection, day: jiff::civil::Date) -> Result<Vec<Plan>> {
 pub fn forget_source(conn: &Connection, source: &str) -> Result<()> {
     for table in ["agenda", "mails", "reminders", "plans"] {
         conn.execute(
-            &format!("DELETE FROM {table} WHERE source{}", crate::store::OF_SOURCE),
+            &format!(
+                "DELETE FROM {table} WHERE source{}",
+                crate::store::OF_SOURCE
+            ),
             [source],
         )?;
     }

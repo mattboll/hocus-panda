@@ -2277,3 +2277,131 @@ The setting is followed live, so switching back to "classic" stops the process a
   shows in the Settings); her own answers' notebook (a perso conversation
   stays in the thread unless its items are perso); her consent cards for
   a sign-in Online Accounts asks for.
+
+### #752: her name, "privé" said plainly, the calendars she reads, consents at once, her key in the UI
+
+The maintainer's feedback after installing sprint 11.
+
+- **Her name** (`[secretary] name`, empty by default: "Ta secrétaire"):
+  a field in Settings › Agents › LA SECRÉTAIRE ("Son nom"), written on
+  `Enter`, `Tab` or leaving it. Her process watches the configuration
+  file (`watch.rs`, inotify on its folder): her face (`Look::name`)
+  carries it at once, and the shell shows it in her drawer's header and
+  her peek's label ("MARGOT"); she introduces herself by it ("Bonjour, je
+  suis Margot, ta secrétaire."), and her persona's first line is "Tu
+  t'appelles Margot.".
+- **« C'est privé »** replaces the Pro/Perso pills on every consent sheet
+  (the Settings' Google and notifications sheets, her first-run cards):
+  one box, checked for the perso notebook (suggested by the account's
+  domain, as before), and what it does under it, as the code does it
+  (`sheets::private`): never shown during a meeting, a screen share or a
+  call (the speak gate, the drawer's masking); never in a message or a
+  task she drafts for work (work drafts take the work notebook only); she
+  brings it up evenings and weekends too, never within the private
+  notebook's quiet hours (`[secretary.speak] quiet-perso`, 22 h – 8 h by
+  default; the work notebook's are 19 h – 8 h and weekends); « Oublier
+  tout le privé » erases it at once. The maintainer's suggested "she
+  doesn't bring it up during work hours" is not what the gate does: the
+  words say what it does. On a granted row (a Google kind, an
+  application's notifications), « Privé » changes it later: a new record
+  (`ConsentBook::set_notebook`); her book is watched, and what came from
+  the source moves to the other notebook at once (`Store::refile_source`:
+  episodes, what was learned from them, the day's records, the items
+  waiting; summaries citing them made again), each source's notebook as
+  filed kept in her memory so that a change made while she was away is
+  taken at her start. Everywhere the user reads it: "travail" and "privé"
+  (`Notebook::said`): "Ce qu'elle sait"'s Tout / Travail / Privé, « Oublier
+  tout le privé », « N choses privées masquées », the briefing's « EN
+  PRIVÉ », the rows ("Elle lit · privé"), the cards ("Je lis ton agenda ·
+  travail"), the toasts. Internal names (`Notebook::Pro/Perso`, `pro` and
+  `perso` in the files) stay.
+- **The calendars**: every `calendarList` entry is read, shared ones
+  included (`dataOwner`, else the id when it is someone's address: «
+  partagé par lea@… »). A calendar shared as free/busy only
+  (`freeBusyReader`) gives its busy blocks through `POST /freeBusy` (a
+  read that only answers), as "Occupé" events of no title. A sync token a
+  calendar refuses lists its window again. One calendar failing never
+  stops the others (only a refused token, or every calendar failing,
+  fails the account's read): it is logged with its name, and her status
+  says it (« Agenda · Gmail à jour · 2 agendas illisibles », its hint
+  naming them). The Agenda's sheet (the Settings' and her card) lists the
+  calendars she will read (« LES AGENDAS QU'ELLE LIRA »: name, « partagé
+  par X », « masqué », « ses heures occupées seulement »), each to be left
+  out; left out ones are written with the consent (`Consent::left_out`)
+  and never read; on the granted Agenda row each can be left out or taken
+  back later (a new record), and what came from one left out is
+  forgotten (an event's source is its calendar's, `account:calendar#ID`;
+  a revocation forgets every part). To show the list before "Autoriser",
+  an Agenda not decided yet has its calendars **listed** (names and who
+  shares them, `calendarList` only, never an event) at each cycle; she
+  keeps the list in her folder (`calendars.json`) for the Settings.
+- **Consents at once**: her consent book is watched (inotify): a consent,
+  a revocation, a notebook or a calendar changed in the Settings reaches
+  her at once (her cards say it, her Google source reads now, her first
+  run goes on), not at her next cycle.
+- **« Ajouter un compte Google ›»** under the Google rows opens GNOME's
+  Online Accounts panel (`gnome-control-center online-accounts`), shown
+  only when it is installed; once it closes, the rows are read again. An
+  account found after her first run is asked about in her drawer: « J'ai
+  trouvé un nouveau compte Google : … », then one source at a time
+  (`accounts-known` in her memory).
+- **Her key in the UI**: her drawer's band, while she misses it, is a
+  masked field « Colle ta clé Anthropic » (`Ctrl+V` pastes; nothing copies
+  out), « Enregistrer », « Elle va dans ton trousseau, jamais dans un
+  fichier. »; the Settings' « Clé Anthropic » row says « Enregistrée dans
+  ton trousseau » (never the key) with « Remplacer » and « Effacer », or a
+  masked field. Both give it to her (`ToSecretary::Key`, protocol 6; the
+  Settings connect as `Client::Settings`): she checks it with the
+  smallest request there is (`GET /v1/models?limit=1`, no tokens) and
+  keeps it in the keyring of her bus, answering « Clé refusée par
+  Anthropic », « Pas de réseau », or « Ce n'est pas une clé Anthropic »
+  without a request. The key is never logged, audited (only that a key
+  was given, and its outcome), kept in her thread, drawn (dots, at most
+  32), nor kept in memory after it is sent (overwritten); a copy of it in
+  the clipboard's history goes (she gives the shells its FNV digest only,
+  `FromSecretary::ClipSecret`). The compositor already keeps no
+  clipboard entry marked secret (`x-kde-passwordManagerHint`), but a
+  browser's copy is not marked: hence the digest.
+- **`hocus-secretary key PROVIDER`** asks on a terminal (« Colle ta clé
+  Anthropic puis Entrée : ») with the echo off, back on after; on a pipe it
+  reads silently. A key put on its command line (after the provider, or
+  in its place) is refused and never printed back, the message saying
+  that the shell's history may keep it.
+- **The drawer's field** has its caret while the keyboard types there
+  (before the placeholder when empty), still as the shell's other fields'
+  (nothing blinks at rest), and its ring in the accent; the keyboard
+  leaving the drawer takes them away.
+- **The triage on Ollama** goes through its own API (`POST /api/chat`)
+  with `options.num_ctx` (`[secretary.triage] context`, 8192 by default),
+  since `/v1` drops options and Ollama's default context takes an 8B model
+  past an 8 GB card; the schema goes in `format`, the unload stays
+  (`keep_alive: 0`). An item longer than the context is cut, its start
+  kept and the cut said in the request. Her status (`hocus msg secretary
+  status`) says where the model is held (`/api/ps`): « tri : sur la carte
+  graphique » or « en partie sur le processeur ». An OpenAI-compatible
+  server (`kind = "openai"`) still gets `/v1`.
+- **Tests**: `hocus-secretary/tests/key_given.rs` (a key checked against
+  a fake API, kept, refused, malformed, offline; never in the audit),
+  `keyring.rs` (the terminal's prompt with its echo off on a
+  pseudo-terminal; a key on the command line refused, never printed),
+  `name.rs` (her name followed live, her persona's first line),
+  `first_run.rs` (her introduction by name; a consent from the Settings
+  taken at once; the Agenda's card listing its calendars, one left out
+  never read, one unreadable said; an account added later asked about),
+  `notebooks.rs` (a source made private moves what came from it at once),
+  `models.rs` (`num_ctx` on Ollama's own API, `/v1` for "openai", a long
+  item cut); `hocus-sources/tests/sources.rs` (shared, free/busy-only,
+  failing and left-out calendars against a fake Calendar API);
+  `hocus-compositor/tests/secretary_drawer.rs` (the key's band, masked, a
+  refused key said; her name in the header; « C'est privé » on her card;
+  the field's caret and ring, nothing drawn at rest),
+  `settings_agents.rs` (the key's row through a fake socket of hers, the
+  name's field, « C'est privé » on the sheets and the rows, the Agenda's
+  calendars, « Ajouter un compte Google »).
+- **To confirm**: listing an undecided Agenda's calendar names before its
+  consent (the alternative: list them only once granted, which reads a
+  calendar once before it can be left out); "she doesn't bring it up
+  during work hours", which the gate does not do today (it could hold a
+  private item within the work notebook's working hours); the caret is
+  steady, as every field of the shell's, rather than blinking.
+

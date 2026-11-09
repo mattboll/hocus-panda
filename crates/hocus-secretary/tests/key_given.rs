@@ -55,9 +55,7 @@ fn given(driver: &mut common::Driver, key: Option<&str>) -> (KeyOutcome, Vec<Fro
     });
     loop {
         match driver.receive() {
-            FromSecretary::Keyed {
-                id: i, outcome, ..
-            } if i == id => return (outcome, before),
+            FromSecretary::Keyed { id: i, outcome, .. } if i == id => return (outcome, before),
             other => before.push(other),
         }
     }
@@ -102,14 +100,21 @@ fn a_key_given_to_her_is_checked_kept_and_never_said_back() -> anyhow::Result<()
     // Refused by the API.
     let (outcome, _) = given(&mut driver, Some(BAD));
     assert_eq!(outcome, KeyOutcome::Refused);
-    assert_eq!(outcome.words("anthropic", true), "Clé refusée par Anthropic.");
+    assert_eq!(
+        outcome.words("anthropic", true),
+        "Clé refusée par Anthropic."
+    );
     assert!(held.key("anthropic").map_err(anyhow::Error::msg)?.is_none());
     // The good one: one tiny request, kept, her face asks no more.
     let (outcome, said) = given(&mut driver, Some(&format!("  {GOOD}\n")));
     assert_eq!(outcome, KeyOutcome::Kept);
     let asked = fake.seen().pop().expect("a check");
     assert_eq!(asked.method, "GET");
-    assert!(asked.path.starts_with("/v1/models?limit=1"), "{}", asked.path);
+    assert!(
+        asked.path.starts_with("/v1/models?limit=1"),
+        "{}",
+        asked.path
+    );
     assert_eq!(asked.header("x-api-key"), Some(GOOD));
     assert_eq!(
         held.key("anthropic")
@@ -162,7 +167,11 @@ fn an_api_out_of_reach_is_said_as_no_network() -> anyhow::Result<()> {
     );
     let (outcome, _) = given(&mut driver, Some(GOOD));
     assert_eq!(outcome, KeyOutcome::Offline);
-    assert!(outcome.words("anthropic", true).starts_with("Pas de réseau"));
+    assert!(
+        outcome
+            .words("anthropic", true)
+            .starts_with("Pas de réseau")
+    );
     driver.stop();
     Ok(())
 }

@@ -31,7 +31,11 @@ pub struct Sheet {
 
 /// The calendars' label on an Agenda's sheet.
 pub fn calendars_label(fr: bool) -> &'static str {
-    if fr { "LES AGENDAS QU’ELLE LIRA" } else { "THE CALENDARS SHE WILL READ" }
+    if fr {
+        "LES AGENDAS QU’ELLE LIRA"
+    } else {
+        "THE CALENDARS SHE WILL READ"
+    }
 }
 
 /// « C'est privé »: its box's words, and what checking it does, as the
@@ -64,7 +68,9 @@ pub fn private(fr: bool, quiet: Hours) -> Private {
             lines: vec![
                 "Jamais montré pendant une réunion, un partage d’écran ou un appel.".to_owned(),
                 "Jamais dans un message ou une tâche qu’elle prépare pour le travail.".to_owned(),
-                format!("Elle t’en parle aussi le soir et le week-end, jamais entre {from} et {to}."),
+                format!(
+                    "Elle t’en parle aussi le soir et le week-end, jamais entre {from} et {to}."
+                ),
                 "Ce qu’elle sait › « Oublier tout le privé » l’efface d’un coup.".to_owned(),
             ],
         }
@@ -74,7 +80,9 @@ pub fn private(fr: bool, quiet: Hours) -> Private {
             lines: vec![
                 "Never shown during a meeting, a screen share or a call.".to_owned(),
                 "Never in a message or a task she drafts for work.".to_owned(),
-                format!("She brings it up evenings and weekends too, never between {from} and {to}."),
+                format!(
+                    "She brings it up evenings and weekends too, never between {from} and {to}."
+                ),
                 "What she knows › “Forget everything private” erases it at once.".to_owned(),
             ],
         }

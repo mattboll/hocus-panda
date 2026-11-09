@@ -687,16 +687,18 @@ fn lay_out_key(
         hex(0xFFE2A8),
     )];
     if c.key_asked.is_some() {
-        said.push((
-            words.pick("Je la vérifie…", "Checking it…").to_owned(),
-            DIM,
-        ));
+        said.push((words.pick("Je la vérifie…", "Checking it…").to_owned(), DIM));
     } else if let Some((given, outcome)) = &c.key_said
         && *outcome != hocus_secretary_link::KeyOutcome::Kept
     {
         said.push((outcome.words(given, words.fr), ORANGE));
     }
-    if let Some(hint) = c.look.as_ref().map(|l| l.hint.clone()).filter(|h| !h.is_empty()) {
+    if let Some(hint) = c
+        .look
+        .as_ref()
+        .map(|l| l.hint.clone())
+        .filter(|h| !h.is_empty())
+    {
         said.push((hint, FAINT));
     }
     let mut lines = Vec::new();
@@ -1532,7 +1534,10 @@ fn lay_out_sheet(
                 lines_of(&note, SMALL, false, inner - size - 8.0)
             };
             let h = name_lines.len() as f32 * SHEET_LINE + note_lines.len() as f32 * SMALL_LINE;
-            let rect = Rectangle::new(Point::new(x + CARD_X - 3.0, at - 2.0), Size::new(inner + 6.0, h + 4.0));
+            let rect = Rectangle::new(
+                Point::new(x + CARD_X - 3.0, at - 2.0),
+                Size::new(inner + 6.0, h + 4.0),
+            );
             if open.hover == Some(target) {
                 parts.push(Shape::Box {
                     rect,

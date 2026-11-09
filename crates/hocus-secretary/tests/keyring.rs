@@ -424,7 +424,10 @@ fn a_key_on_the_command_line_is_refused_and_never_printed_back() -> anyhow::Resu
         );
         assert!(!out.status.success(), "{said}");
         assert!(!said.contains(made_up), "never printed back: {said}");
-        assert!(said.contains("ne se met pas sur la ligne de commande"), "{said}");
+        assert!(
+            said.contains("ne se met pas sur la ligne de commande"),
+            "{said}"
+        );
         assert!(said.contains("never goes on the command line"), "{said}");
         assert!(said.contains("history"), "{said}");
     }
