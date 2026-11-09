@@ -60,6 +60,8 @@ pub enum Compiled {
     Urgent { sender: String },
     /// `calendar C: ignored`.
     Ignore { calendar: String },
+    /// Her way of being (#753): `style S ⇒ every answer`, in her prompt.
+    Style { style: crate::style::Style },
 }
 
 impl Compiled {
@@ -121,6 +123,14 @@ impl Compiled {
             (Self::Ignore { calendar }, false) => (
                 format!("The “{calendar}” calendar: ignored."),
                 "What I do with it: I no longer use it for your days.".to_owned(),
+            ),
+            (Self::Style { style }, true) => (
+                style.said(true),
+                "Ce que j’en fais\u{a0}: je m’y tiens dans chacune de mes réponses.".to_owned(),
+            ),
+            (Self::Style { style }, false) => (
+                style.said(false),
+                "What I do with it: I keep to it in every answer.".to_owned(),
             ),
         }
     }
@@ -1236,6 +1246,12 @@ pub enum Noticed {
         day: Date,
         notebook: Notebook,
     },
+    /// A way of being her own records suggest (#753).
+    Style {
+        style: crate::style::Style,
+        cause: crate::style::Cause,
+        count: u32,
+    },
 }
 
 impl Noticed {
@@ -1245,12 +1261,21 @@ impl Noticed {
             Self::Quiet { source, .. } => format!("quiet:{source}"),
             Self::Ignore { calendar, .. } => format!("ignore:{}", fold(calendar)),
             Self::Arrival { name, .. } => format!("arrival:{}", fold(name)),
+            Self::Style { style, .. } => format!("style:{}", style.aspect()),
         }
     }
 
     /// Her question, with its evidence.
     pub fn question(&self, fr: bool) -> (String, String) {
         match (self, fr) {
+            (
+                Self::Style {
+                    style,
+                    cause,
+                    count,
+                },
+                fr,
+            ) => crate::style::question(style, *cause, *count, fr),
             (
                 Self::Quiet {
                     tool, count, days, ..
@@ -1514,6 +1539,19 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
                 notebook: *notebook,
             };
             Ok(add_person(store, &found, pointer, true)?.1)
+        }
+        Noticed::Style { style, .. } => {
+            let sentence = style.said(true);
+            match crate::style::keep(
+                store,
+                style,
+                &sentence,
+                &Origin::inferred(pointer, 0.8),
+                store.today(),
+            )? {
+                crate::style::Kept::New { edits, .. } => Ok(edits),
+                crate::style::Kept::Already { .. } => Ok(Vec::new()),
+            }
         }
     }
 }

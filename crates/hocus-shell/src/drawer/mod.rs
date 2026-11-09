@@ -827,6 +827,7 @@ pub fn act(id: window::Id, target: Target) {
             }
             Target::Point(item) => {
                 tracing::info!(item, "the drawer unfolds her briefing");
+                crate::secretary::unfolded(item);
                 open.point = Some(item);
                 open.briefing = false;
                 open.scroll = f32::MAX;

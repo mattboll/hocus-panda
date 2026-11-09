@@ -39,6 +39,7 @@
 mod consent;
 mod conversation;
 mod keys;
+mod manner;
 mod memory;
 mod speaking;
 
@@ -673,6 +674,7 @@ impl Brain {
                 }
             }
             ToSecretary::Thread { id } => self.thread(conn, id),
+            ToSecretary::Unfolded { item } => self.unfolded(item),
             ToSecretary::Drawer { open } => self.drawer(open),
             ToSecretary::Session { locked } => {
                 tracing::info!(locked, "the session's lock");

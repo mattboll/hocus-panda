@@ -62,7 +62,7 @@ enum Waiting {
 
 /// What "Annuler" in a toast takes back.
 #[derive(Debug)]
-enum Back {
+pub(super) enum Back {
     Forgot(Box<Forgotten>),
     Edits(Vec<i64>),
 }
@@ -84,6 +84,9 @@ pub(super) struct Memory {
     /// A Sunday whose weekly summary waits for its days'.
     weekly: Option<Date>,
     exports: Option<PathBuf>,
+    /// Her model's way-of-being cards waiting for "Garder" (#753): the
+    /// item, the user's words, where they were said.
+    pub(super) styles: HashMap<u64, (crate::style::Style, String, String)>,
 }
 
 impl Memory {
@@ -131,11 +134,11 @@ impl Brain {
     }
 
     /// The thread's last item's id: the user's sentence just added.
-    fn last_item(&self) -> u64 {
+    pub(super) fn last_item(&self) -> u64 {
         self.talk.items.last().map_or(0, |i| i.id)
     }
 
-    fn her(&mut self, id: u64, text: String, note: Option<String>) -> u64 {
+    pub(super) fn her(&mut self, id: u64, text: String, note: Option<String>) -> u64 {
         self.add_item(
             Some(id),
             Body::Her {
@@ -147,7 +150,7 @@ impl Brain {
     }
 
     /// "Retenu : …" with "Annuler" for ten seconds, playing `edits` back.
-    fn learned(&mut self, id: u64, text: String, edits: Vec<i64>) -> u64 {
+    pub(super) fn learned(&mut self, id: u64, text: String, edits: Vec<i64>) -> u64 {
         let item = self.add_item(
             Some(id),
             Body::Learned {
@@ -859,7 +862,7 @@ impl Brain {
     }
 
     /// Something noticed: kept and asked once.
-    fn notice(&mut self, noticed: Noticed) {
+    pub(super) fn notice(&mut self, noticed: Noticed) {
         let mut seen = learn::load_seen(&self.store);
         let key = noticed.key();
         if seen.iter().any(|s| s.noticed.key() == key) {
@@ -1070,7 +1073,7 @@ impl Brain {
         }
     }
 
-    fn toast(&mut self, conn: u64, id: u64, text: &str, back: Option<Back>) {
+    pub(super) fn toast(&mut self, conn: u64, id: u64, text: &str, back: Option<Back>) {
         let undo = back.map(|back| {
             self.memory.next_token += 1;
             let token = self.memory.next_token;
@@ -1170,6 +1173,10 @@ impl Brain {
             return Ok(());
         }
         let n: i64 = number.parse().map_err(|_| format!("{item:?} is no item"))?;
+        // Her way of being is closed, never deleted (#753).
+        if kind == "rule" && act == Act::Forget && self.forget_style(conn, id, n)? {
+            return Ok(());
+        }
         let kept = match kind {
             "node" => Kept::Node(n),
             "edge" => Kept::Edge(n),
@@ -1498,6 +1505,8 @@ impl Brain {
             }
             Err(err) => tracing::warn!(%err, "could not look at her sources"),
         }
+        // And in her own thread, how she could be (#753).
+        self.style_observe(now);
         self.audited(audit::Entry {
             kind: audit::Kind::Memory,
             what: "compaction".to_owned(),

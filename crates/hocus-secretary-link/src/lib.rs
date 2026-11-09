@@ -391,6 +391,9 @@ pub enum ToSecretary {
     Thread { id: u64 },
     /// The drawer opened or closed.
     Drawer { open: bool },
+    /// Her item `item` unfolded by the user (a briefing's "Ouvrir le
+    /// point"): what she counts to propose a shorter way of being (#753).
+    Unfolded { item: u64 },
     /// The session locked or unlocked: she keeps working, and never speaks
     /// while locked (§3.10).
     Session { locked: bool },

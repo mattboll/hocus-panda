@@ -50,6 +50,7 @@ pub mod server;
 pub mod settings;
 pub mod sources;
 pub mod store;
+pub mod style;
 pub mod tools;
 pub mod triage;
 pub mod watch;

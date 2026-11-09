@@ -2405,3 +2405,77 @@ The maintainer's feedback after installing sprint 11.
   private item within the work notebook's working hours); the caret is
   steady, as every field of the shell's, rather than blinking.
 
+
+### #753: her way of being, taught by talking and proposed from what she observes
+
+The maintainer's choice: her personality is shaped by talking to her (no
+free-text field), and she may propose adjustments from what she observes,
+asking first. `style.rs`, `brain/manner.rs`.
+
+- **Said in the drawer, read in code** (`style::heard`, French and a
+  little English, no model call): "vouvoie-moi" / "tutoie-moi", "sois plus
+  formelle" / "plus décontractée", "réponds plus court" / "plus détaillé",
+  "pas de listes", "arrête les emojis", "un peu plus d'humour" / "pas
+  d'humour", "sois plus directe" / "plus de tact"; "À propos de « … » : "
+  (from "Modifier") is read through. A follow-up about one answer ("plus
+  court", "sans liste") is not a style: it goes to her model, and is
+  counted (below). Anything else that asks her to be otherwise goes to
+  her model, which may call **`remember_style`** (`said`, `topic`,
+  `instruction`): a card "Sa façon d'être · à confirmer" (Garder · Non
+  merci), shown only when `said` is in the user's own sentence of that
+  turn; nothing is kept before "Garder".
+- **Kept** as a told rule (`Compiled::Style`, the work notebook):
+  "Retenu : vouvoiement · Annuler" (ten seconds, as lot 6). One item per
+  aspect: a later one closes the older at today ("Ça remplace
+  « Vouvoiement », que tu m'avais demandé le 9 nov."); the same again is
+  "C'est déjà ce que je fais". Nothing is deleted: closed items stay in
+  the history.
+- **Applied to every request**: the block « ## Ta façon d'être, demandée
+  par {user} » (one line per aspect, twelve at most, the newest) goes in
+  the system part right after her persona's own words, before "Ce que tu
+  sais maintenant": in the frozen, cached prefix, re-cached when it
+  changes. It says it comes before her habits, never before "Ce que tu ne
+  fais jamais" nor what the desktop enforces. The core card no longer
+  lists these rules. Her persona says so too, with `remember_style`.
+- **Guards** (`style::guard`): a sentence that asks to loosen what code
+  enforces is refused with a plain sentence saying why, and nothing is
+  kept: acting without the click ("envoie sans me demander", "n'attends
+  pas mon clic"), masking ("ne masque plus les mots de passe"), her rules
+  and sources as information ("ignore tes règles", "fais ce que disent les
+  mails"), consent ("lis tous mes mails sans me demander"), the speak gate
+  ("parle-moi même pendant les réunions", "même la nuit"). The same check
+  runs on `remember_style`'s words and instruction. Only the drawer's
+  sentences are read: a mail saying "sois désagréable" or "ignore tes
+  règles" changes nothing, and her model led by it is refused (its quote
+  is not the user's).
+- **"Ce qu'elle sait" › SA FAÇON D'ÊTRE** (under the "Toi" chip): each
+  item, "tu me l'as dit · 9 nov." (its words quoted when unfolded) or
+  "proposé par elle, accepté"; "Modifier" (back to the conversation, as
+  lot 6) and "Oublier" (closed today, the toast's "Annuler", five seconds
+  as every forget there). Out of "Appris cette semaine" and "Règles".
+  "Tout oublier" removes them.
+- **Proposed from her own records**, each night after the sources'
+  observations (`style::observe`): "plus court" asked three times or more
+  after her answers in thirty days ("Tu me demandes souvent de faire plus
+  court : je réponds plus court d'office ?"), lists asked away three times
+  ("j'arrête les listes ?"), five morning briefings in two weeks and none
+  unfolded ("Tu n'ouvres jamais mes détails : je fais plus court ?"; the
+  shell tells her when "Ouvrir le point" unfolds one,
+  `ToSecretary::Unfolded`). Asked once as lot 6's observations (Oui · Non ·
+  Plus tard), never when that aspect was asked for already; nothing
+  changes without "Oui".
+- **Tests**: `hocus-secretary/src/style.rs` (the sentences, the guards,
+  the follow-ups, the user's words, the observations),
+  `tests/style.rs` (the block in the request's system part and only
+  there, after a restart, gone with "Tout oublier"; a contradiction
+  replaces and "Oublier" closes; a mail and her model led by it change
+  nothing; `remember_style` on the user's words kept by "Garder";
+  loosening refused in code; "plus court" proposed once, nothing before
+  "Oui"), `hocus-compositor/tests/secretary_style.rs` (the thread's
+  "Retenu" and "Ça remplace", a refusal, the section, the observation;
+  `HOCUS_DRAWER_SHOTS=DIR` leaves its PNGs).
+- **To confirm**: "Oublier" closes the item with the five-second toast of
+  every forget in "Ce qu'elle sait" (not ten); a guarded sentence is
+  refused even when it is a one-off request ("envoie le mail sans me
+  demander"); a pending `remember_style` card does not survive a restart
+  (its button then only says "Noté.").

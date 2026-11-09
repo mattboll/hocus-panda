@@ -472,6 +472,11 @@ impl Brain {
             self.tell_look();
             return;
         }
+        // How she should be (#753): read in code too.
+        if self.styled(conn, id, &text) {
+            self.tell_look();
+            return;
+        }
         match self.candidate(&text) {
             Some(candidate) => {
                 self.ask_about(id, text, candidate);
@@ -815,8 +820,24 @@ impl Brain {
                 // question), and is told so.
                 let mut results = Vec::new();
                 let mut read = false;
+                // The user's own sentence of this turn: what a way of
+                // being must quote (#753).
+                let asked = self.talk.turns.get(&id).and_then(|t| {
+                    t.messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.from == "user" && !m.text.is_empty())
+                        .map(|m| m.text.clone())
+                });
                 for call in &reply.tool_calls {
-                    if tools::READ.contains(&call.name.as_str()) {
+                    if call.name == "remember_style" {
+                        let text = self.style_called(id, call, asked.as_deref());
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            text,
+                            error: false,
+                        });
+                    } else if tools::READ.contains(&call.name.as_str()) {
                         read = true;
                         let ran = tools::run(&self.store, call, None);
                         results.push(ToolResult {
@@ -969,8 +990,10 @@ impl Brain {
         if !card.actions.iter().any(|a| a.decision == decision) {
             return self.error(conn, Some(id), "no such button");
         }
-        // Her own cards about her memory (lot 6).
-        if self.memory_decide(conn, id, item, decision) {
+        // Her own cards about her memory (lot 6), and her way of being.
+        if self.memory_decide(conn, id, item, decision)
+            || self.style_decide(conn, id, item, decision)
+        {
             return;
         }
         let now = self.clock.now();

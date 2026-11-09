@@ -88,3 +88,22 @@ Google rows, « Ajouter un compte Google » opens GNOME's Online Accounts; a
 new account shows there, and she asks about it in her drawer.
 
 Then tell her what you work on, and with whom: she remembers it.
+
+## 5. Her way of being
+
+There is no field for her character: tell her. « Vouvoie-moi », « sois
+plus directe », « pas de listes », « réponds plus court », « un peu plus
+d'humour », « arrête les emojis »: she answers « Retenu : … » (with
+« Annuler » for ten seconds) and keeps to it in every answer; a later
+request on the same thing replaces the older, and she says so. What she
+keeps is listed in « Ce qu'elle sait » › « Sa façon d'être », where you can
+change it (« Modifier ») or remove it (« Oublier »). She may also notice
+something herself (« Tu me demandes souvent de faire plus court : je
+réponds plus court d'office ? ») and asks once; nothing changes without
+your « Oui ».
+
+Her way of being never changes her rules: a request to act without your
+click, to stop masking passwords, to obey what a mail says, to read a
+source you did not allow or to speak during a meeting is refused, with
+the reason. Only what you write in her drawer counts, never what a mail or
+a message says.
