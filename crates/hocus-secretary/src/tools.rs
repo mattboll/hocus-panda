@@ -1,7 +1,10 @@
 //! Her read-only memory tools (§7.3, persona.md): `graph` and `search`,
 //! for the model to go further than what context assembly gave it. Their
-//! schemas are strict (every field required, nothing else allowed; an
-//! optional one is nullable). They read her memory on her loop, which
+//! schemas are strict (every field required, nothing else allowed). An
+//! optional field is a plain type whose empty value means "none" (an empty
+//! string, a 0), never a nullable union: strict mode allows only 16
+//! parameters with unions across a request's tools, and the proposals
+//! alone have 36 optional fields. They read her memory on her loop, which
 //! owns it: [`run`] is called there, with a call the model made.
 //!
 //! The conversation's ([`TALK`], lot 2): `ask_user`, a question with its
@@ -46,8 +49,8 @@ pub const TALK: [&str; 11] = [
     "propose_delegation",
 ];
 
-/// A proposal's input: the card's words (every field required, nullable
-/// when it may be left out).
+/// A proposal's input: the card's words (every field required, empty
+/// when it is left out).
 fn proposal(description: &'static str, name: &'static str) -> Spec {
     Spec {
         name,
@@ -57,10 +60,10 @@ fn proposal(description: &'static str, name: &'static str) -> Spec {
             "additionalProperties": false,
             "required": ["to", "label", "text", "draft", "lines"],
             "properties": {
-                "to": {"type": ["string", "null"], "description": "À qui, s'il y a quelqu'un."},
-                "label": {"type": ["string", "null"], "description": "Le titre de la carte, court."},
-                "text": {"type": ["string", "null"], "description": "Une phrase qui dit ce que c'est."},
-                "draft": {"type": ["string", "null"], "description": "Le texte exact proposé, s'il y en a un."},
+                "to": {"type": "string", "description": "À qui, s'il y a quelqu'un ; sinon vide."},
+                "label": {"type": "string", "description": "Le titre de la carte, court ; vide : le titre par défaut."},
+                "text": {"type": "string", "description": "Une phrase qui dit ce que c'est."},
+                "draft": {"type": "string", "description": "Le texte exact proposé, s'il y en a un ; sinon vide."},
                 "lines": {"type": "array", "items": {"type": "string"}, "description": "Ses lignes : les étapes d'un plan, les tâches."}
             }
         }),
@@ -80,7 +83,7 @@ pub fn spec(name: &str) -> Option<Spec> {
                 "properties": {
                     "question": {"type": "string"},
                     "replies": {"type": "array", "items": {"type": "string"}},
-                    "note": {"type": ["string", "null"]}
+                    "note": {"type": "string", "description": "Ce que tu as trouvé ; vide s'il n'y a rien."}
                 }
             }),
         }),
@@ -148,8 +151,8 @@ pub fn spec(name: &str) -> Option<Spec> {
                 "required": ["node", "hops", "as_of"],
                 "properties": {
                     "node": {"type": "string", "description": "Un nom ou un alias."},
-                    "hops": {"type": ["integer", "null"], "description": "Profondeur, 2 par défaut, 3 au plus."},
-                    "as_of": {"type": ["string", "null"], "description": "AAAA-MM-JJ ; null : aujourd'hui."}
+                    "hops": {"type": "integer", "description": "Profondeur, 3 au plus ; 0 : la profondeur par défaut (2)."},
+                    "as_of": {"type": "string", "description": "AAAA-MM-JJ ; vide : aujourd'hui."}
                 }
             }),
         }),
@@ -163,8 +166,8 @@ pub fn spec(name: &str) -> Option<Spec> {
                 "required": ["query", "from", "to"],
                 "properties": {
                     "query": {"type": "string"},
-                    "from": {"type": ["string", "null"], "description": "AAAA-MM-JJ ou null."},
-                    "to": {"type": ["string", "null"], "description": "AAAA-MM-JJ ou null."}
+                    "from": {"type": "string", "description": "AAAA-MM-JJ, ou vide."},
+                    "to": {"type": "string", "description": "AAAA-MM-JJ, ou vide."}
                 }
             }),
         }),
@@ -194,7 +197,7 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
         "graph" => {
             let input: GraphInput =
                 serde_json::from_value(call.input.clone()).map_err(|e| e.to_string())?;
-            let day = match input.as_of.as_deref() {
+            let day = match input.as_of.as_deref().filter(|t| !t.trim().is_empty()) {
                 Some(text) => as_of(text).ok_or_else(|| format!("{text:?} n'est pas une date"))?,
                 None => store.today(),
             };
@@ -205,7 +208,12 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
                 .next()
                 .ok_or_else(|| format!("rien sur {:?}", input.node))?;
             let around = store
-                .neighbourhood(start, input.hops.unwrap_or(2).min(3), day, notebook)
+                .neighbourhood(
+                    start,
+                    input.hops.filter(|&h| h > 0).unwrap_or(2).min(3),
+                    day,
+                    notebook,
+                )
                 .map_err(|e| e.to_string())?;
             let mut out = format!("Valide au {day} :\n");
             for edge in &around.edges {
@@ -217,8 +225,16 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
         "search" => {
             let input: SearchInput =
                 serde_json::from_value(call.input.clone()).map_err(|e| e.to_string())?;
-            let from = input.from.as_deref().and_then(as_of);
-            let to = input.to.as_deref().and_then(as_of);
+            let from = input
+                .from
+                .as_deref()
+                .filter(|t| !t.trim().is_empty())
+                .and_then(as_of);
+            let to = input
+                .to
+                .as_deref()
+                .filter(|t| !t.trim().is_empty())
+                .and_then(as_of);
             let mut out = String::new();
             for item in retrieve::search_any(store, &input.query, notebook, 20)
                 .map_err(|e| e.to_string())?
@@ -244,5 +260,34 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
             Ok(out)
         }
         other => Err(format!("{other} n'est pas un de ses outils de lecture")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Strict mode rejects a request whose tools have more than 16
+    /// parameters with unions (type arrays or anyOf); she sends all of
+    /// these at once, so none has one.
+    #[test]
+    fn no_tool_parameter_is_a_union() {
+        let mut unions = Vec::new();
+        for name in READ.iter().chain(TALK.iter()) {
+            let spec = spec(name).expect("a tool she sends");
+            let properties = spec.schema["properties"].as_object().expect("properties");
+            for (field, schema) in properties {
+                if schema["type"].is_array() || schema.get("anyOf").is_some() {
+                    unions.push(format!("{name}.{field}"));
+                }
+            }
+            let required = spec.schema["required"].as_array().expect("required");
+            assert_eq!(
+                required.len(),
+                properties.len(),
+                "{name}: every field required"
+            );
+        }
+        assert!(unions.is_empty(), "{unions:?}");
     }
 }
