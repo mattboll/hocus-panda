@@ -222,3 +222,43 @@ fn her_memory_s_key_is_kept_in_the_keyring_of_the_bus_given() -> anyhow::Result<
     assert!(!data.join(key::FILE).exists());
     Ok(())
 }
+
+/// A provider's API key (§11.3): kept by `hocus-secretary key PROVIDER`
+/// in the keyring of the bus given, under its own attributes, and read
+/// back by her providers; none for a provider without one.
+#[test]
+fn a_provider_s_key_is_kept_and_read_in_the_keyring_of_the_bus_given() -> anyhow::Result<()> {
+    use hocus_secretary::providers::{Keyring, Keys};
+    let dir = tempfile::tempdir()?;
+    let Some(bus) = PrivateBus::start(dir.path())? else {
+        return Ok(());
+    };
+    let held = Held::default();
+    let _keyring = keyring(&bus.address, &held)?;
+    let made_up = "sk-ant-test-made-up-key";
+    assert!(key::keep_provider_key(&bus.address, "anthropic", made_up));
+    let kept = held.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    let (attributes, secret) = kept.expect("an item");
+    assert_eq!(
+        attributes.get("provider").map(String::as_str),
+        Some("anthropic")
+    );
+    assert_eq!(
+        attributes.get("hocuspanda").map(String::as_str),
+        Some("secretary-provider")
+    );
+    assert_eq!(secret, made_up.as_bytes());
+
+    let keys = Keyring::new(Some(bus.address.clone()));
+    let read = keys.key("anthropic").map_err(anyhow::Error::msg)?;
+    assert_eq!(read.as_ref().map(|k| k.expose()), Some(made_up));
+    assert!(!format!("{read:?}").contains(made_up), "never printed");
+    assert_eq!(keys.key("other").map_err(anyhow::Error::msg)?, None);
+    assert_eq!(
+        Keyring::new(None)
+            .key("anthropic")
+            .map_err(anyhow::Error::msg)?,
+        None
+    );
+    Ok(())
+}

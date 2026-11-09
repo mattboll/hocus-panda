@@ -36,6 +36,6 @@ pub mod redact;
 pub use crate::{
     consent::{Consent, ConsentBook, Grant},
     item::{Content, Item, Notebook, Pointer, SourceKey, SourceKind},
-    redact::{Check, Redacted, Redactor},
+    redact::{Check, Outbound, Quoted, Redacted, Redactor, SecondPass},
 };
 pub use hocus_day::source::{Result, SourceError};

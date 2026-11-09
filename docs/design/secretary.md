@@ -966,6 +966,19 @@ what it misses is left to pass 2 ("le code alarme c'est un-deux-trois-quatre",
 described before it is given). The rules were tuned on that corpus: a second
 corpus written apart is needed for an unbiased figure.
 
+**As built (pass 2, #746).** The triage's schema has `secrets: [{text,
+kind}]`: the secret's exact characters, not its offsets (a model miscounts
+bytes; code does not). Code finds every place of each (`hocus_sources::Quoted`)
+in every field of the item and masks it, and masks them, with pass 1, in
+whatever the model wrote (its digest, commitments, facts' quotes) before it
+is kept. The model is shown the item after pass 1 only, and its answer goes
+nowhere but to code. The corpus test runs both passes through that path:
+with the recorded detector answers (`tests/fixtures/secrets-pass2.toml`,
+**scripted by hand**, not a model's: they exercise the path, not a model's
+quality), 104/104 (100 %), 4 by pass 2 alone, 1 false positive of 107
+(0.9 %, a build number taken for a code). A bench run of the real model over
+the corpus replaces that file with its recorded answers (machine).
+
 ## 15. Errors and unknown states
 
 Each says what happened, what she does, and what the user can do. Her ear and the
@@ -1550,3 +1563,135 @@ The setting is followed live, so switching back to "classic" stops the process a
 - **Not yet**: the drawer and the conversation (lot 2), redaction and
   sources (lot 3), providers, context assembly and embeddings (lot 4),
   compaction (lot 6), the Landlock sandbox and the 24 h sealed prompts.
+
+### Lot 4 (#746): the models, retrieval and the secrets' second pass
+
+- **One request shape, providers by role** (§11.1): `model::Request`
+  (role, system, context parts with the item ids each holds, turns with
+  tool calls and results, tools by name) and `Reply` (text, tool calls,
+  provider and model, tokens, cache reads and writes, the stop reason, the
+  provider's own blocks for the next turn). `Model::stream` hands the text
+  as it comes (the drawer's streaming, lot 2); a model that cannot stream
+  gives it at once. `providers::Router` gives each role (`answer`,
+  `briefing`, `extraction`, `compaction`, `triage`) the provider and model
+  `[secretary.models]` names (`"PROVIDER/MODEL"`), reading the
+  configuration again when it changed, at the next request (AC22): Claude
+  Sonnet 5.5 for all but the triage, `qwen3:8b` on the local server for
+  it. Providers are `[secretary.providers.NAME]`: `kind = "anthropic" |
+  "openai" | "ollama"`, `url`; only HTTPS, or this machine in clear.
+- **The Anthropic adapter** (`providers/anthropic.rs`): the Messages API
+  over HTTP (API version `2026-10-21`; no official Rust SDK), `ureq` on
+  rustls, on the call's worker thread. Adaptive thinking, its effort by
+  role (answer and compaction `medium`, briefing `high`, extraction
+  `low`); the frozen prefix (persona, tools, core card) is the system,
+  cached an hour; the day's part opens the first user turn, cached five
+  minutes; what was retrieved for the question comes just before its
+  words, uncached; content stays in `<source>` blocks, never in the
+  system. Tools are strict (`strict: true`, every field required, optional
+  ones nullable). Streaming (SSE): text deltas to the caller, tool calls'
+  JSON gathered, thinking blocks kept whole and replayed unchanged. On
+  Sonnet 5.5 (and Opus 5.5) the API's own refusal fallback is asked
+  (`fallbacks: "default"`); a refusal ends with `stop = "refusal"`. An
+  overloaded or rate-limited API, a server error or a lost connection is
+  tried again three times (§15), after the wait it asks for or a doubling
+  one, never once part of the answer was streamed; a 4xx is not. Batches
+  for compaction come with compaction (lot 6).
+- **OpenAI-compatible** (`providers/openai.rs`): chat completions, not
+  streamed; with a JSON schema, `response_format: json_schema` (strict).
+  For `ollama`, the model is unloaded by `POST /api/generate {"model",
+  "keep_alive": 0}` beside the `/v1` API. Answer roles may use it (no
+  tools offered yet: lot 14).
+- **Keys** (§11.3): in the Secret Service of the bus she is given
+  (`application=hocuspanda`, `hocuspanda=secretary-provider`,
+  `provider=NAME`), read on the call's thread and kept in memory; none
+  for Anthropic is an error before any request. `hocus-secretary key
+  PROVIDER` (`--bus` or `HOCUS_SECRETARY_BUS`) keeps one read on standard
+  input. A body that would hold the key is never sent (AC19).
+- **The triage queue and the second pass** (`triage.rs`, §11.1, §14.1):
+  a source item with a text (a mail's body, an event's description) is
+  held in her process (`context::Inbox`, never written) after pass 1,
+  its episode kept with its metadata (sender and subject through pass 1),
+  and queued. Her loop steps the queue (`triage::Queue`, a state machine:
+  idle, running, resting, paused); one request at a time, on a worker
+  thread, to the triage role's provider, which must be on this machine
+  (another is refused), with the triage prompt and its JSON schema (for
+  me?, project, urgency, needs a reply?, digest, commitments, candidate
+  facts with quotes, suspicious?, secrets), no tools. Paced: a rest
+  (`pace`, 2 s) between two; on battery below `battery` (50 %) or over
+  `heat` (95 °C, `x86_pkg_temp`) it pauses and looks again each minute
+  (`HOCUS_POWER_SUPPLY_DIR`, `HOCUS_THERMAL_DIR` for tests); idle
+  `unload-after` (120 s) after its last request, the model is told to
+  unload (AC21). An item the model did not read goes back to the head and
+  the queue pauses five minutes; after three failures it stays unchecked.
+  Each request is audited (role `triage`, the item's id, provider, model,
+  tokens, duration). A verdict applies the second pass (above), and the
+  masked digest replaces the episode's metadata (a journaled edit). Its
+  candidate facts and its "suspicious" flag are kept for lots 6 and 2.
+  `[secretary.triage]` holds `battery`, `heat`, `unload-after`, `pace`.
+- **Fail closed** (AC51): an item's text leaves only once both passes ran;
+  before, `<source checked="no">` holds its sender, subject, date and
+  "peut contenir un secret, pas encore vérifié". "Seuls des résumés locaux
+  sortent" is a consent option (`ConsentBook::summaries_only`, a record
+  like the others; `summaries-only = true` on a fixture): its items leave
+  as the local summary only. The pending queue is in memory: after a
+  restart, items not yet triaged keep their metadata only (a follow-up
+  could fetch them again by id).
+- **Context assembly** (`context.rs`, §7.3): four parts, each capped
+  (frozen 8k, the day 5k, retrieved 8k, the conversation 4k; 25k in all,
+  tokens counted high at a character in three), what does not fit said as
+  "… N de plus" for `graph` and `search`. The frozen part: her persona
+  (French or English by the desktop's language) and the core card (the
+  user, accepted rules, people with their current edges and aliases,
+  projects, clients, tools), deterministic so the cache holds it. The day:
+  the date, the moment and the visible notebooks, public holidays today
+  and tomorrow as `[fait calculé]` lines (AC14), today's and tomorrow's
+  events, yesterday's daily summary, what arrived today (marked when not
+  checked yet). Retrieved: below. In a public moment (meeting, sharing,
+  camera) only the pro notebook is read; the moment itself comes with
+  lot 5. AC31: 10,000 log lines and 200 people give about 17.7k tokens,
+  assembled in a few tens of milliseconds.
+- **Hybrid retrieval** (`retrieve.rs`): entity linking on the question
+  (every name and accepted alias folded, longest phrase first; a person's
+  first name when it is only one person's; an edit distance of 1 on words
+  of 5 to 8 letters, 2 beyond); the day the question is about, in code (a
+  date said, "le 15 avril 2026", "en mars 2026" as the 15th, "l'an
+  dernier"; or an event of the graph: "quand on a livré la v2" is the
+  linked node's `shipped_on` "v2" edge's date), said in the context as a
+  computed fact and the graph read as of it (AC45); two hops from the
+  linked nodes, and the relations the question names ("relit", "équipe",
+  "remplace", "dirige"…) two hops further (AC46: `replaces` →
+  `member_of` → `reviews` is three edges from Sophie; the spec's "within
+  2 hops" reads as two hops plus the named relations); FTS5 BM25 over
+  episodes, summaries and nodes, any content word; the episodes that
+  mention the linked nodes; reciprocal rank fusion with a boost for what
+  is near the day asked about. Each edge is cited with its id and
+  provenance. Embeddings are not built.
+- **Her read-only tools** (`tools.rs`): `graph(node, hops, as_of)` and
+  `search(query, from, to)`, strict schemas, and `tools::run` on her loop.
+  The tool loop itself (calls, results, the next turn) is the
+  conversation's (lot 2), with `Message::replied` and `ToolResult`.
+- **Her Google accounts as one source** (`google.rs`): `hocus-sources`'
+  cycle on the bus she is given (`HOCUS_SECRETARY_BUS`; not with
+  `--fixture` or `--no-google`), the consent book `consents.json` in her
+  folder, the cycle's cursors her cursor (JSON). Items carry the part of
+  the source they came from (`account_1:mail`), which their episodes and
+  pointers name; a revoked part is forgotten (its episodes, held texts and
+  queue). One `Notebook` type for the sources and her memory (the
+  protocol's). Fixture mails may carry `sender` and `body`, redacted as a
+  real one.
+- **Status**: `hocus msg secretary status` shows `triage` (state, model,
+  pending, done, given up, held).
+- **Tests** (all against fake HTTP servers on 127.0.0.1 that record every
+  request; no real API, no model): `tests/models.rs` (AC21, AC22, AC51
+  twice, the recorder halves of AC18 and AC19: no mail secret and no
+  keyring key in any request body, the key only in its header; retries;
+  the triage refusing a remote model; a revoked part forgotten),
+  `tests/retrieval.rs` (AC45, AC46, AC31, AC14's recorder half, entity
+  linking and dates), `tests/keyring.rs` (a provider's key on a fake
+  Secret Service), unit tests of the request body, the SSE stream, the
+  queue and the settings; `hocus-sources/tests/secrets_corpus.rs` (AC50,
+  both passes).
+- **Not yet**: embeddings; the Batch API (with compaction, lot 6); tools
+  for OpenAI-compatible answer models (lot 14); extraction's proposals
+  from the triage's candidates (lot 6); the moment and quiet hours (lot
+  5); the pending queue across restarts; the banc d'essai (lot 8).

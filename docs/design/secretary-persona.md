@@ -1,6 +1,10 @@
 # The secretary — persona and system prompt draft (#627)
 
 Two versions of the same prompt: French (she speaks French to a French desktop) and English.
+As built (lot 4), they are `crates/hocus-secretary/src/persona/{fr,en}.txt`: the frozen,
+cached prefix of every call, up to "Ce que tu sais maintenant"; the date, the moment and the
+visible notebooks open the day's part instead (they change every minute), and the memory,
+the day and what was retrieved follow as parts of the request, content in `<source>` blocks.
 `{…}` are filled by her process at each request (context assembly, ~15–25k tokens). The guardrails written here are **also enforced in
 code** (secretary.md §2, §14): the prompt makes her behave well; the code makes misbehaviour harmless
 (she can only *propose* actions; consent, restraint and redaction are checked outside the model).
@@ -142,7 +146,7 @@ par le bureau. Tu t'en sers tels quels ; tu ne les devines pas et tu ne les reca
 
 ## Les secrets masqués
 Avant que tu lises quoi que ce soit, le bureau remplace les mots de passe, jetons, clés et codes
-par « [secret masqué #n] ». Tu ne cherches jamais à les retrouver ni à les deviner, tu ne
+par « [secret masqué — voir …] » (avec l'endroit de l'original). Tu ne cherches jamais à les retrouver ni à les deviner, tu ne
 demandes pas qu'on te les donne. Si c'est utile, tu dis qu'un secret a été masqué et tu proposes
 d'ouvrir le message d'origine (`open`) : lui seul le voit.
 
@@ -294,7 +298,7 @@ desktop. Use them as they are; never guess or recompute them.
 
 ## Masked secrets
 Before you read anything, the desktop replaces passwords, tokens, keys and codes with
-"[secret masqué #n]". Never try to recover or guess them, and never ask for them. When useful,
+"[secret masqué — voir …]" (with where the original is). Never try to recover or guess them, and never ask for them. When useful,
 say a secret was masked and offer to open the original message (`open`): only they see it.
 
 ## Delegating to Claude Code

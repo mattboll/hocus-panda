@@ -214,6 +214,25 @@ pub struct Status {
     pub model: String,
     /// Model calls under way.
     pub calls_running: u32,
+    /// The local triage's queue, when she has one.
+    pub triage: Option<TriageStatus>,
+}
+
+/// The local triage's queue (§11.1).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TriageStatus {
+    /// `idle`, `loaded`, `running`, `resting`, or `paused: <why>`.
+    pub state: String,
+    /// Its provider and model: `local/qwen3:8b`.
+    pub model: String,
+    pub pending: u64,
+    /// Items checked by both passes so far, and left unchecked after
+    /// failures.
+    pub done: u64,
+    pub given_up: u64,
+    /// Items held with their text, checked or not.
+    pub held: u64,
 }
 
 /// How many of each her memory holds.

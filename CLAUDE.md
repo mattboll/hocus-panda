@@ -315,6 +315,23 @@ The compositor's tests that start her (`tests/secretary.rs`) run the
 program built beside them: build it first (`cargo build -p hocus-secretary`,
 as CI does).
 
+Her models (lot 4) are set in `[secretary.models]` (`"PROVIDER/MODEL"`
+per role) and `[secretary.providers.NAME]` of the configuration she is
+given (`--config`, else `HOCUS_CONFIG`, else the user's), read again when
+it changes; `[secretary.triage]` paces the local triage. Without
+`--fake-model` she calls the Anthropic API with the key the keyring of
+her bus holds, and the local model server the settings name: next to a
+live session, give her a configuration of your own, and never run a
+model on a laptop to try her. Her Google accounts are read on the bus
+given, unless `--fixture` or `--no-google`. Her tests fake both APIs on
+127.0.0.1 (`crates/hocus-secretary/tests/common/http.rs`):
+
+```sh
+printf '%s\n' "$KEY" | target/debug/hocus-secretary --bus "$ADDRESS" key anthropic
+HOCUS_POWER_SUPPLY_DIR=… HOCUS_THERMAL_DIR=…        # the triage's power and heat (tests)
+cargo nextest run -p hocus-sources --test secrets_corpus --no-capture   # AC50's numbers
+```
+
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
 `$XDG_CACHE_HOME/hocuspanda-vm`):

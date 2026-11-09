@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod http;
+
 use std::{
     sync::mpsc::{self, Receiver, Sender},
     thread::JoinHandle,
@@ -104,6 +106,50 @@ impl Driver {
         self.settle()
     }
 
+    /// Waits until her status says `done`.
+    pub fn until(&mut self, what: &str, done: impl Fn(&Status) -> bool) -> Status {
+        let start = Instant::now();
+        loop {
+            let status = self.status();
+            if done(&status) {
+                return status;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "never {what}: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Her answer to a question, whole.
+    pub fn answer_to(&mut self, text: &str) -> String {
+        let mut answer = String::new();
+        let id = self.next;
+        self.next += 1;
+        self.send(&ToSecretary::Ask {
+            id,
+            text: text.to_owned(),
+        });
+        loop {
+            match self.receive() {
+                FromSecretary::Answer { id: i, text, done } if i == id => {
+                    answer.push_str(&text);
+                    if done {
+                        return answer;
+                    }
+                }
+                FromSecretary::Error {
+                    id: Some(i),
+                    message,
+                } if i == id => {
+                    panic!("she could not answer: {message}")
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Waits until no source syncs.
     pub fn settle(&mut self) -> Status {
         let start = Instant::now();
@@ -134,5 +180,6 @@ pub fn options(sources: Vec<Fixture>) -> Options {
             .map(|f| Box::new(f) as Box<dyn hocus_secretary::sources::Source>)
             .collect(),
         key: "file".to_owned(),
+        ..Options::default()
     }
 }
