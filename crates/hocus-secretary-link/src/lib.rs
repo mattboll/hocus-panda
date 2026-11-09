@@ -27,6 +27,13 @@
 //! ([`FromSecretary::Typing`]), her answer's text as it comes
 //! ([`FromSecretary::Answer`]), and her face and status line
 //! ([`FromSecretary::Look`]).
+//!
+//! **Version 3** brings "Ce qu'elle sait" (§8, lot 6): the tab asks her
+//! what she knows ([`ToSecretary::Knows`], [`knows`]) and acts on it
+//! ([`ToSecretary::Memory`]); she answers with the view
+//! ([`FromSecretary::Knows`]) and a toast when there is something to take
+//! back ([`FromSecretary::Toast`]). What she kept settles after ten
+//! seconds: its "Annuler" goes ([`Body::Learned`]'s `settled`).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -38,10 +45,11 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 pub mod consent;
+pub mod knows;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -198,6 +206,16 @@ pub enum ToSecretary {
     /// do. Nothing goes back: no line of hers can invoke, close or mark a
     /// notification (Slack's would mark the channel read).
     Notification(Notification),
+    /// "Ce qu'elle sait" (lot 6): her view of what she knows for `query`,
+    /// sent again while it changes; none stops it (the tab left).
+    Knows {
+        id: u64,
+        #[serde(default)]
+        query: Option<knows::Query>,
+    },
+    /// Something done in "Ce qu'elle sait": answered with the view again,
+    /// and a toast when it can be taken back.
+    Memory { id: u64, act: knows::Do },
 }
 
 /// A notification forwarded to her ([`ToSecretary::Notification`]).
@@ -263,6 +281,21 @@ pub enum FromSecretary {
     Look {
         look: Look,
     },
+    /// "Ce qu'elle sait" for the last query of the connection's
+    /// ([`ToSecretary::Knows`]), `id` that request's.
+    Knows {
+        id: u64,
+        view: Box<knows::Knowledge>,
+    },
+    /// A short word at the bottom of the tab for five seconds ("Oublié"),
+    /// with "Annuler" when `undo` is a token to give back
+    /// ([`knows::Do::Restore`]).
+    Toast {
+        id: u64,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undo: Option<u64>,
+    },
     Error {
         #[serde(default)]
         id: Option<u64>,
@@ -278,7 +311,9 @@ impl FromSecretary {
             | Self::Graph { id, .. }
             | Self::Answer { id, .. }
             | Self::Typing { id, .. }
-            | Self::Thread { id, .. } => Some(*id),
+            | Self::Thread { id, .. }
+            | Self::Knows { id, .. }
+            | Self::Toast { id, .. } => Some(*id),
             Self::Error { id, .. } => *id,
             Self::Hello { .. } | Self::Refused { .. } | Self::Item { .. } | Self::Look { .. } => {
                 None
@@ -327,11 +362,15 @@ pub enum Body {
     },
     /// A card: a proposal when it has actions.
     Card { card: Card },
-    /// "Retenu : … · Annuler", once something is kept (§9.3).
+    /// "Retenu : … · Annuler", once something is kept (§9.3); `settled`
+    /// ten seconds later, its "Annuler" gone (it is then corrected in
+    /// "Ce qu'elle sait").
     Learned {
         text: String,
         #[serde(default, skip_serializing_if = "is_false")]
         undone: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        settled: bool,
     },
 }
 
@@ -731,7 +770,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":2,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":3,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });

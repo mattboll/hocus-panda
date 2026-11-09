@@ -165,6 +165,9 @@ impl Source for Notifications {
                 project: None,
                 sender: None,
                 body: None,
+                calendar: None,
+                until: None,
+                open: None,
                 text: Some(Box::new(redacted)),
                 summaries_only: grant.summaries_only(),
             });

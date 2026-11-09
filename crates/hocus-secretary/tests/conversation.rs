@@ -232,7 +232,7 @@ fn an_unknown_word_on_one_projects_board_is_asked_once() -> anyhow::Result<()> {
     );
     let learned = made
         .iter()
-        .find(|i| matches!(&i.body, Body::Learned { text, undone: false } if text.contains("égaluantes") && text.contains("Chapitô")))
+        .find(|i| matches!(&i.body, Body::Learned { text, undone: false, .. } if text.contains("égaluantes") && text.contains("Chapitô")))
         .expect("Retenu");
     assert!(
         made.iter()

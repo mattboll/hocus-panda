@@ -737,7 +737,7 @@ fn lay_out_thread(
                             .map_or(String::new(), |o| format!(" → {o}"))
                     ));
                 }
-                Body::Learned { text, undone } => {
+                Body::Learned { text, undone, .. } => {
                     let h = LEARNED * 1.4 + 10.0;
                     let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
                     shapes.push(Shape::Box {

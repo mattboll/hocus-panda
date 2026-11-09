@@ -193,6 +193,7 @@ fn run(args: Args) -> Result<(), String> {
             },
             effects: recorder,
             notifications: Some(arrivals),
+            exports: Some(data.join("exports")),
             ..Options::default()
         },
     );

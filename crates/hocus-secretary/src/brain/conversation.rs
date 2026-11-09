@@ -51,6 +51,9 @@ struct Turn {
     messages: Vec<Message>,
     facts: Vec<Part>,
     round: u32,
+    /// What the call may hold: the pro notebook only for a work draft
+    /// (§7.4, lot 6); none, her usual scope.
+    scope: Option<crate::context::Scope>,
 }
 
 /// A word she does not know, and the one project whose items hold it.
@@ -87,7 +90,7 @@ struct Proposal {
 /// The conversation's state, on her loop.
 #[derive(Debug, Default)]
 pub(super) struct Talk {
-    items: Vec<Item>,
+    pub(super) items: Vec<Item>,
     next: u64,
     /// The words she makes herself in French (the desktop's language, as
     /// the shell says it).
@@ -99,10 +102,10 @@ pub(super) struct Talk {
     declined: HashSet<String>,
     proposals: HashMap<u64, Proposal>,
     /// What "Annuler" undoes, by its item: the edits, the last first.
-    kept: HashMap<u64, Vec<i64>>,
+    pub(super) kept: HashMap<u64, Vec<i64>>,
     drawer: bool,
     /// Something just kept: her face says so until the next sentence.
-    happy: bool,
+    pub(super) happy: bool,
     /// Her face as last sent.
     told: Option<Look>,
     /// The sentences her model is on, by request.
@@ -110,11 +113,11 @@ pub(super) struct Talk {
 }
 
 impl Talk {
-    fn fr(&self) -> bool {
+    pub(super) fn fr(&self) -> bool {
         !self.english
     }
 
-    fn t(&self, fr: &'static str, en: &'static str) -> &'static str {
+    pub(super) fn t(&self, fr: &'static str, en: &'static str) -> &'static str {
         if self.english { en } else { fr }
     }
 }
@@ -140,7 +143,7 @@ impl Brain {
 
     /// `message` to every talker, and to `asker` (a `hocus` command's
     /// question) besides.
-    fn tell_talkers(&mut self, message: &FromSecretary, asker: Option<u64>) {
+    pub(super) fn tell_talkers(&mut self, message: &FromSecretary, asker: Option<u64>) {
         let mut to: Vec<u64> = self
             .conns
             .keys()
@@ -157,7 +160,7 @@ impl Brain {
         }
     }
 
-    fn add_item(&mut self, request: Option<u64>, body: Body) -> u64 {
+    pub(super) fn add_item(&mut self, request: Option<u64>, body: Body) -> u64 {
         self.talk.next += 1;
         let item = Item {
             id: self.talk.next,
@@ -177,7 +180,7 @@ impl Brain {
         self.talk.next
     }
 
-    fn change_item(&mut self, id: u64, change: impl FnOnce(&mut Body)) {
+    pub(super) fn change_item(&mut self, id: u64, change: impl FnOnce(&mut Body)) {
         let Some(item) = self.talk.items.iter_mut().find(|i| i.id == id) else {
             return;
         };
@@ -187,7 +190,7 @@ impl Brain {
     }
 
     /// The end of what she says to request `id`.
-    fn done(&mut self, conn: u64, id: u64) {
+    pub(super) fn done(&mut self, conn: u64, id: u64) {
         self.tell_talkers(
             &FromSecretary::Answer {
                 id,
@@ -279,6 +282,11 @@ impl Brain {
         }
         self.talk.happy = false;
         self.add_item(Some(id), Body::User { text: text.clone() });
+        // What teaches her is read in code (lot 6): no model call.
+        if self.taught(conn, id, &text) {
+            self.tell_look();
+            return;
+        }
         match self.candidate(&text) {
             Some(candidate) => {
                 self.ask_about(id, text, candidate);
@@ -381,6 +389,11 @@ impl Brain {
                 text: reply.clone(),
             },
         );
+        // Her own questions about her memory (lot 6).
+        if self.memory_chose(conn, id, item, choice) {
+            self.tell_look();
+            return;
+        }
         let pending = self.talk.pending.take_if(|p| p.question == item);
         match (pending, choice) {
             (Some(pending), 0) => {
@@ -443,6 +456,7 @@ impl Brain {
             Body::Learned {
                 text,
                 undone: false,
+                settled: false,
             },
         );
         self.talk.kept.insert(item, edits);
@@ -478,6 +492,7 @@ impl Brain {
     /// The sentence to her model, `facts` computed in code with it; her
     /// answer comes in pieces ([`Event::Piece`]) on a worker thread.
     fn compose(&mut self, conn: u64, id: u64, sentence: String, facts: Vec<Part>) {
+        let scope = self.work_scope(&sentence);
         self.compose_turn(
             conn,
             id,
@@ -485,6 +500,7 @@ impl Brain {
                 messages: vec![Message::user(sentence)],
                 facts,
                 round: 0,
+                scope,
             },
         );
     }
@@ -507,7 +523,11 @@ impl Brain {
             );
             return self.error(conn, Some(id), "she has no model yet");
         };
-        let mut request = match self.request(Role::Answer, &turn.messages) {
+        let made = match &turn.scope {
+            Some(scope) => self.request_in(Role::Answer, &turn.messages, scope),
+            None => self.request(Role::Answer, &turn.messages),
+        };
+        let mut request = match made {
             Ok(request) => request,
             Err(err) => return self.error(conn, Some(id), err),
         };
@@ -704,7 +724,7 @@ impl Brain {
         }
     }
 
-    fn audited(&mut self, entry: audit::Entry) {
+    pub(super) fn audited(&mut self, entry: audit::Entry) {
         if let Err(err) = self.store.audit(entry) {
             tracing::warn!(%err, "could not audit");
         }
@@ -726,6 +746,10 @@ impl Brain {
         }
         if !card.actions.iter().any(|a| a.decision == decision) {
             return self.error(conn, Some(id), "no such button");
+        }
+        // Her own cards about her memory (lot 6).
+        if self.memory_decide(conn, id, item, decision) {
+            return;
         }
         let now = self.clock.now();
         let outcome = match decision {

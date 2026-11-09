@@ -544,6 +544,9 @@ impl Source for Accounts {
             project: None,
             sender: None,
             body: None,
+            calendar: None,
+            until: None,
+            open: None,
             text: None,
             summaries_only: false,
         };

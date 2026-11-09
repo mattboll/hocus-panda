@@ -25,7 +25,17 @@ use serde_json::{Map, Value as Json, json};
 use crate::clock::Clock;
 
 /// The schema's version, in `meta`.
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
+
+/// What takes a memory from each version to the next: version 2 (lot 6)
+/// keeps of an episode when it ends (an event's), what opens it at its
+/// source (for the user's click), and its calendar's name (an event's).
+const MIGRATIONS: [(i64, &str); 1] = [(
+    2,
+    "ALTER TABLE episodes ADD COLUMN ends TEXT;
+     ALTER TABLE episodes ADD COLUMN open TEXT;
+     ALTER TABLE episodes ADD COLUMN calendar TEXT;",
+)];
 
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -514,17 +524,24 @@ impl Store {
         )?;
         if !made {
             self.conn.execute_batch(&format!(
-                "BEGIN; {SCHEMA_SQL} INSERT INTO meta (key, value) VALUES ('schema', '{SCHEMA}'); COMMIT;"
+                "BEGIN; {SCHEMA_SQL} INSERT INTO meta (key, value) VALUES ('schema', '1'); COMMIT;"
             ))?;
-            return Ok(());
         }
-        let version: i64 = self
+        let mut version: i64 = self
             .conn
             .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| {
                 r.get::<_, String>(0)
             })?
             .parse()
             .unwrap_or(0);
+        for (to, sql) in MIGRATIONS {
+            if version + 1 == to {
+                self.conn.execute_batch(&format!(
+                    "BEGIN; {sql} UPDATE meta SET value = '{to}' WHERE key = 'schema'; COMMIT;"
+                ))?;
+                version = to;
+            }
+        }
         if version != SCHEMA {
             return Err(Error::Refused(format!(
                 "her memory's schema is {version}, this program reads {SCHEMA}"
@@ -620,6 +637,30 @@ impl Store {
             )?;
         }
         Ok(u64::try_from(n).unwrap_or(0))
+    }
+
+    /// How many items `notebook` holds, in every table of items.
+    pub fn notebook_rows(&self, notebook: Notebook) -> Result<u64> {
+        let mut n = 0;
+        for table in Table::ITEMS {
+            n += self.conn.query_row(
+                &format!("SELECT count(*) FROM {} WHERE notebook = ?1", table.name()),
+                [notebook.word()],
+                |r| r.get::<_, i64>(0),
+            )?;
+        }
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
+    /// Every summary's text, one a line (checks).
+    pub fn summaries_text(&self) -> Result<String> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT text FROM summaries ORDER BY id")?;
+        let texts: Vec<String> = statement
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(texts.join("\n"))
     }
 
     /// Starts an edit: one transaction, one line of the journal.
@@ -761,6 +802,84 @@ impl Store {
             return Err(Error::Missing(item));
         }
         self.purge(vec![(item.table(), item.id())], "an item")
+    }
+
+    /// Forgets `item` as [`Store::forget`] does, and gives back what went
+    /// ([`Kept`]), to be held in her process only (never written) for the
+    /// few seconds "Annuler" shows: [`Store::restore`] puts it back.
+    pub fn forget_kept(&mut self, item: Item) -> Result<Kept> {
+        let exists: bool = self.conn.query_row(
+            &format!("SELECT count(*) FROM {} WHERE id = ?1", item.table().name()),
+            [item.id()],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !exists {
+            return Err(Error::Missing(item));
+        }
+        let mut gone: std::collections::BTreeSet<(Table, i64)> =
+            std::collections::BTreeSet::from([(item.table(), item.id())]);
+        loop {
+            let before = gone.len();
+            let found = self.dependents(&gone)?;
+            gone.extend(found);
+            if gone.len() == before {
+                break;
+            }
+        }
+        let mut rows = Vec::new();
+        for (table, id) in &gone {
+            rows.push((*table, Self::row_of(&self.conn, *table, *id)?));
+        }
+        let mut summaries = Vec::new();
+        {
+            let mut statement = self.conn.prepare(
+                "SELECT id, text, stale FROM summaries WHERE id IN (
+                     SELECT summary FROM mentions WHERE summary IS NOT NULL AND node = ?1
+                     UNION SELECT summary FROM summary_episodes WHERE episode = ?2)",
+            )?;
+            for (table, id) in &gone {
+                let (node, episode) = match table {
+                    Table::Nodes => (*id, -1),
+                    Table::Episodes => (-1, *id),
+                    _ => continue,
+                };
+                for row in statement.query_map(params![node, episode], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })? {
+                    summaries.push(row?);
+                }
+            }
+        }
+        self.purge(gone.into_iter().collect(), "an item")?;
+        Ok(Kept { rows, summaries })
+    }
+
+    /// Puts back what a forget took ("Annuler" within its seconds): the
+    /// rows as they were, their ids the same, the summaries' texts. The
+    /// journal says a restore happened, never what.
+    pub fn restore(&mut self, kept: &Kept) -> Result<i64> {
+        let mut e = self.edit()?;
+        // What is linked to after what it links: the reverse of the
+        // deletion order.
+        for table in Table::ALL.iter().rev() {
+            for (t, row) in kept.rows.iter().filter(|(t, _)| t == table) {
+                e.restore_insert(*t, row)?;
+            }
+        }
+        for (id, text, stale) in &kept.summaries {
+            e.tx.execute(
+                "UPDATE summaries SET text = ?1, stale = ?2 WHERE id = ?3",
+                params![text, stale, id],
+            )?;
+        }
+        // The rows' contents stay out of the journal, as a forget's.
+        e.changes.clear();
+        let (edit, _) = e.commit(&Who::User, "restored what was forgotten", None, "restore")?;
+        Ok(edit)
     }
 
     /// Forgets every item of `notebook` ("Oublier tout le perso"); the
@@ -1041,6 +1160,13 @@ impl Store {
         }
         Ok(Json::Object(out))
     }
+}
+
+/// What a forget took, held in her process only for "Annuler".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Kept {
+    rows: Vec<(Table, Map<String, Json>)>,
+    summaries: Vec<(i64, String, i64)>,
 }
 
 /// An edit under way: one transaction, the rows it changes, and its line

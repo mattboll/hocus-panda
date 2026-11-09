@@ -50,6 +50,16 @@ pub struct Item {
     pub sender: Option<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// An event's calendar, by its name ("Congés"): what a taught rule
+    /// names (§9.1).
+    #[serde(default)]
+    pub calendar: Option<String>,
+    /// When an event ends.
+    #[serde(default)]
+    pub until: Option<Timestamp>,
+    /// What opens it in its app (Gmail's page), for the user's click only.
+    #[serde(default)]
+    pub open: Option<String>,
     /// Its text through the first pass, for the triage; never kept.
     #[serde(skip)]
     pub text: Option<Box<Redacted>>,

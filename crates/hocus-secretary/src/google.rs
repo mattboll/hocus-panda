@@ -109,6 +109,13 @@ fn gather(events: Vec<Event>, consents: &ConsentBook) -> Synced {
 /// leave before the second pass (§14.1, 3); its text held for the triage.
 fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
     let source = &redacted.item;
+    let (calendar, until) = match &source.content {
+        Content::Event(event) => (
+            Some(event.calendar_name.clone()),
+            Some(event.when.end(&TimeZone::system())),
+        ),
+        _ => (None, None),
+    };
     let (kind, digest, text) = match &source.content {
         Content::Mail(mail) => (
             "mail",
@@ -138,6 +145,9 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
         project: None,
         sender: None,
         body: None,
+        calendar,
+        until,
+        open: source.pointer.open.clone(),
         summaries_only,
         text: text.then(|| Box::new(redacted)),
     }
