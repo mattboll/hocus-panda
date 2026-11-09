@@ -35,6 +35,7 @@ pub mod effects;
 pub mod fold;
 pub mod google;
 pub mod graph;
+pub mod heat;
 mod http;
 pub mod kept;
 pub mod key;

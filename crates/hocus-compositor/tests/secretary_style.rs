@@ -94,7 +94,8 @@ fn start() -> anyhow::Result<Option<Bed>> {
         &her,
         format!(
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}' \
-             HOCUS_POWER_SUPPLY_DIR='{}' HOCUS_THERMAL_DIR='{}'\n\
+             HOCUS_POWER_SUPPLY_DIR='{}' HOCUS_THERMAL_DIR='{}' \
+             HOCUS_HWMON_DIR=/nonexistent HOCUS_NVIDIA_SMI=/nonexistent\n\
              exec '{}' --virtual-clock 2026-11-09T08:00:00Z --fake-model '{}' \
              --memory-fixture '{}'{fixture_args} \"$@\" 2>>'{}'\n",
             dir.path().join("data").display(),

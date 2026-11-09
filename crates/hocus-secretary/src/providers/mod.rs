@@ -455,8 +455,18 @@ impl Triager for Router {
             ("user", triage::fitted(input, context)),
         ];
         let (content, tokens_in, tokens_out) = if provider.kind == Kind::Ollama {
-            let answer =
-                endpoint.ollama_chat(&choice.model, &messages, triage::schema(), context)?;
+            // The model whole on the card at its last answer: its runner
+            // on few threads, so that it does not heat the processor (the
+            // first request, where it is not known yet, goes without).
+            let threads = (self.placement() == Some(openai::Placement::Gpu))
+                .then_some(settings.triage.threads);
+            let answer = endpoint.ollama_chat(
+                &choice.model,
+                &messages,
+                triage::schema(),
+                context,
+                threads,
+            )?;
             // Where the model is held, now that it is loaded: cheap, and
             // only said in her status.
             *self.placed.lock().unwrap_or_else(PoisonError::into_inner) =

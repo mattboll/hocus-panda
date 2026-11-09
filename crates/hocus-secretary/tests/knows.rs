@@ -32,6 +32,8 @@ fn sensors(dir: &Path) -> Sensors {
     Sensors {
         supplies: dir.join("power_supply"),
         thermal: dir.join("thermal"),
+        hwmon: dir.join("hwmon"),
+        nvidia_smi: dir.join("no-nvidia-smi"),
     }
 }
 

@@ -31,6 +31,7 @@ use jiff::Timestamp;
 use super::Brain;
 use crate::{
     graph::Origin,
+    heat::Gauge,
     learn::{self, Compiled, Noticed},
     triage::{Pause, State},
 };
@@ -457,13 +458,20 @@ impl Brain {
         };
         let pause = match &self.queue.state {
             State::Paused { why, .. } if waiting > 0 => Some(match (why, fr) {
-                (Pause::Heat(c), true) => format!(
-                    "L’ordinateur chauffe ({c} °C) : je reprends sous {} °C.",
-                    settings.heat
+                (Pause::Heat(hot), true) => format!(
+                    "{} chauffe : {} °C en moyenne sur une minute, je reprends sous {} °C.",
+                    match hot.gauge {
+                        Gauge::Cpu => "Le processeur",
+                        Gauge::Gpu => "La carte graphique",
+                    },
+                    hot.average,
+                    hot.resume
                 ),
-                (Pause::Heat(c), false) => format!(
-                    "The computer is hot ({c} °C): I go on below {} °C.",
-                    settings.heat
+                (Pause::Heat(hot), false) => format!(
+                    "The {} is hot: {} °C on average over a minute, I go on below {} °C.",
+                    hot.gauge.word(),
+                    hot.average,
+                    hot.resume
                 ),
                 (Pause::Battery(c), true) => format!(
                     "Sur batterie ({c} %) : je reprends sur secteur, ou au-dessus de {} %.",

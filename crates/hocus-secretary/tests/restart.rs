@@ -58,6 +58,8 @@ fn mains(dir: &std::path::Path) -> hocus_secretary::power::Sensors {
     hocus_secretary::power::Sensors {
         supplies,
         thermal: dir.join("thermal"),
+        hwmon: dir.join("hwmon"),
+        nvidia_smi: dir.join("no-nvidia-smi"),
     }
 }
 

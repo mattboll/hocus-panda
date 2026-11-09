@@ -759,7 +759,9 @@ the machine.
   llama.cpp, run by the user; the desktop ships no weights):
   - a **paced background queue**: one request at a time, `nice`d;
   - only on AC power, or above a battery threshold (default 50 %);
-  - paused under heat (CPU package above 95 °C);
+  - paused under heat, on a steady reading: the CPU package's temperature averaged over
+    the last minute (100 °C, or its critical point minus 10; going on below 90 °C), the
+    graphics card's when the model is on it (#756);
   - **the model is unloaded when the queue is idle** (`keep_alive` 0 after 2 min);
   - output is constrained to a **JSON schema**: for me?, project, urgency, needs a
     reply?, one-line digest, commitments, proposed facts, suspicious?, **secrets** (spans, §14.1);
@@ -1622,7 +1624,8 @@ The setting is followed live, so switching back to "classic" stops the process a
   me?, project, urgency, needs a reply?, digest, commitments, candidate
   facts with quotes, suspicious?, secrets), no tools. Paced: a rest
   (`pace`, 2 s) between two; on battery below `battery` (50 %) or over
-  `heat` (95 °C, `x86_pkg_temp`) it pauses and looks again each minute
+  `heat` (95 °C, `x86_pkg_temp`; a steady reading since #756, below) it
+  pauses and looks again each minute
   (`HOCUS_POWER_SUPPLY_DIR`, `HOCUS_THERMAL_DIR` for tests); idle
   `unload-after` (120 s) after its last request, the model is told to
   unload (AC21). An item the model did not read goes back to the head and
@@ -2612,6 +2615,75 @@ The maintainer's try of sprint 11 with #752.
   (a click in a window closes it, `Super+S` reopens it with what was typed
   and the answer written meanwhile; a click in the field gives it the
   keyboard back after a window took it).
+
+### #756: the triage's heat pause reads a steady temperature, the card's when the model is on it
+
+The maintainer's triage spent far more time paused for heat than
+triaging, the model whole on the graphics card (the card at 45 °C): his
+laptop's package (Meteor Lake, critical at 110 °C), read every 0.5 s,
+went 101 100 100 89 72 65 64 80 64 100, a jump to about 100 °C on every
+turbo burst by design; the queue paused on one sample over 95 °C and
+looked again a minute later on one sample. `heat.rs`.
+
+- **A steady reading**: a sampler on its own thread (never her loop)
+  reads the temperature every five seconds of her clock, only while the
+  triage has something waiting or under way (her loop tells it what to
+  watch, `heat::Watch`, and it rests otherwise), and averages the last
+  minute. The average says nothing until its samples cover 30 s (a first
+  burst alone is not a reading). The queue pauses once the average
+  reaches the pause point and goes on once it is below the resume point
+  (hysteresis); the sampler tells her loop only when its verdict changes
+  (`Event::Heat`), so a pause ends as soon as it is cool again, not at the
+  next minute's look. Her clock jumping (tests), each five-second tick of
+  the jump is sampled; late on the wall clock (a suspend), now only.
+- **The points** (`[secretary.triage]`): `heat`, the package's pause
+  point, unset by default: the `x86_pkg_temp` zone's critical trip point
+  minus 10 (else coretemp's `temp1_crit` minus 10), else 100 °C; `resume`,
+  unset: 10 under it (90 °C on the laptop). An explicit value wins.
+- **The card instead** when Ollama's `/api/ps` says the model is whole on
+  it (the placement asked after each request): its hwmon (`name` amdgpu,
+  nouveau or radeon: `temp1_input`, its slowdown point `temp1_max`, else
+  `temp1_crit` minus 10), else, for NVIDIA's proprietary driver, which has
+  none, `nvidia-smi --query-gpu=temperature.gpu,temperature.gpu.tlimit
+  --format=csv,noheader,nounits` on the sampler's thread (its slowdown
+  point is the temperature plus the margin `tlimit` says; an older driver
+  refusing that field is asked the temperature alone), at most every ten
+  seconds, five seconds at most a run; not there, or failing three times,
+  it is not asked again. `gpu-heat` (unset: the slowdown point read, else
+  87 °C) and `gpu-resume` (unset: 10 under). The card unreadable, the
+  package is watched. `HOCUS_HWMON_DIR` and `HOCUS_NVIDIA_SMI` stand for
+  `/sys/class/hwmon` and `nvidia-smi` (tests).
+- **Ollama's runner on few threads**: with the model whole on the card at
+  its last answer, the triage's `/api/chat` carries `options.num_thread`
+  (`[secretary.triage] threads`, 2), so that the runner does not heat the
+  processor (it took about 30 % of it). The first request, the placement
+  not known yet, goes without (Ollama then reloads its runner once).
+- **Said**: the queue's view, « Le processeur chauffe : 101 °C en moyenne
+  sur une minute, je reprends sous 90 °C. » or « La carte graphique
+  chauffe : 88 °C … »; her status line, « Le processeur chauffe : le tri
+  attend · N en attente », its hint the average and the resume point; her
+  status (`hocus msg secretary status`), `paused: processor 101 °C on
+  average, resumes below 90 °C`.
+- **Tests**: unit tests in `heat.rs` (the laptop's swing, a sample each
+  five seconds for five minutes: no pause; a steady 100 °C: a pause, then
+  85 °C: going on only once the average is under 90; a first burst alone;
+  the critical trip point and the settings; an amdgpu card watched instead
+  of the package; `nvidia-smi`'s lines); `hocus-secretary/tests/queue.rs`
+  (her loop and sampler on her clock: the swinging package never pauses
+  the six items; a steady 100 °C pauses after the item under way, said in
+  the view, then 85 °C lets it go on after 40 s or more; a model on the
+  card with a fake `nvidia-smi` script at 90 °C, 3 °C over its slowdown
+  point: paused on the card's, asked at most every ten seconds);
+  `models.rs` (`num_thread` 2 to a fake Ollama once it says the model is
+  whole on the card, none before, none when split);
+  `hocus-compositor/tests/secretary_queue.rs` (the pause in the drawer).
+  No test runs a real `nvidia-smi` or reads a real card: every test's
+  sensors are fake folders.
+- **To confirm**: the pause and resume points (100 and 90 °C for the
+  package on the laptop; 87 °C or the driver's slowdown point for the
+  card); 30 s of samples before the first verdict; two threads for
+  Ollama's runner; an AMD processor's package (`k10temp`, no
+  `x86_pkg_temp` zone) is not read, as before.
 
 ### #757: her text selected and copied
 

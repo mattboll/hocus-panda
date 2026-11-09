@@ -131,6 +131,8 @@ pub enum Event {
         result: Result<(Verdict, u64, u64), String>,
         placement: Option<crate::providers::openai::Placement>,
     },
+    /// The triage's steady heat reading changed: too hot, or not (#756).
+    Heat(Option<crate::heat::Hot>),
     /// A summary's words came back from her compaction role's model.
     Compacted {
         work: Box<crate::compaction::Work>,
@@ -277,6 +279,11 @@ pub struct Brain {
     /// Where the local model was held after its last request (Ollama's
     /// `/api/ps`, asked on the request's thread).
     placement: Option<crate::providers::openai::Placement>,
+    /// The heat's sampler (#756): what it was last told to watch, and
+    /// its verdict.
+    heat_watch: Option<Sender<Option<crate::heat::Watch>>>,
+    heat_sent: Option<crate::heat::Watch>,
+    heat: Option<crate::heat::Hot>,
 }
 
 impl Brain {
@@ -339,7 +346,24 @@ impl Brain {
             aside_rules: Vec::new(),
             queue_watch: BTreeMap::new(),
             placement: None,
+            heat_watch: None,
+            heat_sent: None,
+            heat: None,
         };
+        // The heat sampled off her loop, for the triage only.
+        if brain.triager.is_some() {
+            let (watches, watched) = mpsc::channel();
+            let sender = brain.sender.clone();
+            match crate::heat::spawn(
+                brain.sensors.clone(),
+                brain.clock.clone(),
+                watched,
+                move |hot| sender.send(Event::Heat(hot)).is_ok(),
+            ) {
+                Ok(()) => brain.heat_watch = Some(watches),
+                Err(err) => tracing::warn!(%err, "no thread to sample the heat"),
+            }
+        }
         // The senders set aside, before the items waiting come back.
         brain.aside_rules =
             crate::learn::set_aside(&brain.store, brain.store.today()).unwrap_or_default();
@@ -580,6 +604,16 @@ impl Brain {
                 started,
                 result,
             } => self.worded(*built, away, items, started, result),
+            Event::Heat(hot) => {
+                // Told before it was told to rest: stale.
+                if self.heat_sent.is_some() {
+                    if hot != self.heat {
+                        tracing::info!(?hot, "the triage's heat");
+                    }
+                    self.heat = hot;
+                    self.queue.heat(self.clock.now(), hot);
+                }
+            }
             Event::Compacted {
                 work,
                 started,
@@ -1218,9 +1252,14 @@ impl Brain {
         };
         let settings = self.settings.current().triage;
         let now = self.clock.now();
-        // Power and heat are read only when there is something to do.
+        self.watch_heat(&settings);
+        // Power is read only when there is something to do; the heat is
+        // the sampler's.
         let power = if self.queue.pending() > 0 {
-            self.sensors.read()
+            crate::power::Power {
+                heat: self.heat,
+                ..self.sensors.read()
+            }
         } else {
             crate::power::Power {
                 on_ac: true,
@@ -1271,6 +1310,31 @@ impl Brain {
                 }
             }
         }
+    }
+
+    /// The heat's sampler told what to watch, when that changed: the
+    /// graphics card with the model whole on it, else the package; only
+    /// while the triage has something to do.
+    fn watch_heat(&mut self, settings: &settings::Triage) {
+        let Some(watches) = &self.heat_watch else {
+            return;
+        };
+        let busy = self.queue.pending() > 0 || self.queue.running().is_some();
+        let watch = busy.then(|| crate::heat::Watch {
+            gpu: self.placement == Some(crate::providers::openai::Placement::Gpu),
+            triage: settings.clone(),
+        });
+        if watch == self.heat_sent {
+            return;
+        }
+        if watches.send(watch.clone()).is_err() {
+            tracing::warn!("the heat's sampler is gone");
+            self.heat_watch = None;
+        }
+        if watch.is_none() {
+            self.heat = None;
+        }
+        self.heat_sent = watch;
     }
 
     /// The triage's verdict on an item: the second pass applied (its

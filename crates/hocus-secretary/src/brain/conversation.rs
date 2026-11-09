@@ -365,13 +365,28 @@ impl Brain {
                     format!("On battery: I’ll sort the {n} new ones once you plug in"),
                     "Until then, only the sender, subject and date go to Claude.".to_owned(),
                 ),
-                (crate::triage::Pause::Heat(_), true) => (
-                    format!("L’ordinateur chauffe : le tri attend · {n} en attente"),
-                    "Je reprends quand il a refroidi.".to_owned(),
+                (crate::triage::Pause::Heat(hot), true) => (
+                    format!(
+                        "{} chauffe : le tri attend · {n} en attente",
+                        match hot.gauge {
+                            crate::heat::Gauge::Cpu => "Le processeur",
+                            crate::heat::Gauge::Gpu => "La carte graphique",
+                        }
+                    ),
+                    format!(
+                        "{} °C en moyenne sur une minute : je reprends sous {} °C.",
+                        hot.average, hot.resume
+                    ),
                 ),
-                (crate::triage::Pause::Heat(_), false) => (
-                    format!("The computer is hot: the sorting waits · {n} waiting"),
-                    "I’ll go on once it has cooled down.".to_owned(),
+                (crate::triage::Pause::Heat(hot), false) => (
+                    format!(
+                        "The {} is hot: the sorting waits · {n} waiting",
+                        hot.gauge.word()
+                    ),
+                    format!(
+                        "{} °C on average over a minute: I’ll go on below {} °C.",
+                        hot.average, hot.resume
+                    ),
                 ),
             };
             (status, Tone::Warn, hint)
