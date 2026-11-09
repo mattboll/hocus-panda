@@ -36,6 +36,7 @@ use hocus_link::SecretaryShown;
 use hocus_secretary_link::{
     Body, Client, Decision, FromSecretary, Item, Look, Notification, ToSecretary, VERSION,
     consent::{CONSENTS, ConsentBook},
+    knows::{Do, Knowledge, Query},
     line, read,
 };
 
@@ -83,6 +84,18 @@ pub fn state() -> State {
     line_state().state
 }
 
+/// A word at the bottom of "Ce qu'elle sait" for five seconds, with
+/// "Annuler" when it can be taken back.
+#[derive(Debug, Clone)]
+pub struct Toast {
+    pub text: String,
+    pub undo: Option<u64>,
+    pub until: std::time::Instant,
+}
+
+/// How long a toast shows (§8).
+pub const TOAST: Duration = Duration::from_secs(5);
+
 /// What her drawer shows of the conversation: the thread, her answer as
 /// it streams, her typing, her face.
 #[derive(Debug, Clone, Default)]
@@ -93,6 +106,9 @@ pub struct Conversation {
     /// She composes an answer to a request: what she is doing.
     pub typing: Option<(u64, String)>,
     pub look: Option<Look>,
+    /// "Ce qu'elle sait", as she last sent it (lot 6).
+    pub knows: Option<Box<Knowledge>>,
+    pub toast: Option<Toast>,
     /// Bumped at each change: what the drawer lays out again for.
     pub rev: u64,
 }
@@ -153,6 +169,17 @@ fn heard(message: FromSecretary) {
             }
         }),
         FromSecretary::Look { look } => converse(|c| c.look = Some(look)),
+        FromSecretary::Knows { view, .. } => converse(|c| c.knows = Some(view)),
+        FromSecretary::Toast { text, undo, .. } => {
+            tracing::info!(text, undo = undo.is_some(), "her toast");
+            converse(|c| {
+                c.toast = Some(Toast {
+                    text,
+                    undo,
+                    until: std::time::Instant::now() + TOAST,
+                });
+            });
+        }
         FromSecretary::Error {
             id: Some(id),
             message,
@@ -255,10 +282,35 @@ pub fn undo(item: u64) {
     send(ToSecretary::Undo { id, item });
 }
 
+/// "Ce qu'elle sait" for `query`, sent again while it changes; none: no
+/// more (the tab left, the drawer closed).
+pub fn knows(query: Option<Query>) {
+    let id = next_id();
+    send(ToSecretary::Knows { id, query });
+}
+
+/// Something done in "Ce qu'elle sait".
+pub fn memory(act: Do) {
+    let id = next_id();
+    tracing::info!(id, ?act, "an act on her memory");
+    send(ToSecretary::Memory { id, act });
+}
+
+/// The toast's time is over, or its "Annuler" clicked: it goes.
+pub fn toast_gone() {
+    converse(|c| c.toast = None);
+}
+
 /// The drawer opened or closed: she is told; opened, the thread is asked
 /// for once (the shell may have started again since she began it).
 pub fn drawer(open: bool) {
     send(ToSecretary::Drawer { open });
+    if !open {
+        send(ToSecretary::Knows {
+            id: next_id(),
+            query: None,
+        });
+    }
     if open && conversation(|c| c.items.is_empty()) {
         let id = next_id();
         send(ToSecretary::Thread { id });
@@ -414,6 +466,8 @@ fn listen(stream: UnixStream) {
                 tracing::info!(version, "the secretary is connected");
                 line_state().state = State::Ready;
                 crate::drawer::changed();
+                // Her watch on "Ce qu'elle sait" went with her last run.
+                crate::drawer::knows_again();
             }
             Ok(FromSecretary::Refused { reason }) => {
                 tracing::warn!(reason, "the secretary refused the shell");

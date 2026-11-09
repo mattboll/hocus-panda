@@ -25,7 +25,10 @@ use std::{
 };
 
 use hocus_link::{DRAWER_CLOSE, DRAWER_WIDE, EDGE, SECRETARY_NAMESPACE, ToCompositor};
-use hocus_secretary_link::{Body, Decision, Mood};
+use hocus_secretary_link::{
+    Body, Decision, Mood, Notebook,
+    knows::{Act, Do, Kind, Query},
+};
 use iced::{Point, Size, keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
@@ -61,13 +64,6 @@ impl Words {
 
     pub fn knows(self) -> &'static str {
         self.pick("Ce qu’elle sait", "What she knows")
-    }
-
-    pub fn knows_soon(self) -> &'static str {
-        self.pick(
-            "Ce qu’elle sait de toi, de ton équipe et de tes projets s’affichera ici.",
-            "What she knows of you, your team and your projects will show here.",
-        )
     }
 
     pub fn placeholder(self) -> &'static str {
@@ -133,6 +129,114 @@ impl Words {
     pub fn today(self) -> &'static str {
         self.pick("Aujourd’hui", "Today")
     }
+
+    pub fn knows_subtitle(self) -> &'static str {
+        self.pick(
+            "Tout ce qu’elle sait, d’où elle le tient",
+            "All she knows, and where she has it from",
+        )
+    }
+
+    pub fn search(self) -> &'static str {
+        self.pick(
+            "Chercher : une personne, un projet, une règle…",
+            "Search: a person, a project, a rule…",
+        )
+    }
+
+    pub fn notebooks(self) -> [&'static str; 3] {
+        if self.fr {
+            ["Tout", "Pro", "Perso"]
+        } else {
+            ["All", "Work", "Perso"]
+        }
+    }
+
+    /// An act's button, for an item (`seen:`, `edit:` or another).
+    pub fn act(self, act: Act, item: &str) -> &'static str {
+        let seen = item.starts_with("seen:");
+        let merge = item.starts_with("edit:");
+        match act {
+            Act::Edit => self.pick("Modifier", "Edit"),
+            Act::Close => self.pick("N’est plus vrai", "No longer true"),
+            Act::Forget => self.pick("Oublier", "Forget"),
+            Act::Keep => self.pick("Garder", "Keep"),
+            Act::Accept if seen => self.pick("Oui", "Yes"),
+            Act::Accept => self.pick("C’est vrai", "It’s true"),
+            Act::Reject if seen => self.pick("Non", "No"),
+            Act::Reject if merge => self.pick("Défaire", "Undo"),
+            Act::Reject => self.pick("Oublier", "Forget"),
+            Act::Later => self.pick("Plus tard", "Later"),
+        }
+    }
+
+    pub fn memories(self, n: u64) -> String {
+        match (self.fr, n) {
+            (true, 1) => "1 souvenir, sur cette machine, chiffré".to_owned(),
+            (true, n) => format!("{n} souvenirs, sur cette machine, chiffrés"),
+            (false, 1) => "1 memory, on this machine, encrypted".to_owned(),
+            (false, n) => format!("{n} memories, on this machine, encrypted"),
+        }
+    }
+
+    pub fn export(self) -> &'static str {
+        self.pick("Exporter", "Export")
+    }
+
+    pub fn forget_perso(self) -> &'static str {
+        self.pick("Oublier tout le perso…", "Forget all perso…")
+    }
+
+    pub fn forget_all(self) -> &'static str {
+        self.pick("Tout oublier…", "Forget everything…")
+    }
+
+    pub fn open_source(self) -> &'static str {
+        self.pick("Ouvrir la source ↗", "Open the source ↗")
+    }
+
+    /// The confirmation of a forget of a whole notebook: its title, its
+    /// words, its button.
+    pub fn confirm(self, what: Confirm) -> (&'static str, &'static str, &'static str) {
+        match what {
+            Confirm::Perso => (
+                self.pick("Oublier tout le perso ?", "Forget all perso?"),
+                self.pick(
+                    "Tout ce qu’elle sait de ta vie perso — proches, dossiers, souvenirs — sera effacé de cette machine, résumés compris. Le pro reste. Ça ne s’annule pas.",
+                    "All she knows of your personal life — close ones, files, memories — will be erased from this machine, summaries included. Work stays. This cannot be undone.",
+                ),
+                self.pick("Oublier tout le perso", "Forget all perso"),
+            ),
+            Confirm::All => (
+                self.pick("Tout oublier ?", "Forget everything?"),
+                self.pick(
+                    "Tout ce qu’elle sait, pro et perso, sera effacé de cette machine. Ça ne s’annule pas.",
+                    "All she knows, work and perso, will be erased from this machine. This cannot be undone.",
+                ),
+                self.pick("Tout oublier", "Forget everything"),
+            ),
+        }
+    }
+
+    pub fn keep_it(self) -> &'static str {
+        self.pick("Garder", "Keep")
+    }
+
+    /// "Modifier" from "Ce qu'elle sait": the field's start.
+    pub fn about(self, title: &str) -> String {
+        if self.fr {
+            format!("À propos de « {title} » : ")
+        } else {
+            format!("About “{title}”: ")
+        }
+    }
+}
+
+/// What a whole forget asks to confirm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Confirm {
+    Perso,
+    All,
 }
 
 pub fn words() -> Words {
@@ -174,6 +278,26 @@ pub enum Target {
     Correct(u64),
     Field,
     Send,
+    /// "Ce qu'elle sait": the notebook switch (0 Tout, 1 Pro, 2 Perso).
+    Notebook(u8),
+    /// A filter chip, by its place.
+    Chip(u8),
+    Search,
+    /// Item `index` (its place in the view): an act's button.
+    Known {
+        index: u32,
+        act: Act,
+    },
+    /// An item's line: its provenance unfolds.
+    Expand(u32),
+    /// Its source opens.
+    Open(u32),
+    Export,
+    ForgetPerso,
+    ForgetAll,
+    /// The confirmation's buttons: forget, or keep.
+    Confirm(bool),
+    ToastUndo,
 }
 
 impl Target {
@@ -193,6 +317,17 @@ impl Target {
             Self::Correct(item) => format!("Correct({item})"),
             Self::Field => "Field".to_owned(),
             Self::Send => "Send".to_owned(),
+            Self::Notebook(n) => format!("Notebook({n})"),
+            Self::Chip(n) => format!("Chip({n})"),
+            Self::Search => "Search".to_owned(),
+            Self::Known { index, act } => format!("Known({index},{act:?})"),
+            Self::Expand(n) => format!("Expand({n})"),
+            Self::Open(n) => format!("Open({n})"),
+            Self::Export => "Export".to_owned(),
+            Self::ForgetPerso => "ForgetPerso".to_owned(),
+            Self::ForgetAll => "ForgetAll".to_owned(),
+            Self::Confirm(yes) => format!("Confirm({yes})"),
+            Self::ToastUndo => "ToastUndo".to_owned(),
         }
     }
 }
@@ -225,11 +360,31 @@ pub struct Open {
     pub mood: Option<(Mood, Instant)>,
     /// Bumped at each change of its own that moves what it lays out.
     pub rev: u64,
+    /// "Ce qu'elle sait": what is searched, the notebook and the kind
+    /// shown, the item unfolded, how far the list is scrolled down, the
+    /// whole forget waiting for its confirmation.
+    pub search: String,
+    pub book: Option<Notebook>,
+    pub kind: Option<Kind>,
+    /// The item unfolded, by what it is in her memory and its line
+    /// ([`unfolded`]): the same item may show in two sections.
+    pub expanded: Option<String>,
+    pub knows_scroll: f32,
+    pub confirm: Option<Confirm>,
 }
 
 impl Open {
     fn changed(&mut self) {
         self.rev += 1;
+    }
+
+    /// What "Ce qu'elle sait" asks her now.
+    pub fn query(&self) -> Query {
+        Query {
+            notebook: self.book,
+            kind: self.kind,
+            search: self.search.trim().to_owned(),
+        }
     }
 }
 
@@ -377,6 +532,12 @@ pub fn toggle(output: &str, screen: u32) {
             opened: now,
             mood: None,
             rev: 0,
+            search: String::new(),
+            book: None,
+            kind: None,
+            expanded: None,
+            knows_scroll: 0.0,
+            confirm: None,
         }));
         (effects, true)
     });
@@ -414,13 +575,27 @@ pub fn close() {
     }
 }
 
-/// When [`tick`] has something to do.
+/// When [`tick`] has something to do: a surface fading out, her toast
+/// going.
 pub fn deadline() -> Option<Instant> {
+    let toast = if is_open() {
+        crate::secretary::conversation(|c| c.toast.as_ref().map(|t| t.until))
+    } else {
+        None
+    };
     with(|d| d.closing.iter().map(|(_, at)| *at).min())
+        .into_iter()
+        .chain(toast)
+        .min()
 }
 
-/// What is due at `now`: its surface faded out goes.
+/// What is due at `now`: its surface faded out goes; her toast goes.
 pub fn tick(now: Instant) -> Vec<Effect> {
+    let toast_over =
+        crate::secretary::conversation(|c| c.toast.as_ref().is_some_and(|t| t.until <= now));
+    if toast_over {
+        crate::secretary::toast_gone();
+    }
     with(|d| {
         let mut effects = Vec::new();
         d.closing.retain(|(id, at)| {
@@ -430,8 +605,22 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             !due
         });
+        if toast_over && matches!(d.phase, Phase::Open(_)) {
+            effects.push(Effect::Wake(SECRETARY_NAMESPACE));
+        }
         effects
     })
+}
+
+/// She is connected again: an open "Ce qu'elle sait" asks her again.
+pub fn knows_again() {
+    let query = with(|d| match &d.phase {
+        Phase::Open(open) if open.tab == Tab::Knows => Some(open.query()),
+        _ => None,
+    });
+    if let Some(query) = query {
+        crate::secretary::knows(Some(query));
+    }
 }
 
 /// A bar changed form: the drawer follows its edge.
@@ -449,6 +638,11 @@ pub fn bar_changed(bar: &str) {
     }
 }
 
+/// What names an unfolded item: what it is, and its line.
+pub fn unfolded(known: &hocus_secretary_link::knows::Known) -> String {
+    format!("{}|{}", known.item, known.text)
+}
+
 /// What `target` does, clicked on the drawer on `id`.
 pub fn act(id: window::Id, target: Target) {
     enum Then {
@@ -457,6 +651,7 @@ pub fn act(id: window::Id, target: Target) {
         Close,
         Send(String),
         Effects(Vec<Effect>),
+        Undo(Option<u64>),
     }
     let then = with(|d| {
         let Some(open) = d.open_mut(id) else {
@@ -471,6 +666,12 @@ pub fn act(id: window::Id, target: Target) {
             Target::Tab(tab) if tab != open.tab => {
                 open.tab = tab;
                 open.briefing = false;
+                open.confirm = None;
+                open.expanded = None;
+                crate::secretary::knows(match tab {
+                    Tab::Knows => Some(open.query()),
+                    Tab::Talk => None,
+                });
                 open.width = match tab {
                     Tab::Talk => open.base,
                     Tab::Knows => DRAWER_WIDE,
@@ -531,6 +732,130 @@ pub fn act(id: window::Id, target: Target) {
                 }
                 Then::Draw
             }
+            Target::Notebook(n) => {
+                open.book = match n {
+                    1 => Some(Notebook::Pro),
+                    2 => Some(Notebook::Perso),
+                    _ => None,
+                };
+                open.knows_scroll = 0.0;
+                open.expanded = None;
+                open.changed();
+                crate::secretary::knows(Some(open.query()));
+                Then::Draw
+            }
+            Target::Chip(n) => {
+                let kind = crate::secretary::conversation(|c| {
+                    c.knows
+                        .as_ref()
+                        .and_then(|k| k.chips.get(n as usize))
+                        .map(|chip| chip.kind)
+                });
+                if let Some(kind) = kind {
+                    open.kind = kind;
+                    open.knows_scroll = 0.0;
+                    open.expanded = None;
+                    open.changed();
+                    crate::secretary::knows(Some(open.query()));
+                }
+                Then::Draw
+            }
+            Target::Search => Then::Nothing,
+            Target::Known { index, act } => {
+                let known = crate::secretary::conversation(|c| {
+                    c.knows
+                        .as_ref()
+                        .and_then(|k| k.items().nth(index as usize).cloned())
+                });
+                let Some(known) = known else {
+                    return Then::Nothing;
+                };
+                if act == Act::Edit {
+                    // Corrected by telling her, in the conversation.
+                    let title = if known.title.is_empty() {
+                        known.text.trim().to_owned()
+                    } else {
+                        known.title.clone()
+                    };
+                    open.field = words().about(&title);
+                    open.tab = Tab::Talk;
+                    open.width = open.base;
+                    open.changed();
+                    crate::secretary::knows(None);
+                    return Then::Effects(vec![Effect::Resize {
+                        id: open.surface,
+                        size: (open.width, 0),
+                        margin: None,
+                    }]);
+                }
+                crate::secretary::memory(Do::Item {
+                    item: known.item,
+                    act,
+                });
+                Then::Nothing
+            }
+            Target::Expand(index) => {
+                let item = crate::secretary::conversation(|c| {
+                    c.knows
+                        .as_ref()
+                        .and_then(|k| k.items().nth(index as usize).map(unfolded))
+                });
+                open.expanded = if open.expanded == item { None } else { item };
+                open.changed();
+                Then::Draw
+            }
+            Target::Open(index) => {
+                let url = crate::secretary::conversation(|c| {
+                    c.knows
+                        .as_ref()
+                        .and_then(|k| k.items().nth(index as usize))
+                        .and_then(|k| k.origin.open.clone())
+                });
+                match url.and_then(|u| crate::launcher::browse(&u)) {
+                    Some(effect) => Then::Effects(vec![effect]),
+                    None => Then::Nothing,
+                }
+            }
+            Target::Export => {
+                crate::secretary::memory(Do::Export {
+                    notebook: open.book,
+                });
+                Then::Nothing
+            }
+            Target::ForgetPerso => {
+                open.confirm = Some(Confirm::Perso);
+                open.changed();
+                Then::Draw
+            }
+            Target::ForgetAll => {
+                open.confirm = Some(Confirm::All);
+                open.changed();
+                Then::Draw
+            }
+            Target::Confirm(yes) => {
+                let what = open.confirm.take();
+                open.changed();
+                if yes {
+                    match what {
+                        Some(Confirm::Perso) => crate::secretary::memory(Do::ForgetNotebook {
+                            notebook: Notebook::Perso,
+                        }),
+                        Some(Confirm::All) => {
+                            for notebook in [Notebook::Perso, Notebook::Pro] {
+                                crate::secretary::memory(Do::ForgetNotebook { notebook });
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                Then::Draw
+            }
+            Target::ToastUndo => {
+                let token =
+                    crate::secretary::conversation(|c| c.toast.as_ref().and_then(|t| t.undo));
+                // Out of the drawer's lock: the toast's going wakes it.
+                Then::Undo(token)
+            }
             Target::Field => Then::Nothing,
             Target::Send => match sentence(open) {
                 Some(text) => Then::Send(text),
@@ -541,6 +866,12 @@ pub fn act(id: window::Id, target: Target) {
     match then {
         Then::Nothing => {}
         Then::Draw => wake(),
+        Then::Undo(token) => {
+            if let Some(token) = token {
+                crate::secretary::memory(Do::Restore { token });
+            }
+            crate::secretary::toast_gone();
+        }
         Then::Close => close(),
         Then::Send(text) => {
             crate::secretary::ask(text);
@@ -572,6 +903,61 @@ fn sentence(open: &mut Open) -> Option<String> {
     Some(text)
 }
 
+enum Then {
+    Nothing,
+    Close,
+    Send(String),
+    Draw,
+}
+
+/// A key in "Ce qu'elle sait": the search field takes what is typed;
+/// `Esc` leaves a confirmation, else closes.
+fn search_key(
+    open: &mut Open,
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+    text: Option<&str>,
+) -> Then {
+    use keyboard::{Key, key::Named};
+    let before = open.search.clone();
+    match key {
+        Key::Named(Named::Escape) if open.confirm.is_some() => {
+            open.confirm = None;
+            open.changed();
+            return Then::Draw;
+        }
+        Key::Named(Named::Escape) => return Then::Close,
+        Key::Named(Named::Backspace) => {
+            if modifiers.control() {
+                let kept = open.search.trim_end().rfind(' ').map_or(0, |at| at + 1);
+                open.search.truncate(kept);
+            } else {
+                open.search.pop();
+            }
+        }
+        _ => match text {
+            Some(typed)
+                if !modifiers.control()
+                    && !modifiers.alt()
+                    && !modifiers.logo()
+                    && !typed.is_empty()
+                    && !typed.chars().any(char::is_control)
+                    && open.search.chars().count() < 200 =>
+            {
+                open.search.push_str(typed);
+            }
+            _ => return Then::Nothing,
+        },
+    }
+    if open.search != before {
+        open.knows_scroll = 0.0;
+        open.expanded = None;
+        open.changed();
+        crate::secretary::knows(Some(open.query()));
+    }
+    Then::Draw
+}
+
 /// A key on the open drawer on `id`: what it does. Whether it was its.
 pub fn key_on(
     id: window::Id,
@@ -580,14 +966,11 @@ pub fn key_on(
     text: Option<&str>,
 ) -> bool {
     use keyboard::{Key, key::Named};
-    enum Then {
-        Nothing,
-        Close,
-        Send(String),
-        Draw,
-    }
     let then = with(|d| {
         let open = d.open_mut(id)?;
+        if open.tab == Tab::Knows {
+            return Some(search_key(open, key, modifiers, text));
+        }
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) if modifiers.shift() => {
