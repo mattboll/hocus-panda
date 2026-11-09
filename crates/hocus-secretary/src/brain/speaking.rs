@@ -207,11 +207,46 @@ impl Brain {
             away,
             public: self.scope.moment.public(),
         };
-        let built = if morning_due {
+        let mut built = if morning_due {
             briefing::morning(&self.store, &input)
         } else {
             briefing::absence(&self.store, &input)
         };
+        // Friday: what she learned this week (§9.3), from her memory's
+        // weekly digest, to keep or forget in "Ce qu'elle sait".
+        if morning_due && here.weekday() == jiff::civil::Weekday::Friday {
+            let lines = self.week_learned();
+            if !lines.is_empty() {
+                let at = built
+                    .briefing
+                    .sections
+                    .iter()
+                    .position(|s| s.key == "perso")
+                    .unwrap_or(built.briefing.sections.len());
+                built.briefing.sections.insert(
+                    at,
+                    hocus_secretary_link::Section {
+                        key: "week".to_owned(),
+                        label: self
+                            .talk
+                            .t(
+                                "CE QUE J’AI APPRIS CETTE SEMAINE",
+                                "WHAT I LEARNED THIS WEEK",
+                            )
+                            .to_owned(),
+                        note: self
+                            .talk
+                            .t(
+                                "à garder ou oublier dans « Ce qu’elle sait »",
+                                "keep or forget in “What she knows”",
+                            )
+                            .to_owned(),
+                        lines,
+                        proposal: None,
+                    },
+                );
+            }
+        }
         if morning_due && let Err(err) = self.store.set_meta(BRIEFED, &today) {
             tracing::warn!(%err, "could not note the briefing");
         }

@@ -429,6 +429,12 @@
 # quiet-perso = "22:00-08:00"
 # stays = 12
 
+# [secretary.compaction]
+# The night's tidying of her memory (each day's summary, the week's on
+# Sunday night, duplicates merged), at this hour; on battery only above
+# the triage's battery threshold, else an hour later, again. Once a night.
+# hour = 3
+
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the
 # session is idle, in seconds, from 1 to 86400, or "off". Idle, every

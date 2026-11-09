@@ -37,6 +37,7 @@
 //! ([`crate::effects`]).
 
 mod conversation;
+mod memory;
 mod speaking;
 
 pub use conversation::Said;
@@ -124,6 +125,12 @@ pub enum Event {
         started: Timestamp,
         result: Result<(Verdict, u64, u64), String>,
     },
+    /// A summary's words came back from her compaction role's model.
+    Compacted {
+        work: Box<crate::compaction::Work>,
+        started: Timestamp,
+        result: Result<Reply, String>,
+    },
     Stop,
 }
 
@@ -149,6 +156,9 @@ pub struct Options {
     /// Where the notifications the shell forwards go: her notifications'
     /// source's, among `sources`. None: they are dropped.
     pub notifications: Option<Arrivals>,
+    /// Where "Exporter" writes her memory (her folder's `exports`); none:
+    /// no export (tests).
+    pub exports: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -163,6 +173,7 @@ impl Default for Options {
             scope: Scope::default(),
             effects: None,
             notifications: None,
+            exports: None,
         }
     }
 }
@@ -226,6 +237,8 @@ pub struct Brain {
     scope: Scope,
     redactor: Redactor,
     arrivals: Option<Arrivals>,
+    /// "Ce qu'elle sait", what she learns, compaction (lot 6).
+    memory: memory::Memory,
 }
 
 impl Brain {
@@ -278,6 +291,7 @@ impl Brain {
             scope: options.scope,
             redactor: Redactor::new(),
             arrivals: options.notifications,
+            memory: memory::Memory::new(options.exports),
         };
         if let Some(away) = away {
             brain.catch_up(away);
@@ -297,6 +311,7 @@ impl Brain {
             self.ask_due();
             self.triage_step();
             self.speak_due();
+            self.memory_due();
             let triage = self.settings.current().triage;
             let next = self
                 .slots
@@ -305,6 +320,7 @@ impl Brain {
                 .map(|s| s.due)
                 .chain(self.queue.next(&triage))
                 .chain(self.speaking_next())
+                .chain(self.memory_next())
                 .min();
             let event = match next.and_then(|at| self.clock.wait_until(at)) {
                 Some(wait) => match self.events.recv_timeout(wait) {
@@ -410,6 +426,22 @@ impl Brain {
 
     /// Takes one event: whether to go on.
     fn handle(&mut self, event: Event) -> bool {
+        let changes = matches!(
+            event,
+            Event::Line { .. }
+                | Event::Synced { .. }
+                | Event::Triaged { .. }
+                | Event::Compacted { .. }
+        );
+        let go_on = self.take(event);
+        if changes {
+            self.knows_refresh();
+        }
+        go_on
+    }
+
+    /// Takes one event: whether to go on.
+    fn take(&mut self, event: Event) -> bool {
         match event {
             Event::Connected {
                 conn,
@@ -455,6 +487,11 @@ impl Brain {
                 started,
                 result,
             } => self.worded(*built, away, items, started, result),
+            Event::Compacted {
+                work,
+                started,
+                result,
+            } => self.compacted(*work, started, result),
             Event::Stop => return false,
         }
         true
@@ -529,7 +566,11 @@ impl Brain {
             ToSecretary::Ask { id, text } => self.sentence(conn, id, text),
             ToSecretary::Choose { id, item, choice } => self.choose(conn, id, item, choice),
             ToSecretary::Decide { id, item, decision } => self.decide(conn, id, item, decision),
-            ToSecretary::Undo { id, item } => self.undo(conn, id, item),
+            ToSecretary::Undo { id, item } => {
+                if !self.too_late(conn, id, item) {
+                    self.undo(conn, id, item);
+                }
+            }
             ToSecretary::Thread { id } => self.thread(conn, id),
             ToSecretary::Drawer { open } => self.drawer(open),
             ToSecretary::Session { locked } => {
@@ -568,8 +609,12 @@ impl Brain {
                     hocus_secretary_link::Moment::Sharing => context::Moment::Sharing,
                     hocus_secretary_link::Moment::Camera => context::Moment::Camera,
                 };
+                // "Ce qu'elle sait" hides, or shows again, the perso.
+                self.knows_refresh();
             }
             ToSecretary::Effected { effect, ok, detail } => self.effected(effect, ok, &detail),
+            ToSecretary::Knows { id, query } => self.knows(conn, id, query),
+            ToSecretary::Memory { id, act } => self.memory_act(conn, id, act),
         }
     }
 
@@ -802,6 +847,20 @@ impl Brain {
                     self.keep_day(&item, &pointer, notebook);
                     match self.store.add_episode(&episode, &mentions) {
                         Ok((episode, _)) => {
+                            if (item.until.is_some()
+                                || item.open.is_some()
+                                || item.calendar.is_some())
+                                && let Err(err) = self.store.set_episode_extras(
+                                    episode,
+                                    item.until,
+                                    item.open.as_deref(),
+                                    item.calendar.as_deref(),
+                                )
+                            {
+                                tracing::warn!(source = name, %err, "could not keep an item's extras");
+                            }
+                            // What it says of the team (lot 6): proposals.
+                            self.seen_in_source(episode, &item.digest, item.at);
                             if let Some(text) = item.text {
                                 self.hold(pointer.clone(), *text, episode, item.summaries_only);
                             }
@@ -849,12 +908,22 @@ impl Brain {
     /// A call's request for `role`: the conversation `messages`, its
     /// context assembled within the budget (§7.3).
     pub fn request(&self, role: Role, messages: &[Message]) -> Result<Request, String> {
+        self.request_in(role, messages, &self.scope)
+    }
+
+    /// The same, within `scope` (a work draft: the pro notebook only).
+    pub fn request_in(
+        &self,
+        role: Role,
+        messages: &[Message],
+        scope: &Scope,
+    ) -> Result<Request, String> {
         context::assemble(
             &self.store,
             &self.inbox,
             role,
             messages,
-            &self.scope,
+            scope,
             self.clock.now(),
         )
         .map_err(|e| format!("her memory: {e}"))
@@ -993,6 +1062,10 @@ impl Brain {
             && let Err(err) = triage::keep_digest(&mut self.store, episode, &digest)
         {
             tracing::warn!(pointer, %err, "could not keep the triage's digest");
+        }
+        // Its candidate facts: proposals, never confirmed (lot 6, §7.1).
+        if !verdict.facts.is_empty() {
+            self.extracted(episode, &verdict.facts);
         }
         let commitments: Vec<String> = verdict
             .commitments

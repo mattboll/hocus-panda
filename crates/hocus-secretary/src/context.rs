@@ -411,6 +411,8 @@ fn day(
         };
         lines.extend(facts.lines(&zone, scope.moment.public()));
     }
+    // Who is away, from the leaves' rule's calendar (§9.1): computed.
+    lines.extend(crate::learn::leave_lines(store, today, notebook));
     let start = today.to_zoned(zone.clone()).map_or(now, |z| z.timestamp());
     let after = today
         .checked_add(2.days())
@@ -444,9 +446,18 @@ fn day(
         items.push(format!("summary:{id}"));
         lines.push(format!("Hier : {text}"));
     }
+    // A tool barely used is mentioned only when asked (§9.1).
+    let quiet = crate::learn::quiet_sources(store, today);
     let arrived: Vec<_> = retrieve::episodes_between(store, (start, now), notebook, 40)?
         .into_iter()
         .filter(|e| e.kind != "event" && e.kind != "catch-up")
+        .filter(|e| {
+            e.source.as_deref().is_none_or(|s| {
+                !quiet
+                    .iter()
+                    .any(|q| s == q || s.starts_with(&format!("{q}:")))
+            })
+        })
         .collect();
     if !arrived.is_empty() {
         lines.push("Arrivé aujourd'hui :".to_owned());

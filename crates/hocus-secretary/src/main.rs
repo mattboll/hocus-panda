@@ -74,6 +74,10 @@ struct Args {
     /// Her Google accounts are not read, even with a bus.
     #[arg(long)]
     no_google: bool,
+    /// People, projects, facts and rules written into an empty memory at
+    /// her start, from this TOML file: tests, screenshots.
+    #[arg(long, value_name = "FILE")]
+    memory_fixture: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -131,8 +135,13 @@ fn run(args: Args) -> Result<(), String> {
     private_dir(&data)?;
     let memory = data.join(MEMORY);
     let (key, place) = key::key(&data, bus.as_deref(), memory.exists())?;
-    let store =
+    let mut store =
         Store::open(&memory, &key, clock).map_err(|e| format!("{}: {e}", memory.display()))?;
+    if let Some(file) = &args.memory_fixture {
+        let seed = hocus_secretary::seed::Seed::from_file(file)?;
+        seed.write(&mut store)
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+    }
     // The recorder writes down the fake model's calls and the outside
     // effects of accepted cards alike.
     let recorder = args
@@ -195,6 +204,7 @@ fn run(args: Args) -> Result<(), String> {
             },
             effects: recorder,
             notifications: Some(arrivals),
+            exports: Some(data.join("exports")),
             ..Options::default()
         },
     );

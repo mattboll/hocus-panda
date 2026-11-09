@@ -218,6 +218,21 @@ impl Speak {
     }
 }
 
+/// The night's compaction (§7.2, lot 6).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Compaction {
+    /// The hour it runs at, where the user is; on battery, only above
+    /// `[secretary.triage] battery`, else an hour later, again.
+    pub hour: i8,
+}
+
+impl Default for Compaction {
+    fn default() -> Self {
+        Self { hour: 3 }
+    }
+}
+
 /// Her settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -227,6 +242,7 @@ pub struct Settings {
     pub providers: BTreeMap<String, Provider>,
     pub triage: Triage,
     pub speak: Speak,
+    pub compaction: Compaction,
 }
 
 impl Default for Settings {
@@ -236,6 +252,7 @@ impl Default for Settings {
             providers: default_providers(),
             triage: Triage::default(),
             speak: Speak::default(),
+            compaction: Compaction::default(),
         }
     }
 }

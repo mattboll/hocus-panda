@@ -35,6 +35,8 @@ tokio = { version = "1.54.1", features = ["rt", "time"] }
 rustix = { version = "1.1.6", features = ["time"] }
 # Names and aliases folded: accents and case.
 unicode-normalization = "0.1.26"
+# What the user teaches her, read in code (rules, arrivals, departures).
+regex = "1.13.1"
 # Her sources (Google accounts of Online Accounts), redacted before
 # anything else sees them: one Notebook with her memory's.
 hocus-sources = { path = "../hocus-sources", version = "1.0.0" }

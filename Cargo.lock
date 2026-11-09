@@ -2068,6 +2068,7 @@ dependencies = [
  "hocus-secretary-link",
  "hocus-sources",
  "jiff",
+ "regex",
  "rusqlite",
  "rustix 1.1.6",
  "rustls",
