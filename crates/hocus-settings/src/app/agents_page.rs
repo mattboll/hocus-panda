@@ -135,6 +135,11 @@ pub enum Msg {
     KeyErase,
     /// What she did with the key given.
     Keyed(Result<KeyOutcome, String>),
+    /// The sheet's calendar `n`, read or left out (#752).
+    SheetCalendar(usize),
+    /// Calendar `n` of the `i`th Google source's row (an Agenda granted),
+    /// read or left out.
+    RowCalendar(usize, usize),
     /// « C'est privé » on the `n`th Google source's row, granted (#752).
     GooglePrivate(usize),
     /// « C'est privé » on the `n`th application's row, granted.
@@ -202,6 +207,8 @@ struct GoogleSheet {
     source: GoogleSource,
     notebook: Notebook,
     on_allow: bool,
+    /// An Agenda's calendars left out on it, by their ids (#752).
+    left_out: std::collections::BTreeSet<String>,
 }
 
 /// The page's state.
@@ -544,14 +551,14 @@ impl App {
     /// `decision` on a Google source written in her consent book
     /// (`Some(notebook)`: read; `None`: no longer), then the accounts
     /// read again; on a thread.
-    fn agents_google_job(&self, decision: Option<(GoogleSource, Option<Notebook>)>) {
+    fn agents_google_job(&self, decision: Option<(GoogleSource, Option<Notebook>, Vec<String>)>) {
         let Some(to) = self.agents.to.clone() else {
             return;
         };
         let started = std::thread::Builder::new()
             .name("google sources".to_owned())
             .spawn(move || {
-                if let Some((source, notebook)) = decision {
+                if let Some((source, notebook, left_out)) = decision {
                     let written = notifiers::book_path()
                         .ok_or_else(|| std::io::Error::other("no data folder"))
                         .and_then(|path| {
@@ -560,6 +567,7 @@ impl App {
                                 &source.key(),
                                 &source.identity,
                                 notebook,
+                                left_out,
                                 jiff::Timestamp::now(),
                             )
                         });
@@ -789,6 +797,7 @@ impl App {
                         notebook: source.suggested,
                         source: source.clone(),
                         on_allow: true,
+                        left_out: std::collections::BTreeSet::new(),
                     });
                 }
                 iced::Task::none()
@@ -810,7 +819,8 @@ impl App {
                         format!("{title}: she reads it ({})", sheet.notebook.said(false))
                     }
                 };
-                self.agents_google_job(Some((sheet.source, Some(sheet.notebook))));
+                let left_out = sheet.left_out.into_iter().collect();
+                self.agents_google_job(Some((sheet.source, Some(sheet.notebook), left_out)));
                 self.toast(text, ToastAction::None, TOAST)
             }
             Msg::GoogleRevoke(i) => {
@@ -832,8 +842,54 @@ impl App {
                         format!("{title}: she no longer reads it and forgets what she knew of it")
                     }
                 };
-                self.agents_google_job(Some((source, None)));
+                self.agents_google_job(Some((source, None, Vec::new())));
                 self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::SheetCalendar(n) => {
+                if let Some(sheet) = &mut self.agents.google_sheet
+                    && let Some(id) = sheet.source.calendars.get(n).map(|c| c.id.clone())
+                    && !sheet.left_out.remove(&id)
+                {
+                    sheet.left_out.insert(id);
+                }
+                iced::Task::none()
+            }
+            Msg::RowCalendar(i, n) => {
+                let Some(source) = self.agents.google.get(i).filter(|s| s.granted.is_some()) else {
+                    return iced::Task::none();
+                };
+                let Some(id) = source.calendars.get(n).map(|c| c.id.clone()) else {
+                    return iced::Task::none();
+                };
+                let mut left_out = source.left_out.clone();
+                if let Some(at) = left_out.iter().position(|l| *l == id) {
+                    left_out.remove(at);
+                } else {
+                    left_out.push(id);
+                }
+                let key = source.key();
+                let Some(to) = self.agents.to.clone() else {
+                    return iced::Task::none();
+                };
+                let started = std::thread::Builder::new()
+                    .name("a calendar left out".to_owned())
+                    .spawn(move || {
+                        let written = notifiers::book_path()
+                            .ok_or_else(|| std::io::Error::other("no data folder"))
+                            .and_then(|path| {
+                                google_sources::leave_out(&path, &key, left_out, jiff::Timestamp::now())
+                            });
+                        if let Err(err) = written {
+                            tracing::warn!(source = %key, %err, "the calendars left out are not written");
+                        } else {
+                            tracing::info!(source = %key, "the calendars left out written");
+                        }
+                        let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
+                    });
+                if let Err(err) = started {
+                    tracing::warn!(%err, "the calendars left out are not written");
+                }
+                iced::Task::none()
             }
             Msg::Quiet(hours) => {
                 self.agents.quiet = Some(hours);
@@ -1616,12 +1672,25 @@ impl App {
     fn agents_google_row<'a>(&'a self, i: usize, source: &'a GoogleSource) -> El<'a> {
         let lang = self.lang;
         let focused = self.agents_focused(Stop::Google(i));
-        let words = column![
+        let mut words = column![
             t(source.title(lang), 14.0, TEXT.get()).font(SEMIBOLD),
             t(source.line(lang), 12.5, DIM.get()),
         ]
         .spacing(3)
         .width(Length::Fill);
+        // An Agenda granted: the calendars she reads, each to be left out
+        // (#752).
+        if source.granted.is_some() {
+            for (n, calendar) in source.calendars.iter().enumerate() {
+                let read = !source.left_out.contains(&calendar.id);
+                words = words.push(self.agents_calendar(
+                    calendar,
+                    read,
+                    Message::Agents(Msg::RowCalendar(i, n)),
+                    format!("calendar:{}:{n}", source.word()),
+                ));
+            }
+        }
         let action = if source.granted.is_some() {
             self.agents_button(
                 self.say(w("Ne plus lire", "Stop reading")),
@@ -1713,6 +1782,23 @@ impl App {
                 .spacing(5),
             );
         }
+        if !sheet.source.calendars.is_empty() {
+            let fr = lang == Lang::French;
+            let mut list = column![
+                t(hocus_secretary_link::sheets::calendars_label(fr), 11.0, FAINT.get()).font(BOLD)
+            ]
+            .spacing(4);
+            for (n, calendar) in sheet.source.calendars.iter().enumerate() {
+                let read = !sheet.left_out.contains(&calendar.id);
+                list = list.push(self.agents_calendar(
+                    calendar,
+                    read,
+                    Message::Agents(Msg::SheetCalendar(n)),
+                    format!("sheet:calendar:{n}"),
+                ));
+            }
+            body = body.push(list);
+        }
         body = body.push(self.agents_private(sheet.notebook, &words.private));
         let buttons = row![
             Space::new().width(Length::Fill),
@@ -1792,6 +1878,47 @@ impl App {
         column![container(label).id("sheet:private".to_owned()), lines]
             .spacing(4)
             .into()
+    }
+
+    /// A calendar of an Agenda, read (ticked) or left out: its name, who
+    /// shares it, hidden, busy times only (#752).
+    fn agents_calendar<'a>(
+        &self,
+        calendar: &hocus_secretary_link::calendars::CalendarInfo,
+        read: bool,
+        press: Message,
+        id: String,
+    ) -> El<'a> {
+        let note = calendar.note(self.lang == Lang::French);
+        let mut words = row![t(
+            calendar.name.clone(),
+            13.0,
+            if read { TEXT.get() } else { DIM.get() }
+        )
+        .font(SEMIBOLD)]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        if !note.is_empty() {
+            words = words.push(t(note, 12.0, DIM.get()));
+        }
+        container(
+            button(
+                row![Self::agents_check(read, 15.0), words.wrap()]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+            )
+            .padding([3, 4])
+            .on_press(press)
+            .style(|_, status| button::Style {
+                background: matches!(status, button::Status::Hovered)
+                    .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                text_color: TEXT.get(),
+                border: border(6.0, 0.0, Color::TRANSPARENT),
+                ..button::Style::default()
+            }),
+        )
+        .id(id)
+        .into()
     }
 
     /// A check box, ticked or not.
@@ -2720,7 +2847,10 @@ impl App {
                 "title": g.title(lang),
                 "suggested": g.suggested.word(),
                 "granted": g.granted.map(Notebook::word),
+                "calendars": g.calendars.iter().map(|c| format!("{} {}", c.name, c.note(true)).trim().to_owned()).collect::<Vec<_>>(),
+                "left_out": g.left_out,
             })).collect::<Vec<_>>(),
+            "google_left_out": self.agents.google_sheet.as_ref().map(|g| g.left_out.iter().cloned().collect::<Vec<_>>()),
             "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
             "name": self.agents_name(),
             "naming": self.agents.name.clone(),

@@ -306,6 +306,11 @@ pub enum Target {
     Private {
         item: u64,
     },
+    /// An Agenda's consent card's calendar `index`, read or left out.
+    Calendar {
+        item: u64,
+        index: u32,
+    },
     /// "Annuler" under what she kept.
     Undo(u64),
     /// "corriger" under an assumption: its sentence into the field.
@@ -355,6 +360,7 @@ impl Target {
             Self::Reply { item, choice } => format!("Reply({item},{choice})"),
             Self::Button { item, decision } => format!("Button({item},{decision:?})"),
             Self::Private { item } => format!("Private({item})"),
+            Self::Calendar { item, index } => format!("Calendar({item},{index})"),
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
             Self::Point(item) => format!("Point({item})"),
@@ -424,6 +430,8 @@ pub struct Open {
     /// The notebook chosen on each consent card, before its "Autoriser"
     /// (none: the one it suggests).
     pub notebooks: std::collections::HashMap<u64, Notebook>,
+    /// The calendars left out on each Agenda's consent card, by their ids.
+    pub left_out: std::collections::HashMap<u64, std::collections::BTreeSet<String>>,
     /// The keyboard is on the drawer (it is given it as it first shows; a
     /// window clicked takes it back).
     pub focused: bool,
@@ -609,6 +617,7 @@ pub fn toggle(output: &str, screen: u32) {
             knows_scroll: 0.0,
             confirm: None,
             notebooks: std::collections::HashMap::new(),
+            left_out: std::collections::HashMap::new(),
             focused: true,
             key: String::new(),
             // Her key missing: the keyboard types in its field first.
@@ -858,8 +867,34 @@ pub fn act(id: window::Id, target: Target) {
                     })
                 });
                 let notebook = suggested.map(|n| open.notebooks.get(&item).copied().unwrap_or(n));
-                crate::secretary::decide(item, decision, notebook);
+                let left_out = open
+                    .left_out
+                    .get(&item)
+                    .map(|l| l.iter().cloned().collect())
+                    .unwrap_or_default();
+                crate::secretary::decide(item, decision, notebook, left_out);
                 Then::Nothing
+            }
+            Target::Calendar { item, index } => {
+                let id = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => card
+                            .sheet
+                            .as_ref()
+                            .and_then(|s| s.calendars.get(index as usize))
+                            .map(|c| c.id.clone()),
+                        _ => None,
+                    })
+                });
+                if let Some(id) = id {
+                    let left = open.left_out.entry(item).or_default();
+                    if !left.remove(&id) {
+                        left.insert(id);
+                    }
+                    tracing::info!(item, index, left_out = left.len(), "a consent card's calendar");
+                    open.changed();
+                }
+                Then::Draw
             }
             Target::Private { item } => {
                 let suggested = crate::secretary::conversation(|c| {

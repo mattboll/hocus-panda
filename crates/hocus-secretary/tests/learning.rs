@@ -242,6 +242,7 @@ fn an_arrival_said_is_searched_proposed_kept_and_undone_within_ten_seconds() -> 
         item: card.id,
         decision: Decision::Accept,
         notebook: None,
+        left_out: Vec::new(),
     });
     let kept = until(&driver, ended(2));
     let learned = items(&kept)
@@ -285,6 +286,7 @@ fn an_arrival_said_is_searched_proposed_kept_and_undone_within_ten_seconds() -> 
         item: card.id,
         decision: Decision::Accept,
         notebook: None,
+        left_out: Vec::new(),
     });
     let kept = until(&driver, ended(5));
     let learned = items(&kept)

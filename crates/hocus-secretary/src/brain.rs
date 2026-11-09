@@ -661,8 +661,9 @@ impl Brain {
                 item,
                 decision,
                 notebook,
+                left_out,
             } => {
-                if !self.consent_decide(conn, id, item, decision, notebook) {
+                if !self.consent_decide(conn, id, item, decision, notebook, left_out) {
                     self.decide(conn, id, item, decision);
                 }
             }
@@ -920,12 +921,14 @@ impl Brain {
         let (name, notebook) = (slot.name.clone(), slot.notebook);
         let mut read = 0;
         let mut found = None;
+        let mut calendars = None;
         match result {
             Ok(mut synced) => {
                 slot.error = None;
                 slot.items += synced.items.len() as u64;
                 read = synced.items.len() as u64;
                 found = synced.found.take();
+                calendars = synced.calendars.take();
                 for gone in &synced.forget {
                     tracing::info!(source = gone, "a source revoked: what came from it goes");
                     if let Err(err) = self.store.forget_source(gone) {
@@ -1012,6 +1015,9 @@ impl Brain {
         }
         self.catch_up_done_if_over();
         self.try_brief();
+        if let Some(calendars) = calendars {
+            self.calendars_found(calendars);
+        }
         if let Some(accounts) = found {
             self.accounts_found(accounts);
         }

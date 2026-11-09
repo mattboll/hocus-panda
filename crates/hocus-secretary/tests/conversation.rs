@@ -374,6 +374,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         item: cards[0].0,
         decision: Decision::Accept,
         notebook: None,
+        left_out: Vec::new(),
     });
     let decided = until(&driver, ended(2));
     assert!(items(&decided).iter().any(|i| i.id == cards[0].0
@@ -385,6 +386,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         item: cards[2].0,
         decision: Decision::Reject,
         notebook: None,
+        left_out: Vec::new(),
     });
     until(&driver, ended(3));
     assert_eq!(
@@ -398,6 +400,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         item: cards[0].0,
         decision: Decision::Accept,
         notebook: None,
+        left_out: Vec::new(),
     });
     assert!(matches!(again, FromSecretary::Error { .. }), "{again:?}");
     assert_eq!(effects(&recorder), ["message"], "decided once");

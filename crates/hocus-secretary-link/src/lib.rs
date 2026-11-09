@@ -71,6 +71,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub mod calendars;
 pub mod consent;
 pub mod gate;
 #[cfg(feature = "goa")]
@@ -369,6 +370,10 @@ pub enum ToSecretary {
         /// A consent card's "Autoriser": the notebook chosen on it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         notebook: Option<Notebook>,
+        /// An Agenda's consent card's "Autoriser": the calendars left out
+        /// on it, by their ids (version 6).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        left_out: Vec<String>,
     },
     /// "Annuler" under what she kept (`item`, a [`Body::Learned`]).
     Undo { id: u64, item: u64 },
@@ -1382,6 +1387,7 @@ mod tests {
                 item: 4,
                 decision: Decision::Accept,
                 notebook: None,
+                left_out: Vec::new(),
             }
         );
         let allowed: ToSecretary = read(

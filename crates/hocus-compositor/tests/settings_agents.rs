@@ -1395,3 +1395,73 @@ fn her_name_is_typed_in_its_field_and_written() -> anyhow::Result<()> {
     bed.shows(|s| s["agents"]["name"] == "Margot" && s["agents"]["naming"].is_null())?;
     Ok(())
 }
+
+/// #752: the Agenda's sheet lists the calendars she will read (as she
+/// listed them, in her folder): who shares one, hidden ones; one left out
+/// there is written with the consent; on the granted row, each can be
+/// left out again or taken back. Under the Google rows, « Ajouter un
+/// compte Google » when GNOME's Online Accounts panel is installed.
+#[test]
+fn the_agenda_lists_its_calendars_each_to_be_left_out() -> anyhow::Result<()> {
+    const WORK: &str = "alex@atelier-lune.fr";
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        google: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    // Her list of the work account's calendars (the fake's id is the
+    // e-mail).
+    let list = serde_json::json!({ WORK: [
+        {"id": WORK, "name": "Travail"},
+        {"id": "design@group.calendar.google.com", "name": "Équipe design", "shared_by": "lea@atelier-lune.fr"},
+        {"id": "claire@atelier-lune.fr", "name": "Claire Dubois", "shared_by": "claire@atelier-lune.fr", "busy_only": true},
+        {"id": "famille@group.calendar.google.com", "name": "Famille", "shared": true, "hidden": true},
+    ]});
+    let her = bed.root().join("data/hocuspanda/secretary");
+    std::fs::create_dir_all(&her)?;
+    std::fs::write(her.join("calendars.json"), list.to_string())?;
+    bed.open()?;
+    let work_calendar = format!("{WORK}:calendar");
+    let shown = bed.shows(|s| google(s, &work_calendar)["calendars"].as_array().is_some_and(|c| c.len() == 4))?;
+    assert_eq!(
+        google(&shown, &work_calendar)["calendars"],
+        serde_json::json!([
+            "Travail",
+            "Équipe design partagé par lea@atelier-lune.fr",
+            "Claire Dubois partagé par claire@atelier-lune.fr · ses heures occupées seulement",
+            "Famille partagé · masqué",
+        ])
+    );
+    bed.click(&format!("google:{work_calendar}"))?;
+    bed.shows(|s| s["agents"]["google_sheet"] == work_calendar.as_str())?;
+    bed.click("sheet:calendar:3")?;
+    bed.shows(|s| s["agents"]["google_left_out"] == serde_json::json!(["famille@group.calendar.google.com"]))?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        std::fs::create_dir_all(&out)?;
+        save(&mut bed, &out, "settings-agenda-sheet.png")?;
+    }
+    bed.click("sheet:allow")?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "pro")?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    let source = hocus_secretary_link::consent::SourceKey::new(
+        WORK,
+        hocus_secretary_link::consent::SourceKind::Calendar,
+    );
+    assert_eq!(
+        book.grant(&source).expect("granted").left_out(),
+        ["famille@group.calendar.google.com"]
+    );
+    // On its row: Équipe design left out too, Famille taken back.
+    bed.click(&format!("calendar:{work_calendar}:1"))?;
+    bed.shows(|s| google(s, &work_calendar)["left_out"].as_array().is_some_and(|l| l.len() == 2))?;
+    bed.click(&format!("calendar:{work_calendar}:3"))?;
+    bed.shows(|s| google(s, &work_calendar)["left_out"] == serde_json::json!(["design@group.calendar.google.com"]))?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        bed.reveal(&format!("row:agents.google.{work_calendar}"))?;
+        save(&mut bed, &out, "settings-agenda-row.png")?;
+    }
+    Ok(())
+}

@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use hocus_secretary_link::{
     Action, Body, Card, CardKind, Decision, Notebook,
+    calendars::{CALENDARS, CalendarInfo, Calendars},
     consent::{ConsentBook, SourceKey, SourceKind},
     goa::GoogleAccount,
     sheets,
@@ -70,6 +71,8 @@ pub(super) struct Consents {
     /// "Pas maintenant" this run.
     pub later: HashSet<SourceKey>,
     pub first_run: FirstRun,
+    /// Each account's calendars, as her source last listed them (#752).
+    pub calendars: std::collections::BTreeMap<String, Vec<CalendarInfo>>,
 }
 
 impl Brain {
@@ -129,6 +132,63 @@ impl Brain {
             .as_deref()
             .map(ConsentBook::load)
             .unwrap_or_default()
+    }
+
+    /// Her Google source listed these accounts' calendars (#752): kept in
+    /// her folder for the Settings' Agenda rows, shown on an Agenda's
+    /// card still waiting, and those she could not read said in her
+    /// status.
+    pub(super) fn calendars_found(
+        &mut self,
+        found: std::collections::BTreeMap<String, Vec<CalendarInfo>>,
+    ) {
+        if self.consents.calendars == found {
+            return;
+        }
+        self.consents.calendars = found;
+        if let Some(path) = self
+            .consents
+            .book
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(|d| d.join(CALENDARS))
+            && let Err(err) = Calendars(self.consents.calendars.clone()).save(&path)
+        {
+            tracing::warn!(%err, "could not keep the calendars' list");
+        }
+        let cards: Vec<(u64, Asked)> = self
+            .consents
+            .cards
+            .iter()
+            .filter(|(_, a)| a.source.kind == SourceKind::Calendar)
+            .map(|(i, a)| (*i, a.clone()))
+            .collect();
+        for (item, asked) in cards {
+            let list = self.consents.calendars.get(&asked.source.account).cloned().unwrap_or_default();
+            self.change_item(item, |body| {
+                if let Body::Card { card } = body
+                    && let Some(sheet) = &mut card.sheet
+                {
+                    sheet.calendars = list;
+                }
+            });
+        }
+        self.tell_look();
+    }
+
+    /// The calendars she could not read at her last cycle.
+    pub(super) fn unreadable_calendars(&self) -> Vec<&CalendarInfo> {
+        let book = self.book();
+        self.consents
+            .calendars
+            .iter()
+            .filter(|(account, _)| {
+                book.grant(&SourceKey::new(account.as_str(), SourceKind::Calendar))
+                    .is_some()
+            })
+            .flat_map(|(_, list)| list)
+            .filter(|c| c.unreadable.is_some())
+            .collect()
     }
 
     /// Her Google source found these accounts: the cards follow the book,
@@ -301,7 +361,15 @@ impl Brain {
     fn consent_card(&mut self, account: &GoogleAccount, kind: SourceKind) -> u64 {
         let fr = self.talk.fr();
         let quiet = self.settings.current().speak.restraint().perso;
-        let sheet = sheets::google(&account.identity, kind, account.suggested, quiet, fr);
+        let mut sheet = sheets::google(&account.identity, kind, account.suggested, quiet, fr);
+        if kind == SourceKind::Calendar {
+            sheet.calendars = self
+                .consents
+                .calendars
+                .get(&account.id)
+                .cloned()
+                .unwrap_or_default();
+        }
         let card = Card {
             kind: CardKind::Consent,
             label: format!("{} · {}", sheets::kind_name(kind, fr), account.identity),
@@ -349,6 +417,7 @@ impl Brain {
         item: u64,
         decision: Decision,
         notebook: Option<Notebook>,
+        left_out: Vec<String>,
     ) -> bool {
         let Some(asked) = self.consents.cards.get(&item).cloned() else {
             return false;
@@ -367,7 +436,13 @@ impl Brain {
                 let notebook = notebook
                     .or_else(|| self.card_notebook(item))
                     .unwrap_or_default();
-                book.allow(asked.source.clone(), &asked.identity, notebook, now);
+                book.allow_leaving_out(
+                    asked.source.clone(),
+                    &asked.identity,
+                    notebook,
+                    left_out,
+                    now,
+                );
                 let said = format!("{} {what} · {}", self.talk.t("Je lis", "I read"), notebook.said(fr));
                 (said, vec![self.stop_reading()], None, true)
             }

@@ -1504,6 +1504,93 @@ fn lay_out_sheet(
         }
     }
     let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
+    if asking && !sheet.calendars.is_empty() {
+        // The calendars she will read (#752), each to be left out.
+        at += 8.0;
+        parts.push(Shape::Text(Line {
+            text: hocus_secretary_link::sheets::calendars_label(super::words().fr).to_owned(),
+            at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
+            size: CARD_LABEL,
+            color: LABEL,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += CARD_LABEL * 1.4 + 4.0;
+        let left = open.left_out.get(&item);
+        for (n, calendar) in sheet.calendars.iter().enumerate() {
+            let read = left.is_none_or(|l| !l.contains(&calendar.id));
+            let size = 14.0;
+            let target = Target::Calendar {
+                item,
+                index: u32::try_from(n).unwrap_or(u32::MAX),
+            };
+            let note = calendar.note(super::words().fr);
+            let name_lines = lines_of(&calendar.name, SHEET_TEXT, true, inner - size - 8.0);
+            let note_lines = if note.is_empty() {
+                Vec::new()
+            } else {
+                lines_of(&note, SMALL, false, inner - size - 8.0)
+            };
+            let h = name_lines.len() as f32 * SHEET_LINE + note_lines.len() as f32 * SMALL_LINE;
+            let rect = Rectangle::new(Point::new(x + CARD_X - 3.0, at - 2.0), Size::new(inner + 6.0, h + 4.0));
+            if open.hover == Some(target) {
+                parts.push(Shape::Box {
+                    rect,
+                    radius: 6.0,
+                    fill: alpha(0xFFFFFF, 0.05),
+                    rim: None,
+                    dashed: false,
+                    sharp: Corner::None,
+                });
+            }
+            let check = Rectangle::new(
+                Point::new(x + CARD_X, at + (SHEET_LINE - size) / 2.0),
+                Size::new(size, size),
+            );
+            parts.push(Shape::Box {
+                rect: check,
+                radius: 4.0,
+                fill: if read { GREEN } else { alpha(0xFFFFFF, 0.04) },
+                rim: (!read).then_some(alpha(0xFFFFFF, 0.35)),
+                dashed: false,
+                sharp: Corner::None,
+            });
+            if read {
+                parts.push(Shape::Text(Line {
+                    text: "✓".to_owned(),
+                    at: check.center(),
+                    size: 10.5,
+                    color: INK,
+                    bold: true,
+                    align: Alignment::Center,
+                }));
+            }
+            push_lines(
+                &mut parts,
+                &name_lines,
+                x + CARD_X + size + 8.0,
+                at,
+                SHEET_TEXT,
+                SHEET_LINE,
+                if read { TEXT } else { DIM },
+                true,
+            );
+            let mut y = at + name_lines.len() as f32 * SHEET_LINE;
+            push_lines(
+                &mut parts,
+                &note_lines,
+                x + CARD_X + size + 8.0,
+                y,
+                SMALL,
+                SMALL_LINE,
+                DIM,
+                false,
+            );
+            y += note_lines.len() as f32 * SMALL_LINE;
+            targets.push((target, rect));
+            at = y + 4.0;
+        }
+    }
     if asking {
         // « C'est privé » (#752): checked for the private notebook (the
         // account's domain suggests it), what it does under it.

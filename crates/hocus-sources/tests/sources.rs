@@ -220,13 +220,22 @@ fn no_source_is_read_before_its_consent_and_a_revoked_one_is_purged() -> anyhow:
         "Les photos sont en ligne.",
     );
     let mut bed = start(vec![mail(4, raw)])?;
-    // Nothing allowed: nothing read, not even a token asked.
+    // Nothing allowed: nothing read; only each Agenda's calendars listed,
+    // their names, for its consent sheet (#752).
     let events = bed.cycle();
-    assert!(events.is_empty(), "{events:?}");
+    assert!(
+        events.iter().all(|e| matches!(e, Event::Calendars { .. })),
+        "{events:?}"
+    );
     assert_eq!(bed.imap.with(|s| s.connections), 0);
-    assert!(bed.api.asked().is_empty());
+    assert!(
+        bed.api
+            .asked()
+            .iter()
+            .all(|a| a.path == "/users/me/calendarList"),
+        "no event read"
+    );
     assert!(bed.carddav.asked().is_empty());
-    assert_eq!(bed.goa.given(), 0);
 
     // The personal account's mail, into the perso notebook.
     let mail_source = SourceKey::new("account_1700000000_1", SourceKind::Mail);
@@ -242,8 +251,13 @@ fn no_source_is_read_before_its_consent_and_a_revoked_one_is_purged() -> anyhow:
     assert_eq!(read[0].item.notebook, Notebook::Perso);
     assert_eq!(read[0].item.pointer.source, mail_source);
     assert_eq!(bed.imap.with(|s| s.connections), 1);
-    // Only that source: no calendar, no contacts.
-    assert!(bed.api.asked().is_empty());
+    // Only that source: no event, no contacts.
+    assert!(
+        bed.api
+            .asked()
+            .iter()
+            .all(|a| a.path == "/users/me/calendarList")
+    );
     assert!(bed.carddav.asked().is_empty());
 
     // What the process keeps of it (its digests), by source.
@@ -267,7 +281,8 @@ fn no_source_is_read_before_its_consent_and_a_revoked_one_is_purged() -> anyhow:
 
     // Revoked: the next cycle does not read it and says to purge it, once.
     bed.consents.revoke(&mail_source, now().timestamp());
-    let events = bed.cycle();
+    let listed = |e: &Event| matches!(e, Event::Calendars { .. });
+    let events: Vec<Event> = bed.cycle().into_iter().filter(|e| !listed(e)).collect();
     assert!(
         matches!(events.as_slice(), [Event::Purge(source)] if *source == mail_source),
         "{events:?}"
@@ -275,7 +290,7 @@ fn no_source_is_read_before_its_consent_and_a_revoked_one_is_purged() -> anyhow:
     keep(events, &mut digests);
     assert!(digests.is_empty());
     assert_eq!(bed.imap.with(|s| s.connections), 1);
-    assert!(bed.cycle().is_empty());
+    assert!(bed.cycle().iter().all(listed));
     assert_eq!(bed.imap.with(|s| s.connections), 1);
     Ok(())
 }
@@ -343,6 +358,139 @@ fn every_calendar_is_read_hidden_ones_too() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #752: every calendar the account lists is read, those others share
+/// too; one shared as free/busy only gives its busy blocks, as "Occupé";
+/// one that cannot be read is said and never stops the others; a sync
+/// token refused lists again; a calendar left out is not read, and what
+/// came from it goes.
+#[test]
+fn shared_free_busy_and_failing_calendars_never_stop_the_others() -> anyhow::Result<()> {
+    const DESIGN: &str = "equipe-design@group.calendar.google.com";
+    const CLAIRE: &str = "claire@atelier-lune.fr";
+    const BROKEN: &str = "panne@group.calendar.google.com";
+    const CONGES: &str = "conges@group.calendar.google.com";
+    let mut bed = start(Vec::new())?;
+    bed.api.with(|api| {
+        let mut own = calendar(WORK, "Travail", "#4285f4", "owner", true);
+        own["primary"] = json!(true);
+        let mut design = calendar(DESIGN, "Équipe design", "#f6bf26", "reader", true);
+        design["dataOwner"] = json!("lea@atelier-lune.fr");
+        let claire = calendar(CLAIRE, "Claire Dubois", "#e67c73", "freeBusyReader", true);
+        let broken = calendar(BROKEN, "Salles", "#616161", "reader", true);
+        let hidden = api.calendars[1].clone();
+        api.calendars = vec![own, design, claire, broken, hidden];
+        api.events.insert(
+            DESIGN.to_owned(),
+            (
+                vec![fakes::day::event("d1", "Revue des maquettes", "14:00", "15:00")],
+                "sync-design-1".to_owned(),
+            ),
+        );
+        api.busy.insert(
+            CLAIRE.to_owned(),
+            vec![("2026-11-12T09:00:00Z".to_owned(), "2026-11-12T10:30:00Z".to_owned())],
+        );
+    });
+    bed.allow(
+        "account_1700000000_0",
+        WORK,
+        SourceKind::Calendar,
+        Notebook::Pro,
+    );
+    let events = bed.cycle();
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Failed { .. })),
+        "one calendar failing fails nothing: {events:?}"
+    );
+    let mut read: Vec<(String, String)> = items(&events)
+        .iter()
+        .filter_map(|r| match &r.item.content {
+            Content::Event(e) => Some((e.calendar_name.clone(), e.title.clone())),
+            _ => None,
+        })
+        .collect();
+    read.sort();
+    assert_eq!(
+        read,
+        [
+            ("Claire Dubois".to_owned(), "Occupé".to_owned()),
+            ("Congés".to_owned(), "Sophie en congés".to_owned()),
+            ("Travail".to_owned(), "Point Chapitô".to_owned()),
+            ("Équipe design".to_owned(), "Revue des maquettes".to_owned()),
+        ]
+    );
+    let busy = items(&events)
+        .into_iter()
+        .find_map(|r| match &r.item.content {
+            Content::Event(e) if e.calendar_name == "Claire Dubois" => Some(e.clone()),
+            _ => None,
+        })
+        .expect("Claire's busy block");
+    assert!(busy.busy && busy.description.is_none() && busy.place.is_none());
+    let listed = events
+        .iter()
+        .find_map(|e| match e {
+            Event::Calendars { list, .. } => Some(list.clone()),
+            _ => None,
+        })
+        .expect("the calendars listed");
+    let notes: Vec<(String, String)> = listed
+        .iter()
+        .map(|c| (c.name.clone(), c.note(true)))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            ("Travail".to_owned(), String::new()),
+            ("Équipe design".to_owned(), "partagé par lea@atelier-lune.fr".to_owned()),
+            (
+                "Claire Dubois".to_owned(),
+                "partagé par claire@atelier-lune.fr · ses heures occupées seulement".to_owned()
+            ),
+            ("Salles".to_owned(), "partagé · illisible".to_owned()),
+            ("Congés".to_owned(), "partagé · masqué".to_owned()),
+        ]
+    );
+    // A refused sync token: the window listed again, nothing fails.
+    bed.api.with(|api| {
+        api.syncs
+            .insert("sync-work-1".to_owned(), fakes::day::Sync::Refused);
+    });
+    let before = bed.api.asked().len();
+    let events = bed.cycle();
+    assert!(!events.iter().any(|e| matches!(e, Event::Failed { .. })));
+    let relisted = bed.api.asked()[before..]
+        .iter()
+        .any(|a| a.path == format!("/calendars/{WORK}/events") && a.query.contains_key("timeMin"));
+    assert!(relisted, "listed again");
+    // Congés left out: not read again, what came from it goes.
+    let calendar_source = SourceKey::new("account_1700000000_0", SourceKind::Calendar);
+    bed.consents
+        .leave_out(&calendar_source, vec![CONGES.to_owned()], now().timestamp());
+    let before = bed.api.asked().len();
+    let events = bed.cycle();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::PurgePart { part, .. } if part == CONGES)),
+        "{events:?}"
+    );
+    assert!(
+        !bed.api.asked()[before..]
+            .iter()
+            .any(|a| a.path.contains("conges")),
+        "not read again"
+    );
+    // Every calendar failing: the account's read does.
+    bed.api.with(|api| {
+        api.calendars.retain(|c| c["id"] == BROKEN);
+    });
+    let events = bed.cycle();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Failed { .. })),
+        "{events:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn birthdays_are_read_once_a_day_and_nothing_else_of_the_cards() -> anyhow::Result<()> {
     let mut bed = start(Vec::new())?;
@@ -374,7 +522,11 @@ fn birthdays_are_read_once_a_day_and_nothing_else_of_the_cards() -> anyhow::Resu
         bed.carddav.asked()[0]
             .starts_with("REPORT /principals/alex.martin@gmail.com/lists/default/")
     );
-    assert!(bed.cycle().is_empty());
+    assert!(
+        bed.cycle()
+            .iter()
+            .all(|e| matches!(e, Event::Calendars { .. }))
+    );
     assert_eq!(bed.carddav.asked().len(), 1);
     Ok(())
 }
@@ -478,10 +630,12 @@ fn attachments_and_tokens_never_leave() -> anyhow::Result<()> {
     let all = serde_json::to_string(&read)?;
     assert!(all.contains("facture-octobre.pdf"), "its name is kept");
     assert!(!all.contains("CONTENU-DE-LA-PIECE-JOINTE"), "{all}");
+    // The first token of the cycle (its Agenda's calendars listed, #752)
+    // is masked wherever it shows up.
     assert!(!all.contains(&first_token), "the token leaves: {all}");
     assert!(
         bed.imap
-            .with(|s| s.signed_in.iter().any(|(_, t)| *t == first_token))
+            .with(|s| s.signed_in.iter().any(|(_, t)| t.starts_with(TOKEN)))
     );
     Ok(())
 }

@@ -148,6 +148,7 @@ fn decide(driver: &mut common::Driver, item: u64, decision: Decision, notebook: 
         item,
         decision,
         notebook,
+        left_out: Vec::new(),
     });
     assert!(
         matches!(answer, FromSecretary::Answer { done: true, .. }),
@@ -357,6 +358,130 @@ fn a_consent_given_in_the_settings_shows_on_her_card_at_once() -> anyhow::Result
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    driver.stop();
+    Ok(())
+}
+
+/// #752: the Agenda's card lists the calendars she will read, those
+/// others share said so; one left out on it is never read; one that
+/// cannot be read is said in her status (« 1 agenda illisible »), the
+/// others read; the list is kept in her folder for the Settings.
+#[test]
+fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow::Result<()> {
+    use fakes::day::{calendar, event};
+    let bed = Bed::start()?;
+    bed.api.with(|api| {
+        let mut own = calendar(WORK, "Travail", "#4285f4", "owner", true);
+        own["primary"] = serde_json::json!(true);
+        let mut design = calendar(
+            "design@group.calendar.google.com",
+            "Équipe design",
+            "#f6bf26",
+            "reader",
+            true,
+        );
+        design["dataOwner"] = serde_json::json!("lea@atelier-lune.fr");
+        let mut famille = calendar(
+            "famille@group.calendar.google.com",
+            "Famille",
+            "#33b679",
+            "reader",
+            false,
+        );
+        famille["hidden"] = serde_json::json!(true);
+        let broken = calendar(
+            "salles@group.calendar.google.com",
+            "Salles",
+            "#616161",
+            "reader",
+            true,
+        );
+        api.calendars = vec![own, design, famille, broken];
+        api.events.insert(
+            WORK.to_owned(),
+            (vec![event("e1", "Point Chapitô", "10:00", "11:00")], "s-w".to_owned()),
+        );
+        api.events.insert(
+            "design@group.calendar.google.com".to_owned(),
+            (vec![event("d1", "Revue", "14:00", "15:00")], "s-d".to_owned()),
+        );
+        api.events.insert(
+            "famille@group.calendar.google.com".to_owned(),
+            (vec![event("f1", "Kiné", "18:00", "19:00")], "s-f".to_owned()),
+        );
+    });
+    let mut driver = common::Driver::start(Store::in_memory(common::clock())?, bed.options());
+    let items = thread_until(&mut driver, |items| {
+        waiting(items)
+            .first()
+            .and_then(|(_, c)| c.sheet.as_ref())
+            .is_some_and(|s| s.calendars.len() == 4)
+    });
+    let (card_id, card) = waiting(&items)[0].clone();
+    let sheet = card.sheet.expect("its sheet");
+    let notes: Vec<String> = sheet
+        .calendars
+        .iter()
+        .map(|c| format!("{} {}", c.name, c.note(true)).trim().to_owned())
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "Travail",
+            "Équipe design partagé par lea@atelier-lune.fr",
+            "Famille partagé · masqué",
+            "Salles partagé",
+        ]
+    );
+    // Listed before the consent, nothing of them read.
+    assert!(
+        bed.api.asked().iter().all(|a| !a.path.ends_with("/events")),
+        "no event before Autoriser"
+    );
+    // "Autoriser", Famille left out.
+    let answer = driver.request(|id| ToSecretary::Decide {
+        id,
+        item: card_id,
+        decision: Decision::Accept,
+        notebook: Some(Notebook::Pro),
+        left_out: vec!["famille@group.calendar.google.com".to_owned()],
+    });
+    assert!(matches!(answer, FromSecretary::Answer { done: true, .. }));
+    let grant = book(&bed.book())
+        .grant(&SourceKey::new(WORK_ID, SourceKind::Calendar))
+        .expect("granted");
+    assert_eq!(grant.left_out(), ["famille@group.calendar.google.com"]);
+    // Her status: one calendar she could not read; the others are.
+    let look = loop {
+        if let FromSecretary::Look { look } = driver.receive()
+            && look.status.contains("illisible")
+        {
+            break look;
+        }
+    };
+    assert!(look.status.ends_with("1 agenda illisible"), "{}", look.status);
+    assert!(look.hint.contains("Salles"), "{}", look.hint);
+    let asked = bed.api.asked();
+    assert!(asked.iter().any(|a| a.path == format!("/calendars/{WORK}/events")));
+    assert!(
+        asked
+            .iter()
+            .any(|a| a.path == "/calendars/design@group.calendar.google.com/events"),
+        "a shared calendar read"
+    );
+    assert!(
+        !asked.iter().any(|a| a.path.contains("famille")),
+        "Famille left out: never read"
+    );
+    let kept = hocus_secretary_link::calendars::Calendars::load(
+        &bed.dir.path().join(hocus_secretary_link::calendars::CALENDARS),
+    );
+    let salles = kept
+        .of(WORK_ID)
+        .iter()
+        .find(|c| c.name == "Salles")
+        .expect("kept for the Settings");
+    assert!(salles.unreadable.is_some());
     driver.stop();
     Ok(())
 }

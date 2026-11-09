@@ -23,6 +23,15 @@ pub struct Sheet {
     /// « C'est privé » and what it does (#752).
     #[serde(default)]
     pub private: Private,
+    /// An Agenda's: the calendars she will read, each to be left out
+    /// (#752); empty before they are known.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calendars: Vec<crate::calendars::CalendarInfo>,
+}
+
+/// The calendars' label on an Agenda's sheet.
+pub fn calendars_label(fr: bool) -> &'static str {
+    if fr { "LES AGENDAS QU’ELLE LIRA" } else { "THE CALENDARS SHE WILL READ" }
 }
 
 /// « C'est privé »: its box's words, and what checking it does, as the
@@ -177,7 +186,7 @@ pub fn google(
             "Lire ton agenda ?",
             "Google Agenda",
             lines(&[
-                "Tous tes agendas, y compris ceux que tu as masqués (congés, famille)",
+                "Tous tes agendas, ceux que tu as masqués et ceux qu’on te partage compris, sauf ceux que tu laisses de côté",
                 "Les événements, qui y est invité, et leur description",
             ]),
             lines(&[
@@ -195,7 +204,7 @@ pub fn google(
             "Read your calendar?",
             "Google Calendar",
             lines(&[
-                "All your calendars, hidden ones included (leaves, family)",
+                "All your calendars, hidden and shared ones included, but those you leave out",
                 "The events, who is invited, and their descriptions",
             ]),
             lines(&[
@@ -270,6 +279,7 @@ pub fn google(
         ],
         notebook: suggested,
         private: private(fr, quiet),
+        calendars: Vec::new(),
     }
 }
 

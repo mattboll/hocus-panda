@@ -322,15 +322,21 @@ pub fn choose(item: u64, choice: u32) {
 }
 
 /// A card's button; a consent card's "Autoriser" with the notebook
-/// chosen on it.
-pub fn decide(item: u64, decision: Decision, notebook: Option<hocus_secretary_link::Notebook>) {
+/// chosen on it, and the calendars left out on it.
+pub fn decide(
+    item: u64,
+    decision: Decision,
+    notebook: Option<hocus_secretary_link::Notebook>,
+    left_out: Vec<String>,
+) {
     let id = next_id();
-    tracing::info!(id, item, ?decision, ?notebook, "a card's button");
+    tracing::info!(id, item, ?decision, ?notebook, left_out = left_out.len(), "a card's button");
     send(ToSecretary::Decide {
         id,
         item,
         decision,
         notebook,
+        left_out,
     });
 }
 
