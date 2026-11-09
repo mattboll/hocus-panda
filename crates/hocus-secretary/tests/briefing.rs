@@ -344,6 +344,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         id: 50,
         item: card_id,
         decision: Decision::Accept,
+        notebook: None,
     });
     let after = until(&driver, |l| {
         matches!(
@@ -378,6 +379,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         id: 51,
         item: draft.0,
         decision: Decision::Accept,
+        notebook: None,
     });
     until(&driver, |l| {
         matches!(
@@ -546,6 +548,7 @@ mail = {{ to = ["Léa Martin <lea@atelier-lune.fr>"], sent = true }}
         id: 60,
         item: card,
         decision: Decision::Accept,
+        notebook: None,
     });
     let asked = until(&driver, |l| matches!(l, FromSecretary::Effect { .. }));
     let Some(FromSecretary::Effect {
@@ -680,6 +683,7 @@ mail = {{ to = ["Paul Durand <paul@client.fr>"], sent = true }}
         id: 70,
         item: card,
         decision: Decision::Accept,
+        notebook: None,
     });
     until(&driver, |l| matches!(l, FromSecretary::Effect { .. }));
     driver.send(&ToSecretary::Effected {

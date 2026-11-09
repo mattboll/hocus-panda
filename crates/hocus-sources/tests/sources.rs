@@ -195,9 +195,14 @@ fn every_google_account_is_found_each_with_its_notebook_suggested() -> anyhow::R
     );
     assert_eq!(accounts[0].imap.host, "imap.gmail.com");
     assert_eq!(accounts[0].kinds(), SourceKind::ALL);
-    let sheet = goa::sheet(&accounts[1], SourceKind::Mail);
-    assert_eq!(sheet.ask_notebook, Some("C'est ton compte perso ?"));
-    assert!(sheet.never.contains("ne marque rien comme lu"));
+    let sheet = hocus_secretary_link::sheets::google(
+        &accounts[1].identity,
+        SourceKind::Mail,
+        accounts[1].suggested,
+        true,
+    );
+    assert_eq!(sheet.ask.as_deref(), Some("C’est ton compte perso ?"));
+    assert!(sheet.sections[1].lines[0].contains("lecture seule"));
     // Discovering asks no token.
     assert_eq!(bed.goa.given(), 0);
     Ok(())

@@ -14,12 +14,20 @@
 //!   line goes to its agent.
 //! - AC24: a card proposes; nothing happens before its click.
 //! - AC35: her moods' marks show; with reduced motion nothing moves.
+//! - Her first run (§15, #750): with two Google accounts in a fake Online
+//!   Accounts on a private bus, one consent card at a time, "Autoriser"
+//!   writing the grant in the notebook chosen, then « Dis-moi sur quoi tu
+//!   travailles et avec qui. »; without a key in the keyring, her status
+//!   says so and how to give one.
 //!
 //! Pixman, so the shell draws on the CPU, opaque and still, as in CI.
 //! With `HOCUS_DRAWER_SHOTS=DIR`, the tests leave PNGs of the drawer
 //! there (screenshots for review, never compared).
 
 mod common;
+
+#[path = "../../hocus-day/tests/fakes/mod.rs"]
+mod fakes;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -95,6 +103,9 @@ struct Bed {
     hocus: PathBuf,
     /// A line to her, in assistant mode.
     her: Option<Connection>,
+    /// Online Accounts faked on a private bus, with Google's services
+    /// nowhere (her real model's routes, no key): her first run.
+    _google: Option<(fakes::FakeGoa, fakes::PrivateBus)>,
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +113,10 @@ struct Setup {
     output: &'static str,
     mode: SecretaryMode,
     reduced_motion: bool,
+    /// Her Google accounts (two, in a fake Online Accounts) instead of a
+    /// fixture board, her real providers (on nothing, with no key)
+    /// instead of the fake model.
+    google: bool,
 }
 
 impl Default for Setup {
@@ -110,6 +125,7 @@ impl Default for Setup {
             output: "1920x1080",
             mode: SecretaryMode::Assistant,
             reduced_motion: false,
+            google: false,
         }
     }
 }
@@ -130,17 +146,45 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
     let board = dir.path().join("board.toml");
     std::fs::write(&board, BOARD)?;
     let her = dir.path().join("secretary");
+    let google = if setup.google {
+        let bus = fakes::PrivateBus::start(dir.path())?;
+        let goa = fakes::FakeGoa::start(&bus.address)?;
+        goa.add("account_1700000000_0", "google", "alex@atelier-lune.fr")?;
+        goa.add("account_1700000000_1", "google", "alex.martin@gmail.com")?;
+        Some((goa, bus))
+    } else {
+        None
+    };
+    let routes = match &google {
+        // Her providers on a port where nothing listens, no key in a
+        // keyring: nothing reaches a model or the network.
+        Some((_, bus)) => {
+            let config = dir.path().join("secretary.toml");
+            std::fs::write(
+                &config,
+                "[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"http://127.0.0.1:9\"\n\
+                 [secretary.providers.local]\nkind = \"ollama\"\nurl = \"http://127.0.0.1:9/v1\"\n",
+            )?;
+            format!(
+                "--bus '{}' --google-at http://127.0.0.1:9 --config '{}'",
+                bus.address,
+                config.display()
+            )
+        }
+        None => format!(
+            "--fake-model '{}' --recorder '{}' --fixture '{}'",
+            model.display(),
+            dir.path().join("calls.jsonl").display(),
+            board.display(),
+        ),
+    };
     std::fs::write(
         &her,
         format!(
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}'\n\
-             exec '{}' --virtual-clock 2026-11-09T08:00:00Z --fake-model '{}' \
-             --recorder '{}' --fixture '{}' \"$@\" 2>>'{}'\n",
+             exec '{}' --virtual-clock 2026-11-09T08:00:00Z {routes} \"$@\" 2>>'{}'\n",
             dir.path().join("data").display(),
             secretary.display(),
-            model.display(),
-            dir.path().join("calls.jsonl").display(),
-            board.display(),
             dir.path().join("secretary.log").display(),
         ),
     )?;
@@ -206,6 +250,7 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
         log,
         hocus,
         her,
+        _google: google,
     }))
 }
 
@@ -803,5 +848,121 @@ fn her_moods_show_and_reduced_motion_moves_nothing() -> anyhow::Result<()> {
         commits,
         "her ask's motion does not play"
     );
+    Ok(())
+}
+
+/// The button `decision` of the newest consent card still waiting (its
+/// "Autoriser" shows), as the drawer last logged its places.
+fn button_of(bed: &mut Bed, decision: &str) -> anyhow::Result<(f64, f64)> {
+    let log = bed.log.clone();
+    let newest = |text: &str| -> Option<u64> {
+        let line = text
+            .lines()
+            .rev()
+            .find(|l| l.contains("the drawer's items"))?;
+        line.split_whitespace()
+            .filter_map(|w| w.strip_prefix("Button("))
+            .filter_map(|w| w.split('@').next())
+            .filter(|w| w.ends_with(",Accept)"))
+            .filter_map(|w| w.split(',').next()?.parse::<u64>().ok())
+            .max()
+    };
+    let done = bed
+        .hp
+        .dispatch_until(WAIT, |_| newest(&common::logged(&log)).is_some())?;
+    anyhow::ensure!(done, "no consent card waiting");
+    let item = newest(&common::logged(&bed.log)).unwrap_or_default();
+    bed.place(&format!("Button({item},{decision})"))
+}
+
+/// Her first run (§15, #750): one source at a time, each on its consent
+/// card, then « Dis-moi sur quoi tu travailles et avec qui. »; her
+/// status says the key she misses, and how to give one.
+#[test]
+fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup {
+        google: true,
+        ..Setup::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    let shown = bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("card:Consent:Agenda · alex@atelier-lune.fr")
+    })?;
+    let items = shown["items"].to_string();
+    assert!(items.contains("une source à la fois"), "{items}");
+    assert_eq!(
+        items.matches("card:Consent").count(),
+        1,
+        "one at a time: {items}"
+    );
+    assert_eq!(shown["status"], "Il me manque ma clé Anthropic");
+    assert!(
+        shown["hint"]
+            .as_str()
+            .is_some_and(|h| h.contains("hocus-secretary key anthropic")),
+        "{shown}"
+    );
+    bed.shot("first-run-consent")?;
+    // "Autoriser": the grant, pro; the next source.
+    let allow = button_of(&mut bed, "Accept")?;
+    bed.click(allow)?;
+    let shown = bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("card:Consent:Anniversaires · alex@atelier-lune.fr")
+    })?;
+    assert!(
+        shown["items"]
+            .to_string()
+            .contains("Je lis ton agenda · carnet pro"),
+        "{shown}"
+    );
+    let book = std::fs::read_to_string(
+        bed.dir
+            .path()
+            .join("data/hocuspanda/secretary/consents.json"),
+    )?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&book)?;
+    let grant = book
+        .grant(&hocus_secretary_link::consent::SourceKey::new(
+            // The fake's id is the account's e-mail.
+            "alex@atelier-lune.fr",
+            hocus_secretary_link::consent::SourceKind::Calendar,
+        ))
+        .expect("the work calendar granted");
+    assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
+    bed.shot("first-run-granted")?;
+    // "Pas maintenant" on the rest, the gmail.com account perso.
+    for n in 0..5 {
+        let not_now = button_of(&mut bed, "Reject")?;
+        let before = bed.shows(|_| true)?["items"].clone();
+        bed.click(not_now)?;
+        bed.shows(|s| s["items"] != before)?;
+        if n == 1 {
+            let shown = bed.shows(|s| {
+                s["items"]
+                    .to_string()
+                    .contains("card:Consent:Agenda · alex.martin@gmail.com")
+            })?;
+            assert!(shown["items"].to_string().contains("Pas maintenant"));
+            bed.shot("first-run-perso")?;
+        }
+    }
+    let shown = bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("her:Dis-moi sur quoi tu travailles et avec qui.")
+    })?;
+    assert_eq!(
+        shown["items"].to_string().matches("card:Consent").count(),
+        6
+    );
+    bed.shot("first-run-done")?;
     Ok(())
 }

@@ -1,9 +1,11 @@
 //! The "Agents" page (6.16, variant A, docs/design/settings.md "Agents"):
 //! the tools followed, the halo and its preview, the pandas, and the
 //! secretary: her mode, and in assistant mode the applications whose
-//! notifications she reads (secretary.md lot 7, [`crate::notifiers`]),
-//! each consented to on a sheet that says what she reads, what she never
-//! does there and what leaves the machine, with its notebook.
+//! notifications she reads (secretary.md lot 7, [`crate::notifiers`]) and
+//! each kind of each Google account of Online Accounts (#750,
+//! [`crate::google_sources`]), each consented to on a sheet that says what
+//! she reads, what she never does there and what leaves the machine, with
+//! its notebook.
 //!
 //! The tools are the compositor's (4.0): it says them on the Settings'
 //! line (`agent-tools`), and the page asks it to plug one in or out, or
@@ -45,6 +47,7 @@ use super::{
 };
 use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
+    google_sources::{self, Source as GoogleSource},
     lang::{Lang, w},
     model::{SectionId, Setting, Value},
     notifiers::{self, Notifier},
@@ -108,6 +111,14 @@ pub enum Msg {
     Allowed(bool),
     /// "Ne plus lire" on the `n`th application's row.
     Revoke(usize),
+    /// Her Google sources, as found.
+    Google(Vec<GoogleSource>),
+    /// "Autoriser" on the `n`th Google source's row: its sheet opens.
+    GoogleAllow(usize),
+    /// Its sheet's "Autoriser" (`true`) or "Pas maintenant".
+    GoogleAllowed(bool),
+    /// "Ne plus lire" on the `n`th Google source's row.
+    GoogleRevoke(usize),
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -119,6 +130,8 @@ pub enum Stop {
     Copy,
     /// The `n`th application's button, under the secretary.
     Notifier(usize),
+    /// The `n`th Google source's button.
+    Google(usize),
 }
 
 /// A tool plugged in or out, herdr followed or not, for its undo.
@@ -155,6 +168,15 @@ struct Notify {
     on_allow: bool,
 }
 
+/// A Google source's consent sheet: which, into which notebook, and
+/// which button has the keyboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GoogleSheet {
+    source: GoogleSource,
+    notebook: Notebook,
+    on_allow: bool,
+}
+
 /// The page's state.
 #[derive(Debug, Default)]
 pub struct State {
@@ -180,6 +202,9 @@ pub struct State {
     /// The applications whose notifications she may read, as last read.
     notifiers: Vec<Notifier>,
     notify: Option<Notify>,
+    /// Her Google sources, as last read.
+    google: Vec<GoogleSource>,
+    google_sheet: Option<GoogleSheet>,
 }
 
 impl State {
@@ -298,6 +323,7 @@ impl App {
             out.extend(
                 (0..self.agents.notifiers.len()).map(|i| Control::Agents(Stop::Notifier(i))),
             );
+            out.extend((0..self.agents.google.len()).map(|i| Control::Agents(Stop::Google(i))));
         }
         out
     }
@@ -313,6 +339,47 @@ impl App {
     /// thread, said back to the window.
     fn agents_read_notifiers(&self) {
         self.agents_notifiers_job(None);
+        self.agents_google_job(None);
+    }
+
+    /// `decision` on a Google source written in her consent book
+    /// (`Some(notebook)`: read; `None`: no longer), then the accounts
+    /// read again; on a thread.
+    fn agents_google_job(&self, decision: Option<(GoogleSource, Option<Notebook>)>) {
+        let Some(to) = self.agents.to.clone() else {
+            return;
+        };
+        let started = std::thread::Builder::new()
+            .name("google sources".to_owned())
+            .spawn(move || {
+                if let Some((source, notebook)) = decision {
+                    let written = notifiers::book_path()
+                        .ok_or_else(|| std::io::Error::other("no data folder"))
+                        .and_then(|path| {
+                            google_sources::decide(
+                                &path,
+                                &source.key(),
+                                &source.identity,
+                                notebook,
+                                jiff::Timestamp::now(),
+                            )
+                        });
+                    match written {
+                        Ok(()) => tracing::info!(
+                            source = source.word(),
+                            notebook = notebook.map(Notebook::word),
+                            "the secretary's consent to a Google source written"
+                        ),
+                        Err(err) => {
+                            tracing::warn!(source = source.word(), %err, "the consent is not written");
+                        }
+                    }
+                }
+                let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
+            });
+        if let Err(err) = started {
+            tracing::warn!(%err, "the Google accounts are not read");
+        }
     }
 
     /// `decision` written in her consent book (`(name, Some(notebook))`:
@@ -458,10 +525,75 @@ impl App {
                 iced::Task::none()
             }
             Msg::Notebook(notebook) => {
-                if let Some(notify) = &mut self.agents.notify {
+                if let Some(sheet) = &mut self.agents.google_sheet {
+                    sheet.notebook = notebook;
+                } else if let Some(notify) = &mut self.agents.notify {
                     notify.notebook = notebook;
                 }
                 iced::Task::none()
+            }
+            Msg::Google(found) => {
+                self.agents.google = found;
+                iced::Task::none()
+            }
+            Msg::GoogleAllow(i) => {
+                if let Some(source) = self.agents.google.get(i)
+                    && source.granted.is_none()
+                    && self.agents_assistant()
+                {
+                    tracing::debug!(
+                        source = source.word(),
+                        "a Google source's consent sheet opens"
+                    );
+                    self.agents.google_sheet = Some(GoogleSheet {
+                        notebook: source.suggested,
+                        source: source.clone(),
+                        on_allow: true,
+                    });
+                }
+                iced::Task::none()
+            }
+            Msg::GoogleAllowed(yes) => {
+                let Some(sheet) = self.agents.google_sheet.take() else {
+                    return iced::Task::none();
+                };
+                if !yes {
+                    tracing::debug!(source = sheet.source.word(), "not read");
+                    return iced::Task::none();
+                }
+                let title = sheet.source.title(self.lang);
+                let text = match self.lang {
+                    Lang::French => {
+                        format!("{title} : elle le lit (carnet {})", sheet.notebook.word())
+                    }
+                    Lang::English => {
+                        format!("{title}: she reads it ({} notebook)", sheet.notebook.word())
+                    }
+                };
+                self.agents_google_job(Some((sheet.source, Some(sheet.notebook))));
+                self.toast(text, ToastAction::None, TOAST)
+            }
+            Msg::GoogleRevoke(i) => {
+                let Some(source) = self
+                    .agents
+                    .google
+                    .get(i)
+                    .filter(|s| s.granted.is_some())
+                    .cloned()
+                else {
+                    return iced::Task::none();
+                };
+                let title = source.title(self.lang);
+                let text = match self.lang {
+                    Lang::French => {
+                        format!("{title} : elle ne le lit plus et oublie ce qu’elle en savait")
+                    }
+                    Lang::English => {
+                        format!("{title}: she no longer reads it and forgets what she knew of it")
+                    }
+                };
+                self.agents_google_job(Some((source, None)));
+                self.toast(text, ToastAction::None, TOAST)
             }
             Msg::Allowed(yes) => {
                 let Some(notify) = self.agents.notify.take() else {
@@ -585,6 +717,28 @@ impl App {
     /// The consent sheet takes the keyboard: `Esc` cancels, `Enter`
     /// acts, `Tab` and the arrows go from one button to the other.
     pub(super) fn agents_key_first(&mut self, key: &Key) -> Option<iced::Task<Message>> {
+        if let Some(sheet) = self.agents.google_sheet.as_mut() {
+            match key.as_ref() {
+                Key::Named(Named::Escape) => {
+                    return Some(self.agents_update(Msg::GoogleAllowed(false)));
+                }
+                Key::Named(Named::Enter | Named::Space) => {
+                    let yes = sheet.on_allow;
+                    return Some(self.agents_update(Msg::GoogleAllowed(yes)));
+                }
+                Key::Named(Named::Tab | Named::ArrowLeft | Named::ArrowRight) => {
+                    sheet.on_allow = !sheet.on_allow;
+                }
+                Key::Named(Named::ArrowUp | Named::ArrowDown) => {
+                    sheet.notebook = match sheet.notebook {
+                        Notebook::Pro => Notebook::Perso,
+                        Notebook::Perso => Notebook::Pro,
+                    };
+                }
+                _ => {}
+            }
+            return Some(iced::Task::none());
+        }
         if let Some(notify) = self.agents.notify.as_mut() {
             match key.as_ref() {
                 Key::Named(Named::Escape) => return Some(self.agents_update(Msg::Allowed(false))),
@@ -644,6 +798,11 @@ impl App {
                 Stop::Notifier(i) => match self.agents.notifiers.get(i).map(|n| n.granted) {
                     Some(Some(_)) => self.agents_update(Msg::Revoke(i)),
                     Some(None) => self.agents_update(Msg::Allow(i)),
+                    None => iced::Task::none(),
+                },
+                Stop::Google(i) => match self.agents.google.get(i).map(|s| s.granted) {
+                    Some(Some(_)) => self.agents_update(Msg::GoogleRevoke(i)),
+                    Some(None) => self.agents_update(Msg::GoogleAllow(i)),
                     None => iced::Task::none(),
                 },
                 Stop::Action(tool) => {
@@ -760,7 +919,10 @@ impl App {
             (model::PANDAS, Value::Bool(true)) => self.agents.hop = motion.then(Instant::now),
             // The assistant: the applications are read again for her rows.
             (model::SECRETARY, Value::Bool(true)) => self.agents_read_notifiers(),
-            (model::SECRETARY, Value::Bool(false)) => self.agents.notify = None,
+            (model::SECRETARY, Value::Bool(false)) => {
+                self.agents.notify = None;
+                self.agents.google_sheet = None;
+            }
             _ => {}
         }
     }
@@ -936,7 +1098,200 @@ impl App {
         for (i, notifier) in self.agents.notifiers.iter().enumerate() {
             body = body.push(divided(true, self.agents_notifier_row(i, notifier)));
         }
+        if self.agents.google.is_empty() {
+            body = body.push(divided(
+                true,
+                container(t(
+                    self.say(w(
+                        "Aucun compte Google dans Comptes en ligne : son agenda et ses mails apparaîtront ici dès que tu en ajouteras un.",
+                        "No Google account in Online Accounts: its calendar and mail will show here as soon as you add one.",
+                    )),
+                    12.5,
+                    DIM.get(),
+                ))
+                .padding([12, 16])
+                .id("agents:no-google".to_owned())
+                .into(),
+            ));
+        }
+        for (i, source) in self.agents.google.iter().enumerate() {
+            body = body.push(divided(true, self.agents_google_row(i, source)));
+        }
         body.into()
+    }
+
+    /// A Google source's row: the account's kind, what she reads of it,
+    /// "Autoriser" or "Ne plus lire".
+    fn agents_google_row<'a>(&'a self, i: usize, source: &'a GoogleSource) -> El<'a> {
+        let lang = self.lang;
+        let focused = self.agents_focused(Stop::Google(i));
+        let words = column![
+            t(source.title(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+            t(source.line(lang), 12.5, DIM.get()),
+        ]
+        .spacing(3)
+        .width(Length::Fill);
+        let action = if source.granted.is_some() {
+            self.agents_button(
+                self.say(w("Ne plus lire", "Stop reading")),
+                false,
+                focused,
+                Some(Message::Agents(Msg::GoogleRevoke(i))),
+            )
+        } else {
+            self.agents_button(
+                self.say(w("Autoriser", "Allow")),
+                true,
+                focused,
+                Some(Message::Agents(Msg::GoogleAllow(i))),
+            )
+        };
+        container(
+            row![
+                Self::agents_google_tile(28.0),
+                words,
+                container(action).id(format!("google:{}", source.word())),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: 11.0,
+            right: 14.0,
+            bottom: 11.0,
+            left: 16.0,
+        })
+        .id(format!("row:agents.google.{}", source.word()))
+        .into()
+    }
+
+    /// A Google account's mark: its letter on a blue tile (no brand
+    /// drawing).
+    fn agents_google_tile<'a>(size: f32) -> El<'a> {
+        container(text("G").size(size * 0.46).font(BOLD).color(Color::WHITE))
+            .width(size)
+            .height(size)
+            .center(size)
+            .style(boxed(rgb(0x4A6FD6), size * 0.28, None))
+            .into()
+    }
+
+    /// A Google source's consent sheet (§10.1): the words of her card in
+    /// the drawer, the notebook suggested by the account's domain.
+    fn agents_google_sheet<'a>(&self, sheet: &GoogleSheet) -> El<'a> {
+        use hocus_secretary_link::sheets::Mark;
+        let lang = self.lang;
+        let words = sheet.source.sheet(lang);
+        let mut body = column![
+            row![
+                Self::agents_google_tile(32.0),
+                column![
+                    text(words.title.clone()).size(17).font(BOLD).color(TEXT),
+                    t(words.from.clone(), 12.0, FAINT.get()),
+                ]
+                .spacing(2),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(12);
+        for section in &words.sections {
+            let (mark, colour) = match section.mark {
+                Mark::Yes => ("✓", rgb(0x7EE0A0)),
+                Mark::No => ("✕", rgb(0xF7A77A)),
+                Mark::Plain => ("•", FAINT.get()),
+            };
+            let mut lines = column![].spacing(3);
+            for line in &section.lines {
+                lines = lines.push(
+                    row![
+                        container(t(mark, 13.0, colour).font(BOLD)).width(16),
+                        t(line.clone(), 13.0, SOFT.get()).line_height(1.45),
+                    ]
+                    .spacing(2),
+                );
+            }
+            body = body.push(
+                column![
+                    t(section.label.clone(), 11.0, FAINT.get()).font(BOLD),
+                    lines
+                ]
+                .spacing(5),
+            );
+        }
+        let pill = |notebook: Notebook, said: &'static str| -> El<'a> {
+            let on = sheet.notebook == notebook;
+            container(
+                button(t(said, 12.5, if on { DEEP.get() } else { TEXT.get() }).font(BOLD))
+                    .padding([5, 14])
+                    .on_press(Message::Agents(Msg::Notebook(notebook)))
+                    .style(move |_, _| button::Style {
+                        background: Some(Background::Color(if on {
+                            ACCENT.get()
+                        } else {
+                            crate::theme::ink(rgba(255, 255, 255, 0.08))
+                        })),
+                        text_color: TEXT.get(),
+                        border: border(13.0, 0.0, Color::TRANSPARENT),
+                        ..button::Style::default()
+                    }),
+            )
+            .id(format!("sheet:{}", notebook.word()))
+            .into()
+        };
+        let mut notebook =
+            column![t(self.say(w("CARNET", "NOTEBOOK")), 11.0, FAINT.get()).font(BOLD)].spacing(6);
+        if let Some(ask) = &words.ask {
+            notebook = notebook.push(t(ask.clone(), 12.5, rgb(0xFFE2A8)).font(SEMIBOLD));
+        }
+        notebook = notebook.push(
+            row![
+                pill(Notebook::Pro, self.say(w("Pro", "Work"))),
+                pill(Notebook::Perso, self.say(w("Perso", "Personal"))),
+                t(
+                    self.say(w(
+                        "Le perso ne se montre jamais pendant un partage d’écran.",
+                        "Personal items never show while the screen is shared.",
+                    )),
+                    12.0,
+                    DIM.get()
+                ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+        body = body.push(notebook);
+        let buttons = row![
+            Space::new().width(Length::Fill),
+            container(self.agents_button(
+                self.say(w("Pas maintenant", "Not now")),
+                false,
+                !sheet.on_allow,
+                Some(Message::Agents(Msg::GoogleAllowed(false))),
+            ))
+            .id("sheet:not-now".to_owned()),
+            container(self.agents_button(
+                self.say(w("Autoriser", "Allow")),
+                true,
+                sheet.on_allow,
+                Some(Message::Agents(Msg::GoogleAllowed(true))),
+            ))
+            .id("sheet:allow".to_owned()),
+        ]
+        .spacing(8);
+        Self::agents_over(
+            container(column![body, buttons].spacing(20))
+                .width(460)
+                .padding(20)
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(rgb(0x1B2130))),
+                    border: border(14.0, 1.0, RIM_12.get()),
+                    shadow: shadow(),
+                    ..container::Style::default()
+                })
+                .id("sheet".to_owned())
+                .into(),
+        )
     }
 
     /// An application's mark: its first letter on the neutral tile the
@@ -1674,6 +2029,9 @@ impl App {
 
     /// The consent sheet, over the window at 60 %.
     pub(super) fn agents_sheet(&self) -> Option<El<'_>> {
+        if let Some(sheet) = &self.agents.google_sheet {
+            return Some(self.agents_google_sheet(sheet));
+        }
         if let Some(notify) = &self.agents.notify {
             return Some(self.agents_notify_sheet(notify));
         }
@@ -1835,6 +2193,14 @@ impl App {
             "notify": self.agents.notify.as_ref().map(|n| n.name.clone()),
             "notify_notebook": self.agents.notify.as_ref().map(|n| n.notebook.word()),
             "notify_on": self.agents.notify.as_ref().map(|n| if n.on_allow { "allow" } else { "not-now" }),
+            "google": self.agents.google.iter().map(|g| serde_json::json!({
+                "key": g.word(),
+                "title": g.title(lang),
+                "suggested": g.suggested.word(),
+                "granted": g.granted.map(Notebook::word),
+            })).collect::<Vec<_>>(),
+            "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
+            "google_notebook": self.agents.google_sheet.as_ref().map(|g| g.notebook.word()),
         })
     }
 }

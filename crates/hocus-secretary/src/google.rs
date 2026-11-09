@@ -66,15 +66,54 @@ impl Source for Google {
             .filter(|c| !c.is_empty())
             .and_then(|c| serde_json::from_str(c).ok())
             .unwrap_or_default();
-        let accounts = goa::discover(&self.bus).map_err(|e| format!("Online Accounts: {e}"))?;
+        let accounts = match goa::discover(&self.bus) {
+            Ok(accounts) => accounts,
+            // No Online Accounts on this bus at all: no account, not a
+            // failure (her first run says so).
+            Err(err) if absent(&err.to_string()) => {
+                tracing::info!(%err, "no Online Accounts: no Google account");
+                Vec::new()
+            }
+            Err(err) => return Err(format!("Online Accounts: {err}")),
+        };
         let consents = ConsentBook::load(&self.consents);
         let now = now.to_zoned(TimeZone::system());
         let events = self.sources.cycle(&accounts, &consents, &now);
         let mut synced = gather(events, &consents);
         synced.cursor = serde_json::to_string(&self.sources.cursors)
             .map_err(|e| format!("the cursors do not write: {e}"))?;
+        synced.found = Some(accounts);
         Ok(synced)
     }
+}
+
+/// `env` with Google's services at `url`, a fake on this machine (tests):
+/// the Calendar API and CardDAV there, IMAP on its port in clear. Another
+/// address is refused: tests never reach the network.
+pub fn at(mut env: Env, url: &str) -> Result<Env, String> {
+    let local = ["http://127.0.0.1:", "http://localhost:"];
+    let Some(port) = local
+        .iter()
+        .find_map(|l| url.strip_prefix(l))
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|p| p.parse::<u16>().ok())
+    else {
+        return Err(format!("--google-at {url}: only this machine"));
+    };
+    env.calendar_api = hocus_day::google::api(Some(url));
+    env.carddav_api = hocus_sources::contacts::api(Some(url));
+    env.imap_override = Some(goa::Imap {
+        host: "127.0.0.1".to_owned(),
+        port,
+        user: String::new(),
+        tls: false,
+    });
+    Ok(env)
+}
+
+/// Online Accounts is not on the bus (not installed, not activatable).
+fn absent(error: &str) -> bool {
+    error.contains("ServiceUnknown") || error.contains("NameHasNoOwner")
 }
 
 /// A cycle's events as hers: items with their text, parts to forget.

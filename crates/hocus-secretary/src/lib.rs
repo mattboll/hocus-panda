@@ -36,6 +36,7 @@ pub mod fold;
 pub mod google;
 pub mod graph;
 mod http;
+pub mod kept;
 pub mod key;
 pub mod knows;
 pub mod learn;

@@ -14,7 +14,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0" }
+hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0", features = ["goa"] }
 # Her memory: one SQLite database, encrypted page by page by SQLCipher
 # (BSD-3-Clause; SQLite's public-domain blessing; decision 0004), built
 # from source against the system's libcrypto, FTS5 included.
@@ -54,6 +54,9 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 [dev-dependencies]
 tempfile = "3.27.0"
 anyhow = "1.0.104"
-# A fake Secret Service on a private bus.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio", "service"] }
+# A fake Secret Service and a fake Online Accounts on a private bus.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+# The sources' fakes (a fake IMAP server's XOAUTH2), shared with
+# hocus-sources' tests.
+base64 = "0.22.1"

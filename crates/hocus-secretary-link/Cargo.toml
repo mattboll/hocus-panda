@@ -15,6 +15,13 @@ serde_json = "1.0.154"
 # The consent records' times.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "serde"] }
 tracing = "0.1.44"
+# Online Accounts' Google accounts (`goa`), for her sources and the
+# Settings' consent rows; the shell and `hocus` go without.
+zbus = { version = "6.0.0", default-features = false, features = ["tokio"], optional = true }
+tokio = { version = "1.54.1", features = ["rt", "time"], optional = true }
+
+[features]
+goa = ["dep:zbus", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3.27.0"

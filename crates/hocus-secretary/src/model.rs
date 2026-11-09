@@ -85,6 +85,10 @@ pub struct Message {
     /// come back as they were).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native: Option<serde_json::Value>,
+    /// Who gave [`Message::native`] (`provider/model`): it is replayed to
+    /// that model only, as plain text to any other.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub by: String,
 }
 
 impl Message {
@@ -112,6 +116,7 @@ impl Message {
             tool_calls: reply.tool_calls.clone(),
             tool_results: Vec::new(),
             native: reply.native.clone(),
+            by: format!("{}/{}", reply.provider, reply.model),
         }
     }
 }
@@ -241,6 +246,27 @@ pub trait Model: Send + Sync + std::fmt::Debug {
     /// Its name as the drawer shows it under the field.
     fn shown(&self) -> String {
         format!("{} · {}", self.provider(), self.model())
+    }
+
+    /// The model that answers `role` now, fixed for a whole turn (§11.1,
+    /// #750): a router gives the provider and model its settings name now,
+    /// which a later change of the settings does not move, so that one
+    /// model's own blocks (its thinking's signatures) never go to another.
+    /// `None`: this one is fixed already.
+    fn pin(&self, _role: Role) -> Result<Option<std::sync::Arc<dyn Model>>, String> {
+        Ok(None)
+    }
+
+    /// Whether it needs a provider's key from the keyring to answer.
+    fn needs_key(&self) -> bool {
+        false
+    }
+
+    /// The provider whose key the answers need and the keyring does not
+    /// give now (none there, or the keyring silent). Blocking: on a
+    /// thread, never her loop.
+    fn missing_key(&self) -> Option<String> {
+        None
     }
 }
 

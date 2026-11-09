@@ -120,15 +120,22 @@ impl Router {
             retry: Duration::from_secs(1),
         }
     }
+}
 
-    fn key(&self, provider: &str, kind: Kind) -> Result<Option<Secret>, String> {
-        let key = self.keys.key(provider)?;
-        if key.is_none() && kind == Kind::Anthropic {
-            return Err(format!(
-                "no key for {provider}: hocus-secretary key {provider} (or Settings)"
-            ));
+impl Router {
+    /// The provider and model `role` goes to now, fixed.
+    pub fn pinned(&self, role: Role) -> Result<Pinned, String> {
+        if role == Role::Triage {
+            return Err("the triage goes to the local queue, not a conversation".to_owned());
         }
-        Ok(key)
+        let settings = self.settings.current();
+        let (choice, provider) = settings.provider(role)?;
+        Ok(Pinned {
+            choice: choice.clone(),
+            provider: provider.clone(),
+            keys: self.keys.clone(),
+            retry: self.retry,
+        })
     }
 }
 
@@ -148,21 +155,106 @@ impl Model for Router {
     fn stream(
         &self,
         request: &Request,
+        clock: &Clock,
+        part: &mut dyn FnMut(&str),
+    ) -> Result<Reply, String> {
+        self.pinned(request.role)?.stream(request, clock, part)
+    }
+
+    fn pin(&self, role: Role) -> Result<Option<Arc<dyn Model>>, String> {
+        Ok(Some(Arc::new(self.pinned(role)?)))
+    }
+
+    /// The model that answers now, as the drawer says it.
+    fn shown(&self) -> String {
+        self.pinned(Role::Answer)
+            .map(|p| p.shown())
+            .unwrap_or_default()
+    }
+
+    fn needs_key(&self) -> bool {
+        true
+    }
+
+    fn missing_key(&self) -> Option<String> {
+        let pinned = self.pinned(Role::Answer).ok()?;
+        if pinned.provider.kind != Kind::Anthropic {
+            return None;
+        }
+        match self.keys.key(&pinned.choice.provider) {
+            Ok(Some(_)) => None,
+            Ok(None) => Some(pinned.choice.provider),
+            Err(err) => {
+                tracing::info!(%err, "the keyring does not give her key");
+                Some(pinned.choice.provider)
+            }
+        }
+    }
+}
+
+/// One provider and model, as the settings named them when it was made:
+/// a turn's, whatever the settings say meanwhile (#750).
+#[derive(Debug, Clone)]
+pub struct Pinned {
+    choice: settings::Choice,
+    provider: settings::Provider,
+    keys: Arc<dyn Keys>,
+    retry: Duration,
+}
+
+impl Pinned {
+    fn key(&self) -> Result<Option<Secret>, String> {
+        let key = self.keys.key(&self.choice.provider)?;
+        if key.is_none() && self.provider.kind == Kind::Anthropic {
+            return Err(format!(
+                "no key for {0}: hocus-secretary key {0} (or Settings)",
+                self.choice.provider
+            ));
+        }
+        Ok(key)
+    }
+}
+
+impl Model for Pinned {
+    fn provider(&self) -> &str {
+        &self.choice.provider
+    }
+
+    fn model(&self) -> &str {
+        &self.choice.model
+    }
+
+    fn call(&self, request: &Request, clock: &Clock) -> Result<Reply, String> {
+        self.stream(request, clock, &mut |_| {})
+    }
+
+    fn stream(
+        &self,
+        request: &Request,
         _clock: &Clock,
         part: &mut dyn FnMut(&str),
     ) -> Result<Reply, String> {
         if request.role == Role::Triage {
             return Err("the triage goes to the local queue, not a conversation".to_owned());
         }
-        let settings = self.settings.current();
-        let (choice, provider) = settings.provider(request.role)?;
+        let (choice, provider) = (&self.choice, &self.provider);
         if !crate::http::allowed(&provider.url) {
             return Err(format!(
                 "{}: only HTTPS, or this machine in clear",
                 choice.provider
             ));
         }
-        let key = self.key(&choice.provider, provider.kind)?;
+        // Another model's own blocks never reach this one: its turns go
+        // as their text and tool calls.
+        let by = format!("{}/{}", choice.provider, choice.model);
+        let mut request = request.clone();
+        for message in &mut request.messages {
+            if message.native.is_some() && message.by != by {
+                tracing::info!(from = %message.by, to = %by, "another model's blocks: plain text");
+                message.native = None;
+            }
+        }
+        let key = self.key()?;
         let mut reply = match provider.kind {
             Kind::Anthropic => {
                 let key = key.ok_or("no key")?;
@@ -172,14 +264,14 @@ impl Model for Router {
                     key: &key,
                     retry: self.retry,
                 }
-                .run(request, part)?
+                .run(&request, part)?
             }
             Kind::Openai | Kind::Ollama => {
                 let reply = openai::Endpoint {
                     url: &provider.url,
                     key: key.as_ref(),
                 }
-                .converse(&choice.model, request)?;
+                .converse(&choice.model, &request)?;
                 if !reply.text.is_empty() {
                     part(&reply.text);
                 }
@@ -190,6 +282,35 @@ impl Model for Router {
         reply.model.clone_from(&choice.model);
         Ok(reply)
     }
+
+    fn shown(&self) -> String {
+        shown(&self.choice.model)
+    }
+}
+
+/// A model's name as people say it: `claude-sonnet-5-5` is "Claude
+/// Sonnet 5.5"; another stays as it is (`qwen3:8b`).
+pub fn shown(model: &str) -> String {
+    let Some(rest) = model.strip_prefix("claude-") else {
+        return model.to_owned();
+    };
+    let (words, numbers): (Vec<&str>, Vec<&str>) = rest
+        .split('-')
+        .partition(|w| !w.chars().all(|c| c.is_ascii_digit()));
+    let mut out = String::from("Claude");
+    for word in words {
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            out.push(' ');
+            out.extend(first.to_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    if !numbers.is_empty() {
+        out.push(' ');
+        out.push_str(&numbers.join("."));
+    }
+    out
 }
 
 impl Triager for Router {

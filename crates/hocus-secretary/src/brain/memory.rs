@@ -259,6 +259,7 @@ impl Brain {
                     actions: Vec::new(),
                     decided: None,
                     outcome: None,
+                    sheet: None,
                 },
             },
         );
@@ -431,6 +432,7 @@ impl Brain {
                     ],
                     decided: None,
                     outcome: None,
+                    sheet: None,
                 },
             },
         );
@@ -1118,6 +1120,12 @@ impl Brain {
                     .forget_notebook(notebook)
                     .map_err(|e| e.to_string());
                 if done.is_ok() {
+                    // Her thread's items of that notebook too (#750).
+                    self.talk.items.retain(|i| i.notebook != Some(notebook));
+                    let items = self.talk.items.clone();
+                    self.tell_talkers(&FromSecretary::Thread { id: 0, items }, None);
+                    // Its items waiting for the triage.
+                    self.inbox.forget_notebook(notebook);
                     // Her observations of that notebook go with it.
                     let mut seen = learn::load_seen(&self.store);
                     seen.retain(|s| {

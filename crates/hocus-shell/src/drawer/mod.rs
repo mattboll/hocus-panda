@@ -301,6 +301,11 @@ pub enum Target {
         item: u64,
         decision: Decision,
     },
+    /// A consent card's notebook, chosen before its "Autoriser".
+    Pill {
+        item: u64,
+        notebook: Notebook,
+    },
     /// "Annuler" under what she kept.
     Undo(u64),
     /// "corriger" under an assumption: its sentence into the field.
@@ -346,6 +351,7 @@ impl Target {
             Self::Agent(id) => format!("Agent({id})"),
             Self::Reply { item, choice } => format!("Reply({item},{choice})"),
             Self::Button { item, decision } => format!("Button({item},{decision:?})"),
+            Self::Pill { item, notebook } => format!("Pill({item},{})", notebook.word()),
             Self::Undo(item) => format!("Undo({item})"),
             Self::Correct(item) => format!("Correct({item})"),
             Self::Point(item) => format!("Point({item})"),
@@ -410,6 +416,9 @@ pub struct Open {
     pub expanded: Option<String>,
     pub knows_scroll: f32,
     pub confirm: Option<Confirm>,
+    /// The notebook chosen on each consent card, before its "Autoriser"
+    /// (none: the one it suggests).
+    pub notebooks: std::collections::HashMap<u64, Notebook>,
 }
 
 impl Open {
@@ -580,6 +589,7 @@ pub fn toggle(output: &str, screen: u32) {
             expanded: None,
             knows_scroll: 0.0,
             confirm: None,
+            notebooks: std::collections::HashMap::new(),
         }));
         (effects, true)
     });
@@ -811,8 +821,29 @@ pub fn act(id: window::Id, target: Target) {
                 Then::Nothing
             }
             Target::Button { item, decision } => {
-                crate::secretary::decide(item, decision);
+                // A consent card's: the notebook chosen on it, else the
+                // one it suggests.
+                let suggested = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => {
+                            card.sheet.as_ref().map(|s| s.notebook)
+                        }
+                        _ => None,
+                    })
+                });
+                let notebook = suggested.map(|n| open.notebooks.get(&item).copied().unwrap_or(n));
+                crate::secretary::decide(item, decision, notebook);
                 Then::Nothing
+            }
+            Target::Pill { item, notebook } => {
+                tracing::info!(
+                    item,
+                    notebook = notebook.word(),
+                    "a consent card's notebook"
+                );
+                open.notebooks.insert(item, notebook);
+                open.changed();
+                Then::Draw
             }
             Target::Undo(item) => {
                 crate::secretary::undo(item);

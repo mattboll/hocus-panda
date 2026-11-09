@@ -281,11 +281,17 @@ pub fn choose(item: u64, choice: u32) {
     send(ToSecretary::Choose { id, item, choice });
 }
 
-/// A card's button.
-pub fn decide(item: u64, decision: Decision) {
+/// A card's button; a consent card's "Autoriser" with the notebook
+/// chosen on it.
+pub fn decide(item: u64, decision: Decision, notebook: Option<hocus_secretary_link::Notebook>) {
     let id = next_id();
-    tracing::info!(id, item, ?decision, "a card's button");
-    send(ToSecretary::Decide { id, item, decision });
+    tracing::info!(id, item, ?decision, ?notebook, "a card's button");
+    send(ToSecretary::Decide {
+        id,
+        item,
+        decision,
+        notebook,
+    });
 }
 
 /// "Annuler" under what she kept.

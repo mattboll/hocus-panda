@@ -22,6 +22,9 @@
 mod common;
 mod settings_page;
 
+#[path = "../../hocus-day/tests/fakes/mod.rs"]
+mod fakes;
+
 use std::{
     io::{BufRead, BufReader, Write},
     os::unix::{fs::PermissionsExt, net::UnixListener},
@@ -58,6 +61,10 @@ struct Machine {
     /// Slack and Signal notified (the shell's history), and an agents'
     /// tool.
     notified: bool,
+    /// Two Google accounts in Online Accounts (a fake, on a private bus
+    /// the Settings take for the session's): a company's and a gmail.com
+    /// one.
+    google: bool,
 }
 
 struct Bed {
@@ -67,6 +74,7 @@ struct Bed {
     script: PathBuf,
     hocus: PathBuf,
     _herdr: Option<std::thread::JoinHandle<()>>,
+    _google: Option<(fakes::FakeGoa, fakes::PrivateBus)>,
 }
 
 /// A fake herdr on `socket`: one workspace, one tab, one Claude Code
@@ -188,13 +196,26 @@ impl Bed {
             )?;
         }
         std::fs::write(&file, &text)?;
+        let google = if machine.google {
+            let bus = fakes::PrivateBus::start(root)?;
+            let goa = fakes::FakeGoa::start(&bus.address)?;
+            goa.add("account_1700000000_0", "google", "alex@atelier-lune.fr")?;
+            goa.add("account_1700000000_1", "google", "alex.martin@gmail.com")?;
+            Some((goa, bus))
+        } else {
+            None
+        };
+        let session_bus = google.as_ref().map_or_else(
+            || "unset DBUS_SESSION_BUS_ADDRESS".to_owned(),
+            |(_, bus)| format!("export DBUS_SESSION_BUS_ADDRESS='{}'", bus.address),
+        );
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
         let at = |sub: &str| root.join(sub).display().to_string();
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS CODEX_HOME\n\
+                "#!/bin/sh\n{session_bus}\nunset CODEX_HOME\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
                  HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=UTC HOME='{}' XDG_CONFIG_HOME='{}' \
@@ -244,6 +265,7 @@ impl Bed {
             script,
             hocus,
             _herdr: herdr,
+            _google: google,
         }))
     }
 
@@ -836,6 +858,133 @@ fn autoriser_writes_a_grant_only_from_its_sheet_and_ne_plus_lire_a_revocation() 
         Some(hocus_secretary_link::Notebook::Perso)
     );
     assert_eq!(book.records().len(), 3, "a revocation is a later record");
+    Ok(())
+}
+
+fn google<'a>(shown: &'a Value, key: &str) -> &'a Value {
+    shown["agents"]["google"]
+        .as_array()
+        .and_then(|g| g.iter().find(|g| g["key"] == key))
+        .unwrap_or(&Value::Null)
+}
+
+/// #750: each kind of each Google account of Online Accounts is a row
+/// under her mode, its notebook suggested by the account's domain; its
+/// sheet says what she reads, never does and what leaves, and nothing is
+/// written before its "Autoriser"; "Ne plus lire" writes a revocation.
+#[test]
+fn each_google_account_s_kind_is_consented_on_its_sheet() -> anyhow::Result<()> {
+    const WORK: &str = "alex@atelier-lune.fr";
+    const PERSO: &str = "alex.martin@gmail.com";
+    let Some(mut bed) = Bed::start(Machine {
+        assistant: true,
+        google: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    // The fake's ids are the accounts' e-mails.
+    let work_calendar = format!("{WORK}:calendar");
+    let perso_calendar = format!("{PERSO}:calendar");
+    let shown = bed.shows(|s| {
+        s["agents"]["google"]
+            .as_array()
+            .is_some_and(|g| g.len() == 6)
+    })?;
+    let keys: Vec<&str> = shown["agents"]["google"]
+        .as_array()
+        .map(|g| g.iter().filter_map(|g| g["key"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        keys,
+        [
+            format!("{WORK}:calendar"),
+            format!("{WORK}:birthdays"),
+            format!("{WORK}:mail"),
+            format!("{PERSO}:calendar"),
+            format!("{PERSO}:birthdays"),
+            format!("{PERSO}:mail"),
+        ]
+    );
+    assert_eq!(google(&shown, &work_calendar)["suggested"], "pro");
+    assert_eq!(google(&shown, &perso_calendar)["suggested"], "perso");
+    assert_eq!(
+        google(&shown, &perso_calendar)["title"],
+        format!("Agenda · {PERSO}")
+    );
+
+    bed.click(&format!("google:{perso_calendar}"))?;
+    let shown = bed.shows(|s| s["agents"]["google_sheet"] == perso_calendar.as_str())?;
+    assert_eq!(
+        shown["agents"]["google_notebook"], "perso",
+        "gmail.com: perso"
+    );
+    bed.click("sheet:not-now")?;
+    bed.shows(|s| s["agents"]["google_sheet"].is_null())?;
+    assert!(
+        consents(&bed).is_empty(),
+        "nothing before the sheet's Autoriser"
+    );
+
+    bed.click(&format!("google:{work_calendar}"))?;
+    bed.shows(|s| s["agents"]["google_sheet"] == work_calendar.as_str())?;
+    bed.click("sheet:allow")?;
+    bed.shows(|s| google(s, &work_calendar)["granted"] == "pro")?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    let grant = book
+        .grant(&hocus_secretary_link::consent::SourceKey::new(
+            WORK,
+            hocus_secretary_link::consent::SourceKind::Calendar,
+        ))
+        .expect("granted");
+    assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Pro);
+    assert_eq!(grant.identity(), WORK);
+
+    bed.click(&format!("google:{work_calendar}"))?;
+    bed.shows(|s| google(s, &work_calendar)["granted"].is_null())?;
+    let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&consents(&bed))?;
+    assert_eq!(
+        book.revoked(),
+        [hocus_secretary_link::consent::SourceKey::new(
+            WORK,
+            hocus_secretary_link::consent::SourceKind::Calendar,
+        )]
+    );
+    Ok(())
+}
+
+/// #750's screenshots, into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_secretary_s_google_sources() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(Machine {
+        claude: true,
+        assistant: true,
+        notified: true,
+        google: true,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    let perso_mail = "alex.martin@gmail.com:mail";
+    bed.shows(|s| google(s, perso_mail).is_object())?;
+    bed.reveal(&format!("row:agents.google.{perso_mail}"))?;
+    save(&mut bed, &out, "settings-google-rows.png")?;
+    bed.click(&format!("google:{perso_mail}"))?;
+    bed.shows(|s| s["agents"]["google_sheet"] == perso_mail)?;
+    save(&mut bed, &out, "settings-google-sheet.png")?;
+    bed.click("sheet:allow")?;
+    bed.shows(|s| google(s, perso_mail)["granted"] == "perso")?;
+    bed.reveal(&format!("row:agents.google.{perso_mail}"))?;
+    save(&mut bed, &out, "settings-google-allowed.png")?;
     Ok(())
 }
 
