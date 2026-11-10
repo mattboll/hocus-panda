@@ -762,12 +762,7 @@ impl Operation for Shown {
         self.next_shift = Some(translation);
     }
 
-    fn focusable(
-        &mut self,
-        id: Option<&Id>,
-        _: Rectangle,
-        state: &mut dyn operation::Focusable,
-    ) {
+    fn focusable(&mut self, id: Option<&Id>, _: Rectangle, state: &mut dyn operation::Focusable) {
         if state.is_focused() {
             self.focused = id.and_then(name);
         }

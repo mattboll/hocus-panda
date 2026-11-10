@@ -53,6 +53,7 @@ mod levels;
 mod locale;
 mod lock;
 mod meeting;
+mod music;
 mod network;
 mod notifications;
 mod outputs;
@@ -173,6 +174,7 @@ fn main() -> ExitCode {
     // The lock's avatar: the account's photo, if AccountsService has one.
     lock::avatar::start();
     tray::start();
+    music::start();
     // Screen readers: a thread that waits until one listens.
     a11y::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
@@ -425,6 +427,10 @@ enum Message {
     /// A key went to another surface than the one holding the keyboard:
     /// every surface is woken, that one's widgets taking it ([`keys`]).
     Keys,
+    /// The music players changed (s12): their tiles and popover follow.
+    Music,
+    /// The music tile was pressed.
+    MusicTile(music::tile::Press),
 }
 
 impl Shell {
@@ -485,6 +491,7 @@ impl Shell {
         subscriptions.push(Subscription::run(popover::effects));
         subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(Subscription::run(tray::effects));
+        subscriptions.push(Subscription::run(music::effects));
         subscriptions.push(Subscription::run(reminder::effects));
         subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
@@ -551,6 +558,14 @@ impl Shell {
             // Its update is the wake: iced_layershell redraws every surface
             // after one.
             Message::Keys => Task::none(),
+            Message::Music => {
+                music::changed();
+                Task::none()
+            }
+            Message::MusicTile(press) => {
+                music::tile::pressed(press);
+                Task::none()
+            }
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -658,12 +673,14 @@ impl Shell {
                     reminder::forget(&bar.output);
                     let today = today::forget(&bar.output);
                     let windows = windows::forget(&bar.output);
+                    let music = music::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
                         card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
                         today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
                         windows.map_or_else(Task::none, |w| Task::done(Message::RemoveWindow(w))),
+                        music.map_or_else(Task::none, |m| Task::done(Message::RemoveWindow(m))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.tasks)),
@@ -1166,6 +1183,7 @@ impl Shell {
             after.extend(meeting::bar_opened(&output, form));
             after.extend(today::bar_opened(&output, form));
             after.extend(windows::bar_opened(&output, form));
+            after.extend(music::bar_opened(&output, form));
             reminder::bar_opened(&output, form);
         }
         open.chain(open_clock)
@@ -1312,6 +1330,7 @@ impl Shell {
         let form = bar.form;
         today::form(&output, form, switching);
         windows::form(&output, form, switching);
+        music::form(&output, form, switching);
         // The column's groups to their places in the form: Today's rows,
         // the room the agents' rows have on a bar in the full form.
         column::moved();
@@ -1624,6 +1643,22 @@ impl Shell {
         ))
     }
 
+    /// The music player's tile (s12), if its surface is `id`.
+    fn music_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = music::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        // The bar's colour behind it, where the column puts it.
+        let backdrop = (!self.look.glass).then(|| {
+            let middle = music::placed(&output).map_or(0.0, |(top, _)| top + music::TILE / 2.0);
+            agents::draw::Backdrop {
+                top: OPAQUE_TOP.get(),
+                bottom: OPAQUE_BOTTOM.get(),
+            }
+            .at(middle, bar.height)
+        });
+        Some(music::tile::view(&output, self.look.motion, backdrop))
+    }
+
     /// Today (Day.3), if its surface is `id`.
     fn today_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let output = today::bar_of(id)?;
@@ -1921,6 +1956,7 @@ impl Shell {
                     software: self.software,
                 })
             }
+            popover::Item::Music => popover::music::view(id, self.look.glass),
             popover::Item::Wifi => canvas(popover::wifi::Panel {
                 id,
                 words: self.words,
@@ -2136,6 +2172,7 @@ impl Shell {
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
                 .or_else(|| self.windows_view(id))
+                .or_else(|| self.music_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .or_else(|| reminder::view(id, self.look.glass))

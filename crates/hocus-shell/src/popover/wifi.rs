@@ -31,7 +31,7 @@
 //! cut to their bounds, which both renderers honour.
 
 // The same popover as a tree of iced's stock widgets (spike #770).
-mod custom;
+pub(crate) mod custom;
 pub mod widgets;
 
 use std::{

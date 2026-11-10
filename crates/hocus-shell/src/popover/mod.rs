@@ -49,6 +49,7 @@ pub mod history;
 pub mod in_use;
 pub mod kit;
 pub mod meeting;
+pub mod music;
 pub mod session;
 pub mod setup;
 pub mod sound;
@@ -66,9 +67,9 @@ use std::{
 
 use hocus_link::{
     AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
-    FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE,
-    POPOVER_NAMESPACE, POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE, TRAY_NAMESPACE,
-    ToCompositor, WINDOWS_NAMESPACE,
+    FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, MUSIC_NAMESPACE,
+    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE,
+    TRAY_NAMESPACE, ToCompositor, WINDOWS_NAMESPACE,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -176,6 +177,9 @@ pub enum Item {
     /// A window's menu (#723), by the compositor's id: opened by a right
     /// click on its line, once the compositor said what it shows.
     WindowMenu(u64),
+    /// The music player's tile over the desktops (s12): its popover, by a
+    /// click.
+    Music,
 }
 
 impl Item {
@@ -258,6 +262,7 @@ impl Item {
             Self::Windows => windows::WIDTH,
             Self::WindowMenu(_) => window_menu::WIDTH,
             Self::WindowsMore => desktop::WIDTH,
+            Self::Music => music::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -287,6 +292,7 @@ impl Item {
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
             Self::WindowMenu(id) => window_menu::height(id),
+            Self::Music => music::height(),
             Self::WindowsMore => desktop::height(
                 bar,
                 0,
@@ -336,6 +342,7 @@ impl Item {
             Self::DayChoose => crate::setup::opening(),
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
+            Self::Music => music::opening(),
             Self::Window(_)
             | Self::WindowClose(_)
             | Self::WindowsMore
@@ -374,7 +381,8 @@ impl Item {
             | Self::WindowClose(_)
             | Self::WindowsMore
             | Self::Windows
-            | Self::WindowMenu(_) => {}
+            | Self::WindowMenu(_)
+            | Self::Music => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -414,6 +422,7 @@ impl Item {
                 _,
             ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
+            (Self::Music, _) => MUSIC_NAMESPACE,
             (
                 Self::Window(_)
                 | Self::WindowClose(_)
@@ -630,6 +639,9 @@ pub enum Effect {
     Remove(window::Id),
     /// The surfaces of this namespace show something new.
     Wake(&'static str),
+    /// Every surface's view built again (a view of stock widgets reads
+    /// what it shows as it is built, not as it draws).
+    Rebuild,
     /// Surface `id` takes the pointer (`takes`), or lets it through.
     Input {
         id: window::Id,
@@ -2008,7 +2020,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::TasksMore
         | Item::DayChoose
         | Item::Windows
-        | Item::WindowMenu(_) => None,
+        | Item::WindowMenu(_)
+        | Item::Music => None,
     }
 }
 
@@ -2605,6 +2618,7 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             crate::side::gone(id);
             vec![Message::RemoveWindow(id)]
         }
+        Effect::Rebuild => vec![crate::Message::Keys],
         Effect::Wake(namespace) => {
             if tell(ToCompositor::Wake(namespace.to_owned())) {
                 Vec::new()

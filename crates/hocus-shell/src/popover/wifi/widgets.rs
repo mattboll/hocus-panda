@@ -541,7 +541,7 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
                     clear()
                 }
             })
-            .on_press_maybe(busy.is_none().then(|| Msg::Act(Target::Row(i))));
+            .on_press_maybe(busy.is_none().then_some(Msg::Act(Target::Row(i))));
         let pressed = control(pressed, Target::Row(i), ui.focus, ROW_RADIUS);
         let block: El<'a> = if unfolded {
             container(column![pressed, self::form(panel, network_busy(busy), ui)])
@@ -643,13 +643,11 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
             icon: DIM.get(),
             placeholder: FAINT.get(),
             value: TEXT.get(),
-            selection: Ink::Accent(
-                if matches!(status, text_input::Status::Focused { .. }) {
-                    0.35
-                } else {
-                    0.2
-                },
-            )
+            selection: Ink::Accent(if matches!(status, text_input::Status::Focused { .. }) {
+                0.35
+            } else {
+                0.2
+            })
             .get(),
         });
     let eye = button(glyph(Glyph::Eye(ui.shown), super::EYE))
@@ -713,7 +711,7 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
             filled(FILL_HOVER.get(), ROW_RADIUS, FAINT.get())
         }
     })
-    .on_press_maybe(ready.then(|| Msg::Act(Target::Join)));
+    .on_press_maybe(ready.then_some(Msg::Act(Target::Join)));
     all = all.push(row![
         space::horizontal(),
         control(cancel, Target::Cancel, focus, ROW_RADIUS),
@@ -765,7 +763,7 @@ fn link<'a>(panel: &Panel, focus: Option<Target>) -> El<'a> {
 // --- The pieces ----------------------------------------------------------------------------
 
 /// `content` in `font` at `size`, on the mockups' line.
-fn said<'a>(
+pub(crate) fn said<'a>(
     content: impl text::IntoFragment<'a>,
     size: f32,
     font: Font,
@@ -794,7 +792,7 @@ fn centred<'a>(word: &'static str, size: f32, font: Font) -> El<'a> {
     .into()
 }
 
-fn gap_x<'a>(width: f32) -> El<'a> {
+pub(crate) fn gap_x<'a>(width: f32) -> El<'a> {
     Space::new().width(width).into()
 }
 
@@ -846,18 +844,18 @@ fn rule<'a>() -> El<'a> {
 
 // --- The styles ------------------------------------------------------------------------------
 
-fn lit(status: button::Status) -> bool {
+pub(crate) fn lit(status: button::Status) -> bool {
     matches!(status, button::Status::Hovered | button::Status::Pressed)
 }
 
-fn round(radius: f32) -> Border {
+pub(crate) fn round(radius: f32) -> Border {
     Border {
         radius: radius.into(),
         ..Border::default()
     }
 }
 
-fn boxed(fill: Color, radius: f32) -> container::Style {
+pub(crate) fn boxed(fill: Color, radius: f32) -> container::Style {
     container::Style {
         background: Some(fill.into()),
         border: round(radius),
@@ -866,7 +864,7 @@ fn boxed(fill: Color, radius: f32) -> container::Style {
 }
 
 /// A button filled, its words in `ink`.
-fn filled(fill: Color, radius: f32, ink: Color) -> button::Style {
+pub(crate) fn filled(fill: Color, radius: f32, ink: Color) -> button::Style {
     button::Style {
         background: Some(fill.into()),
         text_color: ink,
@@ -875,7 +873,7 @@ fn filled(fill: Color, radius: f32, ink: Color) -> button::Style {
     }
 }
 
-fn clear() -> button::Style {
+pub(crate) fn clear() -> button::Style {
     button::Style {
         background: None,
         text_color: TEXT.get(),
@@ -885,7 +883,7 @@ fn clear() -> button::Style {
 
 /// Lit under the pointer: its fill; under high contrast, which has no
 /// fills, a 1 px border in `text.dim` (as [`crate::theme::hover`]).
-fn hovered(fill: Color, radius: f32) -> button::Style {
+pub(crate) fn hovered(fill: Color, radius: f32) -> button::Style {
     if crate::theme::contrast() {
         button::Style {
             background: None,
@@ -903,7 +901,7 @@ fn hovered(fill: Color, radius: f32) -> button::Style {
 }
 
 /// The popover's glass (or its opaque colour) and its rim.
-fn background(glass: bool) -> container::Style {
+pub(crate) fn background(glass: bool) -> container::Style {
     let (top, bottom) = if glass {
         (GLASS_TOP, GLASS_BOTTOM)
     } else {
@@ -990,7 +988,15 @@ impl<Message> canvas::Program<Message> for Glyph {
         let mut f = canvas::Frame::new(renderer, bounds.size());
         match *self {
             Self::Wifi(bars, colour) => {
-                arcs(&mut f, Point::ORIGIN, bounds.width, bars, colour, false, 1.0);
+                arcs(
+                    &mut f,
+                    Point::ORIGIN,
+                    bounds.width,
+                    bars,
+                    colour,
+                    false,
+                    1.0,
+                );
             }
             Self::Ethernet(colour) => ethernet(&mut f, Point::ORIGIN, bounds.width, colour),
             Self::Lock => super::lock(&mut f, Point::ORIGIN),

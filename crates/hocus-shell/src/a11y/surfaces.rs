@@ -67,6 +67,7 @@ pub fn popover_title(item: Item, words: Words) -> String {
         Item::Menu => "Menu".to_owned(),
         Item::User => pick("Session", "Session"),
         Item::InUse => pick("En ce moment", "Right now"),
+        Item::Music => pick("Musique", "Music"),
         Item::Tray(_) => pick("Menu de l'icône", "Icon's menu"),
         Item::Meeting | Item::MeetingMark | Item::Join => pick("Réunion", "Meeting"),
         Item::TodayLine(_) | Item::TodayMore | Item::Calendar => words.calendar().to_owned(),
