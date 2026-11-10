@@ -437,6 +437,8 @@ pub const FAINT: Ink = Ink::Token(|t| t.faint);
 /// `accent`, and as text.
 pub const ACCENT: Ink = Ink::Accent(1.0);
 pub const ACCENT_TEXT: Ink = Ink::AccentText;
+/// Text selected: the accent behind it, as the Settings' fields select.
+pub const SELECTION: Ink = Ink::Accent(0.35);
 
 #[cfg(test)]
 mod tests {

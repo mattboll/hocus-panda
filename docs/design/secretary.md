@@ -2708,7 +2708,8 @@ The maintainer's try of sprint 11: nothing she wrote could be copied.
   never her key's field), by the right click's menu « Copier · Ctrl+C »
   (what is selected, else the answer or text under the pointer; `Esc` or a
   press elsewhere closes it), and by « Copier » on hover beside each of her
-  answers and on each draft card (her answer's text; the draft's lines).
+  answers and on each draft card (her answer's text; the draft's lines;
+  gone with #761).
   The copy goes as the shell's copies go (`clip copy text …` to the
   compositor, which offers it; the shell's own offers are not read back
   into the clipboard's history), and « Copié » shows over the thread's
@@ -2901,3 +2902,59 @@ redraws at rest); the empty drawer's greeting names her sources as she
 reads them (« Planka et tes notifications »); a guess whose source is not
 in her memory says « Deviné d'après ce que j'ai lu »; the Settings and
 `hocus msg` cannot yet open her drawer on a given view.
+
+### #761: her text selected as in any chat, no « Copier » button
+
+The maintainer's try of sprint 11: a button to copy is not what is wanted;
+her text is selected with the pointer and copied, as in any chat.
+
+- **No « Copier » button**: the one on hover beside her answers and draft
+  cards is gone (its target, its place in the log, its drawing). The right
+  click's menu « Copier · Ctrl+C » stays: what is selected, else her answer
+  or the text under the pointer.
+- **By character, across messages** (`drawer/select.rs`, as #757 built
+  it): a press on any text of the thread (her answers, the user's
+  sentences, her questions, cards' text and drafts, the queue's lines) and
+  a drag select from the press to the pointer, through every message in
+  between in reading order. The tint behind the lines is the theme's
+  selection colour (`theme::SELECTION`: the accent at 35 %, as the
+  Settings' fields select), so it follows the accent chosen.
+- **Past the edge**: a drag held above the thread's top or under its
+  bottom scrolls it toward the pointer, each frame by the time since the
+  last (10 px a second for each px past, 150 to 1500 px a second), the
+  selection following the pointer over what comes into view, until the
+  thread's end; letting go, or coming back over the thread, stops it.
+  Nothing is queued per frame: the scroll is the drawer's own state, read
+  as it draws (`View::edge`).
+- **Plain text**: her markdown's emphasis (`**…**`, `*…*`, `__…__`,
+  `_…_`, three of them) shows and copies as its words, without the marks
+  (`select::unmarked`, on her answers, as they stream, and her questions);
+  a mark counts only as markdown counts it (a list's `* `, `2 * 3` and
+  `mon_fichier` stay). Paragraphs and messages copy a line apart. Drafts
+  keep their text as written: they leave as the user sends them.
+- **Cleared**: a press elsewhere in the drawer (not on text, or on a
+  button) or `Esc` clears it; `Esc` with nothing selected closes the drawer
+  as before (the right click's menu goes first, then the selection). The
+  wheel keeps it, as a scroll by the edge does.
+- **The pointer**: the I-beam over text and while selecting, the hand over
+  buttons and links, the arrow elsewhere. A press on a button never starts
+  a selection, even dragged over text, and a button acts only if let go on
+  it.
+- **Tests**: `hocus-shell` (`drawer::select`:
+  `her_emphasis_shows_and_copies_without_its_marks`), and
+  `hocus-compositor/tests/secretary_drawer.rs`, one per criterion, with the
+  real shell and her process:
+  `a_drag_selects_by_character_across_messages_in_the_selection_colour`
+  (from inside the user's word into hers, the rose accent's tint behind
+  it), `a_double_click_takes_a_word_and_a_triple_click_a_paragraph`,
+  `ctrl_c_copies_plain_text_with_its_line_breaks`,
+  `a_click_elsewhere_or_esc_clears_the_selection`,
+  `a_drag_past_the_top_scrolls_and_the_wheel_keeps_the_selection` (seven
+  exchanges on a 1366 × 768 screen, held over the header until the thread's
+  top), `the_pointer_is_an_i_beam_over_text_and_buttons_keep_theirs`,
+  `no_copy_button_and_her_answers_and_drafts_are_selected` (a masked secret
+  copies as its mask).
+
+Not selectable yet: her briefing's card and its unfolded view, "Ce qu'elle
+sait", the header and the agents' line. Her emphasis shows as plain words,
+not in bold.

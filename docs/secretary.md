@@ -166,6 +166,15 @@ are labelled « Question », in blue; what she notes says « Noté : … » with
 « Annuler » and a bar emptying over its ten seconds. Under the field, only
 how to send: her model's name is in the Settings.
 
+Her text is selected with the pointer as in any chat: her answers, your
+sentences, her questions and the drafts she proposes. Drag over it (across
+several messages if you like; held above or below the conversation, it
+scrolls), double-click a word, triple-click a paragraph, then press
+`Ctrl+C`, or right-click and choose « Copier ». It copies as plain text, a
+line between paragraphs and between messages, without the asterisks of
+her bold or italic words; a secret she masked copies as its mask. A click
+elsewhere or `Esc` clears the selection.
+
 « Ce qu'elle sait »: what is to confirm first (« C'est juste · Faux » for
 what she guessed, « Oui · Non » for what she proposes; she uses none of it
 until you answer), what she learned this week, then the rest; each line

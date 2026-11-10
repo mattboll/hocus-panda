@@ -1,8 +1,9 @@
-//! Her text selected and copied (#757): what the drawer shows of her
-//! answers, the user's sentences, questions, cards and the queue's lines
-//! is laid out as blocks of text ([`Texts`]), each with its lines placed
-//! ([`Run`]), so that a point finds a place in a text ([`Spot`]) and a
-//! selection between two places gives its text back.
+//! Her text selected and copied (#757, #761): what the drawer shows of
+//! her answers, the user's sentences, questions, cards and the queue's
+//! lines is laid out as blocks of text ([`Texts`]), each with its lines
+//! placed ([`Run`]), so that a point finds a place in a text ([`Spot`])
+//! and a selection between two places gives its text back, as in any
+//! chat: there is no button to copy.
 //!
 //! A block is named by what it shows ([`Source`]), not by where: the
 //! drawer lays itself out again at each change (the pointer on a button,
@@ -11,7 +12,8 @@
 //!
 //! A block's text is what it shows: its lines as [`wrap`] breaks them,
 //! joined by the space the break took, its paragraphs by a line break; a
-//! masked secret is the words that mask it. Blocks copy one per line.
+//! masked secret is the words that mask it; her markdown's emphasis is
+//! its words ([`unmarked`]). Blocks copy one per line.
 
 use std::ops::Range;
 
@@ -30,8 +32,9 @@ pub enum Source {
     Queue(u32),
 }
 
-/// A block: what it shows, its text, its box, the item its « Copier »
-/// copies and that button's place, if it has one.
+/// A block: what it shows, its text, its box, and the thread's item the
+/// right click's « Copier » copies whole when nothing is selected (her
+/// answer, a draft), if it is one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub source: Source,
@@ -39,7 +42,7 @@ pub struct Block {
     pub rect: Rectangle,
     /// Whole in view: only then does it take the pointer.
     pub shown: bool,
-    pub copy: Option<(u64, Rectangle)>,
+    pub item: Option<u64>,
 }
 
 /// A line of a block, placed: its range in the block's text, where it
@@ -129,7 +132,7 @@ impl Texts {
             text: String::new(),
             rect: Rectangle::new(Point::ORIGIN, Size::ZERO),
             shown: true,
-            copy: None,
+            item: None,
         });
         self.blocks.len() - 1
     }
@@ -395,11 +398,9 @@ impl Texts {
         out
     }
 
-    /// The shown block whose box (or « Copier ») holds `p`.
+    /// The shown block whose box holds `p`.
     pub fn block_at(&self, p: Point) -> Option<&Block> {
-        self.blocks.iter().find(|b| {
-            b.shown && (b.rect.contains(p) || b.copy.is_some_and(|(_, button)| button.contains(p)))
-        })
+        self.blocks.iter().find(|b| b.shown && b.rect.contains(p))
     }
 
     /// Whether `p` is on a line of text.
@@ -415,6 +416,69 @@ impl Selection {
     pub fn is_empty(&self) -> bool {
         self.anchor == self.focus
     }
+}
+
+/// `text` as her drawer shows it and copies it: her markdown's emphasis
+/// (`**word**`, `*word*`, `__word__`, `_word_`, and three of them) is its
+/// words, without the marks. A mark counts only as markdown counts it: it
+/// opens before a word (not before a space, so a list's `* ` stays) and
+/// closes after one, on the same line, and an underscore never inside a
+/// word (`file_name` stays).
+pub fn unmarked(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(['*', '_']) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    strip(&chars, &mut out);
+    std::borrow::Cow::Owned(out)
+}
+
+/// [`unmarked`] on `chars`, into `out`.
+fn strip(chars: &[char], out: &mut String) {
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c != '*' && c != '_' {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let run = chars[i..].iter().take_while(|&&d| d == c).count();
+        let before = i.checked_sub(1).map(|k| chars[k]);
+        let opens = run <= 3
+            && chars.get(i + run).is_some_and(|n| !n.is_whitespace())
+            && before.is_none_or(|b| !b.is_alphanumeric());
+        if opens && let Some(end) = closing(chars, i + run, c, run) {
+            strip(&chars[i + run..end], out);
+            i = end + run;
+            continue;
+        }
+        out.extend(&chars[i..i + run]);
+        i += run;
+    }
+}
+
+/// Where the run of `run` marks `c` closing what opened before `from`
+/// starts: after a word, before no letter, on the same line.
+fn closing(chars: &[char], from: usize, c: char, run: usize) -> Option<usize> {
+    let mut k = from;
+    while k < chars.len() {
+        match chars[k] {
+            '\n' => return None,
+            d if d == c => {
+                let len = chars[k..].iter().take_while(|&&d| d == c).count();
+                let after_word = k > from && !chars[k - 1].is_whitespace();
+                let ends = chars.get(k + len).is_none_or(|n| !n.is_alphanumeric());
+                if len == run && after_word && ends {
+                    return Some(k);
+                }
+                k += len;
+            }
+            _ => k += 1,
+        }
+    }
+    None
 }
 
 /// `at` moved back to a character's boundary of `text`.
@@ -547,6 +611,30 @@ mod tests {
         let (a, b) = texts.paragraph_at(spot).ok_or("nowhere")?;
         assert_eq!(&text[a.at..b.at], "Bien noté, je range ta journée.");
         Ok(())
+    }
+
+    #[test]
+    fn her_emphasis_shows_and_copies_without_its_marks() {
+        for (marked, plain) in [
+            ("Voici **le plan** :", "Voici le plan :"),
+            ("relire *l'article*, puis", "relire l'article, puis"),
+            (
+                "un ***tout*** et __gras__ et _penché_.",
+                "un tout et gras et penché.",
+            ),
+            ("**gras avec *penché* dedans**", "gras avec penché dedans"),
+            // Not emphasis: a list's mark, a product, a name, unclosed.
+            ("* un point\n* un autre", "* un point\n* un autre"),
+            ("2 * 3 * 4", "2 * 3 * 4"),
+            (
+                "le fichier mon_fichier_long.txt",
+                "le fichier mon_fichier_long.txt",
+            ),
+            ("**pas fermé\nici**", "**pas fermé\nici**"),
+            ("rien", "rien"),
+        ] {
+            assert_eq!(unmarked(marked), plain, "{marked:?}");
+        }
     }
 
     #[test]
