@@ -26,7 +26,8 @@
 //! - `hocus msg shell status`, `hocus msg shell restart [--program PATH |
 //!   --installed]`: which program the compositor runs as the shell and
 //!   since when, and that program ended and started again at once, from
-//!   PATH when given, for this session only (docs/workflow.md,
+//!   PATH when given, for this session only, which the compositor takes
+//!   only in developer mode (`[developer] live-reload`; docs/workflow.md,
 //!   "Development loop").
 //!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
@@ -198,7 +199,8 @@ struct RestartArgs {
     /// Run this program from now on, for this session only (an absolute
     /// path): nothing is written to the configuration, and the next
     /// session runs the installed one. One that does not start or keeps
-    /// ending gives way to the installed one.
+    /// ending gives way to the installed one. Refused unless the
+    /// configuration says `[developer] live-reload = true`.
     #[arg(long, value_name = "PATH", conflicts_with = "installed")]
     program: Option<PathBuf>,
     /// Run the installed program again, after one was given.

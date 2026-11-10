@@ -11,7 +11,7 @@
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
-//! `[magnifier]` (#424), `[accessibility]` (#734),
+//! `[magnifier]` (#424), `[accessibility]` (#734), `[developer]` (#783),
 //! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[agents]`
 //! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
 //! layouts or options changed has its keymap compiled on the thread too
@@ -272,6 +272,10 @@ impl State {
         // The screen reader (#734): started or stopped.
         if self.accessibility_changed(&new.accessibility) {
             followed.push("[accessibility]");
+        }
+        // The developer mode (#783): off, a program given is let go of.
+        if self.developer_changed(&new.developer) {
+            followed.push("[developer]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

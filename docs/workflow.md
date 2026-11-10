@@ -21,6 +21,24 @@ at once. A build that does not start, or ends three times in a row within
 says so. `--no-build` reloads what is built already. The script refuses to
 run when it finds no Hocuspanda session.
 
+The session takes a program given only in developer mode, which is off by
+default (#783): the shell draws the lock screen and the password dialog,
+and the control socket is open to every program of the user's. Turn it on
+once, in the session's configuration file
+(`~/.config/hocuspanda/config.toml`), followed at once:
+
+```toml
+[developer]
+live-reload = true
+```
+
+Off, `hocus msg shell restart --program PATH` is refused with these words
+(and `live.sh` says them before it builds); `shell restart` alone,
+`--installed` and `shell status` (its line `live-reload on|off`) are always
+answered. Turned off while a program given runs, the installed one runs
+again at once. The Settings have no switch for it yet: no page of theirs
+has a place for it without a design choice.
+
 The first build in that directory compiles every dependency (about ten
 minutes on the maintainer's laptop, 8 cargo jobs); after a one-line change
 in the shell, the build took 17 s there (16.5 s and 18.1 s, #781), and a

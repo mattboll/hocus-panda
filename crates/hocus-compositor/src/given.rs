@@ -9,6 +9,12 @@
 //! installed one runs again, the log says so and the shell says it in a
 //! notification once it is there ([`ToShell::FellBack`]).
 //!
+//! A program is given only in a developer mode (`[developer] live-reload`,
+//! off by default, #783): the shell draws the lock screen and the password
+//! dialog, and the control socket is open to every program of the user's.
+//! A plain restart, the installed one again and the status are always
+//! answered.
+//!
 //! The program is looked at ([`check`]) on the control socket's thread,
 //! never on the loop.
 
@@ -131,6 +137,8 @@ pub struct Status<'a> {
     /// The process that runs and since when.
     pub process: Option<(Option<u32>, &'a Started)>,
     pub starts: u64,
+    /// Whether a program can be given (`[developer] live-reload`).
+    pub live_reload: bool,
 }
 
 impl Status<'_> {
@@ -153,6 +161,8 @@ impl Status<'_> {
             let _ = writeln!(said, "for {:.1} s", started.at.elapsed().as_secs_f64());
         }
         let _ = writeln!(said, "starts {}", self.starts);
+        let live_reload = if self.live_reload { "on" } else { "off" };
+        let _ = writeln!(said, "live-reload {live_reload}");
         if let Some((program, why)) = &self.given.fell_back {
             let _ = writeln!(said, "fell-back {} ({})", program.display(), why.says());
         }
@@ -195,6 +205,13 @@ impl State {
         match ask {
             ProgramAsk::Status(Supervised::Shell) => self.shell_status(),
             ProgramAsk::Restart(which @ Supervised::Shell, restart) => {
+                if matches!(restart, Restart::Given(_)) && !self.config.developer.live_reload {
+                    tracing::info!(
+                        program = which.word(),
+                        "a program given is refused: the developer mode is off"
+                    );
+                    return refused(self.live_reload_off());
+                }
                 if let Err(why) = self.shell_restartable() {
                     tracing::info!(
                         program = which.word(),
@@ -209,6 +226,38 @@ impl State {
                 format!("restarting\nprogram {}\n", program.display())
             }
         }
+    }
+
+    /// Why a program given is refused, and how to have it accepted: the
+    /// setting, in the file this session reads.
+    fn live_reload_off(&self) -> String {
+        let file = self.config.file.as_deref().map_or_else(
+            || "the configuration file".to_owned(),
+            |file| file.display().to_string(),
+        );
+        format!(
+            "developer mode is off, so no other program is run as the shell. \
+             To allow it, set `live-reload = true` under `[developer]` in {file} \
+             (followed at once)"
+        )
+    }
+
+    /// `[developer]` changed. Turned off while a program given runs, the
+    /// installed one runs again at once: what the mode allowed ends with
+    /// it.
+    pub(crate) fn developer_changed(&mut self, new: &crate::config::Developer) -> bool {
+        if *new == self.config.developer {
+            return false;
+        }
+        self.config.developer = new.clone();
+        if !new.live_reload && self.shell.given.program().is_some() {
+            tracing::info!("the developer mode is off: the installed shell runs again");
+            self.shell.given.asked(Restart::Installed);
+            if self.shell_restartable().is_ok() {
+                self.restart_shell();
+            }
+        }
+        true
     }
 
     /// The program given as `which` was let go of: logged, and said by

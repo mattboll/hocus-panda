@@ -6,6 +6,8 @@
 //!   stay, the bar's space stays kept, the bar comes back.
 //! - A program given runs in place of the installed one, the status says
 //!   so, and `installed` lets go of it; one that cannot run is refused.
+//! - A program is given only in developer mode (`[developer] live-reload`,
+//!   #783): off, as by default, it is refused and the installed one runs on.
 //! - A given program that keeps ending, or does not start, gives way to
 //!   the installed one: the status says it, and the shell says it in a
 //!   notification.
@@ -21,7 +23,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
+use hocus_compositor::{Config, Developer, Headless, HeadlessConfig, RendererChoice};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -29,6 +31,14 @@ fn pixman() -> HeadlessConfig {
     HeadlessConfig {
         renderer: RendererChoice::Pixman,
         ..HeadlessConfig::default()
+    }
+}
+
+/// The developer mode on: a program can be given.
+fn developer() -> Config {
+    Config {
+        developer: Developer { live_reload: true },
+        ..Config::default()
     }
 }
 
@@ -179,7 +189,7 @@ fn a_program_given_runs_and_the_status_says_so() -> anyhow::Result<()> {
     let copy = dev.join("hocuspanda-shell");
     std::fs::copy(&built, &copy)?;
     let given = common::shell_script(&dev, &copy, &[])?;
-    let mut hp = Headless::start_with_shell(pixman(), Config::default(), Some(installed.clone()))?;
+    let mut hp = Headless::start_with_shell(pixman(), developer(), Some(installed.clone()))?;
     shell_back(&mut hp, None)?;
     let first = hp.shell_pid();
     assert_eq!(exe(first), Some(built.clone()));
@@ -239,6 +249,48 @@ fn a_program_given_runs_and_the_status_says_so() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Without the developer mode, as by default, a program given is refused
+/// with how to turn it on, and the installed shell keeps running; a plain
+/// restart and `installed` are still taken.
+#[test]
+fn a_program_given_is_refused_without_the_developer_mode() -> anyhow::Result<()> {
+    let built = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let installed = common::shell_script(dir.path(), &built, &[])?;
+    let dev = dir.path().join("dev");
+    std::fs::create_dir(&dev)?;
+    let given = common::shell_script(&dev, &built, &[])?;
+    let mut hp = Headless::start_with_shell(pixman(), Config::default(), Some(installed.clone()))?;
+    let status = shell_back(&mut hp, None)?;
+    assert_eq!(said(&status, "live-reload"), Some("off"), "{status}");
+    let first = hp.shell_pid();
+
+    let answer = ask(
+        &mut hp,
+        &format!("msg shell restart program {}", given.display()),
+    )?;
+    assert!(
+        answer.starts_with("refused: developer mode is off")
+            && answer.contains("`live-reload = true` under `[developer]`"),
+        "{answer}"
+    );
+    common::wait(&mut hp, Duration::from_millis(200))?;
+    assert_eq!(hp.shell_pid(), first, "the shell was left alone");
+    let status = ask(&mut hp, "msg shell status")?;
+    assert_eq!(said(&status, "state"), Some("running"), "{status}");
+    assert_eq!(said(&status, "program"), installed.to_str(), "{status}");
+    assert_eq!(said(&status, "given"), Some("no"), "{status}");
+    assert_eq!(said(&status, "starts"), Some("1"), "{status}");
+
+    assert_eq!(
+        ask(&mut hp, "msg shell restart installed")?,
+        format!("restarting\nprogram {}\n", installed.display())
+    );
+    let status = shell_back(&mut hp, first)?;
+    assert_eq!(said(&status, "program"), installed.to_str(), "{status}");
+    Ok(())
+}
+
 /// A given program that keeps ending gives way to the installed one, and
 /// so does one that does not start: the status says which and why, and
 /// the installed shell, back, says it in a notification.
@@ -251,7 +303,7 @@ fn a_bad_program_falls_back_to_the_installed_one_and_it_is_said() -> anyhow::Res
     script_at(&ending, "#!/bin/sh\nexit 1\n")?;
     let unstartable = dir.path().join("unstartable");
     script_at(&unstartable, "#!/nonexistent/interpreter\n")?;
-    let mut hp = Headless::start_with_shell(pixman(), Config::default(), Some(installed.clone()))?;
+    let mut hp = Headless::start_with_shell(pixman(), developer(), Some(installed.clone()))?;
     common::drawn(&mut hp, hocus_link::NAMESPACE)?;
     let window = common::open(&mut hp, "test.kept", (640, 480))?;
     let area = hp.work_area();

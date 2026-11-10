@@ -52,7 +52,10 @@ sharing).
   One exception, and only one: when the maintainer asks to see a change
   of the shell live, `scripts/dev/live.sh shell` reloads that program
   alone in their session
-  ([docs/workflow.md](docs/workflow.md), "Development loop"). Only when
+  ([docs/workflow.md](docs/workflow.md), "Development loop"); the session
+  takes it only with `[developer] live-reload = true` in its
+  configuration, off by default, which the maintainer turns on, never an
+  agent. Only when
   asked, only through that script: nothing else of the session is touched,
   and the change is still developed and tested headless first. A
   compositor change is not seen this way: it needs the package and a new
@@ -189,7 +192,7 @@ the real screen; nested and headless take `--output`; `panel-form`),
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`, `windows`), `[recording]` (`format`), `[idle]` (`delay`,
 docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
-`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`); the shell reads `[day]` from the same file
+`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`), `[developer]` (`live-reload`, docs/workflow.md); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd

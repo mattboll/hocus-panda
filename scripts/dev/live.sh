@@ -12,6 +12,10 @@
 # start or keeps ending gives way to the installed program by itself, and
 # a notification says so.
 #
+# The session takes a program given only in developer mode, off by default
+# (the shell draws the lock screen and the password dialog): `[developer]
+# live-reload = true` in its configuration file, followed at once.
+#
 # The build is cargo's dev profile in a target directory of its own
 # ($HOCUS_LIVE_TARGET, default ~/.cache/hocuspanda-dev/target), incremental,
 # without sccache's wrapper (it has nothing to cache of an incremental
@@ -136,6 +140,12 @@ if [ "$installed" = yes ]; then
     exit
 fi
 
+# Said before the build, which is long, as the compositor says it when it
+# refuses the program.
+if [ "$(said live-reload "$before")" = off ]; then
+    fail "developer mode is off, so no other program is run as the $what. To allow it, set \`live-reload = true\` under \`[developer]\` in ${HOCUS_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/hocuspanda/config.toml} (followed at once)."
+fi
+
 build_time=
 if [ "$build" = yes ]; then
     started=$(now)
@@ -150,7 +160,9 @@ fi
 
 starts=$(said starts "$before")
 asked=$(now)
-ask "$what" restart --program "$built" >/dev/null
+# Refused (the developer mode turned off meanwhile, a program that cannot
+# run): hocus said why.
+ask "$what" restart --program "$built" >/dev/null || exit 1
 
 # Until the status says the program built runs: a run started since, and
 # for the shell every bar drawn.

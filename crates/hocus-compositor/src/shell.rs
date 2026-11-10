@@ -592,6 +592,7 @@ impl State {
             given: &shell.given,
             process: running.map(|(_, started)| (shell.running.pid(), started)),
             starts: shell.starts,
+            live_reload: self.config.developer.live_reload,
         }
         .lines();
         said.push_str(&format!(
