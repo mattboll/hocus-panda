@@ -580,8 +580,12 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
     bed.shows(|s| s["items"].to_string().contains(&format!("menu:{rule}")))?;
     bed.place(&format!("Expand({rule})"))?;
     bed.click(&format!("Known({rule},Forget)"))?;
-    let gone = bed.shows(|s| s["items"].to_string().contains("toast:Oublié · Annuler"))?;
-    assert!(!gone["items"].to_string().contains("cabinet Morel"));
+    // The toast and the list without the rule, in either order: the toast
+    // is the shell's, the list comes back from her.
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains("toast:Oublié · Annuler") && !items.contains("cabinet Morel")
+    })?;
     bed.click("ToastUndo")?;
     bed.shows(|s| {
         let items = s["items"].to_string();
