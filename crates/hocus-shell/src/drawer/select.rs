@@ -28,8 +28,12 @@ pub enum Source {
     Item(u64),
     /// Her answer to this request as it streams.
     Streaming(u64),
-    /// The queue view's line of this place.
-    Queue(u32),
+    /// A view's paragraph of this place among those it lays out (the
+    /// queue's, a briefing unfolded, "Ce qu'elle sait", #761).
+    Line(u32),
+    /// Thread item `0`'s paragraph `1` of those it draws (her briefing's
+    /// card, #761).
+    Part(u64, u32),
 }
 
 /// A block: what it shows, its text, its box, and the thread's item the
@@ -171,6 +175,46 @@ impl Texts {
                 size,
                 font,
                 width: measure(line, size, font),
+            });
+        }
+    }
+
+    /// A line drawn of `text` from `x` around `middle`, `width` wide,
+    /// ending block `block`'s text after `sep` (nothing on the same row,
+    /// a space where a wrap broke a paragraph, a line break between
+    /// lines); placed for the pointer only if `shown`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn line(
+        &mut self,
+        block: usize,
+        sep: &str,
+        text: &str,
+        x: f32,
+        middle: f32,
+        height: f32,
+        size: f32,
+        font: Font,
+        width: f32,
+        shown: bool,
+    ) {
+        let Some(b) = self.blocks.get_mut(block) else {
+            return;
+        };
+        if !b.text.is_empty() {
+            b.text.push_str(sep);
+        }
+        let start = b.text.len();
+        b.text.push_str(text);
+        if shown {
+            self.runs.push(Run {
+                block,
+                range: start..b.text.len(),
+                x,
+                middle,
+                height,
+                size,
+                font,
+                width,
             });
         }
     }

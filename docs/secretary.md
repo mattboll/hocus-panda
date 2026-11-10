@@ -167,7 +167,9 @@ are labelled « Question », in blue; what she notes says « Noté : … » with
 how to send: her model's name is in the Settings.
 
 Her text is selected with the pointer as in any chat: her answers, your
-sentences, her questions and the drafts she proposes. Drag over it (across
+sentences, her questions, the drafts she proposes, her morning briefing
+(its card and the briefing unfolded) and the lines of « Ce qu'elle sait »
+(a click on a line there still unfolds where she has it from). Drag over it (across
 several messages if you like; held above or below the conversation, it
 scrolls), double-click a word, triple-click a paragraph, then press
 `Ctrl+C`, or right-click and choose « Copier ». It copies as plain text, a

@@ -426,6 +426,31 @@ pub(super) fn lay_out(
             && band.is_none_or(|(a, b)| bottom <= a || top >= b)
             && card_band.is_none_or(|(a, b)| bottom <= a || top >= b)
     };
+    // Its words selectable, as the thread's (#761): only those whole in
+    // the list take the pointer; its buttons, links and « ··· » are not
+    // text to select.
+    let skip: Vec<Rectangle> = list_targets
+        .iter()
+        .filter(|(t, _)| !t.holds_text())
+        .map(|(_, r)| *r)
+        .collect();
+    let shows = |n: usize, top: f32, bottom: f32| {
+        let item = blocks
+            .iter()
+            .find(|(first, last, _, _)| (*first..*last).contains(&n));
+        match item {
+            Some((_, _, from, to)) => whole(*from, *to),
+            None => blocks.is_empty() && whole(top - shift, bottom - shift),
+        }
+    };
+    super::lines_as_texts(
+        &mut laid.texts,
+        &shapes,
+        &skip,
+        shift,
+        &super::select::Source::Line,
+        &shows,
+    );
     let mut menu = None;
     if !confirming {
         for (target, rect) in list_targets {

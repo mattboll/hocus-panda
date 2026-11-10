@@ -18,6 +18,10 @@
 //!   "Ajouter"; her observation of a board barely used, a proposal, kept by
 //!   "Oui".
 //!
+//! - #761: its lines are selected and copied as the thread's (a wrapped
+//!   line copies whole); a click on a line still unfolds it, « ··· »
+//!   still opens its menu, and a press on it never selects.
+//!
 //! Pixman, as in CI. With `HOCUS_DRAWER_SHOTS=DIR`, PNGs of the tab are
 //! left there (for review, never compared).
 
@@ -29,7 +33,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{KEY_LEFTMETA, WAIT, chord, wait};
+use common::{BTN_LEFT, KEY_LEFTCTRL, KEY_LEFTMETA, WAIT, chord, wait};
 use hocus_agents::tools::Places;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, SecretaryMode};
 use hocus_link::ToShell;
@@ -635,5 +639,110 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
         let items = s["items"].to_string();
         !items.contains("Je n’en parle que si tu me le demandes") && items.contains("Planka")
     })?;
+    Ok(())
+}
+
+const KEY_C: u32 = 46;
+
+/// #761: a triple click on an item's line takes it whole (its wrapped
+/// rows joined by the spaces they broke at), `Ctrl+C` copies it; a click
+/// on it alone unfolds or folds it as before; « ··· » opens its menu, and a press
+/// on it dragged over text selects nothing.
+#[test]
+fn her_known_lines_are_selected_and_their_clicks_stay() -> anyhow::Result<()> {
+    let Some(mut bed) = start()? else {
+        return Ok(());
+    };
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_S]);
+    bed.opened()?;
+    bed.click("TabKnows")?;
+    bed.shows(|s| s["tab"] == "knows" && s["items"].to_string().contains("section:PERSONNES"))?;
+    let wide = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.drawer_surfaces().first().map(|(_, r)| r.width) == Some(720)
+    })?;
+    assert!(wide);
+    common::at_rest(&mut bed.hp)?;
+    let nadia = bed.index_of("Nadia Ferreira")?;
+    let shown = bed.shows(|_| true)?;
+    let said = shown["items"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.as_str())
+                .find(|i| i.starts_with(&format!("{nadia}:")))
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| anyhow::anyhow!("no item {nadia}"))?;
+    // Her line: the item's first text, the topmost block in its box.
+    let (cx, cy) = bed.place(&format!("Expand({nadia})"))?;
+    let r = bed.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
+    let log = common::logged(&bed.log);
+    let texts = log
+        .lines()
+        .rev()
+        .find(|l| l.contains("the drawer's texts"))
+        .and_then(|l| l.split("the drawer's texts").nth(1))
+        .unwrap_or_default();
+    let line = texts
+        .split_whitespace()
+        .filter_map(|b| {
+            let (_, at) = b.split_once('@')?;
+            let (start, end) = at.split_once('>')?;
+            let (x, y) = start.split_once(',')?;
+            let (ex, _) = end.split_once(',')?;
+            Some((
+                f64::from(r.x) + x.parse::<f64>().ok()?,
+                f64::from(r.y) + y.parse::<f64>().ok()?,
+                f64::from(r.x) + ex.parse::<f64>().ok()?,
+            ))
+        })
+        .find(|(_, y, _)| (y - cy).abs() < 30.0 && *y <= cy + 4.0)
+        .ok_or_else(|| anyhow::anyhow!("no line near {cx},{cy} in {texts}"))?;
+    let on = ((line.0 + line.2) / 2.0, line.1);
+    common::over(&mut bed.hp, on, hocus_link::SECRETARY_NAMESPACE)?;
+    for _ in 0..3 {
+        bed.hp.button(BTN_LEFT, true);
+        bed.hp.button(BTN_LEFT, false);
+    }
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_C]);
+    let copied = bed.hp.dispatch_until(WAIT, |hp| hp.clipboard().is_some())?;
+    assert!(copied, "nothing copied");
+    let copied = bed.hp.clipboard().unwrap_or_default();
+    assert!(
+        copied.starts_with("Nadia Ferreira") && said.contains(&copied),
+        "her line whole: {copied:?} in {said:?}"
+    );
+    bed.shot("knows-selected")?;
+    // A click alone on it still unfolds it, or folds it (the triple
+    // click's first was a click too).
+    let unfolded = bed.shows(|_| true)?["items"]
+        .to_string()
+        .contains("| unfolded");
+    wait(&mut bed.hp, Duration::from_millis(700))?;
+    common::click_on(&mut bed.hp, on, hocus_link::SECRETARY_NAMESPACE)?;
+    bed.shows(|s| s["items"].to_string().contains("| unfolded") != unfolded)?;
+    // Its « ··· »: a press dragged over its text selects nothing; a click
+    // opens its menu.
+    let dots = bed.place(&format!("KnownMenu({nadia})"))?;
+    common::over(&mut bed.hp, dots, hocus_link::SECRETARY_NAMESPACE)?;
+    // The shell has the pointer there, its « ··· » lit, before the press.
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    bed.hp.button(BTN_LEFT, true);
+    wait(&mut bed.hp, Duration::from_millis(60))?;
+    bed.hp.pointer_move(on.0, on.1);
+    wait(&mut bed.hp, Duration::from_millis(60))?;
+    bed.hp.button(BTN_LEFT, false);
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    let mark = common::logged(&bed.log).len();
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_C]);
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    assert!(
+        !common::logged(&bed.log)[mark..].contains("the drawer copies"),
+        "nothing selected from « ··· »"
+    );
+    bed.click(&format!("KnownMenu({nadia})"))?;
+    bed.shows(|s| s["items"].to_string().contains(&format!("menu:{nadia}")))?;
     Ok(())
 }
