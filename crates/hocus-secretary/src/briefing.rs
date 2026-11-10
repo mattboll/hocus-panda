@@ -1036,7 +1036,13 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             footer,
         },
         moves,
-        facts: facts_lines.join("\n"),
+        // Titles, senders and names are their sources' words (#768): each
+        // fact stays its line, and writes no tag.
+        facts: facts_lines
+            .iter()
+            .map(|l| crate::inert::line(l))
+            .collect::<Vec<_>>()
+            .join("\n"),
         listed,
         arrived,
         peek: peek.join(", "),

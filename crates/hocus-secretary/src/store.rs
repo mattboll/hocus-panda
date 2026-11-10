@@ -497,12 +497,25 @@ impl Store {
 
     fn keyed(conn: Connection, key: Option<&[u8; 32]>, clock: Clock) -> Result<Self> {
         if let Some(key) = key {
-            let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
             // A raw key: SQLCipher derives nothing from it. A wrong key is
-            // said by the error below, not on standard error.
-            conn.execute_batch(&format!(
-                "PRAGMA cipher_log_level = NONE; PRAGMA key = \"x'{hex}'\";"
-            ))?;
+            // said by the error below, not on standard error. The key in
+            // hexadecimal is written once, into the statement itself,
+            // which has its room from the start and is wiped after it ran
+            // (#768): no copy of it is left behind.
+            const OPEN: &str = "PRAGMA cipher_log_level = NONE; PRAGMA key = \"x'";
+            const CLOSE: &str = "'\";";
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let mut sql = zeroize::Zeroizing::new(String::with_capacity(
+                OPEN.len() + 2 * key.len() + CLOSE.len(),
+            ));
+            sql.push_str(OPEN);
+            for byte in key {
+                sql.push(char::from(HEX[usize::from(byte >> 4)]));
+                sql.push(char::from(HEX[usize::from(byte & 0x0f)]));
+            }
+            sql.push_str(CLOSE);
+            conn.execute_batch(&sql)?;
+            drop(sql);
             // The first read of a database the key does not open fails.
             if conn
                 .query_row("SELECT count(*) FROM sqlite_master", [], |r| {

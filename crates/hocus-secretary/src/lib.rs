@@ -11,7 +11,8 @@
 //! local servers, each role as [`settings`] say), the local triage queue
 //! and the secrets' second pass ([`triage`]), context assembly within a
 //! budget ([`context`]) from hybrid retrieval over her graph
-//! ([`retrieve`]), and her read-only tools ([`tools`]). Her Google
+//! ([`retrieve`]), what a source wrote made inert on its way into a prompt
+//! ([`inert`]), and her read-only tools ([`tools`]). Her Google
 //! accounts are one source ([`google`]); the applications' notifications
 //! the shell forwards, another ([`notifications`], lot 7).
 //!
@@ -38,6 +39,7 @@ pub mod google;
 pub mod graph;
 pub mod heat;
 mod http;
+pub mod inert;
 pub mod kept;
 pub mod key;
 pub mod knows;

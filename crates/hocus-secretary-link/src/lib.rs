@@ -66,6 +66,11 @@
 //! ([`ToSecretary::Queue`], answered and sent again while open by
 //! [`FromSecretary::Queue`], [`queue`]) and a sender's items set aside or
 //! brought back ([`ToSecretary::QueueAct`]).
+//!
+//! **Version 9** brings #768: "Ce qu'elle sait" says when her memory's
+//! key is in a file beside it, no keyring having had it
+//! ([`knows::Knowledge`]'s `key_beside`), in the words the Settings use
+//! from her status ([`key_beside_said`], [`KEY_IN_FILE`]).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -87,7 +92,7 @@ pub mod sheets;
 
 /// The protocol's version: a change that an older side would misread
 /// raises it.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 /// The environment variable that names her socket, for her and for the
 /// programs the compositor starts.
@@ -203,10 +208,24 @@ impl Drop for Secret {
 /// `text`'s bytes overwritten with zeros, then emptied: what held a key
 /// does not keep it in memory once it is used.
 pub fn wipe(text: &mut String) {
-    let mut bytes = std::mem::take(text).into_bytes();
-    bytes.fill(0);
-    // The zeros are read back, so that the write is not left out.
-    std::hint::black_box(&bytes);
+    // Writes the compiler may not leave out, over all it had room for.
+    zeroize::Zeroize::zeroize(text);
+}
+
+/// Where her memory's key is when no keyring had it, as her status says
+/// it ([`Status::key`]): in a file beside her memory.
+pub const KEY_IN_FILE: &str = "file";
+
+/// What the user reads where her memory is described, when its key is in
+/// a file beside it (#768): encrypted still, but whoever reads the disk
+/// reads the key too. The key stays in its file from then on, a keyring
+/// come since or not: the sentence says when, not now.
+pub const fn key_beside_said(fr: bool) -> &'static str {
+    if fr {
+        "Sa mémoire est chiffrée, mais sa clé est rangée à côté, sur ce disque : ton trousseau n’était pas disponible quand elle a été créée. Qui peut lire tes fichiers peut donc lire sa mémoire."
+    } else {
+        "Her memory is encrypted, but its key is kept beside it, on this disk: your keyring was not available when it was made. Whoever can read your files can therefore read her memory."
+    }
 }
 
 /// The clipboard history's digest of a text (FNV-1a, the shell's): what
@@ -1115,7 +1134,8 @@ pub struct Status {
     /// She runs on a clock of her own (tests).
     pub virtual_clock: bool,
     pub locked: bool,
-    /// Where her memory's key is: `keyring`, `file`.
+    /// Where her memory's key is: `keyring`, `file` ([`KEY_IN_FILE`]: no
+    /// keyring had it, and what is said of her memory says so, #768).
     pub key: String,
     pub counts: Counts,
     pub sources: Vec<SourceStatus>,
@@ -1386,7 +1406,7 @@ mod tests {
             lang: None,
         };
         let text = line(&hello);
-        assert_eq!(text, "{\"hello\":{\"version\":8,\"client\":\"shell\"}}\n");
+        assert_eq!(text, "{\"hello\":{\"version\":9,\"client\":\"shell\"}}\n");
         assert_eq!(read::<ToSecretary>(&text), Ok(hello));
         let resumed: ToSecretary = read("{\"resumed\":{}}").expect("reads");
         assert_eq!(resumed, ToSecretary::Resumed { slept: None });

@@ -15,7 +15,9 @@
 //! passes have run (its [`Held`] checked); before that, its metadata and
 //! "peut contenir un secret, pas encore vérifié" (fail closed). A source
 //! whose items leave only as local summaries gives its triage's summary,
-//! never its text. Content stays in `<source>` blocks, out of the system.
+//! never its text. Content stays in `<source>` blocks, out of the system,
+//! and cannot leave them: what a source wrote goes in through
+//! [`crate::inert`], which leaves no `<` in it (#768).
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -25,6 +27,7 @@ use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 
 use crate::{
     graph::{NodeKind, Target},
+    inert,
     model::{Message, Part, Request, Role},
     retrieve::{self, day_of},
     store::{Result, Store},
@@ -218,8 +221,11 @@ fn cut(text: &str, most: usize) -> String {
     out
 }
 
-/// A held item as it may leave now.
+/// A held item as it may leave now: one block, whatever it says. Its
+/// pointer and its texts are its source's words ([`inert`]): a header
+/// stays one line, and nothing in it closes the block or opens another.
 pub fn outbound(pointer: &str, held: &Held) -> String {
+    let id = inert::attr(pointer);
     match held.redacted.outbound() {
         Outbound::MetadataOnly {
             from,
@@ -228,50 +234,58 @@ pub fn outbound(pointer: &str, held: &Held) -> String {
             note,
             ..
         } => format!(
-            "<source id=\"{pointer}\" checked=\"no\">\nDe : {}\nObjet : {subject}\nDate : {}\n({note})\n</source>",
-            from.unwrap_or("—"),
+            "<source id=\"{id}\" checked=\"no\">\nDe : {}\nObjet : {}\nDate : {}\n({note})\n</source>",
+            inert::line(from.unwrap_or("—")),
+            inert::line(subject),
             day_of(at)
         ),
         Outbound::Checked(_) if held.summaries_only => format!(
-            "<source id=\"{pointer}\" checked=\"yes\" text=\"résumé local seulement\">\n{}\n</source>",
-            held.summary.as_deref().unwrap_or("(pas de résumé)")
+            "<source id=\"{id}\" checked=\"yes\" text=\"résumé local seulement\">\n{}\n</source>",
+            inert::text(held.summary.as_deref().unwrap_or("(pas de résumé)"))
         ),
         Outbound::Checked(item) => {
             let text = match &item.content {
                 Content::Mail(mail) => format!(
                     "De : {}\nÀ : {}\nObjet : {}\nDate : {}\nPièces jointes : {}\n\n{}",
-                    mail.from,
-                    mail.to.join(", "),
-                    mail.subject,
+                    inert::line(&mail.from),
+                    inert::line(&mail.to.join(", ")),
+                    inert::line(&mail.subject),
                     day_of(item.at),
                     if mail.attachments.is_empty() {
                         "aucune".to_owned()
                     } else {
-                        mail.attachments.join(", ")
+                        inert::line(&mail.attachments.join(", ")).into_owned()
                     },
                     mail.body.as_deref().unwrap_or_default()
                 ),
                 Content::Event(event) => format!(
                     "Événement : {}\nAgenda : {}\nLieu : {}\n\n{}",
-                    event.title,
-                    event.calendar_name,
-                    event.place.as_deref().unwrap_or("—"),
+                    inert::line(&event.title),
+                    inert::line(&event.calendar_name),
+                    inert::line(event.place.as_deref().unwrap_or("—")),
                     event.description.as_deref().unwrap_or_default()
                 ),
                 Content::Birthday(b) => {
-                    format!("Anniversaire de {} : {}/{}", b.name, b.day, b.month)
+                    format!(
+                        "Anniversaire de {} : {}/{}",
+                        inert::line(&b.name),
+                        b.day,
+                        b.month
+                    )
                 }
                 Content::Notification(n) => format!(
                     "Notification de {}\nTitre : {}\nDate : {}\n\n{}",
-                    n.app,
-                    n.title,
+                    inert::line(&n.app),
+                    inert::line(&n.title),
                     day_of(item.at),
                     n.body
                 ),
             };
+            // The whole of it, its body with the rest; cut after, so that
+            // the cap counts what is sent.
             format!(
-                "<source id=\"{pointer}\" checked=\"yes\">\n{}\n</source>",
-                cut(&text, ITEM_CAP)
+                "<source id=\"{id}\" checked=\"yes\">\n{}\n</source>",
+                cut(&inert::text(&text), ITEM_CAP)
             )
         }
     }
@@ -298,7 +312,7 @@ pub fn persona(store: &Store, language: Language) -> String {
         Language::French => include_str!("persona/fr.txt"),
         Language::English => include_str!("persona/en.txt"),
     };
-    text.replace("{user_name}", &user)
+    text.replace("{user_name}", &inert::line(&user))
 }
 
 /// Her persona with the way of being the user asked for (#753) right
@@ -431,6 +445,9 @@ fn card(store: &Store, today: Date, scope: &Scope, most: usize) -> Result<(Strin
             lines.push(line);
         }
     }
+    // Names, aliases and facts may have been read in a source: each
+    // stays the one line it is, and writes no tag.
+    let lines = lines.iter().map(|l| inert::line(l).into_owned());
     let left = fill(&mut out, lines, most.saturating_sub(4));
     if left > 0 {
         out.push_str(&format!("… {left} lignes de plus : `graph` et `search`\n"));
@@ -479,8 +496,13 @@ fn day(
         };
         lines.extend(facts.lines(&zone, scope.moment.public()));
     }
-    // Who is away, from the leaves' rule's calendar (§9.1): computed.
-    lines.extend(crate::learn::leave_lines(store, today, notebook));
+    // Who is away, from the leaves' rule's calendar (§9.1): computed,
+    // from names an event's title gave.
+    lines.extend(
+        crate::learn::leave_lines(store, today, notebook)
+            .iter()
+            .map(|l| inert::line(l).into_owned()),
+    );
     let start = today.to_zoned(zone.clone()).map_or(now, |z| z.timestamp());
     let after = today
         .checked_add(2.days())
@@ -533,7 +555,7 @@ fn day(
         .ok();
     if let Some((id, text)) = summary {
         items.push(format!("summary:{id}"));
-        lines.push(format!("Hier : {text}"));
+        lines.push(inert::line(&format!("Hier : {text}")).into_owned());
     }
     // A tool barely used is mentioned only when asked (§9.1).
     let quiet = crate::learn::quiet_sources(store, today);
@@ -594,7 +616,8 @@ fn retrieved(
         out.push_str(&format!(" as_of=\"{}\">\n", as_of.day));
         out.push_str(&format!(
             "[fait calculé] La question porte sur le {} ({}) : le graphe ci-dessous est lu à cette date.\n",
-            as_of.day, as_of.why
+            as_of.day,
+            inert::line(&as_of.why)
         ));
         if let Some(edge) = as_of.edge {
             items.push(format!("edge:{edge}"));
@@ -607,7 +630,7 @@ fn retrieved(
             .linked
             .iter()
             .filter_map(|l| store.node(l.node).ok())
-            .map(|n| format!("{} ({})", n.name, n.kind.word()))
+            .map(|n| format!("{} ({})", inert::line(&n.name), n.kind.word()))
             .collect();
         out.push_str(&format!("Liés à la question : {}\n", names.join(", ")));
     }

@@ -213,7 +213,7 @@ fn her_memory_s_key_is_kept_in_the_keyring_of_the_bus_given() -> anyhow::Result<
     let file = data.join("memory.db");
     drop(Store::open(&file, &made, Clock::Wall)?);
     let (again, place) = key::key(&data, Some(&bus.address), true).map_err(anyhow::Error::msg)?;
-    assert_eq!((again, place), (made, Place::Keyring));
+    assert_eq!((&again, place), (&made, Place::Keyring));
     Store::open(&file, &again, Clock::Wall)?;
 
     // The keyring emptied: her memory stays closed, no new key over it.
