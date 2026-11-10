@@ -167,10 +167,17 @@ impl Bed {
         let on = self
             .hp
             .dispatch_until(WAIT, |hp| hp.keyboard_layer().as_deref() == namespace)?;
+        let said: Vec<String> = self
+            .log()
+            .lines()
+            .filter(|l| !l.contains("icons"))
+            .map(str::to_owned)
+            .collect();
         anyhow::ensure!(
             on,
-            "the keyboard is on {:?}, not {namespace:?}",
-            self.hp.keyboard_layer()
+            "the keyboard is on {:?}, not {namespace:?}; the shell said:\n{}",
+            self.hp.keyboard_layer(),
+            said.join("\n")
         );
         Ok(())
     }
@@ -249,7 +256,11 @@ fn super_b_lands_on_the_clock_and_esc_gives_the_keyboard_back_to_the_window() ->
     let _ = typed(&typing.events);
     bed.press(KEY_Q);
     wait(&mut bed.hp, Duration::from_millis(200))?;
-    assert_eq!(typed(&typing.events), Vec::<u32>::new());
+    // `Super` going down may reach the window only now, on a loaded
+    // machine: that one is expected; Q is not.
+    let mut got = typed(&typing.events);
+    got.retain(|&key| key != KEY_LEFTMETA);
+    assert_eq!(got, Vec::<u32>::new());
     assert_eq!(bed.focused().as_deref(), Some("test.typing"));
 
     // Down: the next item, another surface.

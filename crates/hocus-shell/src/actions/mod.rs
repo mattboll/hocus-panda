@@ -799,7 +799,10 @@ pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&st
 
 /// The action catalogue's size, for the footer of the empty field.
 pub fn all() -> usize {
-    actions::catalogue().len()
+    actions::catalogue()
+        .iter()
+        .filter(|d| list::listed(d))
+        .count()
 }
 
 /// The open palette for screen readers (A.1): a dialog named "Actions",

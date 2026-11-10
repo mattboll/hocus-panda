@@ -1,5 +1,6 @@
 //! The "Agents" page (6.16, variant A, docs/design/settings.md "Agents"):
-//! the tools followed, the halo and its preview, the pandas.
+//! the tools followed, the halo and its preview, the pandas, and a line
+//! to the secretary's own page (#759, [`super::secretary_page`]).
 //!
 //! The tools are the compositor's (4.0): it says them on the Settings'
 //! line (`agent-tools`), and the page asks it to plug one in or out, or
@@ -46,7 +47,6 @@ use crate::{
     screens::Said,
     store::Slot,
 };
-
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
 const WAVE: Duration = Duration::from_millis(600);
@@ -101,6 +101,8 @@ pub enum Stop {
     Action(Tool),
     Preview,
     Copy,
+    /// The line to the secretary's page.
+    Secretary,
 }
 
 /// A tool plugged in or out, herdr followed or not, for its undo.
@@ -263,6 +265,7 @@ impl App {
                 out.push(Control::Agents(Stop::Preview));
             }
         }
+        out.push(Control::Agents(Stop::Secretary));
         out
     }
 
@@ -471,6 +474,10 @@ impl App {
                 Stop::Preview => {
                     self.agents_update(Msg::Play(self.agents.played.unwrap_or(Played::Waiting)))
                 }
+                Stop::Secretary => {
+                    self.go(Page::Section(SectionId::Secretary));
+                    iced::Task::none()
+                }
                 Stop::Action(tool) => {
                     let action = self
                         .agents
@@ -610,6 +617,29 @@ impl App {
         .into()
     }
 
+    /// « Secrétaire › »: her own page.
+    fn agents_secretary_link<'a>(&self) -> El<'a> {
+        let focused = self.agents_focused(Stop::Secretary);
+        container(
+            button(t(self.say(w("Secrétaire ›", "Secretary ›")), 13.0, MINT.get()).font(BOLD))
+                .padding([1, 2])
+                .on_press(Message::Section(SectionId::Secretary))
+                .style(move |_, status| button::Style {
+                    background: matches!(status, button::Status::Hovered)
+                        .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                    text_color: TEXT.get(),
+                    border: if focused {
+                        ring(5.0)
+                    } else {
+                        border(5.0, 0.0, Color::TRANSPARENT)
+                    },
+                    ..button::Style::default()
+                }),
+        )
+        .id("link:secretary".to_owned())
+        .into()
+    }
+
     /// A group: its label, a note on its right, its card.
     fn agents_group<'a>(&self, label_words: &'static str, note: String, body: El<'a>) -> El<'a> {
         column![
@@ -716,7 +746,44 @@ impl App {
                 .into(),
             ),
         );
+        // Her own page (#759): a line to it, where her group was.
+        page = page.push(
+            row![
+                super::view::icon(crate::model::Icon::Secretary, 14.0, DIM.get()),
+                t(
+                    self.say(w(
+                        "Ta secrétaire, ce qu’elle lit et le tri de tes mails ont leur page :",
+                        "Your secretary, what she reads and how your mail is sorted have their page:",
+                    )),
+                    13.0,
+                    DIM.get()
+                ),
+                self.agents_secretary_link(),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .wrap(),
+        );
         container(page).id("page:agents".to_owned()).into()
+    }
+
+    /// `sheet` over the window, its scrim taking the clicks.
+    pub(super) fn agents_over(sheet: El<'_>) -> El<'_> {
+        stack![
+            mouse_area(
+                container(Space::new().width(Length::Fill).height(Length::Fill)).style(boxed(
+                    crate::theme::ink(rgba(0, 0, 0, 0.6)),
+                    0.0,
+                    None
+                ))
+            )
+            .on_press(Message::Nothing),
+            container(sheet)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center(Length::Fill),
+        ]
+        .into()
     }
 
     /// A tool's mark: a round in its colour, its letter.
@@ -836,7 +903,7 @@ impl App {
     }
 
     /// A button: green ("Brancher") or secondary; inert without `press`.
-    fn agents_button<'a>(
+    pub(super) fn agents_button<'a>(
         &self,
         said: &'static str,
         green: bool,

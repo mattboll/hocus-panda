@@ -71,6 +71,11 @@ pub struct Env {
     pub cursor: crate::cursor::Choice,
     /// The session bus given (`--session-bus`), which the programs use.
     pub session_bus: Option<String>,
+    /// The bus whose keyring holds the secretary's keys, as she is given
+    /// it (`HOCUS_SECRETARY_BUS`): `hocus-secretary key anthropic`, typed
+    /// in a terminal of the session, keeps the key where she reads it
+    /// (#750), a nested session's private bus included.
+    pub secretary_bus: Option<String>,
     /// The configuration file read (`HOCUS_CONFIG`): the Settings started
     /// from the desktop write into this one.
     pub config: Option<PathBuf>,
@@ -89,6 +94,11 @@ impl Env {
             session_bus: match &state.shell.bus {
                 Some(crate::shell::Bus::Given(address)) => Some(address.clone()),
                 _ => None,
+            },
+            secretary_bus: match &state.shell.bus {
+                Some(crate::shell::Bus::Given(address)) => Some(address.clone()),
+                Some(crate::shell::Bus::Session) => Some("session".to_owned()),
+                None => None,
             },
             config: state.config.file.clone(),
             language: state.config.locale.language.env(),
@@ -137,6 +147,10 @@ impl Env {
         if let Some(bus) = &self.session_bus {
             cmd.env("DBUS_SESSION_BUS_ADDRESS", bus);
         }
+        match &self.secretary_bus {
+            Some(bus) => cmd.env(hocus_secretary_link::BUS_ENV, bus),
+            None => cmd.env_remove(hocus_secretary_link::BUS_ENV),
+        };
         if let Some(language) = self.language {
             cmd.env("LANGUAGE", language);
         }
@@ -202,6 +216,7 @@ impl crate::State {
         let mut programs = std::mem::take(&mut self.programs);
         programs.ready(&env, || self.activation_token());
         self.start_shell();
+        self.secretary_follow();
     }
 }
 
@@ -405,6 +420,7 @@ mod tests {
             activation: None,
             cursor: crate::cursor::Choice::of(None, None, &crate::CursorEnv::default()),
             session_bus: None,
+            secretary_bus: None,
             config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
             language: None,
         }
@@ -463,6 +479,25 @@ mod tests {
         assert_eq!(masks.1, "SigBlk:\t0000000000000000");
         assert_eq!(masks.2, "SigBlk:\t0000000000000000");
         Ok(())
+    }
+
+    /// A terminal of the session knows the secretary's keyring (#750):
+    /// `hocus-secretary key anthropic` keeps the key where she reads it.
+    #[test]
+    fn a_program_is_told_the_secretary_s_bus() {
+        let bus = |env: &Env| {
+            env.command("foot")
+                .get_envs()
+                .find(|(name, _)| *name == hocus_secretary_link::BUS_ENV)
+                .and_then(|(_, value)| value.map(std::ffi::OsStr::to_owned))
+        };
+        let mut session = env("/run/user/1000/hocus-0");
+        session.secretary_bus = Some("session".to_owned());
+        assert_eq!(
+            bus(&session).as_deref(),
+            Some(std::ffi::OsStr::new("session"))
+        );
+        assert_eq!(bus(&env("/run/user/1000/hocus-0")), None, "none: unset");
     }
 
     #[test]

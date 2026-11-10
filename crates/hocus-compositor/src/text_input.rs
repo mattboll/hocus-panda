@@ -95,6 +95,21 @@ impl TextInputs {
         true
     }
 
+    /// An input method's text being composed into `surface`'s enabled
+    /// text input, with its cursor (bytes): whether one took it. The
+    /// compositor has no input method yet; the tests compose as one would
+    /// (#763).
+    pub fn preedit_string(&self, surface: &WlSurface, text: &str, cursor: (i32, i32)) -> bool {
+        let Some(input) = self.active(surface) else {
+            return false;
+        };
+        input
+            .resource
+            .preedit_string(Some(text.to_owned()), cursor.0, cursor.1);
+        input.resource.done(input.commits);
+        true
+    }
+
     /// The keyboard went to `focus`: the text inputs in the surface it left
     /// leave it, those of its client enter it.
     pub fn focus_changed(&mut self, focus: Option<&WlSurface>) {
@@ -125,7 +140,7 @@ impl TextInputs {
 
 impl State {
     /// The surface holding the keyboard, if it is a Wayland one.
-    fn keyboard_surface(&self) -> Option<WlSurface> {
+    pub(crate) fn keyboard_surface(&self) -> Option<WlSurface> {
         let focus = self.seat.get_keyboard()?.current_focus()?;
         focus.wl_surface().map(|s| s.into_owned())
     }

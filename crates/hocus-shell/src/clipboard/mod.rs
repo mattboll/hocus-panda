@@ -228,6 +228,20 @@ impl History {
         Some(item)
     }
 
+    /// Every text item whose trimmed text has `digest`, pinned or not,
+    /// gone: their keys.
+    pub fn forget_secret(&mut self, digest: u64) -> Vec<u64> {
+        let keys: Vec<u64> = self
+            .items
+            .iter()
+            .filter(|i| {
+                i.kind != Kind::Image && hocus_secretary_link::clip_digest(&i.text) == digest
+            })
+            .map(|i| i.key)
+            .collect();
+        keys.into_iter().filter(|k| self.remove(*k)).collect()
+    }
+
     pub fn remove(&mut self, key: u64) -> bool {
         let before = self.items.len();
         self.items.retain(|i| i.key != key);
@@ -443,6 +457,21 @@ pub fn pin(key: u64) {
     }
 }
 
+/// A key the secretary kept (#752): any copy of it leaves the history,
+/// pinned or not, by its digest ([`hocus_secretary_link::clip_digest`]);
+/// she never says the key itself.
+pub fn forget_secret(digest: u64) {
+    let gone = with(|h| h.forget_secret(digest));
+    if !gone.is_empty() {
+        tracing::info!(
+            gone = gone.len(),
+            "a key's copy leaves the clipboard's history"
+        );
+        store::ask(store::Ask::Remove(gone));
+        changed();
+    }
+}
+
 /// "Clear all": the pinned ones stay.
 pub fn clear() {
     let gone = with(History::clear);
@@ -501,6 +530,21 @@ mod tests {
         // Used again: first.
         h.used(2, NOW + 1000);
         assert_eq!(keys(&h), [2, 1]);
+    }
+
+    /// A key the secretary kept (#752): its copies go, pinned or not, a
+    /// trailing newline included; nothing else does.
+    #[test]
+    fn a_key_kept_by_the_secretary_leaves_the_history() {
+        let key = "sk-ant-api03-test-made-up";
+        let mut h = History::default();
+        h.add(text_item(1, "git status", "kitty", 0), NOW - 3);
+        h.add(text_item(2, key, "firefox", 0), NOW - 2);
+        h.add(text_item(3, &format!("{key}\n"), "firefox", 0), NOW - 1);
+        h.pin(3);
+        let gone = h.forget_secret(hocus_secretary_link::clip_digest(key));
+        assert_eq!(gone.len(), 2);
+        assert_eq!(keys(&h), [1]);
     }
 
     #[test]

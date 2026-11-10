@@ -4,7 +4,8 @@
 //! worker, never the shell's loop.
 //!
 //! - `calendarList` gives the calendars: `summaryOverride` else `summary`,
-//!   `backgroundColor`, `selected`, `accessRole`.
+//!   `backgroundColor`, `selected`, `accessRole`; with `showHidden` (the
+//!   secretary's reader) the calendars the user hid too, marked `hidden`.
 //! - `events`, with `singleEvents=true` (recurring events expanded by
 //!   Google, exceptions honoured), lists the window and gives a
 //!   `nextSyncToken`; a sync from it gives what changed, a `410` that it
@@ -13,9 +14,14 @@
 //!   token left unused: the window's syncs keep it up to date.
 //! - The token is asked for again when it expires, and once on a `401`;
 //!   Online Accounts refusing it is [`SourceError::SignIn`].
+//! - A calendar the user may see only as busy (`freeBusyReader`, a
+//!   colleague's shared "free/busy only") has no events to list: its busy
+//!   blocks come from `POST /freeBusy` ([`GoogleCalendar::busy`]), a read
+//!   that only answers (#752). Who shares a calendar is its `dataOwner`,
+//!   else its id when that is someone's address.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -76,6 +82,31 @@ pub struct GoogleCalendar {
     base: String,
     /// Each calendar's own reminders, for its events that use them.
     defaults: HashMap<CalendarId, Vec<u32>>,
+    /// Calendars the user hid from the list are listed too (the
+    /// secretary reads them: "Congés", a family calendar).
+    show_hidden: bool,
+    /// The calendars listed that the user hid.
+    hidden: HashSet<CalendarId>,
+    /// Each calendar listed: the user's access to it, and who shares it.
+    access: HashMap<CalendarId, Access>,
+}
+
+/// What the user may do with a calendar, and whose it is.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Access {
+    /// `owner`, `writer`, `reader`, `freeBusyReader`.
+    pub role: String,
+    /// The account's own main calendar.
+    pub primary: bool,
+    /// Who shares it with the user, when it is someone else's.
+    pub shared_by: Option<String>,
+}
+
+impl Access {
+    /// Only its busy blocks may be read.
+    pub fn busy_only(&self) -> bool {
+        self.role == "freeBusyReader"
+    }
 }
 
 impl std::fmt::Debug for GoogleCalendar {
@@ -97,7 +128,104 @@ impl GoogleCalendar {
             agent: crate::http::agent(TIMEOUT),
             base,
             defaults: HashMap::new(),
+            show_hidden: false,
+            hidden: HashSet::new(),
+            access: HashMap::new(),
         }
+    }
+
+    /// The user's access to `calendar`, as last listed.
+    pub fn access(&self, calendar: &CalendarId) -> Option<&Access> {
+        self.access.get(calendar)
+    }
+
+    /// `calendar`'s busy blocks within `range` (`POST /freeBusy`): a
+    /// calendar shared as free/busy only.
+    pub fn busy(
+        &mut self,
+        calendar: &CalendarId,
+        range: Range,
+    ) -> Result<Vec<(Timestamp, Timestamp)>> {
+        let body = serde_json::json!({
+            "timeMin": range.from.to_string(),
+            "timeMax": range.to.to_string(),
+            "items": [{"id": calendar.as_str()}],
+        });
+        let answer: FreeBusyAnswer = self.post("/freeBusy", &body)?;
+        let Some(found) = answer.calendars.get(calendar.as_str()) else {
+            return Err(SourceError::Refused(
+                "Google Calendar says nothing of the calendar".to_owned(),
+            ));
+        };
+        if let Some(error) = found.errors.first() {
+            return Err(SourceError::Refused(format!(
+                "Google Calendar: {}",
+                error.reason
+            )));
+        }
+        Ok(found
+            .busy
+            .iter()
+            .filter_map(|b| Some((b.start.parse().ok()?, b.end.parse().ok()?)))
+            .collect())
+    }
+
+    /// `POST path` with `body`, read as `T`; a `401` asks for a new token
+    /// once.
+    fn post<T: DeserializeOwned>(&mut self, path: &str, body: &serde_json::Value) -> Result<T> {
+        let url = format!("{}{path}", self.base);
+        let text = body.to_string();
+        let mut asked_again = false;
+        loop {
+            let token = self.token()?;
+            let request = self
+                .agent
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", token.expose()))
+                .header("content-type", "application/json");
+            let (status, answer) =
+                crate::http::read(request.send(text.as_bytes()), "Google Calendar", LARGEST)?;
+            match status {
+                200..=299 => {
+                    return serde_json::from_str(&answer).map_err(|err| {
+                        SourceError::Refused(format!(
+                            "Google Calendar's answer does not read: {err}"
+                        ))
+                    });
+                }
+                401 if !asked_again => {
+                    self.token = None;
+                    asked_again = true;
+                }
+                401 => {
+                    return Err(SourceError::SignIn(
+                        "Google refuses the account's token".to_owned(),
+                    ));
+                }
+                429 | 500..=599 => {
+                    return Err(SourceError::Offline(format!(
+                        "Google Calendar answers {status}"
+                    )));
+                }
+                _ => {
+                    return Err(SourceError::Refused(format!(
+                        "Google Calendar answers {status}"
+                    )));
+                }
+            }
+        }
+    }
+
+    /// The calendars the user hid from the list are listed too
+    /// (`showHidden`).
+    pub fn with_hidden(mut self) -> Self {
+        self.show_hidden = true;
+        self
+    }
+
+    /// Whether `calendar`, as last listed, is one the user hid.
+    pub fn hidden(&self, calendar: &CalendarId) -> bool {
+        self.hidden.contains(calendar)
     }
 
     /// A token not about to expire: the last one, else a new one.
@@ -201,12 +329,45 @@ impl CalendarSource for GoogleCalendar {
         let mut next: Option<String> = None;
         loop {
             let mut query = vec![("maxResults", "250")];
+            if self.show_hidden {
+                query.push(("showHidden", "true"));
+            }
             if let Some(page) = &next {
                 query.push(("pageToken", page));
             }
             let page: CalendarPage = self.get("/users/me/calendarList", &query)?;
+            if next.is_none() {
+                self.hidden.clear();
+                self.access.clear();
+            }
             for entry in page.items.into_iter().filter(|c| !c.deleted) {
                 let id = CalendarId::new(entry.id);
+                if entry.hidden {
+                    self.hidden.insert(id.clone());
+                }
+                let role = entry.access_role.clone().unwrap_or_default();
+                // Someone else's: its owner as Google says, else its id
+                // when it is an address (a person's main calendar).
+                let shared_by = (!entry.primary && role != "owner")
+                    .then(|| {
+                        entry
+                            .data_owner
+                            .clone()
+                            .filter(|o| !o.is_empty())
+                            .or_else(|| {
+                                (id.0.contains('@') && !id.0.ends_with("calendar.google.com"))
+                                    .then(|| id.0.clone())
+                            })
+                    })
+                    .flatten();
+                self.access.insert(
+                    id.clone(),
+                    Access {
+                        role,
+                        primary: entry.primary,
+                        shared_by,
+                    },
+                );
                 self.defaults
                     .insert(id.clone(), popups(&entry.default_reminders));
                 calendars.push(Calendar {
@@ -433,6 +594,39 @@ struct CalendarEntry {
     default_reminders: Vec<Reminder>,
     #[serde(default)]
     deleted: bool,
+    #[serde(default)]
+    hidden: bool,
+    #[serde(default)]
+    primary: bool,
+    /// Who owns a secondary calendar.
+    data_owner: Option<String>,
+}
+
+/// `POST /freeBusy`'s answer.
+#[derive(Deserialize)]
+struct FreeBusyAnswer {
+    #[serde(default)]
+    calendars: HashMap<String, FreeBusyCalendar>,
+}
+
+#[derive(Deserialize)]
+struct FreeBusyCalendar {
+    #[serde(default)]
+    busy: Vec<BusyBlock>,
+    #[serde(default)]
+    errors: Vec<FreeBusyError>,
+}
+
+#[derive(Deserialize)]
+struct BusyBlock {
+    start: String,
+    end: String,
+}
+
+#[derive(Deserialize)]
+struct FreeBusyError {
+    #[serde(default)]
+    reason: String,
 }
 
 #[derive(Deserialize)]

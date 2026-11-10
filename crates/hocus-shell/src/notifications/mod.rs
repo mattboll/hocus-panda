@@ -659,6 +659,8 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         }
         Effect::Changed => {
             crate::popover::changed(crate::popover::Item::Notifications);
+            // Do not disturb may have changed: the secretary's gate looks.
+            crate::speak::poke();
             Vec::new()
         }
         Effect::Save(records) => {

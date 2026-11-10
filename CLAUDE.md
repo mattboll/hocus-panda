@@ -81,7 +81,7 @@ sharing).
 
 Building needs, besides Rust, the system's headers the CI installs
 (`.github/workflows/ci.yml`), `libpipewire-0.3-dev` among them (screen
-sharing's streams).
+sharing's streams), and `libssl-dev` (the secretary's SQLCipher).
 
 ```sh
 cargo build                                   # build everything
@@ -289,6 +289,59 @@ next to a live session, give the nested compositor a fresh `HOME`, or
 plugging in writes into your real `~/.claude/settings.json`. Tests give
 `Config::agent_places` a home of their own (`tests/agents.rs`).
 
+The secretary (docs/design/secretary.md, crates `hocus-secretary`, binary
+`hocus-secretary`, and `hocus-secretary-link`, her socket's protocol) runs
+only with `[secretary] mode = "assistant"` (default `"classic"`, followed
+live; also Settings › Secretary): the compositor starts her from beside its
+own binary (or `--secretary PATH`), starts her again when she ends, and
+stops her back in classic mode; she listens on `<socket>.secretary`, which
+the shell and `hocus` connect to. Her memory is an SQLCipher database in
+`$XDG_DATA_HOME/hocuspanda/secretary`, its key in the keyring of the bus
+given with `--session-bus` only, else in `memory.key` beside it: next to a
+live session, give the nested compositor a fresh `HOME` (or
+`XDG_DATA_HOME`). Run alone, for tests and debugging, on a clock of her
+own, with the scripted fake model, its recorder and fixture sources:
+
+```sh
+# her socket beside a control socket's name, as under a compositor
+target/debug/hocus-secretary --socket /tmp/hp-XXXX/hocus-0.secretary --data /tmp/hp-XXXX/data \
+    --virtual-clock 2026-11-09T08:00:00Z --fake-model model.toml \
+    --recorder calls.jsonl --fixture mail.toml      # formats: crates/hocus-secretary/src/{model,sources}.rs
+target/debug/hocus --socket /tmp/hp-XXXX/hocus-0.control msg secretary status
+target/debug/hocus --socket /tmp/hp-XXXX/hocus-0.control msg secretary graph Chapitô --as-of 2026-04-15
+```
+
+The compositor's tests that start her (`tests/secretary.rs`) run the
+program built beside them: build it first (`cargo build -p hocus-secretary`,
+as CI does).
+
+Her models (lot 4) are set in `[secretary.models]` (`"PROVIDER/MODEL"`
+per role) and `[secretary.providers.NAME]` of the configuration she is
+given (`--config`, else `HOCUS_CONFIG`, else the user's), read again when
+it changes; `[secretary.triage]` paces the local triage. Without
+`--fake-model` she calls the Anthropic API with the key the keyring of
+her bus holds, and the local model server the settings name: next to a
+live session, give her a configuration of your own, and never run a
+model on a laptop to try her. Her Google accounts are read on the bus
+given, unless `--fixture` or `--no-google`; `--google-at
+http://127.0.0.1:PORT` puts Google's services on fakes of this machine,
+never the network. Her first run (one consent card a source, then « Dis-moi
+sur quoi tu travailles et avec qui ») needs a shell and those accounts;
+the Settings list them on the session's bus (Settings › Agents). Her
+tests fake both APIs on 127.0.0.1 (`crates/hocus-secretary/tests/common/http.rs`),
+and Online Accounts on a private bus (`tests/first_run.rs`). The
+user-facing steps are [docs/secretary.md](docs/secretary.md).
+
+```sh
+# the compositor tells its programs her bus (HOCUS_SECRETARY_BUS): in a
+# terminal of a nested session, the key goes to that session's keyring
+printf '%s\n' "$KEY" | target/debug/hocus-secretary --bus "$ADDRESS" key anthropic
+HOCUS_DRAWER_SHOTS=DIR cargo nextest run -p hocus-compositor --test secretary_drawer first_run
+HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test settings_agents --run-ignored all google
+HOCUS_POWER_SUPPLY_DIR=… HOCUS_THERMAL_DIR=…        # the triage's power and heat (tests)
+cargo nextest run -p hocus-sources --test secrets_corpus --no-capture   # AC50's numbers
+```
+
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
 `$XDG_CACHE_HOME/hocuspanda-vm`):
@@ -316,7 +369,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex

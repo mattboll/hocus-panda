@@ -127,7 +127,8 @@ rebound key shows rebound and an unbound action shows none.
   with a target.
 - The radial menu's: always on top and on all desktops (switches), the
   other screen, the previous and the next desktop.
-- The bar's: the secretary's briefing, the agents' sources, the
+- The bar's: the secretary's briefing, her drawer (`Super+S`, listed in
+  assistant mode only, secretary.md §21), the agents' sources, the
   clipboard's history, the notifications, do not disturb (a switch), the
   calendar, adding a task, the sound, the Wi-Fi, the volume keys, the
   bar's form.

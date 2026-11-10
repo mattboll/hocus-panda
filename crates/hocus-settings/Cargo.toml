@@ -19,6 +19,10 @@ hocus-config = { path = "../hocus-config", version = "1.0.0" }
 # The mice and touchpads, followed on the desktop's control socket (6.12).
 hocus-agents = { path = "../hocus-agents", version = "1.0.0" }
 hocus-link = { path = "../hocus-link", version = "1.0.0" }
+# The secretary's consent book: which applications' notifications and
+# which Google accounts of Online Accounts she reads (Agents, "LA
+# SECRÉTAIRE", secretary.md lot 7, #750), and the consent sheets' words.
+hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0", features = ["goa"] }
 hocus-pandas = { path = "../hocus-pandas", version = "1.0.0" }
 # The Performances page: the days the compositor recorded, their peaks and
 # signals (#655).

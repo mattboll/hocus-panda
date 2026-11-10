@@ -374,13 +374,17 @@ impl Layout {
         self.targets().into_iter().map(|(t, _)| t).collect()
     }
 
-    /// Where the keyboard lands as it shows: "Annuler", so that a stray
-    /// `Enter` ends nothing; nothing on the rows.
+    /// Where the keyboard lands as it shows: the confirmation's "…
+    /// maintenant", since it was just chosen and `Enter` is the quick way
+    /// on; the list of what holds the ending on "Annuler", since ending
+    /// anyway loses what those applications hold; nothing on the rows.
     pub fn first_focus(&self) -> Option<Target> {
-        match &self.view {
-            View::Rows { .. } => None,
-            _ => self.order().into_iter().find(|t| *t == Target::Cancel),
-        }
+        let first = match &self.view {
+            View::Rows { .. } => return None,
+            View::Confirm { .. } => Target::Now,
+            _ => Target::Cancel,
+        };
+        self.order().into_iter().find(|t| *t == first)
     }
 
     pub fn height(&self) -> u32 {
@@ -454,13 +458,13 @@ mod tests {
     }
 
     #[test]
-    fn the_confirmation_has_the_keyboard_on_cancel() {
+    fn the_confirmation_has_the_keyboard_on_now() {
         let layout = confirm(
             LeaveAction::ShutDown,
             &LeaveStep::Counting { left_ms: 10_000 },
         );
         assert_eq!(layout.order(), [Target::Now, Target::Cancel]);
-        assert_eq!(layout.first_focus(), Some(Target::Cancel));
+        assert_eq!(layout.first_focus(), Some(Target::Now));
         let View::Confirm {
             bar: Some(bar),
             now: Some(now),

@@ -136,7 +136,14 @@ fn what_happened_is_written_with_the_next_sample() -> anyhow::Result<()> {
             .flat_map(|s| &s.e)
             .map(|e| (e.kind, e.what.as_str()))
             .collect();
-        wanted.iter().all(|w| said.contains(w)) && day.samples.iter().any(|s| s.m.len() == 3)
+        // The second screen's frames are counted from its first frame on:
+        // a sample written before it draws has none, so wait for one that has.
+        wanted.iter().all(|w| said.contains(w))
+            && day.samples.iter().any(|s| s.m.len() == 3)
+            && day
+                .samples
+                .iter()
+                .any(|s| s.o.contains_key("HEADLESS-2") && s.f > 0)
     })?;
     assert!(all, "{:#?}", day.samples);
     for s in &day.samples {

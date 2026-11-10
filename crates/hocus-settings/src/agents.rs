@@ -741,6 +741,28 @@ mod tests {
     }
 
     #[test]
+    fn the_secretary_s_switch_writes_classic_or_assistant() {
+        let codec = Codec::Flag {
+            off: "classic",
+            on: "assistant",
+        };
+        assert_eq!(codec.read(&"assistant".into()), Some(Value::Bool(true)));
+        assert_eq!(codec.read(&"classic".into()), Some(Value::Bool(false)));
+        assert_eq!(codec.read(&"on".into()), None);
+        assert_eq!(
+            codec
+                .write(&Value::Bool(true))
+                .and_then(|v| v.as_str().map(str::to_owned)),
+            Some("assistant".to_owned())
+        );
+        let names: Vec<&str> = crate::search::find("secrétaire", Lang::French)
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        assert!(names.contains(&"La secrétaire"), "{names:?}");
+    }
+
+    #[test]
     fn the_preview_shows_what_the_halo_shows() {
         assert!(Played::ALL.iter().all(|p| p.shown_by("all")));
         assert!(Played::Waiting.shown_by("waiting") && !Played::Done.shown_by("waiting"));

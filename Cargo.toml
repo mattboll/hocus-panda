@@ -24,6 +24,14 @@ unwrap_used = "warn"
 [profile.dev]
 # Keep debug builds usable: the compositor draws every frame.
 opt-level = 1
+# Line tables only: backtraces keep file and line, and target/ stays a
+# fraction of its size with full debug info (which outgrew CI's disk).
+# Here, not in each tool's environment: a build with other settings
+# fingerprints differently and builds every dependency again.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3

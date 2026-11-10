@@ -39,8 +39,10 @@ mod column;
 mod curtain;
 mod day;
 mod desktops;
+mod drawer;
 mod emoji;
 mod ending;
+mod field;
 mod footer;
 mod foreign;
 mod in_use;
@@ -60,9 +62,11 @@ mod pointer;
 mod popover;
 mod reminder;
 mod renderer;
+mod secretary;
 mod setup;
 mod share;
 mod side;
+mod speak;
 mod tasks;
 mod theme;
 mod today;
@@ -640,6 +644,7 @@ impl Shell {
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
+                    speak::peek::forget(&bar.output);
                     footer::forget(&bar.output);
                     tasks::draw::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
@@ -687,6 +692,7 @@ impl Shell {
                 launcher::outside();
                 emoji::outside();
                 actions::close();
+                drawer::outside();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -754,6 +760,7 @@ impl Shell {
             }
             ToShell::NoPeek => {
                 agents::peek::back();
+                speak::peek::back();
                 Task::none()
             }
             ToShell::ScreensMoved(moved) => {
@@ -865,12 +872,29 @@ impl Shell {
             ToShell::Day(ask) => {
                 if let hocus_link::DayAsk::Slept(seconds) = ask {
                     self.slept(seconds);
+                    secretary::resumed(Some(seconds));
                 }
                 day::ask(ask);
                 Task::none()
             }
             ToShell::Join => {
                 reminder::join_key();
+                Task::none()
+            }
+            ToShell::Secretary(shown) => {
+                secretary::told(shown);
+                Task::none()
+            }
+            ToShell::SecretaryAsk(text) => {
+                secretary::ask(text);
+                Task::none()
+            }
+            ToShell::SecretaryDrawer { output, width } => {
+                drawer::toggle(&output, width);
+                Task::none()
+            }
+            ToShell::SecretaryPeek(id) => {
+                speak::peek::show(id);
                 Task::none()
             }
             ToShell::Fullscreen(screens) => {
@@ -882,6 +906,8 @@ impl Shell {
                 Task::none()
             }
             ToShell::Lock(shown) => {
+                secretary::locked(true);
+                speak::poke();
                 let screens = outputs::step();
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
@@ -891,15 +917,19 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
+                secretary::locked(false);
                 let effects = lock::end();
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
                 let effects = curtain::set(shown);
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
                 let effects = curtain::end();
+                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -1205,6 +1235,7 @@ impl Shell {
         let output = bar.output.clone();
         self.place_popovers(id);
         agents::peek::form(&output, form);
+        speak::peek::moved();
         self.fit(id)
     }
 
@@ -1724,6 +1755,14 @@ impl Shell {
 
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if let Some(bar) = speak::peek::bar_of(id) {
+            return Some(
+                canvas(speak::peek::View { bar })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
+            );
+        }
         let bar = agents::peek::bar_of(id)?;
         Some(
             canvas(agents::peek::View { bar })
@@ -1776,6 +1815,22 @@ impl Shell {
             .height(Length::Fill)
             .into(),
         )
+    }
+
+    /// The secretary's drawer, if its surface is `id`.
+    fn drawer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        if !drawer::is_surface(id) {
+            return None;
+        }
+        let drawn = canvas(drawer::draw::View {
+            id,
+            words: drawer::words(),
+            glass: self.look.glass,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
+        // An input method for its fields (#763).
+        Some(field::ime::Asking::new(drawn, Box::new(move || drawer::ime(id))).into())
     }
 
     /// The emoji picker, if its surface is `id`.
@@ -2056,6 +2111,7 @@ impl Shell {
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.actions_view(id))
+                .or_else(|| self.drawer_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
@@ -2357,6 +2413,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             launcher::outside();
                             emoji::outside();
                             actions::close();
+                            drawer::outside();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
@@ -2450,6 +2507,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
+                            speak::peek::back();
+                            continue;
+                        }
+                        Ok(ToShell::SecretaryPeek(id)) => {
+                            speak::peek::show(id);
                             continue;
                         }
                         Ok(ToShell::ScreensMoved(moved)) => {
@@ -2504,6 +2566,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::EmojiInserted) => {
                             emoji::inserted();
+                            continue;
+                        }
+                        // The secretary's drawer: its own surface
+                        // (secretary.md §5).
+                        Ok(ToShell::SecretaryDrawer { output, width }) => {
+                            drawer::toggle(&output, width);
                             continue;
                         }
                         // The actions palette: its own surface (#736).
@@ -2592,12 +2660,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             popover::session::open(&output);
                             continue;
                         }
-                        // `Super+B` (bar.md §11): the item's surface
-                        // takes the keyboard and draws its ring.
-                        Ok(ToShell::BarKeyboard(output)) => {
-                            popover::bar_keyboard(output.as_deref());
-                            continue;
-                        }
+                        // `Super+B` (bar.md §11) is not taken here: it
+                        // would overtake a bar's form still on its way as
+                        // a message (`Super+Shift+B` just before), and the
+                        // form, coming after, would take the keyboard back
+                        // from the bar. It goes as a message, in its turn.
                         _ => {}
                     }
                     let _ = output.send(Message::FromCompositor(line)).await;
