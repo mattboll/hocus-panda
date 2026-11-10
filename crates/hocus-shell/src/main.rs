@@ -42,6 +42,7 @@ mod desktops;
 mod drawer;
 mod emoji;
 mod ending;
+mod field;
 mod footer;
 mod foreign;
 mod in_use;
@@ -1821,16 +1822,15 @@ impl Shell {
         if !drawer::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(drawer::draw::View {
-                id,
-                words: drawer::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        let drawn = canvas(drawer::draw::View {
+            id,
+            words: drawer::words(),
+            glass: self.look.glass,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
+        // An input method for its fields (#763).
+        Some(field::ime::Asking::new(drawn, Box::new(move || drawer::ime(id))).into())
     }
 
     /// The emoji picker, if its surface is `id`.

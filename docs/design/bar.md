@@ -1881,6 +1881,48 @@ What issue #465 changes under the five popovers, nothing on screen.
   keyboard's ring, muted, a row unfolded, a password refused, a failure, a
   list scrolled), pixel for pixel the same.
 
+### The shell's text field (#763, 2026-11-10)
+
+The shell draws its own widgets on canvases, and each field was written
+by hand (typing and Backspace). One field, edited as everywhere, is now
+shared (`hocus-shell/src/field/`); the secretary's drawer's field and her
+key's field use it first, the others move to it later (listed on #763).
+
+- **The model** (`Field`): its text, its caret and the selection's anchor
+  (byte offsets on character boundaries), what the pointer does (an enum:
+  `Idle`, or `Dragging` by character, word or line from where it began),
+  its undo history (typing gathered a word at a time, a run of deletions
+  at once, the rest a step each; 200 steps), an input method's preedit.
+  Pure: told what a key or the pointer asks (`Act`, `press`, `drag`,
+  `release`), it says what came of it (`Outcome`: the same, moved,
+  edited, to copy, cut, to paste); the surface reads and writes the
+  clipboard (`paste::Clean::Lines` keeps a paste's line breaks).
+  Its kinds: `Lines` (a line break goes in) and `Secret` (one line,
+  masked, never copied nor cut out, no history, a word is its whole, its
+  room taken once and its text overwritten with zeros as it empties or
+  goes).
+- **Its keys** (`field::keys::act`): the arrows (Ctrl: by word), Home and
+  End (Ctrl: the text's ends), Shift with them, Backspace and Delete
+  (Ctrl: a word), `Ctrl+A`, `Ctrl+C`/`X`/`V`, `Ctrl+Insert`,
+  `Shift+Delete`, `Shift+Insert`, `Ctrl+Z`, `Ctrl+Shift+Z` and `Ctrl+Y`,
+  what is typed. Enter, Tab and Escape stay the surface's.
+- **Laid out** (`field::view::Laid`): its rows (on lines, broken between
+  words, a word too long broken where it must; one line for a secret, a
+  dot a character), scrolled to keep the caret in view (down its rows,
+  or across), where a point falls in it, and its rows are the lines Home,
+  End, Up and Down follow (`field::Lines`; Up and Down keep their place
+  across). Drawn with the selection behind its text in the theme's
+  selection colour (`theme::SELECTION`), the preedit underlined, the
+  caret while it has the keyboard (still: nothing blinks at rest).
+- **An input method** (`field::ime::Asking`): a canvas cannot ask iced for
+  one, so a surface with a field wraps its widgets in `Asking`, which asks
+  at each redraw while a field there has the keyboard (text-input-v3
+  enabled, the caret's place, `Secure` for a secret). Its preedit and
+  commits come back to the canvas as iced's `InputMethod` events.
+- **Double and triple clicks** take the word and the line as the drawer's
+  text selection does (`field::word_around`, `field::line_around`, which
+  `drawer/select.rs` uses too).
+
 ### 3.9, the desktops (2026-10-30)
 
 What the approved mockup of 3.9 shows, variant A for the mini form (§4

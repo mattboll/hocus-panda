@@ -363,6 +363,36 @@ impl Headless {
         )
     }
 
+    /// Whether the surface holding the keyboard (a window's or the
+    /// shell's) has a text input enabled.
+    pub fn keyboard_takes_text(&self) -> bool {
+        let state = &self.app.state;
+        state
+            .keyboard_surface()
+            .is_some_and(|s| state.emoji.inputs.enabled(&s))
+    }
+
+    /// What an input method would send the surface holding the keyboard:
+    /// `preedit` being composed (its cursor at its end), else `commit`
+    /// committed. Whether its text input took it.
+    pub fn input_method(&mut self, preedit: Option<&str>, commit: Option<&str>) -> bool {
+        let state = &self.app.state;
+        let Some(surface) = state.keyboard_surface() else {
+            return false;
+        };
+        match (preedit, commit) {
+            (Some(text), _) => {
+                let end = i32::try_from(text.len()).unwrap_or(0);
+                state
+                    .emoji
+                    .inputs
+                    .preedit_string(&surface, text, (end, end))
+            }
+            (None, Some(text)) => state.emoji.inputs.commit_string(&surface, text),
+            (None, None) => false,
+        }
+    }
+
     /// How many windows are minimised.
     pub fn minimized(&self) -> usize {
         let state = &self.app.state;

@@ -37,6 +37,7 @@ use super::{
 };
 use crate::{
     agents::{self, Brief, Look as AgentLook},
+    field::{self, Gesture},
     levels::draw::{MANROPE, MANROPE_BOLD},
     pandas,
     popover::kit::{measure, wrap},
@@ -353,7 +354,8 @@ pub struct Laid {
     /// The thread's height, whole, and how far it may scroll.
     pub content: f32,
     pub field: Rectangle,
-    pub field_lines: Vec<String>,
+    /// What the field shows (#763), laid out in it.
+    pub entry: Option<field::view::Laid>,
     pub send: Rectangle,
     pub foot: f32,
     /// What it shows, for the log.
@@ -376,12 +378,13 @@ pub struct Laid {
 
 /// Her key's field in the band under her header (#752): masked, with
 /// "Enregistrer", and its lines under it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct KeyBand {
     pub field: Rectangle,
     pub save: Rectangle,
-    /// What is typed, as dots (never the key), or the placeholder.
-    pub shown: String,
+    /// What is typed, laid out as dots (never the key), or the
+    /// placeholder (#763).
+    pub entry: field::view::Laid,
     pub placeholder: bool,
     /// The keyboard types there.
     pub focused: bool,
@@ -393,10 +396,33 @@ pub struct KeyBand {
     pub error: bool,
 }
 
-/// The dots a key shows as, at most this many: its length is not drawn
-/// past it.
-const KEY_DOTS: usize = 32;
 const KEY_FIELD: f32 = 30.0;
+const KEY_TEXT: f32 = 13.0;
+
+/// How the composer's field is set: 14 px, 1 to 5 rows in view (#763).
+fn composer_style() -> field::view::Style {
+    field::view::Style {
+        size: FIELD_TEXT,
+        line: FIELD_LINE,
+        font: MANROPE,
+        rows: FIELD_LINES,
+        measure,
+        hint: (FIELD_TEXT, MANROPE),
+    }
+}
+
+/// How her key's field is set: its dots bold, on one row, its
+/// placeholder smaller.
+fn key_style() -> field::view::Style {
+    field::view::Style {
+        size: KEY_TEXT,
+        line: KEY_TEXT * 1.45,
+        font: MANROPE_BOLD,
+        rows: 1,
+        measure,
+        hint: (11.5, MANROPE),
+    }
+}
 
 /// The measures of text, at a size, in a weight.
 fn width_of(text: &str, size: f32, bold: bool) -> f32 {
@@ -773,15 +799,17 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         laid.targets.push((Target::Agents, rect));
         top += AGENTS + AGENTS_BOTTOM;
     }
-    // The composer, from the bottom.
+    // The composer, from the bottom: its field (#763) beside the send
+    // button, 1 to 5 rows high, scrolled past them to keep its caret in
+    // view.
     let field_room = right - PAD - 14.0 - 8.0 - SEND - 6.0;
-    let shown_field = if open.field.is_empty() {
-        vec![words.placeholder(&laid.title)]
-    } else {
-        lines_of(&open.field, FIELD_TEXT, false, field_room)
-    };
-    let field_lines = shown_field.len().clamp(1, FIELD_LINES);
-    let field_height = FIELD.max(field_lines as f32 * FIELD_LINE + 14.0);
+    let mut entry = field::view::Laid::new(
+        &open.field,
+        field_room,
+        composer_style(),
+        &words.placeholder(&laid.title),
+    );
+    let field_height = FIELD.max(entry.height() + 14.0);
     let foot_height = FOOT * 1.4;
     // No field in a sub-view: nothing is said there (#758).
     laid.composer = subview.is_none() && open.tab == Tab::Talk;
@@ -794,14 +822,11 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         Point::new(PAD, composer_top + COMPOSER_TOP),
         Size::new(right - PAD, field_height),
     );
-    laid.field_lines = shown_field
-        .into_iter()
-        .rev()
-        .take(FIELD_LINES)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    entry.place(Point::new(
+        laid.field.x + 14.0,
+        laid.field.y + (field_height - entry.height()) / 2.0,
+    ));
+    laid.entry = Some(entry);
     laid.send = Rectangle::new(
         Point::new(
             laid.field.x + laid.field.width - 6.0 - SEND,
@@ -810,8 +835,9 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         Size::new(SEND, SEND),
     );
     if laid.composer {
-        laid.targets.push((Target::Send, laid.send));
+        // The send button over the field: it takes its clicks.
         laid.targets.push((Target::Field, laid.field));
+        laid.targets.push((Target::Send, laid.send));
     }
     laid.foot = laid.field.y + laid.field.height + FOOT_GAP + foot_height / 2.0;
     laid.thread = Rectangle::new(
@@ -891,7 +917,15 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "moment": format!("{:?}", crate::speak::moment()).to_lowercase(),
         "agents": laid.agents.as_ref().map(|(_, text, n, _)| format!("{text} | {n}")),
         "items": said_items,
-        "field": open.field.chars().count(),
+        "field": open.field.text().chars().count(),
+        // The caret and the selection's anchor in characters, the
+        // preedit's length, its rows and the first in view: never what
+        // it says.
+        "caret": open.field.text()[..open.field.caret()].chars().count(),
+        "anchor": open.field.text()[..open.field.anchor()].chars().count(),
+        "preedit": open.field.preedit().map(|p| p.text.chars().count()),
+        "field_rows": laid.entry.as_ref().map(|e| e.rows.len()),
+        "field_first": laid.entry.as_ref().map(|e| e.scroll.first),
         // Whether a key is being typed: never what, nor its length.
         "key_field": laid.key_band.as_ref().map(|k| !k.placeholder),
         "key_lines": laid.key_band.as_ref().map(|k| k.lines.iter().map(|(l, _, _)| l.clone()).collect::<Vec<_>>().join(" ")),
@@ -1135,11 +1169,18 @@ fn lay_out_key(
         Size::new(save_w, KEY_FIELD),
     );
     at += KEY_FIELD + 6.0;
-    let (shown, placeholder) = if open.key.is_empty() {
-        (words.key_placeholder().to_owned(), true)
-    } else {
-        ("•".repeat(open.key.chars().count().min(KEY_DOTS)), false)
-    };
+    // A dot a character, scrolled across to keep the caret in view.
+    let mut entry = field::view::Laid::new(
+        &open.key,
+        field.width - 20.0,
+        key_style(),
+        words.key_placeholder(),
+    );
+    entry.place(Point::new(
+        field.x + 10.0,
+        field.center_y() - entry.height() / 2.0,
+    ));
+    let placeholder = entry.placeholder;
     let mut said: Vec<(String, Color)> = Vec::new();
     let mut error = false;
     if c.key_asked.is_some() {
@@ -1170,7 +1211,7 @@ fn lay_out_key(
     laid.key_band = Some(KeyBand {
         field,
         save,
-        shown,
+        entry,
         placeholder,
         focused: open.focused && open.key_focus,
         lines,
@@ -3866,6 +3907,9 @@ pub struct State {
     logged: String,
     places: String,
     texts: String,
+    entry: String,
+    /// The keyboard's modifiers: Shift+click extends a field's selection.
+    modifiers: iced::keyboard::Modifiers,
 }
 
 /// What a layout is made for.
@@ -3911,6 +3955,25 @@ impl View {
                         .scroll
                         .clamp(0.0, (laid.content - laid.thread.height).max(0.0));
                 }
+                // The fields keep where they scrolled to (#763), and an
+                // input method opens at the caret of the one typed in.
+                if let Some(entry) = &laid.entry {
+                    open.field.scroll = entry.scroll;
+                }
+                if let Some(band) = &laid.key_band {
+                    open.key.scroll = band.entry.scroll;
+                }
+                use iced::advanced::input_method::Purpose;
+                open.ime = match (&laid.key_band, &laid.entry) {
+                    _ if !open.focused => None,
+                    (Some(band), _) if open.key_focus => {
+                        Some((band.entry.ime_cursor(), Purpose::Secure))
+                    }
+                    (_, Some(entry)) if laid.composer => {
+                        Some((entry.ime_cursor(), Purpose::Normal))
+                    }
+                    _ => None,
+                };
                 Some(Some((key, laid)))
             })
         });
@@ -3973,6 +4036,22 @@ impl View {
             })
             .collect();
         let texts = texts.join(" ");
+        // Where the field's rows in view start and end, and its caret
+        // (#763), never what they say.
+        let entry = laid
+            .entry
+            .as_ref()
+            .filter(|_| laid.composer)
+            .map(|e| {
+                let mut rows: Vec<String> = e
+                    .rows_in_view()
+                    .map(|(x0, middle, x1)| format!("{x0:.0},{middle:.0}>{x1:.0}"))
+                    .collect();
+                let caret = e.caret_rect();
+                rows.push(format!("caret@{:.0},{:.0}", caret.x, caret.center_y()));
+                rows.join(" ")
+            })
+            .unwrap_or_default();
         let mood = laid.mood;
         if said != state.logged {
             tracing::debug!("the drawer shows {said}");
@@ -3985,6 +4064,10 @@ impl View {
         if texts != state.texts {
             tracing::debug!("the drawer's texts {texts}");
             state.texts = texts;
+        }
+        if entry != state.entry {
+            tracing::debug!("the drawer's field rows {entry}");
+            state.entry = entry;
         }
         let now = Instant::now();
         let plays = super::with(|d| {
@@ -4383,32 +4466,12 @@ impl View {
                 .with_color(alpha(0x6CC287, if typing_here { 0.9 } else { 0.3 }))
                 .with_width(if typing_here { 1.5 } else { 1.0 }),
         );
-        let empty = open.field.is_empty();
-        let lines_top = field.y + (field.height - laid.field_lines.len() as f32 * FIELD_LINE) / 2.0;
-        let mut caret = Point::new(field.x + 14.0, lines_top + FIELD_LINE / 2.0);
-        for (n, line) in laid.field_lines.iter().enumerate() {
-            let at = Point::new(
-                field.x + 14.0,
-                lines_top + n as f32 * FIELD_LINE + FIELD_LINE / 2.0,
-            );
-            f.fill_text(text(
-                line,
-                at,
-                FIELD_TEXT,
-                if empty { FAINT } else { TEXT },
-                false,
-                Alignment::Left,
-            ));
-            if !empty {
-                caret = Point::new(at.x + width_of(line, FIELD_TEXT, false) + 1.0, at.y);
-            }
-        }
-        // Its caret while the keyboard types there, still as the shell's
-        // other fields' (nothing blinks at rest): after what is typed,
-        // else just before the placeholder's first letter (#752).
-        if typing_here {
-            let x = if empty { caret.x - 2.0 } else { caret.x };
-            f.fill_rectangle(Point::new(x, caret.y - 8.0), Size::new(1.5, 16.0), MINT);
+        // What is typed, its selection and its caret while the keyboard
+        // types there, still as the shell's other fields' (nothing blinks
+        // at rest); just before the placeholder's first letter (#752,
+        // #763).
+        if let Some(entry) = &laid.entry {
+            entry.draw(f, &field_look(), typing_here);
         }
         let send = laid.send;
         let hover = open.hover == Some(Target::Send);
@@ -4746,6 +4809,17 @@ fn arrow(f: &mut Frame, c: Point) {
     f.stroke(&path, Stroke::default().with_color(INK).with_width(2.0));
 }
 
+/// The colours of the drawer's fields: the selection in the theme's
+/// selection colour, as her text's (#761).
+fn field_look() -> field::view::Look {
+    field::view::Look {
+        text: TEXT,
+        faint: FAINT,
+        caret: MINT,
+        selection: crate::theme::SELECTION.get(),
+    }
+}
+
 /// Her key's field, masked, its caret while it has the keyboard, and
 /// "Enregistrer".
 fn draw_key_band(f: &mut Frame, band: &KeyBand, open: &Open) {
@@ -4773,24 +4847,7 @@ fn draw_key_band(f: &mut Frame, band: &KeyBand, open: &Open) {
             })
             .with_width(if band.focused || band.error { 1.5 } else { 1.0 }),
     );
-    let x = field.x + 10.0;
-    let y = field.center_y();
-    f.fill_text(text(
-        &band.shown,
-        Point::new(x, y),
-        if band.placeholder { 11.5 } else { 13.0 },
-        if band.placeholder { FAINT } else { TEXT },
-        !band.placeholder,
-        Alignment::Left,
-    ));
-    if band.focused {
-        let caret_x = if band.placeholder {
-            x - 2.0
-        } else {
-            x + width_of(&band.shown, 13.0, true) + 1.0
-        };
-        f.fill_rectangle(Point::new(caret_x, y - 8.0), Size::new(1.5, 16.0), MINT);
-    }
+    band.entry.draw(f, &field_look(), band.focused);
     let save = band.save;
     let hover = open.hover == Some(Target::KeySave);
     let ready = !band.placeholder;
@@ -4863,9 +4920,25 @@ impl<Message> canvas::Program<Message> for View {
                     super::copy(self.id, selected);
                     return Some(canvas::Action::request_redraw().and_capture());
                 }
-                super::key_on(self.id, key, *modifiers, text.as_deref())
+                // Its fields as laid out now: their carets move along
+                // their rows (#763).
+                self.laid(state, bounds.size());
+                let laid = state.laid.as_ref().map(|(_, l)| l);
+                let laids = super::Laids {
+                    composer: laid.and_then(|l| l.entry.as_ref()),
+                    key: laid.and_then(|l| l.key_band.as_ref().map(|b| &b.entry)),
+                };
+                super::key_on(self.id, key, *modifiers, text.as_deref(), laids)
                     .then(|| canvas::Action::request_redraw().and_capture())
             }
+            iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+                None
+            }
+            // An input method's preedit and commits, in the field typed in
+            // (#763).
+            iced::Event::InputMethod(event) => super::input_method(self.id, event)
+                .then(|| canvas::Action::request_redraw().and_capture()),
             // The keyboard on the drawer or gone from it: its caret and
             // its ring follow (#752).
             iced::Event::Window(window::Event::Focused) => {
@@ -4932,7 +5005,10 @@ impl<Message> canvas::Program<Message> for View {
             let Some(open) = d.open_on(self.id) else {
                 return mouse::Interaction::default();
             };
-            let selecting = open.selection.is_some_and(|s| s.hold == Hold::Dragging);
+            let selecting = open.selection.is_some_and(|s| s.hold == Hold::Dragging)
+                || [&open.field, &open.key]
+                    .iter()
+                    .any(|f| matches!(f.gesture, Gesture::Dragging { .. }));
             match open.hover {
                 Some(Target::Field | Target::Search | Target::KeyField) => mouse::Interaction::Text,
                 Some(t) if t.holds_text() && on_text(selecting) => mouse::Interaction::Text,
@@ -4968,8 +5044,15 @@ impl View {
         raw: Option<Point>,
         size: Size,
     ) -> Option<canvas::Action<Message>> {
+        let shift = state.modifiers.shift();
         let laid = self.laid(state, size)?;
         let content = laid.content - laid.thread.height;
+        // The drawer's fields as laid out (#763).
+        let entry_of = |entry: super::Entry| match entry {
+            super::Entry::Composer => laid.entry.as_ref().filter(|_| laid.composer),
+            super::Entry::Key => laid.key_band.as_ref().map(|b| &b.entry),
+        };
+        let entries = [super::Entry::Composer, super::Entry::Key];
         enum Then {
             Nothing,
             Draw,
@@ -4999,6 +5082,16 @@ impl View {
                     if open.hover != target {
                         open.hover = target;
                         draw = true;
+                    }
+                    // A press in a field drags its selection (#763).
+                    for entry in entries {
+                        if let (Some(view), Some(p)) = (entry_of(entry), raw)
+                            && matches!(open.entry(entry).gesture, Gesture::Dragging { .. })
+                            && open.entry(entry).drag(view.at(p))
+                        {
+                            open.changed();
+                            draw = true;
+                        }
                     }
                     // A press on her text drags its selection; held past
                     // the thread's top or bottom, the thread scrolls under
@@ -5034,6 +5127,30 @@ impl View {
                         open.pressed = target;
                         return Some(Then::Nothing);
                     }
+                    // A press in a field (#763): the keyboard types there,
+                    // its caret goes to the press; two or three in a row
+                    // take a word or a line, Shift+click extends.
+                    let pressed_entry = match target {
+                        Some(Target::Field) => Some(super::Entry::Composer),
+                        Some(Target::KeyField) => Some(super::Entry::Key),
+                        _ => None,
+                    };
+                    if let (Some(entry), Some(p)) = (pressed_entry, at)
+                        && let Some(view) = entry_of(entry)
+                    {
+                        let clicks = clicks_at(open, p);
+                        open.menu = None;
+                        open.selection = None;
+                        open.edge = None;
+                        open.pressed = target;
+                        open.key_focus = entry == super::Entry::Key;
+                        for other in entries.into_iter().filter(|e| *e != entry) {
+                            open.entry(other).deselect();
+                        }
+                        open.entry(entry).press(view.at(p), clicks, shift);
+                        open.changed();
+                        return Some(Then::Draw);
+                    }
                     let had = open.menu.take().is_some() || open.selection.is_some();
                     open.pressed = target;
                     // A press on a button never starts a selection; on a
@@ -5049,18 +5166,15 @@ impl View {
                     };
                     // One, two or three presses in a row: a place, a word,
                     // a paragraph.
-                    let now = Instant::now();
-                    let clicks = match open.clicks {
-                        Some((then, q, n))
-                            if now.duration_since(then) <= super::MULTI_CLICK
-                                && (q.x - p.x).abs() <= 4.0
-                                && (q.y - p.y).abs() <= 4.0 =>
-                        {
-                            n % 3 + 1
-                        }
-                        _ => 1,
-                    };
-                    open.clicks = Some((now, p, clicks));
+                    let clicks = clicks_at(open, p);
+                    // Her text selected: a field's selection goes.
+                    let mut deselected = false;
+                    for entry in entries {
+                        deselected |= open.entry(entry).deselect();
+                    }
+                    if deselected {
+                        open.changed();
+                    }
                     let spot = Some(p)
                         .filter(|p| laid.thread.contains(*p))
                         .and_then(|p| laid.texts.spot_at(p, &measure));
@@ -5089,6 +5203,9 @@ impl View {
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
                     open.edge = None;
+                    for entry in entries {
+                        open.entry(entry).release();
+                    }
                     if let Some(selection) = &mut open.selection
                         && selection.hold == Hold::Dragging
                     {
@@ -5181,6 +5298,24 @@ impl View {
             }
         }
     }
+}
+
+/// The press at `p`: one, two or three in a row (close in time and
+/// place), counted on.
+fn clicks_at(open: &mut Open, p: Point) -> u8 {
+    let now = Instant::now();
+    let clicks = match open.clicks {
+        Some((then, q, n))
+            if now.duration_since(then) <= super::MULTI_CLICK
+                && (q.x - p.x).abs() <= 4.0
+                && (q.y - p.y).abs() <= 4.0 =>
+        {
+            n % 3 + 1
+        }
+        _ => 1,
+    };
+    open.clicks = Some((now, p, clicks));
+    clicks
 }
 
 /// What is selected, for the tests: how many characters, never which.

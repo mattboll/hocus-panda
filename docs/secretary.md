@@ -166,6 +166,17 @@ are labelled « Question », in blue; what she notes says « Noté : … » with
 « Annuler » and a bar emptying over its ten seconds. Under the field, only
 how to send: her model's name is in the Settings.
 
+Her field is edited as any: the arrows move the caret (with Ctrl, by
+word), Home and End go to the line's ends, Up and Down between lines,
+Shift with any of them selects, `Ctrl+A` selects it all; a click places
+the caret, a drag selects, a double click takes a word, a triple click the
+line, Shift+click extends; Backspace and Delete (with Ctrl, a word),
+`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z` to undo and `Ctrl+Shift+Z` to redo.
+What you type replaces what is selected. Enter sends, Shift+Enter goes to
+the line; `↑` in an empty field brings back your last sentence. An input
+method's text shows underlined at the caret while you compose it. Her
+key's field edits the same way, masked, and nothing copies it out.
+
 Her text is selected with the pointer as in any chat: her answers, your
 sentences, her questions, the drafts she proposes, her morning briefing
 (its card and the briefing unfolded) and the lines of « Ce qu'elle sait »

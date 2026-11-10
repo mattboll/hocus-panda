@@ -29,6 +29,11 @@
 //! or triple click, `Ctrl+C`, the right click's « Copier »; a click
 //! elsewhere or `Esc` clears it. No button copies.
 //!
+//! Its field and her key's are the shell's text field ([`crate::field`],
+//! #763), edited as everywhere: Enter sends and Shift+Enter breaks the
+//! line; her key's is masked and never copied out. One selection at a
+//! time: a press in a field lets her text's go, and the other way round.
+//!
 //! What she says reaches it from the shell's line to her
 //! ([`crate::secretary`]), off iced's loop: the drawer is woken only while
 //! it is open. Closed, nothing of hers draws.
@@ -51,7 +56,11 @@ use hocus_secretary_link::{
 use iced::{Point, Size, keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Field, Outcome},
+    popover::Effect,
+};
 
 /// The characters the field keeps at most.
 const FIELD_MOST: usize = 2000;
@@ -582,7 +591,8 @@ pub struct Open {
     pub base: u32,
     pub width: u32,
     pub tab: Tab,
-    pub field: String,
+    /// The field (#763), edited as everywhere.
+    pub field: Field,
     /// The last sentence sent: `↑` on an empty field brings it back.
     pub recall: Option<String>,
     /// Her briefing unfolded in place of the thread.
@@ -624,11 +634,14 @@ pub struct Open {
     /// The keyboard is on the drawer (it is given it as it first shows; a
     /// window clicked takes it back).
     pub focused: bool,
-    /// Her key as it is pasted or typed in her band (never drawn, never
-    /// logged; overwritten once sent), and whether the keyboard types
-    /// there rather than in the field (#752).
-    pub key: String,
+    /// Her key as it is pasted or typed in her band (masked, never
+    /// copied, never logged; overwritten once sent), and whether the
+    /// keyboard types there rather than in the field (#752).
+    pub key: Field,
     pub key_focus: bool,
+    /// Where an input method opens for the field the keyboard types in,
+    /// and what it takes, as last laid out (#763).
+    pub ime: Option<(iced::Rectangle, iced::advanced::input_method::Purpose)>,
     /// Her text selected (#757): gone as the drawer closes.
     pub selection: Option<select::Selection>,
     /// A drag selecting held past the thread's top or bottom (#761):
@@ -687,7 +700,7 @@ pub const MULTI_CLICK: Duration = Duration::from_millis(500);
 
 impl Drop for Open {
     fn drop(&mut self) {
-        hocus_secretary_link::wipe(&mut self.key);
+        self.key.wipe();
     }
 }
 
@@ -727,7 +740,7 @@ pub struct Drawer {
 #[derive(Debug, Clone)]
 struct Kept {
     tab: Tab,
-    field: String,
+    field: Field,
     recall: Option<String>,
     scroll: f32,
     briefing: bool,
@@ -860,7 +873,7 @@ pub fn toggle(output: &str, screen: u32) {
         // Where it was (#755), unless her peek asks for a briefing.
         let kept = d.kept.take().filter(|_| point.is_none()).unwrap_or(Kept {
             tab: Tab::Talk,
-            field: String::new(),
+            field: Field::new(field::Kind::Lines, FIELD_MOST),
             recall: None,
             scroll: if point.is_some() { f32::MAX } else { 0.0 },
             briefing: false,
@@ -910,7 +923,8 @@ pub fn toggle(output: &str, screen: u32) {
             notebooks: std::collections::HashMap::new(),
             left_out: std::collections::HashMap::new(),
             focused: true,
-            key: String::new(),
+            key: Field::new(field::Kind::Secret, KEY_MOST),
+            ime: None,
             // Her key missing: the keyboard types in its field first.
             key_focus: crate::secretary::conversation(|c| {
                 c.look.as_ref().is_some_and(|l| l.key.is_some())
@@ -1534,7 +1548,8 @@ pub fn act(id: window::Id, target: Target) {
                         })
                 });
                 if let Some(said) = said {
-                    open.field = said;
+                    open.field.set(&said);
+                    open.key_focus = false;
                     open.changed();
                 }
                 Then::Draw
@@ -1585,7 +1600,8 @@ pub fn act(id: window::Id, target: Target) {
                     } else {
                         known.title.clone()
                     };
-                    open.field = words().about(&title);
+                    open.field.set(&words().about(&title));
+                    open.key_focus = false;
                     open.tab = Tab::Talk;
                     open.width = open.base;
                     open.changed();
@@ -1728,8 +1744,8 @@ fn key_band() -> Option<String> {
 /// lock: it empties, its text overwritten.
 fn send_key(open: &mut Open) -> Option<(String, String)> {
     let provider = key_band()?;
-    let key = open.key.trim().to_owned();
-    hocus_secretary_link::wipe(&mut open.key);
+    let key = open.key.text().trim().to_owned();
+    open.key.wipe();
     open.changed();
     if key.is_empty() || crate::secretary::conversation(|c| c.key_asked.is_some()) {
         return None;
@@ -1753,14 +1769,79 @@ pub fn focused(id: window::Id, on: bool) -> bool {
     })
 }
 
-/// A key in her key's field: `Enter` sends it, `Ctrl+V` pastes, nothing
-/// copies it out; `Esc` closes, `Tab` goes to the field.
+/// The drawer's fields (#763).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entry {
+    /// The composer, to her.
+    Composer,
+    /// Her key's, in her band.
+    Key,
+}
+
+impl Open {
+    /// Field `entry`.
+    pub fn entry(&mut self, entry: Entry) -> &mut Field {
+        match entry {
+            Entry::Composer => &mut self.field,
+            Entry::Key => &mut self.key,
+        }
+    }
+
+    /// The field the keyboard types in: her key's while her band shows
+    /// and has it, else the composer; none on "Ce qu'elle sait".
+    pub fn typing(&self) -> Option<Entry> {
+        match self.tab {
+            Tab::Knows => None,
+            Tab::Talk if self.key_focus && key_band().is_some() => Some(Entry::Key),
+            Tab::Talk => Some(Entry::Composer),
+        }
+    }
+}
+
+/// The drawer's fields as last laid out: the lines their carets move
+/// along.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Laids<'a> {
+    pub composer: Option<&'a field::view::Laid>,
+    pub key: Option<&'a field::view::Laid>,
+}
+
+/// What `act` does to field `entry`, along its lines as laid out (by its
+/// line breaks if it is not laid out yet).
+fn edit(open: &mut Open, entry: Entry, act: field::Act, laid: Option<&field::view::Laid>) -> Then {
+    let outcome = match laid {
+        Some(laid) => open.entry(entry).apply(act, laid),
+        None => {
+            let mut text = open.entry(entry).text().to_owned();
+            let outcome = open.entry(entry).apply(act, &field::Paragraphs(&text));
+            field::wipe(&mut text);
+            outcome
+        }
+    };
+    match outcome {
+        Outcome::Same => Then::Nothing,
+        Outcome::Moved | Outcome::Edited => {
+            open.changed();
+            Then::Draw
+        }
+        Outcome::Copy(text) => Then::Clip(text),
+        Outcome::Cut(text) => {
+            open.changed();
+            Then::Clip(text)
+        }
+        Outcome::Paste => Then::Paste(entry),
+    }
+}
+
+/// A key in her key's field: `Enter` sends it, `Tab` goes to the
+/// composer, `Esc` closes; the rest edits it as any field, but nothing
+/// copies it out.
 fn key_field_key(
-    id: window::Id,
     open: &mut Open,
     key: &keyboard::Key,
     modifiers: keyboard::Modifiers,
     text: Option<&str>,
+    laid: Option<&field::view::Laid>,
 ) -> Then {
     use keyboard::{Key, key::Named};
     match key {
@@ -1774,66 +1855,23 @@ fn key_field_key(
             open.changed();
             Then::Draw
         }
-        Key::Named(Named::Backspace) => {
-            if modifiers.control() {
-                hocus_secretary_link::wipe(&mut open.key);
-            } else {
-                open.key.pop();
-            }
-            open.changed();
-            Then::Draw
-        }
-        _ if crate::paste::asks(key, modifiers) => {
-            let asked = crate::paste::request(crate::paste::Clean::Dropped, move |pasted| {
-                let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
-                    return;
-                };
-                let took = with(|d| match d.open_mut(id) {
-                    Some(open) if open.key_focus && open.key.len() + pasted.len() <= KEY_MOST => {
-                        open.key.push_str(pasted.trim());
-                        open.changed();
-                        true
-                    }
-                    _ => false,
-                });
-                if took {
-                    tracing::debug!("a key pasted into her key's field");
-                    wake();
-                }
-            });
-            if !asked {
-                tracing::debug!("nothing to paste into her key's field");
-            }
-            Then::Nothing
-        }
-        _ => match text {
-            Some(typed)
-                if !modifiers.control()
-                    && !modifiers.alt()
-                    && !modifiers.logo()
-                    && !typed.is_empty()
-                    && !typed.chars().any(char::is_control)
-                    && open.key.len() + typed.len() <= KEY_MOST =>
-            {
-                open.key.push_str(typed);
-                open.changed();
-                Then::Draw
-            }
-            _ => Then::Nothing,
+        _ => match field::keys::act(key, modifiers, text) {
+            Some(act) => edit(open, Entry::Key, act, laid),
+            None => Then::Nothing,
         },
     }
 }
 
-/// The longest key her field takes.
+/// The longest key her field takes, in characters.
 const KEY_MOST: usize = 512;
 
 /// The field's sentence sent: it empties, and `↑` brings it back.
 fn sentence(open: &mut Open) -> Option<String> {
-    let text = open.field.trim().to_owned();
+    let text = open.field.text().trim().to_owned();
     if text.is_empty() {
         return None;
     }
-    open.field.clear();
+    open.field.take();
     open.recall = Some(text.clone());
     open.scroll = 0.0;
     open.changed();
@@ -1847,6 +1885,103 @@ enum Then {
     /// Her key, for this provider, to give her.
     Key(String, String),
     Draw,
+    /// A field's text copied or cut out.
+    Clip(String),
+    /// The clipboard's text into this field.
+    Paste(Entry),
+}
+
+/// `text` copied or cut from a field of the drawer on its surface: the
+/// clipboard takes it, as the compositor offers the shell's copies.
+/// Neither the text nor its words are logged.
+fn clip(text: String) {
+    tracing::info!(chars = text.chars().count(), "the drawer's field copies");
+    crate::popover::send(vec![Effect::Tell(ToCompositor::Clip {
+        paste: false,
+        clip: Clip {
+            kind: ClipKind::Text,
+            data: text.into_bytes(),
+        },
+    })]);
+}
+
+/// The clipboard's text read off the loop, then into field `entry` of
+/// the drawer on `id` at its caret: her key's on one line, trimmed; the
+/// composer's with its line breaks.
+fn paste_into(id: window::Id, entry: Entry) {
+    let clean = match entry {
+        Entry::Composer => crate::paste::Clean::Lines,
+        Entry::Key => crate::paste::Clean::Dropped,
+    };
+    let asked = crate::paste::request(clean, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let took = with(|d| match d.open_mut(id) {
+            Some(open) => {
+                let pasted = match entry {
+                    Entry::Key => pasted.trim(),
+                    Entry::Composer => pasted,
+                };
+                let took = open.entry(entry).paste(pasted) == Outcome::Edited;
+                if took {
+                    open.changed();
+                }
+                took
+            }
+            None => false,
+        });
+        if took {
+            tracing::debug!(
+                ?entry,
+                "the clipboard's text pasted into the drawer's field"
+            );
+            wake();
+        }
+    });
+    if !asked {
+        tracing::debug!(?entry, "nothing to paste into the drawer's field");
+    }
+}
+
+/// Where an input method opens on the drawer on `id`, and what its field
+/// takes, while a field there has the keyboard (#763).
+pub fn ime(id: window::Id) -> Option<(iced::Rectangle, iced::advanced::input_method::Purpose)> {
+    with(|d| d.open_on(id).and_then(|open| open.ime))
+}
+
+/// An input method's preedit or commit for the field the keyboard types
+/// in on the drawer on `id` (#763): whether it changed.
+pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
+    use iced::advanced::input_method::Event as Ime;
+    with(|d| {
+        let Some(open) = d.open_mut(id) else {
+            return false;
+        };
+        let Some(entry) = open.typing() else {
+            return false;
+        };
+        let field = open.entry(entry);
+        let outcome = match event {
+            Ime::Opened => Outcome::Same,
+            Ime::Preedit(text, cursor) => field.compose(text, cursor.clone()),
+            Ime::Commit(text) => {
+                field.compose("", None);
+                field.apply(field::Act::Insert(text.clone()), &field::Paragraphs(""))
+            }
+            Ime::Closed => field.compose("", None),
+        };
+        if outcome == Outcome::Same {
+            return false;
+        }
+        tracing::debug!(
+            ?entry,
+            commit = matches!(event, Ime::Commit(_)),
+            "an input method in the drawer's field"
+        );
+        open.changed();
+        true
+    })
 }
 
 /// A key in "Ce qu'elle sait": the search field takes what is typed;
@@ -1899,12 +2034,14 @@ fn search_key(
     Then::Draw
 }
 
-/// A key on the open drawer on `id`: what it does. Whether it was its.
+/// A key on the open drawer on `id`, its fields laid out as `laids`:
+/// what it does. Whether it was its.
 pub fn key_on(
     id: window::Id,
     key: &keyboard::Key,
     modifiers: keyboard::Modifiers,
     text: Option<&str>,
+    laids: Laids<'_>,
 ) -> bool {
     use keyboard::{Key, key::Named};
     let then = with(|d| {
@@ -1923,63 +2060,42 @@ pub fn key_on(
         if open.tab == Tab::Knows {
             return Some(search_key(open, key, modifiers, text));
         }
-        if open.key_focus && key_band().is_some() {
-            return Some(key_field_key(id, open, key, modifiers, text));
+        if open.typing() == Some(Entry::Key) {
+            return Some(key_field_key(open, key, modifiers, text, laids.key));
         }
+        let plain = !modifiers.control() && !modifiers.alt() && !modifiers.logo();
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
-            Key::Named(Named::Enter) if modifiers.shift() => {
-                open.field.push('\n');
-                open.changed();
-                Then::Draw
-            }
+            Key::Named(Named::Enter) if modifiers.shift() => edit(
+                open,
+                Entry::Composer,
+                field::Act::Insert("\n".to_owned()),
+                laids.composer,
+            ),
             Key::Named(Named::Enter) => match sentence(open) {
                 Some(text) => Then::Send(text),
                 None => Then::Nothing,
             },
-            Key::Named(Named::ArrowUp) if open.field.is_empty() => match open.recall.clone() {
-                Some(last) => {
-                    open.field = last;
-                    open.changed();
-                    Then::Draw
-                }
-                None => Then::Nothing,
-            },
-            Key::Named(Named::Backspace) => {
-                if open.field.is_empty() {
-                    return Some(Then::Nothing);
-                }
-                if modifiers.control() {
-                    let kept = open.field.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                    open.field.truncate(kept);
-                } else {
-                    open.field.pop();
-                }
-                open.changed();
-                Then::Draw
-            }
-            _ => match text {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if open.field.chars().count() + typed.chars().count() > FIELD_MOST {
-                        return Some(Then::Nothing);
+            // The last sentence back, in an empty field.
+            Key::Named(Named::ArrowUp) if plain && !modifiers.shift() && open.field.is_empty() => {
+                match open.recall.clone() {
+                    Some(last) => {
+                        open.field.set(&last);
+                        open.changed();
+                        Then::Draw
                     }
-                    open.field.push_str(typed);
-                    open.changed();
-                    Then::Draw
+                    None => Then::Nothing,
                 }
-                _ => Then::Nothing,
+            }
+            _ => match field::keys::act(key, modifiers, text) {
+                Some(act) => edit(open, Entry::Composer, act, laids.composer),
+                None => Then::Nothing,
             },
         })
     });
     match then {
         None => false,
-        Some(Then::Nothing) => true,
+        Some(Then::Nothing | Then::Draw) => true,
         Some(Then::Close) => {
             close();
             true
@@ -1992,7 +2108,14 @@ pub fn key_on(
             crate::secretary::give_key(provider, key);
             true
         }
-        Some(Then::Draw) => true,
+        Some(Then::Clip(text)) => {
+            clip(text);
+            true
+        }
+        Some(Then::Paste(entry)) => {
+            paste_into(id, entry);
+            true
+        }
     }
 }
 

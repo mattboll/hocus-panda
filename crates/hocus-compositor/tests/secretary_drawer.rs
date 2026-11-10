@@ -31,6 +31,12 @@
 //!   scrolls, the wheel keeps it; the I-beam over text, a press on a
 //!   button never selects; no « Copier » button any more, a masked secret
 //!   copies as its mask.
+//! - The field, edited as everywhere (#763), one test per criterion: the
+//!   caret's keys and Shift's selection, Enter and Shift+Enter; deleting,
+//!   the clipboard, undo; the pointer's click, drag, double and triple
+//!   click, Shift+click; the caret and the selection drawn, the rows
+//!   scrolled to the caret; an input method's preedit and commit; her
+//!   key's field masked and never copied out.
 //!
 //! Pixman, so the shell draws on the CPU, opaque and still, as in CI.
 //! With `HOCUS_DRAWER_SHOTS=DIR`, the tests leave PNGs of the drawer
@@ -2045,5 +2051,488 @@ fn the_queue_s_lines_are_copied_too() -> anyhow::Result<()> {
     bed.clicks(((line.start.0 + line.end.0) / 2.0, line.start.1), 3)?;
     bed.ctrl_c();
     bed.clipboard_is(&state)?;
+    Ok(())
+}
+
+// --- The field, edited as everywhere (#763) -------------------------------------------
+
+const KEY_HOME: u32 = 102;
+const KEY_END: u32 = 107;
+const KEY_BACKSPACE: u32 = 14;
+const KEY_DELETE: u32 = 111;
+const KEY_LEFTSHIFT: u32 = common::KEY_LEFTSHIFT;
+const KEY_V: u32 = 47;
+const KEY_Z: u32 = 44;
+
+/// The evdev key of an ASCII letter or a space, on the US layout the
+/// tests' keyboard has.
+fn key_of(c: char) -> u32 {
+    match c {
+        ' ' => 57,
+        'q' => 16,
+        'w' => 17,
+        'e' => 18,
+        'r' => 19,
+        't' => 20,
+        'y' => 21,
+        'u' => 22,
+        'i' => 23,
+        'o' => 24,
+        'p' => 25,
+        'a' => 30,
+        's' => 31,
+        'd' => 32,
+        'f' => 33,
+        'g' => 34,
+        'h' => 35,
+        'j' => 36,
+        'k' => 37,
+        'l' => 38,
+        'z' => 44,
+        'x' => 45,
+        'c' => 46,
+        'v' => 47,
+        'b' => 48,
+        'n' => 49,
+        'm' => 50,
+        '-' => 12,
+        _ => panic!("no key for {c:?}"),
+    }
+}
+
+/// The field's rows in view as the drawer logged them, global: where each
+/// starts and ends across, its middle; and its caret.
+#[derive(Debug, Clone)]
+struct Rows {
+    rows: Vec<(f64, f64, f64)>,
+    caret: (f64, f64),
+}
+
+impl Rows {
+    /// A point on row `n`, `t` of its way across.
+    fn at(&self, n: usize, t: f64) -> (f64, f64) {
+        let (x0, y, x1) = self.rows[n];
+        (x0 + (x1 - x0) * t, y)
+    }
+}
+
+impl Bed {
+    /// `text` typed, once the field holds `total` characters.
+    fn type_text(&mut self, text: &str, total: u64) -> anyhow::Result<()> {
+        for c in text.chars() {
+            chord(&mut self.hp, &[key_of(c)]);
+        }
+        self.shows(|s| s["field"] == total)?;
+        Ok(())
+    }
+
+    /// The field's caret and its selection's anchor, in characters, once
+    /// they are these.
+    fn caret_is(&mut self, caret: u64, anchor: u64) -> anyhow::Result<serde_json::Value> {
+        self.shows(|s| s["caret"] == caret && s["anchor"] == anchor)
+            .map_err(|e| {
+                let log = common::logged(&self.log);
+                let tail: Vec<&str> = log.lines().rev().take(40).collect();
+                anyhow::anyhow!("caret {caret}, anchor {anchor}: {e}\n{}", tail.join("\n"))
+            })
+    }
+
+    /// The field's rows as last logged, once `least` show.
+    fn rows(&mut self, least: usize) -> anyhow::Result<Rows> {
+        let log = self.log.clone();
+        let parse = |text: &str| -> Option<Rows> {
+            let line = text
+                .lines()
+                .rev()
+                .find(|l| l.contains("the drawer's field rows"))?;
+            let list = line.split("the drawer's field rows").nth(1)?;
+            let mut rows = Vec::new();
+            let mut caret = None;
+            for part in list.split_whitespace() {
+                let pair = |p: &str| -> Option<(f64, f64)> {
+                    let (x, y) = p.split_once(',')?;
+                    Some((x.parse().ok()?, y.parse().ok()?))
+                };
+                if let Some(at) = part.strip_prefix("caret@") {
+                    caret = pair(at);
+                } else {
+                    let (start, end) = part.split_once('>')?;
+                    let (x0, y) = pair(start)?;
+                    rows.push((x0, y, end.parse().ok()?));
+                }
+            }
+            Some(Rows {
+                rows,
+                caret: caret?,
+            })
+        };
+        let done = self.hp.dispatch_until(WAIT, |_| {
+            parse(&common::logged(&log)).is_some_and(|r| r.rows.len() >= least)
+        })?;
+        anyhow::ensure!(done, "never {least} rows in the field");
+        let r = self.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
+        let (x, y) = (f64::from(r.x), f64::from(r.y));
+        let rows = parse(&common::logged(&self.log)).unwrap_or(Rows {
+            rows: Vec::new(),
+            caret: (0.0, 0.0),
+        });
+        Ok(Rows {
+            rows: rows
+                .rows
+                .into_iter()
+                .map(|(x0, m, x1)| (x0 + x, m + y, x1 + x))
+                .collect(),
+            caret: (rows.caret.0 + x, rows.caret.1 + y),
+        })
+    }
+
+    /// `Enter`, and what the field held is said to her: the user's bubble.
+    fn sends(&mut self, said: &str) -> anyhow::Result<()> {
+        self.type_keys(&[KEY_ENTER]);
+        let mine = format!("user:{said}");
+        self.shows(|s| {
+            s["field"] == 0
+                && s["items"]
+                    .as_array()
+                    .is_some_and(|i| i.iter().any(|i| i.as_str() == Some(&mine)))
+        })
+        .map_err(|e| anyhow::anyhow!("never said {said:?}: {e}"))?;
+        Ok(())
+    }
+
+    /// The drawer open, its field holding the keyboard.
+    fn field_ready(&mut self) -> anyhow::Result<()> {
+        self.super_s();
+        self.opened()?;
+        self.shows(|s| s["focus"] == "field")?;
+        Ok(())
+    }
+
+    /// The press at `at` with Shift held.
+    fn shift_click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
+        common::over(&mut self.hp, at, hocus_link::SECRETARY_NAMESPACE)?;
+        self.hp.key(KEY_LEFTSHIFT, true);
+        self.hp.button(BTN_LEFT, true);
+        self.hp.button(BTN_LEFT, false);
+        self.hp.key(KEY_LEFTSHIFT, false);
+        wait(&mut self.hp, Duration::from_millis(60))?;
+        Ok(())
+    }
+}
+
+/// #763 AC1, the caret's keys: Left/Right, Ctrl+Left/Right by word,
+/// Home/End on the caret's line, Up/Down between lines, Shift with them
+/// selects, Ctrl+A; what is typed replaces the selection; Enter sends,
+/// Shift+Enter breaks the line.
+#[test]
+fn the_caret_moves_by_character_word_and_line_and_shift_selects() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.field_ready()?;
+    // "bonjour lea a demain": « demain » from 14 to 20.
+    bed.type_text("bonjour lea a demain", 20)?;
+    bed.caret_is(20, 20)?;
+    bed.type_keys(&[common::KEY_LEFT, common::KEY_LEFT]);
+    bed.caret_is(18, 18)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, common::KEY_LEFT]);
+    bed.caret_is(14, 14)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, common::KEY_LEFT]);
+    bed.caret_is(12, 12)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, common::KEY_RIGHT]);
+    bed.caret_is(13, 13)?;
+    bed.type_keys(&[common::KEY_RIGHT, KEY_HOME]);
+    bed.caret_is(0, 0)?;
+    bed.type_keys(&[KEY_END]);
+    bed.caret_is(20, 20)?;
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_HOME]);
+    bed.caret_is(0, 20)?;
+    bed.shot("763-field-selected-by-keys")?;
+    // Right lets the selection go at its end.
+    bed.type_keys(&[common::KEY_RIGHT]);
+    bed.caret_is(20, 20)?;
+    // Shift+Enter: a second line, which Home and End keep to.
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_ENTER]);
+    bed.type_text("merci", 26)?;
+    let shown = bed.caret_is(26, 26)?;
+    assert_eq!(shown["field_rows"], 2, "{shown}");
+    bed.type_keys(&[KEY_HOME]);
+    bed.caret_is(21, 21)?;
+    bed.type_keys(&[KEY_END, common::KEY_UP]);
+    // Up: on the first line, under where it was across.
+    let shown = bed.shows(|s| s["caret"].as_u64().is_some_and(|c| c > 0 && c < 20))?;
+    let up = shown["caret"].as_u64().unwrap_or_default();
+    bed.type_keys(&[common::KEY_DOWN]);
+    bed.caret_is(26, 26)?;
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, common::KEY_UP]);
+    bed.caret_is(up, 26)?;
+    // Ctrl+A, and what is typed replaces it all.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, 30]);
+    bed.caret_is(26, 0)?;
+    for c in "salut".chars() {
+        chord(&mut bed.hp, &[key_of(c)]);
+    }
+    bed.caret_is(5, 5)?;
+    bed.sends("salut")?;
+    Ok(())
+}
+
+/// #763 AC1, editing: Backspace and Delete take a character, with Ctrl a
+/// word; Ctrl+C, Ctrl+X and Ctrl+V; Ctrl+Z and Ctrl+Shift+Z; the send button
+/// sends.
+#[test]
+fn backspace_delete_the_clipboard_and_undo_edit_as_everywhere() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.field_ready()?;
+    bed.type_text("un deux trois", 13)?;
+    bed.type_keys(&[KEY_BACKSPACE]);
+    bed.shows(|s| s["field"] == 12)?;
+    // « troi » by word: "un deux ".
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_BACKSPACE]);
+    bed.shows(|s| s["field"] == 8)?;
+    bed.type_keys(&[KEY_HOME, KEY_DELETE]);
+    bed.shows(|s| s["field"] == 7 && s["caret"] == 0)?;
+    // « n » by word: " deux ".
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_DELETE]);
+    bed.shows(|s| s["field"] == 6)?;
+    // The deletions after a move go back at once, then those before.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
+    bed.shows(|s| s["field"] == 8)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
+    bed.shows(|s| s["field"] == 13)?;
+    // Redone as it was undone: its caret where the deletions began.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z]);
+    bed.shows(|s| s["field"] == 8 && s["caret"] == 0)?;
+    bed.type_keys(&[KEY_END]);
+    bed.caret_is(8, 8)?;
+    // "un deux ": « deux » and its space selected, copied, cut, pasted
+    // twice.
+    chord(
+        &mut bed.hp,
+        &[KEY_LEFTCTRL, KEY_LEFTSHIFT, common::KEY_LEFT],
+    );
+    bed.caret_is(3, 8)?;
+    let mark = bed.mark();
+    bed.ctrl_c();
+    bed.clipboard_is("deux ")?;
+    bed.logged_after(mark, "the drawer's field copies")?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_X]);
+    bed.shows(|s| s["field"] == 3)?;
+    bed.clipboard_is("deux ")?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.shows(|s| s["field"] == 8)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_V]);
+    bed.shows(|s| s["field"] == 13 && s["caret"] == 13)?;
+    // Sent by its button, over the field's box.
+    let send = bed.place("Send")?;
+    bed.click(send)?;
+    bed.shows(|s| {
+        s["field"] == 0
+            && s["items"]
+                .as_array()
+                .is_some_and(|i| i.iter().any(|i| i.as_str() == Some("user:un deux deux")))
+    })?;
+    Ok(())
+}
+
+const KEY_X: u32 = 45;
+
+/// #763 AC2: a click places the caret, a drag selects, a double click
+/// takes a word, a triple click the line, Shift+click extends; the I-beam
+/// over the field.
+#[test]
+fn a_click_places_the_caret_a_drag_selects_and_clicks_take_a_word_or_the_line() -> anyhow::Result<()>
+{
+    let pause = Duration::from_millis(600);
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.field_ready()?;
+    bed.type_text("bonjour lea a demain", 20)?;
+    let rows = bed.rows(1)?;
+    let (x0, y, x1) = rows.rows[0];
+    bed.cursor_at(rows.at(0, 0.5), CursorIcon::Text)?;
+    bed.click((x0 + 0.5, y))?;
+    bed.caret_is(0, 0)?;
+    wait(&mut bed.hp, pause)?;
+    // Past the row's end, still in the field: its end.
+    bed.click((x1 + 20.0, y))?;
+    bed.caret_is(20, 20)?;
+    wait(&mut bed.hp, pause)?;
+    bed.drag((x0 + 0.5, y), (x1, y))?;
+    bed.caret_is(20, 0)?;
+    bed.shot("763-field-dragged")?;
+    wait(&mut bed.hp, pause)?;
+    // In « bonjour »: two presses take it, three the line.
+    let word = rows.at(0, 0.12);
+    bed.clicks(word, 2)?;
+    bed.caret_is(7, 0)?;
+    wait(&mut bed.hp, pause)?;
+    bed.clicks(word, 3)?;
+    bed.caret_is(20, 0)?;
+    wait(&mut bed.hp, pause)?;
+    // A click in « bonjour », then Shift+click at the end: from there.
+    bed.click(word)?;
+    let shown = bed.shows(|s| s["caret"].as_u64().is_some_and(|c| c > 0 && c < 7))?;
+    let caret = shown["caret"].as_u64().unwrap_or_default();
+    assert_eq!(shown["anchor"], caret, "a place, nothing selected");
+    wait(&mut bed.hp, pause)?;
+    bed.shift_click((x1 - 0.5, y))?;
+    bed.caret_is(20, caret)?;
+    Ok(())
+}
+
+/// #763 AC3: the caret and the selection are drawn, the selection in the
+/// theme's selection colour (the accent); with more lines than show, the
+/// field scrolls to keep the caret in view.
+#[test]
+fn the_caret_and_the_selection_are_drawn_and_the_field_scrolls_to_the_caret() -> anyhow::Result<()>
+{
+    let Some(mut bed) = start(Setup {
+        accent: Accent::Rose,
+        ..Setup::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.field_ready()?;
+    bed.type_text("bonjour lea a demain", 20)?;
+    bed.type_keys(&[common::KEY_LEFT; 7]);
+    bed.caret_is(13, 13)?;
+    common::at_rest(&mut bed.hp)?;
+    let rows = bed.rows(1)?;
+    bed.shot("763-field-caret")?;
+    // The caret mid-text, in the field's mint (where it was logged, to a
+    // pixel).
+    let mint = |p: &[i32; 3]| p[1] > p[0] + 60 && p[1] > p[2] + 40;
+    let since = Instant::now();
+    let caret = loop {
+        let caret: Vec<[i32; 3]> = [-1.0, 0.0, 1.0]
+            .iter()
+            .map(|dx| pixel(&mut bed.hp, (rows.caret.0 + dx, rows.caret.1)))
+            .collect::<anyhow::Result<_>>()?;
+        if caret.iter().any(mint) || since.elapsed() > WAIT {
+            break caret;
+        }
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+    };
+    assert!(caret.iter().any(mint), "the caret: {caret:?} at {rows:?}");
+    // Under the text, between its feet and the field's edge.
+    let (x0, y, x1) = rows.rows[0];
+    let span: Vec<f64> = (1..9)
+        .map(|k| x0 + (x1 - x0) * f64::from(k) / 9.0)
+        .collect();
+    let pink = |p: &[i32; 3]| p[0] - p[1] > 20 && p[2] - p[1] > 10;
+    let under = |bed: &mut Bed| -> anyhow::Result<Vec<[i32; 3]>> {
+        span.iter()
+            .map(|x| pixel(&mut bed.hp, (*x, y + 6.0)))
+            .collect()
+    };
+    let before = under(&mut bed)?;
+    assert_eq!(before.iter().filter(|p| pink(p)).count(), 0, "{before:?}");
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, 30]);
+    bed.caret_is(20, 0)?;
+    // As soon as the shell has drawn it.
+    let since = Instant::now();
+    let mut after = under(&mut bed)?;
+    while after.iter().filter(|p| pink(p)).count() < 7 && since.elapsed() < WAIT {
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        after = under(&mut bed)?;
+    }
+    assert!(
+        after.iter().filter(|p| pink(p)).count() >= 7,
+        "the accent behind the text selected: {after:?}"
+    );
+    bed.shot("763-field-selection")?;
+    // Eight lines: five show, the last ones, the caret's.
+    bed.type_keys(&[KEY_END]);
+    for c in "abcdefg".chars() {
+        chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_ENTER]);
+        chord(&mut bed.hp, &[key_of(c)]);
+    }
+    let shown = bed.shows(|s| s["field_rows"] == 8)?;
+    assert_eq!(shown["field_first"], 3, "{shown}");
+    bed.rows(5)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_HOME]);
+    bed.shows(|s| s["caret"] == 0 && s["field_first"] == 0)?;
+    bed.shot("763-field-scrolled-up")?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_END]);
+    bed.shows(|s| s["field_first"] == 3)?;
+    Ok(())
+}
+
+/// #763 AC4: an input method's preedit shows at the caret, its commit goes
+/// in there; the compositor's text input is enabled on the drawer while
+/// its field has the keyboard.
+#[test]
+fn an_input_method_composes_at_the_caret_and_commits_there() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.field_ready()?;
+    bed.type_text("bonjour demain", 14)?;
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, common::KEY_LEFT]);
+    bed.caret_is(8, 8)?;
+    let enabled = bed.hp.dispatch_until(WAIT, |hp| hp.keyboard_takes_text())?;
+    assert!(enabled, "the drawer's text input is enabled");
+    assert!(bed.hp.input_method(Some("lea"), None), "a preedit taken");
+    let shown = bed.shows(|s| s["preedit"] == 3)?;
+    assert_eq!(shown["field"], 14, "not in the text yet");
+    bed.shot("763-field-preedit")?;
+    assert!(bed.hp.input_method(None, Some("Léa ")), "a commit taken");
+    bed.shows(|s| s["preedit"].is_null() && s["field"] == 18)?;
+    bed.caret_is(12, 12)?;
+    bed.sends("bonjour Léa demain")?;
+    Ok(())
+}
+
+/// #763: her key's field is edited as the rest (its caret moves, a
+/// character goes), masked, and nothing copies or cuts it out.
+#[test]
+fn her_key_s_field_edits_as_any_but_nothing_copies_it_out() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup {
+        google: true,
+        refusing_api: true,
+        ..Setup::default()
+    })?
+    else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    bed.shows(|s| s["key_field"] == serde_json::json!(false) && s["focus"] == "key")?;
+    for c in "sk-ant-xxyy".chars() {
+        chord(&mut bed.hp, &[key_of(c)]);
+    }
+    bed.shows(|s| s["key_field"] == serde_json::json!(true))?;
+    // Back over « yy », one out, then the start.
+    bed.type_keys(&[common::KEY_LEFT, common::KEY_LEFT, KEY_BACKSPACE, KEY_HOME]);
+    bed.shot("763-key-field")?;
+    let mark = bed.mark();
+    let clipboard = bed.hp.clipboard();
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, 30]);
+    bed.ctrl_c();
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_X]);
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    assert!(
+        !common::logged(&bed.log)[mark..].contains("copies"),
+        "nothing copied"
+    );
+    assert_eq!(bed.hp.clipboard(), clipboard, "the clipboard as it was");
+    bed.shows(|s| s["key_field"] == serde_json::json!(true))?;
+    bed.type_keys(&[KEY_ENTER]);
+    bed.shows(|s| {
+        s["key_lines"]
+            .as_str()
+            .is_some_and(|l| l.contains("Anthropic refuse cette clé"))
+    })?;
+    let logs = format!(
+        "{}{}",
+        common::logged(&bed.log),
+        common::logged(&bed.dir.path().join("secretary.log"))
+    );
+    assert!(!logs.contains("sk-ant-xx"), "the key in no log");
     Ok(())
 }
