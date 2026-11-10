@@ -179,6 +179,11 @@ impl Brain {
         if self.locked || self.speaking.building {
             return;
         }
+        // Not in the middle of her first run (#758): no briefing of what
+        // she does not read yet.
+        if self.first_run_under_way() {
+            return;
+        }
         let now = self.clock.now();
         // Her catch-up, her sources' syncs under way and her triage
         // first: what came is in it.

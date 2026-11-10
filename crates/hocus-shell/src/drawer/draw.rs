@@ -84,8 +84,6 @@ const HER_MOST: f32 = 340.0;
 const MINE_MOST: f32 = 310.0;
 const SMALL: f32 = 12.0;
 const SMALL_LINE: f32 = SMALL * 1.45;
-const ASK: f32 = 14.5;
-const ASK_LINE: f32 = ASK * 1.45;
 const PILL: f32 = 12.5;
 const PILL_X: f32 = 12.0;
 const PILL_Y: f32 = 5.0;
@@ -159,6 +157,9 @@ const SHEET_MARK: f32 = 16.0;
 const HINT: f32 = 11.5;
 const HINT_LINE: f32 = HINT * 1.4;
 const HINT_PAD: f32 = 7.0;
+/// Her header's queue button's text, and a sub-view's bar's (#758).
+const QUEUE_TEXT: f32 = 11.5;
+const SUB_TEXT: f32 = 12.5;
 
 // --- The layout -------------------------------------------------------------------------
 
@@ -194,8 +195,6 @@ enum Shape {
     Panda(Point, AgentLook),
     /// Her typing's three dots.
     Dots(Point),
-    /// What she kept: its check.
-    Check(Rectangle),
     /// A draft's quote: its bar.
     Quote(Rectangle),
     /// A day's divider: its two rules either side of its words.
@@ -208,6 +207,118 @@ enum Shape {
     Tick(Rectangle, bool),
     /// The search field's lens, 15 px, centred there.
     Lens(Point),
+    /// « Noté »'s bar (#758): full when `item` first showed (`since`, set
+    /// as it is drawn), empty ten seconds later.
+    Countdown {
+        rect: Rectangle,
+        item: u64,
+        since: Option<Instant>,
+    },
+}
+
+/// How long « Noté » can be taken back (the brain's ten seconds).
+const NOTED: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Her first run's steps (#758): « POUR COMMENCER », each a row with its
+/// mark (✓ done, its number), its title (bold now), its note; its bottom.
+fn lay_out_steps(
+    shapes: &mut Vec<Shape>,
+    steps: &[hocus_secretary_link::Step],
+    x: f32,
+    room: f32,
+    y: f32,
+    words: Words,
+) -> f32 {
+    use hocus_secretary_link::StepState;
+    let mut parts = Vec::new();
+    let mut at = y + CARD_TOP;
+    parts.push(Shape::Text(Line {
+        text: words.pick("POUR COMMENCER", "TO BEGIN").to_owned(),
+        at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
+        size: CARD_LABEL,
+        color: LABEL,
+        bold: true,
+        align: Alignment::Left,
+    }));
+    at += CARD_LABEL * 1.4 + 6.0;
+    for (n, step) in steps.iter().enumerate() {
+        let mark = 18.0;
+        let note_w = if step.note.is_empty() {
+            0.0
+        } else {
+            width_of(&step.note, SMALL, false) + 8.0
+        };
+        let now = step.state == StepState::Now;
+        let lines = lines_of(
+            &step.title,
+            13.0,
+            now,
+            room - 2.0 * CARD_X - mark - 10.0 - note_w,
+        );
+        let h = (lines.len() as f32 * 13.0 * 1.4).max(mark) + 8.0;
+        let centre = Point::new(x + CARD_X + mark / 2.0, at + h / 2.0);
+        let (fill, colour, sign) = match step.state {
+            StepState::Done => (GREEN, INK, "✓".to_owned()),
+            StepState::Now => (AMBER, INK, (n + 1).to_string()),
+            StepState::Later => (alpha(0xFFFFFF, 0.08), DIM, (n + 1).to_string()),
+        };
+        parts.push(Shape::Box {
+            rect: Rectangle::new(
+                Point::new(centre.x - mark / 2.0, centre.y - mark / 2.0),
+                Size::new(mark, mark),
+            ),
+            radius: mark / 2.0,
+            fill,
+            rim: None,
+            dashed: false,
+            sharp: Corner::None,
+        });
+        parts.push(Shape::Text(Line {
+            text: sign,
+            at: centre,
+            size: 10.5,
+            color: colour,
+            bold: true,
+            align: Alignment::Center,
+        }));
+        let top = at + (h - lines.len() as f32 * 13.0 * 1.4) / 2.0;
+        push_lines(
+            &mut parts,
+            &lines,
+            x + CARD_X + mark + 10.0,
+            top,
+            13.0,
+            13.0 * 1.4,
+            match step.state {
+                StepState::Later => DIM,
+                StepState::Done => hex(0xC9D0DC),
+                StepState::Now => TEXT,
+            },
+            now,
+        );
+        if !step.note.is_empty() {
+            parts.push(Shape::Text(Line {
+                text: step.note.clone(),
+                at: Point::new(x + room - CARD_X, at + h / 2.0),
+                size: SMALL,
+                color: LABEL,
+                bold: false,
+                align: Alignment::Right,
+            }));
+        }
+        at += h;
+    }
+    at += CARD_BOTTOM - 4.0;
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
+        radius: 12.0,
+        fill: alpha(0xFFFFFF, 0.03),
+        rim: Some(alpha(0xFFFFFF, 0.1)),
+        dashed: false,
+        sharp: Corner::None,
+    });
+    shapes.extend(parts);
+    at
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +364,14 @@ pub struct Laid {
     pub knows: bool,
     /// Her text, selectable (#757): the thread's or the queue's.
     pub texts: Texts,
+    /// Her status's dot: none over "Ce qu'elle sait"'s subtitle (#758).
+    pub dot: bool,
+    /// Her header's « 21 mails à trier › » (#758).
+    pub queue_button: Option<(Rectangle, String)>,
+    /// A sub-view's bar in place of the tabs (#758): its way back, its
+    /// title; no field under it.
+    pub subbar: Option<(Rectangle, String)>,
+    pub composer: bool,
 }
 
 /// Her key's field in the band under her header (#752): masked, with
@@ -268,6 +387,10 @@ pub struct KeyBand {
     pub focused: bool,
     /// Its lines under it, each with its colour.
     pub lines: Vec<(String, Color, Point)>,
+    /// What is over it: its title, its words, the console's button.
+    shapes: Vec<Shape>,
+    /// The last key given was refused: its ring orange.
+    pub error: bool,
 }
 
 /// The dots a key shows as, at most this many: its length is not drawn
@@ -378,6 +501,9 @@ enum Entry<'a> {
     Typing(&'a str),
     /// Perso items hidden in a public moment: how many.
     Hidden(usize),
+    /// Her hello while nothing is said today (#758), and what can be
+    /// asked of her.
+    Greeting(&'a str),
 }
 
 /// Whether perso titles are hidden now: a public moment, not revealed.
@@ -430,6 +556,30 @@ fn entries<'a>(c: &'a Conversation, words: Words, hide: bool) -> Vec<Entry<'a>> 
     if hidden > 0 {
         out.push(Entry::Hidden(hidden));
     }
+    // Nothing said on her day: her hello, and examples (#758).
+    if let Some(look) = c.look.as_ref().filter(|l| !l.greeting.is_empty())
+        && let Ok(today) = look.today.parse::<jiff::civil::Date>()
+        && c.typing.is_none()
+    {
+        let zone = jiff::tz::TimeZone::system();
+        let said_today = c.items.iter().any(|i| {
+            i.at.parse::<jiff::Timestamp>()
+                .is_ok_and(|at| at.to_zoned(zone.clone()).date() == today)
+        });
+        if !said_today {
+            let noon = today
+                .at(12, 0, 0, 0)
+                .to_zoned(zone)
+                .map(|z| z.timestamp().to_string())
+                .unwrap_or_default();
+            if let Some(this) = day_words(&noon, words)
+                && day.as_ref() != Some(&this)
+            {
+                out.push(Entry::Day(this));
+            }
+            out.push(Entry::Greeting(&look.greeting));
+        }
+    }
     if let Some((request, doing)) = &c.typing
         && !c
             .streaming
@@ -445,7 +595,7 @@ fn entries<'a>(c: &'a Conversation, words: Words, hide: bool) -> Vec<Entry<'a>> 
 fn hers(entry: &Entry<'_>) -> bool {
     match entry {
         Entry::Item(item) => !matches!(item.body, Body::User { .. }),
-        Entry::Streaming(..) | Entry::Typing(_) => true,
+        Entry::Streaming(..) | Entry::Typing(_) | Entry::Greeting(_) => true,
         Entry::Day(_) | Entry::Hidden(_) => false,
     }
 }
@@ -477,9 +627,35 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         (None, _) => words.unavailable().to_owned(),
     };
     laid.tone = look.as_ref().map(|l| l.tone);
+    laid.dot = true;
     if open.tab == Tab::Knows && line == Her::Ready {
         laid.status = words.knows_subtitle().to_owned();
+        laid.dot = false;
     }
+    // The queue shown: what she does, unless her status says more.
+    if open.queue
+        && look.as_ref().is_some_and(|l| l.tone == Tone::Ok)
+        && let Some(view) = c.queue.as_deref()
+        && view.waiting > 0
+    {
+        laid.status = if words.fr {
+            format!("Je trie tes mails · {} en attente", view.waiting)
+        } else {
+            format!("Sorting your mail · {} waiting", view.waiting)
+        };
+    }
+    // A sub-view (#758): the queue, a briefing, the agents' line.
+    let subview = if open.tab != Tab::Talk {
+        None
+    } else if open.queue {
+        Some(words.queue_title().to_owned())
+    } else if let Some(point) = open.point {
+        Some(point_title(c, point, words))
+    } else if open.briefing {
+        Some(words.pick("Tes agents", "Your agents").to_owned())
+    } else {
+        None
+    };
     laid.model = look.as_ref().map(|l| l.model.clone()).unwrap_or_default();
     // The header.
     laid.head = Rectangle::new(Point::new(PAD, HEAD_TOP), Size::new(HEAD, HEAD));
@@ -491,20 +667,33 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     );
     laid.targets.push((Target::Gear, gear));
     laid.targets.push((Target::Close, close));
-    // Her status line: her triage queue unfolds (#754).
-    if line == Her::Ready && look.is_some() && open.tab == Tab::Talk {
+    // Her triage queue's button, while mails wait (#754, #758): under
+    // her status, in the thread only.
+    let mut tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
+    let to_sort = look.as_ref().map_or(0, |l| l.to_sort);
+    if line == Her::Ready && open.tab == Tab::Talk && subview.is_none() && to_sort > 0 {
+        let label = words.to_sort(to_sort);
         let x = laid.head.x + HEAD + HEAD_GAP;
-        let y = laid.head.center_y() + 11.0 - 9.0;
+        let rect = Rectangle::new(
+            Point::new(x, laid.head.center_y() + 12.0),
+            Size::new(width_of(&label, QUEUE_TEXT, true) + 16.0, 19.0),
+        );
+        laid.targets.push((Target::Status, rect));
+        laid.queue_button = Some((rect, label));
+        tabs_top += 6.0;
+    } else if line == Her::Ready && look.is_some() && open.tab == Tab::Talk && subview.is_none() {
+        // No mail waits: her status line still opens the queue's view, as
+        // before #758 (what is set aside is there).
+        let x = laid.head.x + HEAD + HEAD_GAP;
         laid.targets.push((
             Target::Status,
             Rectangle::new(
-                Point::new(x, y),
+                Point::new(x, laid.head.center_y() + 2.0),
                 Size::new((gear.x - 8.0 - x).max(0.0), 18.0),
             ),
         ));
     }
     // How to fix what her status says: a band under her header.
-    let mut tabs_top = HEAD_TOP + HEAD + HEAD_BOTTOM + TABS_TOP;
     if let Some(provider) = look.as_ref().and_then(|l| l.key.clone())
         && open.tab == Tab::Talk
     {
@@ -528,20 +717,34 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         Point::new(PAD, tabs_top),
         Size::new(right - PAD, TAB + 2.0 * TAB_PAD),
     );
-    let tab_width = (laid.tabs.width - 2.0 * TAB_PAD) / 2.0;
-    for (n, tab) in [Tab::Talk, Tab::Knows].into_iter().enumerate() {
+    if let Some(title) = subview.clone() {
+        // Its way back and its title, in place of the tabs.
+        let back = words.back();
         let rect = Rectangle::new(
-            Point::new(PAD + TAB_PAD + n as f32 * tab_width, tabs_top + TAB_PAD),
-            Size::new(tab_width, TAB),
+            Point::new(PAD, tabs_top),
+            Size::new(width_of(back, SUB_TEXT, true) + 20.0, laid.tabs.height),
         );
-        laid.tab_rects.push((tab, rect));
-        laid.targets.push((Target::Tab(tab), rect));
+        laid.targets.push((Target::Back, rect));
+        laid.subbar = Some((laid.tabs, title));
+    } else {
+        let tab_width = (laid.tabs.width - 2.0 * TAB_PAD) / 2.0;
+        for (n, tab) in [Tab::Talk, Tab::Knows].into_iter().enumerate() {
+            let rect = Rectangle::new(
+                Point::new(PAD + TAB_PAD + n as f32 * tab_width, tabs_top + TAB_PAD),
+                Size::new(tab_width, TAB),
+            );
+            laid.tab_rects.push((tab, rect));
+            laid.targets.push((Target::Tab(tab), rect));
+        }
     }
     let mut top = laid.tabs.y + laid.tabs.height + TABS_BOTTOM;
     // The agents' line, while a tool is followed.
     let said = agents::said();
     let shows = said.shows(agents::now_us());
-    if open.tab == Tab::Talk && matches!(shows, agents::Shows::Lines(_) | agents::Shows::Idle(_)) {
+    if open.tab == Tab::Talk
+        && subview.is_none()
+        && matches!(shows, agents::Shows::Lines(_) | agents::Shows::Idle(_))
+    {
         let brief = Brief::of(&said.agents);
         let rect = Rectangle::new(Point::new(PAD, top), Size::new(right - PAD, AGENTS));
         let agent_words = agents::Words::new(if words.fr {
@@ -578,15 +781,20 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     // The composer, from the bottom.
     let field_room = right - PAD - 14.0 - 8.0 - SEND - 6.0;
     let shown_field = if open.field.is_empty() {
-        vec![words.placeholder().to_owned()]
+        vec![words.placeholder(&laid.title)]
     } else {
         lines_of(&open.field, FIELD_TEXT, false, field_room)
     };
     let field_lines = shown_field.len().clamp(1, FIELD_LINES);
     let field_height = FIELD.max(field_lines as f32 * FIELD_LINE + 14.0);
     let foot_height = FOOT * 1.4;
-    let composer_top =
-        size.height - COMPOSER_BOTTOM - foot_height - FOOT_GAP - field_height - COMPOSER_TOP;
+    // No field in a sub-view: nothing is said there (#758).
+    laid.composer = subview.is_none() && open.tab == Tab::Talk;
+    let composer_top = if laid.composer {
+        size.height - COMPOSER_BOTTOM - foot_height - FOOT_GAP - field_height - COMPOSER_TOP
+    } else {
+        size.height - 4.0
+    };
     laid.field = Rectangle::new(
         Point::new(PAD, composer_top + COMPOSER_TOP),
         Size::new(right - PAD, field_height),
@@ -606,8 +814,10 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         ),
         Size::new(SEND, SEND),
     );
-    laid.targets.push((Target::Send, laid.send));
-    laid.targets.push((Target::Field, laid.field));
+    if laid.composer {
+        laid.targets.push((Target::Send, laid.send));
+        laid.targets.push((Target::Field, laid.field));
+    }
     laid.foot = laid.field.y + laid.field.height + FOOT_GAP + foot_height / 2.0;
     laid.thread = Rectangle::new(
         Point::new(0.0, top),
@@ -680,8 +890,9 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
         "key_field": laid.key_band.as_ref().map(|k| !k.placeholder),
         "key_lines": laid.key_band.as_ref().map(|k| k.lines.iter().map(|(l, _, _)| l.clone()).collect::<Vec<_>>().join(" ")),
         "focus": if !open.focused { "none" } else if laid.key_band.is_some() && open.key_focus { "key" } else { "field" },
-        "model": laid.model,
         "search": open.search,
+        "to_sort": laid.queue_button.as_ref().map(|(_, label)| label.clone()),
+        "subview": laid.subbar.as_ref().map(|(_, title)| title.clone()),
     });
     laid
 }
@@ -721,10 +932,40 @@ fn lines_as_texts(shapes: &[Shape], within: Rectangle) -> Texts {
     texts
 }
 
-/// Her key's band at `top` (#752): « Colle ta clé Anthropic », masked,
-/// « Enregistrer », « Elle va dans ton trousseau, jamais dans un
-/// fichier. », what became of the last key given, and the terminal's way.
-/// The tabs' top under it.
+/// A briefing's sub-view title: « Ton point du lundi 9 novembre ».
+fn point_title(c: &Conversation, point: u64, words: Words) -> String {
+    let briefing = c
+        .items
+        .iter()
+        .find(|i| i.id == point)
+        .and_then(|i| match &i.body {
+            Body::Briefing { briefing } => Some(briefing),
+            _ => None,
+        });
+    match briefing {
+        Some(b) if b.kind == BriefingKind::Morning && !b.date.is_empty() => {
+            let mut date = b.date.chars();
+            let date: String = match date.next() {
+                Some(first) if words.fr => first.to_lowercase().chain(date).collect(),
+                Some(first) => std::iter::once(first).chain(date).collect(),
+                None => String::new(),
+            };
+            if words.fr {
+                format!("Ton point du {date}")
+            } else {
+                format!("Your briefing, {date}")
+            }
+        }
+        Some(b) => b.title.clone(),
+        None => words.pick("Ton point", "Your briefing").to_owned(),
+    }
+}
+
+/// Her key's band at `top` (#752, #758): what a key is, where to make one
+/// (« Ouvrir la console d'Anthropic ↗ »), that it is billed apart from a
+/// Claude subscription; its field, masked, with « Enregistrer », what
+/// became of the last key given under it, and where it is kept. The
+/// tabs' top under it.
 fn lay_out_key(
     laid: &mut Laid,
     open: &Open,
@@ -734,9 +975,50 @@ fn lay_out_key(
     top: f32,
     right: f32,
 ) -> f32 {
-    let inner_x = PAD + HINT_PAD + 3.0;
-    let inner = right - inner_x - HINT_PAD - 3.0;
-    let mut at = top + HINT_PAD + 2.0;
+    let inner_x = PAD + HINT_PAD + 4.0;
+    let inner = right - inner_x - HINT_PAD - 4.0;
+    let name = match provider {
+        "anthropic" => "Anthropic",
+        other => other,
+    };
+    let mut shapes = Vec::new();
+    let mut at = top + HINT_PAD + 3.0;
+    for line in lines_of(&words.key_title(name), 13.5, true, inner) {
+        shapes.push(Shape::Text(Line {
+            text: line,
+            at: Point::new(inner_x, at + 13.5 * 0.7),
+            size: 13.5,
+            color: hex(0xF5C46E),
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += 13.5 * 1.4;
+    }
+    at += 3.0;
+    let explain = lines_of(words.key_explain(), 12.5, false, inner);
+    push_lines(
+        &mut shapes,
+        &explain,
+        inner_x,
+        at,
+        12.5,
+        12.5 * 1.45,
+        hex(0xE6EAF1),
+        false,
+    );
+    at += explain.len() as f32 * 12.5 * 1.45 + 6.0;
+    let mut targets = Vec::new();
+    let console = small_button(
+        &mut shapes,
+        &mut targets,
+        open,
+        Target::Console,
+        words.key_console(),
+        false,
+        inner_x,
+        at,
+    );
+    at += console.height + 8.0;
     let save_label = words.pick("Enregistrer", "Save");
     let save_w = width_of(save_label, BUTTON, true) + 2.0 * BUTTON_X;
     let field = Rectangle::new(
@@ -748,46 +1030,23 @@ fn lay_out_key(
         Size::new(save_w, KEY_FIELD),
     );
     at += KEY_FIELD + 6.0;
-    let name = match provider {
-        "anthropic" => "Anthropic",
-        other => other,
-    };
     let (shown, placeholder) = if open.key.is_empty() {
-        (
-            if words.fr {
-                format!("Colle ta clé {name}")
-            } else {
-                format!("Paste your {name} key")
-            },
-            true,
-        )
+        (words.key_placeholder().to_owned(), true)
     } else {
         ("•".repeat(open.key.chars().count().min(KEY_DOTS)), false)
     };
-    let mut said: Vec<(String, Color)> = vec![(
-        words
-            .pick(
-                "Elle va dans ton trousseau, jamais dans un fichier.",
-                "It goes to your keyring, never to a file.",
-            )
-            .to_owned(),
-        hex(0xFFE2A8),
-    )];
+    let mut said: Vec<(String, Color)> = Vec::new();
+    let mut error = false;
     if c.key_asked.is_some() {
         said.push((words.pick("Je la vérifie…", "Checking it…").to_owned(), DIM));
     } else if let Some((given, outcome)) = &c.key_said
         && *outcome != hocus_secretary_link::KeyOutcome::Kept
     {
+        // Under the field, with what to do (#758).
+        error = true;
         said.push((outcome.words(given, words.fr), ORANGE));
     }
-    if let Some(hint) = c
-        .look
-        .as_ref()
-        .map(|l| l.hint.clone())
-        .filter(|h| !h.is_empty())
-    {
-        said.push((hint, FAINT));
-    }
+    said.push((words.key_note().to_owned(), LABEL));
     let mut lines = Vec::new();
     for (text, colour) in said {
         for line in lines_of(&text, HINT, false, inner) {
@@ -800,6 +1059,7 @@ fn lay_out_key(
         Point::new(PAD, top),
         Size::new(right - PAD, bottom - top),
     ));
+    laid.targets.extend(targets);
     laid.targets.push((Target::KeySave, save));
     laid.targets.push((Target::KeyField, field));
     laid.key_band = Some(KeyBand {
@@ -809,6 +1069,8 @@ fn lay_out_key(
         placeholder,
         focused: open.focused && open.key_focus,
         lines,
+        shapes,
+        error,
     });
     bottom + 8.0
 }
@@ -975,81 +1237,87 @@ fn lay_out_thread(
                     replies,
                     chosen,
                 } => {
-                    // Her question in bold amber, what she found under it.
-                    let room = her_room - 2.0 * BUBBLE_X;
-                    let lines = ranged(text, ASK, true, room);
+                    // Her question (#758): a blue « QUESTION » label, her
+                    // words in plain text, what she found under them, the
+                    // quick replies inside the card. Amber stays for what
+                    // waits for the user.
+                    let inner = her_room - 2.0 * CARD_X;
+                    let mut at = y + CARD_TOP;
+                    let mut parts: Vec<Shape> = Vec::new();
+                    parts.push(Shape::Text(Line {
+                        text: words.question().to_owned(),
+                        at: Point::new(her_x + CARD_X, at + CARD_LABEL * 0.7),
+                        size: CARD_LABEL,
+                        color: hex(0x8FB3FF),
+                        bold: true,
+                        align: Alignment::Left,
+                    }));
+                    at += CARD_LABEL * 1.4 + 4.0;
+                    let lines = ranged(text, BUBBLE, false, inner);
                     let notes = note
                         .as_deref()
-                        .map(|n| ranged(n, SMALL, false, room))
+                        .map(|n| ranged(n, SMALL, false, inner))
                         .unwrap_or_default();
-                    let h = lines.len() as f32 * ASK_LINE
-                        + if notes.is_empty() {
-                            0.0
-                        } else {
-                            3.0 + notes.len() as f32 * SMALL_LINE
-                        }
-                        + 2.0 * BUBBLE_Y;
-                    let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
-                    her_box(&mut shapes, rect);
-                    let note_top = y + BUBBLE_Y + lines.len() as f32 * ASK_LINE + 3.0;
                     let block = texts.block(Source::Item(item.id));
-                    texts.blocks[block].rect = rect;
                     texts.put(
                         block,
                         text,
                         &lines,
-                        her_x + BUBBLE_X,
-                        y + BUBBLE_Y,
-                        ASK_LINE,
-                        ASK,
-                        font(true),
+                        her_x + CARD_X,
+                        at,
+                        BUBBLE_LINE,
+                        BUBBLE,
+                        font(false),
                         &measure,
                     );
+                    push_lines(
+                        &mut parts,
+                        &plain(&lines),
+                        her_x + CARD_X,
+                        at,
+                        BUBBLE,
+                        BUBBLE_LINE,
+                        TEXT,
+                        false,
+                    );
+                    at += lines.len() as f32 * BUBBLE_LINE;
                     if let Some(note) = note.as_deref() {
+                        at += 3.0;
                         texts.put(
                             block,
                             note,
                             &notes,
-                            her_x + BUBBLE_X,
-                            note_top,
+                            her_x + CARD_X,
+                            at,
                             SMALL_LINE,
                             SMALL,
                             font(false),
                             &measure,
                         );
+                        push_lines(
+                            &mut parts,
+                            &plain(&notes),
+                            her_x + CARD_X,
+                            at,
+                            SMALL,
+                            SMALL_LINE,
+                            DIM,
+                            false,
+                        );
+                        at += notes.len() as f32 * SMALL_LINE;
                     }
-                    push_lines(
-                        &mut shapes,
-                        &plain(&lines),
-                        her_x + BUBBLE_X,
-                        y + BUBBLE_Y,
-                        ASK,
-                        ASK_LINE,
-                        hex(0xFFE2A8),
-                        true,
-                    );
-                    push_lines(
-                        &mut shapes,
-                        &plain(&notes),
-                        her_x + BUBBLE_X,
-                        note_top,
-                        SMALL,
-                        SMALL_LINE,
-                        DIM,
-                        false,
-                    );
-                    y += h + INNER_GAP;
+                    at += BUTTON_TOP;
                     // Its quick replies: pills, a click sends one and greys
                     // the others.
-                    let mut x = her_x;
+                    let mut x = her_x + CARD_X;
                     let pill_h = PILL * 1.4 + 2.0 * PILL_Y;
                     for (choice, reply) in replies.iter().enumerate() {
                         let w = width_of(reply, PILL, true) + 2.0 * PILL_X;
-                        if x > her_x && x + w > her_x + her_room {
-                            x = her_x;
-                            y += pill_h + PILL_GAP;
+                        if x > her_x + CARD_X && x + w > her_x + her_room - CARD_X {
+                            x = her_x + CARD_X;
+                            at += pill_h + PILL_GAP;
                         }
-                        let rect = Rectangle::new(Point::new(x, y), Size::new(w, pill_h));
+                        let rect = Rectangle::new(Point::new(x, at), Size::new(w, pill_h));
                         let picked = *chosen == Some(choice as u32);
                         let used = chosen.is_some() && !picked;
                         let target = Target::Reply {
@@ -1058,7 +1326,7 @@ fn lay_out_thread(
                         };
                         let hover = open.hover == Some(target) && chosen.is_none();
                         let fade = if used { 0.35 } else { 1.0 };
-                        shapes.push(Shape::Box {
+                        parts.push(Shape::Box {
                             rect,
                             radius: pill_h / 2.0,
                             fill: alpha(
@@ -1075,9 +1343,9 @@ fn lay_out_thread(
                             dashed: false,
                             sharp: Corner::None,
                         });
-                        shapes.push(Shape::Text(Line {
+                        parts.push(Shape::Text(Line {
                             text: reply.clone(),
-                            at: Point::new(x + w / 2.0, y + pill_h / 2.0),
+                            at: Point::new(x + w / 2.0, at + pill_h / 2.0),
                             size: PILL,
                             color: alpha(0x9BEBB8, fade),
                             bold: true,
@@ -1088,7 +1356,30 @@ fn lay_out_thread(
                         }
                         x += w + PILL_GAP;
                     }
-                    y += pill_h;
+                    at += pill_h + CARD_BOTTOM;
+                    let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, at - y));
+                    texts.blocks[block].rect = rect;
+                    shapes.push(Shape::Box {
+                        rect,
+                        radius: 12.0,
+                        fill: Color {
+                            a: 1.0,
+                            ..hex(0x121827)
+                        },
+                        rim: Some(alpha(0x8FB3FF, 0.45)),
+                        dashed: false,
+                        sharp: Corner::None,
+                    });
+                    shapes.push(Shape::Box {
+                        rect,
+                        radius: 12.0,
+                        fill: alpha(0x8FB3FF, 0.07),
+                        rim: None,
+                        dashed: false,
+                        sharp: Corner::None,
+                    });
+                    shapes.extend(parts);
+                    y = at;
                     said.push(format!(
                         "question:{text} [{}]{}",
                         replies.join(" | "),
@@ -1135,55 +1426,81 @@ fn lay_out_thread(
                     );
                     said.push(format!("briefing:{}", briefing.title));
                 }
-                Body::Learned { text, undone, .. } => {
-                    let h = LEARNED * 1.4 + 10.0;
+                Body::Learned {
+                    text,
+                    undone,
+                    settled,
+                } => {
+                    // « Noté : … · Annuler » (#758), a bar emptying over its
+                    // ten seconds; no box to tick.
+                    let undo = words.undo();
+                    let uw = width_of(undo, LEARNED, true);
+                    let can_undo = !*undone && !*settled;
+                    let inner = her_room - 20.0 - if can_undo { uw + 12.0 } else { 0.0 };
+                    let lines = lines_of(text, LEARNED, false, inner);
+                    let h = lines.len() as f32 * LEARNED * 1.4 + 12.0;
                     let rect = Rectangle::new(Point::new(her_x, y), Size::new(her_room, h));
                     shapes.push(Shape::Box {
                         rect,
                         radius: 8.0,
                         fill: alpha(0x8FB3FF, 0.08),
                         rim: Some(alpha(0x8FB3FF, 0.4)),
-                        dashed: true,
+                        dashed: false,
                         sharp: Corner::None,
                     });
-                    shapes.push(Shape::Check(Rectangle::new(
-                        Point::new(her_x + 10.0, y + (h - 14.0) / 2.0),
-                        Size::new(14.0, 14.0),
-                    )));
-                    let undo = words.undo();
-                    let uw = width_of(undo, LEARNED, true);
-                    shapes.push(Shape::Text(Line {
-                        text: text.clone(),
-                        at: Point::new(her_x + 10.0 + 14.0 + 8.0, y + h / 2.0),
-                        size: LEARNED,
-                        color: if *undone {
+                    push_lines(
+                        &mut shapes,
+                        &lines,
+                        her_x + 10.0,
+                        y + 6.0,
+                        LEARNED,
+                        LEARNED * 1.4,
+                        if *undone {
                             alpha(0xB9CEFF, 0.5)
                         } else {
                             hex(0xB9CEFF)
                         },
-                        bold: false,
-                        align: Alignment::Left,
-                    }));
-                    if !*undone {
+                        false,
+                    );
+                    if can_undo {
                         let at = Rectangle::new(
                             Point::new(her_x + her_room - 10.0 - uw - 2.0, y + 2.0),
                             Size::new(uw + 4.0, h - 4.0),
                         );
                         shapes.push(Shape::Text(Line {
                             text: undo.to_owned(),
-                            at: Point::new(her_x + her_room - 10.0, y + h / 2.0),
+                            at: Point::new(her_x + her_room - 10.0, y + 6.0 + LEARNED * 0.7),
                             size: LEARNED,
                             color: MINT,
                             bold: true,
                             align: Alignment::Right,
                         }));
                         targets.push((Target::Undo(item.id), at));
+                        shapes.push(Shape::Countdown {
+                            rect: Rectangle::new(
+                                Point::new(her_x + 8.0, y + h - 4.0),
+                                Size::new(her_room - 16.0, 2.0),
+                            ),
+                            item: item.id,
+                            since: None,
+                        });
                     }
                     said.push(format!(
                         "learned:{text}{}",
                         if *undone { " (undone)" } else { "" }
                     ));
                     y += h;
+                }
+                Body::Steps { steps } => {
+                    y = lay_out_steps(&mut shapes, steps, her_x, her_room, y, words);
+                    said.push(format!(
+                        "steps:{}",
+                        steps
+                            .iter()
+                            .map(|s| format!("{}={:?}", s.title, s.state))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    ));
                 }
             },
             Entry::Streaming(request, text) => {
@@ -1198,6 +1515,46 @@ fn lay_out_thread(
                     y,
                 );
                 said.push(format!("streaming:{text}"));
+            }
+            Entry::Greeting(greeting) => {
+                (y, _) = her_bubble(
+                    &mut shapes,
+                    &mut texts,
+                    Source::Item(0),
+                    greeting,
+                    None,
+                    her_x,
+                    her_room,
+                    y,
+                );
+                // Each example a pill, one under the other: a click says it.
+                let pill_h = PILL * 1.4 + 2.0 * PILL_Y;
+                for (n, example) in words.examples().iter().enumerate() {
+                    y += PILL_GAP;
+                    let w = width_of(example, PILL, true) + 2.0 * PILL_X;
+                    let rect = Rectangle::new(Point::new(her_x, y), Size::new(w, pill_h));
+                    let target = Target::Example(n as u8);
+                    let hover = open.hover == Some(target);
+                    shapes.push(Shape::Box {
+                        rect,
+                        radius: pill_h / 2.0,
+                        fill: alpha(0x7EE0A0, if hover { 0.16 } else { 0.06 }),
+                        rim: Some(alpha(0x7EE0A0, 0.55)),
+                        dashed: false,
+                        sharp: Corner::None,
+                    });
+                    shapes.push(Shape::Text(Line {
+                        text: (*example).to_owned(),
+                        at: Point::new(her_x + w / 2.0, y + pill_h / 2.0),
+                        size: PILL,
+                        color: hex(0x9BEBB8),
+                        bold: true,
+                        align: Alignment::Center,
+                    }));
+                    targets.push((target, rect));
+                    y += pill_h;
+                }
+                said.push(format!("greeting:{greeting}"));
             }
             Entry::Hidden(n) => {
                 y = hidden_line(
@@ -1325,7 +1682,6 @@ fn moved(shape: Shape, dy: f32) -> Shape {
         Shape::Avatar(p) => Shape::Avatar(Point::new(p.x, p.y + dy)),
         Shape::Panda(p, look) => Shape::Panda(Point::new(p.x, p.y + dy), look),
         Shape::Dots(p) => Shape::Dots(Point::new(p.x, p.y + dy)),
-        Shape::Check(r) => Shape::Check(down(r)),
         Shape::Quote(r) => Shape::Quote(down(r)),
         Shape::Rule(r) => Shape::Rule(down(r)),
         Shape::Mono(mut line) => {
@@ -1335,6 +1691,11 @@ fn moved(shape: Shape, dy: f32) -> Shape {
         Shape::Her(r) => Shape::Her(down(r)),
         Shape::Tick(r, done) => Shape::Tick(down(r), done),
         Shape::Lens(p) => Shape::Lens(Point::new(p.x, p.y + dy)),
+        Shape::Countdown { rect, item, since } => Shape::Countdown {
+            rect: down(rect),
+            item,
+            since,
+        },
     }
 }
 
@@ -1634,6 +1995,19 @@ fn lay_out_card(
                 bx += w + 6.0;
             }
             at += button_h;
+            // A draft says nothing leaves before its click (#758).
+            if draft {
+                at += 6.0;
+                parts.push(Shape::Text(Line {
+                    text: super::words().nothing_leaves().to_owned(),
+                    at: Point::new(x + CARD_X, at + SMALL_LINE / 2.0),
+                    size: SMALL,
+                    color: FAINT,
+                    bold: false,
+                    align: Alignment::Left,
+                }));
+                at += SMALL_LINE;
+            }
         }
     }
     at += CARD_BOTTOM;
@@ -1688,6 +2062,9 @@ fn lay_out_sheet(
     y: f32,
 ) -> f32 {
     use hocus_secretary_link::sheets::Mark;
+    if !sheet.reads.is_empty() {
+        return lay_out_account(shapes, targets, open, item, card, sheet, x, room, y);
+    }
     let (rim, fill, _) = card_colours(CardKind::Consent);
     let inner = room - 2.0 * CARD_X;
     let mut parts: Vec<Shape> = Vec::new();
@@ -1998,6 +2375,566 @@ fn lay_out_sheet(
     at
 }
 
+/// A switch at `rect`, on or off (#758).
+fn switch(parts: &mut Vec<Shape>, rect: Rectangle, on: bool, hover: bool) {
+    parts.push(Shape::Box {
+        rect,
+        radius: rect.height / 2.0,
+        fill: match (on, hover) {
+            (true, false) => GREEN,
+            (true, true) => hex(0x7ED198),
+            (false, false) => alpha(0xFFFFFF, 0.12),
+            (false, true) => alpha(0xFFFFFF, 0.18),
+        },
+        rim: None,
+        dashed: false,
+        sharp: Corner::None,
+    });
+    let knob = rect.height - 4.0;
+    let kx = if on {
+        rect.x + rect.width - 2.0 - knob
+    } else {
+        rect.x + 2.0
+    };
+    parts.push(Shape::Box {
+        rect: Rectangle::new(Point::new(kx, rect.y + 2.0), Size::new(knob, knob)),
+        radius: knob / 2.0,
+        fill: hex(0xF4F6FA),
+        rim: None,
+        dashed: false,
+        sharp: Corner::None,
+    });
+}
+
+/// A small button at (`x`, `y`): primary green, or grey; its rect.
+#[allow(clippy::too_many_arguments)]
+fn small_button(
+    parts: &mut Vec<Shape>,
+    targets: &mut Vec<(Target, Rectangle)>,
+    open: &Open,
+    target: Target,
+    label: &str,
+    primary: bool,
+    x: f32,
+    y: f32,
+) -> Rectangle {
+    let h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
+    let w = width_of(label, BUTTON, true) + 2.0 * BUTTON_X;
+    let rect = Rectangle::new(Point::new(x, y), Size::new(w, h));
+    let hover = open.hover == Some(target);
+    parts.push(Shape::Box {
+        rect,
+        radius: 8.0,
+        fill: match (primary, hover) {
+            (true, false) => GREEN,
+            (true, true) => hex(0x7ED198),
+            (false, false) => alpha(0xFFFFFF, 0.07),
+            (false, true) => alpha(0xFFFFFF, 0.12),
+        },
+        rim: (!primary).then_some(alpha(0xFFFFFF, 0.14)),
+        dashed: false,
+        sharp: Corner::None,
+    });
+    parts.push(Shape::Text(Line {
+        text: label.to_owned(),
+        at: rect.center(),
+        size: BUTTON,
+        color: if primary { INK } else { hex(0xD5DBE5) },
+        bold: true,
+        align: Alignment::Center,
+    }));
+    targets.push((target, rect));
+    rect
+}
+
+/// An account's card (#758): its account, a switch per kind, her
+/// promise, « Ce compte est Travail | Privé » and what « Privé » changes,
+/// what she reads exactly folded under a link, « Autoriser l'agenda et
+/// les mails » as the switches say, « Pas maintenant »; once answered,
+/// what came of it and « Ne plus lire ». The account she asks about next
+/// dashed under it. Its bottom.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn lay_out_account(
+    shapes: &mut Vec<Shape>,
+    targets: &mut Vec<(Target, Rectangle)>,
+    open: &Open,
+    item: u64,
+    card: &Card,
+    sheet: &hocus_secretary_link::sheets::Sheet,
+    x: f32,
+    room: f32,
+    y: f32,
+) -> f32 {
+    use hocus_secretary_link::{consent::SourceKind, sheets::Mark};
+    let words = super::words();
+    let inner = room - 2.0 * CARD_X;
+    let left = x + CARD_X;
+    let mut parts: Vec<Shape> = Vec::new();
+    let mut at = y + CARD_TOP;
+    parts.push(Shape::Text(Line {
+        text: card.label.to_uppercase(),
+        at: Point::new(left, at + CARD_LABEL * 0.7),
+        size: CARD_LABEL,
+        color: LABEL,
+        bold: true,
+        align: Alignment::Left,
+    }));
+    at += CARD_LABEL * 1.4 + 6.0;
+    // The account: its mark, its address, where it is.
+    let mark = |parts: &mut Vec<Shape>, at: f32, faint: bool| {
+        parts.push(Shape::Box {
+            rect: Rectangle::new(Point::new(left, at), Size::new(26.0, 26.0)),
+            radius: 7.0,
+            fill: alpha(0x4F7BFF, if faint { 0.4 } else { 0.9 }),
+            rim: None,
+            dashed: false,
+            sharp: Corner::None,
+        });
+        parts.push(Shape::Text(Line {
+            text: "G".to_owned(),
+            at: Point::new(left + 13.0, at + 13.0),
+            size: 13.0,
+            color: if faint { DIM } else { hex(0xFFFFFF) },
+            bold: true,
+            align: Alignment::Center,
+        }));
+    };
+    mark(&mut parts, at + 2.0, false);
+    parts.push(Shape::Text(Line {
+        text: sheet.title.clone(),
+        at: Point::new(left + 36.0, at + 9.0),
+        size: SHEET_TITLE,
+        color: TEXT,
+        bold: true,
+        align: Alignment::Left,
+    }));
+    parts.push(Shape::Text(Line {
+        text: sheet.from.clone(),
+        at: Point::new(left + 36.0, at + 25.0),
+        size: SHEET_FROM,
+        color: LABEL,
+        bold: false,
+        align: Alignment::Left,
+    }));
+    at += 36.0;
+    let asking = card.outcome.is_none();
+    let off = open.off.get(&item);
+    let on_of =
+        |kind: SourceKind, by_default: bool| by_default != off.is_some_and(|o| o.contains(&kind));
+    let rule = |parts: &mut Vec<Shape>, at: f32| {
+        parts.push(Shape::Box {
+            rect: Rectangle::new(Point::new(left, at), Size::new(inner, 1.0)),
+            radius: 0.0,
+            fill: alpha(0xFFFFFF, 0.07),
+            rim: None,
+            dashed: false,
+            sharp: Corner::None,
+        });
+    };
+    if asking {
+        parts.push(Shape::Text(Line {
+            text: sheet.ask.clone(),
+            at: Point::new(left, at + 12.5 * 0.7),
+            size: 12.5,
+            color: TEXT,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        at += 12.5 * 1.4 + 4.0;
+        for read in &sheet.reads {
+            rule(&mut parts, at);
+            at += 7.0;
+            let on = on_of(read.kind, read.on);
+            let sw = Rectangle::new(
+                Point::new(left + inner - 36.0, at + 4.0),
+                Size::new(36.0, 20.0),
+            );
+            let target = Target::Switch {
+                item,
+                kind: read.kind,
+            };
+            switch(&mut parts, sw, on, open.hover == Some(target));
+            targets.push((
+                target,
+                Rectangle::new(Point::new(left, at - 3.0), Size::new(inner, 36.0)),
+            ));
+            let text_room = inner - 48.0;
+            parts.push(Shape::Text(Line {
+                text: read.title.clone(),
+                at: Point::new(left, at + 13.0 * 0.7),
+                size: 13.0,
+                color: if on { TEXT } else { DIM },
+                bold: true,
+                align: Alignment::Left,
+            }));
+            at += 13.0 * 1.4;
+            let choose = read.kind == SourceKind::Calendar && !sheet.calendars.is_empty();
+            let mut line = read.line.clone();
+            if choose {
+                let n = sheet.calendars.len();
+                line = if words.fr {
+                    format!("{line} · {n} agendas, choisir ›")
+                } else {
+                    format!("{line} · {n} calendars, choose ›")
+                };
+            }
+            let lines = lines_of(&line, SMALL, false, text_room);
+            push_lines(&mut parts, &lines, left, at, SMALL, SMALL_LINE, DIM, false);
+            if choose {
+                let target = Target::Calendars(item);
+                targets.push((
+                    target,
+                    Rectangle::new(
+                        Point::new(left, at + (lines.len() as f32 - 1.0) * SMALL_LINE),
+                        Size::new(text_room, SMALL_LINE),
+                    ),
+                ));
+            }
+            at += lines.len() as f32 * SMALL_LINE + 6.0;
+            // Its calendars, each to be left out, once unfolded.
+            if choose && open.unfolded_cards.contains(&(item, true)) {
+                let left_out = open.left_out.get(&item);
+                for (n, calendar) in sheet.calendars.iter().enumerate() {
+                    let read = left_out.is_none_or(|l| !l.contains(&calendar.id));
+                    let size = 14.0;
+                    let target = Target::Calendar {
+                        item,
+                        index: u32::try_from(n).unwrap_or(u32::MAX),
+                    };
+                    let note = calendar.note(words.fr);
+                    let shown = if note.is_empty() {
+                        calendar.name.clone()
+                    } else {
+                        format!("{} · {note}", calendar.name)
+                    };
+                    let lines = lines_of(&shown, SMALL, false, inner - size - 18.0);
+                    let check =
+                        Rectangle::new(Point::new(left + 8.0, at + 1.0), Size::new(size, size));
+                    parts.push(Shape::Box {
+                        rect: check,
+                        radius: 4.0,
+                        fill: if read { GREEN } else { alpha(0xFFFFFF, 0.04) },
+                        rim: (!read).then_some(alpha(0xFFFFFF, 0.35)),
+                        dashed: false,
+                        sharp: Corner::None,
+                    });
+                    if read {
+                        parts.push(Shape::Text(Line {
+                            text: "✓".to_owned(),
+                            at: check.center(),
+                            size: 10.5,
+                            color: INK,
+                            bold: true,
+                            align: Alignment::Center,
+                        }));
+                    }
+                    push_lines(
+                        &mut parts,
+                        &lines,
+                        left + 8.0 + size + 8.0,
+                        at,
+                        SMALL,
+                        SMALL_LINE,
+                        if read { hex(0xC9D0DC) } else { DIM },
+                        false,
+                    );
+                    let h = (lines.len() as f32 * SMALL_LINE).max(size + 2.0);
+                    targets.push((
+                        target,
+                        Rectangle::new(Point::new(left, at - 1.0), Size::new(inner, h + 2.0)),
+                    ));
+                    at += h + 3.0;
+                }
+                at += 4.0;
+            }
+        }
+        // Her promise.
+        at += 2.0;
+        let promise = lines_of(&sheet.promise, SMALL, false, inner - 34.0);
+        let ph = promise.len() as f32 * SMALL_LINE + 14.0;
+        parts.push(Shape::Box {
+            rect: Rectangle::new(Point::new(left, at), Size::new(inner, ph)),
+            radius: 8.0,
+            fill: alpha(0x7EE0A0, 0.05),
+            rim: Some(alpha(0x7EE0A0, 0.25)),
+            dashed: false,
+            sharp: Corner::None,
+        });
+        parts.push(Shape::Text(Line {
+            text: "✓".to_owned(),
+            at: Point::new(left + 12.0, at + 7.0 + SMALL_LINE / 2.0),
+            size: SMALL,
+            color: MINT,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        push_lines(
+            &mut parts,
+            &promise,
+            left + 28.0,
+            at + 7.0,
+            SMALL,
+            SMALL_LINE,
+            hex(0xC9D0DC),
+            false,
+        );
+        at += ph + 10.0;
+        // « Ce compte est Travail | Privé ».
+        let chosen = open.notebooks.get(&item).copied().unwrap_or(sheet.notebook);
+        let label = words.pick("Ce compte est", "This account is");
+        let lw = width_of(label, 12.5, true);
+        parts.push(Shape::Text(Line {
+            text: label.to_owned(),
+            at: Point::new(left, at + 12.0),
+            size: 12.5,
+            color: TEXT,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        let mut sx = left + lw + 10.0;
+        let seg_h = 24.0;
+        let widths: Vec<f32> = sheet
+            .private
+            .choice
+            .iter()
+            .map(|c| width_of(c, 12.0, true) + 22.0)
+            .collect();
+        let total: f32 = widths.iter().sum::<f32>() + 4.0;
+        parts.push(Shape::Box {
+            rect: Rectangle::new(Point::new(sx, at), Size::new(total, seg_h)),
+            radius: 8.0,
+            fill: alpha(0xFFFFFF, 0.04),
+            rim: Some(alpha(0xFFFFFF, 0.1)),
+            dashed: false,
+            sharp: Corner::None,
+        });
+        sx += 2.0;
+        for (n, (word, w)) in sheet.private.choice.iter().zip(&widths).enumerate() {
+            let perso = n == 1;
+            let selected = (chosen == Notebook::Perso) == perso;
+            let rect = Rectangle::new(Point::new(sx, at + 2.0), Size::new(*w, seg_h - 4.0));
+            if selected {
+                parts.push(Shape::Box {
+                    rect,
+                    radius: 6.0,
+                    fill: if perso {
+                        alpha(0xF28FB1, 0.22)
+                    } else {
+                        alpha(0xFFFFFF, 0.13)
+                    },
+                    rim: None,
+                    dashed: false,
+                    sharp: Corner::None,
+                });
+            }
+            parts.push(Shape::Text(Line {
+                text: word.clone(),
+                at: rect.center(),
+                size: 12.0,
+                color: match (selected, perso) {
+                    (true, true) => hex(0xFBD3E1),
+                    (true, false) => TEXT,
+                    _ => LABEL,
+                },
+                bold: true,
+                align: Alignment::Center,
+            }));
+            targets.push((Target::Book { item, perso }, rect));
+            sx += w;
+        }
+        at += seg_h + 8.0;
+        let short = lines_of(&sheet.private.short, SMALL, false, inner);
+        push_lines(&mut parts, &short, left, at, SMALL, SMALL_LINE, DIM, false);
+        at += short.len() as f32 * SMALL_LINE + 8.0;
+        // What she reads exactly, and what leaves: folded.
+        let unfolded = open.unfolded_cards.contains(&(item, false));
+        let more = lines_of(&sheet.more, SMALL, true, inner);
+        let more_h = more.len() as f32 * SMALL_LINE;
+        push_lines(
+            &mut parts,
+            &more,
+            left,
+            at,
+            SMALL,
+            SMALL_LINE,
+            if open.hover == Some(Target::Details(item)) {
+                hex(0x9BEBB8)
+            } else {
+                MINT
+            },
+            true,
+        );
+        targets.push((
+            Target::Details(item),
+            Rectangle::new(
+                Point::new(left - 2.0, at - 2.0),
+                Size::new(inner + 4.0, more_h + 4.0),
+            ),
+        ));
+        at += more_h + 4.0;
+        if unfolded {
+            for section in &sheet.sections {
+                at += 6.0;
+                parts.push(Shape::Text(Line {
+                    text: section.label.clone(),
+                    at: Point::new(left, at + CARD_LABEL * 0.7),
+                    size: CARD_LABEL,
+                    color: LABEL,
+                    bold: true,
+                    align: Alignment::Left,
+                }));
+                at += CARD_LABEL * 1.4 + 2.0;
+                let (sign, colour) = match section.mark {
+                    Mark::Yes => ("✓", MINT),
+                    Mark::No => ("✕", hex(0xF7A77A)),
+                    Mark::Plain => ("•", FAINT),
+                };
+                for text in &section.lines {
+                    let lines = lines_of(text, SMALL, false, inner - SHEET_MARK);
+                    parts.push(Shape::Text(Line {
+                        text: sign.to_owned(),
+                        at: Point::new(left, at + SMALL_LINE / 2.0),
+                        size: SMALL,
+                        color: colour,
+                        bold: true,
+                        align: Alignment::Left,
+                    }));
+                    push_lines(
+                        &mut parts,
+                        &lines,
+                        left + SHEET_MARK,
+                        at,
+                        SMALL,
+                        SMALL_LINE,
+                        hex(0xC9D0DC),
+                        false,
+                    );
+                    at += lines.len() as f32 * SMALL_LINE + 2.0;
+                }
+            }
+        }
+        // Its buttons, on the left, the primary first: it says what it
+        // allows, as the switches are.
+        at += BUTTON_TOP;
+        let on: Vec<SourceKind> = sheet
+            .reads
+            .iter()
+            .filter(|r| on_of(r.kind, r.on))
+            .map(|r| r.kind)
+            .collect();
+        let mut bx = left;
+        let button_h = BUTTON * 1.4 + 2.0 * BUTTON_Y;
+        for (n, action) in card.actions.iter().enumerate() {
+            let label = if n == 0 && action.decision == hocus_secretary_link::Decision::Accept {
+                hocus_secretary_link::sheets::allow_label(&on, words.fr)
+            } else {
+                action.label.clone()
+            };
+            let w = width_of(&label, BUTTON, true) + 2.0 * BUTTON_X;
+            if bx > left && bx + w > left + inner {
+                bx = left;
+                at += button_h + 6.0;
+            }
+            let target = Target::Button {
+                item,
+                decision: action.decision,
+            };
+            let rect = small_button(&mut parts, targets, open, target, &label, n == 0, bx, at);
+            bx += rect.width + 6.0;
+        }
+        at += button_h;
+    } else if let Some(outcome) = &card.outcome {
+        let granted = card.decided.is_none();
+        at += 4.0;
+        let shown = if granted {
+            format!("✓ {outcome}")
+        } else {
+            outcome.clone()
+        };
+        let lines = lines_of(&shown, SMALL, granted, inner);
+        push_lines(
+            &mut parts,
+            &lines,
+            left,
+            at,
+            SMALL,
+            SMALL_LINE,
+            if granted { MINT } else { DIM },
+            granted,
+        );
+        at += lines.len() as f32 * SMALL_LINE;
+        if granted {
+            at += BUTTON_TOP;
+            let mut bx = left;
+            for action in &card.actions {
+                let target = Target::Button {
+                    item,
+                    decision: action.decision,
+                };
+                let rect = small_button(
+                    &mut parts,
+                    targets,
+                    open,
+                    target,
+                    &action.label,
+                    false,
+                    bx,
+                    at,
+                );
+                bx += rect.width + 6.0;
+            }
+            if !card.actions.is_empty() {
+                at += BUTTON * 1.4 + 2.0 * BUTTON_Y;
+            }
+        }
+    }
+    at += CARD_BOTTOM + 2.0;
+    let (rim, fill, _) = card_colours(CardKind::Consent);
+    shapes.push(Shape::Box {
+        rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
+        radius: 14.0,
+        fill,
+        rim: Some(rim),
+        dashed: false,
+        sharp: Corner::None,
+    });
+    shapes.extend(parts);
+    // The account asked about next, dashed.
+    if asking && let Some(then) = &sheet.then {
+        let top = at + GAP;
+        let h = 50.0;
+        shapes.push(Shape::Box {
+            rect: Rectangle::new(Point::new(x, top), Size::new(room, h)),
+            radius: 14.0,
+            fill: alpha(0xFFFFFF, 0.015),
+            rim: Some(alpha(0xFFFFFF, 0.14)),
+            dashed: true,
+            sharp: Corner::None,
+        });
+        let mut next = Vec::new();
+        mark(&mut next, top + 12.0, true);
+        next.push(Shape::Text(Line {
+            text: then.identity.clone(),
+            at: Point::new(left + 36.0, top + 18.0),
+            size: 13.5,
+            color: DIM,
+            bold: true,
+            align: Alignment::Left,
+        }));
+        next.push(Shape::Text(Line {
+            text: then.note.clone(),
+            at: Point::new(left + 36.0, top + 34.0),
+            size: SHEET_FROM,
+            color: FAINT,
+            bold: false,
+            align: Alignment::Left,
+        }));
+        shapes.extend(next);
+        return top + h;
+    }
+    at
+}
+
 /// Her briefing (4.6) in the drawer: who waits, who is stuck, who is to
 /// see, who works, who rests; a line goes to its agent.
 fn lay_out_briefing(
@@ -2008,25 +2945,8 @@ fn lay_out_briefing(
     right: f32,
 ) {
     let brief = Brief::of(agents_shown);
+    // Its way back is the sub-view's bar (#758).
     let mut y = top + THREAD_TOP;
-    let back = words.back();
-    let bw = width_of(back, SMALL, true);
-    laid.shapes.push(Shape::Text(Line {
-        text: back.to_owned(),
-        at: Point::new(PAD, y + SMALL_LINE / 2.0),
-        size: SMALL,
-        color: MINT,
-        bold: true,
-        align: Alignment::Left,
-    }));
-    laid.targets.push((
-        Target::Back,
-        Rectangle::new(
-            Point::new(PAD - 4.0, y - 2.0),
-            Size::new(bw + 8.0, SMALL_LINE + 4.0),
-        ),
-    ));
-    y += SMALL_LINE + GAP;
     let agent_words = agents::Words::new(if words.fr {
         crate::clock::time::Lang::French
     } else {
@@ -2214,15 +3134,21 @@ fn lay_out_briefing_card(
             text: line,
             at: Point::new(x + CARD_X, at + CARD_LABEL * 0.7),
             size: CARD_LABEL,
-            color: hex(0xB9CEFF),
+            color: if absence { hex(0xB9CEFF) } else { MINT },
             bold: true,
             align: Alignment::Left,
         }));
         at += CARD_LABEL * 1.4;
     }
     at += 4.0;
-    if !briefing.sentence.is_empty() {
-        let lines = lines_of(&briefing.sentence, CARD_TEXT, false, inner);
+    // What is in it, in a line (#758); her sentence before there was one.
+    let shown = if briefing.summary.is_empty() {
+        &briefing.sentence
+    } else {
+        &briefing.summary
+    };
+    if !shown.is_empty() {
+        let lines = lines_of(shown, CARD_TEXT, false, inner);
         push_lines(
             &mut parts,
             &lines,
@@ -2302,14 +3228,22 @@ fn lay_out_briefing_card(
             a: 1.0,
             ..hex(0x121827)
         },
-        rim: Some(alpha(0x8FB3FF, 0.45)),
+        rim: Some(if absence {
+            alpha(0x8FB3FF, 0.45)
+        } else {
+            alpha(0x7EE0A0, 0.4)
+        }),
         dashed: false,
         sharp: Corner::None,
     });
     shapes.push(Shape::Box {
         rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
         radius: 12.0,
-        fill: alpha(0x8FB3FF, 0.08),
+        fill: if absence {
+            alpha(0x8FB3FF, 0.08)
+        } else {
+            alpha(0x7EE0A0, 0.05)
+        },
         rim: None,
         dashed: false,
         sharp: Corner::None,
@@ -2359,24 +3293,6 @@ fn lay_out_point(
     let mut shapes: Vec<Shape> = Vec::new();
     let mut targets: Vec<(Target, Rectangle)> = Vec::new();
     let mut y = THREAD_TOP;
-    let back = words.back();
-    let bw = width_of(back, SMALL, true);
-    shapes.push(Shape::Text(Line {
-        text: back.to_owned(),
-        at: Point::new(PAD, y + SMALL_LINE / 2.0),
-        size: SMALL,
-        color: MINT,
-        bold: true,
-        align: Alignment::Left,
-    }));
-    targets.push((
-        Target::Back,
-        Rectangle::new(
-            Point::new(PAD - 4.0, y - 2.0),
-            Size::new(bw + 8.0, SMALL_LINE + 4.0),
-        ),
-    ));
-    y += SMALL_LINE + GAP;
     let briefing = c
         .items
         .iter()
@@ -2423,10 +3339,50 @@ fn lay_out_point(
         }));
         ty += 17.0 * 1.4;
     }
-    for (text, size, colour) in [
-        (&briefing.date, 12.0, LABEL),
-        (&briefing.sentence, 13.0, DIM),
-    ] {
+    // The date, and what the day is like with its free slot named
+    // (#758): « une journée chargée ; ton seul créneau libre : 10 h – 11 h ».
+    let busy = match (briefing.busy.is_empty(), briefing.slot.is_empty()) {
+        (true, _) => String::new(),
+        (false, true) => briefing.busy.clone(),
+        (false, false) => format!("{} :", briefing.busy),
+    };
+    for (text, size, colour) in [(&briefing.date, 12.0, LABEL), (&busy, 12.0, DIM)] {
+        if text.is_empty() {
+            continue;
+        }
+        for line in lines_of(text, size, false, troom) {
+            shapes.push(Shape::Text(Line {
+                text: line,
+                at: Point::new(tx, ty + size * 0.72),
+                size,
+                color: colour,
+                bold: false,
+                align: Alignment::Left,
+            }));
+            ty += size * 1.45;
+        }
+    }
+    if !briefing.slot.is_empty() {
+        let w = measure(&briefing.slot, 11.5, iced::Font::with_name("Martian Mono")) + 10.0;
+        shapes.push(Shape::Box {
+            rect: Rectangle::new(Point::new(tx, ty), Size::new(w, 18.0)),
+            radius: 5.0,
+            fill: alpha(0x7EE0A0, 0.12),
+            rim: None,
+            dashed: false,
+            sharp: Corner::None,
+        });
+        shapes.push(Shape::Mono(Line {
+            text: briefing.slot.clone(),
+            at: Point::new(tx + 5.0, ty + 9.0),
+            size: 11.5,
+            color: hex(0x9BEBB8),
+            bold: false,
+            align: Alignment::Left,
+        }));
+        ty += 22.0;
+    }
+    for (text, size, colour) in [(&briefing.sentence, 13.0, DIM)] {
         if text.is_empty() {
             continue;
         }
@@ -2521,6 +3477,14 @@ fn lay_out_point(
             );
         }
     }
+    // The mails to answer, in order: what their actions name (#758).
+    let mails: Vec<&str> = briefing
+        .sections
+        .iter()
+        .flat_map(|s| s.lines.iter())
+        .filter(|l| !l.pointer.is_empty())
+        .map(|l| l.pointer.as_str())
+        .collect();
     for (key, label, note, lines, proposal) in &sections {
         let visible: Vec<&hocus_secretary_link::Line> = lines
             .iter()
@@ -2623,6 +3587,47 @@ fn lay_out_point(
                     }));
                     y += 12.0 * 1.4;
                 }
+            }
+            // A mail to answer: « Ouvrir le mail ↗ » (never marking it
+            // read), « Rappelle-le-moi », or when she will (#758).
+            if let Some(index) = mails.iter().position(|p| *p == line.pointer) {
+                let index = index as u32;
+                let mut ax = x;
+                let mid = y + 12.0 * 0.72;
+                let mut action = |label: &str, target: Option<Target>, colour: Color| {
+                    let w = width_of(label, 12.0, true);
+                    shapes.push(Shape::Text(Line {
+                        text: label.to_owned(),
+                        at: Point::new(ax, mid),
+                        size: 12.0,
+                        color: if target.is_some_and(|t| open.hover == Some(t)) {
+                            hex(0x9BEBB8)
+                        } else {
+                            colour
+                        },
+                        bold: target.is_some(),
+                        align: Alignment::Left,
+                    }));
+                    if let Some(target) = target {
+                        targets.push((
+                            target,
+                            Rectangle::new(
+                                Point::new(ax - 3.0, y - 2.0),
+                                Size::new(w + 6.0, 12.0 * 1.4 + 4.0),
+                            ),
+                        ));
+                    }
+                    ax += w + 14.0;
+                };
+                if line.open.is_some() {
+                    action(words.open_mail(), Some(Target::OpenMail(index)), MINT);
+                }
+                if line.reminded.is_empty() {
+                    action(words.remind_me(), Some(Target::Remind(index)), MINT);
+                } else {
+                    action(&format!("✓ {}", line.reminded), None, DIM);
+                }
+                y += 12.0 * 1.4 + 2.0;
             }
             if line.attention {
                 shapes.insert(
@@ -2773,7 +3778,14 @@ impl View {
                 if state.laid.as_ref().is_some_and(|(k, _)| *k == key) {
                     return Some(None);
                 }
-                let laid = lay_out(open, c, crate::secretary::state(), self.words, size);
+                let mut laid = lay_out(open, c, crate::secretary::state(), self.words, size);
+                // Each « Noté »'s bar from when it first showed (#758).
+                let now = Instant::now();
+                for shape in &mut laid.shapes {
+                    if let Shape::Countdown { item, since, .. } = shape {
+                        *since = Some(*open.noted.entry(*item).or_insert(now));
+                    }
+                }
                 // A briefing unfolded scrolls from its top: its scroll kept
                 // within it.
                 if open.point.is_some() {
@@ -2846,6 +3858,10 @@ impl View {
             .collect();
         let texts = texts.join(" ");
         let mood = laid.mood;
+        // A « Noté »'s bar empties while it can be taken back (#758).
+        let counting = laid.shapes.iter().any(
+            |shape| matches!(shape, Shape::Countdown { since: Some(t), .. } if t.elapsed() < NOTED),
+        );
         if said != state.logged {
             tracing::debug!("the drawer shows {said}");
             state.logged = said;
@@ -2883,7 +3899,7 @@ impl View {
                 Some((since, super::mood_window(mood))),
                 now,
             )
-            .1
+            .1 || counting
         })
     }
 
@@ -2931,7 +3947,13 @@ impl View {
         };
         f.draw_svg(laid.head, svg::Svg::new(handle));
         let text_x = laid.head.x + HEAD + HEAD_GAP;
-        let middle = laid.head.center_y();
+        // With the queue's button under them, the title and status go up.
+        let middle = laid.head.center_y()
+            - if laid.queue_button.is_some() {
+                7.0
+            } else {
+                0.0
+            };
         f.fill_text(text(
             &laid.title,
             Point::new(text_x, middle - 10.0),
@@ -2947,48 +3969,55 @@ impl View {
             Some(Tone::Off) | None => GREY,
         };
         let status_y = middle + 11.0;
-        f.fill(
-            &Path::circle(Point::new(text_x + DOT / 2.0, status_y), DOT / 2.0),
-            dot,
-        );
+        let status_x = if laid.dot {
+            f.fill(
+                &Path::circle(Point::new(text_x + DOT / 2.0, status_y), DOT / 2.0),
+                dot,
+            );
+            text_x + DOT + 6.0
+        } else {
+            text_x
+        };
         let room = laid
             .targets
             .iter()
             .find(|(t, _)| *t == Target::Gear)
             .map_or(right, |(_, r)| r.x)
-            - text_x
-            - DOT
-            - 6.0
+            - status_x
             - 8.0;
-        // Clickable: a chevron after it, brighter under the pointer (#754).
-        let clickable = laid.targets.iter().any(|(t, _)| *t == Target::Status);
-        let chevron = if open.queue { " ‹" } else { " ›" };
-        let room = if clickable {
-            room - width_of(chevron, STATUS, true)
-        } else {
-            room
-        };
         let status = crate::popover::kit::elide(&laid.status, room, |s| width_of(s, STATUS, false));
-        let hover = open.hover == Some(Target::Status);
         f.fill_text(text(
             &status,
-            Point::new(text_x + DOT + 6.0, status_y),
+            Point::new(status_x, status_y),
             STATUS,
-            if hover { TEXT } else { DIM },
+            DIM,
             false,
             Alignment::Left,
         ));
-        if clickable {
-            f.fill_text(text(
-                chevron,
-                Point::new(
-                    text_x + DOT + 6.0 + width_of(&status, STATUS, false),
-                    status_y,
+        // « 21 mails à trier › », a button (#758).
+        if let Some((rect, label)) = &laid.queue_button {
+            let hover = open.hover == Some(Target::Status);
+            f.fill(
+                &Path::rounded_rectangle(rect.position(), rect.size(), 6.0.into()),
+                alpha(0xFFFFFF, if hover { 0.12 } else { 0.06 }),
+            );
+            f.stroke(
+                &Path::rounded_rectangle(
+                    Point::new(rect.x + 0.5, rect.y + 0.5),
+                    Size::new(rect.width - 1.0, rect.height - 1.0),
+                    5.5.into(),
                 ),
-                STATUS,
-                if hover { MINT } else { FAINT },
+                Stroke::default()
+                    .with_color(alpha(0xFFFFFF, if hover { 0.28 } else { 0.16 }))
+                    .with_width(1.0),
+            );
+            f.fill_text(text(
+                label,
+                rect.center(),
+                QUEUE_TEXT,
+                if hover { MINT } else { hex(0xD5DBE5) },
                 true,
-                Alignment::Left,
+                Alignment::Center,
             ));
         }
         for (target, rect) in &laid.targets {
@@ -3038,11 +4067,32 @@ impl View {
         if let Some(band) = &laid.key_band {
             draw_key_band(f, band, open);
         }
-        // The tabs.
+        // The tabs, or a sub-view's bar.
         f.fill(
             &Path::rounded_rectangle(laid.tabs.position(), laid.tabs.size(), 9.0.into()),
             alpha(0xFFFFFF, 0.05),
         );
+        if let Some((rect, title)) = &laid.subbar {
+            let hover = open.hover == Some(Target::Back);
+            f.fill_text(text(
+                words.back(),
+                Point::new(rect.x + 12.0, rect.center_y()),
+                SUB_TEXT,
+                if hover { hex(0x9BEBB8) } else { MINT },
+                true,
+                Alignment::Left,
+            ));
+            let room = rect.width - width_of(words.back(), SUB_TEXT, true) - 40.0;
+            let title = crate::popover::kit::elide(title, room, |s| width_of(s, 13.0, true));
+            f.fill_text(text(
+                &title,
+                Point::new(rect.x + rect.width - 12.0, rect.center_y()),
+                13.0,
+                TEXT,
+                true,
+                Alignment::Right,
+            ));
+        }
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(laid.tabs.x + 0.5, laid.tabs.y + 0.5),
@@ -3132,13 +4182,16 @@ impl View {
             }
             self.draw_copy_button(f, laid, open);
         });
-        if laid.knows {
+        if laid.knows || !laid.composer {
             // In a layer of its own, as the list's is: it comes over it.
             f.with_clip(Rectangle::new(Point::ORIGIN, size), |f| {
                 for shape in &laid.overlay {
                     draw_shape(f, shape, now);
                 }
             });
+            // Her text copied, and the right click's menu (#757).
+            self.draw_copied(f, laid, open);
+            self.draw_menu(f, open, size);
             return;
         }
         // The composer.
@@ -3206,18 +4259,7 @@ impl View {
             false,
             Alignment::Left,
         ));
-        if !laid.model.is_empty() {
-            let mut model = text(
-                &laid.model,
-                Point::new(right, laid.foot),
-                10.5,
-                FAINT,
-                false,
-                Alignment::Right,
-            );
-            model.font = iced::Font::with_name("Martian Mono");
-            f.fill_text(model);
-        }
+        // Her model's name is the Settings' (#758): nothing here.
         self.draw_copied(f, laid, open);
         self.draw_menu(f, open, size);
     }
@@ -3461,18 +4503,6 @@ fn draw_shape(f: &mut Frame, shape: &Shape, now: Instant) {
                 );
             }
         }
-        Shape::Check(rect) => {
-            f.fill(
-                &Path::rounded_rectangle(rect.position(), rect.size(), 4.0.into()),
-                hex(0x8FB3FF),
-            );
-            let tick = Path::new(|p| {
-                p.move_to(Point::new(rect.x + 3.5, rect.y + 7.5));
-                p.line_to(Point::new(rect.x + 6.0, rect.y + 10.0));
-                p.line_to(Point::new(rect.x + 10.5, rect.y + 4.5));
-            });
-            f.stroke(&tick, Stroke::default().with_color(INK).with_width(2.0));
-        }
         Shape::Quote(rect) => f.fill_rectangle(rect.position(), rect.size(), alpha(0x7EE0A0, 0.5)),
         Shape::Mono(line) => {
             let mut t = text(
@@ -3501,6 +4531,19 @@ fn draw_shape(f: &mut Frame, shape: &Shape, now: Instant) {
                     Stroke::default()
                         .with_color(alpha(0xFFFFFF, 0.35))
                         .with_width(1.5),
+                );
+            }
+        }
+        Shape::Countdown { rect, since, .. } => {
+            let left = since.map_or(1.0, |t| {
+                1.0 - now.saturating_duration_since(t).as_secs_f32() / NOTED.as_secs_f32()
+            });
+            if left > 0.0 {
+                f.fill_rectangle(rect.position(), rect.size(), alpha(0x8FB3FF, 0.15));
+                f.fill_rectangle(
+                    rect.position(),
+                    Size::new(rect.width * left.min(1.0), rect.height),
+                    alpha(0x8FB3FF, 0.7),
                 );
             }
         }
@@ -3579,6 +4622,9 @@ fn arrow(f: &mut Frame, c: Point) {
 /// Her key's field, masked, its caret while it has the keyboard, and
 /// "Enregistrer".
 fn draw_key_band(f: &mut Frame, band: &KeyBand, open: &Open) {
+    for shape in &band.shapes {
+        draw_shape(f, shape, Instant::now());
+    }
     let field = band.field;
     f.fill(
         &Path::rounded_rectangle(field.position(), field.size(), 8.0.into()),
@@ -3591,19 +4637,21 @@ fn draw_key_band(f: &mut Frame, band: &KeyBand, open: &Open) {
             7.5.into(),
         ),
         Stroke::default()
-            .with_color(if band.focused {
+            .with_color(if band.error {
+                alpha(0xF2945B, 0.9)
+            } else if band.focused {
                 alpha(0x6CC287, 0.85)
             } else {
                 alpha(0xFFFFFF, 0.16)
             })
-            .with_width(if band.focused { 1.5 } else { 1.0 }),
+            .with_width(if band.focused || band.error { 1.5 } else { 1.0 }),
     );
     let x = field.x + 10.0;
     let y = field.center_y();
     f.fill_text(text(
         &band.shown,
         Point::new(x, y),
-        if band.placeholder { 12.5 } else { 13.0 },
+        if band.placeholder { 11.5 } else { 13.0 },
         if band.placeholder { FAINT } else { TEXT },
         !band.placeholder,
         Alignment::Left,
@@ -4060,6 +5108,7 @@ mod tests {
                 Entry::Streaming(..) => "streaming",
                 Entry::Typing(_) => "typing",
                 Entry::Hidden(_) => "hidden",
+                Entry::Greeting(_) => "greeting",
             })
             .collect();
         assert_eq!(kinds, ["day", "item", "streaming", "item", "typing"]);

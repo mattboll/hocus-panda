@@ -417,6 +417,10 @@ impl Brain {
         if !self.conns.keys().any(|c| self.talker(*c)) {
             return;
         }
+        // Whether her key is missing is being asked of the keyring.
+        if self.key_asked {
+            return;
+        }
         let fr = self.talk.fr();
         let begun = !self.consents.cards.is_empty()
             || self.store.meta(FIRST_RUN).ok().flatten().as_deref() == Some("begun");
@@ -454,6 +458,8 @@ impl Brain {
             if let Err(err) = self.store.set_meta(FIRST_RUN, "begun") {
                 tracing::warn!(%err, "could not note her first run");
             }
+            // Her steps under her hello, before anything is asked.
+            self.steps(Some(usize::from(self.key_missing.is_none())));
         }
         // Her key first: nothing else is asked while she misses it.
         if self.key_missing.is_some() {
@@ -502,6 +508,13 @@ impl Brain {
             }
         }
         self.tell_look();
+    }
+
+    /// Her first run is under way: begun, her accounts known, not over.
+    pub(super) fn first_run_under_way(&self) -> bool {
+        self.consents.accounts.is_some()
+            && self.consents.first_run != FirstRun::Done
+            && self.conns.keys().any(|c| self.talker(*c))
     }
 
     /// Her first run's steps (#758), step `now` the one being taken (none:

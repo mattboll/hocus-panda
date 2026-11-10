@@ -626,6 +626,8 @@ impl Brain {
                     self.key_missing = missing;
                     self.tell_look();
                 }
+                // Her first run waits for this answer: her key first.
+                self.first_run_step();
             }
             Event::Changed(crate::watch::Watched::Consents) => self.consents_changed(),
             Event::Changed(crate::watch::Watched::Config) => {

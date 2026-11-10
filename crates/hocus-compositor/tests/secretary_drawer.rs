@@ -83,7 +83,7 @@ contains = ["son article"]
 text = "Je te propose ce message pour Léa."
 [[reply.tool_calls]]
 name = "send_message"
-input = { to = "Léa", draft = "Je relis ton article cet après-midi, je te dis vers 16 h." }
+input = { to = "Léa Martin", channel = "slack", draft = "Je relis ton article cet après-midi, je te fais mes retours vers 16 h." }
 
 [[reply]]
 role = "answer"
@@ -132,6 +132,9 @@ struct Setup {
     /// With `google`: her Anthropic API a fake on this machine that
     /// refuses every key (#752), instead of nothing.
     refusing_api: bool,
+    /// With `google`: her answers by the local model, which needs no key
+    /// (#758: her first run goes on to the accounts).
+    keyless: bool,
 }
 
 impl Default for Setup {
@@ -142,6 +145,7 @@ impl Default for Setup {
             reduced_motion: false,
             google: false,
             refusing_api: false,
+            keyless: false,
         }
     }
 }
@@ -182,15 +186,20 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
                 "http://127.0.0.1:9".to_owned()
             };
             // Her name, with the refusing API (#752).
-            let name = if setup.refusing_api {
+            let name = if setup.refusing_api || setup.keyless {
                 "[secretary]\nname = \"Margot\"\n"
+            } else {
+                ""
+            };
+            let models = if setup.keyless {
+                "[secretary.models]\nanswer = \"local/qwen3:8b\"\nbriefing = \"local/qwen3:8b\"\nextraction = \"local/qwen3:8b\"\ncompaction = \"local/qwen3:8b\"\n"
             } else {
                 ""
             };
             std::fs::write(
                 &config,
                 format!(
-                    "{name}[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{api}\"\n\
+                    "{name}{models}[secretary.providers.anthropic]\nkind = \"anthropic\"\nurl = \"{api}\"\n\
                      [secretary.providers.local]\nkind = \"ollama\"\nurl = \"http://127.0.0.1:9/v1\"\n"
                 ),
             )?;
@@ -406,6 +415,22 @@ impl Bed {
         let (x, y) = found(&common::logged(&self.log)).unwrap_or_default();
         let r = self.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
         Ok((f64::from(r.x) + x, f64::from(r.y) + y))
+    }
+
+    /// Where `item` is once the drawer's layout holds still: her thread
+    /// may move as what she sends changes.
+    fn place_settled(&mut self, item: &str) -> anyhow::Result<(f64, f64)> {
+        let mut at = self.place(item)?;
+        for _ in 0..20 {
+            common::at_rest(&mut self.hp)?;
+            wait(&mut self.hp, Duration::from_millis(250))?;
+            let again = self.place(item)?;
+            if again == at {
+                return Ok(at);
+            }
+            at = again;
+        }
+        Ok(at)
     }
 
     /// The drawer's last places' item whose name starts with `prefix`.
@@ -729,10 +754,8 @@ fn a_sentence_shows_its_bubble_her_typing_then_her_answer_as_it_comes() -> anyho
     bed.super_s();
     bed.opened()?;
     bed.shows(|s| {
-        s["model"] == "Claude Sonnet 5.5"
-            && s["status"]
-                .as_str()
-                .is_some_and(|t| t.starts_with("Planka") && t.ends_with("à jour"))
+        // A state in words, no model's name (#758).
+        s["status"] == "Tout est à jour" && !s.to_string().contains("Claude Sonnet")
     })?;
     // "bonjour", then Enter.
     bed.type_keys(&[48, 24, 49, 36, 24, 22, 19]);
@@ -767,7 +790,7 @@ fn a_sentence_shows_its_bubble_her_typing_then_her_answer_as_it_comes() -> anyho
 }
 
 /// AC7: one question naming the project, its quick replies; "Oui" keeps
-/// it ("Retenu"), and the word is not asked about again.
+/// it ("Noté"), and the word is not asked about again.
 #[test]
 fn a_word_on_one_projects_board_is_asked_once_with_quick_replies() -> anyhow::Result<()> {
     let Some(mut bed) = start(Setup::default())? else {
@@ -782,7 +805,7 @@ fn a_word_on_one_projects_board_is_asked_once_with_quick_replies() -> anyhow::Re
     let items = asked["items"].to_string();
     assert_eq!(items.matches("question:").count(), 1, "{items}");
     assert!(
-        items.contains("Chapitô") && items.contains("Oui, Chapitô | Non, autre chose"),
+        items.contains("Chapitô") && items.contains("Oui, c’est Chapitô | Non | Je t’explique"),
         "{items}"
     );
     assert_eq!(asked["mood"], "ask");
@@ -798,7 +821,7 @@ fn a_word_on_one_projects_board_is_asked_once_with_quick_replies() -> anyhow::Re
     bed.click(at)?;
     bed.shows(|s| {
         let items = s["items"].to_string();
-        items.contains("learned:Retenu\u{a0}: «\u{a0}égaluantes\u{a0}» → Chapitô")
+        items.contains("learned:Noté\u{a0}: «\u{a0}égaluantes\u{a0}», c’est Chapitô.")
             && items.contains("chosen 0")
     })?;
     bed.advance(30)?;
@@ -836,7 +859,9 @@ fn a_card_proposes_and_nothing_happens_before_its_click() -> anyhow::Result<()> 
     bed.shows(|s| {
         s["items"]
             .to_string()
-            .contains("card:Draft:Message à Léa:Envoyer/Modifier/Annuler")
+            .contains(
+                "card:Draft:Message Slack · à Léa Martin, en privé:Envoyer sur Slack/Modifier/Ne pas envoyer",
+            )
     })?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert!(bed.recorded().1.is_empty(), "nothing sent before the click");
@@ -845,7 +870,8 @@ fn a_card_proposes_and_nothing_happens_before_its_click() -> anyhow::Result<()> 
     assert!(accept.ends_with("Accept)"), "{accept}");
     let at = bed.place(&accept)?;
     bed.click(at)?;
-    bed.shows(|s| s["items"].to_string().contains("→ Fait."))?;
+    // What left, where, when (#758).
+    bed.shows(|s| s["items"].to_string().contains("→ Envoyé sur Slack à "))?;
     let dir = bed.dir.path().to_path_buf();
     let sent = bed
         .hp
@@ -971,13 +997,15 @@ fn button_of(bed: &mut Bed, decision: &str) -> anyhow::Result<(f64, f64)> {
     bed.place(&format!("Button({item},{decision})"))
 }
 
-/// Her first run (§15, #750): one source at a time, each on its consent
-/// card, then « Dis-moi sur quoi tu travailles et avec qui. »; her
-/// status says the key she misses, and how to give one.
+/// Her first run (§15, #750, #758): her steps, one card per account
+/// with a switch per kind and « Travail | Privé », « Autoriser l'agenda et
+/// les mails » writing a grant for each kind switched on; then « Dis-moi
+/// sur quoi tu travailles, et avec qui. ».
 #[test]
-fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()> {
+fn her_first_run_asks_one_account_at_a_time_in_the_drawer() -> anyhow::Result<()> {
     let Some(mut bed) = start(Setup {
         google: true,
+        keyless: true,
         ..Setup::default()
     })?
     else {
@@ -988,27 +1016,39 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
     let shown = bed.shows(|s| {
         s["items"]
             .to_string()
-            .contains("card:Consent:Agenda · alex@atelier-lune.fr")
+            .contains("card:Consent:Ton compte Google · 1 sur 2")
     })?;
     let items = shown["items"].to_string();
-    assert!(items.contains("une source à la fois"), "{items}");
+    assert!(items.contains("Je ne fais rien sans ton clic."), "{items}");
+    assert!(
+        items.contains("steps:Ce que je peux lire de tes comptes Google=Now"),
+        "{items}"
+    );
     assert_eq!(
         items.matches("card:Consent").count(),
         1,
         "one at a time: {items}"
     );
-    assert_eq!(shown["status"], "Il me manque ma clé Anthropic");
     assert!(
-        shown["key_lines"]
-            .as_str()
-            .is_some_and(|h| h.contains("hocus-secretary key anthropic")),
-        "{shown}"
+        items.contains("Autoriser l’agenda et les mails/Pas maintenant"),
+        "{items}"
     );
+    assert_eq!(shown["status"], "Je ne lis encore rien");
+    common::at_rest(&mut bed.hp)?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
     bed.shot("first-run-consent")?;
-    // « C'est privé » checked on it (#752), then "Autoriser": the grant,
-    // perso; the next source.
-    let private = bed.place_starting("Private(")?;
-    let at = bed.place(&private)?;
+    // « Privé », the mail switched off, then « Autoriser l'agenda »: the
+    // calendar granted, private; not the mail.
+    let item = bed
+        .place_starting("Book(")?
+        .trim_start_matches("Book(")
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let at = bed.place_settled(&format!("Book({item},true)"))?;
+    bed.click(at)?;
+    let at = bed.place_settled(&format!("Switch({item},mail)"))?;
     bed.click(at)?;
     bed.shows(|_| true)?;
     wait(&mut bed.hp, Duration::from_millis(200))?;
@@ -1017,7 +1057,7 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
     let shown = bed.shows(|s| {
         s["items"]
             .to_string()
-            .contains("card:Consent:Anniversaires · alex@atelier-lune.fr")
+            .contains("card:Consent:Ton compte Google · 2 sur 2")
     })?;
     assert!(
         shown["items"]
@@ -1031,39 +1071,28 @@ fn her_first_run_asks_one_source_at_a_time_in_the_drawer() -> anyhow::Result<()>
             .join("data/hocuspanda/secretary/consents.json"),
     )?;
     let book: hocus_secretary_link::consent::ConsentBook = serde_json::from_str(&book)?;
+    let key = |kind| hocus_secretary_link::consent::SourceKey::new("alex@atelier-lune.fr", kind);
     let grant = book
-        .grant(&hocus_secretary_link::consent::SourceKey::new(
-            // The fake's id is the account's e-mail.
-            "alex@atelier-lune.fr",
-            hocus_secretary_link::consent::SourceKind::Calendar,
-        ))
+        .grant(&key(hocus_secretary_link::consent::SourceKind::Calendar))
         .expect("the work calendar granted");
     assert_eq!(grant.notebook(), hocus_secretary_link::Notebook::Perso);
+    assert!(
+        book.grant(&key(hocus_secretary_link::consent::SourceKind::Mail))
+            .is_none(),
+        "switched off: not granted"
+    );
     bed.shot("first-run-granted")?;
-    // "Pas maintenant" on the rest, the gmail.com account perso.
-    for n in 0..5 {
-        let not_now = button_of(&mut bed, "Reject")?;
-        let before = bed.shows(|_| true)?["items"].clone();
-        bed.click(not_now)?;
-        bed.shows(|s| s["items"] != before)?;
-        if n == 1 {
-            let shown = bed.shows(|s| {
-                s["items"]
-                    .to_string()
-                    .contains("card:Consent:Agenda · alex.martin@gmail.com")
-            })?;
-            assert!(shown["items"].to_string().contains("Pas maintenant"));
-            bed.shot("first-run-perso")?;
-        }
-    }
+    // "Pas maintenant" on the gmail.com account.
+    let not_now = button_of(&mut bed, "Reject")?;
+    bed.click(not_now)?;
     let shown = bed.shows(|s| {
         s["items"]
             .to_string()
-            .contains("her:Dis-moi sur quoi tu travailles et avec qui.")
+            .contains("her:Dis-moi sur quoi tu travailles, et avec qui.")
     })?;
     assert_eq!(
         shown["items"].to_string().matches("card:Consent").count(),
-        6
+        2
     );
     bed.shot("first-run-done")?;
     Ok(())
@@ -1101,11 +1130,23 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
             .contains("Bonjour, je suis Margot, ta secrétaire."),
         "{shown}"
     );
+    // What a key is and where to make one; no terminal (#758).
     assert!(
         shown["key_lines"].as_str().is_some_and(|l| l
-            .contains("Elle va dans ton trousseau, jamais dans un fichier.")
-            && l.contains("hocus-secretary key anthropic, Entrée, puis colle ta clé.")),
+            .contains("Je la garde dans le trousseau de ta session")
+            && !l.contains("hocus-secretary key")),
         "{shown}"
+    );
+    bed.place("Console")?;
+    // Her first run's steps: her key now, nothing else asked yet.
+    let items = shown["items"].to_string();
+    assert!(
+        items.contains("steps:Ma clé Anthropic=Now") && !items.contains("card:Consent"),
+        "{items}"
+    );
+    assert!(
+        !items.contains("briefing:"),
+        "no briefing in her first run: {items}"
     );
     bed.shot("key-band")?;
     bed.type_keys(&[
@@ -1117,7 +1158,7 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
     let shown = bed.shows(|s| {
         s["key_lines"]
             .as_str()
-            .is_some_and(|l| l.contains("Clé refusée par Anthropic."))
+            .is_some_and(|l| l.contains("Anthropic refuse cette clé. Vérifie qu’elle est complète"))
     })?;
     assert_eq!(shown["key_field"], serde_json::json!(false), "it empties");
     bed.shot("key-band-refused")?;
@@ -1418,7 +1459,7 @@ fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
 #[test]
 fn her_answers_and_drafts_copy_from_their_button() -> anyhow::Result<()> {
     const HERS: &str = "Je te propose ce message pour Léa.";
-    const DRAFT: &str = "Je relis ton article cet après-midi, je te dis vers 16 h.";
+    const DRAFT: &str = "Je relis ton article cet après-midi, je te fais mes retours vers 16 h.";
     const MASKED: &str = "Le code du wifi : [secret masqué — voir le mail de Léa].";
     let Some(mut bed) = start(Setup::default())? else {
         return Ok(());
@@ -1434,7 +1475,8 @@ fn her_answers_and_drafts_copy_from_their_button() -> anyhow::Result<()> {
     ));
     bed.shows(|s| {
         let items = s["items"].to_string();
-        items.contains("card:Draft:Message à Léa") && items.contains(&format!("her:{HERS}"))
+        items.contains("card:Draft:Message Slack · à Léa Martin")
+            && items.contains(&format!("her:{HERS}"))
     })?;
     let buttons = bed.copy_buttons()?;
     let mut copied = Vec::new();
@@ -1503,9 +1545,14 @@ fn the_queue_s_lines_are_copied_too() -> anyhow::Result<()> {
         .and_then(|s| s.split(" | ").next())
         .map(str::to_owned)
         .ok_or_else(|| anyhow::anyhow!("no state in {shown}"))?;
-    // "‹ Discussion", the section's title, then what she does.
-    let blocks = bed.texts(3)?;
-    let line = &blocks[2];
+    // The sentence saying what the triage is (#758), then what she does:
+    // its first line, 24 px in.
+    let blocks = bed.texts(4)?;
+    let x = f64::from(bed.drawer().map_or(0, |r| r.x)) + 24.0;
+    let line = blocks
+        .iter()
+        .find(|b| (b.start.0 - x).abs() < 1.5)
+        .ok_or_else(|| anyhow::anyhow!("no state line in {blocks:?}"))?;
     assert!(line.source.starts_with("Queue("), "{blocks:?}");
     bed.clicks(((line.start.0 + line.end.0) / 2.0, line.start.1), 3)?;
     bed.ctrl_c();

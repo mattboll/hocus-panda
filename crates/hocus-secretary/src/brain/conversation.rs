@@ -380,7 +380,9 @@ impl Brain {
                 )
             };
             (status, Tone::Warn, hint)
-        } else if self.slots.is_empty() {
+        } else if self.slots.is_empty()
+            || (self.first_run_under_way() && self.granted_kinds().is_empty())
+        {
             (
                 self.talk
                     .t("Je ne lis encore rien", "I read nothing yet")
@@ -405,6 +407,7 @@ impl Brain {
             name: self.settings.current().name.trim().to_owned(),
             to_sort: self.mails_to_sort(),
             greeting: self.greeting(),
+            today: crate::retrieve::day_of(self.clock.now()).to_string(),
         }
     }
 
@@ -439,6 +442,8 @@ impl Brain {
                 ("Agenda", false) => "your calendar".to_owned(),
                 ("Gmail", true) => "tes mails".to_owned(),
                 ("Gmail", false) => "your mail".to_owned(),
+                ("notifications", true) => "tes notifications".to_owned(),
+                ("notifications", false) => "your notifications".to_owned(),
                 _ if slot.name == "google" => {
                     let kinds = self.granted_kinds();
                     for (kind, f, e) in [

@@ -1035,6 +1035,10 @@ pub struct Look {
     /// agenda et tes mails ; dis-moi ce dont tu as besoin, ou essaie : ».
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub greeting: String,
+    /// Her day, on her clock (`2026-11-09`): the drawer's greeting shows
+    /// while nothing is said on it (#758).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub today: String,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
