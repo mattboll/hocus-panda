@@ -38,6 +38,7 @@ struct Said {
     art: String,
     length: i64,
     position: i64,
+    shuffle: bool,
 }
 
 type Heard = Arc<Mutex<Vec<String>>>;
@@ -146,6 +147,23 @@ impl Player {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .position
+    }
+
+    #[zbus(property)]
+    fn shuffle(&self) -> bool {
+        self.said
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .shuffle
+    }
+
+    #[zbus(property)]
+    fn set_shuffle(&mut self, on: bool) {
+        hear(&self.heard, &format!("Shuffle {on}"));
+        self.said
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .shuffle = on;
     }
 
     #[zbus(property)]
@@ -455,6 +473,7 @@ fn brassens(dir: &Path, status: &str) -> Said {
         art: cover(dir, "c1"),
         length: 240_000_000,
         position: 91_000_000,
+        shuffle: true,
     }
 }
 
@@ -468,6 +487,7 @@ fn fireship(dir: &Path) -> Said {
         art: cover(dir, "c3"),
         length: 151_000_000,
         position: 107_000_000,
+        shuffle: true,
     }
 }
 
@@ -481,6 +501,7 @@ fn aphex(dir: &Path) -> Said {
         art: cover(dir, "c2"),
         length: 125_000_000,
         position: 30_000_000,
+        shuffle: true,
     }
 }
 
@@ -568,7 +589,7 @@ fn a_player_playing_shows_its_tile_and_its_popover() -> anyhow::Result<()> {
         "Spotify",
         "Georges Brassens",
         "Fernande · 1972",
-        "Ouvrir Spotify",
+        "Afficher Spotify",
     ] {
         anyhow::ensure!(said.contains(text), "{text:?} not in {said}");
     }
@@ -678,6 +699,18 @@ fn music_shots() -> anyhow::Result<()> {
         return Ok(());
     };
     let dir = bed.dir.path().to_owned();
+    // The two players' state alone, as `HOCUS_MUSIC_ONLY=two:NAME` names it.
+    if let Some(name) = only.as_deref().and_then(|o| o.strip_prefix("two:")) {
+        let _spotify = bed.player("spotify", aphex(&dir))?;
+        let _firefox = bed.player("firefox.instance_1_23", fireship(&dir))?;
+        bed.logged("(Firefox, playing); others")?;
+        let from = bed.plain().len();
+        bed.click_tile(false)?;
+        bed.shows_after(from, "Avril 14th")?;
+        let pop = bed.popover()?;
+        bed.hp.pointer_move(1000.0, 500.0);
+        return shoot(&mut bed, &out, name, with_column(pop), 12);
+    }
     let spotify = bed.player("spotify", brassens(&dir, "Playing"))?;
     bed.logged("(Spotify, playing)")?;
     let tile = bed.tile()?;

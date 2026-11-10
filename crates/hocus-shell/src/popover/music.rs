@@ -71,6 +71,9 @@ const LINE: f32 = 1.3;
 /// `←` and `→` move this far.
 const STEP: Duration = Duration::from_secs(5);
 
+/// The track's filled part and its knob: blue, the play button staying
+/// the accent.
+const PROGRESS: Ink = Ink::Dark(Color::from_rgb8(0x7F, 0xB2, 0xFF));
 const RAIL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
 const ROW_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.09));
@@ -80,6 +83,7 @@ const ON_ACCENT: Ink = Ink::Dark(Color::from_rgb8(0x0B, 0x10, 0x20));
 /// What holds the keyboard's ring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
+    Shuffle,
     Previous,
     Play,
     Next,
@@ -287,7 +291,7 @@ fn progress<'a>(front: &Player, dragging: Option<f32>, now: Instant) -> El<'a> {
         .style(move |_, _| slider::Style {
             rail: slider::Rail {
                 backgrounds: (
-                    Background::Color(ACCENT.get()),
+                    Background::Color(PROGRESS.get()),
                     Background::Color(RAIL.get()),
                 ),
                 width: TRACK,
@@ -298,7 +302,7 @@ fn progress<'a>(front: &Player, dragging: Option<f32>, now: Instant) -> El<'a> {
             },
             handle: slider::Handle {
                 shape: slider::HandleShape::Circle { radius: KNOB / 2.0 },
-                background: Background::Color(TEXT.get()),
+                background: Background::Color(PROGRESS.get()),
                 border_width: 0.0,
                 border_color: Color::TRANSPARENT,
             },
@@ -383,9 +387,28 @@ fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
         filled(fill, MAIN / 2.0, ON_ACCENT.get())
     })
     .on_press_maybe(can.then_some(Msg::Act(Target::Play)));
+    // Shuffle, when the player says it: on the left, and as much room on
+    // the right, so that play stays in the middle.
+    let shuffle: Option<El<'a>> = front.shuffle.map(|on| {
+        side(
+            Glyph::Shuffle(if on { ACCENT } else { DIM }.get()),
+            Target::Shuffle,
+            can,
+        )
+    });
+    let balance: El<'a> = if shuffle.is_some() {
+        gap(BUTTON + BUTTONS_GAP)
+    } else {
+        gap(0.0)
+    };
+    let shuffle = shuffle.map_or_else(
+        || gap(0.0),
+        |shuffle| row![shuffle, gap(BUTTONS_GAP)].into(),
+    );
     container(
         row![
             space::horizontal(),
+            shuffle,
             side(
                 Glyph::Previous(if front.can_previous { TEXT } else { FAINT }.get()),
                 Target::Previous,
@@ -399,6 +422,7 @@ fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
                 Target::Next,
                 front.can_next && can
             ),
+            balance,
             space::horizontal(),
         ]
         .align_y(Vertical::Center),
@@ -569,6 +593,8 @@ pub(crate) enum Glyph {
     Next(Color),
     Play(Color),
     Pause(Color),
+    /// Two crossed arrows, stroked.
+    Shuffle(Color),
 }
 
 impl<M> canvas::Program<M> for Glyph {
@@ -584,6 +610,32 @@ impl<M> canvas::Program<M> for Glyph {
     ) -> Vec<canvas::Geometry> {
         let mut f = canvas::Frame::new(renderer, bounds.size());
         let s = bounds.width / 24.0;
+        if let Self::Shuffle(colour) = *self {
+            let lines: [&[(f32, f32)]; 5] = [
+                &[(3.0, 17.0), (7.5, 17.0), (15.5, 7.0), (21.0, 7.0)],
+                &[(18.0, 4.0), (21.0, 7.0), (18.0, 10.0)],
+                &[(3.0, 7.0), (7.5, 7.0), (10.0, 10.2)],
+                &[(13.0, 13.8), (15.5, 17.0), (21.0, 17.0)],
+                &[(18.0, 14.0), (21.0, 17.0), (18.0, 20.0)],
+            ];
+            for line in lines {
+                let path = canvas::Path::new(|b| {
+                    for (i, (x, y)) in line.iter().enumerate() {
+                        let p = Point::new(x * s, y * s);
+                        if i == 0 { b.move_to(p) } else { b.line_to(p) }
+                    }
+                });
+                f.stroke(
+                    &path,
+                    canvas::Stroke::default()
+                        .with_color(colour)
+                        .with_width(2.0 * s)
+                        .with_line_cap(canvas::LineCap::Round)
+                        .with_line_join(canvas::LineJoin::Round),
+                );
+            }
+            return vec![f.into_geometry()];
+        }
         // The mockup's paths, on its 24 px grid.
         let shapes: &[&[(f32, f32)]] = match self {
             Self::Previous(_) => &[
@@ -599,11 +651,13 @@ impl<M> canvas::Program<M> for Glyph {
                 &[(7.0, 5.0), (11.0, 5.0), (11.0, 19.0), (7.0, 19.0)],
                 &[(13.0, 5.0), (17.0, 5.0), (17.0, 19.0), (13.0, 19.0)],
             ],
+            Self::Shuffle(_) => &[],
         };
         let (Self::Previous(colour)
         | Self::Next(colour)
         | Self::Play(colour)
-        | Self::Pause(colour)) = *self;
+        | Self::Pause(colour)
+        | Self::Shuffle(colour)) = *self;
         for shape in shapes {
             let path = canvas::Path::new(|b| {
                 for (i, (x, y)) in shape.iter().enumerate() {
@@ -665,6 +719,9 @@ fn order(shown: &music::Shown) -> Vec<Target> {
         return Vec::new();
     };
     let mut order = Vec::new();
+    if front.shuffle.is_some() && front.can_control {
+        order.push(Target::Shuffle);
+    }
     if front.can_previous && front.can_control {
         order.push(Target::Previous);
     }
@@ -728,6 +785,10 @@ fn handle(message: Msg) {
 
 fn act(target: Target, front: &Player, shown: &music::Shown) {
     match target {
+        Target::Shuffle => music::ask(Ask::Shuffle {
+            name: front.bus.clone(),
+            on: front.shuffle != Some(true),
+        }),
         Target::Previous => music::ask(Ask::Previous(front.bus.clone())),
         Target::Play => music::ask(Ask::PlayPause(front.bus.clone())),
         Target::Next => music::ask(Ask::Next(front.bus.clone())),

@@ -76,6 +76,8 @@ pub struct Player {
     pub can_seek: bool,
     pub can_control: bool,
     pub can_raise: bool,
+    /// Its `Shuffle`, if it has one.
+    pub shuffle: Option<bool>,
     /// The count of starts of playing when it last started (0: never).
     pub started: u64,
 }
@@ -192,6 +194,7 @@ pub enum Ask {
     Next(String),
     Previous(String),
     Seek { name: String, to: Duration },
+    Shuffle { name: String, on: bool },
     Raise(String),
 }
 
@@ -504,7 +507,7 @@ impl Words {
     }
 
     pub fn open(self, app: &str) -> String {
-        format!("{} {app}", self.pick("Ouvrir", "Open"))
+        format!("{} {app}", self.pick("Afficher", "Show"))
     }
 
     /// The source in the popover's header: "Spotify", "Spotify · en pause".

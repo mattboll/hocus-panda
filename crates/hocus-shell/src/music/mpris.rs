@@ -282,6 +282,21 @@ impl Players {
                 }
                 return;
             }
+            Ask::Shuffle { name, on } => {
+                let body = (PLAYER, "Shuffle", Variant::Bool(on));
+                let call = self.connection.call_method(
+                    Some(name.as_str()),
+                    PATH,
+                    Some(PROPERTIES),
+                    "Set",
+                    &body,
+                );
+                if let Ok(Err(err)) = tokio::time::timeout(PATIENCE, call).await {
+                    tracing::debug!(%err, name, "a music player's shuffle not set");
+                }
+                self.read(&name).await;
+                return;
+            }
             Ask::Seek { name, to } => {
                 let Some(track) = self
                     .players
@@ -421,6 +436,10 @@ fn player_of(name: &str, root: &Props, props: &Props, now: Instant) -> Player {
             root.get("CanRaise").map(|v| inner(v)),
             Some(Variant::Bool(true))
         ),
+        shuffle: match props.get("Shuffle").map(|v| inner(v)) {
+            Some(Variant::Bool(on)) => Some(*on),
+            _ => None,
+        },
         started: 0,
     }
 }
