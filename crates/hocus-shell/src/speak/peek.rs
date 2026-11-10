@@ -779,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn her_bubble_has_its_three_buttons_and_its_bold_words() {
+    fn her_bubble_has_its_buttons_and_its_bold_words() {
         let said = said(
             &speak(
                 "**Ton point du matin est prêt.** 3 réunions.",
@@ -799,7 +799,7 @@ mod tests {
             .filter(|p| p.2)
             .map(|p| p.0.as_str())
             .collect();
-        assert_eq!(bold, ["Ton", "point", "est", "prêt"]);
+        assert_eq!(bold, ["Ton", "point", "du", "matin", "est", "prêt."]);
         assert!(said.menu.is_empty());
         let open = said_menu();
         assert_eq!(open.menu.len(), 5);

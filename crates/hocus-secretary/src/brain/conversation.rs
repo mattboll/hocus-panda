@@ -1459,41 +1459,6 @@ const COMMON: &[&str] = &[
     "travaille",
 ];
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_acting_tool_is_a_proposal_all_the_same() {
-        for (name, effect) in [
-            ("send_message", "message"),
-            ("post", "post"),
-            ("write_file", "file"),
-            ("add_task", "task"),
-            ("start_job", "agent"),
-            ("propose_delegation", "delegation"),
-        ] {
-            let call = ToolCall {
-                name: name.to_owned(),
-                input: serde_json::json!({"to": "Léa", "draft": "Je regarde ça."}),
-                ..ToolCall::default()
-            };
-            let Some(Made::Card(card, made_effect)) = made(&call, true) else {
-                panic!("{name}: no card");
-            };
-            assert_eq!(made_effect.word(), effect);
-            assert!(card.actions.len() <= 3);
-            assert_eq!(card.actions[0].decision, Decision::Accept);
-        }
-        let unknown = ToolCall {
-            name: "rm_rf".to_owned(),
-            input: serde_json::Value::Null,
-            ..ToolCall::default()
-        };
-        assert_eq!(made(&unknown, true), None);
-    }
-}
-
 /// `text` with its first letter in capital: « Égaluantes ».
 fn upper_first(text: &str) -> String {
     let mut chars = text.chars();
@@ -1589,5 +1554,40 @@ impl Channel {
             (None, _, true) => format!("Envoyé à {at}"),
             (None, _, false) => format!("Sent at {at}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_acting_tool_is_a_proposal_all_the_same() {
+        for (name, effect) in [
+            ("send_message", "message"),
+            ("post", "post"),
+            ("write_file", "file"),
+            ("add_task", "task"),
+            ("start_job", "agent"),
+            ("propose_delegation", "delegation"),
+        ] {
+            let call = ToolCall {
+                name: name.to_owned(),
+                input: serde_json::json!({"to": "Léa", "draft": "Je regarde ça."}),
+                ..ToolCall::default()
+            };
+            let Some(Made::Card(card, made_effect)) = made(&call, true) else {
+                panic!("{name}: no card");
+            };
+            assert_eq!(made_effect.word(), effect);
+            assert!(card.actions.len() <= 3);
+            assert_eq!(card.actions[0].decision, Decision::Accept);
+        }
+        let unknown = ToolCall {
+            name: "rm_rf".to_owned(),
+            input: serde_json::Value::Null,
+            ..ToolCall::default()
+        };
+        assert_eq!(made(&unknown, true), None);
     }
 }

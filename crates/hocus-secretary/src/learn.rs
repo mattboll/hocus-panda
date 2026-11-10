@@ -1808,6 +1808,53 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
     }
 }
 
+/// What a barely used tool held in `days` days, in its own words (#758):
+/// "aucune carte en 30 jours", "un seul rendez-vous en 30 jours".
+pub(crate) fn quiet_things(tool: &str, count: u32, days: u32, fr: bool) -> String {
+    let folded = fold(tool);
+    let (one, many, feminine) = match (fr, folded.as_str()) {
+        (true, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
+            ("carte", "cartes", true)
+        }
+        (true, t) if t.contains("agenda") || t.contains("calendar") => {
+            ("rendez-vous", "rendez-vous", false)
+        }
+        (true, t) if t.contains("mail") => ("mail", "mails", false),
+        (true, _) => ("message", "messages", false),
+        (false, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
+            ("card", "cards", false)
+        }
+        (false, t) if t.contains("agenda") || t.contains("calendar") => ("event", "events", false),
+        (false, t) if t.contains("mail") => ("mail", "mails", false),
+        (false, _) => ("message", "messages", false),
+    };
+    match (count, fr) {
+        (0, true) => format!(
+            "{} {one} en {days} jours",
+            if feminine { "aucune" } else { "aucun" }
+        ),
+        (1, true) => format!(
+            "{} {one} en {days} jours",
+            if feminine { "une seule" } else { "un seul" }
+        ),
+        (n, true) => format!("{n} {many} en {days} jours"),
+        (0, false) => format!("no {one} in {days} days"),
+        (1, false) => format!("a single {one} in {days} days"),
+        (n, false) => format!("{n} {many} in {days} days"),
+    }
+}
+
+/// `name` in the middle of a sentence: its article in lower case (« Le
+/// site web » → « le site web »), the rest as it is.
+pub fn mid_sentence(name: &str) -> String {
+    for article in ["Le ", "La ", "Les ", "L’", "L'"] {
+        if let Some(rest) = name.strip_prefix(article) {
+            return format!("{}{rest}", article.to_lowercase());
+        }
+    }
+    name.to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1971,51 +2018,4 @@ mod tests {
         assert_eq!(past_day("hier", wednesday), Some(date(2026, 11, 10)));
         assert_eq!(past_day("", wednesday), None);
     }
-}
-
-/// What a barely used tool held in `days` days, in its own words (#758):
-/// "aucune carte en 30 jours", "un seul rendez-vous en 30 jours".
-pub(crate) fn quiet_things(tool: &str, count: u32, days: u32, fr: bool) -> String {
-    let folded = fold(tool);
-    let (one, many, feminine) = match (fr, folded.as_str()) {
-        (true, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
-            ("carte", "cartes", true)
-        }
-        (true, t) if t.contains("agenda") || t.contains("calendar") => {
-            ("rendez-vous", "rendez-vous", false)
-        }
-        (true, t) if t.contains("mail") => ("mail", "mails", false),
-        (true, _) => ("message", "messages", false),
-        (false, t) if t.contains("planka") || t.contains("board") || t.contains("trello") => {
-            ("card", "cards", false)
-        }
-        (false, t) if t.contains("agenda") || t.contains("calendar") => ("event", "events", false),
-        (false, t) if t.contains("mail") => ("mail", "mails", false),
-        (false, _) => ("message", "messages", false),
-    };
-    match (count, fr) {
-        (0, true) => format!(
-            "{} {one} en {days} jours",
-            if feminine { "aucune" } else { "aucun" }
-        ),
-        (1, true) => format!(
-            "{} {one} en {days} jours",
-            if feminine { "une seule" } else { "un seul" }
-        ),
-        (n, true) => format!("{n} {many} en {days} jours"),
-        (0, false) => format!("no {one} in {days} days"),
-        (1, false) => format!("a single {one} in {days} days"),
-        (n, false) => format!("{n} {many} in {days} days"),
-    }
-}
-
-/// `name` in the middle of a sentence: its article in lower case (« Le
-/// site web » → « le site web »), the rest as it is.
-pub fn mid_sentence(name: &str) -> String {
-    for article in ["Le ", "La ", "Les ", "L’", "L'"] {
-        if let Some(rest) = name.strip_prefix(article) {
-            return format!("{}{rest}", article.to_lowercase());
-        }
-    }
-    name.to_owned()
 }
