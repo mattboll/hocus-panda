@@ -88,6 +88,9 @@ pub enum Heard {
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
+    /// What is asked of the shell's or the secretary's program (`hocus msg
+    /// shell restart`), answered the same way.
+    Program(hocus_agents::ProgramAsk, std::sync::mpsc::Sender<String>),
     /// A Settings' line (`msg screens`, 6.9).
     Screens(crate::displays::FromSettings),
     /// A connection that follows the mice and touchpads (`hocus msg
@@ -320,11 +323,32 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                 }
                 break;
             }
-            if let Some(question) = Question::of(&line) {
+            let asked = match hocus_agents::ProgramAsk::of(&line) {
+                Some(ask) => Some(Asked::Program(ask)),
+                None => Question::of(&line).map(Asked::Question),
+            };
+            if let Some(asked) = asked {
                 // The loop answers; the answer is written back here, off
                 // the loop. One question a connection.
                 let (reply, answer) = std::sync::mpsc::channel();
-                if sender.send(Heard::Asked(question, reply)).is_err() {
+                let heard = match asked {
+                    Asked::Question(question) => Heard::Asked(question, reply),
+                    // A program given is looked at here, on this thread:
+                    // one that cannot run never reaches the loop.
+                    Asked::Program(ask) => match crate::given::refusal(&ask) {
+                        Some(refusal) => {
+                            tracing::info!(
+                                refusal = refusal.trim_end(),
+                                "a program given is refused"
+                            );
+                            let _ = stream.set_write_timeout(Some(READ));
+                            let _ = (&stream).write_all(refusal.as_bytes());
+                            break;
+                        }
+                        None => Heard::Program(ask, reply),
+                    },
+                };
+                if sender.send(heard).is_err() {
                     return;
                 }
                 if let Ok(text) = answer.recv_timeout(ANSWER) {
@@ -350,9 +374,19 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
     }
 }
 
+/// What a control line asks.
+enum Asked {
+    Question(Question),
+    Program(hocus_agents::ProgramAsk),
+}
+
 impl Compositor {
     fn agents_heard(&mut self, heard: Heard) {
         match heard {
+            Heard::Program(ask, reply) => {
+                let _ = reply.send(self.program_asked(ask));
+                return;
+            }
             Heard::Report(report, ancestry) => self.agent_reported(report, ancestry),
             Heard::Tools(seen) => {
                 tracing::debug!(?seen, "the agents' tools");

@@ -1,8 +1,41 @@
 # Build and continuous integration
 
-How the workspace is built the same way everywhere, and what CI checks
-when. The branches and the lots are in [CLAUDE.md](../CLAUDE.md),
-"Workflow".
+How a change is seen while it is written, how the workspace is built the
+same way everywhere, and what CI checks when. The branches and the lots
+are in [CLAUDE.md](../CLAUDE.md), "Workflow".
+
+## Development loop
+
+A change of the shell (`crates/hocus-shell`) or of the secretary
+(`crates/hocus-secretary`) is seen in the running session without a
+package nor sudo: `scripts/dev/live.sh shell` (or `secretary`) builds that
+one program (dev profile, incremental, in a target directory of its own,
+`$HOCUS_LIVE_TARGET`, default `~/.cache/hocuspanda-dev/target`), asks the
+session's compositor to end the one that runs and start the one just
+built (`hocus msg shell restart --program PATH`), waits until `hocus msg
+shell status` says it runs, and prints how long the build and the reload
+took. The windows stay and the bar's space stays kept. The program given
+holds for this session only: nothing is written to the configuration, the
+next login runs the installed one, and so does `live.sh shell --installed`
+at once. A build that does not start, or ends three times in a row within
+30 s of its start, gives way to the installed program, and a notification
+says so. `--no-build` reloads what is built already. The script refuses to
+run when it finds no Hocuspanda session.
+
+The first build in that directory compiles every dependency (about ten
+minutes on the maintainer's laptop, 8 cargo jobs); after a one-line change
+in the shell, the build took 17 s there (16.5 s and 18.1 s, #781), and a
+headless restart brings the bar back in about 0.1 s.
+
+The Settings need none of it: `cargo run -p hocus-settings` in a terminal
+of the session (one window at a time: close the installed ones first). A
+compositor change (`crates/hocus-compositor`, or a crate it is built with,
+`hocus-link` among them) still needs the package and a new login
+([packaging/README.md](../packaging/README.md)): the compositor is the
+session.
+
+This is the one way the live session is touched during development, and
+only when the maintainer asks to see a change (CLAUDE.md, "Hard rules").
 
 ## One toolchain, one lock file
 
