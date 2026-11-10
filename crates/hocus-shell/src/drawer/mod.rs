@@ -513,6 +513,13 @@ pub enum Target {
 }
 
 impl Target {
+    /// Whether it is a line of text that a click acts on ("Ce qu'elle
+    /// sait"'s item unfolds): its words are selected by a drag or a
+    /// double click as the rest (#761), a click alone acts.
+    pub fn holds_text(self) -> bool {
+        matches!(self, Self::Expand(_))
+    }
+
     /// Its name in the log's list of places (tests click there).
     pub fn name(self) -> String {
         match self {
@@ -1884,6 +1891,8 @@ fn search_key(
     if open.search != before {
         open.knows_scroll = 0.0;
         open.expanded = None;
+        // Another list: what was selected in it goes.
+        open.selection = None;
         open.changed();
         crate::secretary::knows(Some(open.query()));
     }

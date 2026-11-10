@@ -2955,9 +2955,44 @@ her text is selected with the pointer and copied, as in any chat.
   `no_copy_button_and_her_answers_and_drafts_are_selected` (a masked secret
   copies as its mask).
 
-Not selectable yet: her briefing's card and its unfolded view, "Ce qu'elle
-sait", the header and the agents' line. Her emphasis shows as plain words,
-not in bold.
+- **Any text** (the same lot's second commit): her briefing's card in the
+  thread (its label and summary), her briefing unfolded (her greeting, the
+  date, her day, each line) and "Ce qu'elle sait"'s lines are selected and
+  copied the same way. Their text is read from what they draw
+  (`draw::lines_as_texts`, the queue's view's way, #757, made general): a
+  row drawn in parts (a bold title, then its rest) is one line; the rows
+  under it from the same place, at the same size and pace, are its
+  paragraph, joined by the space a wrap took when the next row's first
+  word could not have fitted the widest row, else by a line break; what is
+  drawn on a button or a link is left out. A paragraph is named by its
+  place among the view's (`Source::Line`), or the card's
+  (`Source::Part(item, n)`), and "Ce qu'elle sait"'s are read from its
+  whole list, so a selection holds under the wheel there too; a new search
+  clears it. A drag past its list's edge scrolls it as the thread's.
+- **A line a click unfolds** ("Ce qu'elle sait"'s item, `Target::holds_text`):
+  its words are selected by a drag or a double or triple click and the
+  I-beam shows over them; a click alone still unfolds it (a double
+  click's first click too), never once words were selected. « ··· »,
+  « Ouvrir le mail ↗ », « Rappelle-le-moi », « Voir le point » and
+  « Retour » are buttons: a press there never selects.
+- **Tests** (that commit): `hocus-shell`
+  (`drawer::draw::a_view_s_lines_are_its_paragraphs`), and with the real
+  shell and her process
+  `her_briefing_card_is_selected_and_its_button_still_opens_it`,
+  `her_briefing_unfolded_is_selected_and_its_buttons_stay`
+  (`secretary_drawer.rs`), `her_known_lines_are_selected_and_their_clicks_stay`
+  (`secretary_knows.rs`: an item's line copied whole, a click unfolds it,
+  « ··· » opens its menu and a press on it selects nothing).
+
+- **No briefing in her first run, whatever the order** (found by this
+  lot's tests): a session beginning before her sources' first syncs were
+  asked, or a sync's end trying the briefing before the Google accounts it
+  found had started her first run, let a morning briefing in. Sources due
+  to sync now count as settling, and a sync's end tries the briefing once
+  what it found is known.
+
+Not selectable: the header, the tabs, the agents' line and its "Tes
+agents" view, the buttons. Her emphasis shows as plain words, not in bold.
 
 ### #762: her whole agenda for the day, what she is told kept, a graph that fills, no invented setting
 

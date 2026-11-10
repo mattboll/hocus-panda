@@ -830,7 +830,18 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
                 right,
                 &mut said_items,
             );
-            laid.texts = lines_as_texts(&laid.shapes, laid.thread);
+            let thread = laid.thread;
+            let skip: Vec<Rectangle> = laid.targets.iter().map(|(_, r)| *r).collect();
+            let mut texts = Texts::default();
+            lines_as_texts(
+                &mut texts,
+                &laid.shapes,
+                &skip,
+                0.0,
+                &Source::Line,
+                &|_, top, bottom| within(thread, top, bottom),
+            );
+            laid.texts = texts;
         }
         (Tab::Talk, _) if open.point.is_some() => {
             let point = open.point.unwrap_or_default();
@@ -892,12 +903,47 @@ pub fn lay_out(open: &Open, c: &Conversation, line: Her, words: Words, size: Siz
     laid
 }
 
-/// The lines of text `shapes` draws whole within `within`, each a block
-/// of its own (the queue's view, #757): selectable and copied one a line.
-fn lines_as_texts(shapes: &[Shape], within: Rectangle) -> Texts {
-    let mut texts = Texts::default();
+/// The text `shapes` draws as blocks of selectable text (#757, #761),
+/// added to `texts`: a paragraph a block, named by `name` from its place
+/// among them. A row drawn in parts (a bold title, then its rest) is one
+/// line; the rows under it from the same place, at the same size and pace,
+/// are its paragraph's: joined by the space a wrap took when the next
+/// row's first word could not have fitted the widest row, else by a line
+/// break. What is drawn on a button or a link (`skip`) is not selected.
+/// Each line is moved down by `dy`; only those `shown` (by its shape's
+/// index, its top and its bottom moved) take the pointer.
+fn lines_as_texts(
+    texts: &mut Texts,
+    shapes: &[Shape],
+    skip: &[Rectangle],
+    dy: f32,
+    name: &dyn Fn(u32) -> Source,
+    shown: &dyn Fn(usize, f32, f32) -> bool,
+) {
+    /// The paragraph being read: its block, where its rows start, where
+    /// the last row ends and its middle, its size, its rows' pace, its
+    /// widest row, whether all its lines show, its box.
+    struct Para {
+        block: usize,
+        x0: f32,
+        end: f32,
+        middle: f32,
+        size: f32,
+        step: Option<f32>,
+        widest: f32,
+        shown: bool,
+        rect: Rectangle,
+    }
+    let close = |texts: &mut Texts, p: Para| {
+        if let Some(b) = texts.blocks.get_mut(p.block) {
+            b.rect = p.rect;
+            b.shown = p.shown;
+        }
+    };
     let mono = iced::Font::with_name("Martian Mono");
-    for shape in shapes {
+    let mut para: Option<Para> = None;
+    let mut count = 0u32;
+    for (n, shape) in shapes.iter().enumerate() {
         let (line, font) = match shape {
             Shape::Text(line) => (line, font(line.bold)),
             Shape::Mono(line) => (line, mono),
@@ -906,25 +952,89 @@ fn lines_as_texts(shapes: &[Shape], within: Rectangle) -> Texts {
         if line.text.trim().is_empty() {
             continue;
         }
-        let height = line.size * 1.45;
-        let top = line.at.y - height / 2.0;
-        if top < within.y - 0.5 || top + height > within.y + within.height + 0.5 {
-            continue;
-        }
         let w = measure(&line.text, line.size, font);
         let x = match line.align {
             Alignment::Center => line.at.x - w / 2.0,
             Alignment::Right => line.at.x - w,
             _ => line.at.x,
         };
-        let block = texts.block(Source::Queue(texts.blocks.len() as u32));
-        texts.blocks[block].rect = Rectangle::new(Point::new(x, top), Size::new(w, height));
-        let lines = [(line.text.clone(), 0..line.text.len())];
-        texts.put(
-            block, &line.text, &lines, x, top, height, line.size, font, &measure,
-        );
+        let middle = line.at.y;
+        if skip
+            .iter()
+            .any(|r| r.contains(Point::new(x + w / 2.0, middle)))
+        {
+            continue;
+        }
+        let height = line.size * 1.45;
+        let at = middle + dy;
+        let visible = shown(n, at - height / 2.0, at + height / 2.0);
+        let sep = para.as_ref().and_then(|p| {
+            if (p.size - line.size).abs() > 0.01 {
+                return None;
+            }
+            if (middle - p.middle).abs() < 0.5 && (x - p.end).abs() < 2.0 {
+                return Some("");
+            }
+            let row = middle - p.middle;
+            let next_row = matches!(line.align, Alignment::Left)
+                && (x - p.x0).abs() < 0.5
+                && row > line.size * 1.1
+                && row < line.size * 1.8
+                && p.step.is_none_or(|s| (s - row).abs() < 0.5);
+            if !next_row {
+                return None;
+            }
+            let first = line.text.split(' ').next().unwrap_or_default();
+            let room = p.widest.max(p.end - p.x0).max(w);
+            let would = p.end - p.x0 + measure(&format!(" {first}"), line.size, font);
+            Some(if would > room + 0.5 { " " } else { "\n" })
+        });
+        let rect = Rectangle::new(Point::new(x, at - height / 2.0), Size::new(w, height));
+        match (sep, para.as_mut()) {
+            (Some(sep), Some(p)) => {
+                texts.line(
+                    p.block, sep, &line.text, x, at, height, line.size, font, w, visible,
+                );
+                if !sep.is_empty() {
+                    p.widest = p.widest.max(p.end - p.x0);
+                    p.step = Some(middle - p.middle);
+                    p.middle = middle;
+                }
+                p.end = x + w;
+                p.shown &= visible;
+                p.rect = p.rect.union(&rect);
+            }
+            _ => {
+                if let Some(p) = para.take() {
+                    close(texts, p);
+                }
+                let block = texts.block(name(count));
+                count += 1;
+                texts.line(
+                    block, "", &line.text, x, at, height, line.size, font, w, visible,
+                );
+                para = Some(Para {
+                    block,
+                    x0: x,
+                    end: x + w,
+                    middle,
+                    size: line.size,
+                    step: None,
+                    widest: 0.0,
+                    shown: visible,
+                    rect,
+                });
+            }
+        }
     }
-    texts
+    if let Some(p) = para {
+        close(texts, p);
+    }
+}
+
+/// Whether a line from `top` to `bottom` is whole within `area`'s height.
+fn within(area: Rectangle, top: f32, bottom: f32) -> bool {
+    top >= area.y - 0.5 && bottom <= area.y + area.height + 0.5
 }
 
 /// A briefing's sub-view title: « Ton point du lundi 9 novembre ».
@@ -1412,6 +1522,7 @@ fn lay_out_thread(
                     y = lay_out_briefing_card(
                         &mut shapes,
                         &mut targets,
+                        &mut texts,
                         open,
                         item.id,
                         briefing,
@@ -3092,6 +3203,7 @@ fn hidden_line(
 fn lay_out_briefing_card(
     shapes: &mut Vec<Shape>,
     targets: &mut Vec<(Target, Rectangle)>,
+    texts: &mut Texts,
     open: &Open,
     item: u64,
     briefing: &Briefing,
@@ -3196,6 +3308,15 @@ fn lay_out_briefing_card(
         align: Alignment::Center,
     }));
     targets.push((target, rect));
+    // Its words selectable, its button a button (#761).
+    lines_as_texts(
+        texts,
+        &parts,
+        &[rect],
+        0.0,
+        &|n| Source::Part(item, n),
+        &|_, _, _| true,
+    );
     at += button_h + CARD_BOTTOM;
     shapes.push(Shape::Box {
         rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
@@ -3698,6 +3819,17 @@ fn lay_out_point(
     let most = (y - shown).max(0.0);
     let scroll = open.scroll.clamp(0.0, most);
     let shift = top - (most - scroll);
+    // Its words selectable, its buttons and links buttons (#761).
+    let skip: Vec<Rectangle> = targets.iter().map(|(_, r)| *r).collect();
+    let thread = laid.thread;
+    lines_as_texts(
+        &mut laid.texts,
+        &shapes,
+        &skip,
+        shift,
+        &Source::Line,
+        &|_, top, bottom| within(thread, top, bottom),
+    );
     for shape in shapes {
         laid.shapes.push(moved(shape, shift));
     }
@@ -3831,8 +3963,8 @@ impl View {
                 let first = laid.texts.runs.iter().find(|r| r.block == n)?;
                 let last = laid.texts.runs.iter().rfind(|r| r.block == n)?;
                 Some(format!(
-                    "{:?}@{:.0},{:.0}>{:.0},{:.0}",
-                    b.source,
+                    "{}@{:.0},{:.0}>{:.0},{:.0}",
+                    format!("{:?}", b.source).replace(' ', ""),
                     first.x,
                     first.middle,
                     last.x + last.width,
@@ -3906,15 +4038,24 @@ impl View {
             } else {
                 (p.y - thread.y - thread.height, false)
             };
-            let end = if up { most } else { 0.0 };
-            let before = open.scroll.clamp(0.0, most);
+            // The thread scrolls from its bottom, "Ce qu'elle sait" from
+            // its top.
+            let knows = open.tab == super::Tab::Knows;
+            let more = up != knows;
+            let end = if more { most } else { 0.0 };
+            let scroll = if knows {
+                &mut open.knows_scroll
+            } else {
+                &mut open.scroll
+            };
+            let before = scroll.clamp(0.0, most);
             if before == end {
                 return Some((p, false));
             }
             let speed = (past * EDGE_PACE).clamp(EDGE_SLOWEST, EDGE_FASTEST);
             let step = speed * now.duration_since(since).as_secs_f32().min(0.1);
-            let after = if up { before + step } else { before - step }.clamp(0.0, most);
-            open.scroll = after;
+            let after = if more { before + step } else { before - step }.clamp(0.0, most);
+            *scroll = after;
             open.menu = None;
             open.changed();
             if after == end {
@@ -4794,6 +4935,7 @@ impl<Message> canvas::Program<Message> for View {
             let selecting = open.selection.is_some_and(|s| s.hold == Hold::Dragging);
             match open.hover {
                 Some(Target::Field | Target::Search | Target::KeyField) => mouse::Interaction::Text,
+                Some(t) if t.holds_text() && on_text(selecting) => mouse::Interaction::Text,
                 Some(_) if !selecting => mouse::Interaction::Pointer,
                 _ if on_text(selecting) => mouse::Interaction::Text,
                 _ => mouse::Interaction::default(),
@@ -4894,8 +5036,11 @@ impl View {
                     }
                     let had = open.menu.take().is_some() || open.selection.is_some();
                     open.pressed = target;
-                    // A press on a button never starts a selection.
-                    if target.is_some() {
+                    // A press on a button never starts a selection; on a
+                    // line a click unfolds, its words do (#761).
+                    let words_of = target.is_some_and(Target::holds_text)
+                        && at.is_some_and(|p| laid.texts.on_text(p));
+                    if target.is_some() && !words_of {
                         open.selection = None;
                         return Some(if had { Then::Draw } else { Then::Nothing });
                     }
@@ -4953,9 +5098,11 @@ impl View {
                         }
                         log_selection(laid, open.selection.as_ref());
                     }
+                    // A line whose words were selected is not clicked.
+                    let selected = open.selection.is_some_and(|s| !s.is_empty());
                     match open.pressed.take().filter(|p| Some(*p) == target) {
-                        Some(target) => Then::Act(target),
-                        None => Then::Nothing,
+                        Some(target) if !(target.holds_text() && selected) => Then::Act(target),
+                        _ => Then::Nothing,
                     }
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Right) => {
@@ -5045,6 +5192,51 @@ fn log_selection(laid: &Laid, selection: Option<&Selection>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #761: a view's drawn lines as selectable text: a row in two parts
+    /// is one line, a wrapped row joins its paragraph by a space, a short
+    /// row under it starts another line, another size another block, a
+    /// button's label none.
+    #[test]
+    fn a_view_s_lines_are_its_paragraphs() {
+        let line = |text: &str, x: f32, y: f32, size: f32, bold: bool| {
+            Shape::Text(Line {
+                text: text.to_owned(),
+                at: Point::new(x, y),
+                size,
+                color: TEXT,
+                bold,
+                align: Alignment::Left,
+            })
+        };
+        let title = "Léa : ";
+        let tw = measure(title, 13.0, font(true));
+        let shapes = vec![
+            line(title, 10.0, 20.0, 13.0, true),
+            line("relire son article avant", 10.0 + tw, 20.0, 13.0, false),
+            line("midi.", 10.0, 38.0, 13.0, false),
+            line("Oui", 10.0, 56.0, 13.0, false),
+            line("vu dans Slack", 10.0, 80.0, 11.0, false),
+            line("Ouvrir ↗", 200.0, 80.0, 11.0, true),
+        ];
+        let button = Rectangle::new(Point::new(190.0, 70.0), Size::new(80.0, 20.0));
+        let mut texts = Texts::default();
+        lines_as_texts(
+            &mut texts,
+            &shapes,
+            &[button],
+            100.0,
+            &Source::Line,
+            &|_, _, _| true,
+        );
+        let said: Vec<&str> = texts.blocks.iter().map(|b| b.text.as_str()).collect();
+        assert_eq!(
+            said,
+            ["Léa : relire son article avant midi.\nOui", "vu dans Slack"]
+        );
+        assert_eq!(texts.blocks[1].source, Source::Line(1));
+        assert!((texts.runs[0].middle - 120.0).abs() < 0.01, "moved down");
+    }
 
     #[test]
     fn her_answer_streams_after_the_sentence_and_her_typing_ends_the_thread() {

@@ -1281,7 +1281,14 @@ impl Bed {
         let done = self.hp.dispatch_until(WAIT, |_| {
             parse(&common::logged(&log)).is_some_and(|b| b.len() >= least)
         })?;
-        anyhow::ensure!(done, "never {least} blocks of text");
+        anyhow::ensure!(
+            done,
+            "never {least} blocks of text: {:?}",
+            common::logged(&self.log)
+                .lines()
+                .rev()
+                .find(|l| l.contains("the drawer's texts"))
+        );
         let r = self.drawer().ok_or_else(|| anyhow::anyhow!("no drawer"))?;
         let (x, y) = (f64::from(r.x), f64::from(r.y));
         Ok(parse(&common::logged(&self.log))
@@ -1459,9 +1466,11 @@ fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
         let items = s["items"].to_string();
         items.contains(&format!("her:{HERS}")) && items.contains("briefing:")
     })?;
-    let blocks = bed.texts(2)?;
+    // The user's sentence, her briefing's card (its label, its summary,
+    // #761), her answer.
+    let blocks = bed.texts(4)?;
     let n = blocks.len();
-    let (user, her) = (blocks[n - 2].clone(), blocks[n - 1].clone());
+    let (user, her) = (blocks[n - 4].clone(), blocks[n - 1].clone());
     assert!(
         user.start.0 > her.start.0,
         "the user's on the right: {blocks:?}"
@@ -1502,13 +1511,16 @@ fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
     bed.clicks(on_word, 3)?;
     bed.ctrl_c();
     bed.clipboard_is(HERS)?;
-    // Across the user's bubble and hers: both, a line between.
+    // Across the user's bubble, her briefing's card and her answer: all,
+    // a line between.
     bed.drag(
         (user.start.0 + 1.0, user.start.1),
         (her.end.0 + 30.0, her.end.1),
     )?;
     bed.ctrl_c();
-    bed.clipboard_is(&format!("bonjour\n{HERS}"))?;
+    bed.clipboard_is(&format!(
+        "bonjour\nTON POINT DU MATIN · 9 H\nBien noté, je range ta journée.\n{HERS}"
+    ))?;
     // A word selected, then the right click's « Copier ».
     wait(&mut bed.hp, Duration::from_millis(700))?;
     bed.clicks(on_word, 2)?;
@@ -1756,7 +1768,8 @@ fn a_drag_past_the_top_scrolls_and_the_wheel_keeps_the_selection() -> anyhow::Re
     let chars = bed.logged_after(mark, "the drawer copies")?;
     let chars = chars.split("chars=").nth(1).map(str::to_owned);
     assert!(
-        copied.starts_with("question numéro 1\n")
+        copied.starts_with("TON POINT DU MATIN · 9 H\n")
+            && copied.contains("\nquestion numéro 1\n")
             && copied.contains("question numéro 7\n")
             && copied.trim_end_matches('.').ends_with("ta journée"),
         "from her first exchange to her last answer: {copied:?}"
@@ -1890,6 +1903,113 @@ fn no_copy_button_and_her_answers_and_drafts_are_selected() -> anyhow::Result<()
     Ok(())
 }
 
+/// #761: her briefing's card in the thread is text as the rest: its
+/// label and summary are selected and copied, a line between; a press on
+/// « Voir le point » never selects, and a click on it still unfolds it.
+#[test]
+fn her_briefing_card_is_selected_and_its_button_still_opens_it() -> anyhow::Result<()> {
+    const SUMMARY: &str = "Bien noté, je range ta journée.";
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    bed.advance(30)?;
+    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    common::at_rest(&mut bed.hp)?;
+    let parts: Vec<Block> = bed
+        .texts(2)?
+        .into_iter()
+        .filter(|b| b.source.starts_with("Part("))
+        .collect();
+    assert_eq!(parts.len(), 2, "its label and its summary: {parts:?}");
+    let (label, summary) = (parts[0].clone(), parts[1].clone());
+    bed.clicks(
+        ((summary.start.0 + summary.end.0) / 2.0, summary.start.1),
+        3,
+    )?;
+    bed.ctrl_c();
+    bed.clipboard_is(SUMMARY)?;
+    bed.drag(
+        (label.start.0 + 1.0, label.start.1),
+        (summary.end.0 + 30.0, summary.end.1),
+    )?;
+    bed.shot("drawer-briefing-card-selected")?;
+    bed.ctrl_c();
+    let copied = bed.clipboard_changed(Some(SUMMARY))?;
+    assert!(
+        copied.starts_with("TON POINT DU MATIN") && copied.ends_with(&format!("\n{SUMMARY}")),
+        "{copied:?}"
+    );
+    // Its button: pressed and dragged over its words, nothing selected
+    // and nothing unfolded; clicked, it unfolds.
+    let point = bed.place_starting("Point(")?;
+    let button = bed.place(&point)?;
+    wait(&mut bed.hp, Duration::from_millis(700))?;
+    bed.drag(button, (summary.start.0 + 20.0, summary.start.1))?;
+    bed.copies_nothing()?;
+    let shown = bed.shows(|_| true)?;
+    assert!(shown["point"].is_null(), "not unfolded: {shown}");
+    bed.click(button)?;
+    bed.shows(|s| !s["point"].is_null())?;
+    Ok(())
+}
+
+/// #761: her briefing unfolded is text as the rest: a triple click takes
+/// her greeting, a drag all of it, a line between its paragraphs;
+/// « Retour » is still a button.
+#[test]
+fn her_briefing_unfolded_is_selected_and_its_buttons_stay() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    bed.advance(30)?;
+    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    let point = bed.place_starting("Point(")?;
+    let at = bed.place(&point)?;
+    bed.click(at)?;
+    let shown = bed.shows(|s| !s["point"].is_null())?;
+    common::at_rest(&mut bed.hp)?;
+    let lines: Vec<Block> = bed
+        .texts(1)?
+        .into_iter()
+        .filter(|b| b.source.starts_with("Line("))
+        .collect();
+    let first = lines
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no text in {shown}"))?;
+    // Her peek, out of the bar with the briefing, goes first.
+    let on = ((first.start.0 + first.end.0) / 2.0, first.start.1);
+    common::point(&mut bed.hp, on)?;
+    bed.clicks(on, 3)?;
+    bed.ctrl_c();
+    bed.clipboard_is("Bonjour")?;
+    bed.drag(
+        (first.start.0 + 1.0, first.start.1),
+        (
+            lines[lines.len() - 1].end.0 + 20.0,
+            lines[lines.len() - 1].end.1,
+        ),
+    )?;
+    bed.shot("drawer-briefing-unfolded-selected")?;
+    bed.ctrl_c();
+    let all = bed.clipboard_changed(Some("Bonjour"))?;
+    // Her greeting, the date, her day, her free slot, the summary: a line
+    // each.
+    assert!(
+        all.starts_with("Bonjour\nLundi 9 novembre\n")
+            && all.ends_with("\nBien noté, je range ta journée."),
+        "{all:?}"
+    );
+    let back = bed.place("Back")?;
+    bed.click(back)?;
+    bed.shows(|s| s["point"].is_null())?;
+    Ok(())
+}
+
 /// #757: the queue's lines are selected and copied as her answers are: a
 /// triple click on what she does takes that line.
 #[test]
@@ -1921,7 +2041,7 @@ fn the_queue_s_lines_are_copied_too() -> anyhow::Result<()> {
         .iter()
         .find(|b| (b.start.0 - x).abs() < 1.5)
         .ok_or_else(|| anyhow::anyhow!("no state line in {blocks:?}"))?;
-    assert!(line.source.starts_with("Queue("), "{blocks:?}");
+    assert!(line.source.starts_with("Line("), "{blocks:?}");
     bed.clicks(((line.start.0 + line.end.0) / 2.0, line.start.1), 3)?;
     bed.ctrl_c();
     bed.clipboard_is(&state)?;
