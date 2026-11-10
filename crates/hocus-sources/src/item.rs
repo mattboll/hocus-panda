@@ -89,6 +89,11 @@ pub struct Event {
     pub calendar_name: String,
     /// The calendar is hidden in the user's list (still read, §10.1).
     pub hidden_calendar: bool,
+    /// The user's own (#762): on a calendar of theirs (theirs, not one
+    /// shared with them), or an invitation they accepted. What comes
+    /// first when her day's list has to be cut.
+    #[serde(default)]
+    pub mine: bool,
     pub title: String,
     pub when: hocus_day::model::When,
     pub busy: bool,

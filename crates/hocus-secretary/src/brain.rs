@@ -1010,6 +1010,12 @@ impl Brain {
                     self.inbox.forget_source(gone);
                     self.queue.forget_source(gone);
                 }
+                for (part, id) in &synced.removed {
+                    let pointer = format!("{part}:{id}");
+                    if let Err(err) = crate::day::gone(&self.store.conn, &pointer, part) {
+                        tracing::warn!(pointer, %err, "could not mark an event gone");
+                    }
+                }
                 let mut ids = Vec::new();
                 for item in synced.items {
                     let source = item.from.clone().unwrap_or_else(|| name.clone());
@@ -1441,6 +1447,8 @@ impl Brain {
                     presenter: event.presenter.clone(),
                     busy: event.busy,
                     notebook,
+                    mine: event.mine,
+                    declined: event.declined,
                 },
             );
             if let Err(err) = kept {

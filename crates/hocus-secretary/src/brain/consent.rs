@@ -197,6 +197,11 @@ impl Brain {
         &mut self,
         found: std::collections::BTreeMap<String, Vec<CalendarInfo>>,
     ) {
+        // Which calendars are the user's own, for her day's list (#762):
+        // each one's events come as its own part of the account's Agenda.
+        if let Err(err) = crate::agenda::keep_own(&self.store, &found) {
+            tracing::warn!(%err, "could not keep which calendars are the user's");
+        }
         if self.consents.calendars == found {
             return;
         }

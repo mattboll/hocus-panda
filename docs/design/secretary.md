@@ -2901,3 +2901,109 @@ redraws at rest); the empty drawer's greeting names her sources as she
 reads them (« Planka et tes notifications »); a guess whose source is not
 in her memory says « Deviné d'après ce que j'ai lu »; the Settings and
 `hocus msg` cannot yet open her drawer on a given view.
+
+### #762: her whole agenda for the day, what she is told kept, a graph that fills, no invented setting
+
+Feedback from hands-on use with a Google account of 24 calendars (the
+user's own, colleagues' and rooms shared with them): she said she had no
+agenda for the day, sent the user to "a setting on their side", could not
+keep "hocus-panda est un projet perso", and her graph held no node after
+6,451 episodes.
+
+- **Why the agenda was missing**: the day's part took the latest 60
+  episodes of today and tomorrow (`ORDER BY at DESC LIMIT 60`), then kept
+  the events among them. With two dozen calendars, the 60 were tomorrow
+  afternoon's colleagues' meetings: today's own events (a daily at 9:15,
+  a meeting at 17:00) were never in it, nor any time (a line gave only the
+  date). "Arrivé aujourd'hui" had the same limit before its filter.
+- **Her agenda** (`agenda.rs`): the events overlapping a span are each
+  item's latest episode (a moved event's earlier ones are what it was),
+  with its day record (`day.rs`'s `agenda`: the calendar's title, its end,
+  `mine`, `declined`, columns added to an existing memory at its start);
+  declined and cancelled ones left out; the same meeting on several
+  calendars (title and times) one line, the user's copy kept. **The
+  user's own** are those of a calendar of theirs, as the accounts'
+  listings say (`CalendarInfo::own`: not shared by someone, not shared
+  without saying by whom, not busy times only; kept in her memory's
+  `meta` as each calendar's source part, so events read before count
+  too), and the invitations they accepted (`hocus_sources::Event::mine`).
+  A line: "- 09:15–09:30 · Daily · à toi (Travail)", "- toute la journée,
+  jusqu'au 11 nov. · Congés Sophie · agenda partagé « Congés »",
+  "· privé" for the perso notebook's; each day under its heading, "- rien
+  à l'agenda" for an empty one.
+- **The day's part** lists today's and tomorrow's within its own 3k
+  tokens (`AGENDA_CAP`, inside the day's 5k): ranked the user's own first,
+  then by start, kept while they fit, listed by start; what is cut is
+  counted under its day ("(12 de plus, non listés)") and said with how to
+  get it ("… 97 de plus, des agendas partagés avec toi, non listés :
+  `agenda` (from …, to …) les donne tous."). What arrived today
+  is filtered in SQL before its limit (`retrieve::arrived_between`).
+- **`agenda(from, to)`** (`tools.rs`, read-only, `READ`): the days from
+  `from` to `to` (empty: that day; 31 days at most; dates as
+  `AAAA-MM-JJ`), each day said, 6k tokens at most, in what the moment
+  allows (pro only in a public moment or a work draft: the read tools now
+  get the turn's scope, `Scope::notebook`).
+- **`remember`** (`TALK`): what the user tells her of their work and life
+  (`said`, `about`, `kind`, `notebook`, `relation`, `object`,
+  `object_kind`, `fact`: plain strings, every one required, empty for
+  none), kept at once as told (`learn::remember`): the node made when she
+  has none (a person, a project…, the user's own node for "moi"), or
+  moved to the notebook said ("hocus-panda est un projet perso": the
+  project in the perso notebook); its edge from today (a node on the
+  other side made when new, or a value); a fact on something she knew
+  without a relation, a `note` edge. "Noté : …" with "Annuler" (the same
+  `Body::Learned` as her way of being, ten seconds, the edits undone last
+  first); then in "Ce qu'elle sait" (this week's, and its section: a
+  project under PROJETS ET LEURS NOMS, its notebook's filter) and in her
+  next prompt's card. Only when `said` is in the user's own sentence of
+  that turn (`style::said_by_user`): what a source says is refused, and
+  her model told so. No protocol change.
+- **Why her graph stayed empty** (by design, and a gap): a source never
+  makes a node before the user's "Oui" (§7.1, the defence against memory
+  poisoning), so the triage's facts link only to nodes she has; nodes came
+  only from the sentences code reads (an arrival, a departure, a
+  relation between people she knows) and her cards. With none, every
+  fact fell through ("edges=0"). Now `remember` makes nodes from what the
+  user says, and a fact that links someone she does not know to a node
+  she has ("Léa Martin travaille sur hocus-panda") is an observation
+  (`Noticed::Linked`, asked once: « Léa Martin travaille sur
+  hocus-panda ? Je l'ajoute à ce que je sais ? », "Vu dans …" with the
+  quote); "Oui" keeps the person and the edge, extracted from the mail
+  and accepted. The log says how many facts linked to nothing
+  (`unlinked`). `learn::node_named` finds a hyphenated name as told
+  ("hocus-panda").
+- **Her persona** (`persona/fr.txt`, `en.txt`): it named tools she does
+  not have (`flag_suspicious`, `end_validity`, `forget`,
+  `propose_memory_change`, `propose_rule`, `open`), which invited her to
+  invent more. Now a section "Tes outils" lists hers only (`agenda`,
+  `graph`, `search`, `ask_user`, `remember`, `remember_style`,
+  `propose_*`), "Ce que tu ne fais jamais" says she never names a setting,
+  a tool or a feature that does not exist, never sends the user to look
+  for a setting, and says plainly what she lacks; the agenda is never
+  "missing" (the day's part has it, `agenda` the rest); what the user
+  tells her is kept with `remember`, in the right notebook; what stops
+  being true, and forgetting, are the user's in "Ce qu'elle sait".
+  `docs/design/secretary-persona.md` stays the persona's design, with the
+  tools planned.
+- **Tests**: `hocus-secretary/tests/agenda.rs` (the user's shape: their
+  calendar with a daily at 9:15 and a meeting at 17:00, a meeting
+  declined, one also on a room's calendar, 23 colleagues' calendars full,
+  80 mails today, all their own listed with their times and the cut said
+  with `agenda`; `agenda` for another day, pro only in a meeting, an
+  empty day, a span refused; `remember` kept in the perso notebook, in
+  "Ce qu'elle sait" and the next card, a told edge, "Annuler", a source's
+  words refused; a mail's fact on someone unknown asked about, then kept
+  with its source: two nodes, one edge; every tool her persona names is
+  one of hers, and the rule on settings), `src/agenda.rs` (the cut and
+  its order, a moved event where it is now, a deleted one gone, an all-day
+  leave, an empty day), `src/day.rs` (an agenda
+  made before its columns), `hocus-sources/tests/sources.rs` (only the
+  user's own calendar's events are theirs).
+- **An event deleted at its source** (the cycle's `Removed`, now handed
+  on as `Synced::removed`) is off her day: its day record marked declined
+  and no longer busy (`day::gone`), so the briefing's meetings and free
+  slots drop it too.
+- **Not yet**: an invitation accepted on someone else's calendar counts
+  as the user's only for a timed event (the day records keep timed
+  events only; an all-day event counts through its calendar); the
+  extraction role deciding which candidates to propose (§7.1, step 3).

@@ -142,6 +142,15 @@ fn gather(events: Vec<Event>, consents: &ConsentBook) -> Synced {
             }
             Event::Removed { source, ids } => {
                 tracing::info!(%source, removed = ids.len(), "items gone at their source");
+                // An event's id is its calendar's and its own, and it
+                // came as its calendar's part (see `item`).
+                synced.removed.extend(ids.into_iter().map(|id| {
+                    let part = match id.split_once('/') {
+                        Some((calendar, _)) => format!("{source}#{calendar}"),
+                        None => source.to_string(),
+                    };
+                    (part, id)
+                }));
             }
             Event::Reset { source, mailbox } => {
                 tracing::info!(%source, mailbox, "a mailbox's ids changed: read again");
@@ -198,6 +207,8 @@ fn item(redacted: Redacted, from: &str, summaries_only: bool) -> Item {
                     organiser: None,
                     presenter: None,
                     busy: e.busy && !e.declined && !e.cancelled,
+                    mine: e.mine,
+                    declined: e.declined || e.cancelled,
                 }),
                 None,
             )

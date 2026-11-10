@@ -215,8 +215,7 @@ impl Reader {
                 .map(|id| event_id(&calendar.id, id.as_str())),
         );
         for event in events {
-            read.items
-                .push(item(grant, calendar, info.hidden, event, zone));
+            read.items.push(item(grant, calendar, info, event, zone));
         }
         Ok(())
     }
@@ -254,7 +253,12 @@ impl Reader {
                     description: None,
                     alarms: Vec::new(),
                 };
-                read.items.push(item(grant, calendar, false, event, zone));
+                // Someone else's busy times: never the user's own.
+                let info = CalendarInfo {
+                    shared: true,
+                    ..CalendarInfo::default()
+                };
+                read.items.push(item(grant, calendar, &info, event, zone));
             }
             now.push(id);
         }
@@ -276,7 +280,7 @@ fn event_id(calendar: &CalendarId, event: &str) -> String {
 fn item(
     grant: &Grant,
     calendar: &Calendar,
-    hidden: bool,
+    info: &CalendarInfo,
     event: hocus_day::model::Event,
     zone: &TimeZone,
 ) -> Item {
@@ -294,7 +298,8 @@ fn item(
         content: Content::Event(Event {
             calendar: calendar.id.as_str().to_owned(),
             calendar_name: calendar.name.clone(),
-            hidden_calendar: hidden,
+            hidden_calendar: info.hidden,
+            mine: info.own() || event.answer == Answer::Accepted,
             title: event.title,
             when: event.when,
             busy: event.free_busy == FreeBusy::Busy,

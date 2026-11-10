@@ -36,6 +36,12 @@ pub struct CalendarInfo {
 }
 
 impl CalendarInfo {
+    /// One of the user's own (#762): neither someone's who shares it, nor
+    /// one shared without saying by whom, nor only busy times.
+    pub fn own(&self) -> bool {
+        self.shared_by.is_none() && !self.shared && !self.busy_only
+    }
+
     /// What its row says after its name: « partagé par X », « masqué »,
     /// « occupé seulement », « illisible ».
     pub fn note(&self, fr: bool) -> String {

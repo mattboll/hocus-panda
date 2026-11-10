@@ -553,7 +553,11 @@ impl Store {
             )));
         }
         // Her day's records (lot 5): tables added beside, made if missing.
-        self.conn.execute_batch(crate::day::SQL)?;
+        crate::day::make(&self.conn)?;
+        // An item's episodes by its pointer: its latest is what it is now
+        // (an event moved, #762).
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS episodes_pointer ON episodes (pointer);")?;
         // Her thread and the items waiting for the triage (#750).
         self.conn.execute_batch(crate::kept::SQL)?;
         Ok(())

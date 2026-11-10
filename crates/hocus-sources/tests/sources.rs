@@ -427,6 +427,24 @@ fn shared_free_busy_and_failing_calendars_never_stop_the_others() -> anyhow::Res
             ("Équipe design".to_owned(), "Revue des maquettes".to_owned()),
         ]
     );
+    // #762: only the user's own calendar's events are theirs.
+    let mut mine: Vec<(String, bool)> = items(&events)
+        .iter()
+        .filter_map(|r| match &r.item.content {
+            Content::Event(e) => Some((e.calendar_name.clone(), e.mine)),
+            _ => None,
+        })
+        .collect();
+    mine.sort();
+    assert_eq!(
+        mine,
+        [
+            ("Claire Dubois".to_owned(), false),
+            ("Congés".to_owned(), false),
+            ("Travail".to_owned(), true),
+            ("Équipe design".to_owned(), false),
+        ]
+    );
     let busy = items(&events)
         .into_iter()
         .find_map(|r| match &r.item.content {

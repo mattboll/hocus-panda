@@ -4,12 +4,12 @@
 //! | Part | Holds | Cap | Cache |
 //! |---|---|---:|---|
 //! | frozen | her persona, the tools, the core card (the user, taught rules, the roster, the close people, the projects) | 8k | an hour |
-//! | the day | the date and the moment, computed facts, today's and tomorrow's events, yesterday's summary, what arrived today | 5k | five minutes |
+//! | the day | the date and the moment, computed facts, every event of today and tomorrow (3k at most, the user's own first, [`crate::agenda`]), yesterday's summary, what arrived today | 5k | five minutes |
 //! | retrieved | what hybrid retrieval found for the question ([`crate::retrieve`]), the items' texts that may leave | 8k | none |
 //! | the conversation | the latest turns | 4k | — |
 //!
 //! What does not fit is dropped, lowest rank first; the model can fetch
-//! it with `graph` and `search`.
+//! it with `graph`, `search` and `agenda`.
 //!
 //! **What leaves** (§14.1): an item's text goes only once both secrets'
 //! passes have run (its [`Held`] checked); before that, its metadata and
@@ -41,6 +41,9 @@ pub const FROZEN_CAP: usize = 8_000;
 pub const DAY_CAP: usize = 5_000;
 pub const RETRIEVED_CAP: usize = 8_000;
 pub const CONVERSATION_CAP: usize = 4_000;
+/// The day's agenda at most, within the day's part (#762): what arrived
+/// today never crowds it out.
+pub const AGENDA_CAP: usize = 3_000;
 /// One item's text at most, in tokens.
 const ITEM_CAP: usize = 1_500;
 
@@ -121,7 +124,8 @@ pub struct Scope {
 }
 
 impl Scope {
-    fn notebook(&self) -> Option<Notebook> {
+    /// What it may hold: pro only in a public moment.
+    pub fn notebook(&self) -> Option<Notebook> {
         if self.moment.public() {
             Some(Notebook::Pro)
         } else {
@@ -483,18 +487,39 @@ fn day(
         .ok()
         .and_then(|d| d.to_zoned(zone.clone()).ok())
         .map_or(now, |z| z.timestamp());
-    let events: Vec<_> = retrieve::episodes_between(store, (start, after), notebook, 60)?
-        .into_iter()
-        .filter(|e| e.kind == "event")
-        .collect();
-    if !events.is_empty() {
-        lines.push("Agenda (aujourd'hui et demain) :".to_owned());
-        lines.push("<source kind=\"calendar\">".to_owned());
-        for e in events {
-            items.push(format!("episode:{}", e.id));
-            lines.push(retrieve::episode_line(&e));
-        }
-        lines.push("</source>".to_owned());
+    // Every event of today and tomorrow, from every calendar she reads,
+    // within its own cap: the user's own first when it has to be cut,
+    // whatever else the day brought (#762).
+    let tomorrow = today.tomorrow().unwrap_or(today);
+    let events = crate::agenda::between(store, (start, after), notebook)?;
+    let listing = crate::agenda::listing(&events, &[today, tomorrow], &zone, AGENDA_CAP, |d| {
+        let word = if d == today { "Aujourd'hui" } else { "Demain" };
+        format!("{word}, {} :", facts::french_date(d))
+    });
+    lines.push(
+        "Agenda, aujourd'hui et demain : tous les événements des agendas que tu lis, \
+         « à toi » d'abord s'il faut couper ; heure locale."
+            .to_owned(),
+    );
+    lines.push("<source kind=\"calendar\">".to_owned());
+    lines.extend(listing.lines.iter().cloned());
+    lines.push("</source>".to_owned());
+    items.extend(listing.items.iter().cloned());
+    if listing.cut() > 0 {
+        let from = today.to_string();
+        let to = tomorrow.to_string();
+        lines.push(match listing.cut_mine {
+            0 => format!(
+                "… {} de plus, des agendas partagés avec toi, non listés : \
+                 `agenda` (from {from}, to {to}) les donne tous.",
+                listing.cut_others
+            ),
+            mine => format!(
+                "… {} de plus, non listés, dont {mine} à toi : `agenda` (from {from}, to {to}) \
+                 les donne tous.",
+                listing.cut()
+            ),
+        });
     }
     let yesterday = today.yesterday().unwrap_or(today).to_string();
     let summary: Option<(i64, String)> = store
@@ -512,9 +537,8 @@ fn day(
     }
     // A tool barely used is mentioned only when asked (§9.1).
     let quiet = crate::learn::quiet_sources(store, today);
-    let arrived: Vec<_> = retrieve::episodes_between(store, (start, now), notebook, 40)?
+    let arrived: Vec<_> = retrieve::arrived_between(store, (start, now), notebook, 40)?
         .into_iter()
-        .filter(|e| e.kind != "event" && e.kind != "catch-up")
         .filter(|e| {
             e.source.as_deref().is_none_or(|s| {
                 !quiet

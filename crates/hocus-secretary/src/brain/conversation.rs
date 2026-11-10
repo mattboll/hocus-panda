@@ -885,6 +885,15 @@ impl Brain {
                         .find(|m| m.from == "user" && !m.text.is_empty())
                         .map(|m| m.text.clone())
                 });
+                // What the turn may read: pro only in a public moment, or
+                // for a work draft (§7.4).
+                let visible = self
+                    .talk
+                    .turns
+                    .get(&id)
+                    .and_then(|t| t.scope.as_ref())
+                    .unwrap_or(&self.scope)
+                    .notebook();
                 for call in &reply.tool_calls {
                     if call.name == "remember_style" {
                         let text = self.style_called(id, call, asked.as_deref());
@@ -893,9 +902,16 @@ impl Brain {
                             text,
                             error: false,
                         });
+                    } else if call.name == "remember" {
+                        let text = self.remember_called(id, call, asked.as_deref());
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            text,
+                            error: false,
+                        });
                     } else if tools::READ.contains(&call.name.as_str()) {
                         read = true;
-                        let ran = tools::run(&self.store, call, None);
+                        let ran = tools::run(&self.store, call, visible);
                         results.push(ToolResult {
                             id: call.id.clone(),
                             error: ran.is_err(),

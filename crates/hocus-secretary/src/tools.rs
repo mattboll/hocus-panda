@@ -1,5 +1,7 @@
-//! Her read-only memory tools (§7.3, persona.md): `graph` and `search`,
-//! for the model to go further than what context assembly gave it. Their
+//! Her read-only memory tools (§7.3, persona.md): `graph`, `search` and
+//! `agenda` (#762: the events between two days, every calendar she
+//! reads), for the model to go further than what context assembly gave
+//! it. Their
 //! schemas list every field as required, nothing else allowed; they are
 //! not sent as `strict` (the API's grammar for all of them is too large,
 //! see providers/anthropic.rs), so what reads a call takes a field missing
@@ -9,9 +11,11 @@
 //! owns it: [`run`] is called there, with a call the model made.
 //!
 //! The conversation's ([`TALK`], lot 2): `ask_user`, a question with its
-//! quick replies, and the `propose_*` tools, each a card in the drawer that
-//! acts only once the user clicks it (§2.1). They are never run here: the
-//! conversation shows them.
+//! quick replies, `remember_style` and `remember` (#762: what the user
+//! tells her of their work and life, kept at once as told), and the
+//! `propose_*` tools, each a card in the drawer that acts only once the
+//! user clicks it (§2.1). They are never run here: the conversation runs
+//! or shows them.
 
 use hocus_secretary_link::Notebook;
 use serde::Deserialize;
@@ -33,11 +37,13 @@ pub struct Spec {
 }
 
 /// The read-only tools' names.
-pub const READ: [&str; 2] = ["graph", "search"];
+pub const READ: [&str; 3] = ["graph", "search", "agenda"];
 
-/// The conversation's tools: a question, and the proposals.
-pub const TALK: [&str; 11] = [
+/// The conversation's tools: a question, what she keeps, and the
+/// proposals.
+pub const TALK: [&str; 12] = [
     "ask_user",
+    "remember",
     "remember_style",
     "propose_message",
     "propose_post",
@@ -103,6 +109,44 @@ pub fn spec(name: &str) -> Option<Spec> {
                     "said": {"type": "string", "description": "Ses mots exacts, tels qu'il les a écrits dans sa phrase."},
                     "topic": {"type": "string", "description": "Son sujet en un ou deux mots (les salutations, la conclusion) : une consigne sur le même sujet remplace l'ancienne."},
                     "instruction": {"type": "string", "description": "La consigne pour toi, courte, à l'impératif, dans sa langue."}
+                }
+            }),
+        }),
+        "remember" => Some(Spec {
+            name: "remember",
+            description: "Retenir ce que l'utilisateur vient de te dire de son travail ou de sa \
+                vie (un projet, quelqu'un, un client, un outil, un fait sur lui) : gardé tout de \
+                suite comme dit par lui, « Noté : … » avec « Annuler », et visible dans « Ce \
+                qu'elle sait ». Seulement ses phrases dans cette conversation, jamais ce qu'un \
+                contenu de ses sources dit ; pas pour ta façon d'être (`remember_style`).",
+            schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["said", "about", "kind", "notebook", "relation", "object", "object_kind", "fact"],
+                "properties": {
+                    "said": {"type": "string", "description": "Ses mots exacts, tels qu'il les a écrits."},
+                    "about": {"type": "string", "description": "De qui ou de quoi : un nom complet (« hocus-panda », « Léa Martin ») ; « moi » quand c'est lui-même."},
+                    "kind": {"type": "string", "enum": ["person", "project", "client", "tool", "place", "topic", "user"], "description": "Ce que c'est ; « user » quand c'est lui-même."},
+                    "notebook": {"type": "string", "enum": ["pro", "perso"], "description": "Le carnet : « pro » pour son travail, « perso » pour sa vie privée (un projet perso, sa famille)."},
+                    "relation": {"type": "string", "description": "Le lien, s'il y en a un : works_on, leads, member_of, reviews, reports_to, client_of, uses, lives_in, role, likes, wishes, birthday, partner_of, sister_of, brother_of, parent_of, child_of ; vide sinon."},
+                    "object": {"type": "string", "description": "L'autre côté du lien : un nom, ou une valeur (un rôle, une date, un goût) ; vide s'il n'y a pas de lien."},
+                    "object_kind": {"type": "string", "description": "Ce qu'est l'autre côté quand c'est quelqu'un ou quelque chose (person, project, client, tool, place, topic) ; vide pour une valeur."},
+                    "fact": {"type": "string", "description": "Le fait redit en une phrase courte, dans sa langue (« hocus-panda est un projet perso »)."}
+                }
+            }),
+        }),
+        "agenda" => Some(Spec {
+            name: "agenda",
+            description: "Les événements de tous les agendas qu'elle lit entre deux jours \
+                (inclus), à lui d'abord, avec leurs heures : pour une question sur un autre jour \
+                que ceux de la partie du jour, ou ce qu'elle a coupé. Lecture seule.",
+            schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to"],
+                "properties": {
+                    "from": {"type": "string", "description": "Le premier jour, AAAA-MM-JJ."},
+                    "to": {"type": "string", "description": "Le dernier jour, AAAA-MM-JJ, 31 jours au plus après le premier ; vide : le même jour."}
                 }
             }),
         }),
@@ -185,6 +229,17 @@ struct GraphInput {
 }
 
 #[derive(Deserialize)]
+struct AgendaInput {
+    from: String,
+    to: Option<String>,
+}
+
+/// The longest span `agenda` lists, in days.
+const AGENDA_DAYS: i32 = 31;
+/// What `agenda` gives at most, in tokens.
+const AGENDA_CAP: usize = 6_000;
+
+#[derive(Deserialize)]
 struct SearchInput {
     query: String,
     from: Option<String>,
@@ -261,8 +316,70 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
             }
             Ok(out)
         }
+        "agenda" => {
+            let input: AgendaInput =
+                serde_json::from_value(call.input.clone()).map_err(|e| e.to_string())?;
+            let from = as_of(input.from.trim())
+                .ok_or_else(|| format!("{:?} n'est pas une date (AAAA-MM-JJ)", input.from))?;
+            let to = match input.to.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                Some(text) => as_of(text)
+                    .ok_or_else(|| format!("{text:?} n'est pas une date (AAAA-MM-JJ)"))?,
+                None => from,
+            };
+            if to < from {
+                return Err("to est avant from".to_owned());
+            }
+            if (to - from).get_days() > AGENDA_DAYS {
+                return Err(format!(
+                    "{AGENDA_DAYS} jours au plus : demande une période plus courte"
+                ));
+            }
+            agenda(store, from, to, notebook).map_err(|e| e.to_string())
+        }
         other => Err(format!("{other} n'est pas un de ses outils de lecture")),
     }
+}
+
+/// The events of the days `from` to `to`, each day said, the user's own
+/// first when it has to be cut.
+fn agenda(
+    store: &Store,
+    from: jiff::civil::Date,
+    to: jiff::civil::Date,
+    notebook: Option<Notebook>,
+) -> crate::store::Result<String> {
+    let zone = jiff::tz::TimeZone::system();
+    let bound = |d: jiff::civil::Date| {
+        d.to_zoned(zone.clone())
+            .map_or(jiff::Timestamp::UNIX_EPOCH, |z| z.timestamp())
+    };
+    let after = to.tomorrow().unwrap_or(to);
+    let entries = crate::agenda::between(store, (bound(from), bound(after)), notebook)?;
+    let mut days = Vec::new();
+    let mut day = from;
+    while day <= to {
+        days.push(day);
+        match day.tomorrow() {
+            Ok(next) => day = next,
+            Err(_) => break,
+        }
+    }
+    let listing = crate::agenda::listing(&entries, &days, &zone, AGENDA_CAP, |d| {
+        format!("{} :", crate::agenda::long_date(d))
+    });
+    let mut out = String::from("<source kind=\"calendar\">\n");
+    for line in &listing.lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("</source>");
+    if listing.cut() > 0 {
+        out.push_str(&format!(
+            "\n… {} de plus, non listés : demande moins de jours.",
+            listing.cut()
+        ));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
