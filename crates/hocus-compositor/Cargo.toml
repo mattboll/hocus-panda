@@ -22,8 +22,6 @@ hocus-config.workspace = true
 # The windows' geometry, shared with the Settings' trial area (6.14).
 hocus-geometry.workspace = true
 hocus-link.workspace = true
-# The secretary's socket's path and environment, which it starts her with.
-hocus-secretary-link.workspace = true
 hocus-pandas.workspace = true
 hocus-agents.workspace = true
 # The session's start-up applications (6.15), read as the launcher reads

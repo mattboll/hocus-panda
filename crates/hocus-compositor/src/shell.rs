@@ -718,7 +718,6 @@ impl State {
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
-        self.secretary_shell_connected();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
         self.hand_kept_levels();
@@ -786,7 +785,6 @@ impl State {
                 self.popovers_closing(&namespace);
                 self.launcher_closing(&namespace);
             }
-            ToCompositor::SecretaryDrawer(output) => self.secretary_drawer_on(&output),
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
@@ -829,7 +827,6 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::PeekClose => self.peek_closed(),
-            ToCompositor::SecretaryPeek { id, stays } => self.secretary_peek(id, stays),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {

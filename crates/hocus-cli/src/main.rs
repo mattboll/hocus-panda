@@ -23,19 +23,11 @@
 //! - `hocus msg outputs`: the screens, their modes, places, scales and
 //!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
 //!
-//! - `hocus msg secretary status`, `hocus msg secretary graph NODE
-//!   [--as-of DATE] [--hops N] [--notebook pro|perso]`: the secretary's
-//!   state, or her graph around a node now or as of a date, as JSON
-//!   (docs/design/secretary.md; in assistant mode only). These go to her
-//!   own socket, beside the control socket (`<socket>.secretary`); the
-//!   status says her process too, as the compositor supervises it.
-//!
 //! - `hocus msg shell status`, `hocus msg shell restart [--program PATH |
-//!   --installed]`, and `hocus msg secretary process` and `hocus msg
-//!   secretary restart` the same: which program the compositor runs as
-//!   the shell (or the secretary) and since when, and that program ended
-//!   and started again at once, from PATH when given, for this session
-//!   only (docs/workflow.md, "Development loop").
+//!   --installed]`: which program the compositor runs as the shell and
+//!   since when, and that program ended and started again at once, from
+//!   PATH when given, for this session only (docs/workflow.md,
+//!   "Development loop").
 //!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
 //!   on standard input, checked and kept where the bar reads it
@@ -182,12 +174,6 @@ enum MsgCommand {
     /// readers read it: each window's nodes, their roles, names, values,
     /// states, places and actions (docs/design/screen-reader.md).
     A11y,
-    /// The secretary, in assistant mode (docs/design/secretary.md): asked
-    /// on her own socket, beside the control socket.
-    Secretary {
-        #[command(subcommand)]
-        question: SecretaryCommand,
-    },
     /// The shell (the bar) as the compositor runs it: which program, since
     /// when; or restarted (docs/workflow.md, "Development loop").
     Shell {
@@ -228,34 +214,6 @@ impl RestartArgs {
             (None, false) => Restart::Same,
         }
     }
-}
-
-#[derive(Debug, Subcommand)]
-enum SecretaryCommand {
-    /// Her state: her clock, the lock, her memory's counts, her sources'
-    /// cursors, the last catch-up, her connections, her model, and her
-    /// process as the compositor runs it.
-    Status,
-    /// Her process as the compositor runs it: which program, whether it
-    /// was given, since when. Answered by the compositor, whether she
-    /// runs or not.
-    Process,
-    /// Ends her and starts her again at once (assistant mode only).
-    Restart(RestartArgs),
-    /// Her graph around NODE (a name or an alias): the edges that count,
-    /// now or as of a date, and where she has each from.
-    Graph {
-        node: String,
-        /// YYYY-MM-DD (default: today).
-        #[arg(long, value_name = "DATE")]
-        as_of: Option<String>,
-        /// How many edges away from NODE.
-        #[arg(long, default_value_t = 2)]
-        hops: u8,
-        /// pro or perso (default: both).
-        #[arg(long)]
-        notebook: Option<String>,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -344,33 +302,6 @@ fn main() -> ExitCode {
             args.socket,
             &ProgramAsk::Restart(Supervised::Shell, restart.restart()),
         ),
-        Command::Msg {
-            question:
-                MsgCommand::Secretary {
-                    question: SecretaryCommand::Process,
-                },
-        } => program(args.socket, &ProgramAsk::Status(Supervised::Secretary)),
-        Command::Msg {
-            question:
-                MsgCommand::Secretary {
-                    question: SecretaryCommand::Restart(restart),
-                },
-        } => program(
-            args.socket,
-            &ProgramAsk::Restart(Supervised::Secretary, restart.restart()),
-        ),
-        Command::Msg {
-            question: MsgCommand::Secretary { question },
-        } => match secretary(args.socket, question) {
-            Ok(answer) => {
-                println!("{answer}");
-                ExitCode::SUCCESS
-            }
-            Err(err) => {
-                eprintln!("hocus: {err}");
-                ExitCode::FAILURE
-            }
-        },
         Command::Msg { question } => {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
@@ -383,7 +314,7 @@ fn main() -> ExitCode {
                 MsgCommand::InputDevices { follow: false } => {
                     Question::InputDevices { follow: false }
                 }
-                MsgCommand::Secretary { .. } | MsgCommand::Shell { .. } => {
+                MsgCommand::Shell { .. } => {
                     return ExitCode::FAILURE;
                 }
             };
@@ -428,86 +359,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// Asks the secretary on her socket, beside the control socket: her
-/// answer as pretty JSON.
-fn secretary(socket: Option<PathBuf>, question: SecretaryCommand) -> Result<String, String> {
-    use hocus_secretary_link::{
-        Client, Connection, FromSecretary, GraphQuery, Notebook, ToSecretary,
-    };
-    let control = socket_path(socket)
-        .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
-    let path = hocus_secretary_link::beside_control(&control)
-        .ok_or_else(|| format!("{}: not a control socket", control.display()))?;
-    // Her process, as the compositor runs it: said with her status, and
-    // in her place when she does not answer.
-    let process = matches!(question, SecretaryCommand::Status)
-        .then(|| {
-            let line = ProgramAsk::Status(Supervised::Secretary).line();
-            ask(Some(control.clone()), &line).ok()
-        })
-        .flatten();
-    let mut her = Connection::open(&path, Client::Cli, ANSWER).map_err(|e| {
-        let mut said =
-            format!("the secretary does not answer ({e}): is [secretary] mode \"assistant\"?");
-        if let Some(process) = &process {
-            said.push_str("\nher process, as the compositor runs it:\n");
-            said.push_str(process.trim_end());
-        }
-        said
-    })?;
-    let answer = match question {
-        // The compositor's, answered before.
-        SecretaryCommand::Process | SecretaryCommand::Restart(_) => {
-            return Err("not hers to answer".to_owned());
-        }
-        SecretaryCommand::Status => her.request(|id| ToSecretary::Status { id })?,
-        SecretaryCommand::Graph {
-            node,
-            as_of,
-            hops,
-            notebook,
-        } => {
-            let notebook = match notebook.as_deref() {
-                None => None,
-                Some(word) => {
-                    Some(Notebook::of(word).ok_or_else(|| format!("{word:?}: pro or perso"))?)
-                }
-            };
-            her.request(|id| ToSecretary::Graph {
-                id,
-                query: GraphQuery {
-                    node,
-                    as_of,
-                    hops,
-                    notebook,
-                },
-            })?
-        }
-    };
-    let mut value = match answer {
-        FromSecretary::Status { status, .. } => serde_json::to_value(status),
-        FromSecretary::Graph { graph, .. } => serde_json::to_value(graph),
-        other => return Err(format!("an unexpected answer: {other:?}")),
-    }
-    .map_err(|e| e.to_string())?;
-    if let (Some(process), Some(status)) = (process, value.as_object_mut()) {
-        status.insert("process".to_owned(), words(&process));
-    }
-    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
-}
-
-/// The compositor's `WORD VALUE` lines as a JSON object.
-fn words(lines: &str) -> serde_json::Value {
-    lines
-        .lines()
-        .filter_map(|line| line.split_once(' '))
-        .map(|(word, value)| (word.to_owned(), serde_json::Value::from(value)))
-        .collect::<serde_json::Map<_, _>>()
-        .into()
-}
-
-/// Asks the compositor about the shell's or the secretary's program, or
-/// to restart it: its answer, a refusal being a failure.
+/// Asks the compositor about the shell's program, or to restart it: its
+/// answer, a refusal being a failure.
 fn program(socket: Option<PathBuf>, asked: &ProgramAsk) -> ExitCode {
     match ask(socket, &asked.line()) {
         Ok(answer) => match answer.strip_prefix(hocus_agents::REFUSED) {

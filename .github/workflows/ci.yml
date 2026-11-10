@@ -72,7 +72,7 @@ jobs:
             clang mold pkg-config fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev libssl-dev ffmpeg \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
           sudo chown -R "$USER" ~/apt-archives
       - uses: Swatinem/rust-cache@v2
@@ -113,7 +113,7 @@ jobs:
             clang mold pkg-config \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            libpipewire-0.3-dev libssl-dev
+            libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
           # Saved by main's build and by the sprint branches', where the
@@ -128,10 +128,10 @@ jobs:
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
       - name: Programs
-        # The compositor's tests start the real shell, Settings and
-        # secretary, and run `hocus`, from beside them: a test binary does
-        # not build them, and a test fails without them. The archive takes
-        # them along (.config/nextest.toml).
+        # The compositor's tests start the real shell and Settings, and
+        # run `hocus`, from beside them: a test binary does not build
+        # them, and a test fails without them. The archive takes them
+        # along (.config/nextest.toml).
         run: cargo programs --locked
       - name: Tests' archive
         run: cargo nextest archive --locked --workspace --archive-file nextest.tar.zst
@@ -154,7 +154,7 @@ jobs:
             clang mold pkg-config \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            libpipewire-0.3-dev libssl-dev
+            libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy
@@ -193,7 +193,7 @@ jobs:
             fonts-dejavu-core zstd \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev libssl-dev ffmpeg \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
           sudo chown -R "$USER" ~/apt-archives
       - uses: taiki-e/install-action@v2
@@ -207,7 +207,7 @@ jobs:
         # here instead.
         run: |
           zstd -dc nextest.tar.zst | tar -t > archive.txt
-          for program in hocuspanda-shell hocus hocus-settings hocus-secretary; do
+          for program in hocuspanda-shell hocus hocus-settings; do
             grep -qE "/debug/$program\$" archive.txt || { echo "::error::$program is not in the archive"; exit 1; }
           done
       - name: Sources older than the programs
@@ -216,7 +216,7 @@ jobs:
         # checkout is newer than the build's. Only those sources are made
         # older: a test may read its other files' times.
         run: |
-          zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' '*/debug/hocus-secretary.d' \
+          zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' \
             | sed 's/^[^:]*: //; s/\\ /\x00/g' | tr ' ' '\n' | tr '\000' ' ' \
             | grep -F "$PWD/" | sort -u > sources.txt
           wc -l sources.txt
@@ -249,7 +249,7 @@ jobs:
             clang mold pkg-config dpkg-dev \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            libpipewire-0.3-dev libssl-dev
+            libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release
@@ -259,7 +259,7 @@ jobs:
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
       - name: Release build
-        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
       - name: The .deb
         run: packaging/deb/build.sh
       - name: What the .deb holds

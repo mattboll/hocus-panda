@@ -80,12 +80,6 @@ All sizes are logical pixels.
   a virtual terminal (`--backend tty`, `--session`) serves them, on the
   session's own bus; a nested or headless compositor serves none, and
   never takes the live session's.
-- **To the secretary** (secretary.md §22, lot 7): in assistant mode, a
-  notification of an application consented to in her consent book is
-  forwarded to her as it comes — its application, title and text, never
-  its actions — whatever its bubble does (held while sharing or not to be
-  disturbed included). Nothing of hers comes back: she never invokes,
-  closes or marks one.
 - **The name**: requested with `REPLACE_EXISTING` (not `DO_NOT_QUEUE`):
   the desktop takes it from a server that lets it go, else waits in the
   queue for it.

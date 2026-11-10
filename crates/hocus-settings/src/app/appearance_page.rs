@@ -352,9 +352,6 @@ impl App {
         if let Some(said) = crate::agents::button_said(setting.id, value, self.lang) {
             return said.to_owned();
         }
-        if let Some(said) = crate::secretary::button_said(setting.id, value, self.lang) {
-            return said;
-        }
         let said = setting.say(value, self.lang);
         match (setting.id, value) {
             ("locale.language", Value::Word("system")) => {

@@ -25,10 +25,6 @@
 
 use std::time::Duration;
 
-mod secretary;
-
-pub use secretary::{SecretaryMood, secretary_frame};
-
 /// The drawings' view box, `-3 -3.5 126 120.5`: its size.
 pub const VIEW_BOX: (f32, f32) = (126.0, 120.5);
 /// The secretary's: `0 0 120 120`.
@@ -290,18 +286,12 @@ pub fn step(t: Duration) -> u32 {
 /// where they are then; none once the burst is over (the still drawing,
 /// [`Mood::still`], from then on).
 pub fn frame(mood: Mood, window: Duration, t: Duration) -> Option<String> {
-    moved(mood.still(), mood.parts(), window, t)
-}
-
-/// `still` with its moving `parts` where they are `t` into a burst moving
-/// for `window`; none once the burst is over.
-fn moved(still: &str, parts: &[Part], window: Duration, t: Duration) -> Option<String> {
     if t >= lasts(window) {
         return None;
     }
-    let mut drawing = still.to_owned();
+    let mut drawing = mood.still().to_owned();
     let (window, t) = (window.as_secs_f32(), t.as_secs_f32());
-    for part in parts {
+    for part in mood.parts() {
         let pose = part.at(window, t);
         if pose.is_rest() {
             continue;
@@ -403,34 +393,6 @@ enum Anim {
     Smoke,
     Z,
     Breathe,
-    // The secretary's (secretary.md §5.6, the mockup's keyframes).
-    /// A blink at the start of each cycle (`sx-blink`, moved to the
-    /// cycle's start so that a burst shorter than the cycle shows one).
-    Shut,
-    /// The ear's twitch (`sx-wig`), at the cycle's start likewise.
-    Twitch,
-    /// The head's nod as she writes (`sx-nod`).
-    Nod,
-    /// The head tilted as she asks (`sx-tilt`).
-    Tilt,
-    /// The right paw scribbling (`sx-scrib`).
-    Scribble,
-    /// The clipboard's line growing (`sx-line`).
-    Grow,
-    /// The "?" bobbing (`sx-bob`).
-    Float,
-    /// Her two hops (`sx-hop`).
-    Hop,
-    /// The ear's rings (`sx-ring`).
-    Ripple,
-    /// The clipboard's dot pulsing (`sx-dot`).
-    Pulse,
-    /// A sparkle twinkling (`sx-tw`).
-    Glint,
-    /// Asleep, breathing (`sx-breathe`).
-    Puff,
-    /// The worry's drop sliding down (`sx-drop`).
-    Drip,
 }
 
 impl Anim {
@@ -520,102 +482,6 @@ impl Anim {
             ],
             &[],
         );
-        const SHUT: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.04, Pose::scaled(1.0, 0.1)),
-                (0.08, Pose::REST),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const TWITCH: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.04, Pose::turned(-9.0)),
-                (0.09, Pose::turned(6.0)),
-                (0.14, Pose::REST),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const NOD: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.5, Pose::moved(0.0, 1.5).turning(3.5)),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const TILT: Keys = (
-            &[
-                (0.0, Pose::turned(-7.0)),
-                (0.5, Pose::turned(-3.0)),
-                (1.0, Pose::turned(-7.0)),
-            ],
-            &[],
-        );
-        const SCRIBBLE: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.25, Pose::moved(-4.0, -2.0)),
-                (0.5, Pose::moved(-1.0, 1.0)),
-                (0.75, Pose::moved(-5.0, 0.0)),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const GROW: Keys = (
-            &[
-                (0.0, Pose::scaled(0.15, 1.0)),
-                (0.8, Pose::REST),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const FLOAT: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.5, Pose::moved(0.0, -3.0)),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const HOP: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.1, Pose::moved(0.0, -10.0)),
-                (0.2, Pose::REST),
-                (0.3, Pose::moved(0.0, -5.0)),
-                (0.4, Pose::REST),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const RIPPLE: Keys = (
-            &[(0.0, scale(0.8)), (1.0, scale(1.35))],
-            &[(0.0, 0.95), (1.0, 0.0)],
-        );
-        const PULSE: Keys = (
-            &[(0.0, scale(1.0)), (0.5, scale(1.6)), (1.0, scale(1.0))],
-            &[(0.0, 1.0), (0.5, 0.7), (1.0, 1.0)],
-        );
-        const GLINT: Keys = (
-            &[(0.0, scale(1.0)), (0.5, scale(0.5)), (1.0, scale(1.0))],
-            &[(0.0, 1.0), (0.5, 0.5), (1.0, 1.0)],
-        );
-        const PUFF: Keys = (
-            &[
-                (0.0, Pose::REST),
-                (0.5, Pose::scaled(1.025, 0.98)),
-                (1.0, Pose::REST),
-            ],
-            &[],
-        );
-        const DRIP: Keys = (
-            &[(0.0, Pose::moved(0.0, -3.0)), (1.0, Pose::moved(0.0, 9.0))],
-            &[(0.0, 0.0), (0.2, 1.0), (1.0, 0.0)],
-        );
         match self {
             Self::Twinkle => TWINKLE,
             Self::Ring => RING,
@@ -628,19 +494,6 @@ impl Anim {
             Self::Smoke => SMOKE,
             Self::Z => Z,
             Self::Breathe => BREATHE,
-            Self::Shut => SHUT,
-            Self::Twitch => TWITCH,
-            Self::Nod => NOD,
-            Self::Tilt => TILT,
-            Self::Scribble => SCRIBBLE,
-            Self::Grow => GROW,
-            Self::Float => FLOAT,
-            Self::Hop => HOP,
-            Self::Ripple => RIPPLE,
-            Self::Pulse => PULSE,
-            Self::Glint => GLINT,
-            Self::Puff => PUFF,
-            Self::Drip => DRIP,
         }
     }
 
@@ -781,10 +634,6 @@ enum Ease {
     InOut,
     /// `ease-out`.
     Out,
-    /// `ease-in`.
-    In,
-    /// `linear`.
-    Linear,
 }
 
 impl Ease {
@@ -793,8 +642,6 @@ impl Ease {
             Self::Plain => (0.25, 0.1, 0.25, 1.0),
             Self::InOut => (0.42, 0.0, 0.58, 1.0),
             Self::Out => (0.0, 0.0, 0.58, 1.0),
-            Self::In => (0.42, 0.0, 1.0, 1.0),
-            Self::Linear => return x.clamp(0.0, 1.0),
         };
         bezier((x1, y1, x2, y2), x.clamp(0.0, 1.0))
     }

@@ -106,19 +106,13 @@ pub const KEY_Q: u32 = 16;
 pub const KEY_F4: u32 = 62;
 
 /// The shell's program, built next to the test's: `cargo programs` builds
-/// the four the tests run, and a test that needs one that is missing fails
+/// the three the tests run, and a test that needs one that is missing fails
 /// saying so, never passes without it (#765).
 ///
 /// A test binary does not build it, so it may be older than its sources:
 /// that fails the test too, rather than testing an old shell (#464).
 pub fn shell_program() -> std::path::PathBuf {
     built("hocuspanda-shell", "hocus-shell")
-}
-
-/// The secretary's program (docs/design/secretary.md), as
-/// [`shell_program`].
-pub fn secretary_program() -> std::path::PathBuf {
-    built("hocus-secretary", "hocus-secretary")
 }
 
 /// The Settings' program (6.1), as [`shell_program`].

@@ -35,13 +35,3 @@ ear, and the dot on her clipboard, in the moment's colour: green, amber,
 orange. The rings her ear sends out and her hops are motion, drawn by the
 shell over the drawing, so they are not in the files. The shell draws her
 at 56 px in the group, 46 px in the mini item and 34 px in her briefing.
-
-In her drawer (docs/design/secretary.md §5.6) she has seven moods:
-listen, type, ask, nudge, happy, worry and sleep. They are not files:
-`src/secretary.rs` holds the same drawing split into groups (`sx-head`,
-`sx-face`, `sx-eyes`, `sx-ear`, `sx-paw`, `sx-line`, `sx-dot`, `sx-all`)
-so that her parts can move, and adds each mood's marks over it, as the
-approved sprint 11 mockup draws them: the ear's rings (`sx-ring1`,
-`sx-ring2`), a "?" (`sx-q`), sparkles (`sx-s1` to `sx-s4`), closed lids
-and two "z" (`sx-z1`, `sx-z2`), a drop (`sx-drop`). Listening or writing,
-she is `secretary-calm.svg` exactly; keep the two in step.

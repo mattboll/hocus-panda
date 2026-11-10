@@ -1,6 +1,6 @@
 # CI builds once and runs the tests from an archive on other machines
 # (.github/workflows/ci.yml, #633). The compositor's tests start the shell,
-# the Settings, `hocus` and the secretary from beside their own binary, and check against
+# the Settings and `hocus` from beside their own binary, and check against
 # each one's list of sources (NAME.d) that it is fresh: the archive takes
 # them along.
 [profile.default]
@@ -11,8 +11,6 @@ archive.include = [
     { path = "debug/hocus.d", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-settings", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-settings.d", relative-to = "target", on-missing = "error" },
-    { path = "debug/hocus-secretary", relative-to = "target", on-missing = "error" },
-    { path = "debug/hocus-secretary.d", relative-to = "target", on-missing = "error" },
 ]
 
 # CI's runs. A test that fails by chance is quarantined here while its

@@ -27,9 +27,7 @@ hocus-link = { version = "1.0.0", path = "crates/hocus-link" }
 hocus-network = { version = "1.0.0", path = "crates/hocus-network" }
 hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
 hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
-hocus-secretary-link = { version = "1.0.0", path = "crates/hocus-secretary-link" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
-hocus-sources = { version = "1.0.0", path = "crates/hocus-sources" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
 
 # The others. iced and iced_tiny_skia are held at the exact versions
@@ -45,7 +43,6 @@ chacha20poly1305 = "0.11.0"
 clap = { version = "4.6.7", features = ["derive"] }
 fontdue = "0.9.3"
 futures-util = { version = "0.3.34", default-features = false }
-getrandom = "0.3.4"
 iced = { version = "=0.14.0", default-features = false }
 iced_layershell = { version = "=0.19.1", default-features = false }
 iced_tiny_skia = { version = "=0.14.1", default-features = false }
@@ -53,15 +50,10 @@ image = { version = "0.25", default-features = false }
 jiff = { version = "0.2.38", default-features = false }
 libc = "0.2.191"
 libloading = "0.8.9"
-mail-parser = "1.0.1"
 pipewire = { version = "0.10.1", features = ["v0_3_77"] }
-quick-xml = "0.41.0"
-regex = "1.13.1"
 resvg = { version = "0.45.1", default-features = false }
-rusqlite = { version = "0.41.1", default-features = false, features = ["bundled-sqlcipher"] }
 rustix = "1.1.6"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-rustls-platform-verifier = "0.7.1"
 serde = "1.0.229"
 serde_json = "1.0.154"
 smithay = { version = "0.7.0", default-features = false }

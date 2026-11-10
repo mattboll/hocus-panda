@@ -22,8 +22,6 @@ hocus-agents.workspace = true
 hocus-day.workspace = true
 # `hocus perf day`: a day of the desktop's CPU and memory (#655).
 hocus-perf.workspace = true
-# `hocus msg secretary`: her socket's protocol.
-hocus-secretary-link.workspace = true
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 clap.workspace = true
 serde_json.workspace = true

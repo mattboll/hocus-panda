@@ -6,9 +6,8 @@ are in [CLAUDE.md](../CLAUDE.md), "Workflow".
 
 ## Development loop
 
-A change of the shell (`crates/hocus-shell`) or of the secretary
-(`crates/hocus-secretary`) is seen in the running session without a
-package nor sudo: `scripts/dev/live.sh shell` (or `secretary`) builds that
+A change of the shell (`crates/hocus-shell`) is seen in the running
+session without a package nor sudo: `scripts/dev/live.sh shell` builds that
 one program (dev profile, incremental, in a target directory of its own,
 `$HOCUS_LIVE_TARGET`, default `~/.cache/hocuspanda-dev/target`), asks the
 session's compositor to end the one that runs and start the one just

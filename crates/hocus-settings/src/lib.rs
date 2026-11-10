@@ -2,7 +2,7 @@
 //! its own that writes the desktop's configuration file so that nobody has
 //! to edit it, keeping what the user wrote there by hand.
 //!
-//! - [`model`]: the 20 sections in 5 groups, and the settings each holds;
+//! - [`model`]: the 19 sections in 5 groups, and the settings each holds;
 //!   a section's ticket fills its own ([`power`] is the first, [`mouse`]
 //!   the mice and touchpads; [`screens`] draws its page itself, from the
 //!   compositor's line; [`sound`]'s live in PipeWire, [`network`]'s in
@@ -30,8 +30,6 @@
 //!   password changed through the system's `passwd`, kept while typed.
 //! - [`agents`]: the agents' tools as the compositor says them, the halo
 //!   and the pandas' keys (6.16).
-//! - [`secretary`], [`google_sources`] and [`notifiers`]: the secretary's
-//!   own page, her keys, what she reads by account, her triage (#759).
 //! - [`applications`]: the Applications page's default applications
 //!   (`mimeapps.list`, the terminal) and start-up applications (XDG
 //!   autostart), read and written on its thread (6.15).
@@ -53,14 +51,12 @@ pub mod bluetooth;
 pub mod captures;
 pub mod desktops;
 pub mod devices;
-pub mod google_sources;
 pub mod keyboard;
 pub mod keys;
 pub mod lang;
 pub mod model;
 pub mod mouse;
 pub mod network;
-pub mod notifiers;
 pub mod passwd;
 pub mod perf;
 pub mod portal;
@@ -70,7 +66,6 @@ pub mod renderer;
 pub mod screens;
 pub mod search;
 pub mod secret;
-pub mod secretary;
 pub mod single;
 pub mod sound;
 pub mod store;

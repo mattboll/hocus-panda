@@ -1244,16 +1244,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
-name = "encodify"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95d6e27686e1d6991a3077f4dbec9d33d18903466d234165ad86cd08c3ebc79"
-dependencies = [
- "memchr",
- "simdutf8",
-]
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1354,18 +1344,6 @@ dependencies = [
  "event-listener",
  "pin-project-lite",
 ]
-
-[[package]]
-name = "fallible-iterator"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
-
-[[package]]
-name = "fallible-streaming-iterator"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fastrand"
@@ -1855,17 +1833,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashify"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a037b1848eada162d6534c206770180e6bfc0eaa97292250c3e7179d8b1f73"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1937,7 +1904,6 @@ dependencies = [
  "hocus-agents",
  "hocus-day",
  "hocus-perf",
- "hocus-secretary-link",
  "jiff",
  "serde_json",
  "tempfile",
@@ -1959,7 +1925,6 @@ dependencies = [
  "hocus-link",
  "hocus-pandas",
  "hocus-perf",
- "hocus-secretary-link",
  "hocus-xdg",
  "image",
  "jiff",
@@ -2060,49 +2025,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hocus-secretary"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "clap",
- "getrandom 0.3.4",
- "hocus-day",
- "hocus-secretary-link",
- "hocus-sources",
- "jiff",
- "regex",
- "rusqlite",
- "rustix 1.1.6",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "unicode-normalization",
- "ureq",
- "zbus 6.0.0",
- "zeroize",
-]
-
-[[package]]
-name = "hocus-secretary-link"
-version = "1.0.0"
-dependencies = [
- "jiff",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "zbus 6.0.0",
- "zeroize",
-]
-
-[[package]]
 name = "hocus-settings"
 version = "1.0.0"
 dependencies = [
@@ -2115,7 +2037,6 @@ dependencies = [
  "hocus-network",
  "hocus-pandas",
  "hocus-perf",
- "hocus-secretary-link",
  "hocus-sound",
  "hocus-xdg",
  "iced",
@@ -2149,7 +2070,6 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
- "hocus-secretary-link",
  "hocus-sound",
  "hocus-xdg",
  "iced",
@@ -2180,30 +2100,6 @@ version = "1.0.0"
 dependencies = [
  "serde_json",
  "tracing",
-]
-
-[[package]]
-name = "hocus-sources"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "hocus-day",
- "hocus-secretary-link",
- "jiff",
- "mail-parser",
- "quick-xml",
- "regex",
- "rustls",
- "rustls-platform-verifier",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "ureq",
- "zbus 6.0.0",
 ]
 
 [[package]]
@@ -2883,18 +2779,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libsqlite3-sys"
-version = "0.39.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
-dependencies = [
- "cc",
- "pkg-config",
- "sqlcipher-src",
- "vcpkg",
-]
-
-[[package]]
 name = "libudev-sys"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3014,18 +2898,6 @@ dependencies = [
  "float_next_after",
  "lyon_path",
  "num-traits",
-]
-
-[[package]]
-name = "mail-parser"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d4ea9311ef3ca6189aa85c5f984bd47b2f12079bcabae28917d900ab26c9ecc"
-dependencies = [
- "encodify",
- "hashify",
- "memchr",
- "simdutf8",
 ]
 
 [[package]]
@@ -4173,19 +4045,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
-name = "rusqlite"
-version = "0.41.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
-dependencies = [
- "bitflags 2.13.2",
- "fallible-iterator",
- "fallible-streaming-iterator",
- "libsqlite3-sys",
- "smallvec",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4777,12 +4636,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sqlcipher-src"
-version = "419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab732d48ebf2a1449e94d071b26544f99845834c75c3c210e927ace097b49aa4"
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5324,12 +5177,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vcpkg"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version-compare"

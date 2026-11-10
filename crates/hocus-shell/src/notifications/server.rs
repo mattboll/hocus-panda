@@ -275,16 +275,6 @@ impl Server {
             agent,
             "a notification"
         );
-        // To the secretary too, when its application is consented to
-        // (lot 7): what it says, never its actions.
-        crate::secretary::notified(hocus_secretary_link::Notification {
-            id,
-            app: note.app.clone(),
-            entry: note.entry.clone(),
-            title: note.summary.clone(),
-            body: note.body.clone(),
-            at_ms: note.at,
-        });
         super::input(Input::Notify(Box::new(note)));
         id
     }
