@@ -13,8 +13,8 @@ use crate::{Notebook, consent::SourceKind, gate::Hours};
 pub struct Sheet {
     /// "Lire tes mails ?"
     pub title: String,
-    /// Where it comes from: "Gmail · alex@atelier-lune.fr, déjà dans
-    /// Comptes en ligne".
+    /// Where it comes from: "Gmail · alex@atelier-lune.fr, déjà connecté
+    /// à cet ordinateur".
     pub from: String,
     pub sections: Vec<Section>,
     /// The notebook suggested (§7.4), which the user confirms or changes
@@ -315,9 +315,9 @@ pub fn google(
     };
     let [read_label, never_label, leave_label] = labels(fr);
     let from = if fr {
-        format!("{service} · {identity}, déjà dans Comptes en ligne")
+        format!("{service} · {identity}, déjà connecté à cet ordinateur")
     } else {
-        format!("{service} · {identity}, already in Online Accounts")
+        format!("{service} · {identity}, already signed in on this computer")
     };
     Sheet {
         title: title.to_owned(),

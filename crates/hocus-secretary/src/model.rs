@@ -757,8 +757,8 @@ impl Failure {
         match (self, fr) {
             (Self::NoKey, true) => "Je n’ai pas pu te répondre\u{a0}: il me manque ma clé Anthropic. Colle-la dans le champ en haut de mon tiroir. Ou, dans un terminal\u{a0}: hocus-secretary key anthropic, Entrée, puis colle ta clé. Je la garde dans ton trousseau.".to_owned(),
             (Self::NoKey, false) => "I couldn’t answer: I’m missing my Anthropic key. Paste it in the field at the top of my drawer. Or, in a terminal: hocus-secretary key anthropic, Enter, then paste your key. I keep it in your keyring.".to_owned(),
-            (Self::KeyRefused, true) => "Je n’ai pas pu te répondre\u{a0}: Anthropic refuse ma clé. Remplace-la dans Réglages › Agents › Clé Anthropic.".to_owned(),
-            (Self::KeyRefused, false) => "I couldn’t answer: Anthropic refuses my key. Replace it in Settings › Agents › Anthropic key.".to_owned(),
+            (Self::KeyRefused, true) => "Je n’ai pas pu te répondre\u{a0}: Anthropic refuse ma clé. Remplace-la dans Réglages › Secrétaire › Clé Anthropic.".to_owned(),
+            (Self::KeyRefused, false) => "I couldn’t answer: Anthropic refuses my key. Replace it in Settings › Secretary › Anthropic key.".to_owned(),
             (Self::Credit, true) => "Je n’ai pas pu te répondre\u{a0}: le crédit de ton compte Anthropic est épuisé. Il se recharge dans la console Anthropic, rubrique Billing.".to_owned(),
             (Self::Credit, false) => "I couldn’t answer: your Anthropic account’s credit is too low. It is topped up in the Anthropic console, under Billing.".to_owned(),
             (Self::ModelUnknown(m), true) => format!("Je n’ai pas pu te répondre\u{a0}: Anthropic ne connaît pas le modèle demandé{}.", quoted(m, true)),

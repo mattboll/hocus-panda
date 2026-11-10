@@ -18,8 +18,9 @@
 //! over (her memory's `meta` `first-run`), never asked again.
 //!
 //! A granted card keeps "Ne plus lire": a revocation of what it granted,
-//! and her source forgets what came from it at once. The Settings write the same book
-//! (Settings › Agents): a card granted or revoked there says so at her
+//! and her source forgets what came from it at once. The Settings write
+//! the same book (Settings › Secretary): a card granted or revoked there
+//! says so at her
 //! next cycle.
 
 use std::collections::{HashMap, HashSet};
@@ -441,10 +442,10 @@ impl Brain {
                     "Hello, I’m {me}. I read what you allow me to, brief you in the morning, remind you of what matters. I do nothing without your click."
                 ),
                 (true, true) => format!(
-                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google sur cet ordinateur : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Agents."
+                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google sur cet ordinateur : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Secrétaire."
                 ),
                 (true, false) => format!(
-                    "Hello, I’m {me}. I found no Google account on this computer: once you add one, you can open it to me in Settings › Agents."
+                    "Hello, I’m {me}. I found no Google account on this computer: once you add one, you can open it to me in Settings › Secretary."
                 ),
             };
             self.add_item(
@@ -804,8 +805,8 @@ impl Brain {
                 let said = self
                     .talk
                     .t(
-                        "Pas maintenant : tu pourras me l’ouvrir dans Réglages › Agents.",
-                        "Not now: you can open it to me in Settings › Agents.",
+                        "Pas maintenant : tu pourras me l’ouvrir dans Réglages › Secrétaire.",
+                        "Not now: you can open it to me in Settings › Secretary.",
                     )
                     .to_owned();
                 (said, Vec::new(), Some(Decision::Reject), false)

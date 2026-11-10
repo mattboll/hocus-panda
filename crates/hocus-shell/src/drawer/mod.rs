@@ -1296,7 +1296,7 @@ pub fn act(id: window::Id, target: Target) {
             },
             Target::Close => Then::Close,
             Target::Gear => {
-                crate::popover::session::open_settings(Some("agents"));
+                crate::popover::session::open_settings(Some("secretary"));
                 Then::Nothing
             }
             Target::Tab(tab) if tab != open.tab => {

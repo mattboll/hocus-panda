@@ -378,7 +378,7 @@
 # her to forget it. What she reads is not listed here: each source is
 # consented to on its own (each kind of a Google account of Online
 # Accounts, an application's notifications, Slack's for one: in her drawer
-# the first time, and under Settings › Agents), kept in her folder's
+# the first time, and under Settings › Secretary), kept in her folder's
 # consents.json. Her key: `hocus-secretary key anthropic` in a terminal of
 # the session (docs/secretary.md). name is her name, in her drawer, her
 # bubble and when she introduces herself; empty, "Ta secrétaire".
@@ -408,7 +408,8 @@
 # url = "http://127.0.0.1:11434/v1"
 
 # [secretary.triage]
-# On battery, the triage runs only above this charge (%); the model is
+# On battery, the triage runs only above this charge (%, Settings ›
+# Secretary › « Quand trier »); the model is
 # unloaded after unload-after idle seconds; pace seconds between two
 # requests. context is the local model's context in tokens, asked of
 # Ollama (its own default is far larger, and takes an 8B model past an
