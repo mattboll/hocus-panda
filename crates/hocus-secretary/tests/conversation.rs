@@ -6,7 +6,7 @@
 //! again (AC7); a model trying to act gives only cards, and an effect
 //! happens only after "accept" on that card (AC24).
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

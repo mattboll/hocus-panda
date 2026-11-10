@@ -3,9 +3,6 @@
 //! own: the bed of the Agents page's tests (6.16) and the Secrétaire
 //! page's (#759).
 
-// Each test file uses a part of it.
-#![allow(dead_code)]
-
 use std::{
     io::{BufRead, BufReader, Write},
     os::unix::{fs::PermissionsExt, net::UnixListener},
@@ -14,7 +11,7 @@ use std::{
 };
 
 use crate::common::{self, BTN_LEFT, WAIT, wait};
-use crate::{fakes, settings_page};
+use crate::{day_fakes as fakes, settings_page};
 use hocus_agents::tools::Places;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use serde_json::Value;
@@ -184,20 +181,8 @@ impl Bed {
     /// The compositor and the Settings' script; `None` when the programs
     /// are not built.
     pub fn start(machine: Machine) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
-        let exe = std::env::current_exe()?;
-        let Some(hocus) = exe
-            .parent()
-            .and_then(Path::parent)
-            .map(|d| d.join("hocus"))
-            .filter(|h| h.exists())
-        else {
-            eprintln!("hocus is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
+        let hocus = common::hocus_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in [

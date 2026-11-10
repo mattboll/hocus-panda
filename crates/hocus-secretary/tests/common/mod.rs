@@ -1,7 +1,5 @@
 //! Her loop driven directly, as a connection would, on a clock of her own.
 
-#![allow(dead_code)]
-
 pub mod http;
 
 use std::{

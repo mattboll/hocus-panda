@@ -249,7 +249,12 @@ impl Work {
                 text: format!(
                     "<source kind=\"digests\" notebook=\"{}\">\n{}\n</source>",
                     self.notebook.word(),
-                    self.lines.join("\n")
+                    // Digests are their sources' words (#768).
+                    self.lines
+                        .iter()
+                        .map(|l| crate::inert::line(l))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 ),
                 items: self
                     .episodes

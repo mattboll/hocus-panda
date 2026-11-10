@@ -3,7 +3,7 @@
 //! its work area changes, through fullscreen and back, and as a snapped
 //! pair is resized.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

@@ -8,7 +8,7 @@ any difference, in CI (`vendor` job).
 
 | Crate | Version | Patch | Issue | Upstream |
 |---|---|---|---|---|
-| `iced_tiny_skia` | 0.14.1 | [`patches/iced_tiny_skia-0.14.1.patch`](patches/iced_tiny_skia-0.14.1.patch) | #662 | not proposed yet ([text](../docs/upstream/iced_tiny_skia-draw-whole-frames.md)) |
+| `iced_tiny_skia` | 0.14.1 | [`patches/iced_tiny_skia-0.14.1.patch`](patches/iced_tiny_skia-0.14.1.patch) | #662 | not proposed |
 
 ## Why
 

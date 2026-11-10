@@ -11,7 +11,7 @@
 //! a line's click; its tooltip; the mini form, nothing; at rest and at a
 //! minute's change that changes nothing, nothing drawn.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -106,11 +106,7 @@ struct Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 /// The compositor on a `screen` with the real shell on the CPU, its clock

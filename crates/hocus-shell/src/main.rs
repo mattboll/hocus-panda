@@ -912,6 +912,10 @@ impl Shell {
                 secretary::ask(text);
                 Task::none()
             }
+            ToShell::FellBack { which, program } => {
+                notifications::fell_back(which, &program);
+                Task::none()
+            }
             ToShell::SecretaryDrawer { output, width } => {
                 drawer::toggle(&output, width);
                 Task::none()
@@ -2566,6 +2570,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             speak::peek::show(id);
                             continue;
                         }
+                        // A developer's program let go of: a bubble, the
+                        // notifications' own surface.
+                        Ok(ToShell::FellBack { which, program }) => {
+                            notifications::fell_back(which, &program);
+                            continue;
+                        }
                         Ok(ToShell::ScreensMoved(moved)) => {
                             agents::peek::screens(moved);
                             continue;
@@ -2712,12 +2722,11 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             popover::session::open(&output);
                             continue;
                         }
-                        // `Super+B` (bar.md §11): the item's surface
-                        // takes the keyboard and draws its ring.
-                        Ok(ToShell::BarKeyboard(output)) => {
-                            popover::bar_keyboard(output.as_deref());
-                            continue;
-                        }
+                        // `Super+B` (bar.md §11) is not taken here: it
+                        // would overtake a bar's form still on its way as
+                        // a message (`Super+Shift+B` just before), and the
+                        // form, coming after, would take the keyboard back
+                        // from the bar. It goes as a message, in its turn.
                         _ => {}
                     }
                     let _ = output.send(Message::FromCompositor(line)).await;

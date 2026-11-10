@@ -15,12 +15,8 @@
 //! `[secretary.triage] battery`; the triage's state and model from her
 //! status. What the window shows is read from its log, never on a time.
 
-mod agents_bed;
-mod common;
-mod settings_page;
-
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::agents_bed;
+use crate::common;
 
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 

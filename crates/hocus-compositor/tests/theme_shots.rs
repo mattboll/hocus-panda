@@ -7,10 +7,10 @@
 //! fallback). The real shell, its notifications on a D-Bus daemon of the
 //! test's own, its home, state and runtime directories the test's own.
 //!
-//! `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test
-//! theme_shots --run-ignored only` (the shell and `hocus` built first).
+//! `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor theme_shots::
+//! --run-ignored only` (the shell and `hocus` built first).
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -61,20 +61,8 @@ impl Drop for Bed {
 }
 
 fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(None);
-    };
-    let exe = std::env::current_exe()?;
-    let Some(hocus) = exe
-        .parent()
-        .and_then(Path::parent)
-        .map(|d| d.join("hocus"))
-        .filter(|h| h.exists())
-    else {
-        eprintln!("hocus is not built: build the workspace to run this test");
-        return Ok(None);
-    };
+    let shell = common::shell_program();
+    let hocus = common::hocus_program();
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     for sub in ["home/bin", "config/hocuspanda", "state/hocuspanda", "cache"] {

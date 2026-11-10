@@ -9,9 +9,8 @@
 //! `Super+Alt+S` starts the screen reader, or stops it: a fake one here,
 //! as on a real session (nested, never).
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
+use crate::common;
+use crate::fakes;
 
 use std::{
     io::{Read, Write},
@@ -45,10 +44,7 @@ const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175
 const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
 
 fn ready() -> Option<std::path::PathBuf> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = shell_program();
     if !fakes::available() {
         eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
         return None;

@@ -10,7 +10,7 @@
 //! as small text; the editor shows it a pixel a pixel, so that the marks
 //! drawn on the screen land on the image's pixels under them.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -80,10 +80,7 @@ impl Drop for Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     let daemon = Command::new("sh")
         .args(["-c", "command -v dbus-daemon"])
         .stdout(Stdio::null())

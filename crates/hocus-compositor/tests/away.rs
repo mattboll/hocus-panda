@@ -9,7 +9,7 @@
 //! (`OnBattery`): never the machine's. The pill is drawn by the real shell
 //! on the CPU where a test needs it.
 
-mod common;
+use crate::common;
 
 use std::{
     io::Read,
@@ -683,10 +683,7 @@ struct Shell {
 
 impl Shell {
     fn alone() -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state", "data"] {

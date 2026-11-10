@@ -4,12 +4,25 @@
 //! another; else, without a bus or when the keyring does not answer as
 //! her memory is first made, in a key file beside it, `memory.key`
 //! (`0600`), made once and kept, as the clipboard's history does. Once
-//! there, a key file is used from then on.
+//! there, a key file is used from then on. Her memory is then encrypted
+//! against a copy of its file alone, not against who reads the folder: her
+//! status says where the key is ([`Place`]), and the drawer and the
+//! Settings say it to the user in plain words
+//! (`hocus_secretary_link::key_beside_said`, #768).
 //!
 //! The keyring is asked on her own thread, with a timeout: one that hangs,
 //! or asks the user to unlock it and is never answered, leaves her memory
 //! closed (she exits, and the compositor starts her again later), never a
 //! new key over an old memory.
+//!
+//! **Wiped once used** (#768). Her memory's key ([`Key`]) and a provider's
+//! API key are overwritten with zeros (`zeroize`) as soon as what held
+//! them goes: the key file's bytes as read, the keyring's answer, the
+//! line typed on a terminal. A [`Key`] is not `Copy` nor `Clone`, and its
+//! bytes are on the heap: moving it copies a pointer, never the key. What
+//! is out of reach stays so: the D-Bus library's own message buffers,
+//! standard input's, and SQLCipher's copy, which it wipes itself as her
+//! memory closes.
 
 use std::{
     collections::HashMap,
@@ -18,6 +31,8 @@ use std::{
     path::Path,
     time::Duration,
 };
+
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use zbus::{
     Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant, Variant,
@@ -38,7 +53,59 @@ const WAIT: Duration = Duration::from_secs(15);
 /// The key file's name, beside her memory.
 pub const FILE: &str = "memory.key";
 
-pub type Key = [u8; 32];
+/// Her memory's key: 32 bytes, overwritten with zeros when it goes;
+/// never printed, never copied by an assignment.
+#[derive(PartialEq, Eq)]
+pub struct Key(Box<[u8; Key::LEN]>);
+
+impl Key {
+    pub const LEN: usize = 32;
+
+    fn blank() -> Self {
+        Self(Box::new([0; Self::LEN]))
+    }
+
+    /// The key these bytes are, when there are [`Key::LEN`] of them.
+    pub fn of(bytes: &[u8]) -> Option<Self> {
+        (bytes.len() == Self::LEN).then(|| {
+            let mut key = Self::blank();
+            key.0.copy_from_slice(bytes);
+            key
+        })
+    }
+
+    pub fn expose(&self) -> &[u8; Self::LEN] {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for Key {
+    type Target = [u8; Key::LEN];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Key(…)")
+    }
+}
+
+impl PartialEq<Key> for Vec<u8> {
+    fn eq(&self, other: &Key) -> bool {
+        self.as_slice() == other.0.as_slice()
+    }
+}
+
+impl Drop for Key {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Key {}
 
 /// Where the key is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +118,7 @@ impl Place {
     pub const fn word(self) -> &'static str {
         match self {
             Self::Keyring => "keyring",
-            Self::File => "file",
+            Self::File => hocus_secretary_link::KEY_IN_FILE,
         }
     }
 }
@@ -63,9 +130,10 @@ pub fn key(dir: &Path, bus: Option<&str>, made: bool) -> Result<(Key, Place), St
     let file = dir.join(FILE);
     match std::fs::read(&file) {
         Ok(bytes) => {
-            return Key::try_from(bytes.as_slice())
+            let bytes = Zeroizing::new(bytes);
+            return Key::of(&bytes)
                 .map(|key| (key, Place::File))
-                .map_err(|_| format!("{} is not a key", file.display()));
+                .ok_or_else(|| format!("{} is not a key", file.display()));
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(format!("{}: {err}", file.display())),
@@ -94,13 +162,13 @@ pub fn key(dir: &Path, bus: Option<&str>, made: bool) -> Result<(Key, Place), St
         ));
     }
     let key = fresh()?;
-    write_private(&file, &key).map_err(|e| format!("{}: {e}", file.display()))?;
+    write_private(&file, key.expose()).map_err(|e| format!("{}: {e}", file.display()))?;
     Ok((key, Place::File))
 }
 
 fn fresh() -> Result<Key, String> {
-    let mut key = [0u8; 32];
-    getrandom::fill(&mut key).map_err(|e| format!("no random bytes: {e}"))?;
+    let mut key = Key::blank();
+    getrandom::fill(key.0.as_mut_slice()).map_err(|e| format!("no random bytes: {e}"))?;
     Ok(key)
 }
 
@@ -132,9 +200,9 @@ pub fn find(bus: &str) -> Found {
         find_in(&connection, &session, attributes()).await
     });
     match found {
-        Some(Some(bytes)) => match Key::try_from(bytes.as_slice()) {
-            Ok(key) => Found::Key(key),
-            Err(_) => {
+        Some(Some(bytes)) => match Key::of(&bytes) {
+            Some(key) => Found::Key(key),
+            None => {
                 tracing::warn!("the keyring's key for her memory is not one");
                 Found::NoAnswer
             }
@@ -146,7 +214,7 @@ pub fn find(bus: &str) -> Found {
 
 /// Keeps `key` in the keyring on `bus`: whether it did.
 pub fn keep(bus: &str, key: &Key) -> bool {
-    let key = key.to_vec();
+    let key = Zeroizing::new(key.to_vec());
     run(bus, async move |connection| {
         let session = open_session(&connection).await?;
         keep_in(
@@ -193,12 +261,14 @@ pub fn prompt(provider: &str, fr: bool) -> String {
 
 /// A line of standard input: on a terminal, after `prompt` (on standard
 /// error) and with the echo off, back on after, whatever happened; else
-/// read as it comes, silently.
-pub fn read_secret(prompt: &str) -> std::io::Result<String> {
+/// read as it comes, silently. The line is wiped when it goes.
+pub fn read_secret(prompt: &str) -> std::io::Result<Zeroizing<String>> {
     use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
     use std::io::{BufRead as _, IsTerminal as _};
     let stdin = std::io::stdin();
-    let mut line = String::new();
+    // Room for any key at once: a line that grows leaves its shorter
+    // copies behind, unwiped.
+    let mut line = Zeroizing::new(String::with_capacity(4096));
     if !stdin.is_terminal() {
         stdin.lock().read_line(&mut line)?;
         return Ok(line);
@@ -220,15 +290,6 @@ pub fn read_secret(prompt: &str) -> std::io::Result<String> {
     Ok(line)
 }
 
-/// `secret`'s bytes overwritten with zeros, then emptied: what held a key
-/// does not keep it in memory once it is used.
-pub fn wipe(secret: &mut String) {
-    let mut bytes = std::mem::take(secret).into_bytes();
-    bytes.fill(0);
-    // The zeros are read back, so that the write is not left out.
-    std::hint::black_box(&bytes);
-}
-
 /// A provider's API key's attributes in the keyring (§11.3).
 pub fn provider_attributes(provider: &str) -> HashMap<&str, &str> {
     HashMap::from([
@@ -240,8 +301,8 @@ pub fn provider_attributes(provider: &str) -> HashMap<&str, &str> {
 
 /// `provider`'s API key in the keyring on `bus`: `Ok(None)` when it holds
 /// none, an error when it does not answer. Read on a model call's worker
-/// thread, never her loop.
-pub fn provider_key(bus: &str, provider: &str) -> Result<Option<String>, String> {
+/// thread, never her loop. Wiped when it goes.
+pub fn provider_key(bus: &str, provider: &str) -> Result<Option<Zeroizing<String>>, String> {
     let provider = provider.to_owned();
     let found = run(bus, async move |connection| {
         let session = open_session(&connection).await?;
@@ -250,8 +311,8 @@ pub fn provider_key(bus: &str, provider: &str) -> Result<Option<String>, String>
     .ok_or("the keyring does not answer")?;
     found
         .map(|bytes| {
-            String::from_utf8(bytes)
-                .map(|k| k.trim().to_owned())
+            std::str::from_utf8(&bytes)
+                .map(|k| Zeroizing::new(k.trim().to_owned()))
                 .map_err(|_| "the keyring's key is not text".to_owned())
         })
         .transpose()
@@ -260,7 +321,10 @@ pub fn provider_key(bus: &str, provider: &str) -> Result<Option<String>, String>
 /// Keeps `secret` as `provider`'s API key in the keyring on `bus`:
 /// whether it did (`hocus-secretary key PROVIDER`, Settings).
 pub fn keep_provider_key(bus: &str, provider: &str, secret: &str) -> bool {
-    let (provider, secret) = (provider.to_owned(), secret.as_bytes().to_vec());
+    let (provider, secret) = (
+        provider.to_owned(),
+        Zeroizing::new(secret.as_bytes().to_vec()),
+    );
     run(bus, async move |connection| {
         let session = open_session(&connection).await?;
         let label = format!("Hocuspanda: the secretary's {provider} key");
@@ -366,7 +430,7 @@ async fn find_in(
     connection: &Connection,
     session: &OwnedObjectPath,
     attributes: HashMap<&str, &str>,
-) -> zbus::Result<Option<Vec<u8>>> {
+) -> zbus::Result<Option<Zeroizing<Vec<u8>>>> {
     let reply = call(connection, PATH, IFACE, "SearchItems", &(attributes,)).await?;
     let (unlocked, locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
         reply.body().deserialize()?;
@@ -384,7 +448,7 @@ async fn find_in(
     let reply = call(connection, item.as_str(), ITEM, "GetSecret", &(session,)).await?;
     let (_, _, value, _): (OwnedObjectPath, Vec<u8>, Vec<u8>, String) =
         reply.body().deserialize()?;
-    Ok(Some(value))
+    Ok(Some(Zeroizing::new(value)))
 }
 
 async fn keep_in(
@@ -392,7 +456,7 @@ async fn keep_in(
     session: &OwnedObjectPath,
     attributes: HashMap<&str, &str>,
     label: &str,
-    key: Vec<u8>,
+    key: Zeroizing<Vec<u8>>,
 ) -> zbus::Result<()> {
     let reply = call(connection, PATH, IFACE, "ReadAlias", &("default",)).await?;
     let collection: OwnedObjectPath = reply.body().deserialize()?;
@@ -408,7 +472,8 @@ async fn keep_in(
     let secret = (
         ObjectPath::from(session.clone()),
         Vec::<u8>::new(),
-        key,
+        // Borrowed: the bytes are wiped when this returns.
+        &*key,
         "application/octet-stream",
     );
     let reply = call(

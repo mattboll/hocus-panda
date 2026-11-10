@@ -58,6 +58,25 @@ hocus-secretary key anthropic
 Enter, then paste the key when it asks (it is not shown), then Enter.
 Never put the key on the command line: your shell's history would keep it.
 
+**Her memory's key** is another one: 32 random bytes she makes at her
+first start to encrypt her memory, kept in the same keyring. When the
+session has no keyring then (none installed, or one that does not
+answer), she keeps that key in a file beside her memory
+(`~/.local/share/hocuspanda/secretary/memory.key`, readable by you
+alone), and says so where her memory is shown, in her drawer's « Ce
+qu’elle sait » and in Settings › Secretary: « Sa mémoire est chiffrée,
+mais sa clé est rangée à côté, sur ce disque : ton trousseau n’était pas
+disponible quand elle a été créée. Qui peut lire tes fichiers peut donc
+lire sa mémoire. » It means the encryption then only protects a copy of
+the memory's file alone (a backup of `memory.db` without its key), not
+the folder: whoever reads your home directory reads both. With a keyring,
+the key is unlocked with your session and is in no file. A key file,
+once made, stays her memory's key.
+
+Both keys are overwritten with zeros in her process as soon as they have
+been used (the one she asks Anthropic with is kept while she runs, and
+wiped when it is replaced, erased, or she stops).
+
 Her name: Settings › Secretary › « Son nom » (`[secretary] name`); empty,
 she is « Ta secrétaire ».
 
@@ -89,7 +108,14 @@ date go to Claude. Her drawer's status says so in a few words (« Tri en
 pause : l'ordinateur chauffe »), and the sorting's view says why, once
 (« L'ordinateur chauffe (97 °C). Je reprends quand il redescend sous
 90 °C ; rien n'est perdu. »). Another server:
-`[secretary.providers.local]` in the configuration file.
+`[secretary.providers.local]` in the configuration file. The sorting
+only ever goes to this computer: its address must be `http://localhost`,
+`http://127.0.0.1` (any address in 127.0.0.0/8) or `http://[::1]`, with
+or without a port. Its host is what is compared, so an address that only
+begins like one (`http://127.0.0.1:x@elsewhere.example/`,
+`http://localhost.elsewhere.example/`) is refused, as is any address
+carrying a user or a password. Her other providers are called over
+`https://`, or in clear on this computer only.
 
 To see what waits, click « 21 mails à trier › » under her name in her
 drawer (it shows while mails wait): the sorting unfolds there, under

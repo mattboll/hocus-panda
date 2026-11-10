@@ -4,7 +4,7 @@
 //! on light), their faint fills and tints gone; without it, their own dark
 //! colours. Pixels of a headless screen, on the CPU.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

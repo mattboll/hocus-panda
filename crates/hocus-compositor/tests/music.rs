@@ -9,7 +9,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -212,10 +212,7 @@ impl Drop for Bed {
 
 impl Bed {
     fn start() -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let daemon = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())

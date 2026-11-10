@@ -1,7 +1,7 @@
 //! AC20: the audit log lists every read, call, proposal and delegation,
 //! with ids and never content.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

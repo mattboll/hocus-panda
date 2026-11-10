@@ -3,7 +3,7 @@
 //! or snapped; windows not at the gap form none; and the handle shows and
 //! takes presses only where the seam itself shows.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

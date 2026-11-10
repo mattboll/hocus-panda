@@ -15,9 +15,14 @@
 //!
 //! The shell is told her state (`secretary off|unavailable|ready`): her
 //! header says "indisponible" while she is down; the bar works the same.
+//!
+//! `hocus msg secretary restart [--program PATH]` ends her the same way
+//! and starts her again as soon as she has ended, without the delay, from
+//! the program given if one is ([`crate::given`], docs/workflow.md
+//! "Development loop").
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ChildStdin, Stdio},
     time::{Duration, Instant},
 };
@@ -50,7 +55,11 @@ pub struct Secretary {
     pub starts: u64,
     /// Ends in a row that came quickly.
     quick_ends: u32,
-    ended: Option<Sender<(u64, Duration)>>,
+    /// A run's number, and how long it ran (`None`: it did not start).
+    ended: Option<Sender<(u64, Option<Duration>)>>,
+    /// The program given in place of the installed one for this session,
+    /// if one is.
+    pub given: crate::given::Given,
     /// What the shell was told last.
     pub told: Option<SecretaryShown>,
 }
@@ -61,16 +70,19 @@ enum Phase {
     /// Classic mode, or no program: none runs.
     #[default]
     Off,
-    /// She runs: her process, its start's number, the pipe whose end
-    /// ends her.
+    /// She runs: her process (0: it did not start), its start's number,
+    /// its program, the pipe whose end ends her.
     Running {
         pid: u32,
         run: u64,
+        program: PathBuf,
+        started: crate::given::Started,
         _stdin: Option<ChildStdin>,
     },
     /// She ended; started again by this timer.
     Restarting(RegistrationToken),
-    /// Asked to end (classic mode): run `run` is still to end.
+    /// Asked to end (classic mode, or a restart asked for): run `run` is
+    /// still to end.
     Stopping { run: u64 },
 }
 
@@ -81,7 +93,7 @@ pub fn socket_path(wayland: &std::path::Path) -> PathBuf {
 
 /// Learns when she ends.
 pub fn listen(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Result<()> {
-    let (sender, ended) = channel::channel::<(u64, Duration)>();
+    let (sender, ended) = channel::channel::<(u64, Option<Duration>)>();
     handle
         .insert_source(ended, |event, _, app| {
             if let Event::Msg((run, ran)) = event {
@@ -99,9 +111,7 @@ impl State {
     /// Her process as `[secretary]` and her program say: started, left
     /// alone, or stopped.
     pub(crate) fn secretary_follow(&mut self) {
-        let wanted = self.config.secretary.mode == SecretaryMode::Assistant
-            && self.config.secretary_program.is_some()
-            && self.secretary.ended.is_some();
+        let wanted = self.secretary_restartable().is_ok();
         match (&self.secretary.phase, wanted) {
             // Still ending: started again once she has (`secretary_ended`).
             (Phase::Stopping { .. }, true) => {}
@@ -114,9 +124,16 @@ impl State {
         }
     }
 
+    /// The program she runs from: the one given for this session, else
+    /// the installed one.
+    pub(crate) fn secretary_program(&self) -> Option<PathBuf> {
+        let given = self.secretary.given.program().map(Path::to_path_buf);
+        given.or_else(|| self.config.secretary_program.clone())
+    }
+
     fn start_secretary(&mut self) {
         let (Some(program), Some(socket), Some(ended)) = (
-            self.config.secretary_program.clone(),
+            self.secretary_program(),
             self.secretary.socket.clone(),
             self.secretary.ended.clone(),
         ) else {
@@ -142,17 +159,20 @@ impl State {
                 command.env_remove(hocus_secretary_link::BUS_ENV);
             }
         }
+        let given = self.secretary.given.program().is_some();
         // A fork and an exec, as for the screen reader; the wait is a
         // thread's.
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
-                tracing::warn!(program = %program.display(), %err, "the secretary did not start");
-                let _ = ended.send((self.secretary.starts + 1, Duration::ZERO));
+                tracing::warn!(program = %program.display(), given, %err, "the secretary did not start");
+                let _ = ended.send((self.secretary.starts + 1, None));
                 self.secretary.starts += 1;
                 self.secretary.phase = Phase::Running {
                     pid: 0,
                     run: self.secretary.starts,
+                    program,
+                    started: crate::given::Started::now(),
                     _stdin: None,
                 };
                 return;
@@ -161,10 +181,12 @@ impl State {
         self.secretary.starts += 1;
         let run = self.secretary.starts;
         let pid = child.id();
-        tracing::info!(program = %program.display(), pid, "the secretary started");
+        tracing::info!(program = %program.display(), given, pid, "the secretary started");
         self.secretary.phase = Phase::Running {
             pid,
             run,
+            program,
+            started: crate::given::Started::now(),
             _stdin: child.stdin.take(),
         };
         let started = Instant::now();
@@ -174,7 +196,7 @@ impl State {
                 Err(err) => tracing::warn!(%err, "could not wait for the secretary"),
             }
             // The loop is gone when the compositor is: nothing to restart.
-            let _ = ended.send((run, started.elapsed()));
+            let _ = ended.send((run, Some(started.elapsed())));
         });
         self.tell_secretary_state(SecretaryShown::Ready(socket));
     }
@@ -182,8 +204,17 @@ impl State {
     /// Classic mode: her pipe closes, which ends her; killed if she has
     /// not ended after [`GRACE`].
     fn stop_secretary(&mut self) {
+        self.end_secretary();
+        self.tell_secretary_state(SecretaryShown::Off);
+    }
+
+    /// Her pipe closes, which ends her (killed if she has not ended after
+    /// [`GRACE`]); one waiting to start again no longer is.
+    fn end_secretary(&mut self) {
         match std::mem::take(&mut self.secretary.phase) {
-            Phase::Running { pid, run, _stdin } => {
+            Phase::Running {
+                pid, run, _stdin, ..
+            } => {
                 tracing::info!(pid, "the secretary is stopped");
                 drop(_stdin);
                 self.secretary.phase = Phase::Stopping { run };
@@ -204,28 +235,96 @@ impl State {
             Phase::Restarting(token) => self.loop_handle.remove(token),
             other => self.secretary.phase = other,
         }
-        self.tell_secretary_state(SecretaryShown::Off);
     }
 
-    /// Run `run` ended after running `ran`.
-    fn secretary_ended(&mut self, run: u64, ran: Duration) {
-        match self.secretary.phase {
-            Phase::Stopping { run: r, .. } if r == run => {
+    /// Why she cannot be started, or started again, if she cannot.
+    pub(crate) fn secretary_restartable(&self) -> Result<(), &'static str> {
+        if self.config.secretary_program.is_none() || self.secretary.ended.is_none() {
+            return Err("no secretary in this session");
+        }
+        if self.config.secretary.mode != SecretaryMode::Assistant {
+            return Err("the secretary is off: [secretary] mode is not \"assistant\"");
+        }
+        if self.ending.is_some() {
+            return Err("the session ends");
+        }
+        Ok(())
+    }
+
+    /// `hocus msg secretary restart`: she is asked to end, and her end
+    /// starts her again at once ([`State::secretary_ended`]); not running,
+    /// she starts now. The loop waits for nothing.
+    pub(crate) fn restart_secretary(&mut self) {
+        let program = self.secretary_program().unwrap_or_default();
+        tracing::info!(
+            program = %program.display(),
+            given = self.secretary.given.program().is_some(),
+            "hocus msg secretary restart"
+        );
+        self.end_secretary();
+        if matches!(self.secretary.phase, Phase::Stopping { .. }) {
+            self.tell_secretary_state(SecretaryShown::Unavailable);
+        }
+        self.secretary_follow();
+    }
+
+    /// `hocus msg secretary status`, her process's part: which program
+    /// runs, since when.
+    pub(crate) fn secretary_status(&self) -> String {
+        let secretary = &self.secretary;
+        let program = self.secretary_program();
+        let (state, running) = match &secretary.phase {
+            Phase::Off => ("off", None),
+            Phase::Running {
+                pid,
+                program,
+                started,
+                ..
+            } if *pid != 0 => ("running", Some((*pid, program, started))),
+            Phase::Running { .. } | Phase::Restarting(_) => ("waiting", None),
+            Phase::Stopping { .. } => ("ending", None),
+        };
+        crate::given::Status {
+            state,
+            program: running.map(|(_, p, _)| p.as_path()).or(program.as_deref()),
+            installed: self.config.secretary_program.as_deref(),
+            given: &secretary.given,
+            process: running.map(|(pid, _, started)| (Some(pid), started)),
+            starts: secretary.starts,
+        }
+        .lines()
+    }
+
+    /// Run `run` ended after running `ran` (`None`: it did not start).
+    fn secretary_ended(&mut self, run: u64, ran: Option<Duration>) {
+        let program = match &self.secretary.phase {
+            Phase::Stopping { run: r, .. } if *r == run => {
                 self.secretary.phase = Phase::Off;
                 self.remove_secretary_socket();
-                // Assistant again meanwhile: she starts again now.
+                // Assistant again meanwhile, or a restart asked for: she
+                // starts again now.
                 self.secretary_follow();
                 return;
             }
-            Phase::Running { run: r, .. } if r == run => {}
+            Phase::Running {
+                run: r, program, ..
+            } if *r == run => program.clone(),
             // An older run's end, already dealt with.
             _ => return,
-        }
+        };
         if self.ending.is_some() {
             self.secretary.phase = Phase::Off;
             return;
         }
-        if ran >= STEADY {
+        // A given program that does not hold: the installed one, at once.
+        if let Some(why) = self.secretary.given.ended(&program, ran, STEADY) {
+            self.fell_back(hocus_agents::Supervised::Secretary, program, why);
+            self.secretary.phase = Phase::Off;
+            self.tell_secretary_state(SecretaryShown::Unavailable);
+            self.secretary_follow();
+            return;
+        }
+        if ran.is_some_and(|ran| ran >= STEADY) {
             self.secretary.quick_ends = 0;
         }
         let delay = FIRST_DELAY

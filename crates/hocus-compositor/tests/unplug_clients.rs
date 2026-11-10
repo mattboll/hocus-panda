@@ -5,7 +5,7 @@
 //! for the screen they move to. kitty, which drops its `wl_output` on
 //! `global_remove`, died of a `wl_surface.leave` naming it after.
 
-mod common;
+use crate::common;
 
 use std::{
     os::{fd::AsFd, unix::net::UnixStream},
@@ -1020,10 +1020,7 @@ fn a_bar_surface_asked_on_no_screen_goes_to_the_screen_lacking_it() -> anyhow::R
 /// shell stays linked throughout. Skipped without the shell built.
 #[test]
 fn the_shells_bar_closed_with_its_screen_is_drawn_on_the_other() -> anyhow::Result<()> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = common::shell_program();
     let dir = tempfile::tempdir()?;
     let mut env = vec![("ICED_BACKEND", "tiny-skia".to_owned())];
     for (var, sub) in [

@@ -15,8 +15,8 @@
 //! menu; the search. What the window shows is read from its log, never on
 //! a time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -76,10 +76,7 @@ impl Bed {
     /// a private session bus with `with_bus`; `None` when the Settings
     /// are not built.
     fn start_with_bus(text: &str, with_bus: bool) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         if with_bus && !has("dbus-daemon") {
             eprintln!("no dbus-daemon: skipped");
             return Ok(None);

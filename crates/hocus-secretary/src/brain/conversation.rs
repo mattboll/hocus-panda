@@ -707,7 +707,11 @@ impl Brain {
         self.talk.happy = true;
         Some(Part {
             label: "fait".to_owned(),
-            text: format!("« {term} » désigne {name} (déduit, confirmé par l’utilisateur)"),
+            // A word and a name she read in the user's sources.
+            text: crate::inert::line(&format!(
+                "« {term} » désigne {name} (déduit, confirmé par l’utilisateur)"
+            ))
+            .into_owned(),
             items: vec![Kept::Alias(alias).word()],
         })
     }

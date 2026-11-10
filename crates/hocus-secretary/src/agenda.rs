@@ -27,6 +27,7 @@ use rusqlite::params;
 use crate::{
     context::tokens,
     fold::fold,
+    inert,
     store::{Result, Store, stamp, unstamp},
 };
 
@@ -239,7 +240,13 @@ fn line(entry: &Entry, day: Date, zone: &TimeZone) -> String {
     } else {
         ""
     };
-    format!("- {when} · {} · {whose}{perso}", entry.title.trim())
+    // Its title and its calendar's name are their source's words: one
+    // line, and no tag ([`inert`]).
+    inert::line(&format!(
+        "- {when} · {} · {whose}{perso}",
+        entry.title.trim()
+    ))
+    .into_owned()
 }
 
 /// `entries` under each of `days` (`title` names a day), within `most`

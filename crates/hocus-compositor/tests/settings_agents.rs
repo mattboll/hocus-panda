@@ -14,12 +14,8 @@
 //! What the window shows is read from its log, never on a time; and the
 //! line to the secretary's own page (#759, `settings_secretary.rs`).
 
-mod agents_bed;
-mod common;
-mod settings_page;
-
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::agents_bed;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 

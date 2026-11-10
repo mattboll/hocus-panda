@@ -494,7 +494,8 @@ Her memory is a **temporal knowledge graph**:
 It lives in one SQLite database in `$XDG_DATA_HOME/hocuspanda/secretary/`:
 
 - FTS5 for full-text search;
-- encrypted at rest with a key from the keyring;
+- encrypted at rest with a key from the keyring (without a keyring, from a file
+  beside it, which the drawer and the Settings say in plain words: as built, #768);
 - event-sourced: every change is an edit record (who: the user, a source or an
   inference; when; why; the item it came from), and undo reverts an edit.
 
@@ -889,6 +890,8 @@ A new section in TRAVAIL, after Agents (`hocus settings secretary`).
   in messages, ambiguity candidates from the alias index.
 - **Content is data**:
   - delimited `<source>` blocks, never in the system prompt;
+  - what a source wrote cannot write a tag: every `<` of it reaches a model as
+    `&lt;`, so a mail holding `</source>` stays in its block (as built, #768);
   - the triage model has no tools;
   - the answering model's tools are read-only or `propose_*`;
   - a suspicious item (instructions to an assistant, hidden HTML text) is flagged by
@@ -3161,3 +3164,116 @@ text field"), and the drawer's field and her key's field use it.
   `her_key_s_field_edits_as_any_but_nothing_copies_it_out`.
 - **Not yet**: the shell's other fields still edit by hand ("Ce qu'elle
   sait"'s search among them); they are listed on #763 for a later move.
+
+### #768: a source cannot leave its block, local means local, keys wiped, a key file said
+
+From the November 2026 audit of `hocus-secretary`. Four findings, each
+checked before it was fixed.
+
+- **A source's words write no tag** (`inert.rs`). `context::outbound` put a
+  mail's sender, subject and text, an event's title, place and description
+  and a notification's title and text raw between `<source id=… checked=…>`
+  and `</source>`; so did the lines her memory gives back (a digest, which
+  is a mail's subject or the local triage's words on it; an event's title
+  and its calendar's name in the day's agenda; a name or a fact's value in
+  her card and her graph; yesterday's summary; a leave's name under `[fait
+  calculé]`). A mail holding `</source>` and a sentence after it left its
+  block, and a title holding a line break wrote a line of its own among
+  code's. It was exploitable by anyone who can send the user a mail or an
+  invitation; what it could reach is bounded by §14 (her tools read or
+  propose, every action is a click), so: a wrong answer, a proposal card
+  the user must still click, or her read tools called for what the mail
+  asks.
+  - **Neutralised, not a delimiter drawn at each request.** Every `<` of
+    content becomes `&lt;` where it is written into a prompt
+    (`inert::text`); a line of content among code's lines also has its line
+    breaks and control characters folded into spaces (`inert::line`); an
+    item's pointer, whose id its source chose, cannot end its attribute
+    (`inert::attr`: `"` and `>` too). No tag can then be opened or closed
+    from inside any block. A random delimiter guards the one tag it names
+    where her prompts have five (`source`, `today`, `card`, `memory`,
+    `briefing`), holds only as far as the model honours it, changes the
+    cached frozen and day's parts at every request, and cannot be checked
+    from outside; this is checked as an invariant: every `<` a model reads
+    in her context is one code wrote.
+  - **Where**: `context.rs` (the three forms of `outbound`, her card's
+    lines, the day's leaves and yesterday's summary, the memory part's
+    names and dates), `retrieve.rs` (an episode's, an edge's, a summary's
+    and a card's line: her context's and her tools'), `agenda.rs` (an
+    event's line: the day's agenda and the `agenda` tool), `tools.rs`
+    (`search`'s cards), `compaction.rs` (the digests to summarise),
+    `briefing.rs` (the computed facts in `<briefing>`),
+    `brain/conversation.rs` (a confirmed alias's fact). What is kept stays
+    as read; only what goes into a prompt changes. `&` is left alone
+    (links keep theirs). Her persona says it: « un « < » qu'elle contient
+    t'arrive écrit « &lt; » ».
+  - **Not changed, and why**: the triage's request to the local model is
+    its prompt as the system and the item, whole and alone, as the user's
+    turn: there is no block to leave, the model has no tools, its answer is
+    a schema, and it must read the item as it is (the secrets it points at
+    are found by their exact characters). The user's own sentences and her
+    own answers are turns of the conversation, not content.
+- **Local means local** (`http.rs`). `local` compared an address's first
+  characters with `http://127.0.0.1:`, `http://[::1]:` and
+  `http://localhost:`: `http://127.0.0.1:x@evil.example/` passed, and goes
+  to `evil.example` with `127.0.0.1:x` as a user and a password. It gates
+  clear-text HTTP for every provider and the triage's "nothing leaves this
+  machine". It took a configuration file naming such an address (the user
+  pasting one, or what can write the file), nothing a source can do. The
+  address is now parsed by the HTTP client's own parser (`ureq::http::Uri`:
+  what is checked is what is called), its host compared (`localhost`,
+  127.0.0.0/8, `::1`, the IPv4-mapped loopback; any case; with or without
+  a port), an address naming a user or a password refused whatever follows
+  (over TLS too), and what follows the host must be a port in digits or
+  nothing (`127.0.0.1:11434.evil.example` reads as the host `127.0.0.1` to
+  the parser). `127.1`, a number, `0.0.0.0` and `localhost.` are names to
+  look up or other addresses: refused.
+- **Keys wiped once used** (`zeroize`). `providers::Secret` was a `String`
+  and her memory's key a `Copy` array, formatted in hexadecimal into the
+  `PRAGMA key` statement, byte by byte; none was overwritten. Not
+  exploitable by itself: it is what a core dump, swap or a later memory
+  disclosure would find. Now: `Secret` is a `Zeroizing<String>` (each
+  call's copy wiped at its end; the one kept for the next calls when it is
+  replaced, erased, or she stops), the `Bearer` header's text too;
+  `key::Key` is 32 bytes on the heap, neither `Copy` nor `Clone`, never
+  printed, wiped on drop, and dropped as soon as her memory is open; the
+  key file's bytes as read, the keyring's answers and the line typed for
+  `hocus-secretary key` are `Zeroizing`; the statement holding the key in
+  hexadecimal is written once into a buffer with its room from the start
+  and wiped after it ran. `hocus-secretary-link`'s `wipe` (a key on its way
+  from the drawer) uses `zeroize` as well. Out of reach, and left so: the
+  D-Bus and HTTP libraries' own buffers, standard input's, and SQLCipher's
+  copy, which it wipes itself when her memory closes.
+- **A key file is said** (protocol version 9). Without a keyring when her
+  memory is made, its key is `memory.key` (`0600`) beside `memory.db`:
+  encrypted against a copy of the file alone, not against who reads the
+  folder, while the drawer and the Settings said "chiffré sur cet
+  ordinateur" with nothing more. Her status already said `key: file`
+  (`KEY_IN_FILE`); "Ce qu'elle sait" now carries it
+  (`Knowledge::key_beside`), and both places say one sentence
+  (`hocus_secretary_link::key_beside_said`): « Sa mémoire est chiffrée,
+  mais sa clé est rangée à côté, sur ce disque : ton trousseau n’était pas
+  disponible quand elle a été créée. Qui peut lire tes fichiers peut donc
+  lire sa mémoire. » / "Her memory is encrypted, but its key is kept
+  beside it, on this disk: your keyring was not available when it was
+  made. Whoever can read your files can therefore read her memory." In
+  the drawer it opens the tab's list, in orange; in Settings › Secretary it
+  takes the place of "chiffré sur cet ordinateur" in the « Ce qu'elle
+  sait » row. "Was", not "is": a key file once made stays her memory's key,
+  a keyring come since or not (moving it there is not done).
+- **Tests**: `tests/injection.rs` against the fake Anthropic API and the
+  fake local model
+  (`a_mail_carrying_a_closing_tag_and_instructions_stays_inside_its_block`:
+  the mail through her whole loop, before the second pass and after, the
+  triage's digest repeating its tags, the event's title and calendar's
+  name in the day's agenda, then her `search` and `agenda` tools;
+  `an_event_s_description_and_a_notification_stay_inside_their_blocks`,
+  with a pointer that would end its attribute and a summaries-only item;
+  `what_her_memory_kept_of_a_source_writes_no_tag_when_it_comes_back`;
+  `a_compaction_s_digests_stay_inside_their_block`;
+  `a_meeting_s_title_stays_one_fact_of_a_briefing`), `inert::tests`,
+  `http::tests` (a user and a password, `localhost.evil.example`,
+  `127.0.0.1.evil.example`, a port that is not one, IPv6, upper case, no
+  port, TLS), `tests/key_beside.rs` (her status and "Ce qu'elle sait" with
+  a key file and with a keyring; the sentence in both languages),
+  `hocus-settings` (`a_key_beside_her_memory_is_said_with_what_it_means`).

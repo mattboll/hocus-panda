@@ -14,7 +14,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU: nothing draws on a GPU.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -187,10 +187,7 @@ struct Bed {
 
 impl Bed {
     fn start(outputs: &[&str], clock_at: Option<&str>) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state", "data"] {

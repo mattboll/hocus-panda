@@ -32,7 +32,7 @@
 //! on that GPU alone, and are skipped without it. The shell runs away from
 //! the machine's services (no session bus, no system bus, no PipeWire).
 
-mod common;
+use crate::common;
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -137,17 +137,8 @@ impl FakeHerdr {
 
 /// The programs this test needs, built beside it.
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
-    let exe = std::env::current_exe().ok()?;
-    let hocus = exe.parent()?.parent()?.join("hocus");
-    if !hocus.exists() {
-        eprintln!("hocus is not built: build the workspace to run this test");
-        return None;
-    }
-    Some((shell, hocus))
+    let shell = common::shell_program();
+    Some((shell, common::hocus_program()))
 }
 
 fn places(home: &Path, hocus: &Path) -> Places {
@@ -1345,17 +1336,18 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 
 /// On a GPU: a change slides the rows and hops the changed agent's panda,
 /// which plays its mood about 2.5 s (#649), then nothing moves; with
-/// reduced motion, it changes at once and its panda is still. Skipped
+/// reduced motion, it changes at once and its panda is still. Fails
 /// without a render node named in `HOCUS_TEST_GPU`.
 #[test]
+#[ignore = "needs a GPU: HOCUS_TEST_GPU names its render node (docs/performance.md)"]
 fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    if render_node().is_none() {
-        eprintln!("the shell would draw on the CPU, without motion: skipped");
-        return Ok(());
-    }
+    anyhow::ensure!(
+        render_node().is_some(),
+        "no GPU: the shell would draw without motion"
+    );
     for (reduced_motion, moves) in [(false, true), (true, false)] {
         let mut bed = start(
             &shell,
@@ -3437,16 +3429,17 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
 
 /// On a GPU: when someone starts waiting, her ear radiates twice and she
 /// hops twice, 1.2 s, once; then nothing moves. With reduced motion, she
-/// holds still. Skipped without a render node named in `HOCUS_TEST_GPU`.
+/// holds still. Fails without a render node named in `HOCUS_TEST_GPU`.
 #[test]
+#[ignore = "needs a GPU: HOCUS_TEST_GPU names its render node (docs/performance.md)"]
 fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    if render_node().is_none() {
-        eprintln!("the shell would draw on the CPU, without motion: skipped");
-        return Ok(());
-    }
+    anyhow::ensure!(
+        render_node().is_some(),
+        "no GPU: the shell would draw without motion"
+    );
     for (reduced_motion, moves) in [(false, true), (true, false)] {
         let mut bed = start(
             &shell,

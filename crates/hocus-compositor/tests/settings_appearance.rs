@@ -13,8 +13,8 @@
 //! the window staying dark.
 //! What the programs show is read from their logs, never on a time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -56,13 +56,7 @@ impl Bed {
     /// The compositor, the shell and the Settings' script, the file
     /// holding `text`; `None` when they are not built.
     fn start(text: &str) -> anyhow::Result<Option<Self>> {
-        let (Some(shell), Some(settings)) = (common::shell_program(), common::settings_program())
-        else {
-            eprintln!(
-                "the shell or the Settings are not built: build the workspace to run this test"
-            );
-            return Ok(None);
-        };
+        let (shell, settings) = (common::shell_program(), common::settings_program());
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config/hocuspanda", "state", "cache", "data", "bin"] {

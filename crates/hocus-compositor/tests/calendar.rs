@@ -17,7 +17,7 @@
 //! opens it by; no calendar; a month outside the window, asked for as it
 //! turns to it (Day.5b, #578); at rest, nothing drawn.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -276,13 +276,9 @@ struct Bed {
     launched: PathBuf,
 }
 
-/// The shell's program, or `None` (the test skips) when it is not built.
+/// The shell's program: the test fails when it is not built.
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 /// The compositor with the real shell on the CPU, its day `fixture` (with

@@ -3,7 +3,7 @@
 //! from its cursor, and an absence over four hours makes a "Pendant ton
 //! absence" briefing due; nothing arrived meanwhile is lost.
 
-mod common;
+use crate::common;
 
 use hocus_secretary::{clock::Clock, store::Store};
 use hocus_secretary_link::ToSecretary;

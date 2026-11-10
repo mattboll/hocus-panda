@@ -42,10 +42,9 @@
 //! With `HOCUS_DRAWER_SHOTS=DIR`, the tests leave PNGs of the drawer
 //! there (screenshots for review, never compared).
 
-mod common;
+use crate::common;
 
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::day_fakes as fakes;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -119,11 +118,11 @@ doing = "elle regarde ton agenda"
 
 /// The programs: the shell, hers, `hocus`.
 fn ready() -> Option<(PathBuf, PathBuf, PathBuf)> {
-    let shell = common::shell_program()?;
-    let secretary = common::secretary_program()?;
-    let exe = std::env::current_exe().ok()?;
-    let hocus = exe.parent()?.parent()?.join("hocus");
-    hocus.exists().then_some((shell, secretary, hocus))
+    Some((
+        common::shell_program(),
+        common::secretary_program(),
+        common::hocus_program(),
+    ))
 }
 
 struct Bed {
@@ -240,7 +239,7 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
     std::fs::write(
         &her,
         format!(
-            "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}'\n\
+            "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}' TZ=Europe/Paris\n\
              exec '{}' --virtual-clock 2026-11-09T08:00:00Z {routes} \"$@\" 2>>'{}'\n",
             dir.path().join("data").display(),
             secretary.display(),
@@ -256,7 +255,7 @@ fn start(setup: Setup) -> anyhow::Result<Option<Bed>> {
             "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
              export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
-             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' \
+             LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' TZ=Europe/Paris \
              RUST_LOG=warn,hocuspanda_shell=debug\nexec '{}' \"$@\" 2>>'{}'\n",
             home.display(),
             shell.display(),
@@ -519,6 +518,39 @@ impl Bed {
         recorded(self.dir.path())
     }
 
+    /// How many calls of `role` her model has taken so far.
+    fn calls_of(&self, role: &str) -> usize {
+        calls_of(self.dir.path(), role)
+    }
+
+    /// Waits until her model has taken `least` calls of `role`. A call is
+    /// written down once its thread has read her clock, from which its
+    /// delay and its pace are counted: her clock moved before that, the
+    /// reply would wait for a move that never comes (as a triage's,
+    /// #760). What the drawer shows does not tell: her typing shows as
+    /// she starts the thread.
+    fn timed(&mut self, role: &str, least: usize) -> anyhow::Result<()> {
+        let dir = self.dir.path().to_owned();
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |_| calls_of(&dir, role) >= least)?;
+        anyhow::ensure!(
+            done,
+            "her model took {} calls of {role}, not {least}",
+            self.calls_of(role)
+        );
+        Ok(())
+    }
+
+    /// Her morning's briefing in the thread, as her clock moves: its
+    /// call is under way since the session began.
+    fn briefed(&mut self) -> anyhow::Result<()> {
+        self.timed("briefing", 1)?;
+        self.advance(30)?;
+        self.shows(|s| s["items"].to_string().contains("briefing:"))?;
+        Ok(())
+    }
+
     /// A PNG of the drawer and the bar beside it, when the run asks for
     /// screenshots (`HOCUS_DRAWER_SHOTS`).
     fn shot(&mut self, name: &str) -> anyhow::Result<()> {
@@ -573,6 +605,15 @@ fn recorded(dir: &Path) -> (usize, Vec<String>) {
         }
     }
     (calls, effects)
+}
+
+/// How many calls of `role` her recorder wrote in `dir`.
+fn calls_of(dir: &Path, role: &str) -> usize {
+    let text = std::fs::read_to_string(dir.join("calls.jsonl")).unwrap_or_default();
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|value| value["call"]["request"]["role"] == role)
+        .count()
 }
 
 /// The pixel at (`x`, `y`) of output 0, as R, G, B.
@@ -1396,9 +1437,9 @@ impl Bed {
     /// the thread after), then each sentence said and her answer to it:
     /// the blocks of text then.
     fn said(&mut self, said: &[(&str, &str)]) -> anyhow::Result<Vec<Block>> {
-        self.advance(30)?;
-        self.shows(|s| s["items"].to_string().contains("briefing:"))?;
+        self.briefed()?;
         for (sentence, hers) in said {
+            let answers = self.calls_of("answer");
             self.hp
                 .tell_shell(ToShell::SecretaryAsk((*sentence).to_owned()));
             let last = |s: &serde_json::Value, want: &str| {
@@ -1414,6 +1455,7 @@ impl Bed {
                     .as_array()
                     .is_some_and(|i| i.iter().any(|i| i.as_str() == Some(&mine)))
             })?;
+            self.timed("answer", answers + 1)?;
             self.advance(30)?;
             let theirs = format!("her:{hers}");
             self.shows(|s| last(s, &theirs))?;
@@ -1463,20 +1505,18 @@ fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
     };
     bed.super_s();
     bed.opened()?;
-    bed.hp
-        .tell_shell(ToShell::SecretaryAsk("bonjour".to_owned()));
-    bed.shows(|s| s["items"].to_string().contains("typing:"))?;
-    bed.advance(30)?;
-    // Her morning's briefing in too: nothing moves the thread after.
-    bed.shows(|s| {
-        let items = s["items"].to_string();
-        items.contains(&format!("her:{HERS}")) && items.contains("briefing:")
-    })?;
-    // The user's sentence, her briefing's card (its label, its summary,
-    // #761), her answer.
-    let blocks = bed.texts(4)?;
+    // Her briefing's card (its label, its summary, #761), the user's
+    // sentence, her answer: in that order whatever the machine's load,
+    // her briefing being in before the sentence is said.
+    let blocks = bed.said(&[("bonjour", HERS)])?;
+    anyhow::ensure!(blocks.len() >= 4, "four blocks of text: {blocks:?}");
     let n = blocks.len();
-    let (user, her) = (blocks[n - 4].clone(), blocks[n - 1].clone());
+    let (card, user, her) = (
+        blocks[n - 4].clone(),
+        blocks[n - 2].clone(),
+        blocks[n - 1].clone(),
+    );
+    assert!(card.source.starts_with("Part("), "{blocks:?}");
     assert!(
         user.start.0 > her.start.0,
         "the user's on the right: {blocks:?}"
@@ -1517,15 +1557,15 @@ fn her_text_is_selected_and_copied() -> anyhow::Result<()> {
     bed.clicks(on_word, 3)?;
     bed.ctrl_c();
     bed.clipboard_is(HERS)?;
-    // Across the user's bubble, her briefing's card and her answer: all,
+    // Across her briefing's card, the user's bubble and her answer: all,
     // a line between.
     bed.drag(
-        (user.start.0 + 1.0, user.start.1),
+        (card.start.0 + 1.0, card.start.1),
         (her.end.0 + 30.0, her.end.1),
     )?;
     bed.ctrl_c();
     bed.clipboard_is(&format!(
-        "bonjour\nTON POINT DU MATIN · 9 H\nBien noté, je range ta journée.\n{HERS}"
+        "TON POINT DU MATIN · 9 H\nBien noté, je range ta journée.\nbonjour\n{HERS}"
     ))?;
     // A word selected, then the right click's « Copier ».
     wait(&mut bed.hp, Duration::from_millis(700))?;
@@ -1807,8 +1847,7 @@ fn the_pointer_is_an_i_beam_over_text_and_buttons_keep_theirs() -> anyhow::Resul
     };
     bed.super_s();
     let drawer = bed.opened()?;
-    bed.advance(30)?;
-    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    bed.briefed()?;
     bed.hp.tell_shell(ToShell::SecretaryAsk(
         "prépare un message pour Léa sur son article".to_owned(),
     ));
@@ -1852,8 +1891,7 @@ fn no_copy_button_and_her_answers_and_drafts_are_selected() -> anyhow::Result<()
     };
     bed.super_s();
     bed.opened()?;
-    bed.advance(30)?;
-    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    bed.briefed()?;
     bed.hp.tell_shell(ToShell::SecretaryAsk(
         "prépare un message pour Léa sur son article".to_owned(),
     ));
@@ -1920,8 +1958,7 @@ fn her_briefing_card_is_selected_and_its_button_still_opens_it() -> anyhow::Resu
     };
     bed.super_s();
     bed.opened()?;
-    bed.advance(30)?;
-    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    bed.briefed()?;
     common::at_rest(&mut bed.hp)?;
     let parts: Vec<Block> = bed
         .texts(2)?
@@ -1971,8 +2008,7 @@ fn her_briefing_unfolded_is_selected_and_its_buttons_stay() -> anyhow::Result<()
     };
     bed.super_s();
     bed.opened()?;
-    bed.advance(30)?;
-    bed.shows(|s| s["items"].to_string().contains("briefing:"))?;
+    bed.briefed()?;
     let point = bed.place_starting("Point(")?;
     let at = bed.place(&point)?;
     bed.click(at)?;

@@ -28,7 +28,7 @@
 //! differs between versions: 0.4 (Ubuntu 24.04's) reads `target.object` as
 //! an object's serial, 0.5 as a serial or a node's id.
 
-mod common;
+use crate::common;
 
 use std::{
     cell::RefCell,
@@ -61,10 +61,7 @@ fn has(program: &str) -> bool {
 }
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     if !has("dbus-daemon") || !has("pipewire") {
         eprintln!("dbus-daemon or pipewire missing: skipped");
         return None;

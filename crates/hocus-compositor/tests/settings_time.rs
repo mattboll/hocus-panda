@@ -12,12 +12,10 @@
 //! link and the search; at rest, a draw once a minute at most. What the
 //! window shows is read from its log, never on a time.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-mod settings_page;
-#[path = "levels/timedate.rs"]
-mod timedate;
+use crate::common;
+use crate::fakes;
+use crate::settings_page;
+use crate::timedate;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -74,10 +72,7 @@ impl Bed {
     }
 
     fn start_on(state: Option<State>, output: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let bus = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())

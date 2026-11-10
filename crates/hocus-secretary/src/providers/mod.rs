@@ -6,8 +6,9 @@
 //!
 //! Keys are in the keyring of the bus she is given, never in the
 //! configuration; each is read on a call's worker thread and kept in
-//! memory for the next calls. A request body that would hold a key is
-//! never sent.
+//! memory for the next calls, wiped when it goes (`zeroize`, #768: each
+//! call's copy at its end, the one kept when it is replaced, erased, or
+//! she stops). A request body that would hold a key is never sent.
 
 pub mod anthropic;
 pub mod openai;
@@ -19,6 +20,8 @@ use std::{
     time::Duration,
 };
 
+use zeroize::Zeroizing;
+
 use crate::{
     clock::Clock,
     model::{Model, Reply, Request, Role},
@@ -26,13 +29,14 @@ use crate::{
     triage::{self, Triager, Verdict},
 };
 
-/// A secret: never printed.
+/// A secret: never printed, its bytes overwritten with zeros when it
+/// goes (a copy of it too).
 #[derive(Clone, PartialEq, Eq)]
-pub struct Secret(String);
+pub struct Secret(Zeroizing<String>);
 
 impl Secret {
     pub fn new(text: impl Into<String>) -> Self {
-        Self(text.into())
+        Self(Zeroizing::new(text.into()))
     }
 
     pub fn expose(&self) -> &str {

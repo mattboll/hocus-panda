@@ -362,7 +362,7 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
         .env(CHILD_ENV, "1")
         .args([
             "--exact",
-            "a_screen_reader_reads_the_tree_and_presses_a_button",
+            "atspi::a_screen_reader_reads_the_tree_and_presses_a_button",
             "--nocapture",
             "--test-threads=1",
         ])

@@ -27,8 +27,8 @@
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), never on a time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -127,10 +127,7 @@ impl Bed {
 
     /// The same on a screen `output` (`WxH[@SCALE]`).
     fn start_on(file: &str, output: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config/hocuspanda", "cache", "state", "data", "bin"] {

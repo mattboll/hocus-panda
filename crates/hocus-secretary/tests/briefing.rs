@@ -19,7 +19,7 @@
 //!   of it; its reminder comes due, "Plus tard" asks again, "Fait" ends
 //!   it.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

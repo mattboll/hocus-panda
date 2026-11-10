@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [[bin]]
 name = "hocuspanda"
@@ -114,3 +116,7 @@ serde_json.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 zbus = { workspace = true, features = ["tokio", "proxy", "service", "object-manager"] }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

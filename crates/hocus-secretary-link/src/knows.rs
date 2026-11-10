@@ -85,6 +85,9 @@ pub struct Knowledge {
     /// Perso items left out in a public moment ("2 choses perso
     /// masquées", §7.4).
     pub hidden: u32,
+    /// Her memory's key is in a file beside it, not in a keyring (#768,
+    /// version 9): the tab says so ([`crate::key_beside_said`]).
+    pub key_beside: bool,
 }
 
 impl Knowledge {

@@ -14,9 +14,8 @@
 //! unit tests (`popover::tests`); here they are checked within their
 //! bounds, in real time.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
+use crate::common;
+use crate::fakes;
 
 use std::time::{Duration, Instant};
 
@@ -70,10 +69,7 @@ const fn popover(height: i32) -> Rect {
 
 /// The fakes there, or why the test cannot run.
 fn ready() -> Option<std::path::PathBuf> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = shell_program();
     if !fakes::available() {
         eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
         return None;

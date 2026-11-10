@@ -8,7 +8,7 @@
 //! The file is written by hand, as the Settings' worker would, and each
 //! test waits until the compositor has read it.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 

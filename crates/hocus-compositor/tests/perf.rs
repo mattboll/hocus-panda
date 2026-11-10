@@ -3,7 +3,7 @@
 //! loop counted and what happened; it never wakes the loop. Its interval
 //! is shortened here (50 ms) so that a test sees many samples.
 
-mod common;
+use crate::common;
 
 use std::{
     io::Write,

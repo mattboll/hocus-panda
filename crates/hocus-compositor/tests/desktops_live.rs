@@ -9,7 +9,7 @@
 //! The file is written by hand, as the Settings' worker would. Each test
 //! waits for what it checks, never for a time.
 
-mod common;
+use crate::common;
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -325,10 +325,7 @@ fn the_first_desktop_taken_out_goes_to_the_next_and_comes_back_with_its_windows(
 
 /// The shell, logging what its tiles say.
 fn shell_script(dir: &Path, log: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(None);
-    };
+    let shell = common::shell_program();
     let home = dir.join("home");
     std::fs::create_dir_all(&home)?;
     let script = dir.join("shell");

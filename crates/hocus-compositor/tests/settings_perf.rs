@@ -6,10 +6,9 @@
 //! buckets) is tested in the crate (`hocus_settings::perf`); its look on
 //! screenshots, of an invented day (`hocus_perf::fixture`).
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-mod settings_page;
+use crate::common;
+use crate::fakes;
+use crate::settings_page;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -42,10 +41,7 @@ impl Bed {
     /// the Settings' script in `locale`; `None` when the Settings or
     /// `dbus-daemon` are not there.
     fn start(locale: &str, shared: bool) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let bus = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())

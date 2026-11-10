@@ -12,10 +12,9 @@
 //!   reads it at once; "Pas maintenant" writes nothing; "Ne plus lire" a
 //!   revocation.
 
-mod common;
+use crate::common;
 
-#[path = "../../hocus-sources/tests/fakes/mod.rs"]
-mod fakes;
+use crate::fakes;
 
 use std::path::{Path, PathBuf};
 

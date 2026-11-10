@@ -271,5 +271,5 @@ it draws:
 | `nothing_goes_round_a_lockers_lock` | A second locker refused, its unlock opening nothing; the locker's crash leaving the desktop's lock, which the password opens |
 
 The screenshots of the pull request: `tests/lock_shots.rs`
-(`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test lock_shots
+(`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor lock_shots::
 --run-ignored only`).

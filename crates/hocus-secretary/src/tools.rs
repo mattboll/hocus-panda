@@ -8,7 +8,10 @@
 //! as left out. An optional field is a plain type whose empty value means
 //! "none" (an empty string, a 0), never a nullable union, which keeps the
 //! schemas simple for the model. They read her memory on her loop, which
-//! owns it: [`run`] is called there, with a call the model made.
+//! owns it: [`run`] is called there, with a call the model made. What
+//! they give is her memory's lines, made inert as her context's are
+//! ([`crate::inert`], #768): a digest or a name read in a source writes
+//! no tag in a tool's result either.
 //!
 //! The conversation's ([`TALK`], lot 2): `ask_user`, a question with its
 //! quick replies, `remember_style` and `remember` (#762: what the user
@@ -23,6 +26,7 @@ use serde_json::{Value, json};
 
 use crate::{
     brain::as_of,
+    inert,
     model::ToolCall,
     retrieve,
     store::{Item, Store},
@@ -308,7 +312,11 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
                 } else if let Item::Node(id) = item
                     && let Ok(node) = store.node(id)
                 {
-                    out.push_str(&format!("fiche : {} ({})\n", node.name, node.kind.word()));
+                    out.push_str(&format!(
+                        "fiche : {} ({})\n",
+                        inert::line(&node.name),
+                        node.kind.word()
+                    ));
                 }
             }
             if out.is_empty() {

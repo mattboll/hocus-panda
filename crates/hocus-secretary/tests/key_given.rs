@@ -6,7 +6,7 @@
 //! "clé refusée par Anthropic"; an API out of reach "pas de réseau". The
 //! key is in no line she says, no audit row, no thread item.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

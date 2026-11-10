@@ -4,7 +4,7 @@
 //! those whose `TryExec` is missing do not. On a fake XDG tree: never the
 //! machine's autostart entries.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},

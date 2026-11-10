@@ -9,7 +9,7 @@
 //! (attachments and tokens never leave), AC43 (identity and bank numbers
 //! masked, health and family words kept).
 
-mod fakes;
+use crate::fakes;
 
 use std::collections::BTreeMap;
 

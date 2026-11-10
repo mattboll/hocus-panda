@@ -6,7 +6,7 @@
 //! slides onto the screen beyond; an X11 window on the screen at 2 shows
 //! at its size, enlarged.
 
-mod common;
+use crate::common;
 
 use std::{
     os::{fd::AsFd, unix::net::UnixStream},

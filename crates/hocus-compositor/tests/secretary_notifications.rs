@@ -9,7 +9,7 @@
 //! marked: the application hears no `ActionInvoked` and no
 //! `NotificationClosed`, and both bubbles stay as they came.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -50,11 +50,7 @@ impl Drop for Bed {
 
 /// The shell and her programs, and a D-Bus daemon; `None` to skip.
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    let (Some(shell), Some(secretary)) = (common::shell_program(), common::secretary_program())
-    else {
-        eprintln!("the shell or the secretary is not built: build the workspace to run this test");
-        return None;
-    };
+    let (shell, secretary) = (common::shell_program(), common::secretary_program());
     let daemon = std::process::Command::new("sh")
         .args(["-c", "command -v dbus-daemon"])
         .stdout(std::process::Stdio::null())

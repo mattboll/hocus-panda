@@ -22,7 +22,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -335,10 +335,7 @@ struct Client {
 
 impl Bed {
     fn start(form: FormChoice) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let daemon = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())
@@ -895,7 +892,11 @@ impl Scene {
             return Ok(None);
         };
         let child = Command::new(std::env::current_exe()?)
-            .args(["--exact", "a_window_of_another_program", "--nocapture"])
+            .args([
+                "--exact",
+                "tray::a_window_of_another_program",
+                "--nocapture",
+            ])
             .env("HOCUS_TEST_FRONT", bed.hp.socket())
             .stdout(Stdio::null())
             .spawn()?;

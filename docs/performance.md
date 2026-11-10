@@ -26,7 +26,8 @@ So, unless `HOCUS_TEST_GPU` names a render node:
 - the shells they start draw with tiny-skia (`ICED_BACKEND=tiny-skia`),
   since the compositor has no GPU to give them;
 - the tests of the shell's motion on wgpu (the clock's minute, the agents'
-  slide and hop, the secretary's ear) are skipped, and say why.
+  slide and hop, the secretary's ear) are `#[ignore]`d with that reason:
+  asked for without a GPU, they fail and say why.
 
 The harness enforces it. It refuses a compositor asked to draw with GLES
 on a GPU without the variable, or on another node than the one it names,
@@ -43,15 +44,16 @@ reaches a GPU by itself fails.
 The motion tests measure what only a GPU shows: the shell's frames on
 wgpu, the compositor's shaders at a real GPU's pace. Run them:
 
-- **alone**: one test binary, and one test process at a time (`-j1`);
+- **alone**: one test file's, and one test process at a time (`-j1`);
 - **on a machine or VM whose session does not depend on that GPU**: a
   second GPU the session does not draw on, a machine with no session
   running, or a VM with a GPU of its own.
 
 ```sh
-HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test glass -j1
-HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test agents -j1
-HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test bar -j1
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor glass:: -j1
+# with the tests that only a GPU passes (`--run-ignored all`)
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor -E 'test(/^agents::/)' -j1 --run-ignored all
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor -E 'test(/^bar::/)' -j1 --run-ignored all
 ```
 
 With the variable set, the compositor of a test of its shaders draws on
@@ -263,8 +265,8 @@ close, none elsewhere, none 100 ms after.
 | Pixman, 60 s | its still picture drawn once, then 0 frames | 0 |
 | Memory | the atlas ≤ 256 KB a scale; no screen-sized buffer more | 16 KB for every scale; on GLES the wallpaper thread's still picture is not even drawn (the shader draws into the screen's frame) |
 
-Reported, not gated: `cargo nextest run -p hocus-compositor --test
-moving_wallpaper --run-ignored only timings` (a frame at 3440 × 1440, beside
+Reported, not gated: `cargo nextest run -p hocus-compositor --run-ignored
+only -E 'test(/^moving_wallpaper::.*timings/)'` (a frame at 3440 × 1440, beside
 a still one), and the shots for the pull request
 (`HOCUS_SHOTS=DIR … --run-ignored only shots`).
 
