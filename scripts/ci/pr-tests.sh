@@ -33,11 +33,11 @@ printf '  %s\n' $changed
 
 run() {
     echo "+ cargo nextest run $*"
-    cargo nextest run --profile ci --no-tests=warn "$@"
+    cargo nextest run --locked --profile ci --no-tests=warn "$@"
 }
 
 programs() {
-    cargo programs
+    cargo programs --locked
 }
 
 if [ -n "$full" ] || grep -qE '^(Cargo\.lock|Cargo\.toml|rust-toolchain(\.toml)?|\.config/nextest\.toml)$|^crates/[^/]+/tests/(common|levels|fakes)/' <<< "$changed"; then

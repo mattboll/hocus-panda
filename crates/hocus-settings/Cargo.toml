@@ -3,6 +3,7 @@ name = "hocus-settings"
 description = "The Hocuspanda Settings: an application window that writes the desktop's configuration file so that nobody has to edit it"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -15,40 +16,40 @@ workspace = true
 
 [dependencies]
 # The configuration file read, edited in place and written back.
-hocus-config = { path = "../hocus-config", version = "1.0.0" }
+hocus-config.workspace = true
 # The mice and touchpads, followed on the desktop's control socket (6.12).
-hocus-agents = { path = "../hocus-agents", version = "1.0.0" }
-hocus-link = { path = "../hocus-link", version = "1.0.0" }
+hocus-agents.workspace = true
+hocus-link.workspace = true
 # The secretary's consent book: which applications' notifications and
 # which Google accounts of Online Accounts she reads (Agents, "LA
 # SECRÉTAIRE", secretary.md lot 7, #750), and the consent sheets' words.
-hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0", features = ["goa"] }
-hocus-pandas = { path = "../hocus-pandas", version = "1.0.0" }
+hocus-secretary-link = { workspace = true, features = ["goa"] }
+hocus-pandas.workspace = true
 # The Performances page: the days the compositor recorded, their peaks and
 # signals (#655).
-hocus-perf = { path = "../hocus-perf", version = "1.0.0" }
+hocus-perf.workspace = true
 # The trial area's windows move, stick and snap with the compositor's own
 # geometry (6.14).
-hocus-geometry = { path = "../hocus-geometry", version = "1.0.0" }
+hocus-geometry.workspace = true
 # The Son page's PipeWire: followed, set, metered, as the bar does.
-hocus-sound = { path = "../hocus-sound", version = "1.0.0" }
+hocus-sound.workspace = true
 # The Bluetooth page's BlueZ: followed and asked, as the bar does.
-hocus-bluetooth = { path = "../hocus-bluetooth", version = "1.0.0" }
+hocus-bluetooth.workspace = true
 # The Réseau page's NetworkManager and radios, followed and set as the bar
 # does (6.6).
-hocus-network = { path = "../hocus-network", version = "1.0.0" }
+hocus-network.workspace = true
 # The applications, their icons, the defaults (mimeapps.list) and the
 # start-up entries, read as the launcher and the session read them (6.15).
-hocus-xdg = { path = "../hocus-xdg", version = "1.0.0" }
+hocus-xdg.workspace = true
 # The applications' PNG icons, decoded on the page's thread (6.15); the
 # avatars (6.11), a picture cut square and written as PNG (the codecs to
 # read one are hocus-link's).
-image = { version = "0.25", default-features = false, features = ["png"] }
-toml_edit = "0.25.17"
+image = { workspace = true, features = ["png"] }
+toml_edit.workspace = true
 # The shell's toolkit and its settings (tech-choices, decision 2), as an
 # application window this time: winit's Wayland backend, no X11, no theme
 # detection over D-Bus.
-iced = { version = "0.14", default-features = false, features = [
+iced = { workspace = true, features = [
     "wgpu",
     "tiny-skia",
     "crisp",
@@ -68,34 +69,34 @@ iced = { version = "0.14", default-features = false, features = [
 # Its CPU renderer, to draw every frame whole (#662; patched in the
 # workspace's manifest). The same crate iced draws with, its features
 # iced's.
-iced_tiny_skia = { version = "0.14.1", default-features = false }
+iced_tiny_skia.workspace = true
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU (as
 # the shell does).
-wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
+wgpu.workspace = true
 # The file's changes (inotify on its folder), on its worker; the user's id,
 # for their name; `passwd`'s pseudo-terminal (6.11).
-rustix = { version = "1.1.6", features = ["fs", "process", "pty", "event", "termios"] }
+rustix = { workspace = true, features = ["fs", "process", "pty", "event", "termios"] }
 # The search ignores accents: words decomposed (NFD), their marks left out.
-unicode-normalization = "0.1.25"
+unicode-normalization.workspace = true
 # When the last version that read was written, in the user's time zone.
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # Toasts' and the slider's delays.
-tokio = { version = "1.54.1", features = ["time", "rt", "sync"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio = { workspace = true, features = ["time", "rt", "sync"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 # What it shows, said in its log as JSON (tests).
-serde_json = "1.0.154"
+serde_json.workspace = true
 # Raising the window on a second launch: xdg-activation on the connection
 # iced's winit drew it on (winit has no focus request on Wayland). The same
 # versions as winit's.
-wayland-client = "0.31.15"
-wayland-backend = { version = "0.3.17", features = ["client_system"] }
+wayland-client.workspace = true
+wayland-backend.workspace = true
 # And keyboard-shortcuts-inhibit while a shortcut is recorded (6.8).
-wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
+wayland-protocols.workspace = true
 
 # The desktop portal's file chooser (6.3), from the wallpaper page's thread.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
+zbus = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
-tempfile = "3.27.0"
-anyhow = "1.0.104"
+tempfile.workspace = true
+anyhow.workspace = true
