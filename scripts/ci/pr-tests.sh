@@ -14,9 +14,9 @@
 # - a test harness, the lock file, the workspace's Cargo.toml or nextest's
 #   configuration changed, or `full` given: everything.
 #
-# The compositor's tests start the real shell, Settings, `hocus` and the
-# secretary, which a test binary does not build: they are built first
-# (`cargo programs`, .cargo/config.toml), and a test fails without them.
+# The compositor's tests start the real shell, Settings and `hocus`, which
+# a test binary does not build: they are built first (`cargo programs`,
+# .cargo/config.toml), and a test fails without them.
 set -euo pipefail
 
 plan=

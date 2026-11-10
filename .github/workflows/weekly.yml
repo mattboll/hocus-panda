@@ -31,7 +31,7 @@ jobs:
             clang mold pkg-config fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
-            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev libssl-dev ffmpeg \
+            dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
             mesa-vulkan-drivers libvulkan1
       - uses: taiki-e/install-action@v2
         with:
@@ -50,6 +50,6 @@ jobs:
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
       - name: Programs
-        run: cargo build --locked -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+        run: cargo build --locked -p hocus-shell -p hocus-cli -p hocus-settings
       - name: Tests
         run: cargo nextest run --locked --profile ci --workspace --no-fail-fast

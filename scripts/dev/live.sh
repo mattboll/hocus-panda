@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds the shell (the bar) or the secretary alone and reloads it in the
-# running Hocuspanda session, without a package nor sudo: the windows stay,
-# the bar's space stays kept (docs/workflow.md, "Development loop").
+# Builds the shell (the bar) alone and reloads it in the running
+# Hocuspanda session, without a package nor sudo: the windows stay, the
+# bar's space stays kept (docs/workflow.md, "Development loop").
 #
-#   scripts/dev/live.sh shell|secretary [--no-build]
-#   scripts/dev/live.sh shell|secretary --installed
+#   scripts/dev/live.sh shell [--no-build]
+#   scripts/dev/live.sh shell --installed
 #
 # The program built runs for this session only: the compositor holds its
 # path and writes nothing to the configuration, so the next login runs the
@@ -38,7 +38,7 @@ build=yes
 installed=no
 for arg in "$@"; do
     case $arg in
-        shell | secretary) what=$arg ;;
+        shell) what=$arg ;;
         --no-build) build=no ;;
         --installed) installed=yes ;;
         -h | --help)
@@ -62,12 +62,6 @@ case $what in
         program=hocuspanda-shell
         status=(shell status)
         back='the bar drawn again'
-        ;;
-    secretary)
-        package=hocus-secretary
-        program=hocus-secretary
-        status=(secretary process)
-        back='her process running'
         ;;
 esac
 
@@ -134,12 +128,7 @@ seconds() {
 before=$(ask "${status[@]}") ||
     fail "the session at $socket does not answer \`hocus msg ${status[*]}\`: its compositor is older than this, or gone. Install a package that has it and log in again (packaging/README.md)."
 case $(said state "$before") in
-    off)
-        case $what in
-            shell) fail 'this session runs no shell.' ;;
-            secretary) fail 'the secretary is off: [secretary] mode is not "assistant" (Settings, Secretary).' ;;
-        esac
-        ;;
+    off) fail 'this session runs no shell.' ;;
 esac
 
 if [ "$installed" = yes ]; then
