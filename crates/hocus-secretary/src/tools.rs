@@ -1,10 +1,11 @@
 //! Her read-only memory tools (§7.3, persona.md): `graph` and `search`,
 //! for the model to go further than what context assembly gave it. Their
-//! schemas are strict (every field required, nothing else allowed). An
-//! optional field is a plain type whose empty value means "none" (an empty
-//! string, a 0), never a nullable union: strict mode allows only 16
-//! parameters with unions across a request's tools, and the proposals
-//! alone have 36 optional fields. They read her memory on her loop, which
+//! schemas list every field as required, nothing else allowed; they are
+//! not sent as `strict` (the API's grammar for all of them is too large,
+//! see providers/anthropic.rs), so what reads a call takes a field missing
+//! as left out. An optional field is a plain type whose empty value means
+//! "none" (an empty string, a 0), never a nullable union, which keeps the
+//! schemas simple for the model. They read her memory on her loop, which
 //! owns it: [`run`] is called there, with a call the model made.
 //!
 //! The conversation's ([`TALK`], lot 2): `ask_user`, a question with its
@@ -268,9 +269,8 @@ pub fn run(store: &Store, call: &ToolCall, notebook: Option<Notebook>) -> Result
 mod tests {
     use super::*;
 
-    /// Strict mode rejects a request whose tools have more than 16
-    /// parameters with unions (type arrays or anyOf); she sends all of
-    /// these at once, so none has one.
+    /// Plain fields only (no type arrays, no anyOf), every one required:
+    /// an empty value is a field left out.
     #[test]
     fn no_tool_parameter_is_a_union() {
         let mut unions = Vec::new();

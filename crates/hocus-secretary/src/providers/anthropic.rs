@@ -6,7 +6,11 @@
 //!   first user turn, cached five minutes; what was retrieved for this
 //!   question sits in the last user turn, uncached. Content stays in its
 //!   `<source>` blocks, never in the system.
-//! - **Strict tools**: each tool's schema is enforced (`strict: true`).
+//! - **Tools without `strict`**: the API compiles strict tools into one
+//!   grammar, and hers (two readers, eleven proposals) make one too large
+//!   for it ("The compiled grammar is too large"); their schemas still
+//!   guide the model, and what she reads of a call is tolerant (a field
+//!   missing is a field left out).
 //! - **Adaptive thinking**, its depth by the role's effort.
 //! - **Streaming** (SSE): the text goes to the caller as it comes; tool
 //!   calls and thinking blocks are kept whole for the next turn.
@@ -199,7 +203,6 @@ pub fn body(model: &str, request: &Request) -> Value {
                 "name": t.name,
                 "description": t.description,
                 "input_schema": t.schema,
-                "strict": true,
             })
         })
         .collect();
@@ -539,7 +542,10 @@ mod tests {
         assert_eq!(messages[2]["content"][1]["text"], "Et le devis ?");
         let tools = body["tools"].as_array().expect("tools");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["strict"], true);
+        assert!(
+            tools[0].get("strict").is_none(),
+            "the API refuses hers as strict"
+        );
         assert_eq!(tools[0]["input_schema"]["additionalProperties"], false);
     }
 

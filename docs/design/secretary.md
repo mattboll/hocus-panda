@@ -1593,8 +1593,10 @@ The setting is followed live, so switching back to "classic" stops the process a
   cached an hour; the day's part opens the first user turn, cached five
   minutes; what was retrieved for the question comes just before its
   words, uncached; content stays in `<source>` blocks, never in the
-  system. Tools are strict (`strict: true`, every field required, optional
-  ones nullable). Streaming (SSE): text deltas to the caller, tool calls'
+  system. Tools are not sent as `strict`: the API compiles strict tools
+  into one grammar, and hers make one too large for it; every field is
+  required, an optional one a plain type whose empty value means none, and
+  what reads a call takes a missing field as left out. Streaming (SSE): text deltas to the caller, tool calls'
   JSON gathered, thinking blocks kept whole and replayed unchanged. On
   Sonnet 5.5 (and Opus 5.5) the API's own refusal fallback is asked
   (`fallbacks: "default"`); a refusal ends with `stop = "refusal"`. An
@@ -1673,7 +1675,7 @@ The setting is followed live, so switching back to "classic" stops the process a
   is near the day asked about. Each edge is cited with its id and
   provenance. Embeddings are not built.
 - **Her read-only tools** (`tools.rs`): `graph(node, hops, as_of)` and
-  `search(query, from, to)`, strict schemas, and `tools::run` on her loop.
+  `search(query, from, to)`, their schemas, and `tools::run` on her loop.
   The tool loop itself (calls, results, the next turn) is the
   conversation's (lot 2), with `Message::replied` and `ToolResult`.
 - **Her Google accounts as one source** (`google.rs`): `hocus-sources`'
@@ -1816,7 +1818,7 @@ The setting is followed live, so switching back to "classic" stops the process a
   conversation's (`ask_user`, `propose_message`, `propose_post`,
   `propose_mail`, `propose_invitation_answer`, `propose_event`,
   `propose_file`, `propose_task`, `propose_agent`, `propose_delegation`,
-  strict schemas in `tools.rs`). Its text streams (`Model::stream_pieces`:
+  their schemas in `tools.rs`). Its text streams (`Model::stream_pieces`:
   the text, and what she is doing for the typing line; the fake model's
   script has `pace` and `doing`, and a `name` the drawer shows). A read
   tool runs on her loop and the model is called again with its result,

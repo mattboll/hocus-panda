@@ -385,10 +385,11 @@ fn ac51_an_unchecked_mail_leaves_as_its_metadata_then_its_redacted_text() {
     assert_eq!(body["model"], "claude-sonnet-5-5");
     assert_eq!(body["thinking"]["type"], "adaptive");
     assert_eq!(body["system"][1]["cache_control"]["ttl"], "1h");
+    // Not strict: the API refuses her tools' grammar as too large.
     assert!(
         body["tools"]
             .as_array()
-            .is_some_and(|t| t.iter().all(|t| t["strict"] == true))
+            .is_some_and(|t| !t.is_empty() && t.iter().all(|t| t.get("strict").is_none()))
     );
     assert!(
         !body["system"].to_string().contains("<source id="),
