@@ -3,6 +3,7 @@ name = "hocus-day"
 description = "Your day's data for the Hocuspanda bar: calendars, events and tasks from sources behind adapters, read off the loop"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -12,34 +13,34 @@ workspace = true
 [dependencies]
 # The configuration file read and written back in place, as the Settings
 # do.
-hocus-config = { path = "../hocus-config", version = "1.0.0" }
+hocus-config.workspace = true
 # Times: instants, dates and the system's time zones; serde for the cache.
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
-serde = { version = "1.0.229", features = ["derive"] }
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
+serde = { workspace = true, features = ["derive"] }
 # The cache and the local list on disk.
-serde_json = "1.0.154"
+serde_json.workspace = true
 # The configuration's `[day]` and the fixture's file.
-toml = "1.1.8"
+toml.workspace = true
 # Day.1's choices written into the configuration file, its other sections,
 # comments and order kept.
-toml_edit = "0.25.17"
-tracing = "0.1.44"
+toml_edit.workspace = true
+tracing.workspace = true
 # The fixture's file watched for changes (inotify), its worker asleep
 # meanwhile.
-rustix = { version = "1.1.6", features = ["fs"] }
+rustix = { workspace = true, features = ["fs"] }
 # The accounts' tokens in the session's Secret Service, on a thread that
 # waits for it with a timeout (as the clipboard's key, 5.6).
-zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
-tokio = { version = "1.54.1", features = ["rt", "time"] }
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["rt", "time"] }
 # Kanban servers' and Google Calendar's REST APIs (Planka, Google),
 # blocking, on their accounts' workers. TLS by rustls on ring, against the
 # system's certificates (the platform's verifier): no bundled roots.
-ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
-rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+ureq.workspace = true
+rustls.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
-anyhow = "1.0.104"
+tempfile.workspace = true
+anyhow.workspace = true
 # Online Accounts faked on a private bus, for the Google tests.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
-tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+zbus = { workspace = true, features = ["tokio", "proxy", "service", "object-manager"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

@@ -89,7 +89,13 @@ cargo nextest run --workspace                 # tests, on the CPU
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo deny check                              # licences and advisories
+cargo machete                                 # dependencies no source uses
 ```
+
+The Rust version is the one `rust-toolchain.toml` pins; dependencies'
+versions are declared once, in the root `Cargo.toml`'s
+`[workspace.dependencies]`. What CI runs when, and why a pull request runs
+only the tests of what it changes: [docs/workflow.md](docs/workflow.md).
 
 On a pull request, CI runs the tests of what it changes
 (`scripts/ci/pr-tests.sh`): the test files it touches, the unit tests of

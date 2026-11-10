@@ -31,11 +31,11 @@ printf '  %s\n' $changed
 
 run() {
     echo "+ cargo nextest run $*"
-    cargo nextest run --profile ci --no-tests=warn "$@"
+    cargo nextest run --locked --profile ci --no-tests=warn "$@"
 }
 
 programs() {
-    cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+    cargo build --locked -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
 }
 
 if [ -n "$full" ] || grep -qE '^(Cargo\.lock|Cargo\.toml|rust-toolchain(\.toml)?|\.config/nextest\.toml)$|^crates/[^/]+/tests/(common|levels|fakes)/' <<< "$changed"; then

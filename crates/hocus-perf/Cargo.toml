@@ -3,6 +3,7 @@ name = "hocus-perf"
 description = "A day of the Hocuspanda desktop's CPU and memory: sampled every 10 s off the compositor's loop, kept 14 days, read back with its peaks and signals"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -10,15 +11,15 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 # The day's file is the user's day: named by the local date, its times read
 # in the local zone.
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # The clock's ticks and the page's size, to read /proc in milliseconds and
 # kilobytes.
-rustix = { version = "1.1.6", features = ["param"] }
-tracing = "0.1.44"
+rustix = { workspace = true, features = ["param"] }
+tracing.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true
