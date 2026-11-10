@@ -109,15 +109,42 @@ fn sensors(dir: &std::path::Path, heat: u32) -> hocus_secretary::power::Sensors 
 }
 
 fn start(dir: &std::path::Path, file: &std::path::Path, heat: u32) -> common::Driver {
+    start_with_fake(dir, file, heat).0
+}
+
+/// Her loop, and the scripted model it triages with.
+fn start_with_fake(
+    dir: &std::path::Path,
+    file: &std::path::Path,
+    heat: u32,
+) -> (common::Driver, Arc<Fake>) {
     let clock = common::clock();
     let script: Script = toml::from_str(SCRIPT).expect("a script");
     let fake = Arc::new(Fake::new(script, None).with_clock(clock.clone()));
     let mut options = common::options(vec![common::fixture(MAIL)]);
     options.model = Some(fake.clone());
-    options.triage = Some(fake);
+    options.triage = Some(fake.clone());
     options.sensors = sensors(dir, heat);
     let store = Store::open(file, &[3u8; 32], clock).expect("her memory");
-    common::Driver::start(store, options)
+    (common::Driver::start(store, options), fake)
+}
+
+/// Waits until the triage under way, if any, counts its delay on her
+/// clock: her clock moved before its thread read it, the delay would start
+/// after the move and the item never be done (#760).
+fn on_her_clock(driver: &mut common::Driver, fake: &Fake) {
+    let start = std::time::Instant::now();
+    loop {
+        let state = driver.status().triage.map(|t| t.state).unwrap_or_default();
+        if state != "running" || fake.timing() > 0 {
+            return;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "the triage under way never read her clock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 /// Her next view of the queue that `done` says.
@@ -191,7 +218,7 @@ fn aside(view: &View, key: &str) -> u64 {
 fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     let dir = tempfile::tempdir().expect("a folder");
     let file = dir.path().join("memory.db");
-    let mut driver = start(dir.path(), &file, 60);
+    let (mut driver, fake) = start_with_fake(dir.path(), &file, 60);
     driver.settle();
 
     // Her proposal: GitHub's three mails, sent by a machine.
@@ -263,6 +290,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
 
     // 39 s: the first one triaged, the pace measured (the rest between
     // two included), the time left from it.
+    on_her_clock(&mut driver, &fake);
     driver.send(&ToSecretary::Clock { advance: 39 });
     let view = view_until(&driver, "measured", |v| v.done == 1);
     assert_eq!(view.per_item, Some(41));
@@ -322,6 +350,7 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     let view = view_now(&mut driver);
     assert_eq!(view.set_aside, 2, "{view:?}");
     assert_eq!(group(&view, "notifications@github.com"), 1);
+    on_her_clock(&mut driver, &fake);
     driver.send(&ToSecretary::Clock { advance: 41 });
     let view = view_until(&driver, "the next one", |v| {
         v.now.as_ref().is_some_and(|n| n.sender.contains("github"))
@@ -373,18 +402,32 @@ fn the_queue_shows_its_senders_its_pace_and_a_sender_set_aside_waits_apart() {
     });
     // What was sent before it closed, read.
     let _ = driver.status();
+    on_her_clock(&mut driver, &fake);
     driver.send(&ToSecretary::Clock { advance: 41 });
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    driver.send(&ToSecretary::Status { id: 999 });
-    loop {
-        match driver.receive() {
-            FromSecretary::Queue { id, view } => panic!("a view sent once closed: {id} {view:?}"),
-            FromSecretary::Status { id: 999, status } => {
-                assert!(status.triage.is_some_and(|t| t.done >= 2));
-                break;
+    // Her status asked until the item under way is done: a view its end
+    // sent would come before the status that says it.
+    let start = std::time::Instant::now();
+    for asked in 999.. {
+        driver.send(&ToSecretary::Status { id: asked });
+        let done = loop {
+            match driver.receive() {
+                FromSecretary::Queue { id, view } => {
+                    panic!("a view sent once closed: {id} {view:?}")
+                }
+                FromSecretary::Status { id, status } if id == asked => {
+                    break status.triage.map_or(0, |t| t.done);
+                }
+                _ => {}
             }
-            _ => {}
+        };
+        if done >= 2 {
+            break;
         }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "never done: {done}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
     driver.stop();
 }
@@ -454,7 +497,7 @@ fn on_the_graphics_card_the_cards_heat_pauses_it() {
     let fake = Arc::new(Fake::new(script, None).with_clock(clock.clone()));
     let mut options = common::options(vec![common::fixture(MAIL)]);
     options.model = Some(fake.clone());
-    options.triage = Some(Arc::new(OnCard(fake)));
+    options.triage = Some(Arc::new(OnCard(fake.clone())));
     // The processor cool; the card at 90 °C, its slowdown point 3 °C below.
     options.sensors = sensors(dir.path(), 60);
     let asked = dir.path().join("nvidia-smi.log");
@@ -479,6 +522,7 @@ fn on_the_graphics_card_the_cards_heat_pauses_it() {
             break state;
         }
         assert!(waited < 600, "never paused: {state}");
+        on_her_clock(&mut driver, &fake);
         driver.advance(5);
         waited += 5;
         // `nvidia-smi` runs on the wall clock: given its time.
@@ -532,6 +576,7 @@ impl Triager for Down {
 /// says `done`: that state, and how long it took.
 fn advance_until(
     driver: &mut common::Driver,
+    fake: &Fake,
     what: &str,
     done: impl Fn(&str) -> bool,
 ) -> (String, u64) {
@@ -542,6 +587,7 @@ fn advance_until(
             return (state, waited);
         }
         assert!(waited < 600, "never {what}: {state}");
+        on_her_clock(driver, fake);
         driver.advance(5);
         waited += 5;
     }
@@ -560,13 +606,14 @@ fn package_at(dir: &std::path::Path, heat: u32) {
 fn the_laptops_swinging_package_never_pauses_it() {
     let dir = tempfile::tempdir().expect("a folder");
     let file = dir.path().join("memory.db");
-    let mut driver = start(dir.path(), &file, 64);
+    let (mut driver, fake) = start_with_fake(dir.path(), &file, 64);
     driver.settle();
     // The package of #756, its samples five seconds apart, for as long as
     // the six items take (39 s each and a rest).
     let swing = [101, 100, 100, 89, 72, 65, 64, 80, 64, 100];
     for heat in swing.iter().cycle().take(80) {
         package_at(dir.path(), *heat);
+        on_her_clock(&mut driver, &fake);
         let state = driver
             .advance(5)
             .triage
@@ -582,11 +629,11 @@ fn the_laptops_swinging_package_never_pauses_it() {
 fn the_pause_says_why_heat_or_a_model_that_does_not_answer() {
     let dir = tempfile::tempdir().expect("a folder");
     let file = dir.path().join("memory.db");
-    let mut driver = start(dir.path(), &file, 100);
+    let (mut driver, fake) = start_with_fake(dir.path(), &file, 100);
     driver.settle();
     // A steady 100 °C: paused once the minute's average says so, after the
     // item under way.
-    let (state, _) = advance_until(&mut driver, "paused", |s| s.starts_with("paused"));
+    let (state, _) = advance_until(&mut driver, &fake, "paused", |s| s.starts_with("paused"));
     assert_eq!(
         state,
         "paused: processor 100 °C on average, resumes below 90 °C"
@@ -605,7 +652,7 @@ fn the_pause_says_why_heat_or_a_model_that_does_not_answer() {
     // 85 °C: it goes on once the average is below 90, not on the first
     // cool sample.
     package_at(dir.path(), 85);
-    let (_, waited) = advance_until(&mut driver, "going on", |s| !s.starts_with("paused"));
+    let (_, waited) = advance_until(&mut driver, &fake, "going on", |s| !s.starts_with("paused"));
     assert!(waited >= 40, "after {waited} s");
     driver.stop();
 
