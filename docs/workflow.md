@@ -18,7 +18,8 @@ when. The branches and the lots are in [CLAUDE.md](../CLAUDE.md),
   of the root `Cargo.toml`; the crates take them with `workspace = true`
   and add the features they need. A new dependency goes there first.
 - `iced` and `iced_tiny_skia` are held at exact versions: the second is
-  built from `vendor/` with a change made on that version.
+  built from `vendor/` with a patch made on that version
+  ([vendor/README.md](../vendor/README.md)).
 
 ## What runs when
 
@@ -26,6 +27,7 @@ when. The branches and the lots are in [CLAUDE.md](../CLAUDE.md),
 |---|---|---|---|
 | `fmt`, `clippy`, `licenses` (cargo-deny) | yes | yes | |
 | `unused-dependencies` (cargo-machete) | yes | yes | |
+| `vendor` (`scripts/vendor.sh --check`) | yes | yes | |
 | `pr-tests`: the tests of what changed | yes | | |
 | `build` and `linux (N/4)`: the whole suite | when asked (below) | yes | |
 | `package`: the release build, the .deb and what it holds | | yes | |

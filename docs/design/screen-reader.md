@@ -18,8 +18,8 @@ the bubbles, the lock and the password dialog (3: B).
   among its kind ("2 sur 4"), bounds and actions. Crate `hocus-a11y` turns
   them into AccessKit trees and hands them to AT-SPI (`accesskit_unix`,
   MIT OR Apache-2.0), one top-level window per surface, all under one
-  application, "Hocuspanda" (a vendored `accesskit_unix` takes the name;
-  the published one names it after the program).
+  application, which `accesskit_unix` names after the program:
+  "hocuspanda-shell".
 - **The bar's items are the keyboard's.** A bar's nodes are the items its
   surfaces register with the popovers' controller for the keyboard
   (`Controller::items_of`), in their order from the top and at their

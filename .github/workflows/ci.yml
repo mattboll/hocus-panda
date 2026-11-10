@@ -281,3 +281,11 @@ jobs:
         with:
           tool: cargo-machete
       - run: cargo machete
+
+  # vendor/<crate> is the published crate plus its patch file, nothing else
+  # (vendor/README.md).
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/vendor.sh --check
