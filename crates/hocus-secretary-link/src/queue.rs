@@ -9,10 +9,12 @@
 //! sender, its subject and its date: what the drawer already shows of a
 //! mail.
 //!
-//! On a sender's group, "Ne pas trier, chercher si besoin" ([`Act::Aside`])
-//! takes its waiting items out of the queue, and its later ones: a rule
-//! she keeps, listed in "Ce qu'elle sait", which [`Act::Back`] (or its
-//! removal there) undoes.
+//! On a machine's or a newsletter's group, « Ne pas trier les mails de
+//! GitHub » ([`Act::Aside`]) takes its waiting items out of the queue, and
+//! its later ones: a rule she keeps, listed in "Ce qu'elle sait", which
+//! « Trier à nouveau les mails de GitHub » ([`Act::Back`], or its removal
+//! there) undoes. A person's mails are never offered to be left unsorted
+//! (#758).
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,9 @@ pub struct View {
     /// The time left at that pace ("encore ≈ 10 h 41"), and in seconds.
     pub left: String,
     pub left_seconds: Option<u64>,
+    /// Both in a sentence (#758): "Encore 14 min environ (40 s par mail
+    /// sur cet ordinateur)."; empty before the pace is measured.
+    pub pace: String,
     /// "987 en attente · 312 triés · 412 mis de côté".
     pub counts: String,
     pub waiting: u64,
@@ -86,6 +91,28 @@ pub struct Group {
     pub note: String,
     /// It can be set aside (a mail sender's).
     pub can_aside: bool,
+    /// Its sender's name ("GitHub", "Léa Martin"), its address when the
+    /// mail names none (#758).
+    pub name: String,
+    /// What sends it (#758): a machine, a newsletter, a person.
+    pub sender: Sender,
+    /// Set aside since ("depuis le 3 nov."), for a group set aside.
+    pub since: String,
+}
+
+/// Who sends a group's items (#758): the queue's view groups them so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Sender {
+    /// Automatic notifications (`X-GitHub-Reason`, `Auto-Submitted`…).
+    Machine,
+    /// A newsletter (`List-Unsubscribe`).
+    Letter,
+    /// A person: never offered to be left unsorted.
+    Person,
+    /// Not a mail: an application's notifications, a calendar.
+    #[default]
+    Other,
 }
 
 /// What the user does with a group.

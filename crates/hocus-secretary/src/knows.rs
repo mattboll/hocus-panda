@@ -116,12 +116,6 @@ fn episode(store: &Store, pointer: &str) -> Option<Read> {
         .map(|(s, k, d, at, open)| (s, k, d, unstamp(&at).map_or_else(|| store.today(), day_of), open))
 }
 
-/// The item's id at its source, from its pointer (`fixture-board:CHAP-412`
-/// → `CHAP-412`).
-fn item_id(pointer: &str) -> &str {
-    pointer.rsplit(':').next().unwrap_or(pointer)
-}
-
 /// "D'où je le sais" for a fact of `provenance`, from `pointer`, recorded
 /// or accepted when they say.
 fn origin(
@@ -138,9 +132,17 @@ fn origin(
         provenance: Some(provenance),
         ..Origin::default()
     };
+    // Where she has it from, plainly (#758): no ticket's code, no
+    // "source".
     out.text = match (provenance, accepted) {
-        (Provenance::Told, _) => format!("{} · {when}", w.t("tu me l’as dit", "you told me")),
-        (Provenance::Extracted, accepted) => {
+        (Provenance::Told, _) => {
+            if w.fr {
+                format!("Tu me l’as dit le {when}")
+            } else {
+                format!("You told me on {when}")
+            }
+        }
+        (Provenance::Extracted, _) => {
             let (source, day, open) = match episode(store, pointer) {
                 Some((source, _, digest, day, open)) => {
                     out.quote = Some(quote.map_or(digest, ToOwned::to_owned));
@@ -152,37 +154,65 @@ fn origin(
             if out.quote.is_none() {
                 out.quote = quote.map(ToOwned::to_owned);
             }
-            let source = source.unwrap_or_else(|| item_id(pointer).to_owned());
-            let read = if w.fr {
-                format!("lu dans {source}, {}", w.day(day))
+            let source = source.unwrap_or_else(|| w.t("une source", "a source"));
+            if w.fr {
+                format!("Vu dans {source}, le {}", w.day(day))
             } else {
-                format!("read in {source}, {}", w.day(day))
-            };
-            match accepted {
-                Some(_) => read,
-                None => format!("{read} · {}", w.t("à confirmer", "to confirm")),
+                format!("Seen in {source}, on {}", w.day(day))
             }
         }
-        (Provenance::Inferred, Some(_)) if pointer.starts_with("seen:") => format!(
-            "{} · {when}",
-            w.t("proposé par elle, accepté", "she proposed it, accepted")
-        ),
-        (Provenance::Inferred, Some(_)) => {
+        (Provenance::Inferred, Some(_)) if pointer.starts_with("seen:") => {
             if w.fr {
-                format!("déduit de {}, accepté · {when}", item_id(pointer))
+                format!("Ce que j’ai remarqué, confirmé le {when}")
             } else {
-                format!("inferred from {}, accepted · {when}", item_id(pointer))
+                format!("What I noticed, confirmed on {when}")
             }
         }
-        (Provenance::Inferred, None) => {
-            if w.fr {
-                format!("déduit de {} · à confirmer", item_id(pointer))
-            } else {
-                format!("inferred from {} · to confirm", item_id(pointer))
+        (Provenance::Inferred, accepted) => {
+            let from = guessed_from(store, w, pointer);
+            match (accepted, w.fr) {
+                (Some(_), true) => format!("Deviné d’après {from}, confirmé le {when}"),
+                (Some(_), false) => format!("Guessed from {from}, confirmed on {when}"),
+                (None, true) => format!("Deviné d’après {from}"),
+                (None, false) => format!("Guessed from {from}"),
             }
         }
     };
     out
+}
+
+/// What a guess comes from, by what it is and its title (#758): « le
+/// ticket « Refonte de l'accueil » », « le mail « Accès GitLab » ».
+fn guessed_from(store: &Store, w: &Words, pointer: &str) -> String {
+    let Some((source, kind, digest, _, _)) = episode(store, pointer) else {
+        return w.t("ce que j’ai lu", "what I read");
+    };
+    // A digest names its item first ("CHAP-412 · Égaluantes : …"): its
+    // title is what follows the code.
+    let title = digest
+        .split_once(" · ")
+        .filter(|(code, _)| !code.contains(' '))
+        .map_or(digest.as_str(), |(_, rest)| rest)
+        .trim()
+        .to_owned();
+    let what = match (kind.as_str(), w.fr) {
+        ("ticket" | "card" | "task", true) => "le ticket",
+        ("ticket" | "card" | "task", false) => "the ticket",
+        ("mail", true) => "le mail",
+        ("mail", false) => "the mail",
+        ("event", true) => "le rendez-vous",
+        ("event", false) => "the event",
+        ("message", true) => "le message",
+        ("message", false) => "the message",
+        (_, true) => "ce que j’ai lu :",
+        (_, false) => "what I read:",
+    };
+    let _ = source;
+    if w.fr {
+        format!("{what} «\u{a0}{title}\u{a0}»")
+    } else {
+        format!("{what} “{title}”")
+    }
 }
 
 fn edge_origin(store: &Store, w: &Words, edge: &Edge) -> Origin {
@@ -197,10 +227,14 @@ fn edge_origin(store: &Store, w: &Words, edge: &Edge) -> Origin {
     )
 }
 
-/// A node's name, or a value in quotes.
+/// A node's name, or a value in quotes; in the middle of a sentence, a
+/// name's article in lower case (« relit le site web », #758).
 fn target(store: &Store, target: &Target) -> String {
     match target {
-        Target::Node(id) => store.node(*id).map(|n| n.name).unwrap_or_default(),
+        Target::Node(id) => store
+            .node(*id)
+            .map(|n| crate::learn::mid_sentence(&n.name))
+            .unwrap_or_default(),
         Target::Value(v) => v.clone(),
     }
 }
@@ -229,7 +263,7 @@ fn said(store: &Store, w: &Words, edge: &Edge) -> String {
         ("client_of", false) => format!("client of {to}"),
         ("arrived", true) => format!("arrivée le {}", date(&to)),
         ("arrived", false) => format!("arrived on {}", date(&to)),
-        ("left", true) => format!("parti·e le {}", date(&to)),
+        ("left", true) => format!("a quitté l’équipe le {}", date(&to)),
         ("left", false) => format!("left on {}", date(&to)),
         ("role", _) => to,
         ("likes", true) => format!("aime {to}"),
@@ -278,7 +312,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             text: question,
             origin: Origin {
                 provenance: Some(Provenance::Inferred),
-                text: format!("{evidence} · {}", w.t("à confirmer", "to confirm")),
+                text: evidence,
                 ..Origin::default()
             },
             notebook: Some(notebook_of),
@@ -340,11 +374,11 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         let of = store.node(alias.node).map(|n| n.name).unwrap_or_default();
         week.push(Known {
             item: format!("alias:{}", alias.id),
-            title: String::new(),
+            title: of.clone(),
             text: if w.fr {
-                format!("«\u{a0}{}\u{a0}» est un mot de {of}", alias.alias)
+                format!(" s’écrit aussi «\u{a0}{}\u{a0}»", alias.alias)
             } else {
-                format!("“{}” is a word for {of}", alias.alias)
+                format!(" is also written “{}”", alias.alias)
             },
             origin: origin(
                 store,
@@ -380,7 +414,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             r.accepted_at,
         );
         if r.accepted_at.is_some() {
-            o.text = format!("{} · {}", w.t("règle", "rule"), o.text);
+            o.text = format!("{} · {}", w.t("Règle", "Rule"), lower_first(&o.text));
         }
         o
     };
@@ -395,7 +429,9 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             ..Known::default()
         });
     }
-    // What was learned this week, not kept yet.
+    // What was learned this week (#758: noted, corrected through its
+    // menu; nothing to keep).
+    let mut learned: Vec<Known> = Vec::new();
     for node in nodes.iter().filter(|n| new_nodes.contains(&n.id)) {
         let item = format!("node:{}", node.id);
         if kept.contains(&item)
@@ -414,36 +450,47 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             .iter()
             .find(|e| e.kind == "member_of")
             .map(|e| target(store, &e.target));
-        let text = match (node.kind, &team, w.fr) {
-            (NodeKind::Person, Some(team), true) => format!(" est arrivé·e, équipe {team}"),
-            (NodeKind::Person, None, true) => " est arrivé·e".to_owned(),
-            (NodeKind::Person, Some(team), false) => format!(" joined, team {team}"),
-            (NodeKind::Person, None, false) => " joined".to_owned(),
-            (_, _, true) => " : un projet de plus".to_owned(),
-            (_, _, false) => ": one more project".to_owned(),
+        let since = edges
+            .iter()
+            .find(|e| e.src == node.id && e.kind == "arrived")
+            .and_then(|e| e.valid_from)
+            .map(|d| w.day(d));
+        let text = match (node.kind, &team, &since, w.fr) {
+            (NodeKind::Person, Some(team), Some(day), true) => {
+                format!(" est dans l’équipe {team} depuis le {day}")
+            }
+            (NodeKind::Person, None, Some(day), true) => {
+                format!(" est dans l’équipe depuis le {day}")
+            }
+            (NodeKind::Person, Some(team), None, true) => format!(" est dans l’équipe {team}"),
+            (NodeKind::Person, None, None, true) => " est dans l’équipe".to_owned(),
+            (NodeKind::Person, Some(team), _, false) => format!(" is in the {team} team"),
+            (NodeKind::Person, None, _, false) => " is in the team".to_owned(),
+            (_, _, _, true) => " : un projet de plus".to_owned(),
+            (_, _, _, false) => ": one more project".to_owned(),
         };
         let first = current
             .iter()
             .find(|e| e.provenance == Provenance::Told)
             .or(current.first());
-        week.push(Known {
+        learned.push(Known {
             item,
             title: node.name.clone(),
             text,
             origin: first.map_or_else(
                 || Origin {
                     provenance: Some(Provenance::Told),
-                    text: format!(
-                        "{} · {}",
-                        w.t("tu me l’as dit", "you told me"),
-                        w.day(day_of(node.created))
-                    ),
+                    text: if w.fr {
+                        format!("Tu me l’as dit le {}", w.day(day_of(node.created)))
+                    } else {
+                        format!("You told me on {}", w.day(day_of(node.created)))
+                    },
                     ..Origin::default()
                 },
                 |e| edge_origin(store, &w, e),
             ),
             notebook: Some(node.notebook),
-            actions: vec![Act::Keep, Act::Forget],
+            actions: vec![Act::Edit, Act::Forget],
             ..Known::default()
         });
     }
@@ -459,13 +506,13 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             continue;
         }
         let who = store.node(edge.src).map(|n| n.name).unwrap_or_default();
-        week.push(Known {
+        learned.push(Known {
             item,
             title: who,
             text: format!(" {}", said(store, &w, edge)),
             origin: edge_origin(store, &w, edge),
             notebook: Some(edge.notebook),
-            actions: vec![Act::Keep, Act::Forget],
+            actions: vec![Act::Edit, Act::Close, Act::Forget],
             ..Known::default()
         });
     }
@@ -479,12 +526,13 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             continue;
         }
         let of = store.node(alias.node).map(|n| n.name).unwrap_or_default();
-        week.push(Known {
+        learned.push(Known {
             item,
+            title: of.clone(),
             text: if w.fr {
-                format!("«\u{a0}{}\u{a0}» est un mot de {of}", alias.alias)
+                format!(" s’écrit aussi «\u{a0}{}\u{a0}»", alias.alias)
             } else {
-                format!("“{}” is a word for {of}", alias.alias)
+                format!(" is also written “{}”", alias.alias)
             },
             origin: origin(
                 store,
@@ -496,7 +544,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
                 alias.accepted,
             ),
             notebook: Some(alias.notebook),
-            actions: vec![Act::Keep, Act::Forget],
+            actions: vec![Act::Forget],
             ..Known::default()
         });
     }
@@ -509,12 +557,12 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         if kept.contains(&item) {
             continue;
         }
-        week.push(Known {
+        learned.push(Known {
             item,
             text: rule_text(rule),
             origin: rule_origin(rule),
             notebook: Some(rule.notebook),
-            actions: vec![Act::Keep, Act::Forget],
+            actions: vec![Act::Edit, Act::Close, Act::Forget],
             ..Known::default()
         });
     }
@@ -523,7 +571,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         if kept.contains(&item) {
             continue;
         }
-        week.push(Known {
+        learned.push(Known {
             item,
             text: merge.1,
             origin: Origin {
@@ -535,7 +583,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
                 ),
                 ..Origin::default()
             },
-            actions: vec![Act::Keep, Act::Reject],
+            actions: vec![Act::Reject],
             ..Known::default()
         });
     }
@@ -574,7 +622,13 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             }
         }
         let text = match left {
-            Some(_) => format!(" · {}", w.t("parti·e", "left")),
+            Some(day) => {
+                if w.fr {
+                    format!(" · a quitté l’équipe le {}", w.day(day))
+                } else {
+                    format!(" · left the team on {}", w.day(day))
+                }
+            }
             None if parts.is_empty() => String::new(),
             None => format!(" · {}", parts.join(" · ")),
         };
@@ -610,7 +664,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         let new = arrived.is_some_and(|d| d >= day_of(week_ago)) && left.is_none();
         if new {
             tags.push(Tag {
-                text: w.t("nouvelle recrue", "new"),
+                text: w.t("arrivée récente", "new"),
                 tone: Tone::New,
             });
         }
@@ -648,7 +702,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         if let Some(day) = left {
             timeline.push(Step {
                 text: if w.fr {
-                    format!("parti·e le {}", w.day(day))
+                    format!("départ le {}", w.day(day))
                 } else {
                     format!("left on {}", w.day(day))
                 },
@@ -672,8 +726,8 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             (Some(_), _) => Origin {
                 provenance: None,
                 text: w.t(
-                    "gardé pour l’histoire · on ne te le propose plus",
-                    "kept for the record · no longer suggested",
+                    "Gardé pour l’historique ; je ne te le propose plus.",
+                    "Kept for the record; I no longer suggest it.",
                 ),
                 ..Origin::default()
             },
@@ -682,9 +736,9 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
                 provenance: None,
                 text: match &node.source {
                     Some(source) => {
-                        format!("{} {}", w.t("vu dans", "seen in"), shown_source(source))
+                        format!("{} {}", w.t("Vu dans", "Seen in"), shown_source(source))
                     }
-                    None => w.t("tu me l’as dit", "you told me"),
+                    None => w.t("Tu me l’as dit", "You told me"),
                 },
                 ..Origin::default()
             },
@@ -774,7 +828,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
                 text: match &node.source {
                     Some(source) => format!(
                         "{} {} · {}",
-                        w.t("vu dans", "seen in"),
+                        w.t("Vu dans", "Seen in"),
                         shown_source(source),
                         w.t(
                             &format!("depuis le {}", w.day(day_of(node.created))),
@@ -782,7 +836,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
                         )
                     ),
                     None => w.t(
-                        &format!("tu me l’as dit · depuis le {}", w.day(day_of(node.created))),
+                        &format!("Tu me l’as dit · depuis le {}", w.day(day_of(node.created))),
                         &format!("you told me · since {}", w.day(day_of(node.created))),
                     ),
                 },
@@ -909,17 +963,16 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             lines,
             origin: Origin {
                 provenance: None,
-                text: if w.fr {
-                    format!(
-                        "{count} élément{} ces 30 jours · lecture seule",
-                        if count > 1 { "s" } else { "" }
-                    )
-                } else {
-                    format!(
-                        "{count} item{} in 30 days · read only",
-                        if count > 1 { "s" } else { "" }
-                    )
-                },
+                text: format!(
+                    "{} · {}",
+                    upper_first(&learn::quiet_things(
+                        &shown,
+                        u32::try_from(count).unwrap_or(u32::MAX),
+                        30,
+                        w.fr
+                    )),
+                    w.t("lecture seule", "read only")
+                ),
                 ..Origin::default()
             },
             notebook: Some(*book),
@@ -949,7 +1002,7 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             lines,
             origin: Origin {
                 provenance: Some(Provenance::Told),
-                text: w.t("tu m’en as parlé", "you told me about it"),
+                text: w.t("Tu m’en as parlé", "You told me about it"),
                 ..Origin::default()
             },
             notebook: Some(node.notebook),
@@ -1003,7 +1056,6 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
     let departed = people.iter().filter(|p| p.left).count();
     let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
     let chips = vec![
-        (None, w.t("Tout", "All"), 0),
         (
             Some(Kind::People),
             w.t("Personnes", "People"),
@@ -1017,10 +1069,11 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         (Some(Kind::Rules), w.t("Règles", "Rules"), rules_known.len()),
         (Some(Kind::Tools), w.t("Outils", "Tools"), tools.len()),
         (
-            Some(Kind::You),
-            w.t("Toi", "You"),
-            you.len() + style_known.len(),
+            Some(Kind::Manner),
+            w.t("Ma façon d’être", "My way of being"),
+            style_known.len(),
         ),
+        (Some(Kind::You), w.t("Toi", "You"), you.len()),
         (
             Some(Kind::Maintenance),
             w.t("Maintenance", "Maintenance"),
@@ -1043,18 +1096,26 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             count: count(n),
         })
         .collect();
-    let week_len = week.len();
     let mut sections = vec![
+        (
+            None,
+            "confirm",
+            w.t("À CONFIRMER", "TO CONFIRM"),
+            w.t(
+                "je ne m’en sers pas tant que tu n’as pas répondu",
+                "I don’t use it until you answer",
+            ),
+            week,
+        ),
         (
             None,
             "week",
             w.t("APPRIS CETTE SEMAINE", "LEARNED THIS WEEK"),
-            if w.fr {
-                format!("{week_len} · à garder ou oublier")
-            } else {
-                format!("{week_len} · keep or forget")
-            },
-            week,
+            w.t(
+                "c’est noté ; corrige si besoin",
+                "noted; correct it if needed",
+            ),
+            learned,
         ),
         (
             Some(Kind::People),
@@ -1062,13 +1123,9 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             w.t("PERSONNES", "PEOPLE"),
             if departed > 0 {
                 if w.fr {
-                    format!(
-                        "{} · {departed} parti{}",
-                        people.len(),
-                        if departed > 1 { "es" } else { "e" }
-                    )
+                    format!("{}, dont {departed} hors de l’équipe", people.len())
                 } else {
-                    format!("{} · {departed} left", people.len())
+                    format!("{}, {departed} out of the team", people.len())
                 }
             } else {
                 people.len().to_string()
@@ -1104,14 +1161,10 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
             you,
         ),
         (
-            Some(Kind::You),
+            Some(Kind::Manner),
             "style",
-            w.t("SA FAÇON D’ÊTRE", "HER WAY OF BEING"),
-            if w.fr {
-                format!("{} · ce que tu lui as demandé", style_known.len())
-            } else {
-                format!("{} · what you asked her", style_known.len())
-            },
+            w.t("MA FAÇON D’ÊTRE", "MY WAY OF BEING"),
+            w.t("ce que tu m’as demandé", "what you asked me"),
             style_known,
         ),
         (
@@ -1158,9 +1211,9 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
     };
     let sections: Vec<Section> = sections
         .drain(..)
-        .filter(|(kind, key, ..)| match query.kind {
+        .filter(|(kind, ..)| match query.kind {
             None => true,
-            Some(k) => *kind == Some(k) && *key != "week",
+            Some(k) => *kind == Some(k),
         })
         .map(|(_, key, title, note, mut items)| {
             items.retain(&matches);
@@ -1279,4 +1332,20 @@ fn merges(store: &Store, since: Timestamp, fr: bool) -> Result<Vec<(i64, String,
         out.push((line.id, text, line.at));
     }
     Ok(out)
+}
+
+fn upper_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }

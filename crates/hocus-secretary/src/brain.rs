@@ -626,6 +626,8 @@ impl Brain {
                     self.key_missing = missing;
                     self.tell_look();
                 }
+                // Her first run waits for this answer: her key first.
+                self.first_run_step();
             }
             Event::Changed(crate::watch::Watched::Consents) => self.consents_changed(),
             Event::Changed(crate::watch::Watched::Config) => {
@@ -718,6 +720,7 @@ impl Brain {
                 Err(err) => self.error(conn, Some(id), err),
             },
             ToSecretary::Ask { id, text } => self.sentence(conn, id, text),
+            ToSecretary::RemindMe { id, item, pointer } => self.remind_me(conn, id, item, &pointer),
             ToSecretary::Choose { id, item, choice } => self.choose(conn, id, item, choice),
             ToSecretary::Decide {
                 id,
@@ -725,8 +728,9 @@ impl Brain {
                 decision,
                 notebook,
                 left_out,
+                off,
             } => {
-                if !self.consent_decide(conn, id, item, decision, notebook, left_out) {
+                if !self.consent_decide(conn, id, item, decision, notebook, left_out, off) {
                     self.decide(conn, id, item, decision);
                 }
             }

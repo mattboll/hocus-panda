@@ -3,9 +3,10 @@
 //! Google accounts: a company's and a gmail.com one) and Google's services
 //! faked on this machine: never the network, never the session's bus.
 //!
-//! - One source at a time: a consent card per kind of each account, the
-//!   next only once the last is answered; then « Dis-moi sur quoi tu
-//!   travailles et avec qui. », never asked again, a restart included.
+//! - One account at a time (#758): a card per account, a switch per kind,
+//!   the next only once the last is answered, her first run's steps saying
+//!   where it is; then « Dis-moi sur quoi tu travailles, et avec qui. »,
+//!   never asked again, a restart included.
 //! - Pro or perso suggested by the account's domain, chosen on the card.
 //! - "Autoriser" writes the grant in her consent book and her source
 //!   reads it at once; "Pas maintenant" writes nothing; "Ne plus lire" a
@@ -132,6 +133,29 @@ fn waiting(items: &[Item]) -> Vec<(u64, Card)> {
         .collect()
 }
 
+/// Her first run's steps: each title, state and note.
+fn steps(items: &[Item]) -> Vec<String> {
+    items
+        .iter()
+        .find_map(|i| match &i.body {
+            Body::Steps { steps } => Some(
+                steps
+                    .iter()
+                    .map(|s| {
+                        let state = match s.state {
+                            hocus_secretary_link::StepState::Done => "done",
+                            hocus_secretary_link::StepState::Now => "now",
+                            hocus_secretary_link::StepState::Later => "later",
+                        };
+                        format!("{} · {state} · {}", s.title, s.note)
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 fn hers(items: &[Item]) -> Vec<String> {
     items
         .iter()
@@ -143,12 +167,24 @@ fn hers(items: &[Item]) -> Vec<String> {
 }
 
 fn decide(driver: &mut common::Driver, item: u64, decision: Decision, notebook: Option<Notebook>) {
+    decide_off(driver, item, decision, notebook, Vec::new());
+}
+
+/// A card's button, `off` its kinds switched off.
+fn decide_off(
+    driver: &mut common::Driver,
+    item: u64,
+    decision: Decision,
+    notebook: Option<Notebook>,
+    off: Vec<SourceKind>,
+) {
     let answer = driver.request(|id| ToSecretary::Decide {
         id,
         item,
         decision,
         notebook,
         left_out: Vec::new(),
+        off: off.clone(),
     });
     assert!(
         matches!(answer, FromSecretary::Answer { done: true, .. }),
@@ -171,16 +207,40 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
     let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
     let said = hers(&items);
     assert!(
-        said[0].contains("une source à la fois"),
+        said[0].contains("Je ne fais rien sans ton clic."),
         "she introduces herself: {said:?}"
     );
+    // Her steps (#758): no key to give here, the accounts now.
+    assert_eq!(
+        steps(&items),
+        [
+            "Ce que je peux lire de tes comptes Google · now · 1 sur 2",
+            "Sur quoi tu travailles, et avec qui · later · ",
+        ]
+    );
     let first = waiting(&items);
-    assert_eq!(first.len(), 1, "one source at a time");
+    assert_eq!(first.len(), 1, "one account at a time");
     let (card_id, card) = &first[0];
-    assert_eq!(card.label, format!("Agenda · {WORK}"));
+    assert_eq!(card.label, "Ton compte Google · 1 sur 2");
     let sheet = card.sheet.as_ref().expect("its sheet");
-    assert_eq!(sheet.title, "Lire ton agenda ?");
+    assert_eq!(sheet.title, WORK);
+    assert_eq!(sheet.from, "déjà connecté à cet ordinateur");
     assert_eq!(sheet.notebook, Notebook::Pro, "a company's domain: pro");
+    let reads: Vec<(SourceKind, bool)> = sheet.reads.iter().map(|r| (r.kind, r.on)).collect();
+    assert_eq!(
+        reads,
+        [
+            (SourceKind::Calendar, true),
+            (SourceKind::Mail, true),
+            (SourceKind::Birthdays, false)
+        ]
+    );
+    assert_eq!(card.actions[0].label, "Autoriser l’agenda et les mails");
+    assert_eq!(
+        sheet.then.as_ref().map(|t| t.identity.as_str()),
+        Some(PERSO),
+        "the next account announced"
+    );
     assert_eq!(sheet.sections.len(), 3);
     assert!(
         sheet.sections[1]
@@ -194,13 +254,32 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
     );
     let asked_before = bed.api.asked().len();
 
-    // "Autoriser", pro: the grant written, her source reading at once.
-    decide(&mut driver, *card_id, Decision::Accept, Some(Notebook::Pro));
+    // "Autoriser", pro, the birthdays off: two grants, her source reading
+    // at once.
+    decide_off(
+        &mut driver,
+        *card_id,
+        Decision::Accept,
+        Some(Notebook::Pro),
+        vec![SourceKind::Birthdays],
+    );
     let grant = book(&bed.book())
         .grant(&SourceKey::new(WORK_ID, SourceKind::Calendar))
         .expect("the calendar granted");
     assert_eq!(grant.notebook(), Notebook::Pro);
     assert_eq!(grant.identity(), WORK);
+    assert!(
+        book(&bed.book())
+            .grant(&SourceKey::new(WORK_ID, SourceKind::Mail))
+            .is_some(),
+        "the mail granted"
+    );
+    assert!(
+        book(&bed.book())
+            .grant(&SourceKey::new(WORK_ID, SourceKind::Birthdays))
+            .is_none(),
+        "switched off: not granted"
+    );
     let start = std::time::Instant::now();
     while bed.api.asked().len() == asked_before {
         assert!(
@@ -218,70 +297,56 @@ fn her_first_run_asks_one_source_at_a_time_then_what_the_user_works_on() -> anyh
         .expect("the card");
     assert_eq!(
         granted.outcome.as_deref(),
-        Some("Je lis ton agenda · travail")
+        Some("Je lis ton agenda et tes mails · travail")
     );
     assert_eq!(granted.actions.len(), 1);
     assert_eq!(granted.actions[0].label, "Ne plus lire");
 
-    // The next: the same account's birthdays. "Pas maintenant": nothing
-    // written; then its mail.
-    let next = waiting(&items);
-    assert_eq!(next.len(), 1);
-    assert_eq!(next[0].1.label, format!("Anniversaires · {WORK}"));
-    decide(&mut driver, next[0].0, Decision::Reject, None);
-    let items = thread(&mut driver);
-    let mail = waiting(&items);
-    assert_eq!(mail[0].1.label, format!("Gmail · {WORK}"));
-    assert!(
-        book(&bed.book())
-            .grant(&SourceKey::new(WORK_ID, SourceKind::Birthdays))
-            .is_none()
-    );
+    // The gmail.com account: perso suggested; "Pas maintenant" writes
+    // nothing.
+    let perso = waiting(&items);
+    assert_eq!(perso.len(), 1);
+    assert_eq!(perso[0].1.label, "Ton compte Google · 2 sur 2");
+    let sheet = perso[0].1.sheet.as_ref().expect("its sheet");
+    assert_eq!(sheet.title, PERSO);
+    assert_eq!(sheet.notebook, Notebook::Perso);
+    assert_eq!(sheet.private.choice[1], "Privé");
+    assert!(sheet.then.is_none());
+    decide(&mut driver, perso[0].0, Decision::Reject, None);
     assert_eq!(
         book(&bed.book()).records().len(),
-        1,
+        2,
         "Pas maintenant writes nothing"
     );
-    decide(&mut driver, mail[0].0, Decision::Reject, None);
-
-    // The gmail.com account: perso suggested, and asked.
-    let items = thread(&mut driver);
-    let perso = waiting(&items);
-    assert_eq!(perso[0].1.label, format!("Agenda · {PERSO}"));
-    let sheet = perso[0].1.sheet.as_ref().expect("its sheet");
-    assert_eq!(sheet.notebook, Notebook::Perso);
-    assert_eq!(sheet.private.label, "C’est privé", "checked: gmail.com");
-    decide(&mut driver, perso[0].0, Decision::Accept, None);
-    assert_eq!(
-        book(&bed.book())
-            .grant(&SourceKey::new(PERSO_ID, SourceKind::Calendar))
-            .map(|g| g.notebook()),
-        Some(Notebook::Perso),
-        "the notebook the card suggested"
-    );
-    for _ in 0..2 {
-        let items = thread(&mut driver);
-        let next = waiting(&items);
-        assert_eq!(next.len(), 1);
-        decide(&mut driver, next[0].0, Decision::Reject, None);
-    }
     let items = thread(&mut driver);
     assert!(waiting(&items).is_empty());
     assert_eq!(
         hers(&items).last().map(String::as_str),
-        Some("Dis-moi sur quoi tu travailles et avec qui.")
+        Some("Dis-moi sur quoi tu travailles, et avec qui.")
+    );
+    assert_eq!(
+        steps(&items),
+        [
+            "Ce que je peux lire de tes comptes Google · done · ",
+            "Sur quoi tu travailles, et avec qui · now · ",
+        ]
     );
 
-    // "Ne plus lire" on the work calendar: a revocation.
+    // "Ne plus lire" on the work account: a revocation of both.
     decide(&mut driver, *card_id, Decision::Reject, None);
     assert!(
         book(&bed.book())
             .grant(&SourceKey::new(WORK_ID, SourceKind::Calendar))
             .is_none()
     );
+    let mut revoked = book(&bed.book()).revoked();
+    revoked.sort();
     assert_eq!(
-        book(&bed.book()).revoked(),
-        [SourceKey::new(WORK_ID, SourceKind::Calendar)]
+        revoked,
+        [
+            SourceKey::new(WORK_ID, SourceKind::Calendar),
+            SourceKey::new(WORK_ID, SourceKind::Mail)
+        ]
     );
     let before = thread(&mut driver);
     drop(driver.stop());
@@ -456,6 +521,7 @@ fn the_agenda_s_card_lists_its_calendars_and_one_unreadable_is_said() -> anyhow:
         decision: Decision::Accept,
         notebook: Some(Notebook::Pro),
         left_out: vec!["famille@group.calendar.google.com".to_owned()],
+        off: Vec::new(),
     });
     assert!(matches!(answer, FromSecretary::Answer { done: true, .. }));
     let grant = book(&bed.book())
@@ -516,7 +582,7 @@ fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
     const ASSO: &str = "alex.asso@gmail.com";
     let bed = Bed::start()?;
     let mut driver = common::Driver::start(Store::in_memory(common::clock())?, bed.options());
-    for _ in 0..6 {
+    for _ in 0..2 {
         let items = thread_until(&mut driver, |items| !waiting(items).is_empty());
         decide(&mut driver, waiting(&items)[0].0, Decision::Reject, None);
     }
@@ -524,7 +590,7 @@ fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
     assert!(waiting(&items).is_empty());
     assert_eq!(
         hers(&items).last().map(String::as_str),
-        Some("Dis-moi sur quoi tu travailles et avec qui.")
+        Some("Dis-moi sur quoi tu travailles, et avec qui.")
     );
     bed.goa.add("account_1700000000_2", ASSO)?;
     // At her source's next cycle, the account is found.
@@ -539,19 +605,19 @@ fn an_account_added_later_is_asked_about_in_the_drawer() -> anyhow::Result<()> {
     );
     let new = waiting(&items);
     assert_eq!(new.len(), 1, "one at a time");
-    assert_eq!(new[0].1.label, format!("Agenda · {ASSO}"));
+    assert_eq!(
+        new[0].1.sheet.as_ref().map(|s| s.title.as_str()),
+        Some(ASSO)
+    );
     decide(&mut driver, new[0].0, Decision::Reject, None);
     let items = thread(&mut driver);
-    assert_eq!(
-        waiting(&items)[0].1.label,
-        format!("Anniversaires · {ASSO}")
-    );
+    assert!(waiting(&items).is_empty(), "one card for the account");
     assert_eq!(
         cards(&items)
             .iter()
-            .filter(|(_, c)| c.label.contains("atelier-lune"))
+            .filter(|(_, c)| c.sheet.as_ref().is_some_and(|s| s.title == WORK))
             .count(),
-        3,
+        1,
         "the accounts asked about before are not asked again"
     );
     driver.stop();

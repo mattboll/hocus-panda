@@ -3,19 +3,24 @@
 //!
 //! Her Google source says, at each of its cycles, the accounts Online
 //! Accounts has ([`super::Synced::found`]). The first time a shell (or a
-//! test) is there once she knows them, she introduces herself and asks,
-//! **one source at a time**: a consent card (its sheet: what she reads,
-//! what she never does there, what leaves the machine, the notebook
-//! suggested by the account's domain) for each kind of each account that
-//! has no decision yet. "Autoriser" writes the grant in the consent book,
-//! in the notebook chosen on the card, and her source reads it at once;
-//! "Pas maintenant" writes nothing and goes on to the next. Then
-//! « Dis-moi sur quoi tu travailles et avec qui. », and the first run is
+//! test) is there once she knows them, she introduces herself and shows
+//! her first run's three steps (#758, [`Body::Steps`]): her key, what she
+//! may read of each Google account, what the user works on. Her key
+//! first: while she misses one, nothing else is asked. Then **one card
+//! per account** (its sheet: a switch per kind, the calendar and the mail
+//! on, « Travail | Privé » suggested by the account's domain, what she
+//! reads and what leaves the machine folded under a link), for each
+//! account with a kind not decided yet. « Autoriser l'agenda et les
+//! mails » writes a grant for each kind switched on, in the notebook
+//! chosen, and her source reads it at once; the kinds switched off, and
+//! "Pas maintenant", write nothing and go on to the next account. Then
+//! « Dis-moi sur quoi tu travailles, et avec qui. », and the first run is
 //! over (her memory's `meta` `first-run`), never asked again.
 //!
-//! A granted card keeps "Ne plus lire": a revocation, and her source
-//! forgets what came from it at once. The Settings write the same book
-//! (Settings › Secretary): a card granted or revoked there says so at her
+//! A granted card keeps "Ne plus lire": a revocation of what it granted,
+//! and her source forgets what came from it at once. The Settings write
+//! the same book (Settings › Secretary): a card granted or revoked there
+//! says so at her
 //! next cycle.
 
 use std::collections::{HashMap, HashSet};
@@ -43,6 +48,9 @@ const GOOGLE: &str = "google";
 const KNOWN: &str = "accounts-known";
 /// Her memory's `meta` key of each source's notebook as last filed.
 const NOTEBOOKS: &str = "source-notebooks";
+/// Her memory's `meta` key of her first run's steps item, and whether it
+/// shows her key's step (#758).
+const STEPS: &str = "first-run-steps";
 
 /// Where the first run is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,11 +63,32 @@ pub(super) enum FirstRun {
     Done,
 }
 
-/// A consent card: its source, and the account's e-mail.
+/// A consent card: its source (an account's first kind), the account's
+/// e-mail, and the kinds it asks for (#758; none: its source's only, a
+/// card of before).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct Asked {
     pub source: SourceKey,
     pub identity: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<SourceKind>,
+}
+
+impl Asked {
+    fn kinds(&self) -> Vec<SourceKind> {
+        if self.kinds.is_empty() {
+            vec![self.source.kind]
+        } else {
+            self.kinds.clone()
+        }
+    }
+
+    fn sources(&self) -> Vec<SourceKey> {
+        self.kinds()
+            .into_iter()
+            .map(|k| SourceKey::new(&self.source.account, k))
+            .collect()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -137,6 +166,29 @@ impl Brain {
             .unwrap_or_default()
     }
 
+    /// The kinds of her Google accounts she may read now.
+    pub(super) fn granted_kinds(&self) -> Vec<SourceKind> {
+        self.book()
+            .granted()
+            .iter()
+            .map(|g| g.source().kind)
+            .collect()
+    }
+
+    /// `account`'s kinds still to ask about: no decision in the book, not
+    /// put off this run.
+    fn undecided(&self, book: &ConsentBook, account: &GoogleAccount) -> Vec<SourceKind> {
+        account
+            .kinds()
+            .into_iter()
+            .filter(|kind| {
+                let source = SourceKey::new(&account.id, *kind);
+                !book.records().iter().any(|r| r.source == source)
+                    && !self.consents.later.contains(&source)
+            })
+            .collect()
+    }
+
     /// Her Google source listed these accounts' calendars (#752): kept in
     /// her folder for the Settings' Agenda rows, shown on an Agenda's
     /// card still waiting, and those she could not read said in her
@@ -163,7 +215,7 @@ impl Brain {
             .consents
             .cards
             .iter()
-            .filter(|(_, a)| a.source.kind == SourceKind::Calendar)
+            .filter(|(_, a)| a.kinds().contains(&SourceKind::Calendar))
             .map(|(i, a)| (*i, a.clone()))
             .collect();
         for (item, asked) in cards {
@@ -237,44 +289,33 @@ impl Brain {
         let book = self.book();
         let new: Vec<&GoogleAccount> = accounts.iter().filter(|a| !known.contains(&a.id)).collect();
         for account in new {
-            let next = account.kinds().into_iter().find(|kind| {
-                let source = SourceKey::new(&account.id, *kind);
-                !book.records().iter().any(|r| r.source == source)
-                    && !self.consents.later.contains(&source)
-            });
-            let Some(kind) = next else {
+            let kinds = self.undecided(&book, account);
+            if kinds.is_empty() {
                 known.push(account.id.clone());
                 self.keep_known(&known);
                 continue;
-            };
-            let asked_before = self
-                .consents
-                .cards
-                .values()
-                .any(|a| a.source.account == account.id);
-            if !asked_before {
-                let said = if self.talk.fr() {
-                    format!(
-                        "J’ai trouvé un nouveau compte Google : {}. Je ne lis rien sans ton accord.",
-                        account.identity
-                    )
-                } else {
-                    format!(
-                        "I found a new Google account: {}. I read nothing without your consent.",
-                        account.identity
-                    )
-                };
-                self.add_item(
-                    None,
-                    Body::Her {
-                        text: said,
-                        note: None,
-                        assumed: false,
-                    },
-                );
             }
+            let said = if self.talk.fr() {
+                format!(
+                    "J’ai trouvé un nouveau compte Google : {}. Je ne lis rien sans ton accord.",
+                    account.identity
+                )
+            } else {
+                format!(
+                    "I found a new Google account: {}. I read nothing without your consent.",
+                    account.identity
+                )
+            };
+            self.add_item(
+                None,
+                Body::Her {
+                    text: said,
+                    note: None,
+                    assumed: false,
+                },
+            );
             tracing::info!(account = account.id, "a new account: she asks for it");
-            self.consent_card(account, kind);
+            self.consent_card(account, &kinds, None, None);
             self.tell_look();
             return;
         }
@@ -366,7 +407,7 @@ impl Brain {
     }
 
     /// The next step of her first run, when there is one to take: a
-    /// shell is there, and she knows her accounts.
+    /// shell is there, and she knows her accounts; her key first.
     pub(super) fn first_run_step(&mut self) {
         if !matches!(self.consents.first_run, FirstRun::Waiting) {
             return;
@@ -375,6 +416,10 @@ impl Brain {
             return;
         };
         if !self.conns.keys().any(|c| self.talker(*c)) {
+            return;
+        }
+        // Whether her key is missing is being asked of the keyring.
+        if self.key_asked {
             return;
         }
         let fr = self.talk.fr();
@@ -391,16 +436,16 @@ impl Brain {
             };
             let hello = match (accounts.is_empty(), fr) {
                 (false, true) => format!(
-                    "Bonjour, je suis {me}. Je ne lis rien sans ton accord : je te demande, une source à la fois."
+                    "Bonjour, je suis {me}. Je lis ce que tu m’autorises, je te fais le point le matin, je te rappelle ce qui compte. Je ne fais rien sans ton clic."
                 ),
                 (false, false) => format!(
-                    "Hello, I’m {me}. I read nothing without your consent: I’ll ask you, one source at a time."
+                    "Hello, I’m {me}. I read what you allow me to, brief you in the morning, remind you of what matters. I do nothing without your click."
                 ),
                 (true, true) => format!(
-                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google dans Comptes en ligne : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Secrétaire."
+                    "Bonjour, je suis {me}. Je n’ai trouvé aucun compte Google sur cet ordinateur : quand tu en ajouteras un, tu pourras me l’ouvrir dans Réglages › Secrétaire."
                 ),
                 (true, false) => format!(
-                    "Hello, I’m {me}. I found no Google account in Online Accounts: once you add one, you can open it to me in Settings › Secretary."
+                    "Hello, I’m {me}. I found no Google account on this computer: once you add one, you can open it to me in Settings › Secretary."
                 ),
             };
             self.add_item(
@@ -414,26 +459,40 @@ impl Brain {
             if let Err(err) = self.store.set_meta(FIRST_RUN, "begun") {
                 tracing::warn!(%err, "could not note her first run");
             }
+            // Her steps under her hello, before anything is asked.
+            self.steps(Some(usize::from(self.key_missing.is_none())));
+        }
+        // Her key first: nothing else is asked while she misses it.
+        if self.key_missing.is_some() {
+            self.steps(Some(0));
+            self.tell_look();
+            return;
         }
         let book = self.book();
-        let next = accounts.iter().find_map(|account| {
-            account.kinds().into_iter().find_map(|kind| {
-                let source = SourceKey::new(&account.id, kind);
-                let undecided = !book.records().iter().any(|r| r.source == source);
-                (undecided && !self.consents.later.contains(&source))
-                    .then(|| (account.clone(), kind))
-            })
-        });
-        match next {
-            Some((account, kind)) => {
-                let item = self.consent_card(&account, kind);
+        let asking: Vec<(GoogleAccount, Vec<SourceKind>)> = accounts
+            .iter()
+            .map(|a| (a.clone(), self.undecided(&book, a)))
+            .filter(|(_, kinds)| !kinds.is_empty())
+            .collect();
+        match asking.first() {
+            Some((account, kinds)) => {
+                let total = accounts.len();
+                let at = accounts
+                    .iter()
+                    .position(|a| a.id == account.id)
+                    .unwrap_or(0)
+                    + 1;
+                let then = asking.get(1).map(|(a, _)| a.clone());
+                let item = self.consent_card(account, kinds, Some((at, total)), then.as_ref());
                 self.consents.first_run = FirstRun::Asking(item);
+                self.steps(Some(1));
             }
             None => {
                 let ask = self.talk.t(
-                    "Dis-moi sur quoi tu travailles et avec qui.",
+                    "Dis-moi sur quoi tu travailles, et avec qui.",
                     "Tell me what you work on, and with whom.",
                 );
+                self.steps(Some(2));
                 self.add_item(
                     None,
                     Body::Her {
@@ -452,12 +511,145 @@ impl Brain {
         self.tell_look();
     }
 
-    /// A consent card for `account`'s `kind`, in its suggested notebook.
-    fn consent_card(&mut self, account: &GoogleAccount, kind: SourceKind) -> u64 {
+    /// Her first run is under way: begun, her accounts known, not over.
+    pub(super) fn first_run_under_way(&self) -> bool {
+        self.consents.accounts.is_some()
+            && self.consents.first_run != FirstRun::Done
+            && self.conns.keys().any(|c| self.talker(*c))
+    }
+
+    /// Her first run's steps (#758), step `now` the one being taken (none:
+    /// all done), added once and changed in place after. The key's step
+    /// shows only when she missed one.
+    pub(super) fn steps(&mut self, now: Option<usize>) {
+        use hocus_secretary_link::{Step, StepState};
+        let fr = self.talk.fr();
+        let kept: Option<(u64, bool)> = self
+            .store
+            .meta(STEPS)
+            .ok()
+            .flatten()
+            .and_then(|t| serde_json::from_str(&t).ok());
+        let shown = kept.filter(|(item, _)| self.talk.items.iter().any(|i| i.id == *item));
+        let with_key = shown.map_or(self.key_missing.is_some(), |(_, k)| k);
+        let accounts = self.consents.accounts.as_ref().map_or(0, Vec::len);
+        let asking = match self.consents.first_run {
+            FirstRun::Asking(item) => self.consents.cards.get(&item).and_then(|a| {
+                self.consents
+                    .accounts
+                    .as_ref()?
+                    .iter()
+                    .position(|g| g.id == a.source.account)
+            }),
+            _ => None,
+        };
+        let state = |n: usize| match now {
+            Some(at) if n < at => StepState::Done,
+            Some(at) if n == at => StepState::Now,
+            Some(_) => StepState::Later,
+            None => StepState::Done,
+        };
+        let mut steps = Vec::new();
+        if with_key {
+            let st = state(0);
+            steps.push(Step {
+                title: self
+                    .talk
+                    .t("Ma clé Anthropic", "My Anthropic key")
+                    .to_owned(),
+                note: match st {
+                    StepState::Done => self.talk.t("enregistrée", "saved"),
+                    StepState::Now => self.talk.t("maintenant, ci-dessus", "now, above"),
+                    StepState::Later => "",
+                }
+                .to_owned(),
+                state: st,
+            });
+        }
+        let st = state(1);
+        steps.push(Step {
+            title: self
+                .talk
+                .t(
+                    "Ce que je peux lire de tes comptes Google",
+                    "What I may read of your Google accounts",
+                )
+                .to_owned(),
+            note: match (st, asking, fr) {
+                (StepState::Now, Some(at), true) => format!("{} sur {accounts}", at + 1),
+                (StepState::Now, Some(at), false) => format!("{} of {accounts}", at + 1),
+                (StepState::Done, _, _) => String::new(),
+                (_, _, true) if accounts > 1 => format!("{accounts} comptes"),
+                (_, _, false) if accounts > 1 => format!("{accounts} accounts"),
+                (_, _, true) if accounts == 1 => "1 compte".to_owned(),
+                (_, _, false) if accounts == 1 => "1 account".to_owned(),
+                _ => String::new(),
+            },
+            state: st,
+        });
+        steps.push(Step {
+            title: self
+                .talk
+                .t(
+                    "Sur quoi tu travailles, et avec qui",
+                    "What you work on, and with whom",
+                )
+                .to_owned(),
+            note: String::new(),
+            state: state(2),
+        });
+        let body = Body::Steps { steps };
+        match shown {
+            Some((item, _)) => self.change_item(item, |b| *b = body),
+            None => {
+                let item = self.add_item(None, body);
+                let written = serde_json::to_string(&(item, with_key))
+                    .map_err(|e| e.to_string())
+                    .and_then(|t| self.store.set_meta(STEPS, &t).map_err(|e| e.to_string()));
+                if let Err(err) = written {
+                    tracing::warn!(%err, "could not keep her first run's steps");
+                }
+            }
+        }
+    }
+
+    /// Her first run's last step answered: the user told her something.
+    pub(super) fn steps_answered(&mut self) {
+        if self.consents.first_run != FirstRun::Done {
+            return;
+        }
+        let shown = self
+            .store
+            .meta(STEPS)
+            .ok()
+            .flatten()
+            .and_then(|t| serde_json::from_str::<(u64, bool)>(&t).ok())
+            .map(|(item, _)| item);
+        let waits = shown.is_some_and(|item| {
+            self.talk.items.iter().any(|i| {
+                i.id == item
+                    && matches!(&i.body, Body::Steps { steps } if steps.iter().any(|s| s.state != hocus_secretary_link::StepState::Done))
+            })
+        });
+        if waits {
+            self.steps(None);
+        }
+    }
+
+    /// A consent card for `account`'s `kinds` (#758: one card per
+    /// account), in its suggested notebook; `at`, which account of how
+    /// many; `then`, the account asked about next.
+    fn consent_card(
+        &mut self,
+        account: &GoogleAccount,
+        kinds: &[SourceKind],
+        at: Option<(usize, usize)>,
+        then: Option<&GoogleAccount>,
+    ) -> u64 {
         let fr = self.talk.fr();
         let quiet = self.settings.current().speak.restraint().perso;
-        let mut sheet = sheets::google(&account.identity, kind, account.suggested, quiet, fr);
-        if kind == SourceKind::Calendar {
+        let mut sheet = sheets::account(&account.identity, kinds, account.suggested, quiet, fr);
+        if kinds.contains(&SourceKind::Calendar) {
             sheet.calendars = self
                 .consents
                 .calendars
@@ -465,14 +657,37 @@ impl Brain {
                 .cloned()
                 .unwrap_or_default();
         }
+        sheet.then = then.map(|next| sheets::Then {
+            identity: next.identity.clone(),
+            note: match (next.suggested, fr) {
+                (Notebook::Perso, true) => "ensuite · je te propose « Privé »".to_owned(),
+                (Notebook::Pro, true) => "ensuite · je te propose « Travail »".to_owned(),
+                (Notebook::Perso, false) => "next · I suggest “Private”".to_owned(),
+                (Notebook::Pro, false) => "next · I suggest “Work”".to_owned(),
+            },
+        });
+        let on: Vec<SourceKind> = sheet
+            .reads
+            .iter()
+            .filter(|r| r.on)
+            .map(|r| r.kind)
+            .collect();
+        let label = match (at, fr) {
+            (Some((n, total)), true) if total > 1 => format!("Ton compte Google · {n} sur {total}"),
+            (Some((n, total)), false) if total > 1 => {
+                format!("Your Google account · {n} of {total}")
+            }
+            (_, true) => "Ton compte Google".to_owned(),
+            (_, false) => "Your Google account".to_owned(),
+        };
         let card = Card {
             kind: CardKind::Consent,
-            label: format!("{} · {}", sheets::kind_name(kind, fr), account.identity),
+            label,
             text: String::new(),
             lines: Vec::new(),
             actions: vec![
                 Action {
-                    label: self.talk.t("Autoriser", "Allow").to_owned(),
+                    label: sheets::allow_label(&on, fr),
                     decision: Decision::Accept,
                 },
                 Action {
@@ -488,14 +703,16 @@ impl Brain {
         tracing::info!(
             item,
             account = account.id,
-            kind = kind.as_str(),
-            "she asks to read a source"
+            kinds = kinds.len(),
+            "she asks to read an account"
         );
+        let first = kinds.first().copied().unwrap_or(SourceKind::Calendar);
         self.consents.cards.insert(
             item,
             Asked {
-                source: SourceKey::new(&account.id, kind),
+                source: SourceKey::new(&account.id, first),
                 identity: account.identity.clone(),
+                kinds: kinds.to_vec(),
             },
         );
         self.keep_cards();
@@ -503,8 +720,10 @@ impl Brain {
     }
 
     /// A consent card's button (`true`: it was one). "Autoriser" writes
-    /// the grant into `notebook`; "Pas maintenant" nothing; "Ne plus
-    /// lire" a revocation.
+    /// a grant for each kind switched on (none in `off`) into `notebook`;
+    /// "Pas maintenant" nothing; "Ne plus lire" a revocation of what it
+    /// granted.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn consent_decide(
         &mut self,
         conn: u64,
@@ -513,6 +732,7 @@ impl Brain {
         decision: Decision,
         notebook: Option<Notebook>,
         left_out: Vec<String>,
+        off: Vec<SourceKind>,
     ) -> bool {
         let Some(asked) = self.consents.cards.get(&item).cloned() else {
             return false;
@@ -522,31 +742,55 @@ impl Brain {
             return true;
         };
         let mut book = ConsentBook::load(&path);
-        let granted = book.grant(&asked.source);
+        let sources = asked.sources();
+        let granted: Vec<SourceKey> = sources
+            .iter()
+            .filter(|s| book.grant(s).is_some())
+            .cloned()
+            .collect();
         let fr = self.talk.fr();
         let now = self.clock.now();
-        let what = what_she_reads(asked.source.kind, fr);
-        let (outcome, actions, decided, wrote) = match (decision, granted) {
-            (Decision::Accept, None) => {
+        let on: Vec<SourceKey> = sources
+            .iter()
+            .filter(|s| !off.contains(&s.kind))
+            .cloned()
+            .collect();
+        let decision = if decision == Decision::Accept && on.is_empty() {
+            Decision::Reject
+        } else {
+            decision
+        };
+        let (outcome, actions, decided, wrote) = match (decision, granted.is_empty()) {
+            (Decision::Accept, true) => {
                 let notebook = notebook
                     .or_else(|| self.card_notebook(item))
                     .unwrap_or_default();
-                book.allow_leaving_out(
-                    asked.source.clone(),
-                    &asked.identity,
-                    notebook,
-                    left_out,
-                    now,
-                );
+                for source in &on {
+                    let left = if source.kind == SourceKind::Calendar {
+                        left_out.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    book.allow_leaving_out(source.clone(), &asked.identity, notebook, left, now);
+                }
+                for source in sources.iter().filter(|s| off.contains(&s.kind)) {
+                    self.consents.later.insert(source.clone());
+                }
+                let kinds: Vec<SourceKind> = on.iter().map(|s| s.kind).collect();
                 let said = format!(
-                    "{} {what} · {}",
+                    "{} {} · {}",
                     self.talk.t("Je lis", "I read"),
+                    what_she_reads_all(&kinds, fr),
                     notebook.said(fr)
                 );
                 (said, vec![self.stop_reading()], None, true)
             }
-            (Decision::Reject, Some(_)) => {
-                book.revoke(&asked.source, now);
+            (Decision::Reject, false) => {
+                for source in &granted {
+                    book.revoke(source, now);
+                }
+                let kinds: Vec<SourceKind> = granted.iter().map(|s| s.kind).collect();
+                let what = what_she_reads_all(&kinds, fr);
                 let said = if fr {
                     format!("Je ne lis plus {what}, et j’oublie ce que j’en savais.")
                 } else {
@@ -554,8 +798,10 @@ impl Brain {
                 };
                 (said, Vec::new(), Some(Decision::Reject), true)
             }
-            (Decision::Reject, None) => {
-                self.consents.later.insert(asked.source.clone());
+            (Decision::Reject, true) => {
+                for source in &sources {
+                    self.consents.later.insert(source.clone());
+                }
                 let said = self
                     .talk
                     .t(
@@ -575,11 +821,11 @@ impl Brain {
             self.error(conn, Some(id), format!("the consent is not written: {err}"));
             return true;
         }
-        tracing::info!(item, source = %asked.source, ?decision, "a source's consent from the drawer");
+        tracing::info!(item, account = %asked.source.account, ?decision, off = off.len(), "an account's consent from the drawer");
         self.audited(audit::Entry {
             kind: audit::Kind::Answer,
             what: "consent".to_owned(),
-            ids: vec![asked.source.to_string()],
+            ids: sources.iter().map(ToString::to_string).collect(),
             outcome: Some(
                 match decision {
                     Decision::Accept => "granted",
@@ -649,12 +895,21 @@ impl Brain {
             else {
                 continue;
             };
-            let granted = book.grant(&asked.source);
+            let grants: Vec<_> = asked
+                .sources()
+                .iter()
+                .filter_map(|s| book.grant(s))
+                .collect();
             let shown_granted = card.actions.iter().any(|a| a.decision == Decision::Reject)
                 && card.outcome.is_some()
                 && card.decided.is_none();
-            let what = what_she_reads(asked.source.kind, fr);
-            match granted {
+            let kinds: Vec<SourceKind> = if grants.is_empty() {
+                asked.kinds()
+            } else {
+                grants.iter().map(|g| g.source().kind).collect()
+            };
+            let what = what_she_reads_all(&kinds, fr);
+            match grants.first() {
                 Some(grant) if !shown_granted => {
                     let said = if fr {
                         format!(
@@ -668,6 +923,13 @@ impl Brain {
                         )
                     };
                     let stop = self.stop_reading();
+                    // The account answered in the Settings: its other
+                    // kinds are not asked again this run.
+                    for source in asked.sources() {
+                        if book.grant(&source).is_none() {
+                            self.consents.later.insert(source);
+                        }
+                    }
                     self.change_item(item, |body| {
                         if let Body::Card { card } = body {
                             card.outcome = Some(said);
@@ -696,6 +958,17 @@ impl Brain {
                 _ => {}
             }
         }
+    }
+}
+
+/// What she reads of `kinds`, in a sentence: "ton agenda et tes mails".
+fn what_she_reads_all(kinds: &[SourceKind], fr: bool) -> String {
+    let words: Vec<&str> = kinds.iter().map(|k| what_she_reads(*k, fr)).collect();
+    let and = if fr { " et " } else { " and " };
+    match words.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{}{and}{last}", rest.join(", ")),
     }
 }
 

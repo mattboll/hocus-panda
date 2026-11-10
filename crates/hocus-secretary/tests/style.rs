@@ -1,7 +1,7 @@
 //! Her way of being (#753), her side, through the fake model, its
 //! recorder and fixture sources, on a clock of her own:
 //!
-//! - a style said in the drawer is kept ("Retenu : … · Annuler") with no
+//! - a style said in the drawer is kept ("Noté : … · Annuler") with no
 //!   model call, reaches the frozen system part of every request right
 //!   after her persona, survives a restart, shows in "Ce qu'elle sait" ›
 //!   "Sa façon d'être", and goes with "Tout oublier";
@@ -166,7 +166,7 @@ fn a_way_of_being_said_reaches_her_prompt_survives_a_restart_and_goes_with_tout_
         options(&[], MODEL, &recorder, power.path()),
     );
     let said = ask(&driver, 1, "Vouvoie-moi");
-    assert_eq!(learned(&said), ["Retenu\u{a0}: vouvoiement"]);
+    assert_eq!(learned(&said), ["Noté\u{a0}: vouvoiement"]);
     assert!(calls(&recorder).is_empty(), "read in code: no model call");
     let system = prompt(&driver, &recorder, 2);
     let block = system
@@ -187,7 +187,7 @@ fn a_way_of_being_said_reaches_her_prompt_survives_a_restart_and_goes_with_tout_
         .and_then(|s| s.items.first())
         .expect("its item");
     assert!(
-        item.origin.text.starts_with("tu me l’as dit"),
+        item.origin.text.starts_with("Tu me l’as dit le "),
         "{:?}",
         item.origin
     );
@@ -231,7 +231,7 @@ fn a_later_item_replaces_a_contradicting_one_and_oublier_closes_it() -> anyhow::
         hers(&replaced).contains("Ça remplace «\u{a0}Vouvoiement\u{a0}»"),
         "{replaced:?}"
     );
-    assert_eq!(learned(&replaced), ["Retenu\u{a0}: tutoiement"]);
+    assert_eq!(learned(&replaced), ["Noté\u{a0}: tutoiement"]);
     // The same again is one.
     let again = ask(&driver, 4, "tutoie-moi stp");
     assert!(
@@ -380,6 +380,7 @@ fn a_source_cannot_add_one_and_her_model_s_needs_the_user_s_words_and_a_click() 
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let kept = items(&until(&driver, |l| {
         matches!(
@@ -391,7 +392,7 @@ fn a_source_cannot_add_one_and_her_model_s_needs_the_user_s_words_and_a_click() 
             }
         )
     }));
-    assert_eq!(learned(&kept), ["Retenu\u{a0}: termine par une question."]);
+    assert_eq!(learned(&kept), ["Noté\u{a0}: termine par une question."]);
     assert!(prompt(&driver, &recorder, 6).contains("- Termine par une question."));
     let store = driver.stop();
     assert_eq!(style::current(&store, date(2026, 11, 9))?.len(), 1);
@@ -510,7 +511,9 @@ fn shorter_asked_after_her_answers_is_proposed_once_and_changes_nothing_before_o
         .and_then(|s| s.items.first())
         .expect("kept");
     assert!(
-        item.origin.text.starts_with("proposé par elle, accepté"),
+        item.origin
+            .text
+            .starts_with("Ce que j’ai remarqué, confirmé"),
         "{:?}",
         item.origin
     );

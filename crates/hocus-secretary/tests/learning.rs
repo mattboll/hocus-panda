@@ -245,6 +245,7 @@ fn an_arrival_said_is_searched_proposed_kept_and_undone_within_ten_seconds() -> 
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let kept = until(&driver, ended(2));
     let learned = items(&kept)
@@ -289,6 +290,7 @@ fn an_arrival_said_is_searched_proposed_kept_and_undone_within_ten_seconds() -> 
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let kept = until(&driver, ended(5));
     let learned = items(&kept)
@@ -434,7 +436,7 @@ fn a_said_fact_closes_the_one_it_contradicts_at_its_date() -> anyhow::Result<()>
     assert!(
         texts
             .iter()
-            .any(|t| t.contains("Retenu") && t.contains("Nadia Ferreira")),
+            .any(|t| t.contains("Noté") && t.contains("Nadia Ferreira")),
         "{texts:?}"
     );
     assert!(
@@ -540,7 +542,9 @@ fn a_rule_is_restated_checked_kept_and_applied() -> anyhow::Result<()> {
         "{shown:?}"
     );
     assert!(
-        shown.iter().any(|t| t.contains("Retenu · règle n")),
+        shown
+            .iter()
+            .any(|t| t.contains("Noté") && t.contains("Congés")),
         "{shown:?}"
     );
     assert!(
@@ -647,7 +651,7 @@ fn what_she_sees_and_notices_changes_nothing_until_accepted() -> anyhow::Result<
         .expect("a proposal in Ce qu'elle sait")
         .clone();
     assert!(
-        proposal.origin.text.contains("à confirmer"),
+        proposal.origin.text.starts_with("Vu dans Slack"),
         "{:?}",
         proposal.origin
     );
@@ -847,7 +851,11 @@ fn the_triage_s_facts_are_proposals_with_their_source() -> anyhow::Result<()> {
         .find(|k| k.proposal && k.text.contains("travaille sur Chapitô"))
         .expect("the proposal")
         .clone();
-    assert!(works.origin.text.contains("à confirmer"));
+    assert!(
+        works.origin.text.starts_with("Vu dans"),
+        "{:?}",
+        works.origin
+    );
     act(&mut driver, &works.item, Act::Accept);
     let reviews = format!("edge:{inferred}");
     act(&mut driver, &reviews, Act::Accept);
@@ -876,7 +884,11 @@ fn the_triage_s_facts_are_proposals_with_their_source() -> anyhow::Result<()> {
         .iter()
         .find(|k| k.text.contains("travaille sur Chapitô"))
         .expect("learned this week");
-    assert!(read.origin.text.starts_with("lu dans"), "{:?}", read.origin);
+    assert!(
+        read.origin.text.starts_with("Vu dans Gmail, le "),
+        "{:?}",
+        read.origin
+    );
     assert_eq!(
         read.origin.open.as_deref(),
         Some("https://mail.google.com/mail/u/0/#all/18c2"),

@@ -439,7 +439,8 @@ fn her_key_is_given_through_her_and_never_shown() -> anyhow::Result<()> {
     let shown = bed.shows(|s| s["secretary"]["key"]["said"].is_string())?;
     assert_eq!(
         shown["secretary"]["key"]["said"],
-        "Clé refusée par Anthropic."
+        // The words her drawer says too (#758): what to do.
+        "Anthropic refuse cette clé. Vérifie qu’elle est complète, ou crée-en une autre dans la console."
     );
     assert_eq!(
         shown["secretary"]["key"]["typed"], false,

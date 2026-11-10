@@ -101,9 +101,9 @@ impl Brain {
                     self.her(id, text, None);
                 }
                 let text = if fr {
-                    format!("Retenu\u{a0}: {}", lower_first(&asked.said(true)))
+                    format!("Noté\u{a0}: {}", lower_first(&asked.said(true)))
                 } else {
-                    format!("Kept: {}", lower_first(&asked.said(false)))
+                    format!("Noted: {}", lower_first(&asked.said(false)))
                 };
                 self.learned(id, text, edits);
                 tracing::info!(rule, aspect = asked.aspect(), "a way of being kept");

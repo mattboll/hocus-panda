@@ -187,7 +187,7 @@ fn an_unknown_word_on_one_projects_board_is_asked_once() -> anyhow::Result<()> {
         panic!("a question: {questions:?}");
     };
     assert!(
-        text.contains("égaluantes") && text.contains("Chapitô"),
+        text.contains("Égaluantes") && text.contains("Chapitô"),
         "{text}"
     );
     assert!(!text.contains("site web"));
@@ -195,10 +195,7 @@ fn an_unknown_word_on_one_projects_board_is_asked_once() -> anyhow::Result<()> {
         note.as_deref().is_some_and(|n| n.contains("CHAP-412")),
         "{note:?}"
     );
-    assert_eq!(
-        replies,
-        &["Oui, Chapitô", "Non, autre chose", "Je t’explique"]
-    );
+    assert_eq!(replies, &["Oui, c’est Chapitô", "Non", "Je t’explique"]);
     assert_eq!(
         calls(&recorder),
         0,
@@ -228,7 +225,7 @@ fn an_unknown_word_on_one_projects_board_is_asked_once() -> anyhow::Result<()> {
         )));
     assert!(
         made.iter()
-            .any(|i| matches!(&i.body, Body::User { text } if text == "Oui, Chapitô"))
+            .any(|i| matches!(&i.body, Body::User { text } if text == "Oui, c’est Chapitô"))
     );
     let learned = made
         .iter()
@@ -375,6 +372,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let decided = until(&driver, ended(2));
     assert!(items(&decided).iter().any(|i| i.id == cards[0].0
@@ -387,6 +385,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         decision: Decision::Reject,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     until(&driver, ended(3));
     assert_eq!(
@@ -401,6 +400,7 @@ fn a_model_that_tries_to_act_only_proposes() -> anyhow::Result<()> {
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     assert!(matches!(again, FromSecretary::Error { .. }), "{again:?}");
     assert_eq!(effects(&recorder), ["message"], "decided once");

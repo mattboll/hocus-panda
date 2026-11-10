@@ -212,12 +212,15 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
     let spoken = speaks(&lines);
     assert_eq!(spoken.len(), 1);
     assert_eq!(spoken[0].kind, SpeakKind::Briefing);
-    assert!(spoken[0].text.contains("Ton point est prêt"), "{spoken:?}");
+    assert!(
+        spoken[0].text.contains("Ton point du matin est prêt"),
+        "{spoken:?}"
+    );
     let made = briefings(&lines);
     assert_eq!(made.len(), 1, "{lines:?}");
     let (item, briefing) = &made[0];
     assert_eq!(spoken[0].item, Some(item.id));
-    assert!(briefing.title.starts_with("Le point du matin"));
+    assert!(briefing.title.starts_with("Ton point du matin"));
     assert_eq!(
         briefing.sentence,
         "Une journée chargée, mais un bon créneau ce matin."
@@ -348,6 +351,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let after = until(&driver, |l| {
         matches!(
@@ -363,7 +367,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         .iter()
         .find_map(|l| match l {
             FromSecretary::Item { item } => match &item.body {
-                Body::Card { card } if card.label == "Message à Karim Benali" => {
+                Body::Card { card } if card.label == "Message · à Karim Benali" => {
                     Some((item.id, card.clone()))
                 }
                 _ => None,
@@ -384,6 +388,7 @@ event = {{ end = "{}", calendar = "Travail", attendees = ["Léa Martin"] }}
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     until(&driver, |l| {
         matches!(
@@ -554,6 +559,7 @@ mail = {{ to = ["Léa Martin <lea@atelier-lune.fr>"], sent = true }}
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     let asked = until(&driver, |l| matches!(l, FromSecretary::Effect { .. }));
     let Some(FromSecretary::Effect {
@@ -690,6 +696,7 @@ mail = {{ to = ["Paul Durand <paul@client.fr>"], sent = true }}
         decision: Decision::Accept,
         notebook: None,
         left_out: Vec::new(),
+        off: Vec::new(),
     });
     until(&driver, |l| matches!(l, FromSecretary::Effect { .. }));
     driver.send(&ToSecretary::Effected {

@@ -332,6 +332,7 @@ pub fn decide(
     decision: Decision,
     notebook: Option<hocus_secretary_link::Notebook>,
     left_out: Vec<String>,
+    off: Vec<hocus_secretary_link::consent::SourceKind>,
 ) {
     let id = next_id();
     tracing::info!(
@@ -348,7 +349,15 @@ pub fn decide(
         decision,
         notebook,
         left_out,
+        off,
     });
+}
+
+/// "Rappelle-le-moi" on a briefing's mail to answer (#758).
+pub fn remind_me(item: u64, pointer: String) {
+    let id = next_id();
+    tracing::info!(id, item, "a mail to answer, to be reminded of");
+    send(ToSecretary::RemindMe { id, item, pointer });
 }
 
 /// "Annuler" under what she kept.

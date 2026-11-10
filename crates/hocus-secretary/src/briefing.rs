@@ -15,7 +15,7 @@
 //!   slot free for every invitee from the next working day ([`Move`]).
 //! - **À RÉPONDRE**: at most three mails for the user, from a person,
 //!   waiting for an answer (the triage said so), with none in Sent.
-//! - **LE RESTE, EN TROIS LIGNES**: her model's; else what came, counted.
+//! - **LE RESTE**: her model's; else what came, counted.
 //! - **HIER, TU VOULAIS** and **AUJOURD'HUI, TU M'AS DIT**: the tasks put
 //!   in To do through her, by day.
 //! - **À NE PAS OUBLIER**: reminders gone by unsaid, or kept for here.
@@ -71,6 +71,50 @@ pub struct Built {
     pub listed: Vec<i64>,
     /// How many things came while away, and how many matter.
     pub arrived: usize,
+    /// What is in it, for her peek (#758): "3 réunions, 2 mails attendent
+    /// ta réponse, Sophie est en congés".
+    pub peek: String,
+}
+
+/// What opens the item `pointer` at its source, if anything does.
+fn open_of(store: &Store, pointer: &str) -> Option<String> {
+    store
+        .conn
+        .query_row(
+            "SELECT open FROM episodes WHERE pointer = ?1 AND open IS NOT NULL ORDER BY id DESC LIMIT 1",
+            [pointer],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+}
+
+/// The day's free slots of an hour or more between 9 h and 18 h, around
+/// `meetings` (#758).
+fn free_slots(meetings: &[Event], day: Date, zone: &TimeZone) -> Vec<(Zoned, Zoned)> {
+    let at = |h: i8| {
+        day.at(h, 0, 0, 0)
+            .to_zoned(zone.clone())
+            .map(|z| z.timestamp())
+            .ok()
+    };
+    let (Some(open), Some(close)) = (at(9), at(18)) else {
+        return Vec::new();
+    };
+    let mut busy: Vec<(Timestamp, Timestamp)> = meetings
+        .iter()
+        .filter(|m| m.end > open && m.start < close)
+        .map(|m| (m.start.max(open), m.end.min(close)))
+        .collect();
+    busy.sort();
+    let mut free = Vec::new();
+    let mut from = open;
+    for (start, end) in busy.into_iter().chain([(close, close)]) {
+        if start.duration_since(from) >= SignedDuration::from_hours(1) {
+            free.push((from.to_zoned(zone.clone()), start.to_zoned(zone.clone())));
+        }
+        from = from.max(end);
+    }
+    free
 }
 
 fn w<'a>(english: bool, fr: &'a str, en: &'a str) -> &'a str {
@@ -212,7 +256,7 @@ pub fn compile_rule(store: &Store, rule: i64, compiled: &str) -> crate::store::R
 }
 
 /// The user's first name, from her graph.
-fn first_name(store: &Store) -> Option<String> {
+pub(crate) fn first_name(store: &Store) -> Option<String> {
     store
         .conn
         .query_row(
@@ -516,12 +560,18 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
         if received > 0 || arrived > 0 {
             let count = if received > 0 { received } else { arrived };
             let text = match (en, matter.len()) {
-                (false, 0) => format!("{count} arrivés, rien qui attende ta réponse"),
-                (false, 1) => format!("{count} arrivés, 1 qui compte"),
-                (false, n) => format!("{count} arrivés, {n} qui comptent"),
+                (false, 0) => format!(
+                    "{count} {}{s} arrivé{s}, rien qui attende ta réponse",
+                    if received > 0 { "mail" } else { "message" },
+                    s = if count > 1 { "s" } else { "" }
+                ),
+                (false, n) => format!(
+                    "{count} {}{s} arrivé{s}, dont {n} pour toi",
+                    if received > 0 { "mail" } else { "message" },
+                    s = if count > 1 { "s" } else { "" }
+                ),
                 (true, 0) => format!("{count} came, nothing waiting for your answer"),
-                (true, 1) => format!("{count} came, 1 that matters"),
-                (true, n) => format!("{count} came, {n} that matter"),
+                (true, n) => format!("{count} came, {n} for you"),
             };
             lines.push(line(text, Notebook::Pro));
         }
@@ -535,6 +585,8 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
                 .unwrap_or_default();
             l.when = when(mail.at, &here, en);
             l.attention = true;
+            l.pointer.clone_from(&mail.pointer);
+            l.open = open_of(store, &mail.pointer);
             lines.push(l);
         }
         // Perso items that came: their digests.
@@ -710,6 +762,8 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
                         .unwrap_or_default();
                     l.when = when(m.at, &here, en);
                     l.attention = true;
+                    l.pointer.clone_from(&m.pointer);
+                    l.open = open_of(store, &m.pointer);
                     if !(input.public && m.notebook == Notebook::Perso) {
                         facts_lines.push(format!("[à répondre] {} — {}", l.title, l.detail));
                     }
@@ -719,7 +773,12 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             sections.push(Section {
                 key: "answer".to_owned(),
                 label: w(en, "À RÉPONDRE", "TO ANSWER").to_owned(),
-                note: w(en, "vraiment", "really").to_owned(),
+                note: match (en, waiting.len()) {
+                    (false, 1) => "1 mail".to_owned(),
+                    (false, n) => format!("{n} mails"),
+                    (true, 1) => "1 mail".to_owned(),
+                    (true, n) => format!("{n} mails"),
+                },
                 lines,
                 proposal: None,
             });
@@ -763,7 +822,7 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
         if !rest.is_empty() {
             sections.push(Section {
                 key: "rest".to_owned(),
-                label: w(en, "LE RESTE, EN TROIS LIGNES", "THE REST, IN THREE LINES").to_owned(),
+                label: w(en, "LE RESTE", "THE REST").to_owned(),
                 note: String::new(),
                 lines: rest,
                 proposal: None,
@@ -850,12 +909,99 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
     } else {
         format!("Lu à {} : {}", hour(&here, en), input.read.join(", "))
     };
+    // What is in it, in a line (#758), and its free slot named.
+    let (mut summary, mut peek) = (Vec::new(), Vec::new());
+    let (mut busy, mut slot) = (String::new(), String::new());
+    if kind == BriefingKind::Morning {
+        let meetings = meetings_today
+            .iter()
+            .filter(|m| m.notebook == Notebook::Pro)
+            .count();
+        if meetings > 0 {
+            let said = match (en, meetings) {
+                (false, 1) => "1 réunion".to_owned(),
+                (false, n) => format!("{n} réunions"),
+                (true, 1) => "1 meeting".to_owned(),
+                (true, n) => format!("{n} meetings"),
+            };
+            summary.push(said.clone());
+            peek.push(said);
+        }
+        let answer = sections.iter().find(|s| s.key == "answer").map_or(0, |s| {
+            s.lines
+                .iter()
+                .filter(|l| l.notebook == Notebook::Pro)
+                .count()
+        });
+        if answer > 0 {
+            let said = match (en, answer) {
+                (false, 1) => "1 mail attend ta réponse".to_owned(),
+                (false, n) => format!("{n} mails attendent ta réponse"),
+                (true, 1) => "1 mail waits for your answer".to_owned(),
+                (true, n) => format!("{n} mails wait for your answer"),
+            };
+            summary.push(said.clone());
+            peek.push(said);
+        }
+        if let Some((name, _, last)) = away.first() {
+            let first = name.split_whitespace().next().unwrap_or(name);
+            summary.push(match (en, last) {
+                (false, Some(last)) if *last > today => {
+                    format!("{first} en congés jusqu’au {}", last.day())
+                }
+                (true, Some(last)) if *last > today => {
+                    format!("{first} on leave until {}", short(*last, en))
+                }
+                (false, _) => format!("{first} en congés"),
+                (true, _) => format!("{first} on leave"),
+            });
+            peek.push(if en {
+                format!("{first} is on leave")
+            } else {
+                format!("{first} est en congés")
+            });
+        }
+        let free = free_slots(&meetings_today, today, zone);
+        let full = meetings_today.len() >= 3;
+        let day_word = match (full, en) {
+            (true, false) => "une journée chargée ; ",
+            (true, true) => "a busy day; ",
+            (false, _) => "",
+        };
+        match free.as_slice() {
+            [] if meetings_today.is_empty() => {
+                busy = w(en, "une journée sans réunion", "a day without meetings").to_owned();
+            }
+            [] => {
+                busy = w(en, "pas de créneau libre d’une heure", "no free hour").to_owned();
+            }
+            [(from, to)] => {
+                busy = format!(
+                    "{day_word}{}",
+                    w(en, "ton seul créneau libre", "your only free slot")
+                );
+                slot = format!("{} – {}", hour(from, en), hour(to, en));
+            }
+            more => {
+                if let Some((from, to)) = more
+                    .iter()
+                    .max_by_key(|(a, b)| b.timestamp().duration_since(a.timestamp()))
+                {
+                    busy = format!(
+                        "{day_word}{}",
+                        w(en, "ton plus long créneau libre", "your longest free slot")
+                    );
+                    slot = format!("{} – {}", hour(from, en), hour(to, en));
+                }
+            }
+        }
+    }
     let (title, hello, sentence_date) = match kind {
         BriefingKind::Morning => (
             if en {
-                format!("Morning briefing · {}", hour(&here, en))
+                format!("Your morning briefing · {}", hour(&here, en))
             } else {
-                format!("Le point du matin · {}", hour(&here, en))
+                format!("Ton point du matin · {}", hour(&here, en))
             },
             match first_name(store) {
                 Some(name) => format!("{} {name}", w(en, "Bonjour", "Good morning")),
@@ -883,6 +1029,9 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             hello,
             date: sentence_date,
             sentence: String::new(),
+            busy,
+            slot,
+            summary: summary.join(" · "),
             sections,
             footer,
         },
@@ -890,6 +1039,7 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
         facts: facts_lines.join("\n"),
         listed,
         arrived,
+        peek: peek.join(", "),
     }
 }
 

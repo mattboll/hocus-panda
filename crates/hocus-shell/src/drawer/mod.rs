@@ -84,12 +84,61 @@ impl Words {
         self.pick("Ce qu’elle sait", "What she knows")
     }
 
-    pub fn placeholder(self) -> &'static str {
-        self.pick("Dis-lui quelque chose…", "Tell her something…")
+    /// The field's placeholder, to her by her name (#758).
+    pub fn placeholder(self, name: &str) -> String {
+        if self.fr {
+            format!("Écris à {name}…")
+        } else {
+            format!("Write to {name}…")
+        }
     }
 
+    /// Under the field: nothing that does not help to write (#758).
     pub fn keys(self) -> &'static str {
-        self.pick("Entrée envoie · Échap ferme", "Enter sends · Esc closes")
+        self.pick(
+            "Entrée envoie · Maj+Entrée : à la ligne",
+            "Enter sends · Shift+Enter: new line",
+        )
+    }
+
+    /// Her header's button to her queue (#758).
+    pub fn to_sort(self, n: u64) -> String {
+        match (self.fr, n) {
+            (true, 1) => "1 mail à trier ›".to_owned(),
+            (true, n) => format!("{n} mails à trier ›"),
+            (false, 1) => "1 mail to sort ›".to_owned(),
+            (false, n) => format!("{n} mails to sort ›"),
+        }
+    }
+
+    /// What can be asked of her, in an empty drawer (#758).
+    pub fn examples(self) -> [&'static str; 3] {
+        if self.fr {
+            [
+                "Qu’est-ce que j’ai aujourd’hui ?",
+                "Qui attend une réponse de moi ?",
+                "Rappelle-moi d’appeler Paul à 16 h",
+            ]
+        } else {
+            [
+                "What do I have today?",
+                "Who is waiting for an answer from me?",
+                "Remind me to call Paul at 4 pm",
+            ]
+        }
+    }
+
+    /// Under a draft waiting for its click (#758).
+    pub fn nothing_leaves(self) -> &'static str {
+        self.pick(
+            "Rien ne part sans ce clic.",
+            "Nothing leaves without this click.",
+        )
+    }
+
+    /// A question's label (#758): blue, a question, not an alert.
+    pub fn question(self) -> &'static str {
+        self.pick("QUESTION", "QUESTION")
     }
 
     pub fn writing(self) -> &'static str {
@@ -116,12 +165,65 @@ impl Words {
         self.pick("Annuler", "Undo")
     }
 
+    /// A sub-view's way back (#758).
     pub fn back(self) -> &'static str {
-        self.pick("‹ Discussion", "‹ Conversation")
+        self.pick("‹ Retour à la discussion", "‹ Back to the conversation")
     }
 
     pub fn open_point(self) -> &'static str {
-        self.pick("Ouvrir le point", "Open the briefing")
+        self.pick("Voir le point", "See the briefing")
+    }
+
+    /// A briefing's mail to answer (#758): it opens, never marked read.
+    pub fn open_mail(self) -> &'static str {
+        self.pick("Ouvrir le mail ↗", "Open the mail ↗")
+    }
+
+    pub fn remind_me(self) -> &'static str {
+        self.pick("Rappelle-le-moi", "Remind me")
+    }
+
+    /// The queue view's title, and the briefing's.
+    pub fn queue_title(self) -> &'static str {
+        self.pick("Le tri de tes mails", "Sorting your mail")
+    }
+
+    /// Her key's band (#758): what a key is, where to make one, what it
+    /// costs; its field, its note.
+    pub fn key_title(self, name: &str) -> String {
+        if self.fr {
+            format!("Pour te répondre, il me faut une clé {name}")
+        } else {
+            format!("To answer you, I need an {name} key")
+        }
+    }
+
+    pub fn key_explain(self) -> &'static str {
+        self.pick(
+            "Je réfléchis avec Claude, d’Anthropic. Crée une clé d’API dans la console d’Anthropic, puis colle-la ici. Elle est facturée à l’usage, à part d’un abonnement Claude.",
+            "I think with Claude, by Anthropic. Create an API key in Anthropic’s console, then paste it here. It is billed by use, apart from a Claude subscription.",
+        )
+    }
+
+    pub fn key_console(self) -> &'static str {
+        self.pick(
+            "Ouvrir la console d’Anthropic ↗",
+            "Open Anthropic’s console ↗",
+        )
+    }
+
+    pub fn key_placeholder(self) -> &'static str {
+        self.pick(
+            "Colle ta clé ici (elle commence par sk-ant-)",
+            "Paste your key here (it starts with sk-ant-)",
+        )
+    }
+
+    pub fn key_note(self) -> &'static str {
+        self.pick(
+            "Je la garde dans le trousseau de ta session, avec tes mots de passe ; jamais dans un fichier.",
+            "I keep it in your session’s keyring, with your passwords; never in a file.",
+        )
     }
 
     pub fn show(self) -> &'static str {
@@ -171,8 +273,8 @@ impl Words {
 
     pub fn knows_subtitle(self) -> &'static str {
         self.pick(
-            "Tout ce qu’elle sait, d’où elle le tient",
-            "All she knows, and where she has it from",
+            "Tout ce qu’elle sait de toi et de ton travail, et d’où elle le tient",
+            "All she knows of you and your work, and where she has it from",
         )
     }
 
@@ -185,9 +287,9 @@ impl Words {
 
     pub fn notebooks(self) -> [&'static str; 3] {
         if self.fr {
-            ["Tout", "Travail", "Privé"]
+            ["Travail et privé", "Travail", "Privé"]
         } else {
-            ["All", "Work", "Private"]
+            ["Work and private", "Work", "Private"]
         }
     }
 
@@ -197,25 +299,35 @@ impl Words {
         let merge = item.starts_with("edit:");
         match act {
             Act::Edit => self.pick("Modifier", "Edit"),
-            Act::Close => self.pick("N’est plus vrai", "No longer true"),
+            Act::Close => self.pick("Ce n’est plus vrai", "No longer true"),
             Act::Forget => self.pick("Oublier", "Forget"),
             Act::Keep => self.pick("Garder", "Keep"),
             Act::Accept if seen => self.pick("Oui", "Yes"),
-            Act::Accept => self.pick("C’est vrai", "It’s true"),
+            Act::Accept => self.pick("C’est juste", "That’s right"),
             Act::Reject if seen => self.pick("Non", "No"),
             Act::Reject if merge => self.pick("Défaire", "Undo"),
-            Act::Reject => self.pick("Oublier", "Forget"),
+            Act::Reject => self.pick("Faux", "Wrong"),
             Act::Later => self.pick("Plus tard", "Later"),
         }
     }
 
     pub fn memories(self, n: u64) -> String {
         match (self.fr, n) {
-            (true, 1) => "1 souvenir, sur cette machine, chiffré".to_owned(),
-            (true, n) => format!("{n} souvenirs, sur cette machine, chiffrés"),
-            (false, 1) => "1 memory, on this machine, encrypted".to_owned(),
-            (false, n) => format!("{n} memories, on this machine, encrypted"),
+            (true, 1) => "1 chose, chiffrée sur cet ordinateur".to_owned(),
+            (true, n) => format!("{n} choses, chiffrées sur cet ordinateur"),
+            (false, 1) => "1 thing, encrypted on this computer".to_owned(),
+            (false, n) => format!("{n} things, encrypted on this computer"),
         }
+    }
+
+    /// "Effacer… ▾", apart from "Exporter" (#758).
+    pub fn erase(self) -> &'static str {
+        self.pick("Effacer… ▾", "Erase… ▾")
+    }
+
+    /// "···"'s "Voir d'où je le sais".
+    pub fn whence(self) -> &'static str {
+        self.pick("Voir d’où je le sais", "See where I have it from")
     }
 
     pub fn export(self) -> &'static str {
@@ -373,6 +485,32 @@ pub enum Target {
     ToastUndo,
     /// « Copier » on her answer or a draft card `item`, on hover (#757).
     Copy(u64),
+    /// One of the empty drawer's examples (#758): it is said to her.
+    Example(u8),
+    /// An account's card's switch `kind` (#758).
+    Switch {
+        item: u64,
+        kind: hocus_secretary_link::consent::SourceKind,
+    },
+    /// An account's card's « Travail | Privé » (#758).
+    Book {
+        item: u64,
+        perso: bool,
+    },
+    /// An account's card's « Ce que je lis exactement… ›», and its
+    /// calendars' « choisir › » (#758): they unfold.
+    Details(u64),
+    Calendars(u64),
+    /// Her key's band's « Ouvrir la console d'Anthropic ↗ » (#758).
+    Console,
+    /// A briefing's mail to answer, line `index` of the briefing shown:
+    /// « Ouvrir le mail ↗ », « Rappelle-le-moi » (#758).
+    OpenMail(u32),
+    Remind(u32),
+    /// "Ce qu'elle sait": item `index`'s « ··· », its menu (#758).
+    KnownMenu(u32),
+    /// "Effacer… ▾": its menu (#758).
+    Erase,
     /// The right click's menu's « Copier ».
     CopyMenu,
 }
@@ -415,6 +553,16 @@ impl Target {
             Self::Confirm(yes) => format!("Confirm({yes})"),
             Self::ToastUndo => "ToastUndo".to_owned(),
             Self::Copy(item) => format!("Copy({item})"),
+            Self::Example(n) => format!("Example({n})"),
+            Self::Switch { item, kind } => format!("Switch({item},{})", kind.as_str()),
+            Self::Book { item, perso } => format!("Book({item},{perso})"),
+            Self::Details(item) => format!("Details({item})"),
+            Self::Calendars(item) => format!("Calendars({item})"),
+            Self::Console => "Console".to_owned(),
+            Self::OpenMail(n) => format!("OpenMail({n})"),
+            Self::Remind(n) => format!("Remind({n})"),
+            Self::KnownMenu(n) => format!("KnownMenu({n})"),
+            Self::Erase => "Erase".to_owned(),
             Self::CopyMenu => "CopyMenu".to_owned(),
         }
     }
@@ -487,6 +635,20 @@ pub struct Open {
     pub over: Option<u64>,
     /// The right click's menu: where, and what its « Copier » copies.
     pub menu: Option<Menu>,
+    /// Each account's card's kinds switched off (#758), its details and
+    /// its calendars unfolded.
+    pub off: std::collections::HashMap<
+        u64,
+        std::collections::BTreeSet<hocus_secretary_link::consent::SourceKind>,
+    >,
+    pub unfolded_cards: std::collections::HashSet<(u64, bool)>,
+    /// "Ce qu'elle sait": the item whose « ··· » menu shows, and
+    /// « Effacer… ▾ »'s (#758).
+    pub known_menu: Option<u32>,
+    pub erase: bool,
+    /// When each « Noté » was first shown (#758): its bar empties over
+    /// its ten seconds from then.
+    pub noted: std::collections::HashMap<u64, Instant>,
     /// Until when « Copié » shows.
     pub copied: Option<Instant>,
 }
@@ -509,6 +671,9 @@ impl std::fmt::Debug for Menu {
         )
     }
 }
+
+/// How often a « Noté »'s bar steps down.
+const NOTED_STEP: Duration = Duration::from_millis(250);
 
 /// How long « Copié » shows.
 pub const COPIED: Duration = Duration::from_millis(1500);
@@ -751,6 +916,11 @@ pub fn toggle(output: &str, screen: u32) {
             over: None,
             menu: None,
             copied: None,
+            off: std::collections::HashMap::new(),
+            unfolded_cards: std::collections::HashSet::new(),
+            known_menu: None,
+            erase: false,
+            noted: std::collections::HashMap::new(),
         }));
         (effects, true)
     });
@@ -863,7 +1033,20 @@ pub fn deadline() -> Option<Instant> {
             Phase::Open(open) => open.copied,
             Phase::Closed => None,
         };
-        d.closing.iter().map(|(_, at)| *at).chain(copied).min()
+        // A « Noté »'s bar steps down four times a second while it can
+        // be taken back (#758): no redraw at each frame.
+        let noted = match &d.phase {
+            Phase::Open(open) if open.noted.values().any(|t| t.elapsed() < draw::NOTED) => {
+                Some(Instant::now() + NOTED_STEP)
+            }
+            _ => None,
+        };
+        d.closing
+            .iter()
+            .map(|(_, at)| *at)
+            .chain(copied)
+            .chain(noted)
+            .min()
     })
     .into_iter()
     .chain(toast)
@@ -886,6 +1069,8 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             !due
         });
+        let noting = matches!(&d.phase,
+            Phase::Open(open) if open.noted.values().any(|t| now.duration_since(*t) < draw::NOTED + NOTED_STEP));
         let copied_over = match &mut d.phase {
             Phase::Open(open) if open.copied.is_some_and(|until| until <= now) => {
                 open.copied = None;
@@ -893,7 +1078,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             _ => false,
         };
-        if (toast_over || copied_over) && matches!(d.phase, Phase::Open(_)) {
+        if (toast_over || copied_over || noting) && matches!(d.phase, Phase::Open(_)) {
             effects.push(Effect::Wake(SECRETARY_NAMESPACE));
         }
         effects
@@ -987,6 +1172,9 @@ pub fn copy(id: window::Id, text: String) {
     wake();
 }
 
+/// Where an Anthropic key is made.
+const CONSOLE: &str = "https://console.anthropic.com/settings/keys";
+
 /// What `target` does, clicked on the drawer on `id`.
 pub fn act(id: window::Id, target: Target) {
     enum Then {
@@ -1003,7 +1191,116 @@ pub fn act(id: window::Id, target: Target) {
         let Some(open) = d.open_mut(id) else {
             return Then::Nothing;
         };
+        // A menu of "Ce qu'elle sait" goes at any click but its own.
+        if !matches!(target, Target::KnownMenu(_)) {
+            open.known_menu = None;
+        }
+        if !matches!(target, Target::Erase) {
+            open.erase = false;
+        }
         match target {
+            Target::Example(n) => {
+                let said = words().examples().get(n as usize).map(|s| (*s).to_owned());
+                match said {
+                    Some(text) => {
+                        open.scroll = 0.0;
+                        open.changed();
+                        Then::Send(text)
+                    }
+                    None => Then::Nothing,
+                }
+            }
+            Target::Switch { item, kind } => {
+                let off = open.off.entry(item).or_default();
+                if !off.remove(&kind) {
+                    off.insert(kind);
+                }
+                tracing::info!(
+                    item,
+                    kind = kind.as_str(),
+                    off = off.len(),
+                    "an account's switch"
+                );
+                open.changed();
+                Then::Draw
+            }
+            Target::Book { item, perso } => {
+                let notebook = if perso {
+                    Notebook::Perso
+                } else {
+                    Notebook::Pro
+                };
+                tracing::info!(
+                    item,
+                    notebook = notebook.word(),
+                    "an account's « Travail | Privé »"
+                );
+                open.notebooks.insert(item, notebook);
+                open.changed();
+                Then::Draw
+            }
+            Target::Details(item) | Target::Calendars(item) => {
+                let key = (item, matches!(target, Target::Calendars(_)));
+                if !open.unfolded_cards.remove(&key) {
+                    open.unfolded_cards.insert(key);
+                }
+                open.changed();
+                Then::Draw
+            }
+            Target::Console => match crate::launcher::browse(CONSOLE) {
+                Some(effect) => {
+                    tracing::info!("her key's console opens in the browser");
+                    Then::Effects(vec![effect])
+                }
+                None => Then::Nothing,
+            },
+            Target::OpenMail(index) | Target::Remind(index) => {
+                let line = open.point.and_then(|point| {
+                    crate::secretary::conversation(|c| {
+                        c.items
+                            .iter()
+                            .find(|i| i.id == point)
+                            .and_then(|i| match &i.body {
+                                Body::Briefing { briefing } => briefing
+                                    .sections
+                                    .iter()
+                                    .flat_map(|s| s.lines.iter())
+                                    .filter(|l| !l.pointer.is_empty())
+                                    .nth(index as usize)
+                                    .map(|l| (point, l.pointer.clone(), l.open.clone())),
+                                _ => None,
+                            })
+                    })
+                });
+                match (target, line) {
+                    (Target::OpenMail(_), Some((_, _, Some(url)))) => {
+                        // Opened in the browser: never marked read here.
+                        match crate::launcher::browse(&url) {
+                            Some(effect) => Then::Effects(vec![effect]),
+                            None => Then::Nothing,
+                        }
+                    }
+                    (Target::Remind(_), Some((item, pointer, _))) => {
+                        crate::secretary::remind_me(item, pointer);
+                        Then::Nothing
+                    }
+                    _ => Then::Nothing,
+                }
+            }
+            Target::KnownMenu(index) => {
+                open.known_menu = if open.known_menu == Some(index) {
+                    None
+                } else {
+                    Some(index)
+                };
+                open.changed();
+                Then::Draw
+            }
+            Target::Erase => {
+                open.erase = !open.erase;
+                open.changed();
+                Then::Draw
+            }
             Target::Copy(item) => {
                 let text = crate::secretary::conversation(|c| {
                     c.items.iter().find(|i| i.id == item).and_then(item_copy)
@@ -1017,7 +1314,7 @@ pub fn act(id: window::Id, target: Target) {
             },
             Target::Close => Then::Close,
             Target::Gear => {
-                crate::popover::session::open_settings(Some("agents"));
+                crate::popover::session::open_settings(Some("secretary"));
                 Then::Nothing
             }
             Target::Tab(tab) if tab != open.tab => {
@@ -1148,7 +1445,26 @@ pub fn act(id: window::Id, target: Target) {
                     .get(&item)
                     .map(|l| l.iter().cloned().collect())
                     .unwrap_or_default();
-                crate::secretary::decide(item, decision, notebook, left_out);
+                // An account's card: the kinds switched off, those its
+                // sheet has off by default included.
+                let off = crate::secretary::conversation(|c| {
+                    c.items.iter().find_map(|i| match &i.body {
+                        Body::Card { card } if i.id == item => card.sheet.as_ref().map(|s| {
+                            s.reads
+                                .iter()
+                                .filter(|r| {
+                                    let flipped =
+                                        open.off.get(&item).is_some_and(|o| o.contains(&r.kind));
+                                    r.on == flipped
+                                })
+                                .map(|r| r.kind)
+                                .collect::<Vec<_>>()
+                        }),
+                        _ => None,
+                    })
+                })
+                .unwrap_or_default();
+                crate::secretary::decide(item, decision, notebook, left_out, off);
                 Then::Nothing
             }
             Target::Calendar { item, index } => {
@@ -1245,7 +1561,8 @@ pub fn act(id: window::Id, target: Target) {
                         .map(|chip| chip.kind)
                 });
                 if let Some(kind) = kind {
-                    open.kind = kind;
+                    // No « Tout » (#758): the chip chosen again lets go.
+                    open.kind = if open.kind == kind { None } else { kind };
                     open.knows_scroll = 0.0;
                     open.expanded = None;
                     open.changed();
@@ -1316,14 +1633,16 @@ pub fn act(id: window::Id, target: Target) {
                 Then::Nothing
             }
             Target::ForgetPerso => {
+                // Never alongside a toast that undoes (#758): it goes,
+                // out of the drawer's lock.
                 open.confirm = Some(Confirm::Perso);
                 open.changed();
-                Then::Draw
+                Then::Undo(None)
             }
             Target::ForgetAll => {
                 open.confirm = Some(Confirm::All);
                 open.changed();
-                Then::Draw
+                Then::Undo(None)
             }
             Target::Confirm(yes) => {
                 let what = open.confirm.take();
@@ -1378,6 +1697,7 @@ pub fn act(id: window::Id, target: Target) {
                 crate::secretary::memory(Do::Restore { token });
             }
             crate::secretary::toast_gone();
+            wake();
         }
         Then::Close => close(),
         Then::Send(text) => {

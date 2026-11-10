@@ -4,9 +4,12 @@
 //! clock set alike (`HOCUS_CLOCK_AT`), both in UTC.
 //!
 //! - AC9: a login before 07:00 makes no peek; the first unlock after it
-//!   makes exactly one, "Ton point est prêt", and the drawer does not
-//!   open; its bubble opens the briefing in the drawer; a second unlock
-//!   makes none.
+//!   makes exactly one, « Ton point du matin est prêt. » with what is in
+//!   it, « Voir le point · Plus tard ▾ » and no « Fait » (#758), and the
+//!   drawer does not open; its bubble opens the briefing in the drawer,
+//!   under its own bar, its free slot named, each mail to answer with
+//!   « Ouvrir le mail ↗ » and « Rappelle-le-moi »; a second unlock makes
+//!   none.
 //! - AC44: after 14 h asleep, one "Pendant ton absence" peek after the
 //!   unlock, the gap's mails in the briefing.
 //! - AC12, AC38: during a meeting (the shell's featured calendar), her
@@ -543,21 +546,37 @@ fn the_first_unlock_after_seven_brings_her_out_once() -> anyhow::Result<()> {
     bed.unlock()?;
     let (id, rect) = bed.peek()?;
     let said = bed.said("her peek shows");
-    anyhow::ensure!(said.contains("Ton point est prêt"), "{said}");
-    anyhow::ensure!(
-        said.contains("Ouvrir le point | Plus tard ▾ | Fait"),
-        "{said}"
-    );
+    anyhow::ensure!(said.contains("Ton point du matin est prêt."), "{said}");
+    anyhow::ensure!(said.contains("Voir le point | Plus tard ▾"), "{said}");
+    anyhow::ensure!(!said.contains("| Fait"), "no Fait on a briefing: {said}");
     anyhow::ensure!(bed.hp.peeks_told() == 1);
     anyhow::ensure!(
         bed.hp.drawer_surfaces().is_empty(),
         "the drawer never opens by itself"
     );
-    bed.shot("peek", rect)?;
-    // Its bubble opens the briefing in the drawer.
+    bed.shot("8-peek", rect)?;
+    // Its bubble opens the briefing in the drawer: its own bar, no tabs
+    // nor field; its day and its free slot; each mail to answer, its
+    // actions.
     let open = bed.peek_place("Open")?;
     common::click_on(&mut bed.hp, open, hocus_link::PEEK_NAMESPACE)?;
     let drawer = bed.opened()?;
+    let shows = bed.shows(|s| s["point"].as_u64().is_some())?;
+    anyhow::ensure!(
+        shows["subview"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("Ton point du lundi 9 novembre")),
+        "{shows}"
+    );
+    let text = shows.to_string();
+    anyhow::ensure!(
+        !text.contains("vraiment") && !text.contains("EN TROIS LIGNES"),
+        "{text}"
+    );
+    let remind = bed.drawer_place("Remind(0)")?;
+    bed.shot("9-briefing", drawer)?;
+    common::click_on(&mut bed.hp, remind, hocus_link::SECRETARY_NAMESPACE)?;
+    bed.shows(|s| s.to_string().contains("Je te le rappelle à"))?;
     let shows = bed.shows(|s| {
         s["point"].as_u64().is_some()
             && s["items"].as_array().is_some_and(|i| {
@@ -615,14 +634,18 @@ fn after_fourteen_hours_away_she_says_what_came_once() -> anyhow::Result<()> {
     let Some(mut bed) = start("2026-11-09T18:00:00Z", "2026-11-09T18:00:00", "")? else {
         return Ok(());
     };
-    // The evening's first session: the day's briefing; "Fait".
+    // The evening's first session: the day's briefing, seen.
     bed.peek()?;
-    let done = bed.peek_place("Done")?;
-    common::click_on(&mut bed.hp, done, hocus_link::PEEK_NAMESPACE)?;
+    let open = bed.peek_place("Open")?;
+    common::click_on(&mut bed.hp, open, hocus_link::PEEK_NAMESPACE)?;
     let back = bed
         .hp
         .dispatch_until(WAIT, |hp| hp.secretary_peek_out().is_none())?;
-    anyhow::ensure!(back, "\"Fait\" sends her back");
+    anyhow::ensure!(back, "\"Voir le point\" sends her back");
+    bed.opened()?;
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_S]);
+    bed.hp
+        .dispatch_until(WAIT, |hp| hp.drawer_surfaces().is_empty())?;
     let told = bed.hp.peeks_told();
     bed.lock()?;
     bed.hp.tell_shell(ToShell::Day(DayAsk::Slept(14 * 3600)));
@@ -662,7 +685,8 @@ fn after_fourteen_hours_away_she_says_what_came_once() -> anyhow::Result<()> {
         })
         .unwrap_or_default();
     anyhow::ensure!(
-        away.contains("2 arrivés, 1 qui compte") && away.contains("La maquette de la home"),
+        away.contains("2 mails arrivés, dont 1 pour toi")
+            && away.contains("La maquette de la home"),
         "{away}"
     );
     bed.shot("absence", drawer)?;

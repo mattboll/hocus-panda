@@ -4,7 +4,7 @@
 //! row's height, in her `nudge` mood (her ear rings, her clipboard's dot
 //! pulses), and her bubble on its left, 300 px: "TA SECRÉTAIRE", what she
 //! says (the key words bold), and at most three buttons: the action,
-//! "Plus tard ▾", "Fait". The compositor moves the surfaces as an agent's
+//! "Plus tard ▾", "Fait" (not on a briefing, not read yet, #758). The compositor moves the surfaces as an agent's
 //! panda's ([`hocus_link::PEEK_NAMESPACE`]) and says when she is back
 //! (`no-peek`): the surfaces then go.
 //!
@@ -190,11 +190,15 @@ pub fn said(
         Target::Later,
         false,
     ));
-    labels.push((
-        if fr { "Fait" } else { "Done" }.to_owned(),
-        Target::Done,
-        false,
-    ));
+    // « Fait » only where something can be done: a reminder, a proposal;
+    // never on a briefing not read yet (#758).
+    if !matches!(speak.kind, SpeakKind::Briefing | SpeakKind::Absence) {
+        labels.push((
+            if fr { "Fait" } else { "Done" }.to_owned(),
+            Target::Done,
+            false,
+        ));
+    }
     for (label, target, primary) in labels {
         let w = measure(&label, BUTTON, MANROPE_BOLD) + 2.0 * BUTTON_X;
         if bx > PAD_X && bx + w > BUBBLE - PAD_X {
@@ -775,11 +779,11 @@ mod tests {
     }
 
     #[test]
-    fn her_bubble_has_its_three_buttons_and_its_bold_words() {
+    fn her_bubble_has_its_buttons_and_its_bold_words() {
         let said = said(
             &speak(
-                "**Ton point est prêt** pour la journée",
-                Some("Ouvrir le point"),
+                "**Ton point du matin est prêt.** 3 réunions.",
+                Some("Voir le point"),
             ),
             false,
             true,
@@ -787,7 +791,7 @@ mod tests {
         );
         assert_eq!(said.who, "TA SECRÉTAIRE");
         let labels: Vec<&str> = said.buttons.iter().map(|b| b.0.as_str()).collect();
-        assert_eq!(labels, ["Ouvrir le point", "Plus tard ▾", "Fait"]);
+        assert_eq!(labels, ["Voir le point", "Plus tard ▾"]);
         assert!(said.buttons[0].3, "the action is the primary");
         let bold: Vec<&str> = said
             .pieces
@@ -795,7 +799,7 @@ mod tests {
             .filter(|p| p.2)
             .map(|p| p.0.as_str())
             .collect();
-        assert_eq!(bold, ["Ton", "point", "est", "prêt"]);
+        assert_eq!(bold, ["Ton", "point", "du", "matin", "est", "prêt."]);
         assert!(said.menu.is_empty());
         let open = said_menu();
         assert_eq!(open.menu.len(), 5);

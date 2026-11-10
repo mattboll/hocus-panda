@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use hocus_secretary_link::{
     FromSecretary, Notebook,
     knows::Act as KnownAct,
-    queue::{Act, Group, View, Waiting},
+    queue::{Act, Group, Sender, View, Waiting},
 };
 use hocus_sources::Content;
 use jiff::Timestamp;
@@ -50,12 +50,39 @@ pub fn address_of(from: &str) -> String {
         .to_lowercase()
 }
 
-/// What groups an item in the view, how it is shown, whether it can be
-/// set aside (a mail sender's), and why it looks automated.
+/// How a sender names itself (#758): "GitHub <notifications@github.com>"
+/// → "GitHub"; an address alone, its domain's name ("noreply@scaleway.com"
+/// → "Scaleway").
+pub fn sender_name(from: &str) -> String {
+    if let Some((name, _)) = from.rsplit_once('<') {
+        let name = name.trim().trim_matches('"').trim();
+        if !name.is_empty() {
+            return name.to_owned();
+        }
+    }
+    let address = address_of(from);
+    let domain = address
+        .rsplit_once('@')
+        .map_or(address.as_str(), |(_, d)| d);
+    let labels: Vec<&str> = domain.split('.').collect();
+    let name = match labels.as_slice() {
+        [.., name, _tld] => *name,
+        [one] => *one,
+        [] => "",
+    };
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => from.to_owned(),
+    }
+}
+
+/// What groups an item in the view, how it is shown, what sends it.
 struct Of {
     key: String,
     label: String,
-    mail: bool,
+    name: String,
+    sender: Sender,
     automated: Option<String>,
 }
 
@@ -63,33 +90,43 @@ fn of(item: &hocus_sources::Item) -> Of {
     match &item.content {
         Content::Mail(mail) => {
             let address = address_of(&mail.from);
+            let sender = match &mail.automated {
+                Some(why) if why.eq_ignore_ascii_case("list-unsubscribe") => Sender::Letter,
+                Some(_) => Sender::Machine,
+                None if crate::briefing::person(&mail.from) => Sender::Person,
+                None => Sender::Machine,
+            };
             Of {
                 label: if address.is_empty() {
                     mail.from.clone()
                 } else {
                     address.clone()
                 },
+                name: sender_name(&mail.from),
                 key: address,
-                mail: true,
+                sender,
                 automated: mail.automated.clone(),
             }
         }
         Content::Notification(n) => Of {
             key: format!("app:{}", n.app.to_lowercase()),
             label: n.app.clone(),
-            mail: false,
+            name: n.app.clone(),
+            sender: Sender::Other,
             automated: None,
         },
         Content::Event(e) => Of {
             key: format!("calendar:{}", e.calendar),
             label: e.calendar_name.clone(),
-            mail: false,
+            name: e.calendar_name.clone(),
+            sender: Sender::Other,
             automated: None,
         },
         Content::Birthday(_) => Of {
             key: "birthdays".to_owned(),
             label: "Anniversaires".to_owned(),
-            mail: false,
+            name: "Anniversaires".to_owned(),
+            sender: Sender::Other,
             automated: None,
         },
     }
@@ -195,6 +232,21 @@ impl Brain {
         }
     }
 
+    /// How `address` names itself in the mails held from it.
+    pub(super) fn sender_name_of(&self, address: &str) -> String {
+        self.queue
+            .running()
+            .into_iter()
+            .chain(self.queue.waiting().map(String::as_str))
+            .chain(self.queue.set_aside().map(String::as_str))
+            .filter_map(|p| self.inbox.get(p))
+            .find_map(|h| match &h.redacted.item.content {
+                Content::Mail(m) if address_of(&m.from) == address => Some(sender_name(&m.from)),
+                _ => None,
+            })
+            .unwrap_or_else(|| sender_name(address))
+    }
+
     /// A sender that looks automated, with enough of its mails waiting, is
     /// asked about once; one question at a time.
     pub(super) fn notice_automated(&mut self) {
@@ -210,7 +262,9 @@ impl Brain {
             return;
         }
         let mut senders: BTreeMap<String, (usize, String, Notebook)> = BTreeMap::new();
-        for pointer in self.queue.waiting() {
+        // The same count as the view's: the mail read now included.
+        let running = self.queue.running().map(str::to_owned);
+        for pointer in running.iter().chain(self.queue.waiting()) {
             let Some(held) = self.inbox.get(pointer) else {
                 continue;
             };
@@ -237,7 +291,9 @@ impl Brain {
             })
             .max_by_key(|(_, (count, _, _))| *count);
         if let Some((sender, (count, why, notebook))) = most {
+            let name = self.sender_name_of(&sender);
             self.notice(Noticed::Automated {
+                name,
                 sender,
                 count: u32::try_from(count).unwrap_or(u32::MAX),
                 why,
@@ -406,15 +462,24 @@ impl Brain {
                     label: of.label.clone(),
                     count: 0,
                     automated: of.automated.clone(),
-                    note: match &of.automated {
-                        Some(why) => format!(
-                            "{} · {} · {why}",
-                            learn::shown_source(source),
-                            t("envoyé par une machine", "sent by a machine")
+                    // No header's name (#758): what the sender is.
+                    note: match of.sender {
+                        Sender::Machine => format!(
+                            "{} · {}",
+                            of.label,
+                            t("notifications automatiques", "automatic notifications")
                         ),
-                        None => learn::shown_source(source),
+                        Sender::Letter => {
+                            format!("{} · {}", of.label, t("lettre d’information", "newsletter"))
+                        }
+                        Sender::Person => of.label.clone(),
+                        Sender::Other => learn::shown_source(source),
                     },
-                    can_aside: of.mail && !of.key.is_empty(),
+                    can_aside: matches!(of.sender, Sender::Machine | Sender::Letter)
+                        && !of.key.is_empty(),
+                    name: of.name.clone(),
+                    sender: of.sender,
+                    since: String::new(),
                 });
                 group.count += 1;
             }
@@ -422,7 +487,8 @@ impl Brain {
             groups.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.label.cmp(&b.label)));
             groups
         };
-        let mut groups = group(&mut self.queue.waiting());
+        let running = self.queue.running().map(str::to_owned);
+        let mut groups = group(&mut running.iter().chain(self.queue.waiting()));
         let mut more = String::new();
         if groups.len() > GROUPS_SHOWN {
             let rest: Vec<Group> = groups.split_off(GROUPS_SHOWN);
@@ -433,8 +499,30 @@ impl Brain {
                 format!("… {} other senders · {items} items", rest.len())
             };
         }
-        let aside = group(&mut self.queue.set_aside());
-        let waiting = self.queue.pending() as u64;
+        let mut aside = group(&mut self.queue.set_aside());
+        // Since when each is set aside: its rule's day.
+        let rules = learn::rules(&self.store).unwrap_or_default();
+        for group in &mut aside {
+            let day = rules.iter().rev().find_map(|r| match &r.compiled {
+                Some(Compiled::Aside { sender })
+                    if r.valid_to.is_none() && learn::covers(sender, &group.key) =>
+                {
+                    Some(crate::retrieve::day_of(
+                        r.accepted_at.unwrap_or(r.recorded_at),
+                    ))
+                }
+                _ => None,
+            });
+            if let Some(day) = day {
+                group.since = if fr {
+                    format!("depuis le {}", learn::short(day, true))
+                } else {
+                    format!("since {}", learn::short(day, false))
+                };
+                group.note = format!("{} · {}", group.label, group.since);
+            }
+        }
+        let waiting = (self.queue.pending() + usize::from(running.is_some())) as u64;
         let set_aside = self.queue.aside_len() as u64;
         let per_item = self.queue.pace(&settings).map(|d| d.as_secs().max(1));
         let (rate, left, left_seconds) = match per_item {
@@ -456,29 +544,50 @@ impl Brain {
             }
             None => (String::new(), String::new(), None),
         };
+        let pace = match (per_item, left_seconds, fr) {
+            (Some(each), Some(left), true) => format!(
+                "Encore {} environ ({} par mail sur cet ordinateur).",
+                span(left, true),
+                span(each, true)
+            ),
+            (Some(each), Some(left), false) => format!(
+                "About {} left ({} a mail on this computer).",
+                span(left, false),
+                span(each, false)
+            ),
+            _ => String::new(),
+        };
         let pause = match &self.queue.state {
             State::Paused { why, .. } if waiting > 0 => Some(match (why, fr) {
+                // One reason, said once (#758): her status sums it up.
                 (Pause::Heat(hot), true) => format!(
-                    "{} chauffe : {} °C en moyenne sur une minute, je reprends sous {} °C.",
+                    "{} chauffe ({} °C). Je reprends quand {} redescend sous {} °C\u{a0}; rien n’est perdu.",
                     match hot.gauge {
-                        Gauge::Cpu => "Le processeur",
+                        Gauge::Cpu => "L’ordinateur",
                         Gauge::Gpu => "La carte graphique",
+                    },
+                    hot.average,
+                    match hot.gauge {
+                        Gauge::Cpu => "il",
+                        Gauge::Gpu => "elle",
+                    },
+                    hot.resume
+                ),
+                (Pause::Heat(hot), false) => format!(
+                    "The {} is hot ({} °C). I go on once it is below {} °C; nothing is lost.",
+                    match hot.gauge {
+                        Gauge::Cpu => "computer",
+                        Gauge::Gpu => "graphics card",
                     },
                     hot.average,
                     hot.resume
                 ),
-                (Pause::Heat(hot), false) => format!(
-                    "The {} is hot: {} °C on average over a minute, I go on below {} °C.",
-                    hot.gauge.word(),
-                    hot.average,
-                    hot.resume
-                ),
                 (Pause::Battery(c), true) => format!(
-                    "Sur batterie ({c} %) : je reprends sur secteur, ou au-dessus de {} %.",
+                    "Sur batterie ({c} %). Je reprends sur secteur, ou au-dessus de {} %\u{a0}; rien n’est perdu.",
                     settings.battery
                 ),
                 (Pause::Battery(c), false) => format!(
-                    "On battery ({c} %): I go on once plugged in, or above {} %.",
+                    "On battery ({c} %). I go on once plugged in, or above {} %; nothing is lost.",
                     settings.battery
                 ),
                 (Pause::Unavailable, true) => {
@@ -519,9 +628,21 @@ impl Brain {
             _ => t("Je m’y remets", "Getting back to it"),
         }
         .to_owned();
-        let mut counts = if fr {
+        let mails = waiting > 0
+            && running
+                .iter()
+                .chain(self.queue.waiting())
+                .all(|p| matches!(item(p).map(|i| &i.content), Some(Content::Mail(_))));
+        let counts = if fr {
             vec![
-                format!("{waiting} en attente"),
+                if mails {
+                    format!(
+                        "{waiting} mail{} en attente",
+                        if waiting > 1 { "s" } else { "" }
+                    )
+                } else {
+                    format!("{waiting} en attente")
+                },
                 format!(
                     "{} trié{}",
                     self.queue.done,
@@ -534,13 +655,6 @@ impl Brain {
                 format!("{} sorted", self.queue.done),
             ]
         };
-        if set_aside > 0 {
-            counts.push(if fr {
-                format!("{set_aside} mis de côté")
-            } else {
-                format!("{set_aside} set aside")
-            });
-        }
         View {
             state,
             now,
@@ -550,6 +664,7 @@ impl Brain {
             per_item,
             left,
             left_seconds,
+            pace,
             counts: counts.join(" · "),
             waiting,
             done: self.queue.done,
@@ -584,5 +699,11 @@ mod tests {
             "notifications@github.com"
         );
         assert_eq!(address_of("lea@atelier-lune.fr"), "lea@atelier-lune.fr");
+        assert_eq!(sender_name("GitHub <notifications@github.com>"), "GitHub");
+        assert_eq!(
+            sender_name("\"Léa Martin\" <lea@atelier-lune.fr>"),
+            "Léa Martin"
+        );
+        assert_eq!(sender_name("noreply@scaleway.com"), "Scaleway");
     }
 }

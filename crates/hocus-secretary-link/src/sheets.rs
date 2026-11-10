@@ -13,8 +13,8 @@ use crate::{Notebook, consent::SourceKind, gate::Hours};
 pub struct Sheet {
     /// "Lire tes mails ?"
     pub title: String,
-    /// Where it comes from: "Gmail · alex@atelier-lune.fr, déjà dans
-    /// Comptes en ligne".
+    /// Where it comes from: "Gmail · alex@atelier-lune.fr, déjà connecté
+    /// à cet ordinateur".
     pub from: String,
     pub sections: Vec<Section>,
     /// The notebook suggested (§7.4), which the user confirms or changes
@@ -27,6 +27,39 @@ pub struct Sheet {
     /// (#752); empty before they are known.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calendars: Vec<crate::calendars::CalendarInfo>,
+    /// An account's card (#758): what she may read of it, each a switch;
+    /// her question over them, her promise under them, the link that
+    /// unfolds the sections, and the account she asks about next.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<Read>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ask: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub promise: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub more: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub then: Option<Then>,
+}
+
+/// One thing an account's card asks to read (#758), a switch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Read {
+    pub kind: SourceKind,
+    /// "Ton agenda", and its line: "Tous tes agendas, ceux qu'on te
+    /// partage compris".
+    pub title: String,
+    pub line: String,
+    /// On before the user touches it: the calendar and the mail.
+    pub on: bool,
+}
+
+/// The account she asks about after this one (#758), dashed under it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Then {
+    pub identity: String,
+    /// « ensuite · je te propose « Privé » ».
+    pub note: String,
 }
 
 /// The calendars' label on an Agenda's sheet.
@@ -45,6 +78,12 @@ pub fn calendars_label(fr: bool) -> &'static str {
 pub struct Private {
     pub label: String,
     pub lines: Vec<String>,
+    /// The choice in two words (#758), « Travail » and « Privé », and
+    /// what « Privé » changes, in one line.
+    #[serde(default)]
+    pub choice: [String; 2],
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub short: String,
 }
 
 /// « C'est privé » and its consequences; `quiet`, the private notebook's
@@ -62,8 +101,21 @@ pub fn private(fr: bool, quiet: Hours) -> Private {
         }
     };
     let (from, to) = (hour(quiet.from), hour(quiet.to));
+    let (choice, short) = if fr {
+        (
+            ["Travail".to_owned(), "Privé".to_owned()],
+            "Privé : je n’en parle jamais pendant une réunion ou un partage d’écran, ni dans ce que je prépare pour le travail.".to_owned(),
+        )
+    } else {
+        (
+            ["Work".to_owned(), "Private".to_owned()],
+            "Private: I never bring it up during a meeting or a screen share, nor in what I draft for work.".to_owned(),
+        )
+    };
     if fr {
         Private {
+            choice,
+            short,
             label: "C’est privé".to_owned(),
             lines: vec![
                 "Jamais montré pendant une réunion, un partage d’écran ou un appel.".to_owned(),
@@ -76,6 +128,8 @@ pub fn private(fr: bool, quiet: Hours) -> Private {
         }
     } else {
         Private {
+            choice,
+            short,
             label: "It’s private".to_owned(),
             lines: vec![
                 "Never shown during a meeting, a screen share or a call.".to_owned(),
@@ -261,9 +315,9 @@ pub fn google(
     };
     let [read_label, never_label, leave_label] = labels(fr);
     let from = if fr {
-        format!("{service} · {identity}, déjà dans Comptes en ligne")
+        format!("{service} · {identity}, déjà connecté à cet ordinateur")
     } else {
-        format!("{service} · {identity}, already in Online Accounts")
+        format!("{service} · {identity}, already signed in on this computer")
     };
     Sheet {
         title: title.to_owned(),
@@ -288,6 +342,131 @@ pub fn google(
         notebook: suggested,
         private: private(fr, quiet),
         calendars: Vec::new(),
+        reads: Vec::new(),
+        ask: String::new(),
+        promise: String::new(),
+        more: String::new(),
+        then: None,
+    }
+}
+
+/// An account's card in her drawer (#758): one card for all `kinds` of
+/// `identity`, a switch each (the calendar and the mail on, the
+/// birthdays off), « Travail | Privé », and the three sections of each
+/// kind's sheet folded under « Ce que je lis exactement… ».
+pub fn account(
+    identity: &str,
+    kinds: &[SourceKind],
+    suggested: Notebook,
+    quiet: Hours,
+    fr: bool,
+) -> Sheet {
+    let mut sections: Vec<Section> = Vec::new();
+    let mut reads = Vec::new();
+    // The calendar, the mail, the birthdays: the order of the card.
+    let mut kinds = kinds.to_vec();
+    kinds.sort_by_key(|k| match k {
+        SourceKind::Calendar => 0,
+        SourceKind::Mail => 1,
+        SourceKind::Birthdays => 2,
+        SourceKind::Notifications => 3,
+    });
+    for kind in &kinds {
+        let sheet = google(identity, *kind, suggested, quiet, fr);
+        let name = kind_name(*kind, fr);
+        for (n, section) in sheet.sections.into_iter().enumerate() {
+            let lines = section.lines.into_iter().map(|l| format!("{name} : {l}"));
+            match sections.get_mut(n) {
+                Some(s) => s.lines.extend(lines),
+                None => sections.push(Section {
+                    lines: lines.collect(),
+                    ..section
+                }),
+            }
+        }
+        let (title, line, on) = match (kind, fr) {
+            (SourceKind::Calendar, true) => (
+                "Ton agenda",
+                "Tous tes agendas, ceux qu’on te partage compris",
+                true,
+            ),
+            (SourceKind::Calendar, false) => (
+                "Your calendar",
+                "All your calendars, shared ones included",
+                true,
+            ),
+            (SourceKind::Mail, true) => {
+                ("Tes mails", "Les 30 derniers jours, reçus et envoyés", true)
+            }
+            (SourceKind::Mail, false) => ("Your mail", "The last 30 days, received and sent", true),
+            (_, true) => (
+                "Les anniversaires de tes contacts",
+                "Le nom et la date, rien d’autre de leur fiche",
+                false,
+            ),
+            (_, false) => (
+                "Your contacts’ birthdays",
+                "The name and the date, nothing else of their card",
+                false,
+            ),
+        };
+        reads.push(Read {
+            kind: *kind,
+            title: title.to_owned(),
+            line: line.to_owned(),
+            on,
+        });
+    }
+    let t = |f: &str, e: &str| if fr { f.to_owned() } else { e.to_owned() };
+    Sheet {
+        title: identity.to_owned(),
+        from: t(
+            "déjà connecté à cet ordinateur",
+            "already signed in on this computer",
+        ),
+        sections,
+        notebook: suggested,
+        private: private(fr, quiet),
+        calendars: Vec::new(),
+        reads,
+        ask: t("Qu’est-ce que je peux lire ?", "What may I read?"),
+        promise: t(
+            "Je ne marque rien comme lu, je n’envoie rien, je ne réponds à aucune invitation sans ton clic.",
+            "I mark nothing read, send nothing, answer no invitation without your click.",
+        ),
+        more: t(
+            "Ce que je lis exactement, et ce qui part chez Anthropic ›",
+            "What I read exactly, and what goes to Anthropic ›",
+        ),
+        then: None,
+    }
+}
+
+/// "Autoriser l'agenda et les mails": what an account's card allows,
+/// from its switches on (#758).
+pub fn allow_label(on: &[SourceKind], fr: bool) -> String {
+    let word = |kind: &SourceKind| match (kind, fr) {
+        (SourceKind::Calendar, true) => "l’agenda",
+        (SourceKind::Calendar, false) => "the calendar",
+        (SourceKind::Mail, true) => "les mails",
+        (SourceKind::Mail, false) => "the mail",
+        (SourceKind::Birthdays, true) => "les anniversaires",
+        (SourceKind::Birthdays, false) => "the birthdays",
+        (SourceKind::Notifications, true) => "les notifications",
+        (SourceKind::Notifications, false) => "the notifications",
+    };
+    let words: Vec<&str> = on.iter().map(word).collect();
+    let and = if fr { " et " } else { " and " };
+    let list = match words.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{}{and}{last}", rest.join(", ")),
+    };
+    match (list.is_empty(), fr) {
+        (true, true) => "Ne rien lire".to_owned(),
+        (true, false) => "Read nothing".to_owned(),
+        (false, true) => format!("Autoriser {list}"),
+        (false, false) => format!("Allow {list}"),
     }
 }
 
@@ -307,6 +486,24 @@ mod tests {
                 assert_eq!(sheet.private.lines.len(), 4);
             }
         }
+        // One card per account (#758): a switch per kind, the calendar and
+        // the mail on; the button says what it allows.
+        let card = account(
+            "alex@atelier-lune.fr",
+            &SourceKind::ALL,
+            Notebook::Pro,
+            quiet,
+            true,
+        );
+        assert_eq!(card.reads.len(), 3);
+        let on: Vec<SourceKind> = card.reads.iter().filter(|r| r.on).map(|r| r.kind).collect();
+        assert_eq!(allow_label(&on, true), "Autoriser l’agenda et les mails");
+        assert_eq!(card.sections.len(), 3);
+        assert!(!card.from.contains("Comptes en ligne"));
+        assert_eq!(
+            card.private.choice,
+            ["Travail".to_owned(), "Privé".to_owned()]
+        );
         let mail = google(
             "alex.martin@gmail.com",
             SourceKind::Mail,

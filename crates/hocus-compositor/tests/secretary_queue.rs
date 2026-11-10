@@ -2,16 +2,20 @@
 //! process, on a clock of her own, fixture mails, and the scripted local
 //! triage taking 39 s an item.
 //!
-//! - Her proposal in the thread: GitHub's mails, sent by a machine, with
-//!   their count ("Oui · Non · Plus tard").
-//! - Her status line clicked: the queue unfolds in place of the thread,
-//!   the item read now, the senders with their counts (the most first),
-//!   the pace once measured; never an item's text.
-//! - « Ne pas trier, chercher si besoin » on GitHub: its mails move to
-//!   MIS DE CÔTÉ; « Trier quand même » brings them back.
-//! - Too hot: the pause and its reason.
-//! - "‹ Discussion": the thread again, and nothing of the queue is sent
-//!   any more.
+//! - Her proposal in the thread: GitHub's automatic notifications, with
+//!   their count, the same as the view's ("Oui, ne pas les trier · Non ·
+//!   Plus tard").
+//! - Her header's « N mails à trier › » clicked (#758): the queue unfolds
+//!   in place of the thread, under its own bar (no tabs, no field): the
+//!   mail read now, one card per sender grouped by what sends them (a
+//!   person's without an action), the pace once measured; never an item's
+//!   text, no header's name.
+//! - « Ne pas trier les mails de GitHub », inside its card: its mails move
+//!   to PAS TRIÉS, À TA DEMANDE; « Trier à nouveau les mails de GitHub »
+//!   brings them back.
+//! - Too hot: the pause, one reason, with the real threshold.
+//! - "‹ Retour à la discussion": the thread again, and nothing of the
+//!   queue is sent any more.
 //!
 //! Pixman, as in CI. With `HOCUS_DRAWER_SHOTS=DIR`, PNGs of the drawer are
 //! left there (for review, never compared).
@@ -291,6 +295,16 @@ impl Bed {
         Ok((f64::from(r.x) + x, f64::from(r.y) + y))
     }
 
+    /// The drawer's places as it last logged them.
+    fn places(&self) -> String {
+        common::logged(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the drawer's items"))
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     fn click(&mut self, name: &str) -> anyhow::Result<()> {
         let at = self.place(name)?;
         common::click_on(&mut self.hp, at, hocus_link::SECRETARY_NAMESPACE)
@@ -346,56 +360,94 @@ fn her_queue_unfolds_from_her_status_and_a_sender_is_set_aside_by_a_click() -> a
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_S]);
     bed.opened()?;
     // Her proposal, in the thread.
-    let shown = bed.shows(|s| items(s).contains("notifications@github.com"))?;
+    let shown = bed.shows(|s| items(s).contains("GitHub t’a envoyé"))?;
     assert!(
-        items(&shown).contains("12 mails attendent le tri"),
+        items(&shown)
+            .contains("GitHub t’a envoyé 12 notifications automatiques. Je les laisse sans tri")
+            && items(&shown).contains("[Oui, ne pas les trier | Non | Plus tard]"),
         "{}",
         items(&shown)
     );
+    assert!(
+        !items(&shown).contains("X-GitHub-Reason"),
+        "no header's name"
+    );
     bed.shot("queue-proposal")?;
 
-    // Her status line: the queue.
+    // Her header's button: the queue, under its own bar.
+    assert!(
+        shown["to_sort"]
+            .as_str()
+            .is_some_and(|b| b.ends_with("mails à trier ›")),
+        "{shown}"
+    );
     bed.click("Status")?;
     let shown = bed.shows(|s| s["queue"] == true && items(s).contains("group:"))?;
+    assert_eq!(shown["subview"], "Le tri de tes mails");
+    let places = bed.places();
+    assert!(
+        !places.contains("TabTalk") && !places.contains(" Field@") && places.contains("Back@"),
+        "no tabs, no field: {places}"
+    );
     let listed = items(&shown);
     assert!(listed.contains("now:Léa Martin"), "{listed}");
     assert!(
-        listed.contains("group:notifications@github.com · 12"),
+        listed.contains("group:GitHub · 12 · Machine · aside"),
         "{listed}"
     );
     assert!(
-        listed.contains("group:gitlab@git.atelier-lune.fr · 5"),
+        listed.contains("group:GitLab · 5 · Machine · aside"),
         "{listed}"
     );
-    let github = listed
-        .find("group:notifications@github.com")
-        .unwrap_or(usize::MAX);
-    let gitlab = listed.find("group:gitlab@").unwrap_or(0);
+    assert!(
+        listed.contains("group:La Lettre du lundi · 3 · Letter · aside"),
+        "{listed}"
+    );
+    // A person's mails: never offered to be left unsorted.
+    assert!(
+        listed.contains("group:Léa Martin · 2 · Person\""),
+        "{listed}"
+    );
+    assert!(
+        listed.contains("group:Paul Durand · 1 · Person\""),
+        "{listed}"
+    );
+    let github = listed.find("group:GitHub").unwrap_or(usize::MAX);
+    let gitlab = listed.find("group:GitLab").unwrap_or(0);
     assert!(github < gitlab, "the most first: {listed}");
-    for body in ["relire le devis", "commented", "Job deploy", "10 h ?"] {
+    for body in [
+        "relire le devis",
+        "commented",
+        "Job deploy",
+        "10 h ?",
+        "X-GitHub-Reason",
+        "qwen",
+        "fake/",
+    ] {
         assert!(!listed.contains(body), "{body}: {listed}");
     }
     // 39 s: the pace measured.
     bed.advance(39)?;
-    bed.shows(|s| items(s).contains("pace:≈ 41 s par élément"))?;
+    bed.shows(|s| items(s).contains("(41 s par mail sur cet ordinateur)."))?;
     bed.advance(2)?;
     bed.shows(|s| items(s).contains("now:GitHub"))?;
-    bed.shot("queue-view")?;
+    bed.shot("3-queue")?;
 
-    // « Ne pas trier, chercher si besoin » on GitHub, the first group.
+    // « Ne pas trier les mails de GitHub », in its card.
     bed.click("Aside(0)")?;
-    let shown = bed.shows(|s| items(s).contains("aside:notifications@github.com"))?;
+    // Its mails waiting move apart; the one read now goes on.
+    let shown = bed.shows(|s| items(s).contains("aside:GitHub · 11"))?;
     assert!(
-        !items(&shown).contains("group:notifications@github.com"),
+        items(&shown).contains("group:GitHub · 1 ·"),
         "{}",
         items(&shown)
     );
     bed.shot("queue-set-aside")?;
-    // « Trier quand même »: back.
+    // « Trier à nouveau les mails de GitHub »: back.
     bed.click("Unaside(0)")?;
     bed.shows(|s| {
         let i = items(s);
-        i.contains("group:notifications@github.com") && !i.contains("aside:")
+        i.contains("group:GitHub · 12") && !i.contains("aside:")
     })?;
 
     // Steadily too hot (her sampler reads every five seconds of her clock,
@@ -407,8 +459,16 @@ fn her_queue_unfolds_from_her_status_and_a_sender_is_set_aside_by_a_click() -> a
     bed.advance(45)?;
     bed.shows(|s| items(s).contains("state:Je souffle entre deux"))?;
     bed.advance(3)?;
-    bed.shows(|s| items(s).contains("pause:Le processeur chauffe : 100 °C en moyenne"))?;
-    bed.shot("queue-paused")?;
+    // One reason, said once (#758): her status sums it up, the view says
+    // why with her real threshold.
+    let shown = bed.shows(|s| {
+        items(s).contains(
+            "pause:L’ordinateur chauffe (100 °C). Je reprends quand il redescend sous 90 °C",
+        )
+    })?;
+    assert_eq!(shown["status"], "Tri en pause : l’ordinateur chauffe");
+    assert_eq!(shown["hint"], "", "no band besides");
+    bed.shot("4-queue-paused")?;
 
     // Back to the thread.
     bed.click("Back")?;
