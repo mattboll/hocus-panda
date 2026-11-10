@@ -1,11 +1,6 @@
 //! The "Agents" page (6.16, variant A, docs/design/settings.md "Agents"):
-//! the tools followed, the halo and its preview, the pandas, and the
-//! secretary: her mode, and in assistant mode the applications whose
-//! notifications she reads (secretary.md lot 7, [`crate::notifiers`]) and
-//! each kind of each Google account of Online Accounts (#750,
-//! [`crate::google_sources`]), each consented to on a sheet that says what
-//! she reads, what she never does there and what leaves the machine, with
-//! its notebook.
+//! the tools followed, the halo and its preview, the pandas, and a line
+//! to the secretary's own page (#759, [`super::secretary_page`]).
 //!
 //! The tools are the compositor's (4.0): it says them on the Settings'
 //! line (`agent-tools`), and the page asks it to plug one in or out, or
@@ -36,7 +31,7 @@ use iced::{
     mouse,
     widget::{
         Space, button, canvas, column, container, mouse_area, rich_text, row, span, stack, svg,
-        text, text_input,
+        text,
     },
 };
 
@@ -47,18 +42,11 @@ use super::{
 };
 use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
-    google_sources::{self, Source as GoogleSource},
     lang::{Lang, w},
     model::{SectionId, Setting, Value},
-    notifiers::{self, Notifier},
     screens::Said,
     store::Slot,
 };
-use hocus_secretary_link::{KeyOutcome, Notebook, Secret};
-
-/// Her key's field and her name's (#752).
-const KEY_FIELD: &str = "agents-key";
-const NAME_FIELD: &str = "agents-name";
 /// The wave runs down the preview's bar in this time, the glow fades in
 /// over it (bar.md §6).
 const WAVE: Duration = Duration::from_millis(600);
@@ -104,57 +92,6 @@ pub enum Msg {
     Pet(usize),
     /// What the tools' files and the state file say.
     Files(HashMap<Tool, Facts>),
-    /// The applications whose notifications she may read, as found.
-    Notifiers(Vec<Notifier>),
-    /// "Autoriser" on the `n`th application's row: its sheet opens.
-    Allow(usize),
-    /// The sheet's notebook.
-    Notebook(Notebook),
-    /// The sheet's "Autoriser" (`true`) or "Pas maintenant".
-    Allowed(bool),
-    /// "Ne plus lire" on the `n`th application's row.
-    Revoke(usize),
-    /// Her Google sources, as found.
-    Google(Vec<GoogleSource>),
-    /// "Autoriser" on the `n`th Google source's row: its sheet opens.
-    GoogleAllow(usize),
-    /// Its sheet's "Autoriser" (`true`) or "Pas maintenant".
-    GoogleAllowed(bool),
-    /// "Ne plus lire" on the `n`th Google source's row.
-    GoogleRevoke(usize),
-    /// Her answers' key as she says it: its provider and whether her
-    /// keyring misses it; none: she does not answer (#752).
-    KeyState(Option<(String, bool)>),
-    /// Her key's field, as typed or pasted.
-    KeyTyped(Secret),
-    /// "Enregistrer": the key goes to her.
-    KeySave,
-    /// "Remplacer": the field shows; "Annuler" hides it again.
-    KeyReplace(bool),
-    /// "Effacer".
-    KeyErase,
-    /// What she did with the key given.
-    Keyed(Result<KeyOutcome, String>),
-    /// GNOME's Online Accounts panel, installed or not (#752).
-    Panel(Option<std::path::PathBuf>),
-    /// « Ajouter un compte Google »: the panel opens.
-    AddAccount,
-    /// The sheet's calendar `n`, read or left out (#752).
-    SheetCalendar(usize),
-    /// Calendar `n` of the `i`th Google source's row (an Agenda granted),
-    /// read or left out.
-    RowCalendar(usize, usize),
-    /// « C'est privé » on the `n`th Google source's row, granted (#752).
-    GooglePrivate(usize),
-    /// « C'est privé » on the `n`th application's row, granted.
-    NotifierPrivate(usize),
-    /// The private notebook's quiet hours, as the file says: what « C'est
-    /// privé » says.
-    Quiet(hocus_secretary_link::gate::Hours),
-    /// Her name's field, as typed (#752).
-    NameTyped(String),
-    /// Her name written (`Enter`, `Tab`, or the field left).
-    NameCommit,
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -164,10 +101,8 @@ pub enum Stop {
     Action(Tool),
     Preview,
     Copy,
-    /// The `n`th application's button, under the secretary.
-    Notifier(usize),
-    /// The `n`th Google source's button.
-    Google(usize),
+    /// The line to the secretary's page.
+    Secretary,
 }
 
 /// A tool plugged in or out, herdr followed or not, for its undo.
@@ -194,27 +129,6 @@ struct Consent {
     on_plug: bool,
 }
 
-/// The notifications' consent sheet: for which application, into which
-/// notebook, and which button has the keyboard.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Notify {
-    name: String,
-    slack: bool,
-    notebook: Notebook,
-    on_allow: bool,
-}
-
-/// A Google source's consent sheet: which, into which notebook, and
-/// which button has the keyboard.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GoogleSheet {
-    source: GoogleSource,
-    notebook: Notebook,
-    on_allow: bool,
-    /// An Agenda's calendars left out on it, by their ids (#752).
-    left_out: std::collections::BTreeSet<String>,
-}
-
 /// The page's state.
 #[derive(Debug, Default)]
 pub struct State {
@@ -237,36 +151,6 @@ pub struct State {
     seen: bool,
     /// The window's messages: what the files say comes back there.
     to: Option<iced::futures::channel::mpsc::UnboundedSender<Message>>,
-    /// The applications whose notifications she may read, as last read.
-    notifiers: Vec<Notifier>,
-    notify: Option<Notify>,
-    /// Her Google sources, as last read.
-    google: Vec<GoogleSource>,
-    google_sheet: Option<GoogleSheet>,
-    /// Her answers' key (#752).
-    key: KeyRow,
-    /// Her name as it is being typed, before it is written (#752).
-    name: Option<String>,
-    /// The private notebook's quiet hours (`[secretary.speak]
-    /// quiet-perso`), none before they are read: hers by default.
-    quiet: Option<hocus_secretary_link::gate::Hours>,
-    /// GNOME's Online Accounts panel, when installed.
-    panel: Option<std::path::PathBuf>,
-}
-
-/// The "Clé Anthropic" row: what she says of her key, the field (never
-/// drawn as it is, overwritten once sent), what became of the last one.
-#[derive(Debug, Default)]
-struct KeyRow {
-    /// Her answers' provider and whether her keyring misses its key; none
-    /// before she answered, or when she does not.
-    state: Option<(String, bool)>,
-    field: Secret,
-    /// "Remplacer" clicked: the field shows over a key kept.
-    replacing: bool,
-    /// The key is with her, being checked.
-    busy: bool,
-    said: Option<Result<KeyOutcome, String>>,
 }
 
 impl State {
@@ -275,14 +159,6 @@ impl State {
             to: Some(to.clone()),
             ..Self::default()
         }
-    }
-}
-
-/// The other notebook: « C'est privé » checked or not.
-fn other(notebook: Notebook) -> Notebook {
-    match notebook {
-        Notebook::Pro => Notebook::Perso,
-        Notebook::Perso => Notebook::Pro,
     }
 }
 
@@ -384,296 +260,13 @@ impl App {
         }
         out.push(Control::Agents(Stop::Copy));
         for setting in crate::agents::settings() {
-            // Her name is a field of its own (#752), iced's to focus.
-            if setting.id == model::NAME {
-                continue;
-            }
             out.push(Control::Setting(Slot::of(setting, self.source)));
             if setting.id == model::REMIND {
                 out.push(Control::Agents(Stop::Preview));
             }
         }
-        if self.agents_assistant() {
-            out.extend(
-                (0..self.agents.notifiers.len()).map(|i| Control::Agents(Stop::Notifier(i))),
-            );
-            out.extend((0..self.agents.google.len()).map(|i| Control::Agents(Stop::Google(i))));
-        }
+        out.push(Control::Agents(Stop::Secretary));
         out
-    }
-
-    /// The secretary is the assistant (`[secretary] mode`): her rows show.
-    fn agents_assistant(&self) -> bool {
-        self.agents_slot(model::SECRETARY)
-            .and_then(|s| self.value(s))
-            .is_some_and(|v| v == Value::Bool(true))
-    }
-
-    /// The applications whose notifications she may read, found on a
-    /// thread, said back to the window.
-    fn agents_read_notifiers(&self) {
-        self.agents_notifiers_job(None);
-        self.agents_google_job(None);
-        self.agents_key_job(None);
-    }
-
-    /// Her name as written in the file now.
-    fn agents_name(&self) -> String {
-        match self.agents_slot(model::NAME).and_then(|s| self.value(s)) {
-            Some(Value::Text(name)) => name,
-            _ => String::new(),
-        }
-    }
-
-    /// Her name being typed, written if it changed (#752).
-    pub(super) fn agents_name_commit(&mut self) {
-        let Some(typed) = self.agents.name.take() else {
-            return;
-        };
-        let name = typed.trim().to_owned();
-        if name == self.agents_name().trim() || !self.writable() {
-            return;
-        }
-        let Some(slot) = self.agents_slot(model::NAME) else {
-            return;
-        };
-        let said = match (self.lang, name.is_empty()) {
-            (Lang::French, false) => format!("Elle s’appelle {name}"),
-            (Lang::French, true) => "Elle redevient « Ta secrétaire »".to_owned(),
-            (Lang::English, false) => format!("Her name is {name}"),
-            (Lang::English, true) => "She is “Your secretary” again".to_owned(),
-        };
-        tracing::info!("her name written");
-        self.ask(
-            slot,
-            crate::store::Raw::Set(Value::Text(name)),
-            super::Doing::New,
-            None,
-            None,
-            Some(said),
-        );
-    }
-
-    /// Whether her name is being typed.
-    pub(super) fn agents_naming(&self) -> bool {
-        self.agents.name.is_some()
-    }
-
-    /// Her name's row: a field, her name or « Ta secrétaire » greyed.
-    fn agents_name_row<'a>(&'a self) -> El<'a> {
-        let lang = self.lang;
-        let Some(setting) = crate::model::setting(model::NAME) else {
-            return Space::new().into();
-        };
-        let value = self
-            .agents
-            .name
-            .clone()
-            .unwrap_or_else(|| self.agents_name());
-        let words = column![
-            t(setting.name.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
-            t(
-                setting.line.map(|l| l.get(lang)).unwrap_or_default(),
-                12.5,
-                DIM.get()
-            ),
-        ]
-        .spacing(3)
-        .width(Length::Fill);
-        let field = text_input(self.say(w("Ta secrétaire", "Your secretary")), &value)
-            .id(NAME_FIELD)
-            .on_input(|typed| Message::Agents(Msg::NameTyped(typed)))
-            .on_submit(Message::Agents(Msg::NameCommit))
-            .size(13.5)
-            .width(200)
-            .padding([7, 10])
-            .style(|_: &Theme, status| {
-                let focused = matches!(status, text_input::Status::Focused { .. });
-                text_input::Style {
-                    background: Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.06))),
-                    border: border(
-                        8.0,
-                        if focused { 1.5 } else { 1.0 },
-                        if focused { ACCENT.get() } else { RIM_12.get() },
-                    ),
-                    icon: DIM.get(),
-                    placeholder: FAINT.get(),
-                    value: TEXT.get(),
-                    selection: crate::theme::Ink::Accent(0.35).get(),
-                }
-            });
-        container(
-            row![words, container(field).id("agents:name-field".to_owned())]
-                .spacing(12)
-                .align_y(Alignment::Center),
-        )
-        .padding(Padding {
-            top: 11.0,
-            right: 14.0,
-            bottom: 11.0,
-            left: 16.0,
-        })
-        .id(format!("row:{}", model::NAME))
-        .into()
-    }
-
-    /// Her key given (`Some(Some(key))`), erased (`Some(None)`), or only
-    /// asked about, on her socket from a thread; then what she says of it.
-    fn agents_key_job(&self, give: Option<Option<Secret>>) {
-        let Some(to) = self.agents.to.clone() else {
-            return;
-        };
-        let Some(socket) = hocus_secretary_link::session_socket() else {
-            return;
-        };
-        let started = std::thread::Builder::new()
-            .name("her key".to_owned())
-            .spawn(move || {
-                use hocus_secretary_link::{Client, Connection};
-                if let Some(key) = give {
-                    let provider =
-                        Connection::open(&socket, Client::Settings, Duration::from_secs(5))
-                            .and_then(|mut c| c.status())
-                            .ok()
-                            .and_then(|s| s.key_provider)
-                            .unwrap_or_else(|| "anthropic".to_owned());
-                    let outcome =
-                        hocus_secretary_link::give_key(&socket, Client::Settings, &provider, key);
-                    if let Err(err) = &outcome {
-                        tracing::info!(%err, "her key could not be given");
-                    }
-                    let _ = to.unbounded_send(Message::Agents(Msg::Keyed(outcome)));
-                }
-                let state = Connection::open(&socket, Client::Settings, Duration::from_secs(5))
-                    .and_then(|mut c| c.status())
-                    .ok()
-                    .and_then(|s| s.key_provider.map(|p| (p, s.key_missing)));
-                let _ = to.unbounded_send(Message::Agents(Msg::KeyState(state)));
-            });
-        if let Err(err) = started {
-            tracing::warn!(%err, "her key is not asked about");
-        }
-    }
-
-    /// `decision` on a Google source written in her consent book
-    /// (`Some(notebook)`: read; `None`: no longer), then the accounts
-    /// read again; on a thread.
-    fn agents_google_job(&self, decision: Option<(GoogleSource, Option<Notebook>, Vec<String>)>) {
-        let Some(to) = self.agents.to.clone() else {
-            return;
-        };
-        let started = std::thread::Builder::new()
-            .name("google sources".to_owned())
-            .spawn(move || {
-                if let Some((source, notebook, left_out)) = decision {
-                    let written = notifiers::book_path()
-                        .ok_or_else(|| std::io::Error::other("no data folder"))
-                        .and_then(|path| {
-                            google_sources::decide(
-                                &path,
-                                &source.key(),
-                                &source.identity,
-                                notebook,
-                                left_out,
-                                jiff::Timestamp::now(),
-                            )
-                        });
-                    match written {
-                        Ok(()) => tracing::info!(
-                            source = source.word(),
-                            notebook = notebook.map(Notebook::word),
-                            "the secretary's consent to a Google source written"
-                        ),
-                        Err(err) => {
-                            tracing::warn!(source = source.word(), %err, "the consent is not written");
-                        }
-                    }
-                }
-                let _ = to.unbounded_send(Message::Agents(Msg::Quiet(google_sources::quiet())));
-                let _ = to.unbounded_send(Message::Agents(Msg::Panel(google_sources::panel())));
-                let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
-            });
-        if let Err(err) = started {
-            tracing::warn!(%err, "the Google accounts are not read");
-        }
-    }
-
-    /// « C'est privé » checked (`Perso`) or not on a granted source's row
-    /// (#752): written in her book on a thread, the rows read again. She
-    /// takes it at once and moves what came from it.
-    fn agents_private_job(
-        &self,
-        source: hocus_secretary_link::consent::SourceKey,
-        notebook: Notebook,
-    ) {
-        let Some(to) = self.agents.to.clone() else {
-            return;
-        };
-        let started = std::thread::Builder::new()
-            .name("a source's notebook".to_owned())
-            .spawn(move || {
-                let written = notifiers::book_path()
-                    .ok_or_else(|| std::io::Error::other("no data folder"))
-                    .and_then(|path| {
-                        let mut book = hocus_secretary_link::consent::ConsentBook::load(&path);
-                        book.set_notebook(&source, notebook, jiff::Timestamp::now());
-                        book.save(&path)
-                    });
-                match written {
-                    Ok(()) => tracing::info!(
-                        source = %source,
-                        notebook = notebook.word(),
-                        "a source's notebook written"
-                    ),
-                    Err(err) => {
-                        tracing::warn!(source = %source, %err, "the notebook is not written")
-                    }
-                }
-                let _ = to.unbounded_send(Message::Agents(Msg::Notifiers(notifiers::read())));
-                let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
-            });
-        if let Err(err) = started {
-            tracing::warn!(%err, "a source's notebook is not written");
-        }
-    }
-
-    /// The private notebook's quiet hours, as last read.
-    fn agents_quiet(&self) -> hocus_secretary_link::gate::Hours {
-        self.agents
-            .quiet
-            .unwrap_or(hocus_secretary_link::gate::Restraint::default().perso)
-    }
-
-    /// `decision` written in her consent book (`(name, Some(notebook))`:
-    /// read; `None`: no longer), then the applications read again; on a
-    /// thread.
-    fn agents_notifiers_job(&self, decision: Option<(String, Option<Notebook>)>) {
-        let Some(to) = self.agents.to.clone() else {
-            return;
-        };
-        let started = std::thread::Builder::new()
-            .name("notifiers".to_owned())
-            .spawn(move || {
-                if let Some((name, notebook)) = decision {
-                    let written = notifiers::book_path()
-                        .ok_or_else(|| std::io::Error::other("no data folder"))
-                        .and_then(|path| {
-                            notifiers::decide(&path, &name, notebook, jiff::Timestamp::now())
-                        });
-                    match written {
-                        Ok(()) => tracing::info!(
-                            app = name,
-                            notebook = notebook.map(Notebook::word),
-                            "the secretary's consent to an application's notifications written"
-                        ),
-                        Err(err) => tracing::warn!(app = name, %err, "the consent is not written"),
-                    }
-                }
-                let _ = to.unbounded_send(Message::Agents(Msg::Notifiers(notifiers::read())));
-            });
-        if let Err(err) = started {
-            tracing::warn!(%err, "the notifying applications are not read");
-        }
     }
 
     fn agents_focused(&self, stop: Stop) -> bool {
@@ -767,318 +360,6 @@ impl App {
                 self.agents.files = files;
                 iced::Task::none()
             }
-            Msg::Notifiers(found) => {
-                self.agents.notifiers = found;
-                iced::Task::none()
-            }
-            Msg::Allow(i) => {
-                if let Some(n) = self.agents.notifiers.get(i)
-                    && n.granted.is_none()
-                    && self.agents_assistant()
-                {
-                    tracing::debug!(app = n.name, "the notifications' consent sheet opens");
-                    self.agents.notify = Some(Notify {
-                        name: n.name.clone(),
-                        slack: n.is_slack(),
-                        notebook: notifiers::proposed(n),
-                        on_allow: true,
-                    });
-                }
-                iced::Task::none()
-            }
-            Msg::Notebook(notebook) => {
-                if let Some(sheet) = &mut self.agents.google_sheet {
-                    sheet.notebook = notebook;
-                } else if let Some(notify) = &mut self.agents.notify {
-                    notify.notebook = notebook;
-                }
-                iced::Task::none()
-            }
-            Msg::Google(found) => {
-                self.agents.google = found;
-                iced::Task::none()
-            }
-            Msg::GoogleAllow(i) => {
-                if let Some(source) = self.agents.google.get(i)
-                    && source.granted.is_none()
-                    && self.agents_assistant()
-                {
-                    tracing::debug!(
-                        source = source.word(),
-                        "a Google source's consent sheet opens"
-                    );
-                    self.agents.google_sheet = Some(GoogleSheet {
-                        notebook: source.suggested,
-                        source: source.clone(),
-                        on_allow: true,
-                        left_out: std::collections::BTreeSet::new(),
-                    });
-                }
-                iced::Task::none()
-            }
-            Msg::GoogleAllowed(yes) => {
-                let Some(sheet) = self.agents.google_sheet.take() else {
-                    return iced::Task::none();
-                };
-                if !yes {
-                    tracing::debug!(source = sheet.source.word(), "not read");
-                    return iced::Task::none();
-                }
-                let title = sheet.source.title(self.lang);
-                let text = match self.lang {
-                    Lang::French => {
-                        format!("{title} : elle le lit ({})", sheet.notebook.said(true))
-                    }
-                    Lang::English => {
-                        format!("{title}: she reads it ({})", sheet.notebook.said(false))
-                    }
-                };
-                let left_out = sheet.left_out.into_iter().collect();
-                self.agents_google_job(Some((sheet.source, Some(sheet.notebook), left_out)));
-                self.toast(text, ToastAction::None, TOAST)
-            }
-            Msg::GoogleRevoke(i) => {
-                let Some(source) = self
-                    .agents
-                    .google
-                    .get(i)
-                    .filter(|s| s.granted.is_some())
-                    .cloned()
-                else {
-                    return iced::Task::none();
-                };
-                let title = source.title(self.lang);
-                let text = match self.lang {
-                    Lang::French => {
-                        format!("{title} : elle ne le lit plus et oublie ce qu’elle en savait")
-                    }
-                    Lang::English => {
-                        format!("{title}: she no longer reads it and forgets what she knew of it")
-                    }
-                };
-                self.agents_google_job(Some((source, None, Vec::new())));
-                self.toast(text, ToastAction::None, TOAST)
-            }
-            Msg::Panel(panel) => {
-                self.agents.panel = panel;
-                iced::Task::none()
-            }
-            Msg::AddAccount => {
-                let Some(panel) = self.agents.panel.clone() else {
-                    return iced::Task::none();
-                };
-                tracing::info!("Online Accounts' panel opens");
-                let to = self.agents.to.clone();
-                let started = std::thread::Builder::new()
-                    .name("online accounts".to_owned())
-                    .spawn(move || {
-                        let ran = std::process::Command::new(&panel)
-                            .arg("online-accounts")
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .status();
-                        if let Err(err) = ran {
-                            tracing::warn!(%err, "Online Accounts' panel does not run");
-                        }
-                        // Closed: an account added there shows as rows.
-                        if let Some(to) = to {
-                            let _ = to.unbounded_send(Message::Agents(Msg::Google(
-                                google_sources::read(),
-                            )));
-                        }
-                    });
-                if let Err(err) = started {
-                    tracing::warn!(%err, "Online Accounts' panel does not run");
-                }
-                iced::Task::none()
-            }
-            Msg::SheetCalendar(n) => {
-                if let Some(sheet) = &mut self.agents.google_sheet
-                    && let Some(id) = sheet.source.calendars.get(n).map(|c| c.id.clone())
-                    && !sheet.left_out.remove(&id)
-                {
-                    sheet.left_out.insert(id);
-                }
-                iced::Task::none()
-            }
-            Msg::RowCalendar(i, n) => {
-                let Some(source) = self.agents.google.get(i).filter(|s| s.granted.is_some()) else {
-                    return iced::Task::none();
-                };
-                let Some(id) = source.calendars.get(n).map(|c| c.id.clone()) else {
-                    return iced::Task::none();
-                };
-                let mut left_out = source.left_out.clone();
-                if let Some(at) = left_out.iter().position(|l| *l == id) {
-                    left_out.remove(at);
-                } else {
-                    left_out.push(id);
-                }
-                let key = source.key();
-                let Some(to) = self.agents.to.clone() else {
-                    return iced::Task::none();
-                };
-                let started = std::thread::Builder::new()
-                    .name("a calendar left out".to_owned())
-                    .spawn(move || {
-                        let written = notifiers::book_path()
-                            .ok_or_else(|| std::io::Error::other("no data folder"))
-                            .and_then(|path| {
-                                google_sources::leave_out(&path, &key, left_out, jiff::Timestamp::now())
-                            });
-                        if let Err(err) = written {
-                            tracing::warn!(source = %key, %err, "the calendars left out are not written");
-                        } else {
-                            tracing::info!(source = %key, "the calendars left out written");
-                        }
-                        let _ = to.unbounded_send(Message::Agents(Msg::Google(google_sources::read())));
-                    });
-                if let Err(err) = started {
-                    tracing::warn!(%err, "the calendars left out are not written");
-                }
-                iced::Task::none()
-            }
-            Msg::Quiet(hours) => {
-                self.agents.quiet = Some(hours);
-                iced::Task::none()
-            }
-            Msg::GooglePrivate(i) => {
-                let Some((key, now)) = self
-                    .agents
-                    .google
-                    .get(i)
-                    .and_then(|s| s.granted.map(|n| (s.key(), n)))
-                else {
-                    return iced::Task::none();
-                };
-                let next = other(now);
-                self.agents_private_job(key, next);
-                iced::Task::none()
-            }
-            Msg::NotifierPrivate(i) => {
-                let Some((key, now)) = self.agents.notifiers.get(i).and_then(|n| {
-                    n.granted.map(|g| {
-                        (
-                            hocus_secretary_link::consent::SourceKey::notifications(&n.name, None),
-                            g,
-                        )
-                    })
-                }) else {
-                    return iced::Task::none();
-                };
-                self.agents_private_job(key, other(now));
-                iced::Task::none()
-            }
-            Msg::NameTyped(typed) => {
-                self.agents.name = Some(typed.chars().take(40).collect());
-                iced::Task::none()
-            }
-            Msg::NameCommit => {
-                self.agents_name_commit();
-                iced::Task::none()
-            }
-            Msg::KeyState(state) => {
-                self.agents.key.state = state;
-                iced::Task::none()
-            }
-            Msg::KeyTyped(typed) => {
-                // The text before goes, overwritten (Secret's drop).
-                self.agents.key.field = typed;
-                iced::Task::none()
-            }
-            Msg::KeySave => {
-                let typed = std::mem::take(&mut self.agents.key.field);
-                if typed.expose().trim().is_empty() || self.agents.key.busy {
-                    return iced::Task::none();
-                }
-                tracing::info!("her key given in the Settings");
-                self.agents.key.busy = true;
-                self.agents.key.said = None;
-                self.agents_key_job(Some(Some(typed)));
-                iced::Task::none()
-            }
-            Msg::KeyReplace(on) => {
-                self.agents.key.replacing = on;
-                self.agents.key.field = Secret::default();
-                self.agents.key.said = None;
-                if on {
-                    iced::widget::operation::focus(KEY_FIELD)
-                } else {
-                    iced::Task::none()
-                }
-            }
-            Msg::KeyErase => {
-                if self.agents.key.busy {
-                    return iced::Task::none();
-                }
-                tracing::info!("her key erased in the Settings");
-                self.agents.key.busy = true;
-                self.agents.key.said = None;
-                self.agents_key_job(Some(None));
-                iced::Task::none()
-            }
-            Msg::Keyed(outcome) => {
-                self.agents.key.busy = false;
-                if matches!(outcome, Ok(KeyOutcome::Kept | KeyOutcome::Erased)) {
-                    self.agents.key.replacing = false;
-                }
-                let toast = match &outcome {
-                    Ok(o @ (KeyOutcome::Kept | KeyOutcome::Erased)) => {
-                        Some(o.words("anthropic", self.lang == Lang::French))
-                    }
-                    _ => None,
-                };
-                self.agents.key.said = Some(outcome);
-                match toast {
-                    Some(text) => self.toast(text, ToastAction::None, TOAST),
-                    None => iced::Task::none(),
-                }
-            }
-            Msg::Allowed(yes) => {
-                let Some(notify) = self.agents.notify.take() else {
-                    return iced::Task::none();
-                };
-                if !yes {
-                    tracing::debug!(app = notify.name, "not read");
-                    return iced::Task::none();
-                }
-                self.agents_notifiers_job(Some((notify.name.clone(), Some(notify.notebook))));
-                let text = match self.lang {
-                    Lang::French => format!(
-                        "{} : elle lit ses notifications ({})",
-                        notify.name,
-                        notify.notebook.said(true)
-                    ),
-                    Lang::English => format!(
-                        "{}: she reads its notifications ({})",
-                        notify.name,
-                        notify.notebook.said(false)
-                    ),
-                };
-                self.toast(text, ToastAction::None, TOAST)
-            }
-            Msg::Revoke(i) => {
-                let Some(name) = self
-                    .agents
-                    .notifiers
-                    .get(i)
-                    .filter(|n| n.granted.is_some())
-                    .map(|n| n.name.clone())
-                else {
-                    return iced::Task::none();
-                };
-                self.agents_notifiers_job(Some((name.clone(), None)));
-                let text = match self.lang {
-                    Lang::French => format!(
-                        "{name} : elle ne lit plus ses notifications et oublie ce qu’elle en savait"
-                    ),
-                    Lang::English => format!(
-                        "{name}: she no longer reads its notifications and forgets what she knew of them"
-                    ),
-                };
-                self.toast(text, ToastAction::None, TOAST)
-            }
         }
     }
 
@@ -1157,54 +438,6 @@ impl App {
     /// The consent sheet takes the keyboard: `Esc` cancels, `Enter`
     /// acts, `Tab` and the arrows go from one button to the other.
     pub(super) fn agents_key_first(&mut self, key: &Key) -> Option<iced::Task<Message>> {
-        // Her key's field being typed in: `Esc` empties it (#752).
-        if !self.agents.key.field.expose().is_empty() && key.as_ref() == Key::Named(Named::Escape) {
-            self.agents.key.field = Secret::default();
-            self.agents.key.replacing = false;
-            return Some(iced::widget::operation::focus("nothing"));
-        }
-        if let Some(sheet) = self.agents.google_sheet.as_mut() {
-            match key.as_ref() {
-                Key::Named(Named::Escape) => {
-                    return Some(self.agents_update(Msg::GoogleAllowed(false)));
-                }
-                Key::Named(Named::Enter | Named::Space) => {
-                    let yes = sheet.on_allow;
-                    return Some(self.agents_update(Msg::GoogleAllowed(yes)));
-                }
-                Key::Named(Named::Tab | Named::ArrowLeft | Named::ArrowRight) => {
-                    sheet.on_allow = !sheet.on_allow;
-                }
-                Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                    sheet.notebook = match sheet.notebook {
-                        Notebook::Pro => Notebook::Perso,
-                        Notebook::Perso => Notebook::Pro,
-                    };
-                }
-                _ => {}
-            }
-            return Some(iced::Task::none());
-        }
-        if let Some(notify) = self.agents.notify.as_mut() {
-            match key.as_ref() {
-                Key::Named(Named::Escape) => return Some(self.agents_update(Msg::Allowed(false))),
-                Key::Named(Named::Enter | Named::Space) => {
-                    let yes = notify.on_allow;
-                    return Some(self.agents_update(Msg::Allowed(yes)));
-                }
-                Key::Named(Named::Tab | Named::ArrowLeft | Named::ArrowRight) => {
-                    notify.on_allow = !notify.on_allow;
-                }
-                Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                    notify.notebook = match notify.notebook {
-                        Notebook::Pro => Notebook::Perso,
-                        Notebook::Perso => Notebook::Pro,
-                    };
-                }
-                _ => {}
-            }
-            return Some(iced::Task::none());
-        }
         let consent = self.agents.consent.as_mut()?;
         match key.as_ref() {
             Key::Named(Named::Escape) => return Some(self.agents_update(Msg::Consent(false))),
@@ -1241,16 +474,10 @@ impl App {
                 Stop::Preview => {
                     self.agents_update(Msg::Play(self.agents.played.unwrap_or(Played::Waiting)))
                 }
-                Stop::Notifier(i) => match self.agents.notifiers.get(i).map(|n| n.granted) {
-                    Some(Some(_)) => self.agents_update(Msg::Revoke(i)),
-                    Some(None) => self.agents_update(Msg::Allow(i)),
-                    None => iced::Task::none(),
-                },
-                Stop::Google(i) => match self.agents.google.get(i).map(|s| s.granted) {
-                    Some(Some(_)) => self.agents_update(Msg::GoogleRevoke(i)),
-                    Some(None) => self.agents_update(Msg::GoogleAllow(i)),
-                    None => iced::Task::none(),
-                },
+                Stop::Secretary => {
+                    self.go(Page::Section(SectionId::Secretary));
+                    iced::Task::none()
+                }
                 Stop::Action(tool) => {
                     let action = self
                         .agents
@@ -1342,7 +569,6 @@ impl App {
             if self.agents.tools.is_some() {
                 self.agents_read_files();
             }
-            self.agents_read_notifiers();
             self.agents.hop = (!self.reduced_motion).then(Instant::now);
         }
         self.agents.seen = shows;
@@ -1363,12 +589,6 @@ impl App {
                 self.agents.rise = motion.then(Instant::now);
             }
             (model::PANDAS, Value::Bool(true)) => self.agents.hop = motion.then(Instant::now),
-            // The assistant: the applications are read again for her rows.
-            (model::SECRETARY, Value::Bool(true)) => self.agents_read_notifiers(),
-            (model::SECRETARY, Value::Bool(false)) => {
-                self.agents.notify = None;
-                self.agents.google_sheet = None;
-            }
             _ => {}
         }
     }
@@ -1394,6 +614,29 @@ impl App {
                 }),
         )
         .id("link:bar.agents".to_owned())
+        .into()
+    }
+
+    /// « Secrétaire › »: her own page.
+    fn agents_secretary_link<'a>(&self) -> El<'a> {
+        let focused = self.agents_focused(Stop::Secretary);
+        container(
+            button(t(self.say(w("Secrétaire ›", "Secretary ›")), 13.0, MINT.get()).font(BOLD))
+                .padding([1, 2])
+                .on_press(Message::Section(SectionId::Secretary))
+                .style(move |_, status| button::Style {
+                    background: matches!(status, button::Status::Hovered)
+                        .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
+                    text_color: TEXT.get(),
+                    border: if focused {
+                        ring(5.0)
+                    } else {
+                        border(5.0, 0.0, Color::TRANSPARENT)
+                    },
+                    ..button::Style::default()
+                }),
+        )
+        .id("link:secretary".to_owned())
         .into()
     }
 
@@ -1503,698 +746,29 @@ impl App {
                 .into(),
             ),
         );
-        // LA SECRÉTAIRE (secretary.md §21): the assistant, or as she is.
+        // Her own page (#759): a line to it, where her group was.
         page = page.push(
-            self.agents_group(
-                model::SECRETARY_GROUP.label.get(lang),
-                self.say(w(
-                    "Sa mémoire reste sur cet ordinateur",
-                    "Her memory stays on this computer",
-                ))
-                .to_owned(),
-                self.agents_secretary_rows(model_row(model::SECRETARY)),
-            ),
+            row![
+                super::view::icon(crate::model::Icon::Secretary, 14.0, DIM.get()),
+                t(
+                    self.say(w(
+                        "Ta secrétaire, ce qu’elle lit et le tri de tes mails ont leur page :",
+                        "Your secretary, what she reads and how your mail is sorted have their page:",
+                    )),
+                    13.0,
+                    DIM.get()
+                ),
+                self.agents_secretary_link(),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .wrap(),
         );
         container(page).id("page:agents".to_owned()).into()
     }
 
-    /// The secretary's group: her mode's row, and in assistant mode the
-    /// applications whose notifications she may read.
-    fn agents_secretary_rows<'a>(&'a self, mode: El<'a>) -> El<'a> {
-        let mut body = column![mode];
-        if !self.agents_assistant() {
-            return body.into();
-        }
-        body = body.push(divided(true, self.agents_name_row()));
-        if self.agents.key.state.is_some() {
-            body = body.push(divided(true, self.agents_key_row()));
-        }
-        if self.agents.notifiers.is_empty() {
-            body = body.push(divided(
-                true,
-                container(t(
-                    self.say(w(
-                        "Aucune application ne t’a encore envoyé de notification : Slack, par exemple, apparaîtra ici dès qu’il en enverra une.",
-                        "No application has sent you a notification yet: Slack, for one, will show here as soon as it sends one.",
-                    )),
-                    12.5,
-                    DIM.get(),
-                ))
-                .padding([12, 16])
-                .id("agents:no-notifier".to_owned())
-                .into(),
-            ));
-        }
-        for (i, notifier) in self.agents.notifiers.iter().enumerate() {
-            body = body.push(divided(true, self.agents_notifier_row(i, notifier)));
-        }
-        if self.agents.google.is_empty() {
-            body = body.push(divided(
-                true,
-                container(t(
-                    self.say(w(
-                        "Aucun compte Google dans Comptes en ligne : son agenda et ses mails apparaîtront ici dès que tu en ajouteras un.",
-                        "No Google account in Online Accounts: its calendar and mail will show here as soon as you add one.",
-                    )),
-                    12.5,
-                    DIM.get(),
-                ))
-                .padding([12, 16])
-                .id("agents:no-google".to_owned())
-                .into(),
-            ));
-        }
-        for (i, source) in self.agents.google.iter().enumerate() {
-            body = body.push(divided(true, self.agents_google_row(i, source)));
-        }
-        // Another account, in GNOME's Online Accounts, when installed.
-        if self.agents.panel.is_some() {
-            body = body.push(divided(
-                true,
-                container(
-                    button(
-                        row![
-                            Self::agents_google_tile(20.0),
-                            t(
-                                self.say(w("Ajouter un compte Google ›", "Add a Google account ›")),
-                                13.0,
-                                MINT.get()
-                            )
-                            .font(BOLD),
-                        ]
-                        .spacing(10)
-                        .align_y(Alignment::Center),
-                    )
-                    .padding([4, 6])
-                    .on_press(Message::Agents(Msg::AddAccount))
-                    .style(|_, status| button::Style {
-                        background: matches!(status, button::Status::Hovered).then(|| {
-                            Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))
-                        }),
-                        text_color: TEXT.get(),
-                        border: border(7.0, 0.0, Color::TRANSPARENT),
-                        ..button::Style::default()
-                    }),
-                )
-                .padding([8, 10])
-                .id("agents:add-google".to_owned())
-                .into(),
-            ));
-        }
-        body.into()
-    }
-
-    /// "Clé Anthropic" (#752): « enregistrée » with « Remplacer » and
-    /// « Effacer », never the key; or, missing (or being replaced), a
-    /// masked field and « Enregistrer ». What became of the last one under
-    /// it, said plainly.
-    fn agents_key_row<'a>(&'a self) -> El<'a> {
-        let fr = self.lang == Lang::French;
-        let key = &self.agents.key;
-        let Some((provider, missing)) = key.state.clone() else {
-            return Space::new().into();
-        };
-        let name = if provider == "anthropic" {
-            "Anthropic".to_owned()
-        } else {
-            provider.clone()
-        };
-        let title = if fr {
-            format!("Clé {name}")
-        } else {
-            format!("{name} key")
-        };
-        let field_shown = missing || key.replacing;
-        let mut words = column![t(title, 14.0, TEXT.get()).font(SEMIBOLD)].spacing(3);
-        let line = match (field_shown, key.busy) {
-            (_, true) => self.say(w("Elle la vérifie…", "She is checking it…")),
-            (true, false) => self.say(w(
-                "Elle va dans ton trousseau, jamais dans un fichier.",
-                "It goes to your keyring, never to a file.",
-            )),
-            (false, false) => {
-                self.say(w("Enregistrée dans ton trousseau", "Saved in your keyring"))
-            }
-        };
-        words = words.push(t(line, 12.5, DIM.get()));
-        if let Some(said) = &key.said {
-            let (text, colour) = match said {
-                Ok(KeyOutcome::Kept | KeyOutcome::Erased) => (String::new(), DIM.get()),
-                Ok(outcome) => (outcome.words(&provider, fr), rgb(0xF7A77A)),
-                Err(_) => (
-                    self.say(w(
-                        "Elle ne répond pas : réessaie dans un instant.",
-                        "She does not answer: try again in a moment.",
-                    ))
-                    .to_owned(),
-                    rgb(0xF7A77A),
-                ),
-            };
-            if !text.is_empty() {
-                words = words.push(t(text, 12.5, colour));
-            }
-        }
-        let actions: El<'a> = if field_shown {
-            let placeholder = if fr {
-                format!("Colle ta clé {name}")
-            } else {
-                format!("Paste your {name} key")
-            };
-            let mut input = text_input(&placeholder, key.field.expose())
-                .id(KEY_FIELD)
-                .secure(true)
-                .size(13.0)
-                .width(230)
-                .padding([7, 10])
-                .style(|_: &Theme, status| {
-                    let focused = matches!(status, text_input::Status::Focused { .. });
-                    text_input::Style {
-                        background: Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.06))),
-                        border: border(
-                            8.0,
-                            if focused { 1.5 } else { 1.0 },
-                            if focused { ACCENT.get() } else { RIM_12.get() },
-                        ),
-                        icon: DIM.get(),
-                        placeholder: FAINT.get(),
-                        value: TEXT.get(),
-                        selection: crate::theme::Ink::Accent(0.35).get(),
-                    }
-                });
-            if !key.busy {
-                input = input
-                    .on_input(|typed| Message::Agents(Msg::KeyTyped(Secret::new(typed))))
-                    .on_submit(Message::Agents(Msg::KeySave));
-            }
-            let ready = !key.busy && !key.field.expose().trim().is_empty();
-            let mut row = row![
-                container(input).id("agents:key-field".to_owned()),
-                container(self.agents_button(
-                    self.say(w("Enregistrer", "Save")),
-                    true,
-                    false,
-                    ready.then_some(Message::Agents(Msg::KeySave)),
-                ))
-                .id("agents:key-save".to_owned()),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center);
-            if key.replacing && !missing {
-                row = row.push(
-                    container(self.agents_button(
-                        self.say(w("Annuler", "Cancel")),
-                        false,
-                        false,
-                        Some(Message::Agents(Msg::KeyReplace(false))),
-                    ))
-                    .id("agents:key-cancel".to_owned()),
-                );
-            }
-            row.into()
-        } else {
-            row![
-                container(self.agents_button(
-                    self.say(w("Remplacer", "Replace")),
-                    false,
-                    false,
-                    (!key.busy).then_some(Message::Agents(Msg::KeyReplace(true))),
-                ))
-                .id("agents:key-replace".to_owned()),
-                container(self.agents_button(
-                    self.say(w("Effacer", "Erase")),
-                    false,
-                    false,
-                    (!key.busy).then_some(Message::Agents(Msg::KeyErase)),
-                ))
-                .id("agents:key-erase".to_owned()),
-            ]
-            .spacing(8)
-            .into()
-        };
-        container(
-            row![words.width(Length::Fill), actions]
-                .spacing(12)
-                .align_y(Alignment::Center),
-        )
-        .padding(Padding {
-            top: 11.0,
-            right: 14.0,
-            bottom: 11.0,
-            left: 16.0,
-        })
-        .id("row:agents.key".to_owned())
-        .into()
-    }
-
-    /// A Google source's row: the account's kind, what she reads of it,
-    /// "Autoriser" or "Ne plus lire".
-    fn agents_google_row<'a>(&'a self, i: usize, source: &'a GoogleSource) -> El<'a> {
-        let lang = self.lang;
-        let focused = self.agents_focused(Stop::Google(i));
-        let mut words = column![
-            t(source.title(lang), 14.0, TEXT.get()).font(SEMIBOLD),
-            t(source.line(lang), 12.5, DIM.get()),
-        ]
-        .spacing(3)
-        .width(Length::Fill);
-        // An Agenda granted: the calendars she reads, each to be left out
-        // (#752).
-        if source.granted.is_some() {
-            for (n, calendar) in source.calendars.iter().enumerate() {
-                let read = !source.left_out.contains(&calendar.id);
-                words = words.push(self.agents_calendar(
-                    calendar,
-                    read,
-                    Message::Agents(Msg::RowCalendar(i, n)),
-                    format!("calendar:{}:{n}", source.word()),
-                ));
-            }
-        }
-        let action = if source.granted.is_some() {
-            self.agents_button(
-                self.say(w("Ne plus lire", "Stop reading")),
-                false,
-                focused,
-                Some(Message::Agents(Msg::GoogleRevoke(i))),
-            )
-        } else {
-            self.agents_button(
-                self.say(w("Autoriser", "Allow")),
-                true,
-                focused,
-                Some(Message::Agents(Msg::GoogleAllow(i))),
-            )
-        };
-        let mut line = row![Self::agents_google_tile(28.0), words]
-            .spacing(12)
-            .align_y(Alignment::Center);
-        if let Some(notebook) = source.granted {
-            line = line.push(self.agents_row_private(
-                notebook,
-                Message::Agents(Msg::GooglePrivate(i)),
-                format!("private:{}", source.word()),
-            ));
-        }
-        line = line.push(container(action).id(format!("google:{}", source.word())));
-        container(line)
-            .padding(Padding {
-                top: 11.0,
-                right: 14.0,
-                bottom: 11.0,
-                left: 16.0,
-            })
-            .id(format!("row:agents.google.{}", source.word()))
-            .into()
-    }
-
-    /// A Google account's mark: its letter on a blue tile (no brand
-    /// drawing).
-    fn agents_google_tile<'a>(size: f32) -> El<'a> {
-        container(text("G").size(size * 0.46).font(BOLD).color(Color::WHITE))
-            .width(size)
-            .height(size)
-            .center(size)
-            .style(boxed(rgb(0x4A6FD6), size * 0.28, None))
-            .into()
-    }
-
-    /// A Google source's consent sheet (§10.1): the words of her card in
-    /// the drawer, the notebook suggested by the account's domain.
-    fn agents_google_sheet<'a>(&self, sheet: &GoogleSheet) -> El<'a> {
-        use hocus_secretary_link::sheets::Mark;
-        let lang = self.lang;
-        let words = sheet.source.sheet(lang, self.agents_quiet());
-        let mut body = column![
-            row![
-                Self::agents_google_tile(32.0),
-                column![
-                    text(words.title.clone()).size(17).font(BOLD).color(TEXT),
-                    t(words.from.clone(), 12.0, FAINT.get()),
-                ]
-                .spacing(2),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        ]
-        .spacing(12);
-        for section in &words.sections {
-            let (mark, colour) = match section.mark {
-                Mark::Yes => ("✓", rgb(0x7EE0A0)),
-                Mark::No => ("✕", rgb(0xF7A77A)),
-                Mark::Plain => ("•", FAINT.get()),
-            };
-            let mut lines = column![].spacing(3);
-            for line in &section.lines {
-                lines = lines.push(
-                    row![
-                        container(t(mark, 13.0, colour).font(BOLD)).width(16),
-                        t(line.clone(), 13.0, SOFT.get()).line_height(1.45),
-                    ]
-                    .spacing(2),
-                );
-            }
-            body = body.push(
-                column![
-                    t(section.label.clone(), 11.0, FAINT.get()).font(BOLD),
-                    lines
-                ]
-                .spacing(5),
-            );
-        }
-        if !sheet.source.calendars.is_empty() {
-            let fr = lang == Lang::French;
-            let mut list = column![
-                t(
-                    hocus_secretary_link::sheets::calendars_label(fr),
-                    11.0,
-                    FAINT.get()
-                )
-                .font(BOLD)
-            ]
-            .spacing(4);
-            for (n, calendar) in sheet.source.calendars.iter().enumerate() {
-                let read = !sheet.left_out.contains(&calendar.id);
-                list = list.push(self.agents_calendar(
-                    calendar,
-                    read,
-                    Message::Agents(Msg::SheetCalendar(n)),
-                    format!("sheet:calendar:{n}"),
-                ));
-            }
-            body = body.push(list);
-        }
-        body = body.push(self.agents_private(sheet.notebook, &words.private));
-        let buttons = row![
-            Space::new().width(Length::Fill),
-            container(self.agents_button(
-                self.say(w("Pas maintenant", "Not now")),
-                false,
-                !sheet.on_allow,
-                Some(Message::Agents(Msg::GoogleAllowed(false))),
-            ))
-            .id("sheet:not-now".to_owned()),
-            container(self.agents_button(
-                self.say(w("Autoriser", "Allow")),
-                true,
-                sheet.on_allow,
-                Some(Message::Agents(Msg::GoogleAllowed(true))),
-            ))
-            .id("sheet:allow".to_owned()),
-        ]
-        .spacing(8);
-        Self::agents_over(
-            container(column![body, buttons].spacing(20))
-                .width(460)
-                .padding(20)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(rgb(0x1B2130))),
-                    border: border(14.0, 1.0, RIM_12.get()),
-                    shadow: shadow(),
-                    ..container::Style::default()
-                })
-                .id("sheet".to_owned())
-                .into(),
-        )
-    }
-
-    /// « C'est privé » on a sheet (#752): its box, checked for the private
-    /// notebook, and what it does under it.
-    fn agents_private<'a>(
-        &self,
-        notebook: Notebook,
-        private: &hocus_secretary_link::sheets::Private,
-    ) -> El<'a> {
-        let on = notebook == Notebook::Perso;
-        let check = Self::agents_check(on, 18.0);
-        let label = button(
-            row![
-                check,
-                t(private.label.clone(), 13.5, TEXT.get()).font(SEMIBOLD)
-            ]
-            .spacing(9)
-            .align_y(Alignment::Center),
-        )
-        .padding([3, 4])
-        .on_press(Message::Agents(Msg::Notebook(other(notebook))))
-        .style(|_, status| button::Style {
-            background: matches!(status, button::Status::Hovered)
-                .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
-            text_color: TEXT.get(),
-            border: border(6.0, 0.0, Color::TRANSPARENT),
-            ..button::Style::default()
-        });
-        let mut lines = column![].spacing(3).padding(Padding {
-            top: 0.0,
-            right: 0.0,
-            bottom: 0.0,
-            left: 31.0,
-        });
-        for line in &private.lines {
-            lines = lines.push(
-                t(line.clone(), 12.5, if on { SOFT.get() } else { DIM.get() }).line_height(1.4),
-            );
-        }
-        column![container(label).id("sheet:private".to_owned()), lines]
-            .spacing(4)
-            .into()
-    }
-
-    /// A calendar of an Agenda, read (ticked) or left out: its name, who
-    /// shares it, hidden, busy times only (#752).
-    fn agents_calendar<'a>(
-        &self,
-        calendar: &hocus_secretary_link::calendars::CalendarInfo,
-        read: bool,
-        press: Message,
-        id: String,
-    ) -> El<'a> {
-        let note = calendar.note(self.lang == Lang::French);
-        let mut words = row![
-            t(
-                calendar.name.clone(),
-                13.0,
-                if read { TEXT.get() } else { DIM.get() }
-            )
-            .font(SEMIBOLD)
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        if !note.is_empty() {
-            words = words.push(t(note, 12.0, DIM.get()));
-        }
-        container(
-            button(
-                row![Self::agents_check(read, 15.0), words.wrap()]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-            )
-            .padding([3, 4])
-            .on_press(press)
-            .style(|_, status| button::Style {
-                background: matches!(status, button::Status::Hovered)
-                    .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
-                text_color: TEXT.get(),
-                border: border(6.0, 0.0, Color::TRANSPARENT),
-                ..button::Style::default()
-            }),
-        )
-        .id(id)
-        .into()
-    }
-
-    /// A check box, ticked or not.
-    fn agents_check<'a>(on: bool, size: f32) -> El<'a> {
-        let mark: El<'a> = if on {
-            text("✓")
-                .size(size * 0.72)
-                .font(BOLD)
-                .color(DEEP.get())
-                .into()
-        } else {
-            Space::new().into()
-        };
-        container(mark)
-            .width(size)
-            .height(size)
-            .center(size)
-            .style(move |_: &Theme| container::Style {
-                background: Some(Background::Color(if on {
-                    ACCENT.get()
-                } else {
-                    crate::theme::ink(rgba(255, 255, 255, 0.04))
-                })),
-                border: border(
-                    5.0,
-                    if on { 0.0 } else { 1.5 },
-                    crate::theme::ink(rgba(255, 255, 255, 0.35)),
-                ),
-                ..container::Style::default()
-            })
-            .into()
-    }
-
-    /// « Privé » on a granted row, checked or not: a click changes it
-    /// (#752).
-    fn agents_row_private<'a>(&self, notebook: Notebook, press: Message, id: String) -> El<'a> {
-        let on = notebook == Notebook::Perso;
-        container(
-            button(
-                row![
-                    Self::agents_check(on, 16.0),
-                    t(self.say(w("Privé", "Private")), 13.0, TEXT.get())
-                ]
-                .spacing(7)
-                .align_y(Alignment::Center),
-            )
-            .padding([5, 8])
-            .on_press(press)
-            .style(|_, status| button::Style {
-                background: matches!(status, button::Status::Hovered)
-                    .then(|| Background::Color(crate::theme::ink(rgba(255, 255, 255, 0.05)))),
-                text_color: TEXT.get(),
-                border: border(7.0, 0.0, Color::TRANSPARENT),
-                ..button::Style::default()
-            }),
-        )
-        .id(id)
-        .into()
-    }
-
-    /// An application's mark: its first letter on the neutral tile the
-    /// notifications draw for an application without an icon.
-    fn agents_letter<'a>(name: &str, size: f32) -> El<'a> {
-        let letter: String = name
-            .chars()
-            .find(|c| c.is_alphanumeric())
-            .map(|c| c.to_uppercase().collect())
-            .unwrap_or_default();
-        container(
-            text(letter)
-                .size(size * 0.46)
-                .font(BOLD)
-                .color(Color::WHITE),
-        )
-        .width(size)
-        .height(size)
-        .center(size)
-        .style(boxed(rgb(0x5C6576), size * 0.28, None))
-        .into()
-    }
-
-    fn agents_notifier_row<'a>(&'a self, i: usize, notifier: &'a Notifier) -> El<'a> {
-        let lang = self.lang;
-        let focused = self.agents_focused(Stop::Notifier(i));
-        let title = match lang {
-            Lang::French => format!("Les notifications de {}", notifier.name),
-            Lang::English => format!("{}’s notifications", notifier.name),
-        };
-        let words = column![
-            t(title, 14.0, TEXT.get()).font(SEMIBOLD),
-            t(notifier.line(lang), 12.5, DIM.get()),
-        ]
-        .spacing(3)
-        .width(Length::Fill);
-        let action = if notifier.granted.is_some() {
-            self.agents_button(
-                self.say(w("Ne plus lire", "Stop reading")),
-                false,
-                focused,
-                Some(Message::Agents(Msg::Revoke(i))),
-            )
-        } else {
-            self.agents_button(
-                self.say(w("Autoriser", "Allow")),
-                true,
-                focused,
-                Some(Message::Agents(Msg::Allow(i))),
-            )
-        };
-        let mut line = row![Self::agents_letter(&notifier.name, 28.0), words]
-            .spacing(12)
-            .align_y(Alignment::Center);
-        if let Some(notebook) = notifier.granted {
-            line = line.push(self.agents_row_private(
-                notebook,
-                Message::Agents(Msg::NotifierPrivate(i)),
-                format!("notifier-private:{}", notifier.key),
-            ));
-        }
-        line = line.push(container(action).id(format!("notifier:{}", notifier.key)));
-        container(line)
-            .padding(Padding {
-                top: 11.0,
-                right: 14.0,
-                bottom: 11.0,
-                left: 16.0,
-            })
-            .id(format!("row:agents.notifier.{}", notifier.key))
-            .into()
-    }
-
-    /// The notifications' consent sheet (§10.1): what she reads, what she
-    /// never does there, what leaves the machine; the notebook.
-    fn agents_notify_sheet<'a>(&self, notify: &Notify) -> El<'a> {
-        let lang = self.lang;
-        let title = match lang {
-            Lang::French => format!("Lire les notifications de {} ?", notify.name),
-            Lang::English => format!("Read {}’s notifications?", notify.name),
-        };
-        let mut body = column![
-            row![
-                Self::agents_letter(&notify.name, 32.0),
-                text(title).size(17).font(BOLD).color(TEXT),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        ]
-        .spacing(14);
-        for (heading, said) in notifiers::sheet(&notify.name, notify.slack, lang) {
-            body = body.push(
-                column![
-                    t(heading.get(lang), 11.0, FAINT.get()).font(BOLD),
-                    t(said, 13.0, SOFT.get()).line_height(1.45),
-                ]
-                .spacing(5),
-            );
-        }
-        let private =
-            hocus_secretary_link::sheets::private(self.lang == Lang::French, self.agents_quiet());
-        body = body.push(self.agents_private(notify.notebook, &private));
-        let buttons = row![
-            Space::new().width(Length::Fill),
-            container(self.agents_button(
-                self.say(w("Pas maintenant", "Not now")),
-                false,
-                !notify.on_allow,
-                Some(Message::Agents(Msg::Allowed(false))),
-            ))
-            .id("sheet:not-now".to_owned()),
-            container(self.agents_button(
-                self.say(w("Autoriser", "Allow")),
-                true,
-                notify.on_allow,
-                Some(Message::Agents(Msg::Allowed(true))),
-            ))
-            .id("sheet:allow".to_owned()),
-        ]
-        .spacing(8);
-        Self::agents_over(
-            container(column![body, buttons].spacing(20))
-                .width(440)
-                .padding(20)
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(rgb(0x1B2130))),
-                    border: border(14.0, 1.0, RIM_12.get()),
-                    shadow: shadow(),
-                    ..container::Style::default()
-                })
-                .id("sheet".to_owned())
-                .into(),
-        )
-    }
-
     /// `sheet` over the window, its scrim taking the clicks.
-    fn agents_over(sheet: El<'_>) -> El<'_> {
+    pub(super) fn agents_over(sheet: El<'_>) -> El<'_> {
         stack![
             mouse_area(
                 container(Space::new().width(Length::Fill).height(Length::Fill)).style(boxed(
@@ -2329,7 +903,7 @@ impl App {
     }
 
     /// A button: green ("Brancher") or secondary; inert without `press`.
-    fn agents_button<'a>(
+    pub(super) fn agents_button<'a>(
         &self,
         said: &'static str,
         green: bool,
@@ -2761,12 +1335,6 @@ impl App {
 
     /// The consent sheet, over the window at 60 %.
     pub(super) fn agents_sheet(&self) -> Option<El<'_>> {
-        if let Some(sheet) = &self.agents.google_sheet {
-            return Some(self.agents_google_sheet(sheet));
-        }
-        if let Some(notify) = &self.agents.notify {
-            return Some(self.agents_notify_sheet(notify));
-        }
         let consent = self.agents.consent?;
         let lang = self.lang;
         let tool = consent.tool;
@@ -2916,41 +1484,6 @@ impl App {
             "remind_inert": self.agents_word(model::HALO) == "off",
             "pandas": self.agents_pandas(),
             "copied": self.agents.copied.is_some_and(|at| self.now.saturating_duration_since(at) < COPIED),
-            "assistant": self.agents_assistant(),
-            "notifiers": self.agents.notifiers.iter().map(|n| serde_json::json!({
-                "key": n.key,
-                "name": n.name,
-                "granted": n.granted.map(Notebook::word),
-            })).collect::<Vec<_>>(),
-            "notify": self.agents.notify.as_ref().map(|n| n.name.clone()),
-            "notify_notebook": self.agents.notify.as_ref().map(|n| n.notebook.word()),
-            "notify_on": self.agents.notify.as_ref().map(|n| if n.on_allow { "allow" } else { "not-now" }),
-            "google": self.agents.google.iter().map(|g| serde_json::json!({
-                "key": g.word(),
-                "title": g.title(lang),
-                "suggested": g.suggested.word(),
-                "granted": g.granted.map(Notebook::word),
-                "calendars": g.calendars.iter().map(|c| format!("{} {}", c.name, c.note(true)).trim().to_owned()).collect::<Vec<_>>(),
-                "left_out": g.left_out,
-            })).collect::<Vec<_>>(),
-            "add_account": self.agents.panel.is_some(),
-            "google_left_out": self.agents.google_sheet.as_ref().map(|g| g.left_out.iter().cloned().collect::<Vec<_>>()),
-            "google_sheet": self.agents.google_sheet.as_ref().map(|g| g.source.word()),
-            "name": self.agents_name(),
-            "naming": self.agents.name.clone(),
-            // Her key's row: never the key, nor its length.
-            "key": self.agents.key.state.as_ref().map(|(provider, missing)| serde_json::json!({
-                "provider": provider,
-                "kept": !missing,
-                "field": *missing || self.agents.key.replacing,
-                "typed": !self.agents.key.field.expose().is_empty(),
-                "busy": self.agents.key.busy,
-                "said": self.agents.key.said.as_ref().map(|s| match s {
-                    Ok(o) => o.words(provider, true),
-                    Err(_) => "no answer".to_owned(),
-                }),
-            })),
-            "google_notebook": self.agents.google_sheet.as_ref().map(|g| g.notebook.word()),
         })
     }
 }

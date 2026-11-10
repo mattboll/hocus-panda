@@ -292,7 +292,7 @@ plugging in writes into your real `~/.claude/settings.json`. Tests give
 The secretary (docs/design/secretary.md, crates `hocus-secretary`, binary
 `hocus-secretary`, and `hocus-secretary-link`, her socket's protocol) runs
 only with `[secretary] mode = "assistant"` (default `"classic"`, followed
-live; also Settings › Agents): the compositor starts her from beside its
+live; also Settings › Secretary): the compositor starts her from beside its
 own binary (or `--secretary PATH`), starts her again when she ends, and
 stops her back in classic mode; she listens on `<socket>.secretary`, which
 the shell and `hocus` connect to. Her memory is an SQLCipher database in

@@ -113,6 +113,10 @@ impl App {
         if let Some(sheet) = self.agents_sheet() {
             layers.push(sheet);
         }
+        // The Secrétaire page's: a source's consent, its calendars (#759).
+        if let Some(sheet) = self.secretary_sheet() {
+            layers.push(sheet);
+        }
         // The Bluetooth page's sheets: a code, a PIN, forgetting (6.7).
         if let Some(sheet) = self.bluetooth_sheet() {
             layers.push(sheet);
@@ -289,8 +293,8 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            // 27 px: the 19 sections fit the window's 760 px.
-            .height(27)
+            // 26 px: the 20 sections fit the window's 760 px.
+            .height(26)
             .padding([0, 10])
             .on_press(on)
             .style(flat(
@@ -917,6 +921,9 @@ impl App {
         }
         if id == SectionId::Agents {
             return self.agents_page(page);
+        }
+        if id == SectionId::Secretary {
+            return self.secretary_page(page);
         }
         if id == SectionId::Performance {
             return self.perf_page(page);
@@ -1885,6 +1892,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "power": if app.page == Page::Section(SectionId::Power) { app.power_shown() } else { serde_json::Value::Null },
         "perf": if app.page == Page::Section(SectionId::Performance) { app.perf_shown() } else { serde_json::Value::Null },
         "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
+        "secretary": if app.page == Page::Section(SectionId::Secretary) { app.secretary_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
