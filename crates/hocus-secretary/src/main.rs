@@ -155,8 +155,11 @@ fn run(args: Args) -> Result<(), String> {
     private_dir(&data)?;
     let memory = data.join(MEMORY);
     let (key, place) = key::key(&data, bus.as_deref(), memory.exists())?;
-    let mut store =
-        Store::open(&memory, &key, clock).map_err(|e| format!("{}: {e}", memory.display()))?;
+    let opened = Store::open(&memory, &key, clock);
+    // Her memory is open, or will not be: the key is wiped now (#768).
+    // SQLCipher holds its own copy, and wipes it as her memory closes.
+    drop(key);
+    let mut store = opened.map_err(|e| format!("{}: {e}", memory.display()))?;
     if let Some(file) = &args.memory_fixture {
         let seed = hocus_secretary::seed::Seed::from_file(file)?;
         seed.write(&mut store)
@@ -269,16 +272,16 @@ fn keep_key(args: &Args, provider: &str) -> Result<(), String> {
              (which sets HOCUS_SECRETARY_BUS), or give --bus session",
         )?;
     let fr = Language::of_env() == Language::French;
-    let mut read =
+    // The line and the key cut out of it are wiped as each goes.
+    let read =
         key::read_secret(&key::prompt(provider, fr)).map_err(|e| format!("standard input: {e}"))?;
-    let secret = read.trim().to_owned();
-    key::wipe(&mut read);
+    let secret = zeroize::Zeroizing::new(read.trim().to_owned());
+    drop(read);
     if secret.is_empty() {
         return Err("no key on standard input".to_owned());
     }
-    let mut secret = secret;
     let kept = key::keep_provider_key(&bus, provider, &secret);
-    key::wipe(&mut secret);
+    drop(secret);
     if kept {
         tracing::info!(provider, "the key is in the keyring");
         println!("The {provider} key is in your keyring: she reads it at her next answer.");

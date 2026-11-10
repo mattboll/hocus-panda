@@ -70,7 +70,13 @@ impl Endpoint<'_> {
         let agent = crate::http::agent(TIMEOUT);
         let mut request = agent.post(&url).header("content-type", "application/json");
         if let Some(key) = self.key {
-            request = request.header("authorization", &format!("Bearer {}", key.expose()));
+            // Written once, with its room from the start, and wiped once
+            // the request has it.
+            let mut bearer =
+                zeroize::Zeroizing::new(String::with_capacity(7 + key.expose().len()));
+            bearer.push_str("Bearer ");
+            bearer.push_str(key.expose());
+            request = request.header("authorization", bearer.as_str());
         }
         let mut answer = request
             .send(text.as_bytes())

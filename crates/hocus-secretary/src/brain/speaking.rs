@@ -319,6 +319,7 @@ impl Brain {
         request.tools.clear();
         request.context.push(Part {
             label: "briefing".to_owned(),
+            // Made inert where they are built ([`crate::briefing`]).
             text: format!("<briefing>\n{}\n</briefing>", built.facts),
             items: Vec::new(),
         });

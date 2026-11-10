@@ -28,6 +28,9 @@ toml.workspace = true
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
 # Her memory's key: 32 random bytes.
 getrandom.workspace = true
+# Her memory's key and her providers' API keys overwritten with zeros
+# once used (MIT or Apache-2.0), as the lock does its password.
+zeroize.workspace = true
 # Her memory's key in the session's Secret Service, on the bus the
 # compositor names, on a thread that waits for it with a timeout.
 zbus = { workspace = true, features = ["tokio"] }

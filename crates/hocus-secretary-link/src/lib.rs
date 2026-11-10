@@ -203,10 +203,8 @@ impl Drop for Secret {
 /// `text`'s bytes overwritten with zeros, then emptied: what held a key
 /// does not keep it in memory once it is used.
 pub fn wipe(text: &mut String) {
-    let mut bytes = std::mem::take(text).into_bytes();
-    bytes.fill(0);
-    // The zeros are read back, so that the write is not left out.
-    std::hint::black_box(&bytes);
+    // Writes the compiler may not leave out, over all it had room for.
+    zeroize::Zeroize::zeroize(text);
 }
 
 /// The clipboard history's digest of a text (FNV-1a, the shell's): what

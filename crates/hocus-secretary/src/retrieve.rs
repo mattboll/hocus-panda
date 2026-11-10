@@ -29,6 +29,7 @@ use rusqlite::params;
 use crate::{
     fold::fold,
     graph::{Edge, Node, NodeKind, Target},
+    inert,
     store::{Item, Result, Store, unstamp},
 };
 
@@ -194,14 +195,18 @@ pub fn day_of(at: Timestamp) -> Date {
     at.to_zoned(TimeZone::system()).date()
 }
 
+/// An episode as the model reads it: one line, whatever its digest (a
+/// mail's subject, the triage's words on it) and its pointer say
+/// ([`inert`]).
 pub fn episode_line(episode: &Episode) -> String {
-    format!(
+    inert::line(&format!(
         "- {} {} · {} ({})",
         day_of(episode.at),
         episode.kind,
         episode.digest,
         episode.pointer
-    )
+    ))
+    .into_owned()
 }
 
 fn name(store: &Store, id: i64) -> String {
@@ -221,13 +226,15 @@ pub fn edge_line(store: &Store, edge: &Edge) -> String {
         hocus_secretary_link::Provenance::Extracted => "lu dans une source",
         hocus_secretary_link::Provenance::Inferred => "déduit, confirmé",
     };
-    format!(
+    // Its names and its value may have been read in a source.
+    inert::line(&format!(
         "{} —{}→ {} [{from}, {to}) · {how} · edge:{}",
         name(store, edge.src),
         edge.kind,
         target,
         edge.id
-    )
+    ))
+    .into_owned()
 }
 
 /// The question's content words, folded.
@@ -686,7 +693,8 @@ pub fn retrieve(
                     if let Some((start, end, text)) = summary {
                         add(
                             item.word(),
-                            format!("- résumé {start} → {end} : {text}"),
+                            inert::line(&format!("- résumé {start} → {end} : {text}"))
+                                .into_owned(),
                             None,
                             base,
                         );
@@ -702,7 +710,7 @@ pub fn retrieve(
                         line.push_str(" : ");
                         line.push_str(&node.summary);
                     }
-                    add(item.word(), line, None, base);
+                    add(item.word(), inert::line(&line).into_owned(), None, base);
                 }
                 _ => {}
             }
