@@ -703,6 +703,15 @@ pub enum ToShell {
     /// A sentence put to her through the shell, as the drawer's field
     /// does: for tests and tools. Written `secretary-ask TEXT`.
     SecretaryAsk(String),
+    /// A program given for this session in place of an installed one
+    /// (`hocus msg shell restart --program`, docs/workflow.md) did not
+    /// start or kept ending, and the installed one runs again: the shell
+    /// says so in a notification. Written `fell-back shell|secretary
+    /// PROGRAM`.
+    FellBack {
+        which: Supervised,
+        program: std::path::PathBuf,
+    },
     /// `Super+S` (`[shortcuts] secretary`, assistant mode only): her
     /// drawer opens beside the bar of `output` (the focused window's
     /// screen), `width` logical pixels wide, or closes. Written
@@ -770,6 +779,30 @@ pub enum ToShell {
     /// The palette's target window went, or the session locks: it closes.
     /// Written `actions-end`.
     ActionsEnd,
+}
+
+/// A program the compositor starts, supervises and starts again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Supervised {
+    /// `hocuspanda-shell`.
+    Shell,
+    /// `hocus-secretary`, in assistant mode only.
+    Secretary,
+}
+
+impl Supervised {
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+            Self::Secretary => "secretary",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        [Self::Shell, Self::Secretary]
+            .into_iter()
+            .find(|s| s.word() == word)
+    }
 }
 
 /// The secretary's process as the compositor knows it.
@@ -2180,6 +2213,12 @@ impl fmt::Display for ToShell {
                 write!(f, "secretary ready {}", one_line(&socket.to_string_lossy()))
             }
             Self::SecretaryAsk(text) => write!(f, "secretary-ask {}", one_line(text)),
+            Self::FellBack { which, program } => write!(
+                f,
+                "fell-back {} {}",
+                which.word(),
+                one_line(&program.to_string_lossy())
+            ),
             Self::SecretaryDrawer { output, width } => {
                 write!(f, "secretary-drawer {output} {width}")
             }
@@ -2294,6 +2333,17 @@ impl FromStr for ToShell {
         }
         if let Some(rest) = line.strip_prefix("secretary-ask ") {
             return Ok(Self::SecretaryAsk(rest.to_owned()));
+        }
+        if let Some(rest) = line.strip_prefix("fell-back ") {
+            return match rest.split_once(' ') {
+                Some((which, program)) if !program.is_empty() => Supervised::of(which)
+                    .map(|which| Self::FellBack {
+                        which,
+                        program: std::path::PathBuf::from(program),
+                    })
+                    .ok_or_else(|| BadLine(format!("fell-back {rest}"))),
+                _ => Err(BadLine(format!("fell-back {rest}"))),
+            };
         }
         if let Some(rest) = line.strip_prefix("secretary ") {
             return match rest.split_once(' ') {
@@ -3473,6 +3523,14 @@ mod tests {
                 "/run/user/1000/hocus 0.secretary".into(),
             )),
             ToShell::SecretaryAsk("Qui relit les PR ?".into()),
+            ToShell::FellBack {
+                which: Supervised::Shell,
+                program: "/home/alex/my builds/hocuspanda-shell".into(),
+            },
+            ToShell::FellBack {
+                which: Supervised::Secretary,
+                program: "/tmp/hocus-secretary".into(),
+            },
             ToShell::SecretaryDrawer {
                 output: "eDP-1".into(),
                 width: 1366,

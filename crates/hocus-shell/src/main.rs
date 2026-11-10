@@ -889,6 +889,10 @@ impl Shell {
                 secretary::ask(text);
                 Task::none()
             }
+            ToShell::FellBack { which, program } => {
+                notifications::fell_back(which, &program);
+                Task::none()
+            }
             ToShell::SecretaryDrawer { output, width } => {
                 drawer::toggle(&output, width);
                 Task::none()
@@ -2512,6 +2516,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::SecretaryPeek(id)) => {
                             speak::peek::show(id);
+                            continue;
+                        }
+                        // A developer's program let go of: a bubble, the
+                        // notifications' own surface.
+                        Ok(ToShell::FellBack { which, program }) => {
+                            notifications::fell_back(which, &program);
                             continue;
                         }
                         Ok(ToShell::ScreensMoved(moved)) => {

@@ -49,6 +49,14 @@ sharing).
   `XDG_CACHE_HOME`, and no session D-Bus. Never write into the user's real
   configuration. Stop processes by exact PID, never with `pkill -f` or
   pattern matching. Never signal processes you did not start.
+  One exception, and only one: when the maintainer asks to see a change
+  of the shell or of the secretary live, `scripts/dev/live.sh
+  shell|secretary` reloads that program alone in their session
+  ([docs/workflow.md](docs/workflow.md), "Development loop"). Only when
+  asked, only through that script: nothing else of the session is touched,
+  and the change is still developed and tested headless first. A
+  compositor change is not seen this way: it needs the package and a new
+  login.
 - **Deleting files**: name every path explicitly; no globs or variables in
   `rm`.
 
