@@ -105,7 +105,7 @@ pub use clipboard::application_dirs;
 pub use config::{
     Agents as AgentsSettings, AltTab, Animation as WindowAnimation, Appearance,
     Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings, Config,
-    Delay as PowerDelay, Desktops, DragKey, FollowPointer, FormChoice, HaloRule,
+    Delay as PowerDelay, Desktops, Developer, DragKey, FollowPointer, FormChoice, HaloRule,
     Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings, NightLight,
     OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, OutputSettings,
     Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,

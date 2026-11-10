@@ -63,6 +63,8 @@ pub struct Config {
     pub power: Power,
     /// A day's CPU and memory, recorded (#655, docs/performance.md).
     pub perf: Perf,
+    /// What only someone developing the desktop needs (#783).
+    pub developer: Developer,
     /// Every mouse, trackball and trackpoint (6.12).
     pub pointer: Pointer,
     /// Every touchpad (6.12).
@@ -1588,6 +1590,16 @@ impl Default for Overview {
     fn default() -> Self {
         Self { hot_corner: true }
     }
+}
+
+/// `[developer]` (#783, docs/workflow.md, "Development loop").
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Developer {
+    /// `hocus msg shell restart --program PATH` is accepted: another
+    /// program runs as the shell, which draws the lock screen and the
+    /// password dialog, so off unless the user develops the desktop.
+    pub live_reload: bool,
 }
 
 /// `[accessibility]` (docs/design/screen-reader.md, #734).

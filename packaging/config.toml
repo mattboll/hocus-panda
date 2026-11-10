@@ -350,6 +350,15 @@
 # `hocus perf day`). Followed live.
 # record = true
 
+# [developer]
+# For those who develop the desktop itself: lets `hocus msg shell restart
+# --program PATH` (scripts/dev/live.sh) run a program just built as the
+# shell, for the session. Off by default: the shell draws the lock screen
+# and the password dialog, and any of your programs could ask for another
+# one in its place. Followed live; turned off, a program given gives way
+# to the installed one at once.
+# live-reload = false
+
 # [agents]
 # How the bar calls you for the agents (Claude Code, Codex, herdr, and
 # what says its state with `hocus agent`), followed live. Which of their
