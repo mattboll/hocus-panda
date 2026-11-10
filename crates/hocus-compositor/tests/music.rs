@@ -645,6 +645,77 @@ fn two_players_the_last_to_play_in_front_a_click_brings_the_other() -> anyhow::R
     Ok(())
 }
 
+/// A tiny HTTP server on 127.0.0.1 that answers every request with a
+/// PNG of `rgb` alone: its address, and how many requests it had.
+fn cover_server(rgb: [u8; 3]) -> anyhow::Result<(String, Arc<Mutex<u32>>)> {
+    use std::io::{Read as _, Write as _};
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(32, 32, image::Rgb(rgb))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = format!("http://{}/cover.png", listener.local_addr()?);
+    let asked = Arc::new(Mutex::new(0));
+    let count = asked.clone();
+    // It ends with the test's process.
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            *count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                png.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&png);
+        }
+    });
+    Ok((address, asked))
+}
+
+#[test]
+fn a_cover_on_an_http_url_is_fetched_and_shown() -> anyhow::Result<()> {
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+    let Some(mut bed) = Bed::start()? else {
+        return Ok(());
+    };
+    let (url, asked) = cover_server(MAGENTA)?;
+    let dir = bed.dir.path().to_owned();
+    let _client = bed.player(
+        "spotify",
+        Said {
+            art: url,
+            ..brassens(&dir, "Playing")
+        },
+    )?;
+    bed.logged("a cover fetched")?;
+    let from = bed.plain().len();
+    bed.click_tile(false)?;
+    let shows = bed.shows_after(from, "Les Passantes")?;
+    let pop = bed.popover()?;
+    // The cover: on the left of the title's block, as tall as it.
+    let now = shows["music:now"]["at"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("no cover's block in {shows}"))?;
+    let n = |i: usize| now[i].as_f64().unwrap_or_default() as i32;
+    let (x, y) = (pop.x + n(0) + 36, pop.y + n(1) + n(3) / 2);
+    let start = std::time::Instant::now();
+    loop {
+        let (width, _, bytes) = bed.hp.screenshot(0)?;
+        let at = usize::try_from(y * width + x)? * 4;
+        let p = bytes.get(at..at + 4).unwrap_or(&[0; 4]);
+        let seen = [p[2], p[1], p[0]];
+        if seen.iter().zip(MAGENTA).all(|(a, b)| a.abs_diff(b) <= 24) {
+            break;
+        }
+        anyhow::ensure!(start.elapsed() < WAIT, "({x}, {y}) shows {seen:?}");
+        wait(&mut bed.hp, Duration::from_millis(50))?;
+    }
+    // Fetched once: the player's later changes find it kept.
+    anyhow::ensure!(*asked.lock().unwrap_or_else(PoisonError::into_inner) == 1);
+    Ok(())
+}
+
 // --- The mockup's states, shot -------------------------------------------------------
 
 /// The screen's part from `rect` grown by `by`, saved as `name`.png.

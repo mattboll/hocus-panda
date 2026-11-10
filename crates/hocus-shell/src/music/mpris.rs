@@ -5,10 +5,12 @@
 //! A player is a name under `org.mpris.MediaPlayer2.`; its properties
 //! (`org.mpris.MediaPlayer2` and `….Player` at `/org/mpris/MediaPlayer2`)
 //! are read as it comes, and read again on its `PropertiesChanged` and
-//! `Seeked`; it goes with its name's owner. A cover on a `file://` URL is
-//! decoded here, its corners rounded for the bar's sizes; an `http` one
-//! shows the placeholder (nothing fetched). What the bar asks is called
-//! here too, so that a player that does not answer holds nothing up.
+//! `Seeked`; it goes with its name's owner. A cover is decoded here, its
+//! corners rounded for the bar's sizes: a `file://` one as it is read, an
+//! `http(s)://` one (Spotify's) fetched aside on the thread's blocking
+//! pool, the placeholder showing meanwhile and if it fails; the last few
+//! are kept by their URL. What the bar asks is called here too, so that a
+//! player that does not answer holds nothing up.
 
 use std::{
     collections::HashMap,
@@ -44,6 +46,11 @@ enum Input {
     /// A player's signal, by its unique name.
     Changed(String),
     Ask(Ask),
+    /// A cover fetched over HTTP (none: it could not be).
+    Cover {
+        url: String,
+        cover: Option<Cover>,
+    },
 }
 
 /// Follows the players on the bus the compositor names, if it does.
@@ -79,7 +86,21 @@ struct Players {
     owners: HashMap<String, String>,
     /// Counts the starts of playing: the last to start is shown.
     starts: u64,
+    inputs: UnboundedSender<Input>,
+    /// The last covers by their URL, the latest last: one that could not
+    /// be had is kept as none, with when, to be tried again later.
+    covers: Vec<(String, Option<Cover>, Instant)>,
+    /// The URLs being fetched.
+    fetching: Vec<String>,
 }
+
+/// The covers kept.
+const COVERS: usize = 8;
+/// A cover that could not be had is tried again after this long.
+const RETRY: Duration = Duration::from_secs(30);
+/// A cover's answer takes this long at most, and this many bytes.
+const FETCH: Duration = Duration::from_secs(5);
+const FETCH_MOST: u64 = 5 * 1024 * 1024;
 
 async fn run(bus: String, mut asks: UnboundedReceiver<Ask>) {
     let builder = if bus == "session" {
@@ -114,6 +135,9 @@ async fn run(bus: String, mut asks: UnboundedReceiver<Ask>) {
         players: Vec::new(),
         owners: HashMap::new(),
         starts: 0,
+        inputs,
+        covers: Vec::new(),
+        fetching: Vec::new(),
     };
     let names = match DBusProxy::new(&players.connection).await {
         Ok(bus) => bus.list_names().await.unwrap_or_default(),
@@ -200,7 +224,55 @@ impl Players {
                 }
             }
             Input::Ask(ask) => self.ask(ask).await,
+            Input::Cover { url, cover } => {
+                self.fetching.retain(|u| *u != url);
+                for player in self.players.iter_mut().filter(|p| p.art_url == url) {
+                    player.cover = cover.clone();
+                }
+                self.keep(url, cover);
+            }
         }
+    }
+
+    /// `url`'s cover is kept, the oldest going past [`COVERS`].
+    fn keep(&mut self, url: String, cover: Option<Cover>) {
+        self.covers.retain(|(u, _, _)| *u != url);
+        self.covers.push((url, cover, Instant::now()));
+        if self.covers.len() > COVERS {
+            self.covers.remove(0);
+        }
+    }
+
+    /// The cover at `url`: the one kept, else a file's decoded at once, else
+    /// none while it is fetched aside (it comes as [`Input::Cover`]).
+    fn cover(&mut self, url: &str) -> Option<Cover> {
+        if url.is_empty() {
+            return None;
+        }
+        match self.covers.iter().find(|(u, _, _)| u == url) {
+            Some((_, Some(cover), _)) => return Some(cover.clone()),
+            Some((_, None, at)) if at.elapsed() < RETRY => return None,
+            _ => {}
+        }
+        if let Some(path) = url.strip_prefix("file://") {
+            let cover = file_cover(&percent_decoded(path));
+            self.keep(url.to_owned(), cover.clone());
+            return cover;
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://"))
+            || self.fetching.iter().any(|u| u == url)
+        {
+            return None;
+        }
+        self.fetching.push(url.to_owned());
+        let (url, inputs) = (url.to_owned(), self.inputs.clone());
+        // Off this thread: the players' signals and what the bar asks do
+        // not wait for the network.
+        tokio::task::spawn_blocking(move || {
+            let cover = fetched_cover(&url);
+            let _ = inputs.send(Input::Cover { url, cover });
+        });
+        None
     }
 
     /// Player `name` came: its owner and properties.
@@ -245,8 +317,8 @@ impl Players {
         let mut player = player_of(name, &root, &props, now);
         // The cover decoded once a URL.
         player.cover = match &before {
-            Some(b) if b.art_url == player.art_url => b.cover.clone(),
-            _ => cover(&player.art_url),
+            Some(b) if b.art_url == player.art_url && b.cover.is_some() => b.cover.clone(),
+            _ => self.cover(&player.art_url),
         };
         let started = player.status == Status::Playing
             && before.as_ref().is_none_or(|b| b.status != Status::Playing);
@@ -451,22 +523,66 @@ fn inner<'a, 'b>(value: &'b Variant<'a>) -> &'b Variant<'a> {
     }
 }
 
-/// The cover at `url`, decoded and its corners rounded for the popover
-/// (72 px, radius 10) and the bar (34 px, radius 6), at twice their size:
-/// a `file://` one only.
-fn cover(url: &str) -> Option<Cover> {
-    let path = url.strip_prefix("file://")?;
-    let path = percent_decoded(path);
-    let decoded = match image_reader(&path) {
-        Ok(decoded) => decoded,
+/// The cover in the file at `path`.
+fn file_cover(path: &str) -> Option<Cover> {
+    match image_reader(path) {
+        Ok(decoded) => Some(rounded(&decoded)),
         Err(err) => {
             tracing::debug!(%err, path, "a cover not read");
+            None
+        }
+    }
+}
+
+/// The cover at the `http(s)` `url`: fetched ([`FETCH`], [`FETCH_MOST`])
+/// and decoded. Blocking: on the blocking pool only.
+fn fetched_cover(url: &str) -> Option<Cover> {
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::Rustls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .build();
+    let agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .timeout_global(Some(FETCH))
+        .max_redirects(3)
+        .user_agent(concat!("hocuspanda/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .new_agent();
+    let bytes = agent.get(url).call().and_then(|mut response| {
+        response
+            .body_mut()
+            .with_config()
+            .limit(FETCH_MOST)
+            .read_to_vec()
+    });
+    let bytes = match bytes {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::debug!(%err, "a cover not fetched");
             return None;
         }
     };
+    match image_crate::load_from_memory(&bytes) {
+        Ok(decoded) => {
+            tracing::debug!(bytes = bytes.len(), "a cover fetched");
+            Some(rounded(&decoded.to_rgba8()))
+        }
+        Err(err) => {
+            tracing::debug!(%err, "a cover fetched that does not decode");
+            None
+        }
+    }
+}
+
+/// `decoded` with its corners rounded for the popover (72 px, radius 10)
+/// and the bar (34 px, radius 6), at twice their size.
+fn rounded(decoded: &image_crate::RgbaImage) -> Cover {
     let rounded = |side: u32, radius: f32| {
         let mut square = image_crate::imageops::resize(
-            &decoded,
+            decoded,
             side,
             side,
             image_crate::imageops::FilterType::Triangle,
@@ -474,10 +590,10 @@ fn cover(url: &str) -> Option<Cover> {
         round_corners(&mut square, radius);
         image::Handle::from_rgba(side, side, square.into_raw())
     };
-    Some(Cover {
+    Cover {
         big: rounded(144, 20.0),
         small: rounded(68, 12.0),
-    })
+    }
 }
 
 use ::image as image_crate;

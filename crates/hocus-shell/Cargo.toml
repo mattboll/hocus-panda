@@ -50,6 +50,10 @@ iced = { workspace = true, features = [
 # PNG and JPEG alone of the image crate's codecs: the applications' icons,
 # and the captures (a JPEG's, `[capture] format`, 6.17).
 image = { workspace = true, features = ["png", "jpeg"] }
+# The music player's covers on an http(s) URL (Spotify's), fetched on its
+# thread's blocking pool: the client and TLS the day's sources use already.
+ureq.workspace = true
+rustls.workspace = true
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
 iced_layershell.workspace = true
