@@ -20,6 +20,8 @@ mod briefing;
 mod conversation;
 mod first_run;
 mod graph;
+mod injection;
+mod key_beside;
 mod key_given;
 mod keyring;
 mod knows;

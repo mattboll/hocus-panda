@@ -2,7 +2,7 @@
 //! her status says where it is, and "Ce qu'elle sait" carries it, so that
 //! the drawer and the Settings never say "encrypted" alone.
 
-mod common;
+use crate::common;
 
 use hocus_secretary::{
     brain::Options,

@@ -16,7 +16,7 @@
 //! model reads there opens or closes one of code's own tags, and they
 //! pair.
 
-mod common;
+use crate::common;
 
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
