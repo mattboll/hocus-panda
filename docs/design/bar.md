@@ -1885,8 +1885,9 @@ What issue #465 changes under the five popovers, nothing on screen.
 
 The shell draws its own widgets on canvases, and each field was written
 by hand (typing and Backspace). One field, edited as everywhere, is now
-shared (`hocus-shell/src/field/`); the secretary's drawer's field and her
-key's field use it first, the others move to it later (listed on #763).
+shared (`hocus-shell/src/field/`). Its first user, the secretary's
+drawer, was removed with her (2026-11-10): no surface uses it until the
+shell's other fields move to it (#771).
 
 - **The model** (`Field`): its text, its caret and the selection's anchor
   (byte offsets on character boundaries), what the pointer does (an enum:
@@ -1896,7 +1897,7 @@ key's field use it first, the others move to it later (listed on #763).
   Pure: told what a key or the pointer asks (`Act`, `press`, `drag`,
   `release`), it says what came of it (`Outcome`: the same, moved,
   edited, to copy, cut, to paste); the surface reads and writes the
-  clipboard (`paste::Clean::Lines` keeps a paste's line breaks).
+  clipboard.
   Its kinds: `Lines` (a line break goes in) and `Secret` (one line,
   masked, never copied nor cut out, no history, a word is its whole, its
   room taken once and its text overwritten with zeros as it empties or
@@ -1919,9 +1920,8 @@ key's field use it first, the others move to it later (listed on #763).
   at each redraw while a field there has the keyboard (text-input-v3
   enabled, the caret's place, `Secure` for a secret). Its preedit and
   commits come back to the canvas as iced's `InputMethod` events.
-- **Double and triple clicks** take the word and the line as the drawer's
-  text selection does (`field::word_around`, `field::line_around`, which
-  `drawer/select.rs` uses too).
+- **Double and triple clicks** take the word and the line
+  (`field::word_around`, `field::line_around`).
 
 ### 3.9, the desktops (2026-10-30)
 

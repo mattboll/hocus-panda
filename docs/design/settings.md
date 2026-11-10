@@ -67,9 +67,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 20 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 19 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came, 27 px since Performances came, 26 px since Secretary came).
+came, 27 px since Performances came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -1605,10 +1605,6 @@ compositor (bar.md "6.16").
 - **Under the title**: "Le groupe des agents dans la barre, et sa place,
   se règlent dans La barre ›", which opens 6.4 with its "Les agents" row
   lit.
-- **At the end**, where the secretary's group was until #759: "Ta
-  secrétaire, ce qu'elle lit et le tri de tes mails ont leur page :
-  Secrétaire ›", which opens Settings › Secretary (a stop of the
-  keyboard's too).
 - **The tools** come on the Settings' line (`agent-tools`, a JSON line
   as the line opens and when they change: each tool and its state,
   whether herdr is there and declined, whether Codex's hooks were
@@ -1661,70 +1657,6 @@ compositor (bar.md "6.16").
   suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
   does not list the tools yet; "Enregistré" does not wait for the
   watcher's answer.
-
-## Secretary (#759)
-
-The approved mockup ux2 §6 and the first secretary mockup's « Réglages ›
-Secrétaire »: her own page, section `secretary` (`hocus settings
-secretary`), TRAVAIL's fourth row, after Agents; its sidebar icon a
-speech bubble. Under the title: "Ce qu'elle a le droit de lire, compte
-par compte, son nom et sa clé, et le tri de tes mails sur cet
-ordinateur." Its rows moved from the Agents page's group « LA
-SECRÉTAIRE » (lot 7, #750, #752); their keys and ids are kept.
-
-| Group | Row | Control | Written in |
-|---|---|---|---|
-| LA SECRÉTAIRE ("Sa mémoire reste sur cet ordinateur") | La secrétaire | a switch; off, the page shows only it | `[secretary] mode` (`classic`, `assistant`) |
-| | Son nom | a field, « Ta secrétaire » greyed while empty, written as it is left (`Enter`, `Tab`, a click elsewhere) | `[secretary] name` |
-| | Clé Anthropic | « ✓ Enregistrée », « Remplacer », « Effacer »; missing (or replaced), a masked field (« Colle ta clé Anthropic (sk-ant-…) ») and « Enregistrer » | her keyring, through her socket |
-| | Ce qu'elle sait | where it is: her drawer's tab | — |
-| CE QU'ELLE LIT (« + Ajouter un compte Google › ») | each Google account | its G, its address, « Google · déjà connecté à cet ordinateur », « Travail \| Privé » | each kind's notebook in her consent book |
-| | Ton agenda, Tes mails, Les anniversaires de tes contacts (under each account) | a switch; « Choisir › » on an agenda she reads | a grant or a revocation in her consent book |
-| | each application that notified (Slack first) | its letter, its name, what she reads of it; « Travail \| Privé » once she reads it; a switch | the same |
-| LE TRI SUR CET ORDINATEUR | Le tri de tes mails | what it is for, its state, where its queue is | — |
-| | Quand trier | menu: Toujours, même sur batterie; Sur secteur, ou batterie au-dessus de 20, 50 (hers by default), 80 % | `[secretary.triage] battery` |
-| | Le modèle | who runs it and where, its model, « prêt » or « ne répond pas » | — |
-
-- **A switch turned on** opens the source's sheet (§10.1 of the
-  secretary's spec: what she reads, what she never does there, what
-  leaves the machine, « C'est privé », an agenda's calendars), in the
-  account's notebook; its buttons on the left, « Autoriser » first.
-  Nothing is written before its « Autoriser » (toast « Agenda · … : elle
-  le lit (travail) »). Every time a source is not read, its switch opens
-  the sheet: a revoked source is asked again.
-- **A switch turned off** writes a revocation at once (toast « … : elle
-  ne le lit plus et oublie ce qu'elle en savait », « Annuler »).
-  « Annuler » and `Ctrl+Z` read it again as it was (its notebook, its
-  calendars left out), without the sheet: it was consented to;
-  `Ctrl+Shift+Z` revokes it again.
-- **Travail | Privé** on an account's line writes the notebook of each
-  kind she reads of it (toast « alex@… : privé », « Annuler »); lit
-  neither when they differ. On an account she reads nothing of yet,
-  nothing is written: it is what its sheets propose, until the window
-  closes (its domain's otherwise: travail for a company's, privé for
-  gmail.com). On an application's row, its own notebook.
-- **« Choisir › »** lists an agenda's calendars over the window, each
-  ticked or not, written at once; « Fermer » or `Esc` closes it. The
-  row's line says what she reads: « Elle en lit 3 sur 4 · Famille laissé
-  de côté », « Elle les lit tous les 2 ».
-- **Her status** (her socket, on a thread, as the page opens and after
-  her key changes) gives the key's row and the triage's: « 21 en
-  attente. », « Rien à trier pour l'instant. », « En pause : la batterie
-  est à 32 %. », « En pause : l'ordinateur chauffe… », « En pause : le
-  modèle ne répond pas. »; « Le modèle »: « Ollama, sur cet ordinateur ·
-  qwen3:8b · prêt » (its provider's kind read from
-  `[secretary.providers.NAME] kind`). She does not answer: « Elle ne
-  répond pas pour l'instant. », and no key row.
-- **Her consent book** is read and written on threads of the page's
-  (`consents.json` in her folder), never on the window's; reading never
-  writes it.
-- **The search** finds her rows by their words (secrétaire, clé,
-  anthropic, mémoire, google, gmail, agenda, mails, anniversaires,
-  slack, notifications, tri, batterie, ollama, modèle…) and her keys.
-- **Not yet, for want of a way into her drawer** (the drawer has none
-  from outside but `Super+S`): « Ce qu'elle sait › Ouvrir » and « Voir la
-  file › »; the rows say where they are instead. « Le modèle › Changer »
-  is not there either (the models are `[secretary.models]`).
 
 ## Applications (6.15)
 
