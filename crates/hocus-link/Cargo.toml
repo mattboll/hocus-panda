@@ -3,6 +3,7 @@ name = "hocus-link"
 description = "The private line between the Hocuspanda compositor and its shell"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -12,7 +13,7 @@ workspace = true
 [dependencies]
 # The clipboard's clips on a line (5.6), text and images alike (MIT or
 # Apache-2.0).
-base64 = "0.22.1"
+base64.workspace = true
 # The wallpapers' pictures (6.3), decoded off the loop by the compositor,
 # the shell and the Settings alike: JPEG, PNG and WebP (MIT or Apache-2.0).
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+image = { workspace = true, features = ["jpeg", "png", "webp"] }

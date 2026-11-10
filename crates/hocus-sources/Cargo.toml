@@ -3,6 +3,7 @@ name = "hocus-sources"
 description = "The secretary's sources, read-only (Google accounts of Online Accounts: calendars, birthdays, Gmail over IMAP), the secrets' first pass and the facts computed in code"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -11,37 +12,37 @@ workspace = true
 
 [dependencies]
 # The notebooks (pro, perso), one definition with her memory's.
-hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0", features = ["goa"] }
+hocus-secretary-link = { workspace = true, features = ["goa"] }
 # Online Accounts' tokens, the Calendar API's reader and the day's model.
-hocus-day = { path = "../hocus-day", version = "1.0.0" }
+hocus-day.workspace = true
 # Dates, instants and time zones (school holidays are in Paris time).
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
-serde = { version = "1.0.229", features = ["derive"] }
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
+serde = { workspace = true, features = ["derive"] }
 # Consent records, sync cursors and the school calendar's cache on disk.
-serde_json = "1.0.154"
+serde_json.workspace = true
 # The secrets' rules, vendored as data (src/redact/rules.toml).
-toml = "1.1.8"
-regex = "1.13.1"
-tracing = "0.1.44"
+toml.workspace = true
+regex.workspace = true
+tracing.workspace = true
 # Online Accounts on the bus the process is given.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio"] }
-tokio = { version = "1.54.1", features = ["rt", "time"] }
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["rt", "time"] }
 # CardDAV (birthdays) and the school calendar's open data, blocking, on a
 # source's worker. TLS by rustls on ring, against the system's
 # certificates.
-ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
-rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-rustls-platform-verifier = "0.7.1"
+ureq.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
 # CardDAV's multistatus answers.
-quick-xml = "0.41.0"
+quick-xml.workspace = true
 # A mail's text part out of its MIME structure; attachments are never kept.
-mail-parser = "1.0.1"
+mail-parser.workspace = true
 # XOAUTH2's initial response.
-base64 = "0.22.1"
+base64.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
-anyhow = "1.0.104"
+tempfile.workspace = true
+anyhow.workspace = true
 # Online Accounts faked on a private bus.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
-tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+zbus = { workspace = true, features = ["tokio", "proxy", "service", "object-manager"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

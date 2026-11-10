@@ -116,9 +116,10 @@ jobs:
             libpipewire-0.3-dev libssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saved by main's build; a pull request's tests start from it.
+          # Saved by main's build and by the sprint branches', where the
+          # lots land: a pull request's tests start from its base's.
           shared-key: linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/sprint/') }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -130,9 +131,9 @@ jobs:
         # The compositor's tests start the real shell and Settings, and run
         # `hocus`, from beside them: a test binary does not build them. The
         # archive takes them along (.config/nextest.toml).
-        run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+        run: cargo build --locked -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
       - name: Tests' archive
-        run: cargo nextest archive --workspace --archive-file nextest.tar.zst
+        run: cargo nextest archive --locked --workspace --archive-file nextest.tar.zst
       - uses: actions/upload-artifact@v4
         with:
           name: nextest
@@ -156,8 +157,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/sprint/') }}
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   linux:
     needs: build
@@ -226,3 +227,65 @@ jobs:
           cargo nextest run --profile ci --archive-file nextest.tar.zst --workspace-remap .
           --extract-to . --extract-overwrite
           --partition count:${{ matrix.shard }}/4
+
+  # The release build and its package, as the maintainer installs them: a
+  # debug build and the tests say nothing of either. On main and the sprint
+  # branches; a pull request's is checked on the branch it comes from, or
+  # by hand (workflow_dispatch).
+  package:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Free disk space
+        run: |
+          sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL > /dev/null 2>&1 &
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+            clang mold pkg-config dpkg-dev \
+            libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
+            libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
+            libpipewire-0.3-dev libssl-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/sprint/') }}
+      - name: Disk freed
+        run: |
+          while pgrep -x rm > /dev/null; do sleep 2; done
+          df -h /
+      - name: Release build
+        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+      - name: The .deb
+        run: packaging/deb/build.sh
+      - name: What the .deb holds
+        run: packaging/deb/check.sh target/packages/hocuspanda_*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: target/packages/*.deb
+          retention-days: 7
+          # xz already.
+          compression-level: 0
+
+  # A dependency no source uses is still downloaded, built and audited.
+  # False positives are listed in each crate's
+  # `[package.metadata.cargo-machete]`.
+  unused-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - run: cargo machete
+
+  # vendor/<crate> is the published crate plus its patch file, nothing else
+  # (vendor/README.md).
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/vendor.sh --check

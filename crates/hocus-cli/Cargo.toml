@@ -3,6 +3,7 @@ name = "hocus-cli"
 description = "The `hocus` command: tells the Hocuspanda desktop what an agent is doing, and keeps the tokens of your day's accounts"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,17 +15,17 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-hocus-agents = { path = "../hocus-agents", version = "1.0.0" }
+hocus-agents.workspace = true
 # `hocus day planka-token`: a board's token kept where the shell reads it.
-hocus-day = { path = "../hocus-day", version = "1.0.0" }
+hocus-day.workspace = true
 # `hocus perf day`: a day of the desktop's CPU and memory (#655).
-hocus-perf = { path = "../hocus-perf", version = "1.0.0" }
+hocus-perf.workspace = true
 # `hocus msg secretary`: her socket's protocol.
-hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0" }
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
-clap = { version = "4.6.7", features = ["derive"] }
-serde_json = "1.0.154"
+hocus-secretary-link.workspace = true
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+clap.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
-anyhow = "1.0.104"
+tempfile.workspace = true
+anyhow.workspace = true

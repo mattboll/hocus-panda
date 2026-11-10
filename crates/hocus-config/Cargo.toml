@@ -3,6 +3,7 @@ name = "hocus-config"
 description = "The Hocuspanda configuration file: where it is, edited in place keeping its comments and order, written whole or not at all"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -12,8 +13,8 @@ workspace = true
 [dependencies]
 # The file edited as TOML that keeps its comments, order, blank lines and
 # unknown keys.
-toml_edit = "0.25.17"
+toml_edit.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
-anyhow = "1.0.104"
+tempfile.workspace = true
+anyhow.workspace = true

@@ -7,8 +7,84 @@ exclude = ["vendor"]
 [workspace.package]
 version = "1.0.0"
 edition = "2024"
+# The toolchain rust-toolchain.toml pins: the only one built and tested.
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/mattboll/hocus-panda"
+
+# Every dependency's version, once: the crates take them with
+# `workspace = true`, and add the features they need. Features are here
+# when every crate that uses the dependency asks the same ones.
+[workspace.dependencies]
+# The workspace's own crates.
+hocus-a11y = { version = "1.0.0", path = "crates/hocus-a11y" }
+hocus-agents = { version = "1.0.0", path = "crates/hocus-agents" }
+hocus-bluetooth = { version = "1.0.0", path = "crates/hocus-bluetooth" }
+hocus-config = { version = "1.0.0", path = "crates/hocus-config" }
+hocus-day = { version = "1.0.0", path = "crates/hocus-day" }
+hocus-geometry = { version = "1.0.0", path = "crates/hocus-geometry" }
+hocus-link = { version = "1.0.0", path = "crates/hocus-link" }
+hocus-network = { version = "1.0.0", path = "crates/hocus-network" }
+hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
+hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
+hocus-secretary-link = { version = "1.0.0", path = "crates/hocus-secretary-link" }
+hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
+hocus-sources = { version = "1.0.0", path = "crates/hocus-sources" }
+hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
+
+# The others. iced and iced_tiny_skia are held at the exact versions
+# vendor/iced_tiny_skia's patch was made on (vendor/README.md), and
+# iced_layershell at the one that builds with them (its winit-core
+# prerelease dependencies broke it once).
+accesskit = "0.25.2"
+accesskit_unix = "0.24.1"
+anyhow = "1.0.104"
+base64 = "0.22.1"
+calloop = { version = "0.14.5", features = ["signals"] }
+chacha20poly1305 = "0.11.0"
+clap = { version = "4.6.7", features = ["derive"] }
+fontdue = "0.9.3"
+futures-util = { version = "0.3.34", default-features = false }
+getrandom = "0.3.4"
+iced = { version = "=0.14.0", default-features = false }
+iced_layershell = { version = "=0.19.1", default-features = false }
+iced_tiny_skia = { version = "=0.14.1", default-features = false }
+image = { version = "0.25", default-features = false }
+jiff = { version = "0.2.38", default-features = false }
+libc = "0.2.191"
+libloading = "0.8.9"
+mail-parser = "1.0.1"
+pipewire = { version = "0.10.1", features = ["v0_3_77"] }
+quick-xml = "0.41.0"
+regex = "1.13.1"
+resvg = { version = "0.45.1", default-features = false }
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled-sqlcipher"] }
+rustix = "1.1.6"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7.1"
+serde = "1.0.229"
+serde_json = "1.0.154"
+smithay = { version = "0.7.0", default-features = false }
+smithay-client-toolkit = { version = "0.19.2", default-features = false }
+tempfile = "3.27.0"
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+tokio = "1.54.1"
+toml = "1.1.8"
+toml_edit = "0.25.17"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+udev = "0.9.3"
+unicode-normalization = "0.1.26"
+ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+wayland-backend = { version = "0.3.17", features = ["client_system"] }
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
+wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
+wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
+x11rb = "0.13.2"
+xcursor = "0.3.11"
+zbus = { version = "6.0.0", default-features = false }
+zeroize = "1.9.1"
 
 [workspace.lints.rust]
 # FFI crates allow it locally, with a SAFETY comment on every block.
@@ -48,5 +124,3 @@ debug-assertions = false
 # (`iced_tiny_skia::draw_whole_frames`, #662): the Settings do.
 [patch.crates-io]
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
-# The shell named "Hocuspanda" on AT-SPI (#734).
-accesskit_unix = { path = "vendor/accesskit_unix" }
