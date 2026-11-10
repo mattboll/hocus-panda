@@ -160,6 +160,35 @@ pub fn episodes_between(
     Ok(out)
 }
 
+/// What arrived between two instants (events and catch-ups left out),
+/// of `notebook` if given, oldest first, `most` at most (the latest):
+/// filtered before the limit, so the day's events never crowd it out.
+pub fn arrived_between(
+    store: &Store,
+    (from, to): (Timestamp, Timestamp),
+    notebook: Option<Notebook>,
+    most: usize,
+) -> Result<Vec<Episode>> {
+    let mut statement = store.conn.prepare(&format!(
+        "SELECT {EPISODE_COLUMNS} FROM episodes
+         WHERE at >= ?1 AND at < ?2 AND (?3 IS NULL OR notebook = ?3)
+           AND kind NOT IN ('event', 'catch-up')
+         ORDER BY at DESC, id DESC LIMIT ?4"
+    ))?;
+    let rows = statement.query_map(
+        params![
+            crate::store::stamp(from),
+            crate::store::stamp(to),
+            notebook.map(Notebook::word),
+            i64::try_from(most).unwrap_or(i64::MAX)
+        ],
+        episode_of,
+    )?;
+    let mut out: Vec<Episode> = rows.collect::<rusqlite::Result<_>>()?;
+    out.reverse();
+    Ok(out)
+}
+
 /// The day an instant falls on, for the user.
 pub fn day_of(at: Timestamp) -> Date {
     at.to_zoned(TimeZone::system()).date()

@@ -96,6 +96,13 @@ pub struct EventInfo {
     /// It takes time (not marked free, nor declined or cancelled).
     #[serde(default = "yes")]
     pub busy: bool,
+    /// The user's own (#762): on a calendar of theirs, or an invitation
+    /// they accepted.
+    #[serde(default)]
+    pub mine: bool,
+    /// The user declined it, or it is cancelled: not on their day.
+    #[serde(default)]
+    pub declined: bool,
 }
 
 const fn yes() -> bool {
@@ -130,6 +137,9 @@ pub struct Synced {
     /// Parts of the source revoked since: what came from them is
     /// forgotten (their names, as [`Item::from`] gives them).
     pub forget: Vec<String>,
+    /// Items gone at their source since (a deleted event, #762): their
+    /// part (as [`Item::from`] gives it) and id.
+    pub removed: Vec<(String, String)>,
     /// The Google accounts Online Accounts has, as her Google source
     /// found them this time (her consent cards, her first run).
     pub found: Option<Vec<hocus_secretary_link::goa::GoogleAccount>>,

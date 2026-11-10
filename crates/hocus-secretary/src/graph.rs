@@ -341,6 +341,20 @@ impl Store {
         Ok((id, edit))
     }
 
+    /// Node `node` moves to `notebook` (the user said it is theirs, #762).
+    pub fn set_notebook(&mut self, node: i64, notebook: Notebook, who: &Who) -> Result<i64> {
+        let mut e = self.edit()?;
+        e.update(
+            Table::Nodes,
+            node,
+            "UPDATE nodes SET notebook = ?1 WHERE id = ?2",
+            &[&notebook.word(), &node],
+        )?;
+        let (edit, changes) = e.commit(who, "its notebook", None, "set-notebook")?;
+        self.audit_memory(edit, &changes)?;
+        Ok(edit)
+    }
+
     pub fn node(&self, id: i64) -> Result<Node> {
         self.conn
             .query_row(

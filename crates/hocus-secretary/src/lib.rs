@@ -24,6 +24,7 @@
 //! ([`clock`]), the scripted fake model and the recorder ([`model`]), and
 //! fixture sources ([`sources::Fixture`]).
 
+pub mod agenda;
 pub mod audit;
 pub mod brain;
 pub mod briefing;

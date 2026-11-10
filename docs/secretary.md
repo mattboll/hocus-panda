@@ -210,3 +210,29 @@ click, to stop masking passwords, to obey what a mail says, to read a
 source you did not allow or to speak during a meeting is refused, with
 the reason. Only what you write in her drawer counts, never what a mail or
 a message says.
+
+## 6. Your day, and what you tell her
+
+She sees your whole agenda for today and tomorrow: every event of every
+calendar she reads (yours, those shared with you), with its times, the
+same meeting on several calendars once, and nothing you declined. When a
+very full day (a dozen colleagues' calendars, rooms) does not fit what
+she is given, your own events come first (those of your calendars, and
+the invitations you accepted), and she knows what was left out. For
+another day (« et jeudi ? »), or what was left out, she looks at the
+agenda itself, read-only.
+
+What you tell her of your work and your life (« hocus-panda est un
+projet perso », « Léa Martin est ma voisine », « Atlas est un client »)
+she keeps at once, in the notebook it belongs to (Travail or Privé):
+« Noté : … » with « Annuler » for ten seconds, then it is in « Ce qu'elle
+sait » with « tu me l'as dit » and its date, where you change it or
+forget it. Only your own words in her drawer are kept this way, never what
+a mail says.
+
+What she reads in your mails about people and projects she knows becomes
+proposals; someone she does not know whom a mail links to something she
+knows (« Léa Martin travaille sur hocus-panda ») is a question (« Je
+l'ajoute à ce que je sais ? »): nothing is kept before your « Oui ». She
+never invents a setting or a tool: when something is missing, she says
+so.

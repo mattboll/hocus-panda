@@ -564,6 +564,14 @@ pub fn people_named(store: &Store, name: &str) -> Result<Vec<i64>> {
 /// a team whose name holds every one of the words ("le site web",
 /// "site web", "#site-web").
 pub fn node_named(store: &Store, words: &str) -> Result<Option<i64>> {
+    // A name with its hyphen ("hocus-panda") as it was told, first.
+    if let Some(id) = store
+        .find(words.trim_start_matches('#'))?
+        .into_iter()
+        .next()
+    {
+        return Ok(Some(id));
+    }
     let clean = words.trim_start_matches('#').replace('-', " ");
     if let Some(id) = store.find(&clean)?.into_iter().next() {
         return Ok(Some(id));
@@ -592,6 +600,7 @@ pub fn node_named(store: &Store, words: &str) -> Result<Option<i64>> {
     Ok(rows
         .into_iter()
         .find(|(_, folded)| {
+            let folded = folded.replace('-', " ");
             let have: Vec<&str> = folded.split_whitespace().collect();
             wanted.iter().all(|w| have.contains(&w.as_str()))
         })
@@ -1310,15 +1319,28 @@ fn relation_kind(relation: &str) -> Option<&'static str> {
 /// the quoted words.
 pub type Newcomer = (String, Option<String>, String);
 
+/// Someone she does not know, linked by a fact to something she knows
+/// (#762): their name, the edge's type, the node, the quoted words.
+pub type Linked = (String, &'static str, i64, String);
+
+/// What the triage's facts on an episode made.
+#[derive(Debug, Default)]
+pub struct Extracted {
+    /// The edges proposed.
+    pub edges: Vec<i64>,
+    /// Arrivals to ask about.
+    pub arrivals: Vec<Newcomer>,
+    /// People to ask about with what links them (#762).
+    pub linked: Vec<Linked>,
+}
+
 /// The triage's candidate facts on an episode, as proposals (§7.1): an
 /// edge for a person she knows (extracted, so a change to people or
 /// projects waits for the user), an arrival to ask about for someone she
-/// does not. Never a confirmed edge. The edges proposed, and the arrivals.
-pub fn extract(
-    store: &mut Store,
-    episode: i64,
-    facts: &[Fact],
-) -> Result<(Vec<i64>, Vec<Newcomer>)> {
+/// does not, and someone she does not know whom a fact links to what she
+/// knows ("Léa travaille sur hocus-panda"), to ask about with that fact.
+/// Never a confirmed edge, never a node before the user's "Oui".
+pub fn extract(store: &mut Store, episode: i64, facts: &[Fact]) -> Result<Extracted> {
     type Row = (String, Option<String>, String, String, String, String);
     let row: Option<Row> = store
         .conn
@@ -1338,7 +1360,7 @@ pub fn extract(
         )
         .optional()?;
     let Some((pointer, source, notebook, at, kind_of, digest)) = row else {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Extracted::default());
     };
     let notebook = Notebook::of(&notebook).unwrap_or(Notebook::Pro);
     let day = unstamp(&at).map_or_else(|| store.today(), day_of);
@@ -1349,6 +1371,7 @@ pub fn extract(
         .to_owned();
     let mut edges = Vec::new();
     let mut arrivals = Vec::new();
+    let mut linked = Vec::new();
     for fact in facts {
         let Some(kind) = relation_kind(&fact.relation) else {
             continue;
@@ -1368,6 +1391,11 @@ pub fn extract(
                     kind = kind_of,
                     "not someone: no arrival"
                 );
+            } else if !matches!(kind, "left" | "role")
+                && person_like(&fact.subject, &kind_of, &digest, false)
+                && let Some(object) = node_named(store, &fact.object)?
+            {
+                linked.push((fact.subject.clone(), kind, object, fact.quote.clone()));
             }
             continue;
         };
@@ -1394,7 +1422,140 @@ pub fn extract(
         })?;
         edges.push(edge);
     }
-    Ok((edges, arrivals))
+    Ok(Extracted {
+        edges,
+        arrivals,
+        linked,
+    })
+}
+
+// --- Told by the user (#762) -------------------------------------------------------------
+
+/// What the user told her of their work or life, as her model's
+/// `remember` gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Told {
+    /// Who or what it is about.
+    pub about: String,
+    pub kind: NodeKind,
+    pub notebook: Notebook,
+    /// An edge's type, or none.
+    pub relation: Option<String>,
+    /// The other side: a node's name (with its kind), or a value.
+    pub object: Option<(String, Option<NodeKind>)>,
+    /// The fact in a sentence, as she says it back.
+    pub fact: String,
+}
+
+/// The user's name for themself when they speak of themself.
+const SELF_WORDS: [&str; 10] = [
+    "moi",
+    "moi-meme",
+    "je",
+    "toi",
+    "lui",
+    "l'utilisateur",
+    "utilisateur",
+    "me",
+    "myself",
+    "user",
+];
+
+/// An edge type from her model's words: lower case, `_` between words;
+/// none when empty or not one.
+pub fn relation_word(text: &str) -> Option<String> {
+    let word: String = fold(text)
+        .trim()
+        .chars()
+        .map(|c| if c == ' ' || c == '-' { '_' } else { c })
+        .collect();
+    (!word.is_empty()
+        && word.len() <= 30
+        && word.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+    .then_some(word)
+}
+
+/// The node `name` of `kind` names, made in `notebook` when she has none:
+/// its id, and whether it was made.
+fn told_node(
+    store: &mut Store,
+    name: &str,
+    kind: NodeKind,
+    notebook: Notebook,
+    edits: &mut Vec<i64>,
+) -> Result<(i64, bool)> {
+    if kind == NodeKind::User {
+        let user: Option<i64> = store
+            .conn
+            .query_row(
+                "SELECT id FROM nodes WHERE kind = 'user' ORDER BY id LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(user) = user {
+            return Ok((user, false));
+        }
+        let named = !name.is_empty() && !SELF_WORDS.contains(&fold(name).as_str());
+        // Unnamed, as her persona names them until they say.
+        let name = if named { name } else { "l'utilisateur" };
+        let (id, edit) = store.add_node(kind, name, notebook, &Who::User, "told")?;
+        edits.push(edit);
+        return Ok((id, true));
+    }
+    let found = match kind {
+        NodeKind::Person => people_named(store, name)?.into_iter().next(),
+        _ => None,
+    }
+    .or(node_named(store, name)?)
+    .filter(|id| store.node(*id).is_ok_and(|n| n.kind == kind));
+    if let Some(id) = found {
+        return Ok((id, false));
+    }
+    let (id, edit) = store.add_node(kind, name.trim(), notebook, &Who::User, "told")?;
+    edits.push(edit);
+    Ok((id, true))
+}
+
+/// `told` kept as the user's (told, at once): its node made when new, or
+/// moved to the notebook they said; its edge from today, or the fact as a
+/// note on something she knew. The edits, the last first (for
+/// "Annuler").
+pub fn remember(store: &mut Store, told: &Told, origin: &Origin, today: Date) -> Result<Vec<i64>> {
+    let mut edits = Vec::new();
+    let (subject, made) = told_node(store, &told.about, told.kind, told.notebook, &mut edits)?;
+    let mut relation = told.relation.clone();
+    if relation.is_none() && !made {
+        if store.node(subject)?.notebook != told.notebook && told.kind != NodeKind::User {
+            // "hocus-panda est un projet perso": the node is the fact.
+            edits.push(store.set_notebook(subject, told.notebook, &Who::User)?);
+        } else {
+            // A fact on something she knew: a note on it.
+            relation = Some("note".to_owned());
+        }
+    }
+    if let Some(kind) = relation {
+        let target = match &told.object {
+            Some((name, Some(object_kind))) => {
+                let (node, _) = told_node(store, name, *object_kind, told.notebook, &mut edits)?;
+                Target::Node(node)
+            }
+            Some((value, None)) => Target::Value(value.clone()),
+            None => Target::Value(told.fact.clone()),
+        };
+        let (_, edit) = store.add_edge(&NewEdge {
+            src: subject,
+            kind,
+            target,
+            valid_from: Some(today),
+            valid_to: None,
+            origin: origin.clone(),
+            notebook: told.notebook,
+        })?;
+        edits.push(edit);
+    }
+    edits.reverse();
+    Ok(edits)
 }
 
 // --- Observations -----------------------------------------------------------------------
@@ -1433,6 +1594,20 @@ pub enum Noticed {
         day: Date,
         notebook: Notebook,
     },
+    /// Someone she does not know, whom a source links to something she
+    /// knows (#762): "Léa Martin travaille sur hocus-panda".
+    Linked {
+        name: String,
+        /// The edge's type.
+        relation: String,
+        /// What it links them to, by name.
+        object: String,
+        pointer: String,
+        source: Option<String>,
+        quote: String,
+        day: Date,
+        notebook: Notebook,
+    },
     /// A way of being her own records suggest (#753).
     Style {
         style: crate::style::Style,
@@ -1445,7 +1620,9 @@ impl Noticed {
     /// The notebook it is about.
     pub fn notebook(&self) -> Notebook {
         match self {
-            Self::Arrival { notebook, .. } | Self::Automated { notebook, .. } => *notebook,
+            Self::Arrival { notebook, .. }
+            | Self::Automated { notebook, .. }
+            | Self::Linked { notebook, .. } => *notebook,
             _ => Notebook::Pro,
         }
     }
@@ -1456,6 +1633,7 @@ impl Noticed {
             Self::Quiet { source, .. } => format!("quiet:{source}"),
             Self::Ignore { calendar, .. } => format!("ignore:{}", fold(calendar)),
             Self::Arrival { name, .. } => format!("arrival:{}", fold(name)),
+            Self::Linked { name, .. } => format!("linked:{}", fold(name)),
             Self::Style { style, .. } => format!("style:{}", style.aspect()),
             Self::Automated { sender, .. } => format!("aside:{}", sender.to_lowercase()),
         }
@@ -1472,6 +1650,39 @@ impl Noticed {
                 },
                 fr,
             ) => crate::style::question(style, *cause, *count, fr),
+            (
+                Self::Linked {
+                    name,
+                    relation,
+                    object,
+                    source,
+                    day,
+                    quote,
+                    ..
+                },
+                fr,
+            ) => {
+                let what = linked_words(relation, object, fr);
+                let seen = shown_source(source.as_deref().unwrap_or(if fr {
+                    "une source"
+                } else {
+                    "a source"
+                }));
+                if fr {
+                    (
+                        format!("{name} {what}\u{a0}? Je l’ajoute à ce que je sais\u{a0}?"),
+                        format!(
+                            "Vu dans {seen}, {}\u{a0}: «\u{a0}{quote}\u{a0}».",
+                            weekday_short(*day, true)
+                        ),
+                    )
+                } else {
+                    (
+                        format!("{name} {what}? Shall I add it to what I know?"),
+                        format!("Seen in {seen}, {}: “{quote}”.", weekday_short(*day, false)),
+                    )
+                }
+            }
             (
                 Self::Quiet {
                     tool, count, days, ..
@@ -1792,6 +2003,50 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
             };
             Ok(add_person(store, &found, pointer, true)?.1)
         }
+        Noticed::Linked {
+            name,
+            relation,
+            object,
+            pointer,
+            source,
+            quote,
+            day,
+            notebook,
+        } => {
+            let mut edits = Vec::new();
+            let (node, edit) = store.add_node(
+                NodeKind::Person,
+                name,
+                *notebook,
+                &Who::User,
+                "seen, accepted",
+            )?;
+            edits.push(edit);
+            let target = match node_named(store, object)? {
+                Some(id) => Target::Node(id),
+                None => Target::Value(object.clone()),
+            };
+            let source = source.clone().unwrap_or_default();
+            let item = pointer
+                .strip_prefix(&format!("{source}:"))
+                .unwrap_or(pointer)
+                .to_owned();
+            let (edge, edit) = store.add_edge(&NewEdge {
+                src: node,
+                kind: relation.clone(),
+                target,
+                valid_from: Some(*day),
+                valid_to: None,
+                origin: Origin::extracted(&source, &item, quote.clone()),
+                notebook: *notebook,
+            })?;
+            edits.push(edit);
+            if store.edge(edge)?.is_proposal() {
+                edits.push(store.accept(Item::Edge(edge))?);
+            }
+            edits.reverse();
+            Ok(edits)
+        }
         Noticed::Style { style, .. } => {
             let sentence = style.said(true);
             match crate::style::keep(
@@ -1805,6 +2060,27 @@ pub fn apply(store: &mut Store, seen: &Seen) -> Result<Vec<i64>> {
                 crate::style::Kept::Already { .. } => Ok(Vec::new()),
             }
         }
+    }
+}
+
+/// What links someone to `object`, in a question: "travaille sur
+/// hocus-panda".
+fn linked_words(relation: &str, object: &str, fr: bool) -> String {
+    let object = mid_sentence(object);
+    match (relation, fr) {
+        ("leads", true) => format!("dirige {object}"),
+        ("works_on", true) => format!("travaille sur {object}"),
+        ("member_of", true) => format!("fait partie de {object}"),
+        ("reviews", true) => format!("relit {object}"),
+        ("replaces", true) => format!("remplace {object}"),
+        ("client_of", true) => format!("est client de {object}"),
+        ("leads", false) => format!("leads {object}"),
+        ("works_on", false) => format!("works on {object}"),
+        ("member_of", false) => format!("is part of {object}"),
+        ("reviews", false) => format!("reviews {object}"),
+        ("replaces", false) => format!("replaces {object}"),
+        ("client_of", false) => format!("is a client of {object}"),
+        (other, _) => format!("{} {object}", other.replace('_', " ")),
     }
 }
 
@@ -1915,7 +2191,7 @@ mod tests {
                 quote: (*w).to_owned(),
             })
             .collect();
-        let (_, arrivals) = extract(&mut store, event, &facts)?;
+        let arrivals = extract(&mut store, event, &facts)?.arrivals;
         assert!(arrivals.is_empty(), "{arrivals:?}");
         assert_eq!(
             scan(&store, "Réunion a rejoint le canal #général", start)?,

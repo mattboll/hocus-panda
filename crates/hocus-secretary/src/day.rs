@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS agenda (
     organiser TEXT,
     presenter TEXT,
     busy INTEGER NOT NULL DEFAULT 1,
-    notebook TEXT NOT NULL CHECK (notebook IN ('pro', 'perso'))
+    notebook TEXT NOT NULL CHECK (notebook IN ('pro', 'perso')),
+    mine INTEGER NOT NULL DEFAULT 0,
+    declined INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS agenda_start ON agenda (start);
 
@@ -88,6 +90,34 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 "#;
 
+/// The agenda's columns added since its table was first made (#762):
+/// added to a memory that has it without them.
+const ADDED: [(&str, &str); 2] = [
+    (
+        "mine",
+        "ALTER TABLE agenda ADD COLUMN mine INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "declined",
+        "ALTER TABLE agenda ADD COLUMN declined INTEGER NOT NULL DEFAULT 0",
+    ),
+];
+
+/// The tables made when missing, and the columns added since.
+pub fn make(conn: &Connection) -> Result<()> {
+    conn.execute_batch(SQL)?;
+    let mut statement = conn.prepare("SELECT name FROM pragma_table_info('agenda')")?;
+    let have: Vec<String> = statement
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_>>()?;
+    for (column, sql) in ADDED {
+        if !have.iter().any(|c| c == column) {
+            conn.execute_batch(sql)?;
+        }
+    }
+    Ok(())
+}
+
 /// An event of the agenda.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -102,6 +132,10 @@ pub struct Event {
     pub presenter: Option<String>,
     pub busy: bool,
     pub notebook: Notebook,
+    /// The user's own: on a calendar of theirs, or accepted (#762).
+    pub mine: bool,
+    /// Declined by the user, or cancelled.
+    pub declined: bool,
 }
 
 /// A mail's headers, and what the triage made of it.
@@ -224,12 +258,13 @@ fn json(names: &[String]) -> String {
 pub fn keep_event(conn: &Connection, event: &Event) -> Result<()> {
     conn.execute(
         "INSERT INTO agenda (pointer, source, start, end, title, calendar, attendees, organiser,
-             presenter, busy, notebook)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             presenter, busy, notebook, mine, declined)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT (pointer) DO UPDATE SET source = excluded.source, start = excluded.start,
              end = excluded.end, title = excluded.title, calendar = excluded.calendar,
              attendees = excluded.attendees, organiser = excluded.organiser,
-             presenter = excluded.presenter, busy = excluded.busy, notebook = excluded.notebook",
+             presenter = excluded.presenter, busy = excluded.busy, notebook = excluded.notebook,
+             mine = excluded.mine, declined = excluded.declined",
         params![
             event.pointer,
             event.source,
@@ -242,7 +277,22 @@ pub fn keep_event(conn: &Connection, event: &Event) -> Result<()> {
             event.presenter,
             event.busy,
             event.notebook.word(),
+            event.mine,
+            event.declined,
         ],
+    )?;
+    Ok(())
+}
+
+/// Event `pointer`, of `source`, is gone at its source (deleted, #762):
+/// off the user's day and no longer busy, its row kept (the episodes keep
+/// what it was). One not recorded gets a row that says only that.
+pub fn gone(conn: &Connection, pointer: &str, source: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO agenda (pointer, source, start, end, title, busy, notebook, declined)
+         VALUES (?1, ?2, '', '', '', 0, 'pro', 1)
+         ON CONFLICT (pointer) DO UPDATE SET busy = 0, declined = 1",
+        params![pointer, source],
     )?;
     Ok(())
 }
@@ -251,7 +301,7 @@ pub fn keep_event(conn: &Connection, event: &Event) -> Result<()> {
 pub fn events(conn: &Connection, from: Timestamp, to: Timestamp) -> Result<Vec<Event>> {
     let mut statement = conn.prepare(
         "SELECT pointer, source, start, end, title, calendar, attendees, organiser, presenter,
-                busy, notebook
+                busy, notebook, mine, declined
          FROM agenda WHERE start < ?2 AND end > ?1 ORDER BY start, pointer",
     )?;
     let rows = statement.query_map(params![stamp(from), stamp(to)], |r| {
@@ -267,6 +317,8 @@ pub fn events(conn: &Connection, from: Timestamp, to: Timestamp) -> Result<Vec<E
             presenter: r.get(8)?,
             busy: r.get(9)?,
             notebook: notebook(&r.get::<_, String>(10)?),
+            mine: r.get(11)?,
+            declined: r.get(12)?,
         })
     })?;
     rows.collect()
@@ -521,9 +573,8 @@ mod tests {
     #[test]
     fn the_days_records_keep_and_go_with_their_source() {
         let conn = Connection::open_in_memory().expect("a database");
-        conn.execute_batch(SQL).expect("the tables");
-        conn.execute_batch(SQL)
-            .expect("made again: nothing changes");
+        make(&conn).expect("the tables");
+        make(&conn).expect("made again: nothing changes");
         let event = Event {
             pointer: "cal:e1".to_owned(),
             source: Some("cal".to_owned()),
@@ -536,6 +587,8 @@ mod tests {
             presenter: Some("Sophie Marchand".to_owned()),
             busy: true,
             notebook: Notebook::Pro,
+            mine: true,
+            declined: false,
         };
         keep_event(&conn, &event).expect("kept");
         keep_event(&conn, &event).expect("kept again");
@@ -579,5 +632,29 @@ mod tests {
             .is_empty()
         );
         assert_eq!(reminder(&conn, id).expect("read"), None);
+    }
+
+    #[test]
+    fn an_agenda_made_before_its_columns_has_them_added() {
+        let conn = Connection::open_in_memory().expect("a database");
+        conn.execute_batch(
+            "CREATE TABLE agenda (pointer TEXT PRIMARY KEY, source TEXT, start TEXT NOT NULL,
+                 end TEXT NOT NULL, title TEXT NOT NULL, calendar TEXT NOT NULL DEFAULT '',
+                 attendees TEXT NOT NULL DEFAULT '[]', organiser TEXT, presenter TEXT,
+                 busy INTEGER NOT NULL DEFAULT 1,
+                 notebook TEXT NOT NULL CHECK (notebook IN ('pro', 'perso')));
+             INSERT INTO agenda (pointer, start, end, title, notebook)
+                 VALUES ('cal:e0', '2026-11-10T08:00:00Z', '2026-11-10T09:00:00Z', 'Daily', 'pro');",
+        )
+        .expect("an older agenda");
+        make(&conn).expect("its columns added");
+        let found = events(
+            &conn,
+            at("2026-11-10T00:00:00Z"),
+            at("2026-11-11T00:00:00Z"),
+        )
+        .expect("read");
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].mine && !found[0].declined);
     }
 }

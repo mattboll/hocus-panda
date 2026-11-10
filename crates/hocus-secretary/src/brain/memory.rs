@@ -636,6 +636,92 @@ impl Brain {
         true
     }
 
+    /// Her model's `remember` in answer to `asked`, the user's sentence
+    /// of this turn (#762): kept at once as told, "Noté : …" with
+    /// "Annuler", or refused when the words are not theirs. What her model
+    /// is told.
+    pub(super) fn remember_called(
+        &mut self,
+        id: u64,
+        call: &crate::model::ToolCall,
+        asked: Option<&str>,
+    ) -> String {
+        let field = |name: &str| {
+            call.input
+                .get(name)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        let said = field("said");
+        // Only the user's own words in the drawer count, never what a
+        // source said (the defence against memory poisoning, §9.3).
+        if !asked.is_some_and(|a| crate::style::said_by_user(&said, a)) {
+            tracing::info!("a fact not said by the user: nothing kept");
+            return "Refusé : seules ses phrases dans cette conversation comptent ; rien n'est retenu."
+                .to_owned();
+        }
+        let kind =
+            crate::graph::NodeKind::of(&field("kind")).unwrap_or(crate::graph::NodeKind::Topic);
+        let about = field("about");
+        if about.is_empty() && kind != crate::graph::NodeKind::User {
+            return "Rien de retenu : de qui ou de quoi parle-t-il ?".to_owned();
+        }
+        let notebook = Notebook::of(&field("notebook")).unwrap_or(Notebook::Pro);
+        let object = field("object");
+        let object = (!object.is_empty()).then(|| {
+            let kind = crate::graph::NodeKind::of(&field("object_kind"));
+            (object, kind)
+        });
+        let fact = match field("fact") {
+            fact if fact.is_empty() => said.clone(),
+            fact => fact,
+        };
+        let told = learn::Told {
+            about,
+            kind,
+            notebook,
+            relation: learn::relation_word(&field("relation")),
+            object,
+            fact: fact.clone(),
+        };
+        let pointer = format!("conversation:{}", self.last_item());
+        let today = self.today();
+        match learn::remember(&mut self.store, &told, &Origin::told(pointer), today) {
+            Ok(edits) => {
+                let fr = self.fr();
+                let text = if fr {
+                    format!("Noté\u{a0}: {}", lower_first(&fact))
+                } else {
+                    format!("Noted: {}", lower_first(&fact))
+                };
+                let item = self.learned(id, text, edits);
+                tracing::info!(item, notebook = notebook.word(), "a fact told kept");
+                self.audited(audit::Entry {
+                    kind: audit::Kind::Answer,
+                    what: "remember".to_owned(),
+                    ids: vec![format!("item:{item}")],
+                    outcome: Some("kept".to_owned()),
+                    ..Default::default()
+                });
+                self.knows_refresh();
+                let book = match notebook {
+                    Notebook::Pro => "travail",
+                    Notebook::Perso => "privé",
+                };
+                format!(
+                    "Retenu dans le carnet {book} : {fact}. Il le voit (« Noté ») et peut l'annuler ; \
+                     ne le redis pas comme une nouvelle."
+                )
+            }
+            Err(err) => {
+                tracing::warn!(%err, "could not keep a fact told");
+                "Pas retenu : sa mémoire a refusé l'écriture.".to_owned()
+            }
+        }
+    }
+
     // --- Her cards and questions ---------------------------------------------------------
 
     /// A button of one of her cards: whether it was hers.
@@ -827,9 +913,24 @@ impl Brain {
     /// The triage's candidate facts on `episode`: proposals.
     pub(super) fn extracted(&mut self, episode: i64, facts: &[Fact]) {
         match learn::extract(&mut self.store, episode, facts) {
-            Ok((edges, arrivals)) => {
-                tracing::info!(edges = edges.len(), "the triage's facts proposed");
-                if arrivals.is_empty() {
+            Ok(learn::Extracted {
+                edges,
+                arrivals,
+                linked,
+            }) => {
+                // What no node of hers names is let go: a source never
+                // makes one before the user's "Oui" (§7.1, #762).
+                let unlinked = facts
+                    .len()
+                    .saturating_sub(edges.len() + arrivals.len() + linked.len());
+                tracing::info!(
+                    edges = edges.len(),
+                    arrivals = arrivals.len(),
+                    linked = linked.len(),
+                    unlinked,
+                    "the triage's facts proposed"
+                );
+                if arrivals.is_empty() && linked.is_empty() {
                     return;
                 }
                 let row = self.store.conn.query_row(
@@ -847,6 +948,8 @@ impl Brain {
                 let Ok((pointer, source, notebook, at)) = row else {
                     return;
                 };
+                let day = crate::store::unstamp(&at).map_or_else(|| self.today(), day_of);
+                let notebook = Notebook::of(&notebook).unwrap_or(Notebook::Pro);
                 for (name, role, quote) in arrivals {
                     self.notice(Noticed::Arrival {
                         name,
@@ -854,8 +957,21 @@ impl Brain {
                         pointer: pointer.clone(),
                         source: source.clone(),
                         quote,
-                        day: crate::store::unstamp(&at).map_or_else(|| self.today(), day_of),
-                        notebook: Notebook::of(&notebook).unwrap_or(Notebook::Pro),
+                        day,
+                        notebook,
+                    });
+                }
+                for (name, relation, object, quote) in linked {
+                    let object = self.store.node(object).map(|n| n.name).unwrap_or_default();
+                    self.notice(Noticed::Linked {
+                        name,
+                        relation: relation.to_owned(),
+                        object,
+                        pointer: pointer.clone(),
+                        source: source.clone(),
+                        quote,
+                        day,
+                        notebook,
                     });
                 }
             }
@@ -1621,5 +1737,46 @@ fn join_and(names: &[String], and: &str) -> String {
         [] => String::new(),
         [one] => one.clone(),
         [rest @ .., last] => format!("{}{and}{last}", rest.join(", ")),
+    }
+}
+
+/// `text` with its first letter in lower case, unless it is a name's
+/// ("Noté : hocus-panda est…", "Noté : Léa…").
+fn lower_first(text: &str) -> String {
+    let mut words = text.split_whitespace();
+    let first = words.next().unwrap_or_default();
+    // A word with another capital (« LaPoste »), or a name she was told,
+    // keeps its case; a sentence's first word does not.
+    let common = first.chars().skip(1).all(|c| !c.is_uppercase())
+        && matches!(
+            crate::fold::fold(first).as_str(),
+            "le" | "la"
+                | "les"
+                | "l'"
+                | "un"
+                | "une"
+                | "mon"
+                | "ma"
+                | "mes"
+                | "je"
+                | "j'"
+                | "il"
+                | "elle"
+                | "on"
+                | "nous"
+                | "the"
+                | "my"
+                | "i'm"
+                | "it"
+                | "a"
+                | "an"
+        );
+    if !common {
+        return text.to_owned();
+    }
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().chain(chars).collect(),
+        None => String::new(),
     }
 }

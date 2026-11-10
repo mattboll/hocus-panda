@@ -1285,6 +1285,8 @@ mod tests {
             presenter: None,
             busy: false,
             notebook: Notebook::Pro,
+            mine: false,
+            declined: false,
         };
         assert_eq!(absent_of(&event), "Sophie Marchand");
     }
