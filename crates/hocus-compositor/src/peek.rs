@@ -30,12 +30,6 @@
 //! waiting or finished, waiting only, or never; followed live from the
 //! next one, a panda out staying its 8 s.
 //!
-//! The secretary's own peek (docs/design/secretary.md §6.2, assistant
-//! mode) comes out the same way when the shell's speak gate lets it
-//! (`secretary-peek ID STAYS`): 12 s by default, in place of a panda out;
-//! no panda comes out while hers is, and the winking one never replaces
-//! it. Answered ("Fait", "Plus tard"), it goes back (`peek-close`).
-//!
 //! While the secretary's briefing is open (the shell's `briefing open`,
 //! 4.7b), no panda peeks out, and one out goes back at once: it would show
 //! through the briefing. What would have peeked out meanwhile is not kept
@@ -89,8 +83,6 @@ enum What {
     Agent(u64, PeekKind),
     /// The winking panda: screens moved.
     Screens,
-    /// The secretary's request `id`, out this long.
-    Secretary(u64, Duration),
 }
 
 impl What {
@@ -98,7 +90,6 @@ impl What {
         match self {
             Self::Agent(..) => STAYS,
             Self::Screens => SCREENS_STAY,
-            Self::Secretary(_, stays) => stays,
         }
     }
 }
@@ -188,22 +179,8 @@ impl Peeks {
     pub fn out(&self) -> Option<(u64, PeekKind)> {
         match self.out?.what {
             What::Agent(id, kind) => Some((id, kind)),
-            What::Screens | What::Secretary(..) => None,
+            What::Screens => None,
         }
-    }
-
-    /// The secretary's request out, if hers is.
-    pub fn secretary_out(&self) -> Option<u64> {
-        match self.out?.what {
-            What::Secretary(id, _) => Some(id),
-            _ => None,
-        }
-    }
-
-    /// Hers is out, not going back.
-    fn hers_out(&self) -> bool {
-        self.out
-            .is_some_and(|o| matches!(o.what, What::Secretary(..)) && o.back.is_none())
     }
 
     /// Whether the winking panda saying screens moved is out.
@@ -266,14 +243,6 @@ impl State {
             tracing::debug!(id, kind = kind.name(), "the briefing is open: no peek");
             return;
         }
-        if self.peek.hers_out() {
-            tracing::debug!(
-                id,
-                kind = kind.name(),
-                "the secretary's peek is out: no panda"
-            );
-            return;
-        }
         let Some(agent) = self
             .agents
             .told
@@ -324,10 +293,10 @@ impl State {
             return;
         }
         if let Some(out) = self.peek.out
-            && matches!(out.what, What::Agent(..) | What::Secretary(..))
+            && matches!(out.what, What::Agent(..))
             && out.back.is_none()
         {
-            tracing::debug!("a panda is out: the screens' peek is not shown");
+            tracing::debug!("an agent's panda is out: the screens' peek is not shown");
             return;
         }
         let now = self.now();
@@ -352,52 +321,11 @@ impl State {
         self.redraw = true;
     }
 
-    /// The user clicked the winking panda, or answered hers: it goes
-    /// back.
+    /// The user clicked the winking panda: it goes back.
     pub(crate) fn peek_closed(&mut self) {
-        if self.peek.screens_out() || self.peek.secretary_out().is_some() {
+        if self.peek.screens_out() {
             self.peek_back();
         }
-    }
-
-    /// The shell's speak gate lets the secretary's peek of request `id`
-    /// out for `stays` seconds: in place of a panda out; the same one out
-    /// stays that much more.
-    pub(crate) fn secretary_peek(&mut self, id: u64, stays: u32) {
-        if !self.shell_linked() {
-            return;
-        }
-        if self.locked() {
-            tracing::debug!(id, "locked: her peek does not come out");
-            return;
-        }
-        let stays = Duration::from_secs(u64::from(stays.clamp(1, 120)));
-        let now = self.now();
-        if let Some(out) = &mut self.peek.out
-            && out.what == What::Secretary(id, stays)
-            && out.back.is_none()
-        {
-            if out.since.is_some() {
-                out.stays = Some(now + stays);
-                self.arm_peek();
-            }
-            return;
-        }
-        let showing = self
-            .peek
-            .out
-            .and_then(|o| o.since.filter(|_| o.back.is_none()));
-        tracing::debug!(id, "the secretary peeks out");
-        self.peek.out = Some(Out {
-            what: What::Secretary(id, stays),
-            since: showing,
-            stays: showing.map(|_| now + stays),
-            back: None,
-        });
-        self.peek.told += 1;
-        self.tell_shell(ToShell::SecretaryPeek(id));
-        self.arm_peek();
-        self.redraw = true;
     }
 
     /// A commit of the shell's peek surface `layer`: its first frame

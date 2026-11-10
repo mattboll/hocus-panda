@@ -133,8 +133,6 @@ pub struct Panel {
     pub popover_commits: u64,
     /// Commits of the peek's surfaces, for tests: none at rest.
     pub peek_commits: u64,
-    /// Commits of the secretary's drawer, for tests: none at rest.
-    pub drawer_commits: u64,
     /// The bar's own surfaces asked for on no screen, for tests: the
     /// shell names the screen of each (#540).
     pub asked_nowhere: u64,

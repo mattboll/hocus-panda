@@ -88,8 +88,8 @@ pub enum Heard {
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
-    /// What is asked of the shell's or the secretary's program (`hocus msg
-    /// shell restart`), answered the same way.
+    /// What is asked of the shell's program (`hocus msg shell restart`),
+    /// answered the same way.
     Program(hocus_agents::ProgramAsk, std::sync::mpsc::Sender<String>),
     /// A Settings' line (`msg screens`, 6.9).
     Screens(crate::displays::FromSettings),

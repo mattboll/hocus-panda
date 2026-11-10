@@ -1,7 +1,6 @@
-//! The shell or the secretary restarted alone in the running session
-//! (issue #781; docs/workflow.md, "Development loop"): `hocus msg shell
-//! restart [--program PATH]` and `hocus msg secretary restart`, asked on
-//! the control socket as `hocus` asks them.
+//! The shell restarted alone in the running session (issue #781;
+//! docs/workflow.md, "Development loop"): `hocus msg shell restart
+//! [--program PATH]`, asked on the control socket as `hocus` asks it.
 //!
 //! - A restart ends the program and starts it again at once: the windows
 //!   stay, the bar's space stays kept, the bar comes back.
@@ -10,7 +9,6 @@
 //! - A given program that keeps ending, or does not start, gives way to
 //!   the installed one: the status says it, and the shell says it in a
 //!   notification.
-//! - The secretary the same, in assistant mode, with her fake model.
 
 use crate::common;
 
@@ -23,8 +21,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, SecretaryMode};
-use hocus_link::{SecretaryShown, Supervised, ToShell};
+use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -288,182 +285,5 @@ fn a_bad_program_falls_back_to_the_installed_one_and_it_is_said() -> anyhow::Res
     ask(&mut hp, "msg shell restart")?;
     let status = shell_back(&mut hp, before)?;
     assert_eq!(said(&status, "fell-back"), None, "{status}");
-    Ok(())
-}
-
-/// Her program at `dir/NAME`, run by a script that gives her a data
-/// folder of her own, her clock and her fake model (as tests/secretary.rs).
-fn secretary_script(dir: &Path, name: &str, secretary: &Path) -> anyhow::Result<PathBuf> {
-    let model = dir.join("model.toml");
-    std::fs::write(&model, "[default]\ntext = \"D'accord.\"\n")?;
-    let script = dir.join(name);
-    script_at(
-        &script,
-        &format!(
-            "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\nexport XDG_DATA_HOME='{}'\n\
-             exec '{}' --virtual-clock 2026-11-09T08:00:00Z --fake-model '{}' \
-             --recorder '{}' \"$@\" 2>>'{}'\n",
-            dir.join("data").display(),
-            secretary.display(),
-            model.display(),
-            dir.join("calls.jsonl").display(),
-            dir.join("secretary.log").display(),
-        ),
-    )?;
-    Ok(script)
-}
-
-fn secretary_config(script: &Path, mode: SecretaryMode) -> Config {
-    let mut config = Config {
-        secretary_program: Some(script.to_owned()),
-        ..Config::default()
-    };
-    config.secretary.mode = mode;
-    config
-}
-
-/// Her status once she answers on her socket as process `other` than the
-/// one given: she runs, and listens.
-fn secretary_back(hp: &mut Headless, other: Option<u32>) -> anyhow::Result<String> {
-    use hocus_secretary_link::{Client, Connection};
-    let socket = hp
-        .secretary_socket()
-        .map(Path::to_path_buf)
-        .context("no socket")?;
-    let start = Instant::now();
-    loop {
-        let runs = hp.secretary_pid().is_some() && hp.secretary_pid() != other;
-        if runs
-            && let Ok(mut her) = Connection::open(&socket, Client::Test, Duration::from_secs(5))
-            && her.status().is_ok()
-        {
-            break;
-        }
-        anyhow::ensure!(
-            start.elapsed() < WAIT,
-            "she never came back:\n{}",
-            ask(hp, "msg secretary status")?
-        );
-        hp.dispatch(Duration::from_millis(20))?;
-    }
-    ask(hp, "msg secretary status")
-}
-
-/// The secretary, in assistant mode with her fake model: a restart ends
-/// her and starts her again at once (the shell told "unavailable"
-/// meanwhile), a program given runs in her place and the status says so,
-/// one that keeps ending gives way to the installed one and it is to be
-/// said; in classic mode a restart is refused.
-#[test]
-fn the_secretary_restarts_with_a_program_given_and_falls_back() -> anyhow::Result<()> {
-    let built = common::secretary_program();
-    let dir = tempfile::tempdir()?;
-    let installed = secretary_script(dir.path(), "secretary", &built)?;
-    let given = secretary_script(dir.path(), "secretary-dev", &built)?;
-    let ending = dir.path().join("ending");
-    script_at(&ending, "#!/bin/sh\nexit 1\n")?;
-    let mut hp = Headless::start_with(
-        pixman(),
-        secretary_config(&installed, SecretaryMode::Classic),
-    )?;
-    common::wait(&mut hp, Duration::from_millis(200))?;
-    let answer = ask(&mut hp, "msg secretary restart")?;
-    assert!(
-        answer.starts_with("refused: the secretary is off"),
-        "{answer}"
-    );
-    let status = ask(&mut hp, "msg secretary status")?;
-    assert_eq!(said(&status, "state"), Some("off"), "{status}");
-    assert_eq!(hp.secretary_starts(), 0, "classic: nothing starts");
-
-    hp.reconfigure(secretary_config(&installed, SecretaryMode::Assistant));
-    let status = secretary_back(&mut hp, None)?;
-    assert_eq!(said(&status, "state"), Some("running"), "{status}");
-    assert_eq!(said(&status, "program"), installed.to_str(), "{status}");
-    assert_eq!(said(&status, "given"), Some("no"), "{status}");
-    assert_eq!(said(&status, "starts"), Some("1"), "{status}");
-    let first = hp.secretary_pid();
-    assert_eq!(
-        said(&status, "pid").and_then(|pid| pid.parse().ok()),
-        first,
-        "{status}"
-    );
-
-    // A restart: ended and started again at once, said unavailable
-    // meanwhile, ready again after.
-    let asked = Instant::now();
-    assert_eq!(
-        ask(&mut hp, "msg secretary restart")?,
-        format!("restarting\nprogram {}\n", installed.display())
-    );
-    let mut unavailable = hp.secretary_told() == Some(SecretaryShown::Unavailable);
-    let again = hp.dispatch_until(WAIT, |hp| {
-        unavailable |= hp.secretary_told() == Some(SecretaryShown::Unavailable);
-        hp.secretary_starts() == 2 && hp.secretary_pid().is_some()
-    })?;
-    assert!(again && unavailable, "started again, unavailable meanwhile");
-    let status = secretary_back(&mut hp, first)?;
-    eprintln!(
-        "secretary restart: she answers {:.2?} after the restart was asked",
-        asked.elapsed()
-    );
-    assert_eq!(said(&status, "starts"), Some("2"), "{status}");
-    assert!(matches!(
-        hp.secretary_told(),
-        Some(SecretaryShown::Ready(_))
-    ));
-
-    // A program given runs in her place.
-    let second = hp.secretary_pid();
-    assert_eq!(
-        ask(
-            &mut hp,
-            &format!("msg secretary restart program {}", given.display())
-        )?,
-        format!("restarting\nprogram {}\n", given.display())
-    );
-    let status = secretary_back(&mut hp, second)?;
-    assert_eq!(said(&status, "state"), Some("running"), "{status}");
-    assert_eq!(said(&status, "program"), given.to_str(), "{status}");
-    assert_eq!(said(&status, "installed"), installed.to_str(), "{status}");
-    assert_eq!(said(&status, "given"), Some("yes"), "{status}");
-    assert_eq!(said(&status, "starts"), Some("3"), "{status}");
-
-    // One that keeps ending: the installed one again, and it is to be
-    // said by the shell once one is there.
-    let third = hp.secretary_pid();
-    ask(
-        &mut hp,
-        &format!("msg secretary restart program {}", ending.display()),
-    )?;
-    let status = secretary_back(&mut hp, third)?;
-    assert_eq!(said(&status, "program"), installed.to_str(), "{status}");
-    assert_eq!(said(&status, "given"), Some("no"), "{status}");
-    assert_eq!(
-        said(&status, "fell-back"),
-        Some(format!("{} (kept ending)", ending.display()).as_str()),
-        "{status}"
-    );
-    assert_eq!(
-        hp.state().shell.notices,
-        vec![ToShell::FellBack {
-            which: Supervised::Secretary,
-            program: ending,
-        }]
-    );
-
-    // `installed` after a program given.
-    let fourth = hp.secretary_pid();
-    ask(
-        &mut hp,
-        &format!("msg secretary restart program {}", given.display()),
-    )?;
-    let status = secretary_back(&mut hp, fourth)?;
-    assert_eq!(said(&status, "given"), Some("yes"), "{status}");
-    let fifth = hp.secretary_pid();
-    ask(&mut hp, "msg secretary restart installed")?;
-    let status = secretary_back(&mut hp, fifth)?;
-    assert_eq!(said(&status, "program"), installed.to_str(), "{status}");
-    assert_eq!(said(&status, "given"), Some("no"), "{status}");
     Ok(())
 }

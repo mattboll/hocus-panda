@@ -279,8 +279,6 @@ pub enum Sync {
     Changes { items: Vec<Value>, next: String },
     /// `410 Gone`: list again.
     Expired,
-    /// `400`: a token this calendar does not take.
-    Refused,
 }
 
 /// A request the fake was sent.
@@ -301,9 +299,6 @@ pub struct Api {
     pub syncs: HashMap<String, Sync>,
     /// The bearer tokens taken; empty: any.
     pub accept: BTreeSet<String>,
-    /// Each free/busy-only calendar's busy blocks (`POST /freeBusy`), RFC
-    /// 3339 starts and ends.
-    pub busy: HashMap<String, Vec<(String, String)>>,
     pub asked: Vec<Asked>,
 }
 
@@ -453,20 +448,6 @@ fn answer(target: &str, token: String, api: &Mutex<Api>) -> (u16, Value) {
         );
     }
     let page_token = query.get("pageToken");
-    if path == "/freeBusy" {
-        let calendars: serde_json::Map<String, Value> = api
-            .busy
-            .iter()
-            .map(|(id, blocks)| {
-                let busy: Vec<Value> = blocks
-                    .iter()
-                    .map(|(start, end)| json!({"start": start, "end": end}))
-                    .collect();
-                (id.clone(), json!({ "busy": busy }))
-            })
-            .collect();
-        return (200, json!({ "calendars": calendars }));
-    }
     if path == "/users/me/calendarList" {
         return (200, page(&api.calendars, page_token, json!({})));
     }
@@ -482,7 +463,6 @@ fn answer(target: &str, token: String, api: &Mutex<Api>) -> (u16, Value) {
                 200,
                 page(items, page_token, json!({ "nextSyncToken": next })),
             ),
-            Some(Sync::Refused) => (400, json!({"error": {"code": 400}})),
             Some(Sync::Expired) | None => (410, json!({"error": {"code": 410}})),
         };
     }

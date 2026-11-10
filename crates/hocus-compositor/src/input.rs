@@ -401,14 +401,8 @@ impl State {
                         unshifted.shift = false;
                         shortcuts.action(&unshifted, typed, this.nested)
                     });
-                // `Super+S` is the secretary's in assistant mode only: in
-                // classic mode it goes on to the window.
-                let assistant =
-                    this.config.secretary.mode == crate::config::SecretaryMode::Assistant;
                 let action = action.filter(|(a, _)| {
-                    !inhibited
-                        && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
-                        && (*a != Action::Secretary || assistant)
+                    !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
                 });
                 if let Some((action, chord)) = action {
                     this.kept_keys.insert(code);

@@ -10,7 +10,6 @@
 
 mod day;
 mod perf;
-mod secretary;
 
 /// A test file that is not a module here is not built, and its tests would
 /// be missed in silence (the crate's `autotests = false`).

@@ -11,7 +11,7 @@
 //! `[keyboard]` (6.8), `[appearance]` and `[locale]` (6.2), `[wallpaper]`
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
-//! `[magnifier]` (#424), `[accessibility]` (#734), `[secretary] mode`,
+//! `[magnifier]` (#424), `[accessibility]` (#734),
 //! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[agents]`
 //! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
 //! layouts or options changed has its keymap compiled on the thread too
@@ -302,10 +302,6 @@ impl State {
         // halo.rs).
         if self.agents_config_changed(&new.agents) {
             followed.push("[agents]");
-        }
-        // The secretary (secretary.md §21): her process started or stopped.
-        if self.secretary_config_changed(&new.secretary) {
-            followed.push("[secretary]");
         }
         // Idleness, locking, sleeping, the lid, the power button and the
         // power saver (6.10, away/power.rs).

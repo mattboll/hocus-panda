@@ -294,8 +294,6 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     if live(&before) != live(&after) {
         crate::notifications::sharing(live(&after));
     }
-    // The secretary's gate reads the camera, the microphone, the shares.
-    crate::speak::poke();
     let mut effects = Vec::new();
     if was.is_empty() != is.is_empty() {
         // The sign comes or goes on every bar, the column under it moves.

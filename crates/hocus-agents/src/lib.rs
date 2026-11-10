@@ -100,10 +100,9 @@ pub enum Restart {
 }
 
 /// What is asked of a supervised program (`hocus msg shell status`, `hocus
-/// msg shell restart [--program PATH]`, the same of the secretary): a line
-/// `msg shell|secretary status` or `msg shell|secretary restart
-/// [installed|program PATH]`, answered with lines of text. A refusal's
-/// answer starts with [`REFUSED`].
+/// msg shell restart [--program PATH]`): a line `msg shell status` or `msg
+/// shell restart [installed|program PATH]`, answered with lines of text. A
+/// refusal's answer starts with [`REFUSED`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramAsk {
     /// Which program runs, since when, and whether it was given.
@@ -436,9 +435,8 @@ mod tests {
     fn a_programs_ask_reads_back() {
         let asks = [
             ProgramAsk::Status(Supervised::Shell),
-            ProgramAsk::Status(Supervised::Secretary),
             ProgramAsk::Restart(Supervised::Shell, Restart::Same),
-            ProgramAsk::Restart(Supervised::Secretary, Restart::Installed),
+            ProgramAsk::Restart(Supervised::Shell, Restart::Installed),
             ProgramAsk::Restart(
                 Supervised::Shell,
                 Restart::Given("/home/alex/my builds/hocuspanda-shell".into()),

@@ -29,9 +29,9 @@
 //! never copied nor cut out, keeps no undo history, moves by word as by
 //! its whole, and is overwritten with zeros when it empties or goes.
 //!
-//! The drawer's field and its key's field are the first to use it; the
-//! shell's other fields still edit by hand (listed on #763) until they
-//! move here.
+//! No surface uses it yet: its first user, the secretary's drawer, was
+//! removed with her; the shell's other fields still edit by hand until
+//! they move here (#771).
 
 pub mod ime;
 pub mod keys;

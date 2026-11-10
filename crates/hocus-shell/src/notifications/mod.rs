@@ -659,8 +659,6 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         }
         Effect::Changed => {
             crate::popover::changed(crate::popover::Item::Notifications);
-            // Do not disturb may have changed: the secretary's gate looks.
-            crate::speak::poke();
             Vec::new()
         }
         Effect::Save(records) => {
@@ -829,10 +827,10 @@ fn reminder_note(
 /// apart from the reminders' and the captures'.
 const DESKTOPS_OWN_FROM: u32 = 0x4000_0000;
 
-/// The program given for this session as the shell or the secretary
-/// (`hocus msg shell restart --program`) did not start or kept ending, and
-/// the installed one runs again: a notification says so, one for each of
-/// the two, the latest in place of the one before.
+/// The program given for this session as the shell (`hocus msg shell
+/// restart --program`) did not start or kept ending, and the installed
+/// one runs again: a notification says so, the latest in place of the one
+/// before.
 pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
     use crate::clock::time::Lang;
     use hocus_link::Supervised;
@@ -849,18 +847,6 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
             0,
             "The development shell stopped",
             format!("{program} did not start or kept ending. The installed shell runs again."),
-        ),
-        (Supervised::Secretary, Lang::French) => (
-            1,
-            "La secrétaire de développement s’est arrêtée",
-            format!(
-                "{program} n’a pas démarré ou s’arrêtait sans cesse. La secrétaire installée a repris."
-            ),
-        ),
-        (Supervised::Secretary, Lang::English) => (
-            1,
-            "The development secretary stopped",
-            format!("{program} did not start or kept ending. The installed secretary runs again."),
         ),
     };
     tracing::info!(which = which.word(), %program, "a given program was let go of: said");

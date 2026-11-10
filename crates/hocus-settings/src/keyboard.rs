@@ -1,7 +1,7 @@
 //! Clavier et raccourcis / Keyboard and shortcuts (6.8, variant A): the
 //! layouts, the keys' repeat and the special keys on the section's page;
 //! every desktop shortcut (`[shortcuts]`, the compositor's
-//! `shortcuts.rs`: 74 actions) on a sub-page of its own, with its search.
+//! `shortcuts.rs`: 73 actions) on a sub-page of its own, with its search.
 //! Each is an action of the palette's catalogue too
 //! (`hocus_link::actions`, #736): its tests check so.
 //!
@@ -459,16 +459,6 @@ fn actions() -> Vec<Action> {
             (&["émoticône", "smiley"], &["emoji", "smiley"]),
         ),
         a(
-            "secretary",
-            BAR,
-            w("Secrétaire", "Secretary"),
-            &["Super+S"],
-            (
-                &["assistante", "discussion", "tiroir", "agenda"],
-                &["assistant", "chat", "drawer", "calendar"],
-            ),
-        ),
-        a(
             "join",
             BAR,
             w("Rejoindre la réunion", "Join the meeting"),
@@ -844,14 +834,14 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 74);
+        assert_eq!(all.len(), 73);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
         let count = |g| all.iter().filter(|s| s.group == g).count();
         assert_eq!(count(WINDOWS), 16);
         assert_eq!(count(DESKTOPS), 34);
-        assert_eq!(count(BAR), 9);
+        assert_eq!(count(BAR), 8);
         assert_eq!(count(CAPTURES), 4);
         assert_eq!(count(SESSION), 2);
         assert_eq!(count(MEDIA), 5);

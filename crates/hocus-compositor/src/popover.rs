@@ -25,19 +25,12 @@
 //! actions palette (#736, [`ACTIONS_NAMESPACE`]): in over 140 ms coming
 //! down [`ACTIONS_DROP`], out over 100 ms; with reduced motion or a shell
 //! on the CPU it still fades, without moving.
-//!
-//! So is the secretary's drawer (docs/design/secretary.md §5.1,
-//! [`SECRETARY_NAMESPACE`]): the popovers' glass, shadow and corners; in
-//! over 180 ms sliding 16 px from the bar, out over 140 ms; with reduced
-//! motion or a shell on the CPU it only fades. It takes the keyboard as it
-//! first shows (its field is focused on opening), on demand: a window
-//! clicked takes it back, and the drawer stays.
 
 use std::time::Duration;
 
 use hocus_link::{
     ACTIONS_NAMESPACE, ACTIONS_RADIUS, EMOJI_NAMESPACE, EMOJI_RADIUS, EMOJI_RISE, EMOJI_ZOOM,
-    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_OPEN, POPOVER_SHIFT, SECRETARY_NAMESPACE, ToShell,
+    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_OPEN, POPOVER_SHIFT, ToShell,
 };
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
@@ -86,8 +79,6 @@ pub enum Kind {
     Emoji,
     /// The actions palette.
     Actions,
-    /// The secretary's drawer.
-    Drawer,
 }
 
 impl Kind {
@@ -95,34 +86,8 @@ impl Kind {
         match namespace {
             EMOJI_NAMESPACE => Self::Emoji,
             ACTIONS_NAMESPACE => Self::Actions,
-            SECRETARY_NAMESPACE => Self::Drawer,
             _ => Self::Popover,
         }
-    }
-
-    /// Whether it fades even without motion (it only fades then).
-    fn always_fades(self) -> bool {
-        matches!(self, Self::Actions | Self::Drawer)
-    }
-}
-
-/// How the drawer opened at `opened` (and closing since `closing`) is
-/// drawn at `now`: in over 180 ms from 16 px toward the bar (`ease-out`),
-/// out over 140 ms (`ease-in`); without `motion`, it only fades.
-fn drawer_look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool) -> Look {
-    let shown = match closing {
-        None => Tween::new(opened, hocus_link::DRAWER_OPEN, Bezier::EASE_OUT).at(now),
-        Some(since) => 1.0 - Tween::new(since, hocus_link::DRAWER_CLOSE, Bezier::EASE_IN).at(now),
-    }
-    .clamp(0.0, 1.0);
-    Look {
-        alpha: shown as f32,
-        shift: if motion {
-            hocus_link::DRAWER_SHIFT * (1.0 - shown)
-        } else {
-            0.0
-        },
-        rise: 0.0,
     }
 }
 
@@ -197,7 +162,7 @@ impl Shown {
     /// Its shadow.
     pub fn shadow(&self) -> ShadowStyle {
         match self.kind {
-            Kind::Popover | Kind::Drawer => SHADOW,
+            Kind::Popover => SHADOW,
             Kind::Emoji => EMOJI_SHADOW,
             Kind::Actions => ACTIONS_SHADOW,
         }
@@ -206,7 +171,7 @@ impl Shown {
     /// Its corners' radius.
     pub fn radius(&self) -> f64 {
         match self.kind {
-            Kind::Popover | Kind::Drawer => hocus_link::RADIUS,
+            Kind::Popover => hocus_link::RADIUS,
             Kind::Emoji => EMOJI_RADIUS,
             Kind::Actions => ACTIONS_RADIUS,
         }
@@ -215,17 +180,17 @@ impl Shown {
     /// How far it comes down from as it opens (and goes back up to).
     pub fn reach(&self) -> f64 {
         match self.kind {
-            Kind::Popover | Kind::Drawer => 0.0,
+            Kind::Popover => 0.0,
             Kind::Emoji => EMOJI_RISE,
             Kind::Actions => hocus_link::ACTIONS_DROP,
         }
     }
 
     fn moving(&self, now: Duration) -> bool {
-        let (open, close) = match self.kind {
-            Kind::Actions => (hocus_link::ACTIONS_OPEN, hocus_link::ACTIONS_CLOSE),
-            Kind::Drawer => (hocus_link::DRAWER_OPEN, hocus_link::DRAWER_CLOSE),
-            Kind::Popover | Kind::Emoji => (POPOVER_OPEN, POPOVER_CLOSE),
+        let (open, close) = if self.kind == Kind::Actions {
+            (hocus_link::ACTIONS_OPEN, hocus_link::ACTIONS_CLOSE)
+        } else {
+            (POPOVER_OPEN, POPOVER_CLOSE)
         };
         match self.closing {
             Some(since) => now < since + close,
@@ -253,7 +218,6 @@ impl Popovers {
                 }
             }
             Kind::Actions => actions_look(shown.opened, shown.closing, now, motion),
-            Kind::Drawer => drawer_look(shown.opened, shown.closing, now, motion),
         })
     }
 
@@ -263,10 +227,10 @@ impl Popovers {
 
     /// Whether one is still moving at `now`.
     pub fn tick(&self, now: Duration, motion: bool) -> bool {
-        // The palette and the drawer fade in and out even without motion.
+        // The palette fades in and out even without motion.
         self.shown
             .iter()
-            .any(|s| s.moving(now) && (motion || s.kind.always_fades()))
+            .any(|s| s.moving(now) && (motion || s.kind == Kind::Actions))
     }
 
     /// The popovers showing and not closing.
@@ -293,26 +257,13 @@ impl State {
             return;
         }
         let opened = self.now();
-        let kind = Kind::of(layer.namespace());
         self.panel.popovers.shown.push(Shown {
             layer: layer.clone(),
             opened,
             closing: None,
             ids: FrameIds::default(),
-            kind,
+            kind: Kind::of(layer.namespace()),
         });
-        // The drawer's field is focused as it opens (§5.5); it asks for
-        // the keyboard on demand only, so that a window clicked takes it
-        // back while the drawer stays.
-        if kind == Kind::Drawer
-            && let Some(keyboard) = self.seat.get_keyboard()
-        {
-            keyboard.set_focus(
-                self,
-                Some(KeyboardFocus::Wayland(layer.wl_surface().clone())),
-                smithay::utils::SERIAL_COUNTER.next_serial(),
-            );
-        }
         self.redraw = true;
     }
 

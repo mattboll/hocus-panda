@@ -28,7 +28,6 @@ mod perf_page;
 mod places;
 mod power_page;
 mod screens;
-mod secretary_page;
 mod sound;
 mod style;
 mod time;
@@ -228,9 +227,6 @@ enum Undo {
     Power(power_page::ModeChoice),
     /// A tool plugged in or out, herdr followed or not (6.16).
     Agents(agents_page::Choice),
-    /// A source of the secretary's no longer read, or its notebook
-    /// changed (her consent book, #759).
-    Secretary(secretary_page::Choice),
     /// A default application or a start-up one (mimeapps.list, autostart,
     /// 6.15).
     Apps(applications::Choice),
@@ -355,8 +351,6 @@ pub enum Message {
     Power(power_page::Msg),
     /// The Agents page's (6.16).
     Agents(agents_page::Msg),
-    /// The Secrétaire page's (#759).
-    Secretary(secretary_page::Msg),
     /// The Applications page's (6.15).
     Apps(applications::Msg),
     /// The Performances page's (#655).
@@ -453,8 +447,6 @@ pub struct App {
     /// The Agents page: the tools as the compositor says them, the
     /// consent sheet, the preview and the pandas' motions (6.16).
     agents: agents_page::State,
-    /// The Secrétaire page: what she reads, her status, her sheets (#759).
-    secretary: secretary_page::State,
     /// The Applications page: what its thread read, its menus and sheet
     /// (6.15).
     apps: applications::State,
@@ -476,7 +468,6 @@ impl App {
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
         let agents = agents_page::State::with(&sender);
-        let secretary = secretary_page::State::with(&sender);
         let apps = applications::State::new(sender.clone());
         let perf = perf_page::State::new(&sender, start.places.state.clone());
         let to_worker = sender.clone();
@@ -563,7 +554,6 @@ impl App {
             network,
             power,
             agents,
-            secretary,
             apps,
             perf,
         };
@@ -711,7 +701,6 @@ impl App {
         self.wallpaper_want();
         self.network_visit();
         self.agents_visit();
-        self.secretary_visit();
         self.perf_after();
         self.network_after_key();
         self.now = Instant::now();
@@ -743,22 +732,19 @@ impl App {
     fn handle(&mut self, message: Message) -> Task<Message> {
         // A desktop's name being changed is written as the pointer goes
         // elsewhere (6.14).
-        let elsewhere = matches!(
-            message,
-            Message::Toggle(_)
-                | Message::Menu(_)
-                | Message::Section(_)
-                | Message::Home
-                | Message::Query(_)
-                | Message::Close
-                | Message::Result(_)
-        );
-        if self.desktops_editing() && elsewhere {
+        if self.desktops_editing()
+            && matches!(
+                message,
+                Message::Toggle(_)
+                    | Message::Menu(_)
+                    | Message::Section(_)
+                    | Message::Home
+                    | Message::Query(_)
+                    | Message::Close
+                    | Message::Result(_)
+            )
+        {
             self.desktops_commit();
-        }
-        // Her name too (#752).
-        if self.secretary_naming() && elsewhere {
-            self.secretary_name_commit();
         }
         match message {
             Message::Window(id) => {
@@ -789,10 +775,6 @@ impl App {
                 if let Some(task) = self.agents_key_first(&key) {
                     return task;
                 }
-                // The Secrétaire page's sheets and her key's field (#759).
-                if let Some(task) = self.secretary_key_first(&key) {
-                    return task;
-                }
                 // The time zone picker's, the time's fields' (6.11).
                 if let Some(task) = self.time_key_first(&key, captured) {
                     return task;
@@ -815,10 +797,6 @@ impl App {
                     && self.captures_escape()
                 {
                     return Task::none();
-                }
-                // Her name: `Tab` writes it (#752).
-                if self.secretary_naming() && key.as_ref() == Key::Named(Named::Tab) {
-                    self.secretary_name_commit();
                 }
                 // A desktop's name: `Esc` keeps the old one, `Tab` writes.
                 if self.desktops_editing() {
@@ -862,7 +840,6 @@ impl App {
                 let on = self.value(slot) == Some(Value::Bool(true));
                 self.knobs.insert(slot.setting, Instant::now());
                 self.agents_chose(slot, &Value::Bool(!on));
-                self.secretary_switched(slot, &Value::Bool(!on));
                 let say = self.captures_toggle_toast(slot, !on);
                 self.change_saying(slot, Value::Bool(!on), say)
             }
@@ -890,7 +867,6 @@ impl App {
                 }
                 self.bar_chose(slot, &value);
                 self.agents_chose(slot, &value);
-                self.secretary_switched(slot, &value);
                 let say = self.desktops_toast(slot, &value);
                 self.change_saying(slot, value, say)
             }
@@ -974,7 +950,6 @@ impl App {
             Message::Network(msg) => self.network_update(msg),
             Message::Power(msg) => self.power_update(msg),
             Message::Agents(msg) => self.agents_update(msg),
-            Message::Secretary(msg) => self.secretary_update(msg),
             Message::Apps(msg) => self.apps_update(msg),
             Message::Perf(msg) => self.perf_update(msg),
         }
@@ -1378,13 +1353,6 @@ impl App {
                 self.toast = None;
                 return self.agents_undo(choice, false);
             }
-            Some(Undo::Secretary(_)) => {
-                let Some(Undo::Secretary(choice)) = self.undo.pop() else {
-                    return Task::none();
-                };
-                self.toast = None;
-                return self.secretary_undo(choice, false);
-            }
             Some(Undo::Apps(_)) => {
                 let Some(Undo::Apps(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1482,12 +1450,6 @@ impl App {
                     return Task::none();
                 };
                 return self.agents_undo(choice, true);
-            }
-            Some(Undo::Secretary(_)) => {
-                let Some(Undo::Secretary(choice)) = self.redo.pop() else {
-                    return Task::none();
-                };
-                return self.secretary_undo(choice, true);
             }
             Some(Undo::Apps(_)) => {
                 let Some(Undo::Apps(choice)) = self.redo.pop() else {
@@ -1830,9 +1792,6 @@ impl App {
         if section == SectionId::Agents {
             return self.agents_controls();
         }
-        if section == SectionId::Secretary {
-            return self.secretary_controls();
-        }
         if section == SectionId::Captures {
             return self.captures_controls();
         }
@@ -2080,7 +2039,6 @@ impl App {
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
             Control::Agents(stop) => self.agents_key(stop, named),
-            Control::Secretary(stop) => self.secretary_key(stop, named),
             Control::Apps(stop) => self.apps_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -2371,8 +2329,6 @@ enum Control {
     Power(power_page::Stop),
     /// The Agents page's own (6.16).
     Agents(agents_page::Stop),
-    /// The Secrétaire page's own (#759).
-    Secretary(secretary_page::Stop),
     /// The Applications page's own (6.15).
     Apps(applications::Stop),
 }

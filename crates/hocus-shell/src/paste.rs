@@ -71,9 +71,6 @@ pub enum Clean {
     /// ends trimmed, its other control characters dropped: a task's title
     /// (Day.4b).
     Spaced,
-    /// Its line breaks kept (`\r\n` one), tabs a space, its other
-    /// control characters dropped: a message on lines (#763).
-    Lines,
 }
 
 /// Reads the clipboard's text off the loop, then hands it to `done` on the
@@ -216,7 +213,6 @@ fn read(pipe: PipeReader, how: Clean, done: impl FnOnce(Option<&str>)) {
             Ok(text) => Some(match how {
                 Clean::Dropped => without_controls(text, &mut clean.0),
                 Clean::Spaced => on_one_line(text, &mut clean.0),
-                Clean::Lines => on_lines(text, &mut clean.0),
             }),
             Err(_) => {
                 tracing::debug!("the clipboard's text is not UTF-8: nothing pasted");
@@ -292,28 +288,6 @@ fn on_one_line<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
             }
             len += c.encode_utf8(&mut into[len..]).len();
         }
-    }
-    std::str::from_utf8(&into[..len]).unwrap_or_default()
-}
-
-/// `text` on its lines, written into `into` (as long as `text` at
-/// least): `\r\n` and `\r` a line break, a tab a space, its other control
-/// characters dropped.
-fn on_lines<'a>(text: &str, into: &'a mut [u8]) -> &'a str {
-    let mut len = 0;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        let c = match c {
-            '\r' => {
-                chars.next_if_eq(&'\n');
-                '\n'
-            }
-            '\t' => ' ',
-            '\n' => '\n',
-            c if c.is_control() => continue,
-            c => c,
-        };
-        len += c.encode_utf8(&mut into[len..]).len();
     }
     std::str::from_utf8(&into[..len]).unwrap_or_default()
 }
@@ -458,15 +432,6 @@ mod tests {
             "Relire la spec"
         );
         assert_eq!(on_one_line("\n \t", &mut into), "");
-    }
-
-    #[test]
-    fn on_lines_line_breaks_stay_and_tabs_are_spaces() {
-        let mut into = [0; 64];
-        assert_eq!(
-            on_lines("Bonjour,\r\n\tà demain\r\u{7f}!\n", &mut into),
-            "Bonjour,\n à demain\n!\n"
-        );
     }
 
     #[test]

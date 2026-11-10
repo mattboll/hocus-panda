@@ -77,7 +77,6 @@ mod scales;
 mod screen_reader;
 mod screen_sets;
 mod screens;
-mod secretary;
 mod session;
 mod share;
 mod shell;
@@ -111,9 +110,8 @@ pub use config::{
     OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, OutputSettings,
     Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
-    Rule as WindowRule, ScaleFrom, ScreenSet, Secretary as SecretarySettings, SecretaryMode,
-    SessionSettings, SetScreen, SoundPrograms, SystemKeyboard, Wallpaper as WallpaperSettings,
-    Windows,
+    Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
+    SystemKeyboard, Wallpaper as WallpaperSettings, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
@@ -267,8 +265,6 @@ fn start(options: Options) -> anyhow::Result<Started> {
     // Orca only when the compositor is the session (#734).
     state.screen_reader.allowed = matches!(options.backend, BackendKind::Tty(_));
     screen_reader::listen(&event_loop.handle(), &mut state)?;
-    // Only in assistant mode, once ready (§21).
-    secretary::listen(&event_loop.handle(), &mut state)?;
     state.leave_start(match (options.system_bus, &options.backend) {
         (Some(address), _) => Some(address),
         (None, BackendKind::Tty(_)) => Some("system".to_owned()),
@@ -351,7 +347,6 @@ fn remove_sockets(state: &State) {
     lock.push(".lock");
     let mut files = vec![state.socket_path.clone(), PathBuf::from(lock)];
     files.extend(state.shell.socket.clone());
-    files.extend(state.secretary.socket.clone());
     files.extend(state.agents.socket.clone());
     if let Some(n) = state.xdisplay {
         files.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));

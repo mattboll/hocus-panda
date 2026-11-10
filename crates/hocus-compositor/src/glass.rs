@@ -127,12 +127,6 @@ pub fn popover_pane(output: &str) -> String {
     format!("{output} popover")
 }
 
-/// The name of the pane under the secretary's drawer on `output`: its own,
-/// as a popover may show beside it.
-pub fn drawer_pane(output: &str) -> String {
-    format!("{output} drawer")
-}
-
 /// The name of the pane under the emoji picker on `output` (5.7): its
 /// own, as a popover may fade out while it comes.
 pub fn emoji_pane(output: &str) -> String {

@@ -16,8 +16,6 @@ workspace = true
 
 [dependencies]
 hocus-link.workspace = true
-# The secretary's socket, in assistant mode: her protocol.
-hocus-secretary-link.workspace = true
 hocus-pandas.workspace = true
 # What the shell shows, for screen readers: AT-SPI through AccessKit.
 hocus-a11y.workspace = true

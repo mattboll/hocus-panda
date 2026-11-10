@@ -1,7 +1,7 @@
 //! A program given for this session in place of an installed one: the
-//! shell's or the secretary's as a developer just built it (`hocus msg
-//! shell restart --program PATH`, `scripts/dev/live.sh`; docs/workflow.md,
-//! "Development loop").
+//! shell's as a developer just built it (`hocus msg shell restart
+//! --program PATH`, `scripts/dev/live.sh`; docs/workflow.md, "Development
+//! loop").
 //!
 //! It is held here only: nothing is written to the configuration, and the
 //! next session runs the installed one. One that does not start, or ends
@@ -190,17 +190,12 @@ pub fn refusal(ask: &ProgramAsk) -> Option<String> {
 }
 
 impl State {
-    /// `hocus msg shell|secretary status|restart`: the answer.
+    /// `hocus msg shell status|restart`: the answer.
     pub(crate) fn program_asked(&mut self, ask: ProgramAsk) -> String {
         match ask {
             ProgramAsk::Status(Supervised::Shell) => self.shell_status(),
-            ProgramAsk::Status(Supervised::Secretary) => self.secretary_status(),
-            ProgramAsk::Restart(which, restart) => {
-                let refusal = match which {
-                    Supervised::Shell => self.shell_restartable(),
-                    Supervised::Secretary => self.secretary_restartable(),
-                };
-                if let Err(why) = refusal {
+            ProgramAsk::Restart(which @ Supervised::Shell, restart) => {
+                if let Err(why) = self.shell_restartable() {
                     tracing::info!(
                         program = which.word(),
                         why,
@@ -208,29 +203,17 @@ impl State {
                     );
                     return refused(why);
                 }
-                let given = match which {
-                    Supervised::Shell => &mut self.shell.given,
-                    Supervised::Secretary => &mut self.secretary.given,
-                };
-                given.asked(restart);
-                let program = match which {
-                    Supervised::Shell => {
-                        self.restart_shell();
-                        self.shell_program()
-                    }
-                    Supervised::Secretary => {
-                        self.restart_secretary();
-                        self.secretary_program()
-                    }
-                };
-                let program = program.unwrap_or_default();
+                self.shell.given.asked(restart);
+                self.restart_shell();
+                let program = self.shell_program().unwrap_or_default();
                 format!("restarting\nprogram {}\n", program.display())
             }
         }
     }
 
     /// The program given as `which` was let go of: logged, and said by
-    /// the shell once it is there.
+    /// the shell once it is there (its connection, if it is still there,
+    /// is the one that ended; the next one's is told).
     pub(crate) fn fell_back(&mut self, which: Supervised, program: PathBuf, why: Why) {
         tracing::warn!(
             which = which.word(),
@@ -241,11 +224,6 @@ impl State {
         self.shell
             .notices
             .push(ToShell::FellBack { which, program });
-        // The shell's own: its connection, if it is still there, is the
-        // one that ended; the next one's is told.
-        if which != Supervised::Shell {
-            self.tell_notices();
-        }
     }
 
     /// What the shell was to be told once it is there.
