@@ -1087,7 +1087,6 @@ impl Brain {
             catching.items += read;
         }
         self.catch_up_done_if_over();
-        self.try_brief();
         // A sender that looks automated, its mails piling up (#754).
         self.notice_automated();
         if let Some(calendars) = calendars {
@@ -1096,6 +1095,9 @@ impl Brain {
         if let Some(accounts) = found {
             self.accounts_found(accounts);
         }
+        // Her briefing once what the sync found is known: the accounts it
+        // found may start her first run, during which there is none.
+        self.try_brief();
         // A source failing, or answering again: her face says it.
         self.tell_look();
         if let Err(err) = self.store.prune_audit() {

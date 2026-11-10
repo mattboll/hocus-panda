@@ -185,10 +185,12 @@ impl Brain {
             return;
         }
         let now = self.clock.now();
-        // Her catch-up, her sources' syncs under way and her triage
-        // first: what came is in it.
+        // Her catch-up, her sources' syncs under way or about to start
+        // (a session may begin before her first syncs are asked) and her
+        // triage first: what came is in it, and her accounts are known
+        // (her first run has no briefing).
         let settling = self.catching.is_some()
-            || self.slots.iter().any(|s| s.busy)
+            || self.slots.iter().any(|s| s.busy || s.due <= now)
             || (self.queue.pending() > 0
                 && !matches!(self.queue.state, crate::triage::State::Paused { .. }));
         if settling && now.duration_since(began) < SETTLE {

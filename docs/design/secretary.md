@@ -2984,5 +2984,12 @@ her text is selected with the pointer and copied, as in any chat.
   (`secretary_knows.rs`: an item's line copied whole, a click unfolds it,
   « ··· » opens its menu and a press on it selects nothing).
 
+- **No briefing in her first run, whatever the order** (found by this
+  lot's tests): a session beginning before her sources' first syncs were
+  asked, or a sync's end trying the briefing before the Google accounts it
+  found had started her first run, let a morning briefing in. Sources due
+  to sync now count as settling, and a sync's end tries the briefing once
+  what it found is known.
+
 Not selectable: the header, the tabs, the agents' line and its "Tes
 agents" view, the buttons. Her emphasis shows as plain words, not in bold.
