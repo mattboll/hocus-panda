@@ -790,22 +790,20 @@ fn logging_out_ends_the_compositor_once_the_windows_close() -> anyhow::Result<()
 }
 
 #[test]
-fn the_keyboard_lands_on_annuler() -> anyhow::Result<()> {
+fn the_keyboard_lands_on_maintenant() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(Logind::default())? else {
         return Ok(());
     };
     let mark = bed.mark();
     common::chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_E]);
     let line = bed.logged_after(mark, "Se déconnecter ?")?;
-    assert!(line.contains("focus=Some(Cancel)"), "{line}");
+    assert!(line.contains("focus=Some(Now)"), "{line}");
     bed.popover_of(CONFIRM_HEIGHT)?;
-    // A stray Enter ends nothing.
-    let mark = bed.mark();
+    // Enter logs out at once, without waiting out the count.
     bed.press(KEY_ENTER);
-    bed.logged_after(mark, "shows=rows")?;
-    assert_eq!(bed.hp.leave_shown(), None);
-    wait(&mut bed.hp, Duration::from_millis(300))?;
-    assert_eq!(bed.hp.ending(), None);
+    let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
+    anyhow::ensure!(ended, "Enter did not log out");
+    assert_eq!(bed.hp.ending(), Some(Ending::LoggedOut));
     Ok(())
 }
 

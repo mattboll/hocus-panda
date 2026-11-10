@@ -4308,10 +4308,11 @@ close within 5 s is listed as holding it back, with "Revenir à …" and
   10 s.", the number each second), the 4 px bar (draining smoothly on a
   GPU with motion, a step a second on the CPU or with reduced motion),
   "Éteindre maintenant" (`#F5C46E`) and "Annuler", 238 px tall, growing
-  upward from the bar's bottom. The keyboard is on "Annuler"; `Tab` to "…
-  maintenant"; `Esc` cancels, `Esc` again closes; a click outside, or the
-  popover closing, cancels. Chosen from a hover, the popover is held as a
-  click holds it: the pointer leaving does not close it. `Super+Shift+E`
+  upward from the bar's bottom. The keyboard is on "… maintenant" (it was
+  just chosen: `Enter` ends at once); `Tab` to "Annuler"; `Esc` cancels,
+  `Esc` again closes; a click outside, or the popover closing, cancels.
+  Chosen from a hover, the popover is held as a click holds it: the
+  pointer leaving does not close it. `Super+Shift+E`
   opens it on the log-out confirmation, on the focused window's screen
   (else the pointer's); without a shell, it logs out at once as before.
 - **The password first**: when logind says `challenge`, the compositor
@@ -4372,7 +4373,7 @@ close within 5 s is listed as holding it back, with "Revenir à …" and
   `a_window_that_does_not_close_is_listed_and_fermer_quand_meme_closes_it`;
   `super_shift_e_opens_the_log_out_confirmation`;
   `logging_out_ends_the_compositor_once_the_windows_close`;
-  `the_keyboard_lands_on_annuler` (a stray `Enter` ends nothing);
+  `the_keyboard_lands_on_maintenant` (`Enter` logs out at once);
   `a_restart_that_needs_the_password_asks_polkit_first`;
   `at_rest_the_menu_draws_nothing`. In `tests/session.rs`,
   `super_shift_e_logs_out` without a shell. Unit tests: the lines read
