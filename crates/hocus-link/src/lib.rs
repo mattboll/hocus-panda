@@ -240,6 +240,19 @@ pub const WINDOWS_NAMESPACE: &str = "hocus-bar-windows";
 /// plays, over the desktops in the full form. Kept with its bar, drawing
 /// nothing while no player is there.
 pub const MUSIC_NAMESPACE: &str = "hocus-bar-music";
+/// The height of the windows' and the music player's surfaces while they
+/// show nothing, logical pixels: they are kept with their bar (one made
+/// later would take the keyboard's keys, #617), and are not a pixel (at a
+/// fractional scale tiny-skia refuses a buffer that small). A shell that
+/// draws on the CPU has no alpha in its buffers, so the compositor leaves
+/// out a surface this short ([`shows_nothing`]): it would show black.
+pub const IDLE_HEIGHT: i32 = 10;
+
+/// Whether a surface of `namespace`, `height` tall, is one kept while it
+/// shows nothing ([`IDLE_HEIGHT`]).
+pub fn shows_nothing(namespace: &str, height: i32) -> bool {
+    matches!(namespace, WINDOWS_NAMESPACE | MUSIC_NAMESPACE) && height <= IDLE_HEIGHT
+}
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 

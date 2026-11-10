@@ -1121,6 +1121,21 @@ pub fn queue_again() {
     }
 }
 
+/// She says her key is missing while the drawer is open (her word comes
+/// after a drawer opened as the session starts, or her key was removed):
+/// the keyboard types in its field first, as in a drawer opened then,
+/// unless something is being typed to her.
+pub fn key_missing() {
+    with(|d| {
+        if let Phase::Open(open) = &mut d.phase
+            && open.field.text().is_empty()
+        {
+            open.key_focus = true;
+            open.changed();
+        }
+    });
+}
+
 /// A bar changed form: the drawer follows its edge.
 pub fn bar_changed(bar: &str) {
     let effect = with(|d| match &d.phase {
