@@ -77,7 +77,9 @@ impl Driver {
     pub fn receive(&self) -> FromSecretary {
         let text = self
             .lines
-            .recv_timeout(Duration::from_secs(20))
+            // Generous: on a loaded CI runner her loop and the fake
+            // triage's timers start late; a hang still fails.
+            .recv_timeout(Duration::from_secs(60))
             .expect("a line from her");
         read(&text).expect("a line that reads")
     }

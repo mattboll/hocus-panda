@@ -504,6 +504,9 @@ fn the_triage_says_its_state_and_quand_trier_writes_the_battery_key() -> anyhow:
     bed.choose("secretary.triage.battery", 3)?;
     let text = bed.written(|t| t.contains("battery = 80"))?;
     assert!(text.contains("[secretary.triage]"), "{text}");
+    // The file is written before the page offers its undo: Ctrl+Z only
+    // once the toast says it can.
+    bed.shows(|s| s["toast_action"] == "undo")?;
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Z]);
     bed.written(|t| !t.contains("battery = 80"))?;
     Ok(())
