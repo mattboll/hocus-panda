@@ -7,7 +7,7 @@
 //! lid closed with another screen on takes the laptop's screen away as
 //! an unplug; the winking panda says what moved, for 4 s.
 
-mod common;
+use crate::common;
 
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
@@ -353,7 +353,7 @@ fn the_lid_closed_with_another_screen_on_is_an_unplug() -> anyhow::Result<()> {
 /// installed (a CI runner's `firefox.desktop` names it "Navigateur Web
 /// Firefox" in French, #731).
 fn shell_script(dir: &std::path::Path, log: &std::path::Path) -> Option<PathBuf> {
-    let shell = common::shell_program()?;
+    let shell = common::shell_program();
     let script = dir.join("shell");
     let home = dir.join("home");
     std::fs::create_dir_all(&home).ok()?;

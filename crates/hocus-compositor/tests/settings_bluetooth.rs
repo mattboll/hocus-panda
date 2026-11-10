@@ -17,12 +17,10 @@
 //! keyboard; the home's card and the search; at rest, nothing drawn. What
 //! the window shows is read from its log, never on a time.
 
-#[path = "levels/bluez.rs"]
-mod bluez;
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-mod settings_page;
+use crate::bluez;
+use crate::common;
+use crate::fakes;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -124,20 +122,8 @@ impl Bed {
         timeout: u32,
         shell: bool,
     ) -> anyhow::Result<Option<Self>> {
-        let shell = match shell {
-            true => match common::shell_program() {
-                Some(shell) => Some(shell),
-                None => {
-                    eprintln!("the shell is not built: build the workspace to run this test");
-                    return Ok(None);
-                }
-            },
-            false => None,
-        };
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = shell.then(common::shell_program);
+        let program = common::settings_program();
         let bus = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())

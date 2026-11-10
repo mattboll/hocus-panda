@@ -1,7 +1,7 @@
 //! Test clients: real Wayland clients on threads of their own, connected
-//! to an in-process headless compositor that the test drives. Each test
-//! binary uses part of it.
-#![allow(dead_code)]
+//! to an in-process headless compositor that the test drives.
+
+pub mod counting;
 
 use std::{os::unix::net::UnixStream, path::Path, sync::mpsc, time::Duration};
 
@@ -105,38 +105,51 @@ pub const KEY_LEFTALT: u32 = 56;
 pub const KEY_Q: u32 = 16;
 pub const KEY_F4: u32 = 62;
 
-/// The shell's program, built next to the test's when the workspace is.
+/// The shell's program, built next to the test's: `cargo programs` builds
+/// the four the tests run, and a test that needs one that is missing fails
+/// saying so, never passes without it (#765).
 ///
 /// A test binary does not build it, so it may be older than its sources:
-/// that fails the test rather than testing an old shell (#464).
-pub fn shell_program() -> Option<std::path::PathBuf> {
+/// that fails the test too, rather than testing an old shell (#464).
+pub fn shell_program() -> std::path::PathBuf {
     built("hocuspanda-shell", "hocus-shell")
 }
 
 /// The secretary's program (docs/design/secretary.md), as
 /// [`shell_program`].
-#[allow(dead_code)]
-pub fn secretary_program() -> Option<std::path::PathBuf> {
+pub fn secretary_program() -> std::path::PathBuf {
     built("hocus-secretary", "hocus-secretary")
 }
 
 /// The Settings' program (6.1), as [`shell_program`].
-pub fn settings_program() -> Option<std::path::PathBuf> {
+pub fn settings_program() -> std::path::PathBuf {
     built("hocus-settings", "hocus-settings")
 }
 
+/// `hocus`, the command line, as [`shell_program`].
+pub fn hocus_program() -> std::path::PathBuf {
+    built("hocus", "hocus-cli")
+}
+
 /// The workspace's program `name` (of the package `package`), built next
-/// to the test's, and fresh.
-fn built(name: &str, package: &str) -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let program = exe.parent()?.parent()?.join(name);
-    if !program.exists() {
-        return None;
-    }
+/// to the test's, and fresh; the test fails without it.
+fn built(name: &str, package: &str) -> std::path::PathBuf {
+    let exe = std::env::current_exe().expect("the test's own program");
+    let program = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("the test's program is in target/PROFILE/deps")
+        .join(name);
+    assert!(
+        program.exists(),
+        "{name} is not built ({} is not there): this test runs it, build the tests' programs \
+         first (cargo programs, or cargo build -p {package})",
+        program.display()
+    );
     if let Err(why) = is_fresh(&program, name) {
-        panic!("{why}: build it again (cargo build -p {package})");
+        panic!("{why}: build it again (cargo programs, or cargo build -p {package})");
     }
-    Some(program)
+    program
 }
 
 /// Whether `program` was built from this checkout's sources as they are:
@@ -1736,7 +1749,6 @@ pub fn wait(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
 /// drawn it, and until it has a buffer it takes no pointer: a press then
 /// goes to what is under it and is lost. On a loaded machine, with the
 /// shell drawing on the CPU, that is long enough for a test's click.
-#[allow(dead_code)]
 pub fn over(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     loop {
@@ -2080,7 +2092,7 @@ const OTHER_APP: &str = "HOCUS_TEST_OTHER_APP";
 const OTHER_EXPORT: &str = "HOCUS_TEST_OTHER_EXPORT";
 const OTHER_PARENT: &str = "HOCUS_TEST_OTHER_PARENT";
 
-/// The body of a test binary's `another_program` test: run by
+/// The body of `foreign::another_program` (and of `annotate`'s): run by
 /// [`other_program`] as a process of its own, a window of another program
 /// until the compositor goes (the desktop tells programs apart by their
 /// process: a window of the test's own would take the focus as the
@@ -2160,8 +2172,8 @@ impl OtherProgram {
     }
 }
 
-/// Starts another program's window, `app_id`, through the test binary's
-/// `another_program` test, and waits until it is mapped: exported or not,
+/// Starts another program's window, `app_id`, through the test program's
+/// `foreign::another_program` test, and waits until it is mapped: exported or not,
 /// the child of `parent` (a handle) or not.
 pub fn other_program(
     hp: &mut Headless,
@@ -2172,7 +2184,7 @@ pub fn other_program(
     use std::io::BufRead;
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command
-        .args(["--exact", "another_program", "--nocapture"])
+        .args(["--exact", "foreign::another_program", "--nocapture"])
         .env(OTHER_SOCKET, hp.socket())
         .env(OTHER_APP, app_id)
         .stdout(std::process::Stdio::piped());

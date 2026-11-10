@@ -15,7 +15,7 @@
 //!   aside.
 //! - The pause and its reason (heat, the model unreachable).
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [[bin]]
 name = "hocus"
@@ -29,3 +31,7 @@ serde_json.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 anyhow.workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

@@ -16,7 +16,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
-mod common;
+use crate::common;
 
 use std::{
     io::{Read as _, Write as _},
@@ -89,10 +89,7 @@ impl Bed {
     /// The compositor on `outputs`, the real shell, the configuration in
     /// a file of the test's own (followed live).
     fn start(outputs: Vec<OutputSpec>, reduced_motion: bool) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in [

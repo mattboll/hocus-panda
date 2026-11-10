@@ -7,9 +7,8 @@
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
+use crate::common;
+use crate::fakes;
 
 use std::time::Duration;
 
@@ -40,10 +39,7 @@ const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 57);
 
 /// The fakes there, or why the test cannot run.
 fn ready() -> Option<std::path::PathBuf> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = shell_program();
     if !fakes::available() {
         eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
         return None;

@@ -17,9 +17,8 @@
 //! nothing draws. With `HOCUS_SHOTS` naming a folder, each test saves what
 //! the bar shows there.
 
-mod common;
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::common;
+use crate::day_fakes as fakes;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -68,10 +67,7 @@ impl Bed {
         config: &str,
         with: With<'_>,
     ) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state/hocuspanda", "data", "bin"] {

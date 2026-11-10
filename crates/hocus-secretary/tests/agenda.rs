@@ -13,7 +13,7 @@
 //! - her persona names only the tools she has, and never a setting that
 //!   does not exist.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

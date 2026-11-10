@@ -10,7 +10,7 @@
 //! the `hocus` command, in a home of the test's own, no session bus. Each
 //! test waits for what it checks, never for a time.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -423,20 +423,8 @@ struct Bed {
 /// The compositor with the real shell on the CPU on a 1920 × 1080 screen,
 /// its file `text`; none when the programs are not built.
 fn with_shell(text: &str) -> anyhow::Result<Option<Bed>> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(None);
-    };
-    let exe = std::env::current_exe()?;
-    let Some(hocus) = exe
-        .parent()
-        .and_then(Path::parent)
-        .map(|d| d.join("hocus"))
-        .filter(|h| h.exists())
-    else {
-        eprintln!("hocus is not built: build the workspace to run this test");
-        return Ok(None);
-    };
+    let shell = common::shell_program();
+    let hocus = common::hocus_program();
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     let home = root.join("home");

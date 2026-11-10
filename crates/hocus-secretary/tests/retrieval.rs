@@ -7,7 +7,7 @@
 //! - AC31: under its cap (25k tokens) with 10,000 log lines and 200
 //!   people.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

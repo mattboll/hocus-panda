@@ -14,7 +14,7 @@
 //! theme switch draws one frame per screen. Each waits for what the
 //! programs said or what the screen shows, never for a time.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -102,10 +102,7 @@ impl Bed {
 
     /// The same on the screens `outputs` (the first the bar's).
     fn start_on(text: &str, outputs: &[&str]) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config/hocuspanda", "state", "cache", "bin"] {
@@ -628,10 +625,7 @@ const APP_ID: &str = "hocus-settings";
 
 /// The real Settings in `bed`, their log: `None` when they are not built.
 fn settings(bed: &mut Bed) -> anyhow::Result<Option<PathBuf>> {
-    let Some(program) = common::settings_program() else {
-        eprintln!("hocus-settings is not built: build the workspace to run this test");
-        return Ok(None);
-    };
+    let program = common::settings_program();
     let root = bed.dir.path();
     let log = root.join("settings.log");
     let script = root.join("bin/hocus-settings");

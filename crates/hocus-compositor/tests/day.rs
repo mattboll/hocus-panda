@@ -13,9 +13,8 @@
 //! test's own on the bus the compositor names, a Calendar API of its own
 //! on 127.0.0.1 (`HOCUS_TEST_GOOGLE_API`).
 
-mod common;
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::common;
+use crate::day_fakes as fakes;
 
 use std::{
     path::{Path, PathBuf},
@@ -84,13 +83,9 @@ title = "Écrire le ticket"
 const WITH_FIXTURE: &str = "[[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n\
                             [[day.tasks]]\nkind = \"fixture\"\nfile = \"day.toml\"\n";
 
-/// The shell's program, or `None` (the test skips) when it is not built.
+/// The shell's program: the test fails when it is not built.
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 /// The compositor on a 1920×1080 screen with the real shell, its

@@ -85,7 +85,9 @@ sharing's streams), and `libssl-dev` (the secretary's SQLCipher).
 
 ```sh
 cargo build                                   # build everything
+cargo programs                                # the programs the tests run (an alias)
 cargo nextest run --workspace                 # tests, on the CPU
+cargo nextest run -p hocus-compositor settings_sound::   # one test file's
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo deny check                              # licences and advisories
@@ -98,6 +100,20 @@ versions are declared once, in the root `Cargo.toml`'s
 `[workspace.dependencies]`. What CI runs when, and why a pull request runs
 only the tests of what it changes: [docs/workflow.md](docs/workflow.md).
 The vendored crate and its patch: [vendor/README.md](vendor/README.md).
+
+A crate's integration tests are one program, `tests/main.rs`, and each
+test file a module of it (#765: one link a crate, what the files share
+built once): a test is named `FILE::TEST`, and a new test file is declared
+in `main.rs` (a test fails while one is not). Select by name
+(`settings_sound::`, or `-E 'test(/^bar::/)'` when another file's name
+ends the same), never with `--test FILE`. Run them with nextest, each test
+in a process of its own: `cargo test` runs a binary's tests as threads of
+one process, which these do not support (environment variables, children,
+a process's working directory). The compositor's tests run the shell, the
+Settings, `hocus` and the secretary from beside their own program: build
+them first with `cargo programs` (CI does, and its archive takes them
+along). A test that needs one that is missing, or older than its sources,
+fails and names it; none passes without testing.
 
 On a pull request, CI runs the tests of what it changes
 (`scripts/ci/pr-tests.sh`): the test files it touches, the unit tests of
@@ -114,13 +130,17 @@ takes it out. Update this section as commands land.
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on
 Mesa's software device for its shaders' tests; test shells draw with
-tiny-skia; the shell's motion tests are skipped. A test fails if it, or a
+tiny-skia; the shell's motion tests are `#[ignore]`d (they need the
+GPU, and fail without it). A test fails if it, or a
 process it started, holds a render node open without the variable. Run
 the GPU tests on purpose only: alone, one process at a time, on a machine
 or VM whose session does not depend on that GPU:
 
 ```sh
-HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test glass -j1
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor glass:: -j1
+# the shell's motion, which only a GPU shows (ignored without one)
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor -j1 --run-ignored only \
+    -E 'test(a_minute_change_moves_once) | test(a_change_slides_and_hops) | test(the_secretary_radiates_once)'
 ```
 
 The compositor (`crates/hocus-compositor`, binary `hocuspanda`): nested in
@@ -176,8 +196,8 @@ PATH`), restarts it when it ends, and talks to it over a private socket
 all the same); the in-process harness starts none unless asked
 (`Headless::start_with_shell`). The compositor's tests that ask run the
 shell built beside them, which a test binary does not build: build it
-first (`cargo build -p hocus-shell -p hocus-settings`, as CI does). They skip without it,
-and fail when it is older than its sources. The bar's base:
+first (`cargo programs`, as CI does). They fail without it, saying so,
+and when it is older than its sources. The bar's base:
 docs/design/bar.md, "As built".
 
 The shell keeps the clipboard's history in `$XDG_STATE_HOME/hocuspanda/clipboard`
@@ -259,7 +279,7 @@ instead of PAM, for screenshots, and is never packaged. The lock's
 screenshots:
 
 ```sh
-HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor --test lock_shots --run-ignored only
+HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor lock_shots:: --run-ignored only
 ```
 
 Screen readers (docs/design/screen-reader.md, crate `hocus-a11y`): the
@@ -320,8 +340,7 @@ target/debug/hocus --socket /tmp/hp-XXXX/hocus-0.control msg secretary graph Cha
 ```
 
 The compositor's tests that start her (`tests/secretary.rs`) run the
-program built beside them: build it first (`cargo build -p hocus-secretary`,
-as CI does).
+program built beside them: build it first (`cargo programs`, as CI does).
 
 Her models (lot 4) are set in `[secretary.models]` (`"PROVIDER/MODEL"`
 per role) and `[secretary.providers.NAME]` of the configuration she is
@@ -344,10 +363,10 @@ user-facing steps are [docs/secretary.md](docs/secretary.md).
 # the compositor tells its programs her bus (HOCUS_SECRETARY_BUS): in a
 # terminal of a nested session, the key goes to that session's keyring
 printf '%s\n' "$KEY" | target/debug/hocus-secretary --bus "$ADDRESS" key anthropic
-HOCUS_DRAWER_SHOTS=DIR cargo nextest run -p hocus-compositor --test secretary_drawer first_run
-HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test settings_agents --run-ignored all google
+HOCUS_DRAWER_SHOTS=DIR cargo nextest run -p hocus-compositor -E 'test(/^secretary_drawer::.*first_run/)'
+HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored all -E 'test(/^settings_agents::.*google/)'
 HOCUS_POWER_SUPPLY_DIR=… HOCUS_THERMAL_DIR=…        # the triage's power and heat (tests)
-cargo nextest run -p hocus-sources --test secrets_corpus --no-capture   # AC50's numbers
+cargo nextest run -p hocus-sources secrets_corpus:: --no-capture   # AC50's numbers
 ```
 
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM

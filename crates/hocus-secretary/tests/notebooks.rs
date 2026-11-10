@@ -2,7 +2,7 @@
 //! account are perso; "C'est perso" moves an item, and the move is
 //! undoable.
 
-mod common;
+use crate::common;
 
 use hocus_secretary::{
     graph::{NewEdge, NewRule, NodeKind, Origin, Target},

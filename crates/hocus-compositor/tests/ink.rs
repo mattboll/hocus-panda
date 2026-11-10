@@ -5,7 +5,7 @@
 //! from what the screen shows, and from a capture's PNG; a share's frames
 //! are read in `sharing.rs`, which has the share's PipeWire.
 
-mod common;
+use crate::common;
 
 use std::{path::PathBuf, sync::mpsc, time::Duration};
 

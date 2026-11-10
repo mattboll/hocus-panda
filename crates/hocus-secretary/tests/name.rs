@@ -2,7 +2,7 @@
 //! live: her face says it to the shell as soon as the file changes (her
 //! drawer's header, her peek), and her persona's first line is it.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

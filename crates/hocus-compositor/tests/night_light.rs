@@ -4,7 +4,7 @@
 //! warms over 30 min to its temperature, from 7:00 it goes back over
 //! 30 min; the file changed turns it off or moves it at once.
 
-mod common;
+use crate::common;
 
 use common::WAIT;
 use hocus_compositor::{Config, Headless, HeadlessConfig, NightLight, RendererChoice};

@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [[bin]]
 name = "hocus-secretary"
@@ -64,3 +66,7 @@ rustix = { workspace = true, features = ["time", "termios", "fs", "pty"] }
 # The sources' fakes (a fake IMAP server's XOAUTH2), shared with
 # hocus-sources' tests.
 base64.workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

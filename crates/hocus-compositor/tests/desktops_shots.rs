@@ -5,7 +5,7 @@
 //! Written to `$HOCUS_SHOTS` when it names a folder; run by hand
 //! (`--run-ignored only`).
 
-mod common;
+use crate::common;
 
 use std::{path::Path, time::Duration};
 
@@ -56,10 +56,7 @@ fn the_bars_rows_for_two_screens_and_a_window_over_a_tile() -> anyhow::Result<()
     };
     let out = std::path::PathBuf::from(out);
     std::fs::create_dir_all(&out)?;
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built");
-        return Ok(());
-    };
+    let shell = common::shell_program();
     let dir = tempfile::tempdir()?;
     let at = |sub: &str| -> anyhow::Result<String> {
         let path = dir.path().join(sub);

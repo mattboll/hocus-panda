@@ -11,7 +11,7 @@
 //! shutter's programs (`wpctl`, `pw-play`) are the test's own fakes, which
 //! say what they were asked: no sound is ever played.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,

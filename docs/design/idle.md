@@ -388,5 +388,5 @@ opened; unknown: the only screen lit) and back from another terminal
 (`Headless::session_back`; docked, the laptop's screen stays off).
 
 The screenshots of the pull request: `tests/away_shots.rs`
-(`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test away_shots
+(`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor away_shots::
 --run-ignored only`).

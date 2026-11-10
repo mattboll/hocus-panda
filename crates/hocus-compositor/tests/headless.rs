@@ -1,7 +1,7 @@
 //! The compositor's base, headless: real Wayland clients (on threads of
 //! their own) connect to an in-process compositor, which the test drives.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

@@ -15,7 +15,7 @@
 //! - "plus court" asked after her answers becomes one observation, asked
 //!   once, which changes nothing before "Oui".
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

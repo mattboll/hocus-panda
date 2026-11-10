@@ -4,7 +4,6 @@
 //! copies it; what it was asked is recorded, and it refuses everything
 //! while told to (polkit saying no). It says its changes as
 //! AccountsService does (`Changed`).
-#![allow(dead_code)]
 
 use std::{
     path::PathBuf,

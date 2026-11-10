@@ -22,7 +22,7 @@
 //! `HOCUS_DRAWER_SHOTS=DIR`, PNGs of her peek, the briefing and "Pendant
 //! ton absence" are left there (for review, never compared).
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -185,9 +185,7 @@ mail = { to = ["Claire <claire@gmail.com>"], sent = true }
 }
 
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    let shell = common::shell_program()?;
-    let secretary = common::secretary_program()?;
-    Some((shell, secretary))
+    Some((common::shell_program(), common::secretary_program()))
 }
 
 struct Bed {

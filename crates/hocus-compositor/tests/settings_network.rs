@@ -18,14 +18,11 @@
 //! comes; at rest, the window commits nothing. What the window shows is
 //! read from its log, never on a time.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-#[path = "levels/nm.rs"]
-mod nm;
-#[path = "levels/rfkill.rs"]
-mod rfkill;
-mod settings_page;
+use crate::common;
+use crate::fakes;
+use crate::nm;
+use crate::rfkill;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
@@ -124,10 +121,6 @@ impl Bed {
         radios: &[(u8, bool)],
         output: &str,
     ) -> anyhow::Result<Option<Self>> {
-        if common::shell_program().is_none() {
-            eprintln!("the shell is not built: build the workspace to run this test");
-            return Ok(None);
-        }
         Self::start_all(Some(setup), radios, output, true)
     }
 
@@ -137,10 +130,7 @@ impl Bed {
         output: &str,
         shell: bool,
     ) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         if !fakes::available() {
             eprintln!("dbus-daemon or PipeWire's tools missing: skipped");
             return Ok(None);
@@ -198,7 +188,7 @@ impl Bed {
         )?;
         std::fs::set_permissions(&nmcli, std::fs::Permissions::from_mode(0o755))?;
         let shell_log = root.join("shell.log");
-        let shell_script = match common::shell_program().filter(|_| shell) {
+        let shell_script = match shell.then(common::shell_program) {
             Some(program) => Some(fakes.shell_with(
                 &program,
                 "fr_FR.UTF-8",

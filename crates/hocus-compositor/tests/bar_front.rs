@@ -11,7 +11,7 @@
 //! shows at a point says what is in front there. Pixman, as in CI; the
 //! halo on the GPU (its shaders), skipped without one.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 
@@ -347,10 +347,7 @@ fn popovers_and_bubbles_stay_above_a_window_over_the_bar() -> anyhow::Result<()>
 /// is.
 #[test]
 fn the_halo_stays_above_a_window_over_the_bar() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = shell_program();
     let dir = tempfile::tempdir()?;
     let shell = common::shell_script(dir.path(), &shell, &[])?;
     let mut hp = Headless::start_with_shell(

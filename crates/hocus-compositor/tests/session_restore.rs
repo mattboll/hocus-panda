@@ -7,7 +7,7 @@
 //! The autostart's applications are not started twice; one that does
 //! not come back is named; `[session] restore = false` restores nothing.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -104,7 +104,7 @@ impl Tree {
             app,
             "Restored",
             &format!(
-                "env {RESTORED_APP}={app} {RESTORED_COUNT}={count} \"{}\" --exact restored_program --nocapture",
+                "env {RESTORED_APP}={app} {RESTORED_COUNT}={count} \"{}\" --exact session_restore::restored_program --nocapture",
                 exe.display()
             ),
         )

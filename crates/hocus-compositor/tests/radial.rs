@@ -5,7 +5,7 @@
 //! right click; nothing over a shell surface. And the two window states it
 //! brings: always on top, on all desktops.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

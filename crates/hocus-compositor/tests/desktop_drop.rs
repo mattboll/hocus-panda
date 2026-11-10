@@ -9,7 +9,7 @@
 //! A plain layer surface of the test's stands for the shell's desktops'
 //! surface, and the tiles are said as the shell says them.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

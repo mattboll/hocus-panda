@@ -7,7 +7,7 @@
 //!   until the local model checked them; meanwhile only their metadata
 //!   leaves, and her status says the triage does not answer.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 
