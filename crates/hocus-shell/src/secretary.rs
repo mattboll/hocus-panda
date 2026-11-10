@@ -183,13 +183,21 @@ fn heard(message: FromSecretary) {
                 }
             }
         }),
-        FromSecretary::Look { look } => converse(|c| {
-            // The key given elsewhere (the Settings): its field goes.
-            if look.key.is_none() {
-                c.key_asked = None;
+        FromSecretary::Look { look } => {
+            // Her key's field comes: an open drawer gives it the keyboard,
+            // before it shows (the drawer draws it once her look is kept).
+            let had = conversation(|c| c.look.as_ref().is_some_and(|l| l.key.is_some()));
+            if look.key.is_some() && !had {
+                crate::drawer::key_missing();
             }
-            c.look = Some(look);
-        }),
+            converse(|c| {
+                // The key given elsewhere (the Settings): its field goes.
+                if look.key.is_none() {
+                    c.key_asked = None;
+                }
+                c.look = Some(look);
+            });
+        }
         FromSecretary::Keyed {
             id,
             provider,
