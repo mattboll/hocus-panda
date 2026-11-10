@@ -81,6 +81,7 @@ mod magnet;
 mod magnifier;
 mod meeting;
 mod moving_wallpaper;
+mod music;
 mod night_light;
 mod notifications;
 mod overview;

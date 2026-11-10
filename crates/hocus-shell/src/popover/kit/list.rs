@@ -259,7 +259,7 @@ impl Spin {
 
 /// The spinner: `M21 12a9 9 0 1 1-6.2-8.6`, three quarters and more of a
 /// circle, turned by `turn`.
-fn spinner(f: &mut Frame, at: Point, colour: Color, turn: f32) {
+pub(crate) fn spinner(f: &mut Frame, at: Point, colour: Color, turn: f32) {
     let s = SPINNER / 24.0;
     let arc = Path::new(|b| {
         b.arc(canvas::path::Arc {

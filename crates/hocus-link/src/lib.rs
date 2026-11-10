@@ -236,6 +236,10 @@ pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
 /// screen's current desktop over its desktops' tiles, or the mini form's
 /// item over its dots. Opened while it lists a window, none without.
 pub const WINDOWS_NAMESPACE: &str = "hocus-bar-windows";
+/// The namespace of the music player's tile (s12): what an MPRIS player
+/// plays, over the desktops in the full form. Kept with its bar, drawing
+/// nothing while no player is there.
+pub const MUSIC_NAMESPACE: &str = "hocus-bar-music";
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 

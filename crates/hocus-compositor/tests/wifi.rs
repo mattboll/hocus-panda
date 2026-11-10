@@ -1408,3 +1408,7 @@ fn nothing_is_pasted_from_an_empty_clipboard_one_without_text_or_a_client_that_h
     );
     Ok(())
 }
+
+// Spike #770: the popover's states shot, and what they cost.
+#[path = "wifi_spike/shots.rs"]
+mod spike_shots;

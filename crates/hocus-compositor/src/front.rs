@@ -69,6 +69,7 @@ pub fn in_the_bar(namespace: &str) -> bool {
             | hocus_link::MEETING_NAMESPACE
             | hocus_link::TODAY_NAMESPACE
             | hocus_link::WINDOWS_NAMESPACE
+            | hocus_link::MUSIC_NAMESPACE
             | hocus_link::TRAY_NAMESPACE
     )
 }
