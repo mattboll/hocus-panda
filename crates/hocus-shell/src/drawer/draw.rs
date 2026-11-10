@@ -418,11 +418,6 @@ fn plain(lines: &[(String, std::ops::Range<usize>)]) -> Vec<String> {
     lines.iter().map(|(l, _)| l.clone()).collect()
 }
 
-/// « Copier » on hover: its text, its padding, its height.
-const COPY_TEXT: f32 = 11.5;
-const COPY_X: f32 = 9.0;
-const COPY_H: f32 = 22.0;
-
 /// `text` in lines that fit `room`: its own lines, each broken.
 fn lines_of(text: &str, size: f32, bold: bool, room: f32) -> Vec<String> {
     text.split('\n')
@@ -1196,7 +1191,7 @@ fn lay_out_thread(
                         y,
                     );
                     if super::item_copy(item).is_some() {
-                        texts.blocks[block].copy = Some((item.id, Rectangle::default()));
+                        texts.blocks[block].item = Some(item.id);
                     }
                     if *assumed {
                         let at = y + INNER_GAP;
@@ -1253,7 +1248,8 @@ fn lay_out_thread(
                         align: Alignment::Left,
                     }));
                     at += CARD_LABEL * 1.4 + 4.0;
-                    let lines = ranged(text, BUBBLE, false, inner);
+                    let shown = select::unmarked(text);
+                    let lines = ranged(&shown, BUBBLE, false, inner);
                     let notes = note
                         .as_deref()
                         .map(|n| ranged(n, SMALL, false, inner))
@@ -1261,7 +1257,7 @@ fn lay_out_thread(
                     let block = texts.block(Source::Item(item.id));
                     texts.put(
                         block,
-                        text,
+                        &shown,
                         &lines,
                         her_x + CARD_X,
                         at,
@@ -1643,9 +1639,6 @@ fn lay_out_thread(
     for (n, block) in texts.blocks.iter_mut().enumerate() {
         block.shown = whole.get(span_of(n, |s| s.1)).copied().unwrap_or(false);
         block.rect.y += shift;
-        if let Some((_, button)) = &mut block.copy {
-            *button = copy_button(block.rect, right, top, words);
-        }
     }
     laid.texts = texts;
     for (target, rect) in targets {
@@ -1747,6 +1740,8 @@ fn her_bubble(
     y: f32,
 ) -> (f32, usize) {
     let inner = room - 2.0 * BUBBLE_X;
+    // Her markdown's emphasis shows (and copies) as its words (#761).
+    let text = &*select::unmarked(text);
     let lines = ranged(text, BUBBLE, false, inner);
     let notes = note
         .map(|n| ranged(n, SMALL, false, inner))
@@ -1814,24 +1809,6 @@ fn her_bubble(
         false,
     );
     (y + h, block)
-}
-
-/// Where « Copier » shows for a block in `rect`: beside it on the right
-/// when there is room before `right`, else on its top right corner, under
-/// the thread's `top`.
-fn copy_button(rect: Rectangle, right: f32, top: f32, words: Words) -> Rectangle {
-    let w = width_of(words.copy(), COPY_TEXT, true) + 2.0 * COPY_X;
-    let size = Size::new(w, COPY_H);
-    if rect.x + rect.width + 6.0 + w <= right {
-        return Rectangle::new(Point::new(rect.x + rect.width + 6.0, rect.y), size);
-    }
-    Rectangle::new(
-        Point::new(
-            rect.x + rect.width - w - 6.0,
-            (rect.y - COPY_H / 2.0 + 2.0).max(top + 2.0),
-        ),
-        size,
-    )
 }
 
 /// A card at `y`: its label, its text, its lines, its buttons (at most
@@ -2013,7 +1990,7 @@ fn lay_out_card(
     at += CARD_BOTTOM;
     texts.blocks[block].rect = Rectangle::new(Point::new(x, y), Size::new(room, at - y));
     if draft && (!card.lines.is_empty() || !card.text.is_empty()) {
-        texts.blocks[block].copy = Some((item, Rectangle::default()));
+        texts.blocks[block].item = Some(item);
     }
     shapes.push(Shape::Box {
         rect: Rectangle::new(Point::new(x, y), Size::new(room, at - y)),
@@ -3734,6 +3711,12 @@ fn lay_out_point(
 
 // --- Drawing --------------------------------------------------------------------------------
 
+/// A drag held past the thread's edge scrolls it this many px a second
+/// for each px past, within these.
+const EDGE_PACE: f32 = 10.0;
+const EDGE_SLOWEST: f32 = 150.0;
+const EDGE_FASTEST: f32 = 1500.0;
+
 /// The drawer on its surface.
 #[derive(Debug, Clone)]
 pub struct View {
@@ -3812,30 +3795,28 @@ impl View {
     /// Before it draws: her mood followed (a change plays her motion),
     /// what it shows and where logged when they changed.
     fn prepare(&self, state: &mut State, size: Size) -> bool {
+        let edge = self.edge(state);
         let Some(laid) = self.laid(state, size) else {
             return false;
         };
+        // The selection follows the pointer over the thread scrolled.
+        if let Some((p, _)) = edge
+            && let Some(spot) = laid.texts.spot_at(p, &measure)
+        {
+            super::with(|d| {
+                if let Some(selection) = d.open_mut(self.id).and_then(|o| o.selection.as_mut())
+                    && selection.hold == Hold::Dragging
+                {
+                    selection.focus = spot;
+                }
+            });
+        }
+        let edging = edge.is_some_and(|(_, going)| going);
         let said = laid.said.to_string();
-        // Her « Copier » buttons, which show on hover, with them.
         let places: Vec<String> = laid
             .targets
             .iter()
             .map(|(t, r)| format!("{}@{:.0},{:.0}", t.name(), r.center_x(), r.center_y()))
-            .chain(
-                laid.texts
-                    .blocks
-                    .iter()
-                    .filter(|b| b.shown)
-                    .filter_map(|b| {
-                        let (item, r) = b.copy?;
-                        Some(format!(
-                            "{}@{:.0},{:.0}",
-                            Target::Copy(item).name(),
-                            r.center_x(),
-                            r.center_y()
-                        ))
-                    }),
-            )
             .collect();
         let places = places.join(" ");
         // Where her text's blocks start and end (the first line's start,
@@ -3874,7 +3855,7 @@ impl View {
             state.texts = texts;
         }
         let now = Instant::now();
-        super::with(|d| {
+        let plays = super::with(|d| {
             let Some(open) = d.open_mut(self.id) else {
                 return false;
             };
@@ -3899,6 +3880,50 @@ impl View {
                 now,
             )
             .1
+        });
+        plays || edging
+    }
+
+    /// A drag selecting held past the thread's top or bottom (#761): the
+    /// thread scrolls toward it by the time since the last frame, the
+    /// faster the further past, until its end. Where the pointer is, and
+    /// whether it goes on (another frame is asked for).
+    fn edge(&self, state: &State) -> Option<(Point, bool)> {
+        let (_, laid) = state.laid.as_ref()?;
+        let thread = laid.thread;
+        let most = (laid.content - thread.height).max(0.0);
+        super::with(|d| {
+            let open = d.open_mut(self.id)?;
+            let dragging = open.selection.is_some_and(|s| s.hold == Hold::Dragging);
+            let Some((p, since)) = open.edge.filter(|_| dragging) else {
+                open.edge = None;
+                return None;
+            };
+            let now = Instant::now();
+            open.edge = Some((p, now));
+            let (past, up) = if p.y < thread.y {
+                (thread.y - p.y, true)
+            } else {
+                (p.y - thread.y - thread.height, false)
+            };
+            let end = if up { most } else { 0.0 };
+            let before = open.scroll.clamp(0.0, most);
+            if before == end {
+                return Some((p, false));
+            }
+            let speed = (past * EDGE_PACE).clamp(EDGE_SLOWEST, EDGE_FASTEST);
+            let step = speed * now.duration_since(since).as_secs_f32().min(0.1);
+            let after = if up { before + step } else { before - step }.clamp(0.0, most);
+            open.scroll = after;
+            open.menu = None;
+            open.changed();
+            if after == end {
+                tracing::debug!(
+                    "the selection scrolled the thread to its {}",
+                    if up { "top" } else { "bottom" }
+                );
+            }
+            Some((p, after != end))
         })
     }
 
@@ -4173,13 +4198,14 @@ impl View {
             for shape in &laid.shapes {
                 draw_shape(f, shape, now);
             }
-            // Her text selected (#757); nothing at rest.
+            // Her text selected (#757), in the theme's selection colour
+            // (#761); nothing at rest.
             if let Some(selection) = open.selection.filter(|s| !s.is_empty()) {
+                let tint = crate::theme::SELECTION.get();
                 for rect in laid.texts.highlights(&selection, &measure) {
-                    f.fill_rectangle(rect.position(), rect.size(), alpha(0x6CC287, 0.34));
+                    f.fill_rectangle(rect.position(), rect.size(), tint);
                 }
             }
-            self.draw_copy_button(f, laid, open);
         });
         if laid.knows || !laid.composer {
             // In a layer of its own, as the list's is: it comes over it.
@@ -4261,45 +4287,6 @@ impl View {
         // Her model's name is the Settings' (#758): nothing here.
         self.draw_copied(f, laid, open);
         self.draw_menu(f, open, size);
-    }
-
-    /// « Copier » on the answer or the draft the pointer is on (#757).
-    fn draw_copy_button(&self, f: &mut Frame, laid: &Laid, open: &Open) {
-        let Some(item) = open.over else {
-            return;
-        };
-        let Some(rect) = laid
-            .texts
-            .blocks
-            .iter()
-            .filter(|b| b.shown)
-            .find_map(|b| b.copy.filter(|(i, _)| *i == item).map(|(_, r)| r))
-        else {
-            return;
-        };
-        let hover = open.hover == Some(Target::Copy(item));
-        f.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), 7.0.into()),
-            if hover { hex(0x2A3247) } else { hex(0x20263A) },
-        );
-        f.stroke(
-            &Path::rounded_rectangle(
-                Point::new(rect.x + 0.5, rect.y + 0.5),
-                Size::new(rect.width - 1.0, rect.height - 1.0),
-                6.5.into(),
-            ),
-            Stroke::default()
-                .with_color(alpha(0xFFFFFF, if hover { 0.22 } else { 0.14 }))
-                .with_width(1.0),
-        );
-        f.fill_text(text(
-            self.words.copy(),
-            rect.center(),
-            COPY_TEXT,
-            if hover { MINT } else { hex(0xD5DBE5) },
-            true,
-            Alignment::Center,
-        ));
     }
 
     /// « Copié » over the thread's bottom while it shows.
@@ -4841,10 +4828,6 @@ impl View {
     ) -> Option<canvas::Action<Message>> {
         let laid = self.laid(state, size)?;
         let content = laid.content - laid.thread.height;
-        // The answer or draft the pointer is on, for its « Copier ».
-        let over = at
-            .and_then(|p| laid.texts.block_at(p))
-            .and_then(|b| b.copy.map(|(item, _)| item));
         enum Then {
             Nothing,
             Draw,
@@ -4853,19 +4836,14 @@ impl View {
         let then = super::with(|d| {
             let open = d.open_mut(self.id)?;
             open.pointer = at;
-            // What takes a click there: the menu, her « Copier », the rest.
+            // What takes a click there: the menu, then the rest.
             let target = at.and_then(|p| {
                 let menu = open
                     .menu
                     .as_ref()
                     .filter(|m| menu_rects(m.at, size, self.words).1.contains(p))
                     .map(|_| Target::CopyMenu);
-                let copy = laid.texts.blocks.iter().filter(|b| b.shown).find_map(|b| {
-                    b.copy
-                        .filter(|(item, r)| over == Some(*item) && r.contains(p))
-                        .map(|(item, _)| Target::Copy(item))
-                });
-                menu.or(copy).or_else(|| {
+                menu.or_else(|| {
                     laid.targets
                         .iter()
                         .rev()
@@ -4880,24 +4858,33 @@ impl View {
                         open.hover = target;
                         draw = true;
                     }
-                    if open.over != over {
-                        open.over = over;
-                        draw = true;
-                    }
-                    // A press on her text drags its selection.
+                    // A press on her text drags its selection; held past
+                    // the thread's top or bottom, the thread scrolls under
+                    // it (#761), as each frame goes ([`View::edge`]).
                     if let Some(selection) = &mut open.selection
                         && selection.hold == Hold::Dragging
-                        && let Some(spot) = raw.and_then(|p| laid.texts.spot_at(p, &measure))
-                        && spot != selection.focus
                     {
-                        selection.focus = spot;
-                        draw = true;
+                        if let Some(spot) = raw.and_then(|p| laid.texts.spot_at(p, &measure))
+                            && spot != selection.focus
+                        {
+                            selection.focus = spot;
+                            draw = true;
+                        }
+                        let thread = laid.thread;
+                        let past = raw.filter(|p| p.y < thread.y || p.y > thread.y + thread.height);
+                        open.edge = match (past, open.edge) {
+                            (Some(p), Some((_, since))) => Some((p, since)),
+                            (Some(p), None) => {
+                                draw = true;
+                                Some((p, Instant::now()))
+                            }
+                            (None, _) => None,
+                        };
                     }
                     if draw { Then::Draw } else { Then::Nothing }
                 }
                 mouse::Event::CursorLeft => {
                     open.hover = None;
-                    open.over = None;
                     Then::Draw
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
@@ -4907,14 +4894,10 @@ impl View {
                     }
                     let had = open.menu.take().is_some() || open.selection.is_some();
                     open.pressed = target;
-                    match target {
-                        // Her « Copier » leaves what is selected as it is.
-                        Some(Target::Copy(_)) => return Some(Then::Nothing),
-                        Some(_) => {
-                            open.selection = None;
-                            return Some(if had { Then::Draw } else { Then::Nothing });
-                        }
-                        None => {}
+                    // A press on a button never starts a selection.
+                    if target.is_some() {
+                        open.selection = None;
+                        return Some(if had { Then::Draw } else { Then::Nothing });
                     }
                     let Some(p) = at else {
                         return Some(Then::Nothing);
@@ -4960,6 +4943,7 @@ impl View {
                     Then::Draw
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    open.edge = None;
                     if let Some(selection) = &mut open.selection
                         && selection.hold == Hold::Dragging
                     {
@@ -4989,7 +4973,7 @@ impl View {
                         .filter(|t| !t.is_empty());
                     let text = selected.or_else(|| {
                         let block = laid.texts.block_at(p)?;
-                        let item = block.copy.and_then(|(item, _)| {
+                        let item = block.item.and_then(|item| {
                             crate::secretary::conversation(|c| {
                                 c.items
                                     .iter()
