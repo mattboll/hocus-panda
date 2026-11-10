@@ -49,6 +49,14 @@ pub struct Around<'a, Message> {
     natural: Box<dyn Fn(f32) + 'a>,
 }
 
+impl<Message> std::fmt::Debug for Around<'_, Message> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Around")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a, Message> Around<'a, Message> {
     pub fn new(
         id: window::Id,

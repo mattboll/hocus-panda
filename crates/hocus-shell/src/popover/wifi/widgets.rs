@@ -28,7 +28,8 @@ use iced::{
     alignment::Vertical,
     gradient, keyboard, mouse,
     widget::{
-        Space, button, canvas, column, container, mouse_area, row, scrollable, space, stack, text,
+        Space, button, canvas, column, container, keyed_column, mouse_area, row, scrollable, space,
+        stack, text,
         text::{LineHeight, Shaping, Wrapping},
         text_input, toggler,
     },
@@ -199,7 +200,18 @@ fn content<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi], now: In
     let on = ui.enabled(network, now);
     let enabled = on && network.hardware;
     let focus = ui.focus;
-    let mut all = column![header(panel, network.hardware, on, focus)];
+    // Each block under its key: a widget keeps what it knows (the pointer
+    // over the list, how far it is scrolled, the field's caret) by its
+    // place in the tree, and the blocks above the list come and go.
+    let mut all: Vec<(&'static str, El<'a>)> =
+        vec![("header", header(panel, network.hardware, on, focus))];
+    let mut block = |key, content: El<'a>| {
+        let spaced = container(content).padding(Padding {
+            top: super::GAP,
+            ..Padding::ZERO
+        });
+        all.push((key, spaced.into()));
+    };
     if network.wired {
         let line = row![
             glyph(Glyph::Ethernet(DIM.get()), ICON),
@@ -207,11 +219,13 @@ fn content<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi], now: In
             said(words.by_cable(), NOTE, MANROPE, DIM.get()),
         ]
         .align_y(Vertical::Center);
-        all = all.push(gap()).push(
+        block(
+            "wired",
             container(line)
                 .height(super::WIRED)
                 .padding([0.0, ROW_OUT])
-                .align_y(Vertical::Center),
+                .align_y(Vertical::Center)
+                .into(),
         );
     }
     if !enabled {
@@ -222,10 +236,10 @@ fn content<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi], now: In
         } else {
             words.no_adapter()
         };
-        all = all.push(gap()).push(self::note(note));
+        block("off", self::note(note));
     }
     if let Some(current) = network.current.as_ref().filter(|_| enabled) {
-        all = all.push(gap()).push(connected(panel, current, network, focus));
+        block("current", connected(panel, current, network, focus));
         if network.portal {
             let open = button(
                 container(said(
@@ -257,32 +271,31 @@ fn content<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi], now: In
                     .is_some()
                     .then(|| msg(Msg::Act(Target::Portal))),
             );
-            all = all.push(gap()).push(inset(ring(
-                open,
-                focus == Some(Target::Portal),
-                ROW_RADIUS,
-            )));
+            block(
+                "portal",
+                inset(ring(open, focus == Some(Target::Portal), ROW_RADIUS)),
+            );
         }
     }
     if enabled {
-        all = all
-            .push(gap())
-            .push(rule())
-            .push(gap())
-            .push(label(panel, network.scanning))
-            .push(gap());
-        all = if rows.is_empty() {
-            all.push(note(if network.scanning {
-                words.searching_networks()
-            } else {
-                words.no_network()
-            }))
+        block("rule", rule());
+        block("label", label(panel, network.scanning));
+        if rows.is_empty() {
+            block(
+                "none",
+                note(if network.scanning {
+                    words.searching_networks()
+                } else {
+                    words.no_network()
+                }),
+            );
         } else {
-            all.push(list(panel, network, ui, rows))
-        };
+            block("list", list(panel, network, ui, rows));
+        }
     }
-    all = all.push(rule()).push(link(panel, focus));
-    container(all)
+    all.push(("link-rule", rule()));
+    all.push(("link", link(panel, focus)));
+    container(keyed_column(all))
         .padding(Padding {
             top: HEADER_TOP,
             right: kit::LEFT - ROW_OUT,
@@ -433,7 +446,7 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
         } else {
             super::ROW_END
         };
-    let mut all = column![].spacing(ROW_GAP);
+    let mut all = Vec::with_capacity(rows.len());
     for (i, network) in rows.iter().enumerate() {
         let unfolded = unfolded(network);
         let aside = super::row_aside(words, network, unfolded, busy, ui.failed.as_deref());
@@ -496,8 +509,16 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
         } else {
             pressed
         };
-        all = all.push(container(block).id(row_id(i)));
+        // Under its network's name: a row keeps its field's caret when
+        // another comes before it.
+        let mut key = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(&network.ssid, &mut key);
+        all.push((
+            std::hash::Hasher::finish(&key),
+            El::from(container(block).id(row_id(i))),
+        ));
     }
+    let all = keyed_column(all).spacing(ROW_GAP);
     let scrolled = scrollable(container(all).padding(Padding {
         right: super::ROW_END,
         ..Padding::ZERO
@@ -731,11 +752,6 @@ fn centred<'a>(word: &'static str, size: f32, font: Font) -> El<'a> {
     )
     .center_y(Length::Fill)
     .into()
-}
-
-/// The 6 px between the blocks.
-fn gap<'a>() -> El<'a> {
-    Space::new().height(super::GAP).into()
 }
 
 fn gap_x<'a>(width: f32) -> El<'a> {
@@ -996,6 +1012,7 @@ pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
     let mut said_focused = false;
     let mut task = Task::none();
     let mut moved = false;
+    let said = format!("{message:?}");
     match message {
         Msg::Stale => {}
         Msg::Act(target) => act(target, &network, motion),
@@ -1054,7 +1071,16 @@ pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
         event(Seen::Hold);
     }
     crate::popover::refit(Item::Wifi);
+    // What the tree took by itself when last laid out, beside what the
+    // canvas's layout computes: the spike's check that the first can
+    // replace the second.
+    tracing::debug!(
+        natural = natural(),
+        computed = super::height(),
+        "the widgets' height"
+    );
     let after = ui(|ui| ui.focus);
+    tracing::debug!(?said, ?before, ?after, "the widgets' message");
     let field = match (before == Some(Target::Field), after == Some(Target::Field)) {
         (false, true) if !said_focused => iced::widget::operation::focus(FIELD_ID),
         (true, false) => {

@@ -132,6 +132,12 @@ fn main() -> ExitCode {
         Ok(quiet) => filter.add_directive(quiet),
         Err(_) => filter,
     };
+    // iced traces the text of every paragraph it lays out, a stock text
+    // field's too (spike #770): never either.
+    let filter = match "iced_graphics::text::paragraph=off".parse() {
+        Ok(quiet) => filter.add_directive(quiet),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)

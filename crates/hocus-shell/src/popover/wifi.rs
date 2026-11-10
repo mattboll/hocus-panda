@@ -125,7 +125,7 @@ const INK: Ink = Ink::Dark(rgb(0x0B1020));
 
 /// What can be pointed at, or hold the keyboard's focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Switch,
     Disconnect,
     Portal,
