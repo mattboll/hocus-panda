@@ -3099,3 +3099,65 @@ keep "hocus-panda est un projet perso", and her graph held no node after
   as the user's only for a timed event (the day records keep timed
   events only; an all-day event counts through its calendar); the
   extraction role deciding which candidates to propose (§7.1, step 3).
+
+### #763: one standard text field, first in her drawer
+
+Feedback from hands-on use: in the drawer's field the caret could not be
+moved to fix a word, nor a word selected to delete it ("why isn't it a
+standard input, as everywhere?"). Each of the shell's fields was written
+by hand with typing and Backspace only. One field is now shared
+(`hocus-shell/src/field/`, described in bar.md's as-built, "The shell's
+text field"), and the drawer's field and her key's field use it.
+
+- **The keyboard**: Left/Right, Ctrl+Left/Right by word, Home/End on the
+  caret's row (Ctrl: the text's ends), Up/Down between rows (keeping their
+  place across), Shift with any of them selects, `Ctrl+A`; Backspace and
+  Delete take a character, with Ctrl a word; what is typed replaces the
+  selection; `Ctrl+C`, `Ctrl+X`, `Ctrl+V` (and `Ctrl+Insert`,
+  `Shift+Delete`, `Shift+Insert`); `Ctrl+Z`, `Ctrl+Shift+Z` and `Ctrl+Y`
+  (typing goes back a word at a time, a run of deletions at once). Enter
+  sends and Shift+Enter breaks the line, as before; `↑` in an empty field
+  still brings the last sentence back. A paste keeps its line breaks.
+- **The pointer**: a click places the caret, a drag selects (by word or
+  by line after a double or triple click), a double click takes a word, a
+  triple click its line, Shift+click extends from where the selection
+  began; the I-beam over the field. A press in the field lets her text's
+  selection go, and a press on her text the field's: one selection at a
+  time, and `Ctrl+C` copies it. The send button now takes its clicks over
+  the field's box (the field's target was found first).
+- **Drawn**: its text wrapped between words (a word too long for a row
+  broken where it must), the selection in the theme's selection colour
+  (`theme::SELECTION`, as her text's, #761), the caret (still: nothing
+  blinks at rest). It grows from one row to five, then scrolls to keep the
+  caret in view; her key's field scrolls across.
+- **Input methods**: the drawer's surface asks for one while a field there
+  has the keyboard (`field::ime::Asking`: text-input-v3 enabled, the
+  caret's place, `Secure` for her key), so an input method's preedit shows
+  underlined at the caret and its commit goes in there. The compositor has
+  no input method of its own yet: the tests compose as one would
+  (`Headless::input_method`).
+- **Her key's field** is a secret: masked (a dot a character, scrolled
+  across, no more cut at 32), edited as the rest, never copied nor cut
+  out (`Ctrl+C` and `Ctrl+X` do nothing), no undo kept, Ctrl+Backspace and
+  a double click take it whole; its text overwritten with zeros once sent,
+  as the drawer closes, and its room taken once so that it never moves in
+  memory. Its paste stays on one line.
+- **What the log says** of the field: its length, its caret and its
+  selection's anchor in characters, its preedit's length, its rows and the
+  first in view (`the drawer shows`), where its rows in view start and end
+  and its caret (`the drawer's field rows`), never what it says; of her
+  key's, nothing but whether one is typed.
+- **Tests**: `hocus-shell` (`field::tests`, the model, one per key and
+  pointer criterion; `field::view::tests`, rows, scrolling, the mask, the
+  preedit, Up/Down and Home/End on wrapped rows; `field::keys::tests`;
+  `paste::tests::on_lines_line_breaks_stay_and_tabs_are_spaces`), and with
+  the real shell and her process (`secretary_drawer.rs`):
+  `the_caret_moves_by_character_word_and_line_and_shift_selects`,
+  `backspace_delete_the_clipboard_and_undo_edit_as_everywhere`,
+  `a_click_places_the_caret_a_drag_selects_and_clicks_take_a_word_or_the_line`,
+  `the_caret_and_the_selection_are_drawn_and_the_field_scrolls_to_the_caret`
+  (the rose accent behind the text selected, the caret's mint, eight rows
+  scrolled), `an_input_method_composes_at_the_caret_and_commits_there`,
+  `her_key_s_field_edits_as_any_but_nothing_copies_it_out`.
+- **Not yet**: the shell's other fields still edit by hand ("Ce qu'elle
+  sait"'s search among them); they are listed on #763 for a later move.

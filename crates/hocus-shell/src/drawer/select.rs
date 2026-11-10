@@ -310,63 +310,32 @@ impl Texts {
         run.range.start + bounds[k]
     }
 
-    /// The word around `spot`, or the character there if it is no word's.
+    /// The word around `spot`, or the character there if it is no word's:
+    /// as a field takes one ([`crate::field::word_around`], #763).
     pub fn word_at(&self, spot: Spot) -> Option<(Spot, Spot)> {
         let text = &self.blocks.get(self.index(spot.source)?)?.text;
-        let at = floor(text, spot.at.min(text.len()));
-        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
-        let after = text[at..].chars().next();
-        let before = text[..at].chars().next_back();
-        // Past a word's last letter, that word.
-        let at = match (after, before) {
-            (Some(a), Some(b)) if !word(a) && word(b) => at - b.len_utf8(),
-            (None, Some(b)) => at - b.len_utf8(),
-            _ => at,
-        };
-        let c = text[at..].chars().next()?;
-        let (from, to) = if word(c) {
-            let from = text[..at]
-                .char_indices()
-                .rev()
-                .take_while(|(_, c)| word(*c))
-                .last()
-                .map_or(at, |(i, _)| i);
-            let to = text[at..]
-                .char_indices()
-                .find(|(_, c)| !word(*c))
-                .map_or(text.len(), |(i, _)| at + i);
-            (from, to)
-        } else {
-            (at, at + c.len_utf8())
-        };
-        Some((
-            Spot {
-                source: spot.source,
-                at: from,
-            },
-            Spot {
-                source: spot.source,
-                at: to,
-            },
-        ))
+        let range = crate::field::word_around(text, spot.at);
+        (!range.is_empty()).then_some(self.spots(spot.source, range))
     }
 
     /// The paragraph around `spot`: between its block's line breaks.
     pub fn paragraph_at(&self, spot: Spot) -> Option<(Spot, Spot)> {
         let text = &self.blocks.get(self.index(spot.source)?)?.text;
-        let at = floor(text, spot.at.min(text.len()));
-        let from = text[..at].rfind('\n').map_or(0, |i| i + 1);
-        let to = text[at..].find('\n').map_or(text.len(), |i| at + i);
-        Some((
+        Some(self.spots(spot.source, crate::field::line_around(text, spot.at)))
+    }
+
+    /// `range` of `source`'s text, as its two ends.
+    fn spots(&self, source: Source, range: Range<usize>) -> (Spot, Spot) {
+        (
             Spot {
-                source: spot.source,
-                at: from,
+                source,
+                at: range.start,
             },
             Spot {
-                source: spot.source,
-                at: to,
+                source,
+                at: range.end,
             },
-        ))
+        )
     }
 
     /// The selection's ends in reading order, as (block, offset); none if
@@ -375,7 +344,7 @@ impl Texts {
         let place = |s: Spot| -> Option<(usize, usize)> {
             let block = self.index(s.source)?;
             let text = &self.blocks[block].text;
-            Some((block, floor(text, s.at.min(text.len()))))
+            Some((block, crate::field::floor(text, s.at)))
         };
         let (a, b) = (place(selection.anchor)?, place(selection.focus)?);
         Some(if a <= b { (a, b) } else { (b, a) })
@@ -523,14 +492,6 @@ fn closing(chars: &[char], from: usize, c: char, run: usize) -> Option<usize> {
         }
     }
     None
-}
-
-/// `at` moved back to a character's boundary of `text`.
-fn floor(text: &str, mut at: usize) -> usize {
-    while at > 0 && !text.is_char_boundary(at) {
-        at -= 1;
-    }
-    at
 }
 
 #[cfg(test)]
