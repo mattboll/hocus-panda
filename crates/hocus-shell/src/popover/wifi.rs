@@ -30,6 +30,10 @@
 //! alone. The list, and the field's text, are drawn in frames of their own,
 //! cut to their bounds, which both renderers honour.
 
+// The same popover as a tree of iced's stock widgets (spike #770).
+mod custom;
+pub mod widgets;
+
 use std::{
     sync::{Mutex, PoisonError},
     time::Instant,

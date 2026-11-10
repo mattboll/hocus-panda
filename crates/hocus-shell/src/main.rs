@@ -419,6 +419,8 @@ enum Message {
     /// A key went to another surface than the one holding the keyboard:
     /// every surface is woken, that one's widgets taking it ([`keys`]).
     Keys,
+    /// The Wi-Fi's popover made of widgets (spike #770): what one asks.
+    Wifi(popover::wifi::widgets::Msg),
 }
 
 impl Shell {
@@ -545,6 +547,7 @@ impl Shell {
             // Its update is the wake: iced_layershell redraws every surface
             // after one.
             Message::Keys => Task::none(),
+            Message::Wifi(message) => popover::wifi::widgets::update(message, self.look.motion),
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -1906,6 +1909,15 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Wifi if popover::wifi::widgets::on() => {
+                popover::wifi::widgets::view(&popover::wifi::Panel {
+                    id,
+                    words: self.words,
+                    glass: self.look.glass,
+                    motion: self.look.motion,
+                    software: self.software,
+                })
+            }
             popover::Item::Wifi => canvas(popover::wifi::Panel {
                 id,
                 words: self.words,
