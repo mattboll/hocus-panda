@@ -58,7 +58,7 @@ jobs:
         with:
           # The merge commit and main before it: what the pull request changes.
           fetch-depth: 2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/apt-archives
           key: apt-pr-v1-${{ runner.os }}
@@ -135,7 +135,7 @@ jobs:
         run: cargo programs --locked
       - name: Tests' archive
         run: cargo nextest archive --locked --workspace --archive-file nextest.tar.zst
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nextest
           path: nextest.tar.zst
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           # The packages' files, so a slow mirror does not hold the tests
           # (it once took 40 min). apt still checks for newer versions.
@@ -199,7 +199,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nextest
       - name: The programs are in the archive
@@ -264,7 +264,7 @@ jobs:
         run: packaging/deb/build.sh
       - name: What the .deb holds
         run: packaging/deb/check.sh target/packages/hocuspanda_*.deb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb
           path: target/packages/*.deb
