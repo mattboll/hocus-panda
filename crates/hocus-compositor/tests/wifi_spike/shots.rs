@@ -242,6 +242,9 @@ fn spike_shots() -> anyhow::Result<()> {
     shots.shot(&mut bed, "12-password-shown")?;
     bed.press(KEY_SPACE);
     chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_TAB]);
+    // The widgets' field takes iced's focus a turn of its loop later:
+    // typed at once, these two are lost (see the report).
+    wait(&mut bed.hp, brief)?;
     for key in [KEY_U, KEY_I] {
         bed.press(key);
     }
@@ -259,6 +262,10 @@ fn spike_shots() -> anyhow::Result<()> {
     bed.press(KEY_ESC);
     wait(&mut bed.hp, brief)?;
     shots.shot(&mut bed, "16-folded")?;
+    let rect = *bed
+        .popovers()
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("no popover to turn the Wi-Fi off in"))?;
     let switch = (f64::from(rect.x) + 245.0, f64::from(rect.y) + 13.0 + 16.0);
     shots.cost(&mut bed, "a click on the switch", brief, |bed| {
         bed.click(switch)

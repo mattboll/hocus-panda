@@ -15,7 +15,7 @@
 
 use std::{
     sync::{
-        OnceLock,
+        Mutex, OnceLock, PoisonError,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Instant,
@@ -23,13 +23,12 @@ use std::{
 
 use iced::{
     Background, Border, Color, Degrees, Element, Font, Length, Padding, Point, Rectangle, Renderer,
-    Size, Task, Theme,
-    advanced::widget::{self as advanced, Id},
+    Size, Theme,
+    advanced::widget::{Id, Operation, operation::focusable},
     alignment::Vertical,
     gradient, keyboard, mouse,
     widget::{
-        Space, button, canvas, column, container, keyed_column, mouse_area, row, scrollable, space,
-        stack, text,
+        Space, button, canvas, column, container, mouse_area, row, scrollable, space, stack, text,
         text::{LineHeight, Shaping, Wrapping},
         text_input, toggler,
     },
@@ -49,7 +48,7 @@ use crate::{
         secret::Secret,
     },
     popover::{
-        Event as Seen, Item, Pressed, event,
+        Effect, Event as Seen, Item, Pressed, event,
         kit::{
             self, FILL, FILL_HOVER, HEADER, HEADER_TOP, ICON, ICON_GAP, LABEL, MANROPE_SEMIBOLD,
             NAME, NOTE, NOTE_HEIGHT, NOTE_TOP, PAD_BOTTOM, PEACH, ROW, ROW_GAP, ROW_OUT, ROW_PAD,
@@ -59,7 +58,8 @@ use crate::{
     theme::Ink,
 };
 
-type El<'a> = Element<'a, crate::Message>;
+/// The popover's widgets speak [`Msg`], which their surface handles.
+type El<'a> = Element<'a, Msg>;
 
 /// Whether the popover is the widgets' (`HOCUS_WIFI_WIDGETS=1`).
 pub fn on() -> bool {
@@ -84,6 +84,13 @@ const OPAQUE_BOTTOM: Ink = Ink::Token(|t| t.popover_opaque_bottom);
 const RIM: Ink = Ink::Token(|t| t.bar_border);
 const SPINNER: f32 = 12.0;
 
+/// The header's switch is iced's `toggler` (`HOCUS_WIFI_STOCK_SWITCH=1`),
+/// to see what it lacks; else the kit's drawing in a stock button.
+fn stock_switch() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("HOCUS_WIFI_STOCK_SWITCH").is_ok_and(|v| v == "1"))
+}
+
 const FIELD_ID: &str = "wifi:field";
 const LIST_ID: &str = "wifi:list";
 
@@ -106,10 +113,9 @@ pub enum Msg {
     Key(Pressed),
     /// `Ctrl+V` or `Shift+Insert` in the field.
     Paste,
-    /// A press anywhere on the popover.
-    Pressed,
-    /// Whether the field holds iced's focus, asked after a press.
-    Focused(bool),
+    /// A press anywhere on the popover; whether the field holds iced's
+    /// focus after it.
+    Pressed(bool),
     /// The network, or what a paste brought, changed under the view.
     Stale,
 }
@@ -123,19 +129,47 @@ impl std::fmt::Debug for Msg {
             Self::OverList(_) => "OverList",
             Self::Key(_) => "Key",
             Self::Paste => "Paste",
-            Self::Pressed => "Pressed",
-            Self::Focused(_) => "Focused",
+            Self::Pressed(_) => "Pressed",
             Self::Stale => "Stale",
         })
     }
 }
 
-fn msg(msg: Msg) -> crate::Message {
-    crate::Message::Wifi(msg)
+/// What waits for the tree built after a message: iced's focus to the
+/// field or away from it, the list scrolled to a row.
+#[derive(Debug, Clone, Copy)]
+enum Op {
+    Focus,
+    Unfocus,
+    Reveal(usize),
+}
+
+static PENDING: Mutex<Vec<Op>> = Mutex::new(Vec::new());
+
+fn later(op: Op) {
+    PENDING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(op);
+}
+
+fn pending() -> Vec<Box<dyn Operation>> {
+    let ops = std::mem::take(&mut *PENDING.lock().unwrap_or_else(PoisonError::into_inner));
+    ops.into_iter()
+        .map(|op| -> Box<dyn Operation> {
+            match op {
+                Op::Focus => Box::new(focusable::focus(Id::new(FIELD_ID))),
+                Op::Unfocus => Box::new(focusable::unfocus()),
+                Op::Reveal(i) => Box::new(reveal(Id::new(LIST_ID), row_id(i))),
+            }
+        })
+        .collect()
 }
 
 /// Counts what changes outside a message: the network, a paste landed.
 static STAMP: AtomicU64 = AtomicU64::new(0);
+/// Counts the view's builds.
+static BUILDS: AtomicU64 = AtomicU64::new(0);
 /// The height the tree took when last laid out, px (bits of an `f32`).
 static NATURAL: AtomicU32 = AtomicU32::new(0);
 
@@ -153,25 +187,30 @@ pub fn natural() -> Option<u32> {
 // --- The view ------------------------------------------------------------------------------
 
 /// The popover on its surface.
-pub fn view<'a>(panel: &Panel) -> El<'a> {
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
     let network = network::snapshot();
     let built = STAMP.load(Ordering::Relaxed);
-    let (content, typing) = ui(|ui| {
+    let content = ui(|ui| {
         let rows = ui.rows(&network);
-        (
-            content(panel, &network, ui, &rows, Instant::now()),
-            ui.focus == Some(Target::Field),
-        )
+        content(panel, &network, ui, &rows, Instant::now())
     });
-    let around = Around::new(
-        panel.id,
+    let motion = panel.motion;
+    let around = Around {
+        id: panel.id,
+        build: BUILDS.fetch_add(1, Ordering::Relaxed),
         content,
-        move || STAMP.load(Ordering::Relaxed) != built,
-        msg(Msg::Stale),
-        move |pressed| taken(pressed, typing).map(msg),
-        msg(Msg::Pressed),
-        |height| NATURAL.store(height.to_bits(), Ordering::Relaxed),
-    );
+        stale: Box::new(move || STAMP.load(Ordering::Relaxed) != built),
+        on_stale: Box::new(|| Msg::Stale),
+        on_key: Box::new(taken),
+        on_press: Box::new(|focused| Msg::Pressed(focused == Some(Id::new(FIELD_ID)))),
+        handle: Box::new(move |message| handle(message, motion)),
+        pending: Box::new(pending),
+        natural: Box::new(|height| NATURAL.store(height.to_bits(), Ordering::Relaxed)),
+        redraw: Box::new(|| {
+            crate::popover::send(vec![Effect::Wake(hocus_link::POPOVER_NAMESPACE)]);
+        }),
+        wake: crate::Message::Keys,
+    };
     let glass = panel.glass;
     container(around)
         .width(Length::Fill)
@@ -180,11 +219,13 @@ pub fn view<'a>(panel: &Panel) -> El<'a> {
         .into()
 }
 
-/// The keys the surface keeps from its widgets: those that move the ring
-/// or act on what holds it; in the field, only what leaves it, and a
-/// paste (iced's clipboard is off in the shell, [`crate::paste`] reads it).
-fn taken(pressed: Pressed, typing: bool) -> Option<Msg> {
+/// The keys the surface keeps from its widgets, as the keyboard is held
+/// now: those that move the ring or act on what holds it; in the field,
+/// only what leaves it, and a paste (iced's clipboard is off in the
+/// shell, [`crate::paste`] reads it).
+fn taken(pressed: Pressed) -> Option<Msg> {
     use keyboard::{Key, key::Named};
+    let typing = ui(|ui| ui.focus == Some(Target::Field));
     match &pressed.key {
         Key::Named(Named::Escape | Named::Tab) => Some(Msg::Key(pressed)),
         Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Enter | Named::Space) if !typing => {
@@ -200,102 +241,98 @@ fn content<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi], now: In
     let on = ui.enabled(network, now);
     let enabled = on && network.hardware;
     let focus = ui.focus;
-    // Each block under its key: a widget keeps what it knows (the pointer
-    // over the list, how far it is scrolled, the field's caret) by its
-    // place in the tree, and the blocks above the list come and go.
-    let mut all: Vec<(&'static str, El<'a>)> =
-        vec![("header", header(panel, network.hardware, on, focus))];
-    let mut block = |key, content: El<'a>| {
-        let spaced = container(content).padding(Padding {
-            top: super::GAP,
-            ..Padding::ZERO
-        });
-        all.push((key, spaced.into()));
+    // A widget keeps what it knows (the pointer over the list, how far it
+    // is scrolled, the field's caret) by its place in the tree, and the
+    // blocks above the list come and go: each has its place, empty while
+    // it does not show. (iced 0.14's keyed column pairs a tree with
+    // another widget's when more than one run of blocks changes at once,
+    // and panics: not on the shell's loop.)
+    let mut all: Vec<El<'a>> = vec![header(panel, network.hardware, on, focus)];
+    let mut block = |content: Option<El<'a>>| {
+        let spaced: El<'a> = match content {
+            Some(content) => container(content)
+                .padding(Padding {
+                    top: super::GAP,
+                    ..Padding::ZERO
+                })
+                .into(),
+            None => Space::new().into(),
+        };
+        all.push(spaced);
     };
-    if network.wired {
+    block(network.wired.then(|| {
         let line = row![
             glyph(Glyph::Ethernet(DIM.get()), ICON),
             gap_x(ICON_GAP),
             said(words.by_cable(), NOTE, MANROPE, DIM.get()),
         ]
         .align_y(Vertical::Center);
-        block(
-            "wired",
-            container(line)
-                .height(super::WIRED)
-                .padding([0.0, ROW_OUT])
-                .align_y(Vertical::Center)
-                .into(),
-        );
-    }
-    if !enabled {
-        let note = if network.airplane {
+        container(line)
+            .height(super::WIRED)
+            .padding([0.0, ROW_OUT])
+            .align_y(Vertical::Center)
+            .into()
+    }));
+    block((!enabled).then(|| {
+        note(if network.airplane {
             words.airplane_is_on()
         } else if network.hardware {
             words.wifi_is_off()
         } else {
             words.no_adapter()
-        };
-        block("off", self::note(note));
-    }
-    if let Some(current) = network.current.as_ref().filter(|_| enabled) {
-        block("current", connected(panel, current, network, focus));
-        if network.portal {
-            let open = button(
-                container(said(
-                    words.open_sign_in(),
-                    super::PORTAL_TEXT,
-                    MANROPE_SEMIBOLD,
-                    PEACH.get(),
-                ))
-                .center(Length::Fill),
-            )
-            .padding(0)
-            .width(Length::Fill)
-            .height(super::PORTAL)
-            .style(|_, status| {
-                filled(
-                    if lit(status) {
-                        super::PORTAL_HOVER
-                    } else {
-                        super::PORTAL_FILL
-                    }
-                    .get(),
-                    ROW_RADIUS,
-                    PEACH.get(),
-                )
-            })
-            .on_press_maybe(
-                network
-                    .check_uri
-                    .is_some()
-                    .then(|| msg(Msg::Act(Target::Portal))),
-            );
-            block(
-                "portal",
-                inset(ring(open, focus == Some(Target::Portal), ROW_RADIUS)),
-            );
-        }
-    }
-    if enabled {
-        block("rule", rule());
-        block("label", label(panel, network.scanning));
-        if rows.is_empty() {
-            block(
-                "none",
-                note(if network.scanning {
-                    words.searching_networks()
+        })
+    }));
+    let current = network.current.as_ref().filter(|_| enabled);
+    block(current.map(|current| connected(panel, current, network, focus)));
+    block((current.is_some() && network.portal).then(|| {
+        let open = button(
+            container(said(
+                words.open_sign_in(),
+                super::PORTAL_TEXT,
+                MANROPE_SEMIBOLD,
+                PEACH.get(),
+            ))
+            .center(Length::Fill),
+        )
+        .padding(0)
+        .width(Length::Fill)
+        .height(super::PORTAL)
+        .style(|_, status| {
+            filled(
+                if lit(status) {
+                    super::PORTAL_HOVER
                 } else {
-                    words.no_network()
-                }),
-            );
+                    super::PORTAL_FILL
+                }
+                .get(),
+                ROW_RADIUS,
+                PEACH.get(),
+            )
+        })
+        .on_press_maybe(
+            network
+                .check_uri
+                .is_some()
+                .then_some(Msg::Act(Target::Portal)),
+        );
+        inset(control(open, Target::Portal, focus, ROW_RADIUS))
+    }));
+    block(enabled.then(rule));
+    block(enabled.then(|| label(panel, network.scanning)));
+    block(enabled.then(|| {
+        if rows.is_empty() {
+            note(if network.scanning {
+                words.searching_networks()
+            } else {
+                words.no_network()
+            })
         } else {
-            block("list", list(panel, network, ui, rows));
+            list(panel, network, ui, rows)
         }
-    }
-    all.push(("link-rule", rule()));
-    all.push(("link", link(panel, focus)));
-    container(keyed_column(all))
+    }));
+    all.push(rule());
+    all.push(link(panel, focus));
+    container(iced::widget::Column::with_children(all))
         .padding(Padding {
             top: HEADER_TOP,
             right: kit::LEFT - ROW_OUT,
@@ -313,35 +350,46 @@ fn header<'a>(panel: &Panel, hardware: bool, on: bool, focus: Option<Target>) ->
     ]
     .align_y(Vertical::Center);
     if hardware {
-        // Stock: twice as wide as tall (44 × 22 for the mockup's 40 × 22),
-        // no shadow under its knob, no slide.
-        let switch = toggler(on)
-            .on_toggle(|_| msg(Msg::Act(Target::Switch)))
-            .size(SWITCH.height)
-            .style(|_, status| {
-                let on = matches!(
-                    status,
-                    toggler::Status::Active { is_toggled: true }
-                        | toggler::Status::Hovered { is_toggled: true }
-                        | toggler::Status::Disabled { is_toggled: true }
-                );
-                toggler::Style {
-                    background: if on { ACCENT } else { SWITCH_OFF }.get().into(),
-                    background_border_width: 0.0,
-                    background_border_color: Color::TRANSPARENT,
-                    foreground: TEXT.get().into(),
-                    foreground_border_width: 0.0,
-                    foreground_border_color: Color::TRANSPARENT,
-                    text_color: None,
-                    border_radius: None,
-                    padding_ratio: 2.0 / SWITCH.height,
-                }
-            });
-        line = line.push(ring(
-            switch,
-            focus == Some(Target::Switch),
-            SWITCH.height / 2.0,
-        ));
+        let switch: El<'a> = if stock_switch() {
+            // Stock: twice as wide as tall (44 × 22 for the mockup's
+            // 40 × 22), no shadow under its knob, no slide.
+            toggler(on)
+                .on_toggle(|_| Msg::Act(Target::Switch))
+                .size(SWITCH.height)
+                .style(|_, status| {
+                    let on = matches!(
+                        status,
+                        toggler::Status::Active { is_toggled: true }
+                            | toggler::Status::Hovered { is_toggled: true }
+                            | toggler::Status::Disabled { is_toggled: true }
+                    );
+                    toggler::Style {
+                        background: if on { ACCENT } else { SWITCH_OFF }.get().into(),
+                        background_border_width: 0.0,
+                        background_border_color: Color::TRANSPARENT,
+                        foreground: TEXT.get().into(),
+                        foreground_border_width: 0.0,
+                        foreground_border_color: Color::TRANSPARENT,
+                        text_color: None,
+                        border_radius: None,
+                        padding_ratio: 2.0 / SWITCH.height,
+                    }
+                })
+                .into()
+        } else {
+            // The kit's drawing (its knob's shadow, its slide) in a
+            // stock button.
+            button(
+                canvas(Glyph::Switch(panel.motion))
+                    .width(SWITCH.width)
+                    .height(SWITCH.height),
+            )
+            .padding(0)
+            .style(|_, _| clear())
+            .on_press(Msg::Act(Target::Switch))
+            .into()
+        };
+        line = line.push(control(switch, Target::Switch, focus, SWITCH.height / 2.0));
     }
     container(line)
         .height(HEADER)
@@ -387,13 +435,13 @@ fn connected<'a>(
                 if lit(status) { TEXT } else { DIM }.get(),
             )
         })
-        .on_press(msg(Msg::Act(Target::Disconnect)));
+        .on_press(Msg::Act(Target::Disconnect));
     let line = row![
         glyph(Glyph::Wifi(current.bars(), ACCENT.get()), ICON),
         gap_x(ICON_GAP),
         texts,
         gap_x(ICON_GAP),
-        ring(leave, focus == Some(Target::Disconnect), SMALL_RADIUS),
+        control(leave, Target::Disconnect, focus, SMALL_RADIUS),
         // 48 px at least.
         Space::new().height(BLOCK),
     ]
@@ -446,7 +494,7 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
         } else {
             super::ROW_END
         };
-    let mut all = Vec::with_capacity(rows.len());
+    let mut all = column![].spacing(ROW_GAP);
     for (i, network) in rows.iter().enumerate() {
         let unfolded = unfolded(network);
         let aside = super::row_aside(words, network, unfolded, busy, ui.failed.as_deref());
@@ -493,8 +541,8 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
                     clear()
                 }
             })
-            .on_press_maybe(busy.is_none().then(|| msg(Msg::Act(Target::Row(i)))));
-        let pressed = ring(pressed, ui.focus == Some(Target::Row(i)), ROW_RADIUS);
+            .on_press_maybe(busy.is_none().then(|| Msg::Act(Target::Row(i))));
+        let pressed = control(pressed, Target::Row(i), ui.focus, ROW_RADIUS);
         let block: El<'a> = if unfolded {
             container(column![pressed, self::form(panel, network_busy(busy), ui)])
                 .style(|_| {
@@ -509,16 +557,8 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
         } else {
             pressed
         };
-        // Under its network's name: a row keeps its field's caret when
-        // another comes before it.
-        let mut key = std::hash::DefaultHasher::new();
-        std::hash::Hash::hash(&network.ssid, &mut key);
-        all.push((
-            std::hash::Hasher::finish(&key),
-            El::from(container(block).id(row_id(i))),
-        ));
+        all = all.push(container(block).id(row_id(i)));
     }
-    let all = keyed_column(all).spacing(ROW_GAP);
     let scrolled = scrollable(container(all).padding(Padding {
         right: super::ROW_END,
         ..Padding::ZERO
@@ -555,8 +595,8 @@ fn list<'a>(panel: &Panel, network: &Network, ui: &Ui, rows: &[Wifi]) -> El<'a> 
     });
     container(
         mouse_area(scrolled)
-            .on_enter(msg(Msg::OverList(true)))
-            .on_exit(msg(Msg::OverList(false))),
+            .on_enter(Msg::OverList(true))
+            .on_exit(Msg::OverList(false)),
     )
     .max_height(super::LIST)
     .into()
@@ -576,8 +616,8 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
     let field = text_input(words.password(), ui.password.as_str())
         .id(FIELD_ID)
         .secure(!ui.shown)
-        .on_input(|typed| msg(Msg::Typed(typed)))
-        .on_submit(msg(Msg::Act(Target::Join)))
+        .on_input(Msg::Typed)
+        .on_submit(Msg::Act(Target::Join))
         .size(super::FIELD_TEXT)
         .font(MANROPE)
         .line_height(LineHeight::Relative(LINE))
@@ -617,10 +657,10 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
         .width(super::EYE)
         .height(super::EYE)
         .style(|_, _| clear())
-        .on_press(msg(Msg::Act(Target::Eye)));
+        .on_press(Msg::Act(Target::Eye));
     let field = stack![
         field,
-        container(ring(eye, focus == Some(Target::Eye), 6.0))
+        container(control(eye, Target::Eye, focus, 6.0))
             .align_right(Length::Fill)
             .center_y(Length::Fill)
             .padding(Padding {
@@ -653,7 +693,7 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
                 if lit(status) { TEXT } else { DIM }.get(),
             )
         })
-        .on_press(msg(Msg::Act(Target::Cancel)));
+        .on_press(Msg::Act(Target::Cancel));
     let ready = ui.password.complete() && !busy;
     let join = button(centred(
         if busy {
@@ -673,12 +713,12 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
             filled(FILL_HOVER.get(), ROW_RADIUS, FAINT.get())
         }
     })
-    .on_press_maybe(ready.then(|| msg(Msg::Act(Target::Join))));
+    .on_press_maybe(ready.then(|| Msg::Act(Target::Join)));
     all = all.push(row![
         space::horizontal(),
-        ring(cancel, focus == Some(Target::Cancel), ROW_RADIUS),
+        control(cancel, Target::Cancel, focus, ROW_RADIUS),
         gap_x(6.0),
-        ring(join, focus == Some(Target::Join), ROW_RADIUS),
+        control(join, Target::Join, focus, ROW_RADIUS),
     ]);
     container(all)
         .padding(Padding {
@@ -718,8 +758,8 @@ fn link<'a>(panel: &Panel, focus: Option<Target>) -> El<'a> {
                 clear()
             }
         })
-        .on_press(msg(Msg::Act(Target::Settings)));
-    ring(link, focus == Some(Target::Settings), ROW_RADIUS)
+        .on_press(Msg::Act(Target::Settings));
+    control(link, Target::Settings, focus, ROW_RADIUS)
 }
 
 // --- The pieces ----------------------------------------------------------------------------
@@ -756,6 +796,19 @@ fn centred<'a>(word: &'static str, size: f32, font: Font) -> El<'a> {
 
 fn gap_x<'a>(width: f32) -> El<'a> {
     Space::new().width(width).into()
+}
+
+/// A control: under the keyboard's ring while it holds it, in a container
+/// named after it, which tests (and a screen reader's nodes) find it by.
+fn control<'a>(
+    content: impl Into<El<'a>>,
+    target: Target,
+    focus: Option<Target>,
+    radius: f32,
+) -> El<'a> {
+    container(ring(content, focus == Some(target), radius))
+        .id(Id::from(format!("wifi:{target:?}")))
+        .into()
 }
 
 /// `content` between the content's sides, 6 px in from the rows'.
@@ -883,6 +936,9 @@ enum Glyph {
     Sliders,
     Chevron,
     Spinner(Color),
+    /// The header's switch, as the network and what was asked say; it
+    /// slides (with motion).
+    Switch(bool),
 }
 
 fn glyph<'a>(glyph: Glyph, size: f32) -> El<'a> {
@@ -906,15 +962,21 @@ impl<Message> canvas::Program<Message> for Glyph {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        // A spinner alone draws again each frame, and its surface alone.
-        if let (Self::Spinner(_), iced::Event::Window(iced::window::Event::RedrawRequested(now))) =
-            (self, event)
-        {
-            state.spin.run(true, *now);
-            state.now = Some(*now);
-            return Some(canvas::Action::request_redraw());
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        state.now = Some(*now);
+        match self {
+            // A spinner alone draws again each frame, and its surface alone.
+            Self::Spinner(_) => {
+                state.spin.run(true, *now);
+                Some(canvas::Action::request_redraw())
+            }
+            Self::Switch(true) if ui(|ui| ui.switch.sliding(*now)) => {
+                Some(canvas::Action::request_redraw())
+            }
+            _ => None,
         }
-        None
     }
 
     fn draw(
@@ -958,6 +1020,17 @@ impl<Message> canvas::Program<Message> for Glyph {
                 FAINT.get(),
                 &[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)],
             ),
+            Self::Switch(motion) => {
+                let now = state.now.unwrap_or_else(Instant::now);
+                let network = network::snapshot();
+                let at = ui(|ui| {
+                    let on = ui.enabled(&network, now);
+                    ui.switch.knob_at(on, now, motion)
+                });
+                let rect = kit::Switch::rect();
+                f.translate(iced::Vector::new(-rect.x, -rect.y));
+                kit::Switch::draw(&mut f, at);
+            }
             Self::Spinner(colour) => {
                 let turn = state.now.map_or(0.0, |now| state.spin.turn(now));
                 kit::spinner(&mut f, Point::ORIGIN, colour, turn);
@@ -1002,15 +1075,15 @@ fn order(network: &Network, ui: &Ui, rows: &[Wifi], now: Instant) -> Vec<Target>
     order
 }
 
-/// `message`, and what iced is then asked: its focus to the field or away
-/// from it, the list scrolled to what holds the keyboard.
-pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
+/// `message`, handled at once; what the tree built next is then asked:
+/// iced's focus to the field or away from it, the list scrolled to what
+/// holds the keyboard.
+fn handle(message: Msg, motion: bool) {
     let network = network::snapshot();
     let before = ui(|ui| ui.focus);
-    // The field said it holds iced's focus already: not asked again (it
-    // would send its caret to its end).
-    let mut said_focused = false;
-    let mut task = Task::none();
+    // The field holds iced's focus already: not asked again (it would
+    // send its caret to its end).
+    let mut focused = false;
     let mut moved = false;
     let said = format!("{message:?}");
     match message {
@@ -1027,29 +1100,20 @@ pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
         Msg::Key(pressed) => moved = key(&pressed, &network, motion),
         Msg::Paste => super::paste(),
         // As the canvas: a press takes the ring away, but the keyboard
-        // stays in an unfolded field.
-        Msg::Pressed => {
-            ui(|ui| {
-                if !(ui.focus == Some(Target::Field) && ui.unfolded.is_some()) {
-                    ui.focus = None;
-                }
-            });
-            task = iced::widget::operation::is_focused(FIELD_ID)
-                .map(|focused| msg(Msg::Focused(focused)));
-        }
-        Msg::Focused(true) => {
-            said_focused = true;
-            ui(|ui| {
-                if ui.unfolded.is_some() {
-                    ui.focus = Some(Target::Field);
-                }
-            });
-        }
-        Msg::Focused(false) => {
-            if ui(|ui| ui.focus == Some(Target::Field) && ui.unfolded.is_some()) {
-                task = iced::widget::operation::focus(FIELD_ID);
+        // stays in an unfolded field (which a press elsewhere made let
+        // go of iced's focus: it is given back).
+        Msg::Pressed(on_field) => ui(|ui| {
+            focused = on_field;
+            if ui.unfolded.is_none() {
+                ui.focus = None;
+            } else if on_field {
+                ui.focus = Some(Target::Field);
+            } else if ui.focus == Some(Target::Field) {
+                later(Op::Focus);
+            } else {
+                ui.focus = None;
             }
-        }
+        }),
     }
     // What the network's last attempt says, the rows' order, a ring on
     // what is gone.
@@ -1081,13 +1145,11 @@ pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
     );
     let after = ui(|ui| ui.focus);
     tracing::debug!(?said, ?before, ?after, "the widgets' message");
-    let field = match (before == Some(Target::Field), after == Some(Target::Field)) {
-        (false, true) if !said_focused => iced::widget::operation::focus(FIELD_ID),
-        (true, false) => {
-            advanced::operate(advanced::operation::focusable::unfocus::<()>()).discard()
-        }
-        _ => Task::none(),
-    };
+    match (before == Some(Target::Field), after == Some(Target::Field)) {
+        (false, true) if !focused => later(Op::Focus),
+        (true, false) => later(Op::Unfocus),
+        _ => {}
+    }
     let shown = match after {
         Some(Target::Row(i)) if moved => Some(i),
         Some(Target::Field | Target::Eye | Target::Cancel | Target::Join) if moved => ui(|ui| {
@@ -1098,11 +1160,9 @@ pub fn update(message: Msg, motion: bool) -> Task<crate::Message> {
         }),
         _ => None,
     };
-    let shown = match shown {
-        Some(i) => advanced::operate(reveal::<()>(Id::new(LIST_ID), row_id(i))).discard(),
-        None => Task::none(),
-    };
-    Task::batch([task, field, shown])
+    if let Some(i) = shown {
+        later(Op::Reveal(i));
+    }
 }
 
 /// `target` pressed, or `Enter` on it (as the canvas's `act`).
