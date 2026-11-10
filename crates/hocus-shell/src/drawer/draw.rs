@@ -3910,6 +3910,8 @@ pub struct State {
     entry: String,
     /// The keyboard's modifiers: Shift+click extends a field's selection.
     modifiers: iced::keyboard::Modifiers,
+    /// Where the pointer was as of the last event seen ([`View::update`]).
+    pointer: Option<Point>,
 }
 
 /// What a layout is made for.
@@ -4888,6 +4890,22 @@ impl<Message> canvas::Program<Message> for View {
                 plays.then(canvas::Action::request_redraw)
             }
             iced::Event::Mouse(seen) => {
+                // The toolkit hands every event of a batch the pointer's
+                // last place: a press followed by moves before the shell
+                // got to run (a loaded machine, a quick drag) would be
+                // taken where the pointer went afterwards, and a selection
+                // would start there. The moves say where each was; a
+                // press is where the last one before it was.
+                match seen {
+                    mouse::Event::CursorMoved { position } => state.pointer = Some(*position),
+                    mouse::Event::CursorEntered => state.pointer = cursor.position(),
+                    mouse::Event::CursorLeft => state.pointer = None,
+                    _ => {}
+                }
+                let cursor = match (cursor, state.pointer) {
+                    (mouse::Cursor::Available(_), Some(at)) => mouse::Cursor::Available(at),
+                    (cursor, _) => cursor,
+                };
                 // A press on it gives it the keyboard (the compositor's
                 // on-demand rule, #755): the toolkit says no "Focused"
                 // when the pointer came in first, so it is taken here.

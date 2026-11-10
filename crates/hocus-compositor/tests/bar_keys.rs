@@ -167,10 +167,17 @@ impl Bed {
         let on = self
             .hp
             .dispatch_until(WAIT, |hp| hp.keyboard_layer().as_deref() == namespace)?;
+        let said: Vec<String> = self
+            .log()
+            .lines()
+            .filter(|l| !l.contains("icons"))
+            .map(str::to_owned)
+            .collect();
         anyhow::ensure!(
             on,
-            "the keyboard is on {:?}, not {namespace:?}",
-            self.hp.keyboard_layer()
+            "the keyboard is on {:?}, not {namespace:?}; the shell said:\n{}",
+            self.hp.keyboard_layer(),
+            said.join("\n")
         );
         Ok(())
     }
