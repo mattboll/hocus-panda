@@ -765,6 +765,14 @@ impl State {
                 let Some(mut geometry) = map.layer_geometry(&layer) else {
                     continue;
                 };
+                // The windows' and the music player's surfaces are kept
+                // while they show nothing: transparent on a GPU, black
+                // from a shell on the CPU, whose buffers have no alpha.
+                if self.shell.software
+                    && hocus_link::shows_nothing(layer.namespace(), geometry.size.h)
+                {
+                    continue;
+                }
                 // A popover moves in and out, and a notification's bubble;
                 // they show from their first frame.
                 // The emoji picker too (5.7).

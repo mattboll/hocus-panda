@@ -284,8 +284,9 @@ pub const SURFACE_WIDTH: u32 = 194;
 /// The tile's left in the surface, and its width.
 pub const SIDE: f32 = 11.0;
 pub const WIDTH: f32 = 172.0;
-/// The surface's height when it shows nothing (not a pixel, #617).
-const IDLE: u32 = (2.0 * ROOM) as u32;
+/// The surface's height when it shows nothing (not a pixel, #617): on the
+/// CPU, where it would show black, the compositor leaves it out.
+const IDLE: u32 = hocus_link::IDLE_HEIGHT as u32;
 
 #[derive(Debug, Clone, Default)]
 struct Place {

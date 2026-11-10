@@ -478,8 +478,9 @@ fn margin(top: f32) -> (i32, i32, i32, i32) {
 
 /// The surface's height when it shows nothing: the ring's room, drawing
 /// nothing. Not a pixel: at a fractional scale tiny-skia refuses a buffer
-/// that small (#617).
-const IDLE: u32 = (2.0 * draw::ROOM) as u32;
+/// that small (#617). On the CPU, where it would show black, the
+/// compositor leaves it out.
+const IDLE: u32 = hocus_link::IDLE_HEIGHT as u32;
 
 /// The surface's width when it shows nothing, in `form`.
 fn width_of(form: Option<Form>, switching: bool) -> u32 {
