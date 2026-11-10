@@ -13,7 +13,7 @@
 //! of whatever changed elsewhere (the desktops' dots, a row of the bar),
 //! and the bar vanished there until its next frame.
 
-mod common;
+use crate::common;
 
 use std::{path::Path, time::Duration};
 
@@ -77,10 +77,7 @@ impl Bed {
     /// The compositor and the real shell on wgpu in `theme`; `None` when
     /// either is missing.
     fn start(theme: &str) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let Some(manifest) = lavapipe() else {
             eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
             return Ok(None);

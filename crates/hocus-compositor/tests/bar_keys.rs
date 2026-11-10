@@ -12,7 +12,7 @@
 //! "the keyboard on an item") is read from its log; where the keyboard is,
 //! from the compositor; what the window gets, from the test's client.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -220,10 +220,7 @@ fn typed(events: &std::sync::mpsc::Receiver<Event>) -> Vec<u32> {
 #[test]
 fn super_b_lands_on_the_clock_and_esc_gives_the_keyboard_back_to_the_window() -> anyhow::Result<()>
 {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080"])?;
     let (_, typing) = common::open_showing(
         &mut bed.hp,
@@ -295,9 +292,7 @@ fn super_b_lands_on_the_clock_and_esc_gives_the_keyboard_back_to_the_window() ->
 
 #[test]
 fn super_b_lands_on_the_waiting_agent_then_on_the_stuck_one() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080"])?;
     let mark = bed.mark();
     bed.hp.tell_shell(ToShell::Agents(vec![
@@ -331,9 +326,7 @@ fn super_b_lands_on_the_waiting_agent_then_on_the_stuck_one() -> anyhow::Result<
 
 #[test]
 fn enter_opens_the_items_popover_and_esc_steps_back_twice() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080"])?;
     common::open(&mut bed.hp, "test.window", (600, 400))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -357,9 +350,7 @@ fn enter_opens_the_items_popover_and_esc_steps_back_twice() -> anyhow::Result<()
 
 #[test]
 fn super_shift_b_switches_the_form_and_super_b_no_longer_does() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080"])?;
     let form = |hp: &Headless| hp.bars().first().map(|b| b.1);
     assert_eq!(form(&bed.hp), Some(BarForm::Full));
@@ -385,9 +376,7 @@ fn super_shift_b_switches_the_form_and_super_b_no_longer_does() -> anyhow::Resul
 
 #[test]
 fn with_a_bar_on_each_screen_super_b_goes_on_to_the_next_then_back() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080", "1920x1080"])?;
     common::open(&mut bed.hp, "test.window", (600, 400))?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
@@ -418,9 +407,7 @@ fn with_a_bar_on_each_screen_super_b_goes_on_to_the_next_then_back() -> anyhow::
 #[test]
 fn the_magnifiers_view_follows_the_ring() -> anyhow::Result<()> {
     const KEY_EQUAL: u32 = 13;
-    let Some(shell) = shell_program() else {
-        return Ok(());
-    };
+    let shell = shell_program();
     let mut bed = start(&shell, &["1920x1080"])?;
     bed.hp.pointer_move(200.0, 500.0);
     for _ in 0..4 {

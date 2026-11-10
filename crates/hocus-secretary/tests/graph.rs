@@ -2,7 +2,7 @@
 //! on the valid time, beliefs on the recorded time; aliases; provenance
 //! and proposals; notebooks; undo; forget; export; encryption at rest.
 
-mod common;
+use crate::common;
 
 use hocus_secretary::{
     graph::{NewEdge, NewEpisode, NewRule, NodeKind, Origin, Target},

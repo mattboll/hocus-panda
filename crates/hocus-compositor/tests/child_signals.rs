@@ -9,7 +9,7 @@
 //! `sleep` itself, never through `sh`: dash clears its mask as it starts,
 //! which would hide the bug.
 
-mod common;
+use crate::common;
 
 use common::WAIT;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};

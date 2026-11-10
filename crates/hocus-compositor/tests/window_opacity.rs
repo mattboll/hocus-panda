@@ -4,7 +4,7 @@
 //! percentage, then goes; the window is drawn see-through, over what is
 //! under it. Pixman: the same pixels everywhere.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 
@@ -138,10 +138,7 @@ fn screenshots_for_the_maintainer() -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
         return Ok(());
     };
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built");
-        return Ok(());
-    };
+    let shell = common::shell_program();
     std::fs::create_dir_all(&out)?;
     let dir = tempfile::tempdir()?;
     let root = dir.path();

@@ -19,7 +19,7 @@
 //! Pixman here, the shell on the CPU, without motion: as in CI. Without
 //! the shell built or dbus-daemon, the tests skip.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -55,10 +55,7 @@ fn has(program: &str) -> bool {
 }
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     if !has("dbus-daemon") {
         eprintln!("dbus-daemon missing: skipped");
         return None;

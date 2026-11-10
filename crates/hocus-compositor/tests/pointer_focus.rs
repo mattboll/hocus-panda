@@ -4,7 +4,7 @@
 //! enter first), not to the one that was, even in the same turn of the
 //! loop.
 
-mod common;
+use crate::common;
 
 use common::{
     ClientHandle, Event, KEY_LEFTALT, KEY_TAB, Pointed, Shows, WAIT, compositor, open_showing,

@@ -26,9 +26,12 @@ fn hocus(dir: &Path, args: &[&str]) -> anyhow::Result<(bool, String, String)> {
 #[test]
 fn her_status_and_her_graph_as_of_a_date() -> anyhow::Result<()> {
     let program = Path::new(env!("CARGO_BIN_EXE_hocus")).with_file_name("hocus-secretary");
-    if !program.exists() {
-        return Ok(());
-    }
+    anyhow::ensure!(
+        program.exists(),
+        "hocus-secretary is not built ({} is not there): this test runs it, build the tests' \
+         programs first (cargo programs)",
+        program.display()
+    );
     let dir = tempfile::tempdir()?;
     let (ok, _, said) = hocus(dir.path(), &["status"])?;
     assert!(!ok && said.contains("assistant"), "{said}");

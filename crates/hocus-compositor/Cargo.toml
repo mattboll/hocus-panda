@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [[bin]]
 name = "hocuspanda"
@@ -113,3 +115,7 @@ serde_json = "1.0.154"
 serde = "1.0.229"
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

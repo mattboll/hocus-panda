@@ -11,9 +11,6 @@
 //! nothing; a page that "kept still for a moment" said nothing of a wheel
 //! still on its way.
 
-// Each test file uses a part of it.
-#![allow(dead_code)]
-
 use std::{path::Path, time::Duration};
 
 use hocus_compositor::{Headless, model::Rect};

@@ -16,7 +16,7 @@
 //! history 10 min after the start; the mini form's place; at rest nothing
 //! wakes before the next reminder.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -78,11 +78,7 @@ impl Drop for Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 #[derive(Default)]

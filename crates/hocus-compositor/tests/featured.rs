@@ -13,7 +13,7 @@
 //! the calendar; without `featured`, every shown calendar feeds them, as
 //! before. Day.1's step 3 writing `featured` is `day_sources.rs`'s.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -64,11 +64,7 @@ struct Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 /// The compositor with the real shell on the CPU at 14:25, its day

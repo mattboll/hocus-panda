@@ -8,7 +8,7 @@
 //! test over her socket, with a scripted fake model and a fixture source.
 //! Without her program (or the shell's) built, the tests skip.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -120,9 +120,7 @@ fn gone(pid: u32) -> bool {
 /// classic again stops her; the compositor's end ends her.
 #[test]
 fn she_runs_in_assistant_mode_only_and_comes_back_after_a_crash() -> anyhow::Result<()> {
-    let Some(program) = common::secretary_program() else {
-        return Ok(());
-    };
+    let program = common::secretary_program();
     let dir = tempfile::tempdir()?;
     let script = script(dir.path(), &program)?;
     let mut hp = Headless::start_with(pixman(), config(&script, SecretaryMode::Classic))?;
@@ -195,10 +193,7 @@ fn she_runs_in_assistant_mode_only_and_comes_back_after_a_crash() -> anyhow::Res
 /// shell is told she is unavailable.
 #[test]
 fn killing_her_leaves_the_bar_working() -> anyhow::Result<()> {
-    let (Some(program), Some(shell)) = (common::secretary_program(), common::shell_program())
-    else {
-        return Ok(());
-    };
+    let (program, shell) = (common::secretary_program(), common::shell_program());
     let dir = tempfile::tempdir()?;
     let script = script(dir.path(), &program)?;
     let shell = common::shell_script(dir.path(), &shell, &[])?;
@@ -260,9 +255,7 @@ fn turns(hp: &mut Headless, time: Duration) -> anyhow::Result<u32> {
 /// twice) wake its loop no more than rest does, and draw nothing.
 #[test]
 fn ten_minutes_of_hers_wake_the_compositor_zero_times() -> anyhow::Result<()> {
-    let Some(program) = common::secretary_program() else {
-        return Ok(());
-    };
+    let program = common::secretary_program();
     let dir = tempfile::tempdir()?;
     let script = script(dir.path(), &program)?;
     let mut hp = Headless::start_with(pixman(), config(&script, SecretaryMode::Assistant))?;
@@ -313,10 +306,7 @@ fn sent_to_shell(status: &Status) -> u64 {
 /// answer draws nothing meanwhile, and her answer reaches the shell after.
 #[test]
 fn she_holds_no_frame_of_the_shell_at_rest_nor_while_she_thinks() -> anyhow::Result<()> {
-    let (Some(program), Some(shell)) = (common::secretary_program(), common::shell_program())
-    else {
-        return Ok(());
-    };
+    let (program, shell) = (common::secretary_program(), common::shell_program());
     let dir = tempfile::tempdir()?;
     let script = script(dir.path(), &program)?;
     let shell = common::shell_script(dir.path(), &shell, &[])?;

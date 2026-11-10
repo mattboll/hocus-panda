@@ -20,7 +20,7 @@
 //! Pixman, as in CI. With `HOCUS_DRAWER_SHOTS=DIR`, PNGs of the drawer are
 //! left there (for review, never compared).
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -109,7 +109,7 @@ fn mails() -> String {
 }
 
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    Some((common::shell_program()?, common::secretary_program()?))
+    Some((common::shell_program(), common::secretary_program()))
 }
 
 struct Bed {

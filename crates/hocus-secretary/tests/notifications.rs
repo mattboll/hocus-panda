@@ -9,7 +9,7 @@
 //! is the compositor's test (`hocus-compositor/tests/secretary_notifications.rs`),
 //! with the real shell on a private bus.
 
-mod common;
+use crate::common;
 
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 

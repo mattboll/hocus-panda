@@ -127,10 +127,11 @@ jobs:
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
       - name: Programs
-        # The compositor's tests start the real shell and Settings, and run
-        # `hocus`, from beside them: a test binary does not build them. The
-        # archive takes them along (.config/nextest.toml).
-        run: cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+        # The compositor's tests start the real shell, Settings and
+        # secretary, and run `hocus`, from beside them: a test binary does
+        # not build them, and a test fails without them. The archive takes
+        # them along (.config/nextest.toml).
+        run: cargo programs
       - name: Tests' archive
         run: cargo nextest archive --workspace --archive-file nextest.tar.zst
       - uses: actions/upload-artifact@v4
@@ -201,7 +202,8 @@ jobs:
         with:
           name: nextest
       - name: The programs are in the archive
-        # Without them the tests that need them skip, and would pass.
+        # Without them the tests that need them fail, one by one: said once
+        # here instead.
         run: |
           zstd -dc nextest.tar.zst | tar -t > archive.txt
           for program in hocuspanda-shell hocus hocus-settings hocus-secretary; do

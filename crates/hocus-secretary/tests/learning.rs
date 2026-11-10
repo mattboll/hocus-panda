@@ -16,7 +16,7 @@
 //! - Taught rules: restated, checked, kept with "Annuler", their effect
 //!   computed (leaves) or applied (a tool barely used).
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

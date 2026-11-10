@@ -13,8 +13,8 @@
 //! shortcuts. What the window shows is read from its log, never on a
 //! time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -57,10 +57,7 @@ impl Bed {
     /// The compositor and the Settings' script, the file holding `text`;
     /// `None` when the Settings are not built.
     fn start(text: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in [

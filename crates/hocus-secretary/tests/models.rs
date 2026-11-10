@@ -14,7 +14,7 @@
 //! - AC18 and AC19's recorder halves: no secret of a mail, no key of the
 //!   keyring ever reaches a request body.
 
-mod common;
+use crate::common;
 
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 

@@ -3,7 +3,7 @@
 //! would set `\Seen`. A full cycle uses `EXAMINE` and `BODY.PEEK` only,
 //! changes no flag, and the next cycles fetch only what is new.
 
-mod fakes;
+use crate::fakes;
 
 use std::time::Duration;
 

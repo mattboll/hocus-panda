@@ -15,11 +15,9 @@
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-#[path = "levels/nm.rs"]
-mod nm;
+use crate::common;
+use crate::fakes;
+use crate::nm;
 
 use std::{
     path::{Path, PathBuf},
@@ -110,10 +108,7 @@ struct Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     if !fakes::available() {
         eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
         return None;

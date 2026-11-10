@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [lints]
 workspace = true
@@ -43,3 +45,7 @@ anyhow = "1.0.104"
 # Online Accounts faked on a private bus, for the Google tests.
 zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

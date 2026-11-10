@@ -3,7 +3,7 @@
 //! flush to the work area's edges, a resized edge sticks too, and windows
 //! that do not show do not pull.
 
-mod common;
+use crate::common;
 
 use anyhow::Context;
 

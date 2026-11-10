@@ -42,10 +42,9 @@
 //! With `HOCUS_DRAWER_SHOTS=DIR`, the tests leave PNGs of the drawer
 //! there (screenshots for review, never compared).
 
-mod common;
+use crate::common;
 
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::day_fakes as fakes;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -119,11 +118,11 @@ doing = "elle regarde ton agenda"
 
 /// The programs: the shell, hers, `hocus`.
 fn ready() -> Option<(PathBuf, PathBuf, PathBuf)> {
-    let shell = common::shell_program()?;
-    let secretary = common::secretary_program()?;
-    let exe = std::env::current_exe().ok()?;
-    let hocus = exe.parent()?.parent()?.join("hocus");
-    hocus.exists().then_some((shell, secretary, hocus))
+    Some((
+        common::shell_program(),
+        common::secretary_program(),
+        common::hocus_program(),
+    ))
 }
 
 struct Bed {

@@ -19,7 +19,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -87,10 +87,7 @@ impl Drop for Bed {
 /// The shell's program, or `None` (the test skips) when it is not built
 /// or there is no `dbus-daemon`.
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     let daemon = std::process::Command::new("sh")
         .args(["-c", "command -v dbus-daemon"])
         .stdout(std::process::Stdio::null())

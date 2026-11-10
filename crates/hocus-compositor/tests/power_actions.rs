@@ -11,7 +11,7 @@
 //! (`ActiveProfile`); the session bus, where one is needed, another with a
 //! fake notifications server: never the machine's.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -1197,10 +1197,7 @@ struct Shell {
 
 impl Shell {
     fn alone() -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state", "data"] {

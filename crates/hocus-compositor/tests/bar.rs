@@ -2,7 +2,7 @@
 //! for it on the primary screen, its two forms and the switch between
 //! them, and the shell that draws it.
 
-mod common;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -247,10 +247,7 @@ fn a_chosen_form_is_remembered_for_the_next_session() -> anyhow::Result<()> {
 
 #[test]
 fn the_shell_draws_the_bar_as_wide_as_its_form_and_rests() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = shell_program();
     let dir = tempfile::tempdir()?;
     let shell = common::shell_script(dir.path(), &shell, &[])?;
     let mut hp = Headless::start_with_shell(
@@ -329,10 +326,7 @@ fn shell_at(shell: &std::path::Path, at: &str, dir: &std::path::Path) -> anyhow:
 
 #[test]
 fn the_clock_shows_in_its_place_in_both_forms() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = shell_program();
     let dir = tempfile::tempdir()?;
     let shell = common::shell_script(dir.path(), &shell, &[])?;
     let mut hp = Headless::start_with_shell(
@@ -412,19 +406,15 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 
 /// On a GPU (the shell draws with wgpu): a minute change moves once, for
 /// about 520 ms, then the clock rests; with reduced motion it does not
-/// move. Skipped without a render node named in `HOCUS_TEST_GPU`.
+/// move. Fails without a render node named in `HOCUS_TEST_GPU`.
 #[test]
+#[ignore = "needs a GPU: HOCUS_TEST_GPU names its render node (docs/performance.md)"]
 fn a_minute_change_moves_once_then_rests() -> anyhow::Result<()> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = shell_program();
     // Only the GPU HOCUS_TEST_GPU names: the first one found may be the
     // one the session draws with.
-    let Some(node) = common::render_node() else {
-        eprintln!("the shell would draw on the CPU, without motion: skipped");
-        return Ok(());
-    };
+    let node = common::render_node()
+        .ok_or_else(|| anyhow::anyhow!("no GPU: the shell would draw without motion"))?;
     let dir = tempfile::tempdir()?;
     for (config, moves) in [(Config::default(), true), (reduced(), false)] {
         // The minute changes about two seconds after the shell starts.

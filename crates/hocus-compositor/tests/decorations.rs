@@ -5,7 +5,7 @@
 //! neither protocol (GTK 4), gets none. On XWayland, an X11
 //! window gets it unless its Motif hints ask for no decorations.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

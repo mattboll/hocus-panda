@@ -7,7 +7,7 @@
 //! says, the clients' idle notifications, and at rest a single timer that
 //! does not wake.
 
-mod common;
+use crate::common;
 
 use std::{
     io::{Read, Write},

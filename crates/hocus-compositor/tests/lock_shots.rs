@@ -5,13 +5,9 @@
 //! Alex, two agents waiting. Written to `$HOCUS_SHOTS` when it names a
 //! folder; run by hand (`--run-ignored only`).
 
-#[path = "levels/bluez.rs"]
-mod bluez;
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-#[path = "levels/nm.rs"]
-mod nm;
+use crate::common;
+use crate::fakes;
+use crate::nm;
 
 use std::{io::Write, path::PathBuf, time::Duration};
 
@@ -67,9 +63,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
         return Ok(());
     };
-    let Some(shell) = common::shell_program() else {
-        return Ok(());
-    };
+    let shell = common::shell_program();
     if !fakes::available() {
         eprintln!("the fakes' programs are missing: skipped");
         return Ok(());

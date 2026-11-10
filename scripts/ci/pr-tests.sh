@@ -5,7 +5,8 @@
 #   scripts/ci/pr-tests.sh BASE [full]
 #   scripts/ci/pr-tests.sh --plan BASE [full]   # only says whether it is everything
 #
-# - a test file changed (crates/C/tests/NAME.rs): that test binary;
+# - a test file changed (crates/C/tests/NAME.rs): its tests, `NAME::…` in
+#   the crate's one test binary (tests/main.rs, #765);
 # - a crate's sources changed: its unit tests;
 # - the pull request's description names more, on a line of its own:
 #   `Tests: settings_sound, appearance` (test files' names or paths), from
@@ -13,8 +14,9 @@
 # - a test harness, the lock file, the workspace's Cargo.toml or nextest's
 #   configuration changed, or `full` given: everything.
 #
-# The compositor's tests start the real shell, Settings and `hocus`, which
-# a test binary does not build: they are built first.
+# The compositor's tests start the real shell, Settings, `hocus` and the
+# secretary, which a test binary does not build: they are built first
+# (`cargo programs`, .cargo/config.toml), and a test fails without them.
 set -euo pipefail
 
 plan=
@@ -35,7 +37,7 @@ run() {
 }
 
 programs() {
-    cargo build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+    cargo programs
 }
 
 if [ -n "$full" ] || grep -qE '^(Cargo\.lock|Cargo\.toml|rust-toolchain(\.toml)?|\.config/nextest\.toml)$|^crates/[^/]+/tests/(common|levels|fakes)/' <<< "$changed"; then
@@ -56,13 +58,13 @@ add_test() {
     local name=$1 file
     for file in crates/*/tests/"$name".rs; do
         [ -e "$file" ] || { echo "::error::no test file named $name (Tests: line)"; exit 1; }
-        tests["$(cut -d/ -f2 <<< "$file")"]+=" --test $name"
+        tests["$(cut -d/ -f2 <<< "$file")"]+="${name}|"
     done
 }
 
 while read -r path; do
     case $path in
-        crates/*/tests/*/*) ;;
+        crates/*/tests/*/* | crates/*/tests/main.rs) ;;
         crates/*/tests/*.rs)
             [ -e "$path" ] && add_test "$(basename "$path" .rs)" ;;
         crates/*/src/* | crates/*/Cargo.toml)
@@ -98,6 +100,6 @@ if [ ${#units[@]} -gt 0 ]; then
 fi
 
 for crate in "${!tests[@]}"; do
-    # shellcheck disable=SC2086 # the --test flags, split on purpose
-    run -p "$crate" ${tests[$crate]}
+    # The files' modules: `test(/^(a|b)::/)`.
+    run -p "$crate" --test main -E "test(/^(${tests[$crate]%|})::/)"
 done

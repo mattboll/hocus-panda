@@ -9,7 +9,7 @@
 //! would, and each test waits until the compositor has read it. Motions
 //! are seen on the held clock, a step at a time.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 

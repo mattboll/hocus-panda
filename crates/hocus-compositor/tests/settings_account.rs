@@ -14,11 +14,9 @@
 //! nothing drawn. What the window shows is read from its log, never on a
 //! time.
 
-#[path = "levels/accounts.rs"]
-mod accounts;
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
+use crate::accounts;
+use crate::common;
+use crate::fakes;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -113,10 +111,7 @@ impl Bed {
     }
 
     fn start_on(user: User, passwd: bool, output: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let bus = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
             .stdout(Stdio::null())

@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [lints]
 workspace = true
@@ -18,3 +20,7 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

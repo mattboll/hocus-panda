@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [[bin]]
 name = "hocus"
@@ -28,3 +30,7 @@ serde_json = "1.0.154"
 [dev-dependencies]
 tempfile = "3.27.0"
 anyhow = "1.0.104"
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

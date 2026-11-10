@@ -12,7 +12,7 @@
 //! - AC40: "Oublier tout le perso" removes the perso items from her
 //!   memory, the index and the summaries, and leaves the pro ones.
 
-mod common;
+use crate::common;
 
 use std::{path::Path, sync::Arc};
 

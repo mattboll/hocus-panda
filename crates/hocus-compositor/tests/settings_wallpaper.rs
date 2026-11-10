@@ -12,8 +12,8 @@
 //! takes the wallpaper's colour; at rest nothing draws. What the programs
 //! show is read from their logs and the screens' pixels, never on a time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -75,13 +75,7 @@ impl Bed {
     }
 
     fn start_with_bus(text: &str, with_bus: bool) -> anyhow::Result<Option<Self>> {
-        let (Some(shell), Some(settings)) = (common::shell_program(), common::settings_program())
-        else {
-            eprintln!(
-                "the shell or the Settings are not built: build the workspace to run this test"
-            );
-            return Ok(None);
-        };
+        let (shell, settings) = (common::shell_program(), common::settings_program());
         if with_bus && !has("dbus-daemon") {
             eprintln!("no dbus-daemon: skipped");
             return Ok(None);

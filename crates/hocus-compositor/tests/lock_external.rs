@@ -5,7 +5,7 @@
 //! opens nothing, and the locker's crash leaves the session locked under
 //! the desktop's own lock (the tests' authenticator here, never PAM).
 
-mod common;
+use crate::common;
 
 use std::{os::fd::AsFd, path::Path, sync::mpsc, time::Duration};
 

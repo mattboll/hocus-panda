@@ -11,7 +11,7 @@
 //! Pixman, as in CI. With `HOCUS_DRAWER_SHOTS=DIR`, PNGs are left there
 //! (for review, never compared).
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -52,7 +52,7 @@ text = "Demain, tu as le point d’équipe à 9 h, puis la revue du site à 14 h
 "#;
 
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    Some((common::shell_program()?, common::secretary_program()?))
+    Some((common::shell_program(), common::secretary_program()))
 }
 
 struct Bed {

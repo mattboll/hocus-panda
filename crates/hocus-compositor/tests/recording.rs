@@ -11,7 +11,7 @@
 //! the runtime directory and PipeWire (with Son or Micro) are the test's
 //! own, PipeWire stopped by its own process id.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -793,10 +793,7 @@ impl ShellBed {
             .with_env_filter("hocus_compositor::record=debug")
             .with_writer(std::io::stderr)
             .try_init();
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         if !ready() {
             return Ok(None);
         }
