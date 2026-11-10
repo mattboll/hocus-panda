@@ -35,8 +35,13 @@ Where things are on that page:
 
 She thinks with Claude, through the Anthropic API: she needs an API key
 of yours (from the Anthropic console; a Claude subscription is not an API
-key). Until she has one, her drawer says « Il me manque ma clé Anthropic »
-and shows a field: paste the key there (`Ctrl+V`), then « Enregistrer ».
+key, and the key is billed by use, apart from it). Until she has one, her
+drawer says « Il me manque ma clé Anthropic », explains what the key is,
+has « Ouvrir la console d'Anthropic ↗ » (your browser opens on the page
+where keys are made) and a field: paste the key there (`Ctrl+V`; it
+starts with `sk-ant-`), then « Enregistrer ». A key refused is said under
+the field, with what to do. Nothing else is asked before her key: her
+first run's steps (« Pour commencer ») show where you are.
 Settings › Secretary has the same field (« Clé Anthropic »), and once the
 key is saved, « ✓ Enregistrée », « Remplacer » and « Effacer ». She checks the
 key with Anthropic (a request that costs nothing) and says plainly when it
@@ -44,7 +49,7 @@ is refused or when there is no network; it goes to your keyring (the one
 the session unlocks), never to a file, and a copy of it leaves the
 clipboard's history.
 
-Or in a terminal of the session:
+Or, for scripts, in a terminal of the session (her drawer never shows this):
 
 ```sh
 hocus-secretary key anthropic
@@ -80,39 +85,50 @@ its driver does not say), and Ollama runs it on two processor threads
 only. `heat`, `resume`, `gpu-heat`, `gpu-resume` and `threads` in
 `[secretary.triage]` change them. Without it, nothing is lost:
 what arrives waits, and until it is sorted only its sender, subject and
-date go to Claude. Her drawer says so (« Le tri sur cet ordinateur ne
-répond pas »). Another server: `[secretary.providers.local]` in the
-configuration file.
+date go to Claude. Her drawer's status says so in a few words (« Tri en
+pause : l'ordinateur chauffe »), and the sorting's view says why, once
+(« L'ordinateur chauffe (97 °C). Je reprends quand il redescend sous
+90 °C ; rien n'est perdu. »). Another server:
+`[secretary.providers.local]` in the configuration file.
 
-To see what waits, click her status line in her drawer: the sorting
-unfolds there, the mail read now, the rest by sender with their counts,
-how long an item takes and how long is left, and why it waits when it
-does (too hot, on battery, the model not answering). On a sender, « Ne
-pas trier, chercher si besoin » leaves its mails unsorted, those waiting
-and those to come: she keeps their sender, subject and date, finds them
-when you ask, and sorts the one you ask about first. She proposes it
-herself for a sender whose mails say they come from a machine (GitHub,
-GitLab, newsletters, no-reply addresses). It is a rule in « Ce qu’elle
-sait » › Règles: « N’est plus vrai » there, or « Trier quand même » in
-the sorting's view, and its mails are sorted again.
+To see what waits, click « 21 mails à trier › » under her name in her
+drawer (it shows while mails wait): the sorting unfolds there, under
+« ‹ Retour à la discussion » and « Le tri de tes mails », with a sentence
+saying what the sorting is for; the mail read now, how long is left, then
+one card per sender: those sent by machines (notifications, newsletters),
+the people, whom she sorts first. On a machine's card, « Ne pas trier les
+mails de GitHub » (« Ne pas trier cette lettre » for a newsletter) leaves
+its mails unsorted, those waiting and those to come: she keeps their
+sender, subject and date, finds them when you ask, and sorts the one you
+ask about first. A person's mails are never offered to be left unsorted:
+you would miss that they wait for an answer. She proposes it herself for
+a sender whose mails come from a machine (« GitHub t'a envoyé 11
+notifications automatiques. Je les laisse sans tri ? »). It is a rule in
+« Ce qu’elle sait » › Règles: « Ce n’est plus vrai » in its « ··· » menu
+there, or « Trier à nouveau les mails de GitHub » under « Pas triés, à ta
+demande » in the sorting's view, and its mails are sorted again.
 
 ## 4. Your Google accounts
 
-She reads the Google accounts already in GNOME's Online Accounts. Each
-kind (agenda, mail, birthdays) is asked for on its own, on a sheet that
-says what she reads, what she never does there (no mail marked read,
+She reads the Google accounts already signed in on this computer (GNOME's
+Online Accounts). Each kind (agenda, mail, birthdays) is a consent of its
+own, with what she reads, what she never does there (no mail marked read,
 nothing sent, no invitation answered) and what leaves the computer:
 
-- the first time you open her drawer, one source at a time ("Autoriser",
-  or "Pas maintenant");
+- the first time you open her drawer, one card per account: a switch per
+  kind (the agenda and the mails on, the birthdays off), « Ce compte est
+  Travail | Privé », what she reads exactly folded under « Ce que je lis
+  exactement, et ce qui part chez Anthropic › », then « Autoriser l'agenda
+  et les mails » (it says what the switches allow) or « Pas maintenant »;
+  the next account shows dashed under it;
 - at any time in Settings › Secretary, under "CE QU'ELLE LIT": its
   switch. Turned on, its sheet opens, and nothing is read before its
   "Autoriser"; turned off, she no longer reads it and forgets what came
   from it (the toast's "Annuler", or `Ctrl+Z`, reads it again as it
   was).
 
-Each sheet has a box « C'est privé », checked for a gmail.com account and
-not for a company's, with what it does: never shown during a meeting, a
+« Privé » is proposed for a gmail.com account, « Travail » for a
+company's; « Privé » means: never shown during a meeting, a
 screen share or a call; never in a message or a task she drafts for work;
 she brings it up evenings and weekends too, never at night (22 h – 8 h).
 You can change it later on the account's line (« Travail | Privé », for
@@ -134,17 +150,48 @@ Birthdays are read from your Google contacts over CardDAV, as Google
 documents it (a list of the cards, then the cards themselves), once a
 day: only each contact's name, birthday and anniversary.
 
-Then tell her what you work on, and with whom: she remembers it.
+Then tell her what you work on, and with whom (her first run's third
+step): she remembers it.
+
+## Her drawer
+
+Her name, and her state in a few words (« Tout est à jour », « Je ne lis
+encore rien », « Tri en pause : l'ordinateur chauffe »). On a day nothing
+is said yet, she says hello, what she reads, and three things to ask her.
+What she proposes says where it leaves and to whom (« Message Slack · à
+Léa Martin, en privé ») with « Envoyer sur Slack », « Modifier » and « Ne
+pas envoyer »; nothing leaves before that click, and the card then says
+what left, where and when (« ✓ Envoyé sur Slack à 9 h 12 »). Her questions
+are labelled « Question », in blue; what she notes says « Noté : … » with
+« Annuler » and a bar emptying over its ten seconds. Under the field, only
+how to send: her model's name is in the Settings.
+
+« Ce qu'elle sait »: what is to confirm first (« C'est juste · Faux » for
+what she guessed, « Oui · Non » for what she proposes; she uses none of it
+until you answer), what she learned this week, then the rest; each line
+has « ··· » on hover (Modifier, Ce n'est plus vrai, Voir d'où je le sais,
+Oublier) and says plainly where she has it from (« Deviné d'après le
+ticket « Refonte de l'accueil » », « Vu dans Slack, le 9 nov. »).
+« Travail et privé · Travail · Privé » beside the search; the chips (none
+chosen shows everything; « Ma façon d'être » has its own). « Exporter »;
+« Effacer… ▾ » apart (« Oublier tout le privé… », « Tout oublier… »),
+always confirmed.
+
+Her morning briefing comes out of the bar with what is in it (« Ton point
+du matin est prêt. 3 réunions, 2 mails attendent ta réponse »), « Voir le
+point » and « Plus tard ▾ ». The briefing names your free slot, and each
+mail waiting for your answer has « Ouvrir le mail ↗ » (in your browser;
+she never marks it read) and « Rappelle-le-moi » (two hours later).
 
 ## 5. Her way of being
 
 There is no field for her character: tell her. « Vouvoie-moi », « sois
 plus directe », « pas de listes », « réponds plus court », « un peu plus
-d'humour », « arrête les emojis »: she answers « Retenu : … » (with
+d'humour », « arrête les emojis »: she answers « Noté : … » (with
 « Annuler » for ten seconds) and keeps to it in every answer; a later
 request on the same thing replaces the older, and she says so. What she
-keeps is listed in « Ce qu'elle sait » › « Sa façon d'être », where you can
-change it (« Modifier ») or remove it (« Oublier »). She may also notice
+keeps is listed in « Ce qu'elle sait » › « Ma façon d'être », where you can
+change it or remove it from its « ··· » menu (« Modifier », « Oublier »). She may also notice
 something herself (« Tu me demandes souvent de faire plus court : je
 réponds plus court d'office ? ») and asks once; nothing changes without
 your « Oui ».

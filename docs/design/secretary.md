@@ -2790,3 +2790,112 @@ docs/design/settings.md "Secretary (#759)" has the page row by row.
   key, the triage's words and « Quand trier ». The bed they share with the
   Agents page's tests is `tests/agents_bed/`; `settings_agents.rs` checks
   the line to her page.
+
+### #758: the drawer's second UX pass (mockup ux2)
+
+The maintainer-approved mockup `s11-secretary/ux2` (sections 1–5) and its
+audit: the drawer says states and plain words, one way to say yes, and
+buttons where the user decides.
+
+- **Header**: her status is a state (« Tout est à jour », « Je ne lis
+  encore rien » while her first run reads nothing, « Il me manque ma clé
+  Anthropic », « Gmail ne répond plus », « Tri en pause : l'ordinateur
+  chauffe | sur batterie | il ne répond pas », « 2 agendas illisibles »);
+  the sources' list is in « Ce qu'elle sait › Outils ». No hint band for a
+  pause: the queue's view says why. « N mails à trier › » is a button under
+  it while mails wait (`Look::to_sort`: the mails waiting and the one read
+  now, the same count as her question and the view); without it the
+  status line still opens the view. Over « Ce qu'elle sait », her subtitle
+  has no dot.
+- **Sub-views** (the queue, a briefing, the agents' line): « ‹ Retour à la
+  discussion » and their title in place of the tabs; no field.
+- **Thread**: a draft names its channel and recipient (`propose_*`'s new
+  required `channel`: « Message Slack · à Léa Martin, en privé »), « Envoyer
+  sur Slack · Modifier · Ne pas envoyer », « Rien ne part sans ce clic. »;
+  once sent, « Envoyé sur Slack à 9 h 12 » (her clock). A promise's « Non
+  merci ». Her questions: a blue « QUESTION » card, plain text, the quick
+  replies inside (« « Égaluantes », je ne connais pas ce mot. C'est pour
+  Chapitô ? » · « Oui, c'est Chapitô · Non · Je t'explique »). « Noté : … »
+  replaces « Retenu » (no rule's number), with « Annuler » and a bar that
+  empties over its ten seconds (stepped four times a second from the
+  drawer's deadline, never per frame). A day nothing is said on (her
+  clock's day, `Look::today`): her greeting (`Look::greeting`, « Bonjour
+  Alex. Je lis ton agenda et tes mails ; dis-moi ce dont tu as besoin, ou
+  essaie : ») and three examples, a click says one. Refusals say « c'est
+  une sécurité ». Under the field « Entrée envoie · Maj+Entrée : à la
+  ligne », the placeholder « Écris à Margot… »; no model's name. The caret
+  stays still (the shell's rule: nothing redraws at rest).
+- **Queue view**: a sentence saying what the triage is; « Je trie · 21
+  mails en attente · 2 triés », a progress bar, « Encore 14 min environ (40
+  s par mail sur cet ordinateur). » (`View::pace`), « En ce moment : GitHub
+  · « … » »; or « En pause » with one reason and the real threshold
+  (« L'ordinateur chauffe (97 °C). Je reprends quand il redescend sous
+  90 °C ; rien n'est perdu. »). One card per sender (`Group::name`,
+  `Group::sender`: machine, newsletter, person, other), grouped ENVOYÉS
+  PAR DES MACHINES (« Ne pas trier les mails de GitHub », « Ne pas trier
+  cette lettre », inside the card), DES PERSONNES (no action: a person's
+  mails left unsorted would hide a wait; `can_aside` is false for them),
+  NOTIFICATIONS ET AGENDA; PAS TRIÉS, À TA DEMANDE (« depuis le 3 nov. »,
+  « Trier à nouveau les mails de Scaleway »). No header's name, no model's.
+  Her question: « GitHub t'a envoyé 11 notifications automatiques. Je les
+  laisse sans tri ? Je les retrouverai si tu me les demandes. » · « Oui,
+  ne pas les trier · Non · Plus tard ».
+- **Ce qu'elle sait**: À CONFIRMER (proposals: « C'est juste · Faux » for a
+  guess, « Oui · Non » for her observations, nothing used before an answer)
+  then APPRIS CETTE SEMAINE (no « Garder »: noted, corrected through its
+  menu), then the sections. Only what is to confirm has buttons; the rest
+  « ··· » on hover, its menu (Modifier, Ce n'est plus vrai, Voir d'où je le
+  sais, Oublier). Provenance in plain words (« Tu me l'as dit le 9 nov. »,
+  « Vu dans Slack, le 9 nov. · Ouvrir ↗ », « Deviné d'après le ticket
+  « … » », the episode's title, never its code), neutral wording (« est
+  dans l'équipe … depuis », « a quitté l'équipe », « arrivée récente »),
+  articles in lower case mid-sentence (« relit le site web »), a tool's use
+  in its own word (« aucune carte en 30 jours »). One switch « Travail et
+  privé · Travail · Privé » beside the search; chips without « Tout » (a
+  chip chosen again lets go), « Ma façon d'être » its own (`Kind::Manner`).
+  Footer « 30 choses, chiffrées sur cet ordinateur · Exporter » and
+  « Effacer… ▾ » apart, in orange; its confirmation never with a toast
+  that undoes (the toast goes), and the list stays above and below it.
+  A menu's place hides the list's text under it.
+- **First run, three steps** (`Body::Steps`: done, now, later): her key
+  first (nothing else asked while it misses: her first run waits for the
+  keyring's answer, and goes on when a key is kept); then **one card per
+  account** (`sheets::account`: a switch per kind, the calendar and mail
+  on, the birthdays off, « 4 agendas, choisir › » unfolding the calendars,
+  her promise, « Ce compte est Travail | Privé » and one line on what
+  « Privé » changes, « Ce que je lis exactement, et ce qui part chez
+  Anthropic › » unfolding the three sections, « Autoriser l'agenda et les
+  mails » as the switches say, on the left, « Pas maintenant »; the next
+  account dashed under it). « Autoriser » writes a grant for each kind on
+  (`Decide::off`, version 8); the kinds off are not asked again this run.
+  « Ne plus lire » revokes what the card granted. Then « Dis-moi sur quoi
+  tu travailles, et avec qui. », its step done at the user's next
+  sentence. No morning briefing while her first run is under way. Her key's
+  band: what a key is, « Ouvrir la console d'Anthropic ↗ » (the shell's
+  browser opening), billed apart from a Claude subscription, the field
+  « Colle ta clé ici (elle commence par sk-ant-) », a refusal under it with
+  what to do and the field's ring orange, « dans le trousseau de ta
+  session, avec tes mots de passe ». No terminal command on screen.
+- **Briefing**: her peek « **Ton point du matin est prêt.** 3 réunions, 2
+  mails attendent ta réponse, Sophie est en congés. » · « Voir le point ·
+  Plus tard ▾ » (no « Fait » on a briefing). Its card in the thread « TON
+  POINT DU MATIN · 8 H 30 » with its summary (`Briefing::summary`). The
+  view under « Ton point du lundi 9 novembre »: « une journée chargée ; ton
+  seul créneau libre : 10 h – 11 h » (`busy`, `slot`: the free hours of an
+  hour or more between 9 h and 18 h), À RÉPONDRE · 2 mails, each with
+  « Ouvrir le mail ↗ » (the episode's link, in the browser, never marked
+  read) and « Rappelle-le-moi » (`ToSecretary::RemindMe`: a reminder two
+  hours later, the line then « ✓ Je te le rappelle à 11 h »), LE RESTE,
+  « 2 mails arrivés, dont 1 pour toi » while away.
+- **Protocol 8**: `Look::{to_sort, greeting, today}`, `Body::Steps`,
+  `Briefing::{busy, slot, summary}`, `Line::{pointer, open, reminded}`,
+  `queue::{Group::{name, sender, since}, View::pace}`, `knows::Kind::Manner`,
+  `sheets::{Sheet::{reads, ask, promise, more, then}, Private::{choice,
+  short}}`, `Decide::off`, `ToSecretary::RemindMe`.
+
+Differs from the mockup: « Voir ↗ » after a message sent (no link to a
+message she cannot send herself yet); the caret does not blink (nothing
+redraws at rest); the empty drawer's greeting names her sources as she
+reads them (« Planka et tes notifications »); a guess whose source is not
+in her memory says « Deviné d'après ce que j'ai lu »; the Settings and
+`hocus msg` cannot yet open her drawer on a given view.
