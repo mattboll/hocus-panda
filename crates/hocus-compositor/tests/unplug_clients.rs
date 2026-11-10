@@ -45,6 +45,17 @@ use wayland_protocols::{
     },
 };
 
+/// The shell's bar's own surfaces, one of each per bar.
+const BAR_PARTS: [&str; 8] = [
+    hocus_link::NAMESPACE,
+    hocus_link::CLOCK_NAMESPACE,
+    hocus_link::LEVELS_NAMESPACE,
+    hocus_link::CONNECTIONS_NAMESPACE,
+    hocus_link::DESKTOPS_NAMESPACE,
+    hocus_link::AGENTS_NAMESPACE,
+    hocus_link::TASKS_NAMESPACE,
+    hocus_link::FOOTER_NAMESPACE,
+];
 const FIRST: &str = "HEADLESS-1";
 const SECOND: &str = "HEADLESS-2";
 const APP_ID: &str = "test.watcher";
@@ -1037,22 +1048,26 @@ fn the_shells_bar_closed_with_its_screen_is_drawn_on_the_other() -> anyhow::Resu
     )?;
     let bar_on =
         |hp: &Headless| -> Vec<String> { hp.bar_surfaces().into_iter().map(|(o, _)| o).collect() };
+    // The screens of each of the bar's surfaces. Its first one shows before
+    // the shell has asked for the others: its screen unplugged then, the
+    // shell's toolkit no longer knows the name they are asked for by, and
+    // asks for them on no screen (#751). So the test waits for the whole
+    // bar before it unplugs a screen.
+    let whole_on = |hp: &Headless| -> Vec<Vec<String>> {
+        BAR_PARTS
+            .iter()
+            .map(|n| hp.layer_rects(n).into_iter().map(|(o, _)| o).collect())
+            .collect()
+    };
+    let only = |screen: &str| vec![vec![screen.to_owned()]; BAR_PARTS.len()];
     let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| {
-        hp.shell_connected() && bar_on(hp) == [FIRST]
+        hp.shell_connected() && whole_on(hp) == only(FIRST)
     })?;
-    assert!(
-        drawn,
-        "the bar on the first screen: {:?}",
-        hp.bar_surfaces()
-    );
+    assert!(drawn, "the bar on the first screen: {:?}", whole_on(&hp));
 
     hp.unplug(FIRST)?;
-    let moved = hp.dispatch_until(WAIT, |hp| bar_on(hp) == [SECOND])?;
-    assert!(
-        moved,
-        "the bar on the second screen: {:?}",
-        hp.bar_surfaces()
-    );
+    let moved = hp.dispatch_until(WAIT, |hp| whole_on(hp) == only(SECOND))?;
+    assert!(moved, "the bar on the second screen: {:?}", whole_on(&hp));
     wait(&mut hp, Duration::from_millis(300))?;
     assert!(hp.shell_connected(), "the shell went");
 

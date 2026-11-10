@@ -10,7 +10,10 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use jiff::{SignedDuration, Timestamp};
@@ -376,6 +379,8 @@ pub struct Fake {
     recorder: Option<Arc<Recorder>>,
     /// Her clock, for a triage's delay.
     clock: Option<Clock>,
+    /// Its triages that read her clock and have not answered yet.
+    timing: AtomicUsize,
 }
 
 impl Fake {
@@ -384,6 +389,7 @@ impl Fake {
             script,
             recorder,
             clock: None,
+            timing: AtomicUsize::new(0),
         }
     }
 
@@ -490,6 +496,15 @@ impl Model for Fake {
 }
 
 impl Fake {
+    /// How many of its triages counted their delay from her clock and
+    /// still wait on it. Her loop starts a triage on a thread of its own,
+    /// which reads her clock when it gets to run: moved before that, the
+    /// delay starts after the move and never ends. A test moves the clock
+    /// once a triage under way is counted here (#760).
+    pub fn timing(&self) -> usize {
+        self.timing.load(Ordering::SeqCst)
+    }
+
     /// It triages too (its script has `[[triage]]`).
     pub fn triages(&self) -> bool {
         !self.script.triage.is_empty()
@@ -514,7 +529,9 @@ impl crate::triage::Triager for Fake {
                 .now()
                 .checked_add(seconds(delay))
                 .unwrap_or(Timestamp::MAX);
+            self.timing.fetch_add(1, Ordering::SeqCst);
             clock.sleep_until(until);
+            self.timing.fetch_sub(1, Ordering::SeqCst);
         }
         let verdict = scripted.map(|t| t.verdict.clone()).unwrap_or_default();
         Ok((verdict, words(input), 20))
