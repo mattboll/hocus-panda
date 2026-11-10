@@ -103,10 +103,7 @@ mod tests {
     #[test]
     fn an_attribute_ends_neither_its_value_nor_its_tag() {
         let made = attr("mail:<a\"b>@evil\nchecked=\"yes\"");
-        assert_eq!(
-            made,
-            "mail:&lt;a&quot;b&gt;@evil checked=&quot;yes&quot;"
-        );
+        assert_eq!(made, "mail:&lt;a&quot;b&gt;@evil checked=&quot;yes&quot;");
         assert!(!made.contains(['"', '<', '>', '\n']));
     }
 

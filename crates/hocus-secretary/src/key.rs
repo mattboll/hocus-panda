@@ -4,7 +4,11 @@
 //! another; else, without a bus or when the keyring does not answer as
 //! her memory is first made, in a key file beside it, `memory.key`
 //! (`0600`), made once and kept, as the clipboard's history does. Once
-//! there, a key file is used from then on.
+//! there, a key file is used from then on. Her memory is then encrypted
+//! against a copy of its file alone, not against who reads the folder: her
+//! status says where the key is ([`Place`]), and the drawer and the
+//! Settings say it to the user in plain words
+//! (`hocus_secretary_link::key_beside_said`, #768).
 //!
 //! The keyring is asked on her own thread, with a timeout: one that hangs,
 //! or asks the user to unlock it and is never answered, leaves her memory
@@ -114,7 +118,7 @@ impl Place {
     pub const fn word(self) -> &'static str {
         match self {
             Self::Keyring => "keyring",
-            Self::File => "file",
+            Self::File => hocus_secretary_link::KEY_IN_FILE,
         }
     }
 }

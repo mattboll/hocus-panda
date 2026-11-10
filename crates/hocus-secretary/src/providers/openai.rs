@@ -72,8 +72,7 @@ impl Endpoint<'_> {
         if let Some(key) = self.key {
             // Written once, with its room from the start, and wiped once
             // the request has it.
-            let mut bearer =
-                zeroize::Zeroizing::new(String::with_capacity(7 + key.expose().len()));
+            let mut bearer = zeroize::Zeroizing::new(String::with_capacity(7 + key.expose().len()));
             bearer.push_str("Bearer ");
             bearer.push_str(key.expose());
             request = request.header("authorization", bearer.as_str());

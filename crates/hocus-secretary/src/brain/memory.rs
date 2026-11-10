@@ -1127,6 +1127,8 @@ impl Brain {
             seen: learn::load_seen(&self.store),
         };
         let mut view = knows::view(&self.store, query, &context).map_err(|e| e.to_string())?;
+        // No keyring had her memory's key (#768): the tab says where it is.
+        view.key_beside = self.key == hocus_secretary_link::KEY_IN_FILE;
         // In a public moment (§7.4, lot 5): no perso item leaves her, only
         // how many.
         if self.scope.moment.public() {

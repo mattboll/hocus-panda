@@ -693,8 +693,7 @@ pub fn retrieve(
                     if let Some((start, end, text)) = summary {
                         add(
                             item.word(),
-                            inert::line(&format!("- résumé {start} → {end} : {text}"))
-                                .into_owned(),
+                            inert::line(&format!("- résumé {start} → {end} : {text}")).into_owned(),
                             None,
                             base,
                         );

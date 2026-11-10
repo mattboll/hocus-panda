@@ -1232,6 +1232,8 @@ pub fn view(store: &Store, query: &Query, context: &Context) -> Result<Knowledge
         sections,
         total: total(store, notebook)?,
         hidden: 0,
+        // Her loop knows where her key is.
+        key_beside: false,
     })
 }
 

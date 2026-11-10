@@ -343,6 +343,32 @@ pub(super) fn lay_out(
         }
         Some(view) => {
             let mut index = 0u32;
+            // Her memory's key beside it, no keyring having had it (#768):
+            // said first, where her memory is shown.
+            if view.key_beside {
+                at += 8.0;
+                let first = shapes.len();
+                let from = at;
+                let room = right - PAD - 4.0;
+                for line in lines_of(
+                    hocus_secretary_link::key_beside_said(words.fr),
+                    META,
+                    false,
+                    room,
+                ) {
+                    shapes.push(text(
+                        &line,
+                        Point::new(PAD + 2.0, at + META * 0.7),
+                        META,
+                        hex(0xF7A77A),
+                        false,
+                        Alignment::Left,
+                    ));
+                    at += META_LINE;
+                }
+                said.push("key-beside".to_owned());
+                blocks.push((first, shapes.len(), from, at));
+            }
             // A public moment (§7.4): her perso items are not sent, only
             // how many.
             if view.hidden > 0 {

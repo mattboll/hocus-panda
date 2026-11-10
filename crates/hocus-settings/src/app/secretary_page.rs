@@ -118,6 +118,9 @@ pub enum Msg {
 pub struct Heard {
     /// Her answers' provider and whether her keyring misses its key.
     pub key: Option<(String, bool)>,
+    /// Her memory's key is in a file beside it, no keyring having had it
+    /// (#768): "Ce qu'elle sait" says so.
+    pub key_beside: bool,
     pub triage: Option<TriageStatus>,
     /// The triage's provider's kind, as the file says (`ollama`).
     pub kind: Option<String>,
@@ -438,6 +441,7 @@ impl App {
                         });
                         Heard {
                             key: s.key_provider.map(|p| (p, s.key_missing)),
+                            key_beside: s.key == hocus_secretary_link::KEY_IN_FILE,
                             triage: s.triage,
                             kind,
                         }
@@ -1406,17 +1410,18 @@ impl App {
         )
     }
 
+    /// Her memory's key is beside it, as her status last said.
+    fn secretary_key_beside(&self) -> bool {
+        self.secretary.heard.as_ref().is_some_and(|h| h.key_beside)
+    }
+
     /// "Ce qu'elle sait": where to see it (her drawer has no way in from
-    /// here yet).
+    /// here yet), and how it is kept.
     fn secretary_knows_row(&self) -> El<'_> {
         self.secretary_box(
             self.secretary_words(
                 self.say(w("Ce qu’elle sait", "What she knows")).to_owned(),
-                self.say(w(
-                    "De toi et de ton travail, chiffré sur cet ordinateur. Tu le vois et le corriges dans son tiroir, onglet « Ce qu’elle sait ».",
-                    "Of you and your work, encrypted on this computer. You see and correct it in her drawer, under “What she knows”.",
-                ))
-                .to_owned(),
+                knows_said(self.secretary_key_beside(), self.lang == Lang::French),
                 14.0,
             ),
             model::KNOWS,
@@ -2182,10 +2187,29 @@ impl App {
                     Err(_) => "no answer".to_owned(),
                 }),
             })),
+            "knows": knows_said(self.secretary_key_beside(), lang == Lang::French),
             "answers": heard.is_some(),
             "triage": heard.and_then(|h| h.triage.as_ref()).map(|t| model::triage_said(&t.state, t.pending, lang)),
             "model": heard.and_then(|h| h.triage.as_ref().map(|t| model::model_said(&t.model, h.kind.as_deref(), &t.state, lang))),
         })
+    }
+}
+
+/// What "Ce qu'elle sait" says of her memory: encrypted on this
+/// computer; and, when no keyring had its key (`beside`), that the key is
+/// in a file beside it and what that means (#768), never "encrypted" alone.
+fn knows_said(beside: bool, fr: bool) -> String {
+    match (beside, fr) {
+        (false, true) => "De toi et de ton travail, chiffré sur cet ordinateur. Tu le vois et le corriges dans son tiroir, onglet « Ce qu’elle sait ».".to_owned(),
+        (false, false) => "Of you and your work, encrypted on this computer. You see and correct it in her drawer, under “What she knows”.".to_owned(),
+        (true, true) => format!(
+            "De toi et de ton travail. {} Tu le vois et le corriges dans son tiroir, onglet « Ce qu’elle sait ».",
+            hocus_secretary_link::key_beside_said(true)
+        ),
+        (true, false) => format!(
+            "Of you and your work. {} You see and correct it in her drawer, under “What she knows”.",
+            hocus_secretary_link::key_beside_said(false)
+        ),
     }
 }
 
@@ -2234,5 +2258,25 @@ mod tests {
         ];
         assert_eq!(accounts(&google), [(0, vec![0, 2, 1]), (3, vec![3, 4])]);
         assert!(accounts(&[]).is_empty());
+    }
+
+    /// #768: with its key in a file beside it, her memory is never said
+    /// "encrypted on this computer" alone, in either language.
+    #[test]
+    fn a_key_beside_her_memory_is_said_with_what_it_means() {
+        for fr in [true, false] {
+            let kept = knows_said(false, fr);
+            let beside = knows_said(true, fr);
+            assert!(!kept.contains(hocus_secretary_link::key_beside_said(fr)));
+            assert!(beside.contains(hocus_secretary_link::key_beside_said(fr)));
+            assert!(beside.ends_with(if fr { "sait ».") } else { "knows”." }));
+        }
+        let fr = knows_said(true, true);
+        assert!(fr.contains("sa clé est rangée à côté, sur ce disque"), "{fr}");
+        assert!(fr.contains("ton trousseau"), "{fr}");
+        assert!(fr.contains("Qui peut lire tes fichiers"), "{fr}");
+        let en = knows_said(true, false);
+        assert!(en.contains("its key is kept beside it, on this disk"), "{en}");
+        assert!(en.contains("your keyring"), "{en}");
     }
 }

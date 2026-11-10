@@ -62,6 +62,17 @@ fn reach(address: &str) -> Reach {
     if host.is_empty() || authority.as_str().contains('@') {
         return Reach::Refused;
     }
+    // After its host, a port in digits or nothing: the parser takes
+    // `127.0.0.1:11434.evil.example` for the host `127.0.0.1` and a port
+    // it has not read yet, and what a client makes of that is its own.
+    let port = authority.as_str().strip_prefix(host).unwrap_or("?");
+    let port_reads = port.is_empty()
+        || port
+            .strip_prefix(':')
+            .is_some_and(|p| p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok());
+    if !port_reads {
+        return Reach::Refused;
+    }
     match scheme {
         "https" => Reach::Tls,
         "http" if loopback(host) => Reach::LocalClear,
@@ -142,6 +153,11 @@ mod tests {
             "http://127.0.0.1:11434\\@evil.example/",
             "http://127.0.0.1:11434 @evil.example/",
             "http://127.0.0.1:port/",
+            "http://127.0.0.1:/",
+            "http://127.0.0.1:99999/",
+            "http://127.0.0.1:11434.evil.example/",
+            "http://localhost:11434.evil.example/v1",
+            "http://[::1]:11434.evil.example/",
             "http:127.0.0.1:11434",
             "http:///v1",
             "127.0.0.1:11434",
@@ -172,6 +188,7 @@ mod tests {
             "https://user:secret@api.anthropic.com/",
             "https://",
             "https:///v1",
+            "https://api.anthropic.com:443.evil.example/",
         ] {
             assert!(!allowed(address), "{address:?}");
         }
