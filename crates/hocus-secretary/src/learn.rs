@@ -2008,3 +2008,14 @@ pub(crate) fn quiet_things(tool: &str, count: u32, days: u32, fr: bool) -> Strin
         (n, false) => format!("{n} {many} in {days} days"),
     }
 }
+
+/// `name` in the middle of a sentence: its article in lower case (« Le
+/// site web » → « le site web »), the rest as it is.
+pub fn mid_sentence(name: &str) -> String {
+    for article in ["Le ", "La ", "Les ", "L’", "L'"] {
+        if let Some(rest) = name.strip_prefix(article) {
+            return format!("{}{rest}", article.to_lowercase());
+        }
+    }
+    name.to_owned()
+}

@@ -672,6 +672,9 @@ impl std::fmt::Debug for Menu {
     }
 }
 
+/// How often a « Noté »'s bar steps down.
+const NOTED_STEP: Duration = Duration::from_millis(250);
+
 /// How long « Copié » shows.
 pub const COPIED: Duration = Duration::from_millis(1500);
 /// Presses this close in time and place count as one double or triple
@@ -1030,7 +1033,20 @@ pub fn deadline() -> Option<Instant> {
             Phase::Open(open) => open.copied,
             Phase::Closed => None,
         };
-        d.closing.iter().map(|(_, at)| *at).chain(copied).min()
+        // A « Noté »'s bar steps down four times a second while it can
+        // be taken back (#758): no redraw at each frame.
+        let noted = match &d.phase {
+            Phase::Open(open) if open.noted.values().any(|t| t.elapsed() < draw::NOTED) => {
+                Some(Instant::now() + NOTED_STEP)
+            }
+            _ => None,
+        };
+        d.closing
+            .iter()
+            .map(|(_, at)| *at)
+            .chain(copied)
+            .chain(noted)
+            .min()
     })
     .into_iter()
     .chain(toast)
@@ -1053,6 +1069,8 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             !due
         });
+        let noting = matches!(&d.phase,
+            Phase::Open(open) if open.noted.values().any(|t| now.duration_since(*t) < draw::NOTED + NOTED_STEP));
         let copied_over = match &mut d.phase {
             Phase::Open(open) if open.copied.is_some_and(|until| until <= now) => {
                 open.copied = None;
@@ -1060,7 +1078,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             }
             _ => false,
         };
-        if (toast_over || copied_over) && matches!(d.phase, Phase::Open(_)) {
+        if (toast_over || copied_over || noting) && matches!(d.phase, Phase::Open(_)) {
             effects.push(Effect::Wake(SECRETARY_NAMESPACE));
         }
         effects

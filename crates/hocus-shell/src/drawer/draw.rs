@@ -217,7 +217,7 @@ enum Shape {
 }
 
 /// How long « Noté » can be taken back (the brain's ten seconds).
-const NOTED: std::time::Duration = std::time::Duration::from_secs(10);
+pub(super) const NOTED: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Her first run's steps (#758): « POUR COMMENCER », each a row with its
 /// mark (✓ done, its number), its title (bold now), its note; its bottom.
@@ -2319,14 +2319,13 @@ fn lay_out_sheet(
     }
     if !card.actions.is_empty() && card.decided.is_none() {
         at += BUTTON_TOP + 2.0;
-        // Right-aligned, the primary last (the mockup's sheet).
+        // On the left, the primary first (#758), as everywhere.
         let widths: Vec<f32> = card
             .actions
             .iter()
             .map(|a| width_of(&a.label, BUTTON, true) + 2.0 * BUTTON_X)
             .collect();
-        let total: f32 = widths.iter().sum::<f32>() + 6.0 * (widths.len() as f32 - 1.0);
-        let mut bx = x + room - CARD_X - total;
+        let mut bx = x + CARD_X;
         for (n, action) in card.actions.iter().enumerate() {
             let w = widths[n];
             let rect = Rectangle::new(Point::new(bx, at), Size::new(w, button_h));
@@ -3645,7 +3644,11 @@ fn lay_out_point(
                     },
                 );
             }
-            titles.push(line.title.clone());
+            titles.push(if line.reminded.is_empty() {
+                line.title.clone()
+            } else {
+                format!("{} ({})", line.title, line.reminded)
+            });
             y += 6.0;
         }
         if hidden > 0 {
@@ -3858,10 +3861,6 @@ impl View {
             .collect();
         let texts = texts.join(" ");
         let mood = laid.mood;
-        // A « Noté »'s bar empties while it can be taken back (#758).
-        let counting = laid.shapes.iter().any(
-            |shape| matches!(shape, Shape::Countdown { since: Some(t), .. } if t.elapsed() < NOTED),
-        );
         if said != state.logged {
             tracing::debug!("the drawer shows {said}");
             state.logged = said;
@@ -3899,7 +3898,7 @@ impl View {
                 Some((since, super::mood_window(mood))),
                 now,
             )
-            .1 || counting
+            .1
         })
     }
 

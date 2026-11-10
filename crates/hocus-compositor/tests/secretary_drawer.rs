@@ -744,6 +744,34 @@ fn in_classic_mode_super_s_is_no_shortcut() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #758: the drawer opened on a day nothing is said: her hello, what
+/// she reads, three examples; one clicked is said to her.
+#[test]
+fn an_empty_drawer_greets_and_an_example_is_said() -> anyhow::Result<()> {
+    let Some(mut bed) = start(Setup::default())? else {
+        return Ok(());
+    };
+    bed.super_s();
+    bed.opened()?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("greeting:"))?;
+    let items = shown["items"].to_string();
+    assert!(
+        items.contains("dis-moi ce dont tu as besoin, ou essaie :"),
+        "{items}"
+    );
+    bed.place("Example(2)")?;
+    bed.shot("2-empty")?;
+    let example = bed.place_settled("Example(0)")?;
+    bed.click(example)?;
+    let shown = bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("user:Qu’est-ce que j’ai aujourd’hui ?")
+    })?;
+    assert!(!shown["items"].to_string().contains("greeting:"), "{shown}");
+    Ok(())
+}
+
 /// AC6: a sentence typed and sent: its bubble, her typing (and what she
 /// does), her answer a word at a time as her clock moves, then whole.
 #[test]
@@ -853,6 +881,9 @@ fn a_card_proposes_and_nothing_happens_before_its_click() -> anyhow::Result<()> 
     };
     bed.super_s();
     bed.opened()?;
+    bed.hp
+        .tell_shell(ToShell::SecretaryAsk("Tutoie-moi".to_owned()));
+    bed.shows(|s| s["items"].to_string().contains("learned:Noté"))?;
     bed.hp.tell_shell(ToShell::SecretaryAsk(
         "prépare un message pour Léa sur son article".to_owned(),
     ));
@@ -865,7 +896,16 @@ fn a_card_proposes_and_nothing_happens_before_its_click() -> anyhow::Result<()> 
     })?;
     wait(&mut bed.hp, Duration::from_millis(500))?;
     assert!(bed.recorded().1.is_empty(), "nothing sent before the click");
-    bed.shot("drawer-card")?;
+    // Her question under it, for the picture: blue, not an alert.
+    bed.hp.tell_shell(ToShell::SecretaryAsk(
+        "aujourd’hui je finis le ticket des égaluantes".to_owned(),
+    ));
+    bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("question:«\u{a0}Égaluantes\u{a0}»")
+    })?;
+    bed.shot("1-thread")?;
     let accept = bed.place_starting("Button(")?;
     assert!(accept.ends_with("Accept)"), "{accept}");
     let at = bed.place(&accept)?;
@@ -1036,7 +1076,7 @@ fn her_first_run_asks_one_account_at_a_time_in_the_drawer() -> anyhow::Result<()
     assert_eq!(shown["status"], "Je ne lis encore rien");
     common::at_rest(&mut bed.hp)?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
-    bed.shot("first-run-consent")?;
+    bed.shot("7-consent")?;
     // « Privé », the mail switched off, then « Autoriser l'agenda »: the
     // calendar granted, private; not the mail.
     let item = bed
@@ -1148,7 +1188,7 @@ fn her_key_is_pasted_in_her_band_masked_and_a_refused_one_is_said() -> anyhow::R
         !items.contains("briefing:"),
         "no briefing in her first run: {items}"
     );
-    bed.shot("key-band")?;
+    bed.shot("6-key")?;
     bed.type_keys(&[
         KEY_S, KEY_K, KEY_MINUS, KEY_A, KEY_N, KEY_T, KEY_MINUS, KEY_X, KEY_X,
     ]);

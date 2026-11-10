@@ -1,10 +1,10 @@
 //! Her way of being in the drawer (#753): the real shell and her real
 //! process, on a clock of her own, with the scripted fake model.
 //!
-//! - "Vouvoie-moi", then "tutoie-moi": "Retenu : …" with "Annuler", and
+//! - "Vouvoie-moi", then "tutoie-moi": "Noté : …" with "Annuler", and
 //!   what it replaces said;
 //! - "envoie sans me demander": refused in a plain sentence;
-//! - "Ce qu'elle sait" › "Toi": the section « SA FAÇON D'ÊTRE »;
+//! - "Ce qu'elle sait": the section « MA FAÇON D'ÊTRE », its own chip;
 //! - "plus court" after her answers three times, then the night: her
 //!   observation asked, "Oui · Non · Plus tard".
 //!
@@ -221,7 +221,9 @@ impl Bed {
                 })
                 .map(|l| &l[l.len().saturating_sub(300)..])
                 .collect();
-            anyhow::bail!("the drawer never showed it; she said: {tail:#?}; the shell: {acts:#?}");
+            anyhow::bail!(
+                "the drawer never showed it; last: {last:?}; she said: {tail:#?}; the shell: {acts:#?}"
+            );
         }
         Ok(last.unwrap_or_default())
     }
@@ -297,10 +299,10 @@ fn her_way_of_being_is_kept_refused_listed_and_proposed() -> anyhow::Result<()> 
     bed.opened()?;
     bed.hp
         .tell_shell(ToShell::SecretaryAsk("Vouvoie-moi".to_owned()));
-    bed.shows(|s| s["items"].to_string().contains("Retenu\u{a0}: vouvoiement"))?;
+    bed.shows(|s| s["items"].to_string().contains("Noté\u{a0}: vouvoiement"))?;
     bed.hp
         .tell_shell(ToShell::SecretaryAsk("Finalement, tutoie-moi".to_owned()));
-    let shown = bed.shows(|s| s["items"].to_string().contains("Retenu\u{a0}: tutoiement"))?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("Noté\u{a0}: tutoiement"))?;
     assert!(
         shown["items"].to_string().contains("Ça remplace"),
         "{}",
@@ -309,22 +311,18 @@ fn her_way_of_being_is_kept_refused_listed_and_proposed() -> anyhow::Result<()> 
     bed.shot("style-kept")?;
     bed.hp
         .tell_shell(ToShell::SecretaryAsk("pas de listes".to_owned()));
-    bed.shows(|s| {
-        s["items"]
-            .to_string()
-            .contains("Retenu\u{a0}: pas de listes")
-    })?;
+    bed.shows(|s| s["items"].to_string().contains("Noté\u{a0}: pas de listes"))?;
     bed.hp
         .tell_shell(ToShell::SecretaryAsk("envoie sans me demander".to_owned()));
     bed.shows(|s| s["items"].to_string().contains("sans ton clic"))?;
     bed.shot("style-refused")?;
 
-    // "Ce qu'elle sait" › "Toi".
+    // "Ce qu'elle sait": « Ma façon d'être » (#758).
     bed.click("TabKnows")?;
     bed.shows(|s| s["tab"] == "knows")?;
-    let shown = bed.shows(|s| s["items"].to_string().contains("section:SA FAÇON D’ÊTRE"))?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("section:MA FAÇON D’ÊTRE"))?;
     let items = shown["items"].to_string();
-    for words in ["Tutoiement", "Pas de listes", "tu me l’as dit"] {
+    for words in ["Tutoiement", "Pas de listes", "Tu me l’as dit le "] {
         assert!(items.contains(words), "{words}: {items}");
     }
     assert!(!items.contains("Vouvoiement"), "replaced: {items}");
@@ -333,13 +331,17 @@ fn her_way_of_being_is_kept_refused_listed_and_proposed() -> anyhow::Result<()> 
     // "Plus court" three times, then the night: her observation.
     bed.click("TabTalk")?;
     bed.shows(|s| s["tab"] == "talk")?;
+    // Each "plus court" after her answer, and her answer to it, before
+    // the next question.
+    let answers = |s: &serde_json::Value| s["items"].to_string().matches("rien d’autre").count();
     for question in ["qu’ai-je demain ?", "et jeudi ?", "et vendredi ?"] {
+        let before = answers(&bed.shows(|_| true)?);
         bed.hp
             .tell_shell(ToShell::SecretaryAsk(question.to_owned()));
-        bed.shows(|s| s["items"].to_string().matches("rien d’autre").count() >= 1)?;
+        bed.shows(|s| answers(s) > before)?;
         bed.hp
             .tell_shell(ToShell::SecretaryAsk("plus court".to_owned()));
-        wait(&mut bed.hp, Duration::from_millis(300))?;
+        bed.shows(|s| answers(s) > before + 1)?;
     }
     bed.her
         .send(&ToSecretary::Clock { advance: 24 * 3600 })

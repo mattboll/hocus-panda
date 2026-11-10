@@ -397,10 +397,7 @@ impl Brain {
             if !rest.is_empty() && built.briefing.kind == BriefingKind::Morning {
                 let section = hocus_secretary_link::Section {
                     key: "rest".to_owned(),
-                    label: self
-                        .talk
-                        .t("LE RESTE, EN TROIS LIGNES", "THE REST, IN THREE LINES")
-                        .to_owned(),
+                    label: self.talk.t("LE RESTE", "THE REST").to_owned(),
                     note: String::new(),
                     lines: rest
                         .into_iter()

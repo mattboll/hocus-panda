@@ -468,7 +468,7 @@ impl Brain {
                     .take(3)
                     .filter_map(|p| self.store.node(*p).ok().map(|n| n.name))
                     .collect();
-                replies.push(self.talk.t("Aucun·e", "None").to_owned());
+                replies.push(self.talk.t("Personne", "None").to_owned());
                 let text = if self.fr() {
                     format!("Quel·le {name}\u{a0}?")
                 } else {
@@ -596,7 +596,10 @@ impl Brain {
         let fr = self.fr();
         let (who, what) = (
             self.store.node(src).map(|n| n.name).unwrap_or_default(),
-            self.store.node(dst).map(|n| n.name).unwrap_or_default(),
+            self.store
+                .node(dst)
+                .map(|n| learn::mid_sentence(&n.name))
+                .unwrap_or_default(),
         );
         let verb = match (kind, fr) {
             ("leads", true) => "dirige",
@@ -668,9 +671,9 @@ impl Brain {
                     Ok((node, edits)) => {
                         let text = match (&found.team, fr) {
                             (Some((_, team, _)), true) => {
-                                format!("{} ajouté·e à l’équipe {team}", found.name)
+                                format!("{} est dans l’équipe {team}", found.name)
                             }
-                            (None, true) => format!("{} ajouté·e à l’équipe", found.name),
+                            (None, true) => format!("{} est dans l’équipe", found.name),
                             (Some((_, team, _)), false) => {
                                 format!("{} added to the {team} team", found.name)
                             }
@@ -678,7 +681,7 @@ impl Brain {
                         };
                         self.learned(id, text, edits);
                         tracing::info!(node, "an arrival kept");
-                        self.talk.t("Ajouté·e.", "Added.").to_owned()
+                        self.talk.t("C’est noté.", "Noted.").to_owned()
                     }
                     Err(err) => {
                         tracing::warn!(%err, "could not add a person");

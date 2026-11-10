@@ -227,10 +227,14 @@ fn edge_origin(store: &Store, w: &Words, edge: &Edge) -> Origin {
     )
 }
 
-/// A node's name, or a value in quotes.
+/// A node's name, or a value in quotes; in the middle of a sentence, a
+/// name's article in lower case (« relit le site web », #758).
 fn target(store: &Store, target: &Target) -> String {
     match target {
-        Target::Node(id) => store.node(*id).map(|n| n.name).unwrap_or_default(),
+        Target::Node(id) => store
+            .node(*id)
+            .map(|n| crate::learn::mid_sentence(&n.name))
+            .unwrap_or_default(),
         Target::Value(v) => v.clone(),
     }
 }

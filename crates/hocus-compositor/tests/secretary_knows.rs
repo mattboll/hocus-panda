@@ -5,10 +5,15 @@
 //! - The tab at 720 px lists what she knows by section, each item with
 //!   "d'où je le sais"; a click unfolds an item's provenance (its quoted
 //!   words, its source to open).
-//! - AC29 by the clicks: "Oublier" with its toast "Oublié · Annuler";
-//!   "Annuler" brings it back.
-//! - AC40 by the clicks: "Oublier tout le privé…" asks to confirm, then the
-//!   perso notebook is gone and the pro one stays.
+//! - #758: buttons only on what is to confirm; the rest's « ··· » menu
+//!   (Modifier, Ce n'est plus vrai, Voir d'où je le sais, Oublier); one
+//!   « Travail et privé » switch, chips without « Tout » (a chip chosen
+//!   again lets go), « Ma façon d'être » a chip of its own.
+//! - AC29 by the clicks: "Oublier" in its menu, with its toast "Oublié ·
+//!   Annuler"; "Annuler" brings it back.
+//! - AC40 by the clicks: « Effacer… ▾ », "Oublier tout le privé…" asks to
+//!   confirm, the toast gone, then the perso notebook is gone and the pro
+//!   one stays.
 //! - AC27 and AC30 by the clicks: an arrival's card in the thread, kept by
 //!   "Ajouter"; her observation of a board barely used, a proposal, kept by
 //!   "Oui".
@@ -401,6 +406,16 @@ impl Bed {
         Ok((f64::from(r.x) + x, f64::from(r.y) + y))
     }
 
+    /// The drawer's places as it last logged them.
+    fn places(&self) -> String {
+        common::logged(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the drawer's items"))
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     fn click(&mut self, name: &str) -> anyhow::Result<()> {
         let at = self.place(name)?;
         common::click_on(&mut self.hp, at, hocus_link::SECRETARY_NAMESPACE)
@@ -469,7 +484,10 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
     bed.hp.tell_shell(ToShell::SecretaryAsk(
         "les personnes en congés sont notées dans le calendrier Congés".to_owned(),
     ));
-    bed.shows(|s| s["items"].to_string().contains("learned:Retenu · règle n"))?;
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains("learned:Noté") && items.contains("Congés")
+    })?;
     bed.hp
         .tell_shell(ToShell::SecretaryAsk("Julie est arrivée lundi".to_owned()));
     bed.shows(|s| s["items"].to_string().contains("Nouvelle personne"))?;
@@ -488,7 +506,11 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
             .ok_or_else(|| anyhow::anyhow!("no Ajouter"))?
     };
     bed.click(&button)?;
-    bed.shows(|s| s["items"].to_string().contains("ajouté·e à l’équipe"))?;
+    bed.shows(|s| {
+        s["items"]
+            .to_string()
+            .contains("Julie Berthier est dans l’équipe")
+    })?;
 
     // The tab.
     bed.click("TabKnows")?;
@@ -506,25 +528,50 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
         "section:SES OUTILS",
         "section:PROCHES",
         "Nadia Ferreira",
-        "tu me l’as dit",
-        "gardé pour l’histoire",
+        "Tu me l’as dit le ",
+        "Gardé pour l’historique",
     ] {
         assert!(items.contains(words), "{words}: {items}");
     }
-    assert_eq!(shown["status"], "Tout ce qu’elle sait, d’où elle le tient");
+    for words in ["arrivé·e", "parti·e", "règle n", "déduit de", "Garder"] {
+        assert!(!items.contains(words), "{words}: {items}");
+    }
+    assert_eq!(
+        shown["status"],
+        "Tout ce qu’elle sait de toi et de ton travail, et d’où elle le tient"
+    );
+    // No « Tout » chip; « Ma façon d'être » has its own.
+    let places = bed.places();
+    assert!(places.contains("Notebook(0)@"), "{places}");
+    // A chip, chosen, then chosen again: everything again.
+    bed.click("Chip(0)")?;
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains("section:PERSONNES") && !items.contains("section:RÈGLES")
+    })?;
+    bed.click("Chip(0)")?;
+    bed.shows(|s| s["items"].to_string().contains("section:RÈGLES"))?;
     bed.shot("knows-list")?;
 
     // An item's provenance: Julie's role, read in Slack.
     let julie = bed.index_of("Julie Berthier · Développeuse front")?;
     bed.click(&format!("Expand({julie})"))?;
     bed.shows(|s| s["items"].to_string().contains("| unfolded"))?;
-    let shown = bed.shows(|s| s["items"].to_string().contains("lu dans Slack"))?;
+    let shown = bed.shows(|s| s["items"].to_string().contains("Vu dans Slack"))?;
     assert!(shown["items"].to_string().contains("Julie Berthier"));
     bed.place(&format!("Open({julie})"))?;
     bed.shot("knows-provenance")?;
 
-    // "Oublier" a rule, its toast, "Annuler" (within its five seconds).
+    // "Oublier" a rule from its « ··· » menu, its toast, "Annuler"
+    // (within its five seconds): no button on it before.
     let rule = bed.index_of("cabinet Morel")?;
+    assert!(
+        !bed.places().contains(&format!("Known({rule},")),
+        "no buttons on what she knows"
+    );
+    bed.click(&format!("KnownMenu({rule})"))?;
+    bed.shows(|s| s["items"].to_string().contains(&format!("menu:{rule}")))?;
+    bed.place(&format!("Expand({rule})"))?;
     bed.click(&format!("Known({rule},Forget)"))?;
     let gone = bed.shows(|s| s["items"].to_string().contains("toast:Oublié · Annuler"))?;
     assert!(!gone["items"].to_string().contains("cabinet Morel"));
@@ -535,17 +582,26 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
     })?;
     // Again, for its picture: the toast stays its five seconds.
     let rule = bed.index_of("cabinet Morel")?;
+    bed.click(&format!("KnownMenu({rule})"))?;
+    bed.shows(|s| s["items"].to_string().contains(&format!("menu:{rule}")))?;
     bed.click(&format!("Known({rule},Forget)"))?;
     bed.shows(|s| s["items"].to_string().contains("toast:Oublié · Annuler"))?;
     bed.shot("knows-forgotten")?;
 
-    // "Oublier tout le privé…", confirmed.
+    // « Effacer… ▾ », "Oublier tout le privé…", confirmed: never with a
+    // toast that undoes.
+    bed.click("Erase")?;
+    bed.shows(|s| s["items"].to_string().contains("\"erase\""))?;
     bed.click("ForgetPerso")?;
-    bed.shows(|s| {
+    let confirming = bed.shows(|s| {
         s["items"]
             .to_string()
             .contains("confirm:Oublier tout le privé ?")
     })?;
+    assert!(
+        !confirming["items"].to_string().contains("toast:"),
+        "{confirming}"
+    );
     bed.shot("knows-forget-perso")?;
     bed.click("Confirm(true)")?;
     let after = bed.shows(|s| {
@@ -559,13 +615,25 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
         .send(&ToSecretary::Clock { advance: 24 * 3600 })
         .map_err(anyhow::Error::msg)?;
     bed.shows(|s| s["items"].to_string().contains("Planka"))?;
-    let seen = bed.index_of("Je n’en parle que si tu demandes")?;
-    bed.shows(|s| s["items"].to_string().contains("Oui/Non/Plus tard"))?;
-    bed.shot("knows-proposal")?;
+    let seen = bed.index_of("Je n’en parle que si tu me le demandes")?;
+    bed.shows(|s| {
+        let items = s["items"].to_string();
+        items.contains("section:À CONFIRMER") && items.contains("aucune carte en 30 jours")
+    })?;
+    // To confirm: its buttons, Oui and Non.
+    bed.place(&format!("Known({seen},Accept)"))?;
+    bed.place(&format!("Known({seen},Reject)"))?;
+    // A learned item's menu open, for the picture.
+    let julie = bed.index_of("Julie Berthier · Développeuse front")?;
+    bed.click(&format!("KnownMenu({julie})"))?;
+    bed.shows(|s| s["items"].to_string().contains(&format!("menu:{julie}")))?;
+    bed.shot("5-knows")?;
+    bed.click(&format!("KnownMenu({julie})"))?;
+    bed.shows(|s| !s["items"].to_string().contains("menu:"))?;
     bed.click(&format!("Known({seen},Accept)"))?;
     bed.shows(|s| {
         let items = s["items"].to_string();
-        !items.contains("Je n’en parle que si tu demandes") && items.contains("Planka")
+        !items.contains("Je n’en parle que si tu me le demandes") && items.contains("Planka")
     })?;
     Ok(())
 }

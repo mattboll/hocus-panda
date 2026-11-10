@@ -15,7 +15,7 @@
 //!   slot free for every invitee from the next working day ([`Move`]).
 //! - **À RÉPONDRE**: at most three mails for the user, from a person,
 //!   waiting for an answer (the triage said so), with none in Sent.
-//! - **LE RESTE, EN TROIS LIGNES**: her model's; else what came, counted.
+//! - **LE RESTE**: her model's; else what came, counted.
 //! - **HIER, TU VOULAIS** and **AUJOURD'HUI, TU M'AS DIT**: the tasks put
 //!   in To do through her, by day.
 //! - **À NE PAS OUBLIER**: reminders gone by unsaid, or kept for here.
@@ -561,12 +561,12 @@ fn build(store: &Store, input: &Input, kind: BriefingKind) -> Built {
             let count = if received > 0 { received } else { arrived };
             let text = match (en, matter.len()) {
                 (false, 0) => format!(
-                    "{count} {} arrivé{s}, rien qui attende ta réponse",
+                    "{count} {}{s} arrivé{s}, rien qui attende ta réponse",
                     if received > 0 { "mail" } else { "message" },
                     s = if count > 1 { "s" } else { "" }
                 ),
                 (false, n) => format!(
-                    "{count} {} arrivé{s}, dont {n} pour toi",
+                    "{count} {}{s} arrivé{s}, dont {n} pour toi",
                     if received > 0 { "mail" } else { "message" },
                     s = if count > 1 { "s" } else { "" }
                 ),

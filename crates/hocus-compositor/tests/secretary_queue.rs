@@ -435,14 +435,19 @@ fn her_queue_unfolds_from_her_status_and_a_sender_is_set_aside_by_a_click() -> a
 
     // « Ne pas trier les mails de GitHub », in its card.
     bed.click("Aside(0)")?;
-    let shown = bed.shows(|s| items(s).contains("aside:GitHub"))?;
-    assert!(!items(&shown).contains("group:GitHub"), "{}", items(&shown));
+    // Its mails waiting move apart; the one read now goes on.
+    let shown = bed.shows(|s| items(s).contains("aside:GitHub · 11"))?;
+    assert!(
+        items(&shown).contains("group:GitHub · 1 ·"),
+        "{}",
+        items(&shown)
+    );
     bed.shot("queue-set-aside")?;
     // « Trier à nouveau les mails de GitHub »: back.
     bed.click("Unaside(0)")?;
     bed.shows(|s| {
         let i = items(s);
-        i.contains("group:GitHub") && !i.contains("aside:")
+        i.contains("group:GitHub · 12") && !i.contains("aside:")
     })?;
 
     // Steadily too hot (her sampler reads every five seconds of her clock,
