@@ -2269,14 +2269,20 @@ mod tests {
             let beside = knows_said(true, fr);
             assert!(!kept.contains(hocus_secretary_link::key_beside_said(fr)));
             assert!(beside.contains(hocus_secretary_link::key_beside_said(fr)));
-            assert!(beside.ends_with(if fr { "sait ».") } else { "knows”." }));
+            assert!(beside.ends_with(if fr { "sait »." } else { "knows”." }));
         }
         let fr = knows_said(true, true);
-        assert!(fr.contains("sa clé est rangée à côté, sur ce disque"), "{fr}");
+        assert!(
+            fr.contains("sa clé est rangée à côté, sur ce disque"),
+            "{fr}"
+        );
         assert!(fr.contains("ton trousseau"), "{fr}");
         assert!(fr.contains("Qui peut lire tes fichiers"), "{fr}");
         let en = knows_said(true, false);
-        assert!(en.contains("its key is kept beside it, on this disk"), "{en}");
+        assert!(
+            en.contains("its key is kept beside it, on this disk"),
+            "{en}"
+        );
         assert!(en.contains("your keyring"), "{en}");
     }
 }

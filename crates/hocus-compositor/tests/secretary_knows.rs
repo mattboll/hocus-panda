@@ -555,6 +555,9 @@ fn what_she_knows_shows_says_where_from_and_forgets_on_a_click() -> anyhow::Resu
     })?;
     bed.click("Chip(0)")?;
     bed.shows(|s| s["items"].to_string().contains("section:RÈGLES"))?;
+    // Her process here has no keyring: her memory's key is in a file
+    // beside it, and the tab says so first (#768).
+    bed.shows(|s| s["items"].to_string().contains("key-beside"))?;
     bed.shot("knows-list")?;
 
     // An item's provenance: Julie's role, read in Slack.
