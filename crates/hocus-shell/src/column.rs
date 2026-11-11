@@ -190,12 +190,15 @@ pub fn shared_top(form: Form, part: Part) -> f32 {
 
 /// Where bar `bar`'s column ends in the full form, under the bar's top:
 /// its desktops' group's top (the 14 px over it are the last group's);
-/// not known before its desktops are placed.
+/// not known before its desktops are placed, nor before the bar's surface
+/// has its size (until then its height is a default's, taller than a
+/// short screen).
 pub fn bottom(bar: &str) -> Option<f32> {
     let under = crate::desktops::draw::top_above_bottom(bar)?;
+    let height = crate::popover::with(|c| c.known_height(bar))?;
     // The music player's tile sits over the desktops (s12).
     let music = crate::music::room(bar, Form::Full);
-    Some(crate::popover::with(|c| c.bar_height(bar)) - under - music)
+    Some(height - under - music)
 }
 
 /// The room bar `bar`'s full form has for `part`'s group (one of

@@ -433,8 +433,26 @@ fn on_a_short_screen_today_gives_way_first() -> anyhow::Result<()> {
     // Not even one line's room between the card and the desktops.
     let room = desktops.y + 5 - 14 - (8 + 100 + 58);
     assert!(room < 18 + 20, "room for {room} px");
+    // Today may come first, placed while the groups under it are not yet,
+    // and go once they are: time for it to come, then as long as it takes
+    // to go. Looked at once after 500 ms, it was still there on a loaded
+    // machine.
     common::wait(&mut bed.hp, Duration::from_millis(500))?;
-    assert!(bed.hp.layer_rects(TODAY_NAMESPACE).is_empty());
+    let gone = bed.hp.dispatch_until(common::WAIT, |hp| {
+        hp.layer_rects(TODAY_NAMESPACE).is_empty()
+    })?;
+    assert!(
+        gone,
+        "today stays at {:?}; the shell said:\n{}",
+        bed.hp.layer_rects(TODAY_NAMESPACE),
+        bed.lines_since(0, "oday").join("\n")
+    );
+    // What the shell last said of its rows, if it had any: none.
+    let rows = bed.lines_since(0, "today's rows");
+    assert!(
+        rows.last().is_none_or(|l| l.contains("shows=nothing")),
+        "{rows:?}"
+    );
     Ok(())
 }
 

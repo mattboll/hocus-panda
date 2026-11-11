@@ -2260,6 +2260,12 @@ fn bar_sizes() -> Subscription<Message> {
     iced::event::listen_with(|event, _, id| match event {
         iced::Event::Window(window::Event::Opened { size, .. }) if is_bar(id) => {
             popover::with(|c| c.height(id, size.height));
+            // The column's room is the bar's height less its groups': what
+            // was fit before the bar had its size is fit again. The day
+            // read before the bar opened, Today kept the rows of a bar as
+            // tall as the default, over the desktops on a short screen
+            // (#769).
+            column::moved();
             None
         }
         iced::Event::Window(window::Event::Resized(size)) if is_bar(id) => {
