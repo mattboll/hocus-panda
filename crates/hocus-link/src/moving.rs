@@ -12,10 +12,13 @@
 //! The rain's colours are tokens ([`RainColours`]) that a theme can set;
 //! every theme has the phosphor green for now.
 
+use serde::{Deserialize, Serialize};
+
 use crate::theme::AccentColours;
 
 /// A wallpaper that moves: `[wallpaper] picture = "rain"` or `"stars"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Moving {
     /// Columns of glyphs falling one cell per frame, a bright head and a
     /// green tail.

@@ -211,8 +211,7 @@ impl State {
             return;
         };
         programs::on_a_thread("read the clipboard".to_owned(), move || {
-            let line =
-                read(marks, pipe, kind).map(|clip| ToShell::Copied { app, clip }.to_string());
+            let line = read(marks, pipe, kind).map(|clip| ToShell::Copied { app, clip }.line());
             let _ = done.send(Done::Read { number, line });
         });
     }
@@ -554,7 +553,7 @@ pub fn capture_line(capture: u64, png: &[u8]) -> Option<String> {
         kind: ClipKind::Png,
         data: png.to_vec(),
     };
-    Some(ToShell::CaptureCopied { capture, clip }.to_string())
+    Some(ToShell::CaptureCopied { capture, clip }.line())
 }
 
 /// What a selection holds, read from `pipe` as `kind`, unless one of its

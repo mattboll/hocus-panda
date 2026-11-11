@@ -292,7 +292,7 @@ pub fn pointer(id: window::Id, event: Pointing) -> bool {
         }
     });
     if let Some(ask) = ask {
-        tracing::debug!(%ask, "the lock's click");
+        tracing::debug!(?ask, "the lock's click");
         crate::popover::tell(ask);
     }
     draw

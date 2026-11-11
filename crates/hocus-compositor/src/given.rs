@@ -37,6 +37,9 @@ pub const QUICK_ENDS: u32 = 3;
 pub enum Why {
     DidNotStart,
     KeptEnding,
+    /// It speaks another version of the line to the shell
+    /// (`hocus_link::wire`).
+    OtherVersion,
 }
 
 impl Why {
@@ -44,6 +47,7 @@ impl Why {
         match self {
             Self::DidNotStart => "did not start",
             Self::KeptEnding => "kept ending",
+            Self::OtherVersion => "speaks another version of the line",
         }
     }
 }
@@ -105,6 +109,22 @@ impl Given {
         self.quick_ends = 0;
         self.fell_back = self.program.take().map(|program| (program, why));
         Some(why)
+    }
+}
+
+impl Given {
+    /// A run of `program` speaks another version of the line: whether it
+    /// is the given program, which is then let go of.
+    pub fn mismatched(&mut self, program: &Path) -> bool {
+        if self.program.as_deref() != Some(program) {
+            return false;
+        }
+        self.quick_ends = 0;
+        self.fell_back = self
+            .program
+            .take()
+            .map(|program| (program, Why::OtherVersion));
+        true
     }
 }
 

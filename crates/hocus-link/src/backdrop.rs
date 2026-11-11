@@ -12,6 +12,8 @@
 //! screen's pixels (the gradients are smooth: drawn larger, they stay so),
 //! and drawn stretched.
 
+use serde::{Deserialize, Serialize};
+
 /// The picture is this many times smaller than the screen's pixels.
 pub const SHRINK: i32 = 4;
 
@@ -58,7 +60,8 @@ const GLOWS: [((f64, f64), (f64, f64)); 5] = [
 
 /// A built-in background: `linear-gradient(160deg, …)` at 0 %, 55 % and
 /// 100 %, under the five glows in their colours.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Backdrop {
     /// `#10172a 0%, #0b1020 55%, #090c16 100%`, blue, green and the bar's
     /// amber and green lights: the desktop's background since the bar.

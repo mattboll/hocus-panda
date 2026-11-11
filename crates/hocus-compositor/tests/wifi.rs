@@ -1239,6 +1239,15 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     assert!(drawn);
     let said = hp.dispatch_until(WAIT, |_| plain(&log).contains("NetworkManager: not there"))?;
     assert!(said, "the shell never said NetworkManager is away");
+    // Its surface placed: a first commit comes before its size, and the
+    // point aimed at was then one of the levels' surface, whose popover
+    // the click opened.
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        hp.connections_surfaces()
+            .first()
+            .is_some_and(|(_, s)| s.width > 0 && s.height > 0)
+    })?;
+    assert!(placed, "the connections' surface has no size");
     let s = hp.connections_surfaces()[0].1;
     let (x, y) = (f64::from(s.x + 97), f64::from(s.y + 20));
     hp.pointer_move(x - 1.0, y);
