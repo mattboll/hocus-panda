@@ -1974,14 +1974,13 @@ impl Shell {
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             }),
-            popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
-                id,
-                words: tasks::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            popover::Item::Tasks | popover::Item::TasksMore => {
+                popover::tasks::view(&popover::tasks::Panel {
+                    id,
+                    words: tasks::Words::new(clock::time::Lang::of_messages()),
+                    glass: self.look.glass,
+                })
+            }
             popover::Item::DayChoose => canvas(popover::setup::Panel {
                 id,
                 words: setup::Words::new(clock::time::Lang::of_messages()),
