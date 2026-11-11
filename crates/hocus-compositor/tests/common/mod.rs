@@ -1844,6 +1844,43 @@ pub fn drawn_popovers(hp: &Headless) -> Vec<Rect> {
         .collect()
 }
 
+/// The shell's popover as the first screen shows it, saved as a PNG under
+/// `HOCUS_KIT_SHOTS` as `name.png` (the kit's side-by-sides, #770); nothing
+/// without the variable.
+pub fn popover_shot(hp: &mut Headless, name: &str) -> anyhow::Result<()> {
+    let Ok(dir) = std::env::var("HOCUS_KIT_SHOTS") else {
+        eprintln!("HOCUS_KIT_SHOTS is not set: no shot");
+        return Ok(());
+    };
+    // Its hover, its spinners and its fades at rest.
+    wait(hp, Duration::from_millis(800))?;
+    let rect = *drawn_popovers(hp)
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("{name}: no popover"))?;
+    let (width, height, bytes) = hp.screenshot(0)?;
+    let w = rect.width.min(width - rect.x);
+    let h = rect.height.min(height - rect.y);
+    let mut out = image::RgbaImage::new(u32::try_from(w)?, u32::try_from(h)?);
+    for y in 0..h {
+        for x in 0..w {
+            let at = usize::try_from((rect.y + y) * width + rect.x + x)? * 4;
+            if let Some([b, g, r, _]) = bytes
+                .get(at..at + 4)
+                .and_then(|p| <[u8; 4]>::try_from(p).ok())
+            {
+                out.put_pixel(
+                    u32::try_from(x)?,
+                    u32::try_from(y)?,
+                    image::Rgba([r, g, b, 255]),
+                );
+            }
+        }
+    }
+    std::fs::create_dir_all(&dir)?;
+    out.save(Path::new(&dir).join(format!("{name}.png")))?;
+    Ok(())
+}
+
 /// A screen's refresh, as the tests step the held clock: 60 Hz.
 pub const STEP: Duration = Duration::from_millis(16);
 

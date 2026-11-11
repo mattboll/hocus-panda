@@ -742,3 +742,23 @@ fn the_applications_playing_their_volume_their_mute_and_streams_coming_and_going
     popover_is(&mut hp, Some(popover(398)))?;
     Ok(())
 }
+
+/// The popover in its main state (three outputs, two applications
+/// playing), shot under `HOCUS_KIT_SHOTS` (#770's side-by-sides; see
+/// `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut fakes = Fakes::start_with(&OUTPUTS)?;
+    fakes.play("hocus-test-tab-1", "Firefox", None)?;
+    fakes.play("hocus-test-tab-2", "Firefox", None)?;
+    fakes.play("hocus-test-music", "Musique", None)?;
+    let mut hp = start(&fakes, &shell)?;
+    click(&mut hp, ROW)?;
+    popover_is(&mut hp, Some(popover(450)))?;
+    hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut hp, "sound")
+}

@@ -976,3 +976,22 @@ fn nothing_draws_at_rest_and_a_change_draws_the_connections_alone() -> anyhow::R
     assert_eq!(rest(&mut bed)?, (0, 0, 0, 0), "open");
     Ok(())
 }
+
+/// The popover in its main state, shot under `HOCUS_KIT_SHOTS` (#770's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Some(setup(mine(), around())), true)?;
+    let rect = popover(Shape::new(&[BATTERY], 3).height(3, 0.0));
+    let item = bed.item();
+    bed.click(item)?;
+    bed.popover_is(Some(rect))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    bed.settle()?;
+    common::popover_shot(&mut bed.hp, "bluetooth")
+}

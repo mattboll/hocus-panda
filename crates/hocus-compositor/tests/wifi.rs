@@ -1460,6 +1460,44 @@ fn nothing_is_pasted_from_an_empty_clipboard_one_without_text_or_a_client_that_h
     Ok(())
 }
 
-// Spike #770: the popover's states shot, and what they cost.
-#[path = "wifi_spike/shots.rs"]
-mod spike_shots;
+/// The popover in its main state, and a row unfolded, shot under
+/// `HOCUS_KIT_SHOTS` (#770's side-by-sides):
+///
+/// ```sh
+/// HOCUS_KIT_SHOTS=/some/dir cargo nextest run -p hocus-compositor --run-ignored only kit_shot
+/// ```
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: around(),
+        saved: vec![
+            (LIVEBOX, Some("livebox-test")),
+            ("Bbox-55D1", Some("bbox-test")),
+        ],
+        current: Some(LIVEBOX),
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, false)?;
+    bed.hp.pointer_move(600.0, 500.0);
+    let item = bed.item();
+    bed.click(item)?;
+    let rect = popover(height(&[CURRENT], 7, 0.0));
+    bed.popover_is(Some(rect))?;
+    bed.asked(&Call::Scan)?;
+    bed.settle()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "wifi")?;
+    // The Freebox's field, unfolded, the keyboard in it.
+    bed.click(row(rect, &[CURRENT], 1))?;
+    bed.popover_is(Some(popover(height(&[CURRENT], 7, FORM))))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    for key in [KEY_Q, KEY_W, KEY_E] {
+        bed.press(key);
+    }
+    common::popover_shot(&mut bed.hp, "wifi-field")?;
+    Ok(())
+}
