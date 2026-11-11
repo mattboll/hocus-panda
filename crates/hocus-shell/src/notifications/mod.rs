@@ -23,6 +23,7 @@
 //! draw every surface again.
 
 pub mod bell;
+pub mod bubble;
 pub mod dnd;
 pub mod draw;
 pub mod history;
@@ -914,10 +915,7 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
         (is, c.card)
     });
     let element: Element<'a, Message> = match is? {
-        Is::Bubble => canvas(draw::Bubble { id, glass, card })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+        Is::Bubble => bubble::view(id, glass, card),
         Is::Chip => canvas(draw::Chip { id, card })
             .width(Length::Fill)
             .height(Length::Fill)

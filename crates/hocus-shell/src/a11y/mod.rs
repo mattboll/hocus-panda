@@ -172,8 +172,9 @@ enum Target {
     },
     /// A row of the open popover, by its key.
     Row(String),
-    /// A bubble's action, or the bubble itself (`None`: its default).
-    Bubble { serial: u64, action: Option<String> },
+    /// A bubble's control by its key, or the bubble itself (`note`: its
+    /// default).
+    Bubble { serial: u64, key: String },
     Lock {
         surface: window::Id,
         target: crate::lock::Target,
@@ -346,41 +347,45 @@ impl Said {
     }
 
     fn bubbles(&mut self, words: Words) -> Vec<Window> {
-        let bubbles: Vec<surfaces::Bubble> = crate::notifications::with(|c| {
+        let bubbles: Vec<(window::Id, surfaces::Bubble)> = crate::notifications::with(|c| {
             c.stack
                 .bubbles()
                 .iter()
-                .map(|b| surfaces::Bubble {
-                    serial: b.serial,
-                    app: b.note.app.clone(),
-                    summary: b.note.summary.clone(),
-                    body: b.note.body.clone(),
-                    urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
-                    actions: b.note.actions.clone(),
-                    default: b.note.default,
-                    progress: b.note.progress,
+                .map(|b| {
+                    (
+                        b.id,
+                        surfaces::Bubble {
+                            serial: b.serial,
+                            app: b.note.app.clone(),
+                            summary: b.note.summary.clone(),
+                            body: b.note.body.clone(),
+                            urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
+                            default: b.note.default,
+                            nodes: Vec::new(),
+                        },
+                    )
                 })
                 .collect()
         });
         bubbles
-            .iter()
-            .map(|b| {
-                let window = surfaces::bubble(b, words);
-                if b.default {
-                    self.targets.insert(
-                        (window.key.clone(), "note".to_owned()),
-                        Target::Bubble {
-                            serial: b.serial,
-                            action: None,
-                        },
+            .into_iter()
+            .map(|(id, mut b)| {
+                b.nodes = rows::of(id).map(|r| r.nodes).unwrap_or_default();
+                let window = surfaces::bubble(&b, words);
+                let keys = std::iter::once("note".to_owned())
+                    .filter(|_| b.default)
+                    .chain(
+                        b.nodes
+                            .iter()
+                            .filter(|n| !n.acts.is_empty())
+                            .map(|n| n.key.clone()),
                     );
-                }
-                for (action, _) in &b.actions {
+                for key in keys {
                     self.targets.insert(
-                        (window.key.clone(), format!("action:{action}")),
+                        (window.key.clone(), key.clone()),
                         Target::Bubble {
                             serial: b.serial,
-                            action: Some(action.clone()),
+                            key,
                         },
                     );
                 }
@@ -480,14 +485,8 @@ impl Said {
             (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
             (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
             (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
-            (Target::Bubble { serial, action }, Act::Click) => {
-                crate::notifications::input(match action {
-                    Some(key) => crate::notifications::Input::Action {
-                        serial: *serial,
-                        key: key.clone(),
-                    },
-                    None => crate::notifications::Input::Card(*serial),
-                });
+            (Target::Bubble { serial, key }, Act::Click) => {
+                crate::notifications::bubble::a11y_click(*serial, key);
             }
             (Target::Lock { surface, target }, Act::Click | Act::Focus) => {
                 crate::lock::pointer(*surface, crate::lock::Pointing::Press(Some(*target)));

@@ -80,8 +80,9 @@ pub fn popover_title(item: Item, words: Words) -> String {
     }
 }
 
-/// A notification's bubble: its application and summary, its body, its
-/// actions as buttons; said as it comes.
+/// A notification's bubble: its application and summary, its body, and
+/// what its controls declared (its ✕, its actions, its progress); said as
+/// it comes.
 #[derive(Debug, Clone, Default)]
 pub struct Bubble {
     pub serial: u64,
@@ -89,11 +90,10 @@ pub struct Bubble {
     pub summary: String,
     pub body: String,
     pub urgent: bool,
-    /// Its actions, by their key: their labels.
-    pub actions: Vec<(String, String)>,
     /// A click on it does its default action.
     pub default: bool,
-    pub progress: Option<u8>,
+    /// Its controls, as the kit read them.
+    pub nodes: Vec<Node>,
 }
 
 pub fn bubble(b: &Bubble, words: Words) -> Window {
@@ -101,21 +101,10 @@ pub fn bubble(b: &Bubble, words: Words) -> Window {
     let mut window = Window::new(format!("bubble:{}", b.serial), name.clone());
     let mut note = Node::new("note", Role::Notification, name)
         .describe(b.body.clone())
-        .polite();
+        .polite()
+        .children(b.nodes.clone());
     if b.default {
         note = note.act(Act::Click);
-    }
-    if let Some(progress) = b.progress {
-        note = note.child(
-            Node::new("progress", Role::ProgressBar, "")
-                .value(words.percent(f32::from(progress)))
-                .range(f64::from(progress), 0.0, 100.0, None),
-        );
-    }
-    for (action, label) in &b.actions {
-        note = note.child(
-            Node::new(format!("action:{action}"), Role::Button, label.clone()).act(Act::Click),
-        );
     }
     window.nodes = vec![note];
     window
@@ -246,9 +235,10 @@ mod tests {
             summary: "Léa Martin".to_owned(),
             body: "On se voit à 15 h ?".to_owned(),
             urgent: false,
-            actions: vec![("reply".to_owned(), "Répondre".to_owned())],
             default: true,
-            progress: None,
+            nodes: vec![
+                Node::new("bubble:Action(reply)", Role::Button, "Répondre").act(Act::Click),
+            ],
         };
         let window = bubble(&b, FR);
         assert_eq!(window.key, "bubble:4");
@@ -257,7 +247,7 @@ mod tests {
         assert_eq!(note.name, "Slack : Léa Martin");
         assert_eq!(note.description.as_deref(), Some("On se voit à 15 h ?"));
         assert!(note.polite);
-        let reply = window.find("action:reply").expect("its action");
+        let reply = window.find("bubble:Action(reply)").expect("its action");
         assert_eq!(reply.role, Role::Button);
         assert_eq!(reply.name, "Répondre");
         assert_eq!(reply.acts, vec![Act::Click]);
