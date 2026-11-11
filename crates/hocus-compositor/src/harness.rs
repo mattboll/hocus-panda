@@ -1127,11 +1127,19 @@ impl Headless {
         state.peek_due();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
-        // on the screen, but each frame drawn notes its time.
-        let drawn = self.dispatch_until(Duration::from_secs(30), |hp| {
-            hp.app.state.drawn_at.get() == at
-        })?;
-        anyhow::ensure!(drawn, "no frame drawn at {at:?}");
+        // on the screen, but each frame drawn notes its time. Its timer is
+        // set as a turn ends, and fires on the real clock: a turn at once
+        // sets it, then the loop sleeps until something wakes it. Polled
+        // every 5 ms instead, a step took three turns or four as the
+        // machine was fast or loaded, and what a frame costs on the loop
+        // with them (its allocations, tests/rain.rs).
+        self.dispatch(Duration::ZERO)?;
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while self.app.state.drawn_at.get() != at {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            anyhow::ensure!(!left.is_zero(), "no frame drawn at {at:?}");
+            self.dispatch(left)?;
+        }
         Ok(())
     }
 
