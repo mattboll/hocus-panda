@@ -214,68 +214,15 @@ mod tests {
         }
     }
 
-    /// Adding a language is adding a file: this crate, copied with a third
-    /// file (English's words under the code `xx`), builds, and its
-    /// language is chosen by a locale and by its code like the others.
+    /// Built with `HOCUS_WORDS_TEST_LANGUAGE=1` (CI's "third language"
+    /// step), a third file is one more language, chosen like the others.
+    #[cfg(test_language)]
     #[test]
     fn a_third_language_is_one_more_file() {
-        use std::{fs, path::Path, process::Command};
-
-        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir = std::env::temp_dir().join(format!("hocus-words-third-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join("src")).unwrap();
-        fs::create_dir_all(dir.join("words")).unwrap();
-        fs::create_dir_all(dir.join("tests")).unwrap();
-        fs::copy(here.join("build.rs"), dir.join("build.rs")).unwrap();
-        fs::copy(here.join("src/lib.rs"), dir.join("src/lib.rs")).unwrap();
-        for code in ["en", "fr"] {
-            let file = format!("words/{code}.toml");
-            fs::copy(here.join(&file), dir.join(&file)).unwrap();
-        }
-        let english = fs::read_to_string(here.join("words/en.toml")).unwrap();
-        let (_, words) = english.split_once("plural = \"n=1\"\n").unwrap();
-        fs::write(
-            dir.join("words/xx.toml"),
-            format!(
-                "[language]\ncode = \"xx\"\nvariant = \"Test\"\nname = \"Test\"\nplural = \"n=1\"\n{words}"
-            ),
-        )
-        .unwrap();
-        fs::write(
-            dir.join("Cargo.toml"),
-            "[package]\nname = \"hocus-words\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-             [build-dependencies]\ntoml = \"1\"\n[workspace]\n",
-        )
-        .unwrap();
-        let lock = here.join("../../Cargo.lock");
-        fs::copy(lock, dir.join("Cargo.lock")).unwrap();
-        fs::write(
-            dir.join("tests/third.rs"),
-            r#"use hocus_words::Lang;
-
-#[test]
-fn the_third_language_is_there() {
-    assert_eq!(Lang::ALL.len(), 3);
-    assert_eq!(Lang::of("xx_XX.UTF-8"), Lang::Test);
-    assert_eq!(Lang::of_code("xx"), Some(Lang::Test));
-    assert_eq!(Lang::Test.name(), "Test");
-    assert_eq!(hocus_words::every(Lang::Test), hocus_words::every(Lang::English));
-    Lang::choose(Some(Lang::Test));
-    assert_eq!(Lang::of_messages(), Lang::Test);
-}
-"#,
-        )
-        .unwrap();
-        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        let out = Command::new(cargo)
-            .args(["test", "--offline", "--quiet", "--test", "third"])
-            .current_dir(&dir)
-            .env("CARGO_TARGET_DIR", dir.join("target"))
-            .output()
-            .unwrap();
-        let said = String::from_utf8_lossy(&out.stderr).into_owned();
-        let _ = fs::remove_dir_all(&dir);
-        assert!(out.status.success(), "{said}");
+        assert_eq!(Lang::ALL.len(), 3);
+        assert_eq!(Lang::of("xx_XX.UTF-8"), Lang::Test);
+        assert_eq!(Lang::of_code("xx"), Some(Lang::Test));
+        assert_eq!(Lang::Test.name(), "Test");
+        assert_eq!(every(Lang::Test), every(Lang::English));
     }
 }

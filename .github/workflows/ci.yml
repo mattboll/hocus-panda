@@ -160,6 +160,13 @@ jobs:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/sprint/') }}
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # A third language is a file and nothing else (decision 0006): the
+      # workspace builds with one more (xx, English's words), and
+      # hocus-words chooses it like the others.
+      - name: A third language
+        run: |
+          HOCUS_WORDS_TEST_LANGUAGE=1 cargo check --locked --workspace --all-targets
+          HOCUS_WORDS_TEST_LANGUAGE=1 cargo test --locked -p hocus-words
 
   linux:
     needs: build

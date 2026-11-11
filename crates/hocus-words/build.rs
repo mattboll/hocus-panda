@@ -38,6 +38,26 @@ fn main() {
         println!("cargo::rerun-if-changed={}", path.display());
         langs.push(read(path));
     }
+    // `HOCUS_WORDS_TEST_LANGUAGE=1`: one more language, `xx` (`Lang::Test`),
+    // English's words in a file of its own, read like any other: what CI
+    // builds the workspace with to show that a language is a file and
+    // nothing else (docs/decisions/0006-words.md).
+    println!("cargo::rerun-if-env-changed=HOCUS_WORDS_TEST_LANGUAGE");
+    println!("cargo::rustc-check-cfg=cfg(test_language)");
+    if std::env::var_os("HOCUS_WORDS_TEST_LANGUAGE").is_some_and(|v| v == "1") {
+        let english = fs::read_to_string(dir.join(format!("{REFERENCE}.toml")))
+            .unwrap_or_else(|e| fail(&format!("words/{REFERENCE}.toml: {e}")));
+        let Some((_, words)) = english.split_once("plural = \"n=1\"\n") else {
+            fail("words/en.toml: no plural = \"n=1\" line");
+        };
+        let file = PathBuf::from(env("OUT_DIR")).join("xx.toml");
+        let text = format!(
+            "[language]\ncode = \"xx\"\nvariant = \"Test\"\nname = \"Test\"\nplural = \"n=1\"\n{words}"
+        );
+        fs::write(&file, text).unwrap_or_else(|e| fail(&format!("{}: {e}", file.display())));
+        langs.push(read(&file));
+        println!("cargo::rustc-cfg=test_language");
+    }
     // The reference first: it is the default, and its order is `ALL`'s.
     langs.sort_by_key(|l| (l.code != REFERENCE, l.code.clone()));
     if langs.first().is_none_or(|l| l.code != REFERENCE) {
