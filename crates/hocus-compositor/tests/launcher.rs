@@ -1038,7 +1038,9 @@ fn field_shot() -> anyhow::Result<()> {
     wait(&mut bed.hp, Duration::from_millis(400))?;
     let (w, h, px) = bed.hp.screenshot(0)?;
     let rgba: Vec<u8> = px
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [p[2], p[1], p[0], 255])
         .collect();
     let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)

@@ -770,6 +770,16 @@ fn the_caret_moves_in_the_field_and_the_list_follows_what_is_typed_there() -> an
     let from = bed.mark();
     chord(&mut bed.hp, &[KEY_LEFTCTRL, key_of('z').context("z")?]);
     bed.shows_after(from, "query=\"burea\"")?;
+    // The field asks for an input method: what one commits goes in too, in
+    // place of what is selected again.
+    let asks = bed.hp.dispatch_until(WAIT, |hp| hp.keyboard_takes_text())?;
+    anyhow::ensure!(asks, "the field asks for no input method");
+    let from = bed.mark();
+    anyhow::ensure!(
+        bed.hp.input_method(None, Some("é")),
+        "the commit was not taken"
+    );
+    bed.shows_after(from, "query=\"é\"")?;
     Ok(())
 }
 
