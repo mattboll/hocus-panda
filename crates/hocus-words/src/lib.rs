@@ -4,10 +4,13 @@
 //! `words/<code>.toml`, one file a language, English the reference; the
 //! build compiles them into one module a section:
 //!
-//! - a plain text is a [`Text`] constant: `hocus_words::perf::MEGABYTES.get(lang)`;
+//! - a plain text is a [`Text`] constant:
+//!   `hocus_words::perf::totals::MEMORY.get(lang)`;
 //! - a text with `{placeholders}`, or plural forms (`{ one, other }`), is a
 //!   function taking the language and the arguments by name order (`n`,
-//!   the count, first): `hocus_words::perf::frames(lang, 3)`;
+//!   the count, first): `hocus_words::perf::peak::windows_opened(lang, 3)`;
+//!   with several placeholders, a struct of named fields
+//!   (`hocus_words::perf::signal::MemoryLine`);
 //! - a list (the months) is a [`List`] constant.
 //!
 //! A key one file lacks, a placeholder English does not have, a list of

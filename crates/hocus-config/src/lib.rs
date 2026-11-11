@@ -8,6 +8,10 @@
 //! (beside it, then renamed over it), through a symbolic link to where it
 //! really is, with the mode it had. Blocking: from a thread of its own,
 //! never a program's loop.
+//!
+//! Every setting's default is defined once, in `packaging/config.toml`
+//! ([`defaults`]): the compositor's and hocus-day's tests check their
+//! `Default`s against it, and the Settings take their rows' from it.
 
 use std::{
     io::Write as _,

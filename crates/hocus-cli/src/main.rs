@@ -23,6 +23,9 @@
 //! - `hocus msg outputs`: the screens, their modes, places, scales and
 //!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
 //!
+//! - `hocus msg a11y`: what the shell's surfaces show, as screen readers
+//!   read it, whether one listens or not (docs/design/screen-reader.md).
+//!
 //! - `hocus msg shell status`, `hocus msg shell restart [--program PATH |
 //!   --installed]`: which program the compositor runs as the shell and
 //!   since when, and that program ended and started again at once, from
