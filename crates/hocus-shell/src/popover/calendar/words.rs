@@ -10,7 +10,7 @@ use crate::clock::time::Lang;
 /// The calendar's words in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 const MONTHS_FR: [&str; 12] = [
@@ -80,21 +80,15 @@ fn capitalised(word: &str) -> String {
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     fn month(self, month: i8) -> &'static str {
-        if self.fr {
+        if self.lang == Lang::French {
             MONTHS_FR[month_index(month)]
         } else {
             MONTHS_EN[month_index(month)]
@@ -102,7 +96,7 @@ impl Words {
     }
 
     fn short_month(self, month: i8) -> &'static str {
-        if self.fr {
+        if self.lang == Lang::French {
             SHORT_FR[month_index(month)]
         } else {
             SHORT_EN[month_index(month)]
@@ -110,7 +104,7 @@ impl Words {
     }
 
     fn weekday(self, day: Weekday) -> &'static str {
-        if self.fr {
+        if self.lang == Lang::French {
             DAYS_FR[day_index(day)]
         } else {
             DAYS_EN[day_index(day)]
@@ -128,7 +122,7 @@ impl Words {
 
     /// The columns' letters, Monday first.
     pub fn letters(self) -> [&'static str; 7] {
-        if self.fr {
+        if self.lang == Lang::French {
             ["L", "M", "M", "J", "V", "S", "D"]
         } else {
             ["M", "T", "W", "T", "F", "S", "S"]

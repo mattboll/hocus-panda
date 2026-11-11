@@ -751,7 +751,9 @@ mod tests {
 
     #[test]
     fn a_currency_is_not_a_conversion() {
-        let words = Words { fr: false };
+        let words = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(convert("150 usd en eur"), None);
         assert_eq!(convert("150 $ to €"), None);
         assert_eq!(answer("150 usd en eur", EN, words), None);
@@ -759,7 +761,9 @@ mod tests {
 
     #[test]
     fn a_conversion_answers_with_its_kind() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         let answer = answer("10 km en miles", FR, fr).expect("an answer");
         assert_eq!(answer.main, "6,214 mi");
         assert_eq!(answer.sub, "10 km = 6,214 mi · Longueur");

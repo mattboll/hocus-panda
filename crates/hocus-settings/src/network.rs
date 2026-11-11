@@ -183,11 +183,9 @@ pub fn connected(wifi: &Wifi, current: Option<&Current>, lang: Lang) -> String {
 /// "Adresse 192.168.1.24 · par la box 192.168.1.1".
 pub fn address(current: &Current, lang: Lang) -> Option<String> {
     let address = current.address.as_deref()?;
-    Some(match (current.gateway.as_deref(), lang) {
-        (Some(gateway), Lang::French) => format!("Adresse {address} · par la box {gateway}"),
-        (Some(gateway), Lang::English) => format!("Address {address} · via {gateway}"),
-        (None, Lang::French) => format!("Adresse {address}"),
-        (None, Lang::English) => format!("Address {address}"),
+    Some(match current.gateway.as_deref() {
+        Some(gateway) => words::address_via(lang, address, gateway),
+        None => words::address(lang, address),
     })
 }
 
@@ -199,17 +197,12 @@ pub fn ago(timestamp: u64, now: u64, lang: Lang) -> String {
     }
     let seconds = now.saturating_sub(timestamp);
     let (minutes, hours, days) = (seconds / 60, seconds / 3600, seconds / 86_400);
-    match (lang, minutes, hours, days) {
-        (Lang::French, 0, ..) => "À l’instant".to_owned(),
-        (Lang::English, 0, ..) => "Just now".to_owned(),
-        (Lang::French, m, 0, _) => format!("Il y a {m} min"),
-        (Lang::English, m, 0, _) => format!("{m} min ago"),
-        (Lang::French, _, h, 0) => format!("Il y a {h} h"),
-        (Lang::English, _, h, 0) => format!("{h} h ago"),
-        (Lang::French, .., 1) => "Hier".to_owned(),
-        (Lang::English, .., 1) => "Yesterday".to_owned(),
-        (Lang::French, .., d) => format!("Il y a {d} jours"),
-        (Lang::English, .., d) => format!("{d} days ago"),
+    match (minutes, hours, days) {
+        (0, ..) => words::JUST_NOW.get(lang).to_owned(),
+        (m, 0, _) => words::min_ago(lang, m),
+        (_, h, 0) => words::h_ago(lang, h),
+        (.., 1) => words::YESTERDAY.get(lang).to_owned(),
+        (.., d) => words::days_ago(lang, d),
     }
 }
 

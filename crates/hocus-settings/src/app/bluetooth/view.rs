@@ -444,15 +444,7 @@ impl App {
             return Space::new().into();
         };
         let (line, colour) = if bt.powered {
-            let line = match lang {
-                Lang::French => format!(
-                    "Visible sous le nom « {} » tant que cette page est ouverte.",
-                    bt.alias
-                ),
-                Lang::English => {
-                    format!("Visible as “{}” while this page is open.", bt.alias)
-                }
-            };
+            let line = words::visible_as_while_this_page_is(lang, &bt.alias);
             (line, DIM.get())
         } else if bt.blocked {
             (
@@ -1032,10 +1024,7 @@ impl App {
     pub(in crate::app) fn bluetooth_sheet(&self) -> Option<El<'_>> {
         let lang = self.lang;
         let (width, sheet, close) = if let Some((_, name)) = &self.bluetooth.forgetting {
-            let title = match lang {
-                Lang::French => format!("Oublier « {name} » ?"),
-                Lang::English => format!("Forget “{name}”?"),
-            };
+            let title = words::forget_2(lang, name);
             let body = column![
                 text(title).size(17).font(BOLD).color(TEXT),
                 t(
@@ -1112,15 +1101,9 @@ impl App {
         } else {
             Message::Bluetooth(Msg::Answer(Answer::No))
         };
-        let title_words = match (&request.asked, lang) {
-            (Asked::Authorize, Lang::French) => {
-                format!("« {name} » veut s’associer à cet ordinateur.")
-            }
-            (Asked::Authorize, Lang::English) => {
-                format!("“{name}” wants to pair with this computer.")
-            }
-            (_, Lang::French) => format!("Associer « {name} »"),
-            (_, Lang::English) => format!("Pair “{name}”"),
+        let title_words = match &request.asked {
+            Asked::Authorize => words::wants_to_pair_with_this_computer(lang, name),
+            _ => words::pair_2(lang, name),
         };
         let title = row![
             container(draw(kind_glyph(request.kind), 17.0, BLUE.get(), 1.8))
@@ -1155,15 +1138,11 @@ impl App {
             }
             buttons
         };
-        let the = |kind: Kind| match (kind, lang) {
-            (Kind::Phone, Lang::French) => "le téléphone",
-            (Kind::Tablet, Lang::French) => "la tablette",
-            (Kind::Computer, Lang::French) => "l’ordinateur",
-            (_, Lang::French) => "l’appareil",
-            (Kind::Phone, Lang::English) => "the phone",
-            (Kind::Tablet, Lang::English) => "the tablet",
-            (Kind::Computer, Lang::English) => "the computer",
-            (_, Lang::English) => "the device",
+        let the = |kind: Kind| match kind {
+            Kind::Phone => words::THE_PHONE.get(lang),
+            Kind::Tablet => words::THE_TABLET.get(lang),
+            Kind::Computer => words::THE_COMPUTER.get(lang),
+            _ => words::THE_DEVICE.get(lang),
         };
         let body = match &request.asked {
             Asked::Confirm(passkey) => {
@@ -1175,16 +1154,10 @@ impl App {
                 });
                 column![
                     title,
-                    say(match lang {
-                        Lang::French => format!(
-                            "Vérifie que {} affiche le même code, puis accepte des deux côtés.",
-                            the(request.kind)
-                        ),
-                        Lang::English => format!(
-                            "Check that {} shows the same code, then accept on both sides.",
-                            the(request.kind)
-                        ),
-                    }),
+                    say(words::check_that_shows_the_same_code(
+                        lang,
+                        the(request.kind)
+                    )),
                     container(
                         text(grouped(&format!("{passkey:06}")))
                             .size(34)
@@ -1194,15 +1167,8 @@ impl App {
                     .id("sheet:code".to_owned())
                     .center_x(Length::Fill)
                     .padding([4, 0]),
-                    container(t(
-                        match lang {
-                            Lang::French => format!("Il reste {left}\u{a0}s"),
-                            Lang::English => format!("{left}\u{a0}s left"),
-                        },
-                        12.0,
-                        FAINT.get()
-                    ))
-                    .center_x(Length::Fill),
+                    container(t(words::s_left(lang, left), 12.0, FAINT.get()))
+                        .center_x(Length::Fill),
                     buttons(Some(ok(
                         w(words::THE_CODE_MATCHES).get(lang),
                         Message::Bluetooth(Msg::Answer(Answer::Yes)),
@@ -1211,11 +1177,9 @@ impl App {
             }
             Asked::Display { code, typed } => {
                 let on_keyboard = request.kind == Kind::Keyboard;
-                let words = match (on_keyboard, lang) {
-                    (true, Lang::French) => "Tape ce code sur le clavier, puis Entrée.",
-                    (true, Lang::English) => "Type this code on the keyboard, then Enter.",
-                    (false, Lang::French) => "Tape ce code sur l’appareil, puis Entrée.",
-                    (false, Lang::English) => "Type this code on the device, then Enter.",
+                let words = match on_keyboard {
+                    true => words::TYPE_THIS_CODE_ON_THE_KEYBOARD.get(lang),
+                    false => words::TYPE_THIS_CODE_ON_THE_DEVICE.get(lang),
                 };
                 let lit = usize::from(typed.unwrap_or(0));
                 let mut cells = row![].spacing(6);
@@ -1259,12 +1223,7 @@ impl App {
                 if let Some(typed) = typed {
                     body = body.push(
                         container(t(
-                            match lang {
-                                Lang::French => {
-                                    format!("{typed} chiffres tapés sur {}", code.len())
-                                }
-                                Lang::English => format!("{typed} of {} digits typed", code.len()),
-                            },
+                            words::of_digits_typed(lang, code.len(), typed),
                             12.0,
                             FAINT.get(),
                         ))

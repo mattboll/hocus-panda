@@ -176,22 +176,16 @@ pub fn height() -> u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn title(self) -> &'static str {
@@ -223,11 +217,7 @@ impl Words {
     }
 
     fn not_found(self, query: &str) -> String {
-        if self.fr {
-            format!("Rien pour «\u{a0}{query}\u{a0}»")
-        } else {
-            format!("Nothing for \u{201c}{query}\u{201d}")
-        }
+        txt::nothing_for(self.lang, query)
     }
 
     /// Where a capture comes from (5.8b).
@@ -240,7 +230,7 @@ impl Words {
     }
 
     fn ago(self, ago: Ago) -> String {
-        match (ago, self.fr) {
+        match (ago, (self.lang == Lang::French)) {
             (Ago::Now, true) => "maintenant".to_owned(),
             (Ago::Now, false) => "now".to_owned(),
             (Ago::Minutes(n), true) => format!("il y a {n}\u{a0}min"),

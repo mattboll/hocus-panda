@@ -42,7 +42,7 @@ use super::{
 };
 use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
-    lang::{Lang, pair, w},
+    lang::{pair, w},
     model::{SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -391,15 +391,11 @@ impl App {
     /// "Claude Code débranché", "herdr suivi".
     fn agents_said(&self, choice: Choice) -> String {
         let name = choice.tool.title();
-        match (choice.tool, choice.on, self.lang) {
-            (Tool::Herdr, true, Lang::French) => "herdr suivi".to_owned(),
-            (Tool::Herdr, true, Lang::English) => "herdr followed".to_owned(),
-            (Tool::Herdr, false, Lang::French) => "herdr n’est plus suivi".to_owned(),
-            (Tool::Herdr, false, Lang::English) => "herdr no longer followed".to_owned(),
-            (_, true, Lang::French) => format!("{name} branché"),
-            (_, true, Lang::English) => format!("{name} plugged in"),
-            (_, false, Lang::French) => format!("{name} débranché"),
-            (_, false, Lang::English) => format!("{name} unplugged"),
+        match (choice.tool, choice.on) {
+            (Tool::Herdr, true) => words::HERDR_FOLLOWED.get(self.lang).to_owned(),
+            (Tool::Herdr, false) => words::HERDR_NO_LONGER_FOLLOWED.get(self.lang).to_owned(),
+            (_, true) => words::plugged_in(self.lang, name),
+            (_, false) => words::unplugged(self.lang, name),
         }
     }
 
@@ -423,11 +419,9 @@ impl App {
         self.go(Page::Section(SectionId::Agents));
         self.light = Some((model::TOOLS_ROW, Instant::now()));
         let said = self.agents_said(now);
-        let text = match (self.lang, redo) {
-            (Lang::French, false) => format!("Annulé : {said}."),
-            (Lang::English, false) => format!("Undone: {said}."),
-            (Lang::French, true) => format!("Rétabli : {said}."),
-            (Lang::English, true) => format!("Redone: {said}."),
+        let text = match redo {
+            false => words::undone(self.lang, &said),
+            true => words::redone(self.lang, &said),
         };
         self.toast(text, ToastAction::None, UNDONE)
     }
@@ -1242,10 +1236,7 @@ impl App {
             .and_then(|t| t.of(tool))
             .map(|s| s.file.clone())
             .unwrap_or_default();
-        let title = match lang {
-            Lang::French => format!("Brancher {}", tool.title()),
-            Lang::English => format!("Plug in {}", tool.title()),
-        };
+        let title = words::plug_in_2(lang, tool.title());
         let what = match tool {
             Tool::Codex => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_AND_ITS),
             _ => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_TO_CLAUDE),

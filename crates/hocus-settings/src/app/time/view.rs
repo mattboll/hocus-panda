@@ -324,14 +324,7 @@ impl App {
         let hours = if self.time_twelve() { "12 h" } else { "24 h" };
         let today =
             crate::appearance::today_as(self.time_date_format(), self.time_now().date(), self.lang);
-        match self.lang {
-            Lang::French => format!(
-                "{hours} · « {today} ». Une fois pour tout le bureau : la barre, l’agenda, l’écran verrouillé."
-            ),
-            Lang::English => format!(
-                "{hours} · “{today}”. Once for the whole desktop: the bar, the calendar, the lock screen."
-            ),
-        }
+        words::once_for_the_whole_desktop_the(self.lang, hours, &today)
     }
 
     /// A row of the page: its name, its line, its control, lit when found.
@@ -460,14 +453,7 @@ impl App {
         if found.is_empty() {
             rows = rows.push(
                 container(t(
-                    match lang {
-                        Lang::French => {
-                            format!("Aucun fuseau ne répond à « {} ».", picker.query.trim())
-                        }
-                        Lang::English => {
-                            format!("No time zone matches “{}”.", picker.query.trim())
-                        }
-                    },
+                    words::no_time_zone_matches(lang, picker.query.trim()),
                     13.0,
                     DIM.get(),
                 ))
@@ -477,10 +463,7 @@ impl App {
         let chosen = found.get(picker.selected);
         let choose_said = chosen.map_or_else(
             || w(words::CHOOSE).get(lang).to_owned(),
-            |f| match lang {
-                Lang::French => format!("Choisir {}", f.city.name(lang)),
-                Lang::English => format!("Choose {}", f.city.name(lang)),
-            },
+            |f| words::choose_2(lang, f.city.name(lang)),
         );
         let mut choose = button(text(choose_said).size(13).font(BOLD).color(DEEP))
             .height(32)

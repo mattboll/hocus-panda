@@ -245,10 +245,7 @@ impl App {
     /// "Mode d'énergie : Économie".
     fn power_mode_said(&self, mode: &str) -> String {
         let name = model::mode_name(mode, self.lang);
-        match self.lang {
-            Lang::French => format!("Mode d’énergie : {name}"),
-            Lang::English => format!("Power mode: {name}"),
-        }
+        words::power_mode_2(self.lang, name)
     }
 
     /// `choice` undone (or redone): its other side asked, the row lit.
@@ -267,11 +264,9 @@ impl App {
         self.go(Page::Section(SectionId::Power));
         self.light = Some((model::MODE, Instant::now()));
         let said = self.power_mode_said(&mode);
-        let text = match (self.lang, redo) {
-            (Lang::French, false) => format!("Annulé : {said}."),
-            (Lang::English, false) => format!("Undone: {said}."),
-            (Lang::French, true) => format!("Rétabli : {said}."),
-            (Lang::English, true) => format!("Redone: {said}."),
+        let text = match redo {
+            false => words::undone(self.lang, &said),
+            true => words::redone(self.lang, &said),
         };
         self.toast(text, ToastAction::None, UNDONE)
     }
@@ -409,17 +404,8 @@ impl App {
             .chords("shortcuts.lock")
             .first()
             .map(|c| crate::keys::shown(c, lang));
-        let note = chord.map(|c| -> El<'a> {
-            t(
-                match lang {
-                    Lang::French => format!("{c} verrouille à tout moment"),
-                    Lang::English => format!("{c} locks at any time"),
-                },
-                12.0,
-                FAINT.get(),
-            )
-            .into()
-        });
+        let note = chord
+            .map(|c| -> El<'a> { t(words::locks_at_any_time(lang, &c), 12.0, FAINT.get()).into() });
         groups = groups.push(group(
             head(w(words::LOCKING).get(lang), note),
             vec![
@@ -485,14 +471,7 @@ impl App {
                 .spacing(14)
                 .align_y(Alignment::Center);
                 if let Some(health) = battery.health {
-                    let said = match lang {
-                        Lang::French => {
-                            format!("État de la batterie :\n{health} % de sa capacité d’origine")
-                        }
-                        Lang::English => {
-                            format!("Battery health:\n{health} % of its original capacity")
-                        }
-                    };
+                    let said = words::battery_health_of_its_original_capacity(lang, health);
                     r = r.push(
                         t(said, 12.5, FAINT.get())
                             .line_height(1.5)

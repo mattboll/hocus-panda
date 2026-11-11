@@ -953,24 +953,451 @@ pub const BEFORE: &[(&str, &str, &str)] = &[
     ("shell.launcher_answers.mib", "Mio", "MiB"),
     ("shell.launcher_answers.gib", "Gio", "GiB"),
     ("shell.launcher_answers.tib", "Tio", "TiB"),
+    ("shell.agents_peek.a_window", "une fenêtre", "a window"),
+    ("shell.agents_peek.and", "et", "and"),
+    (
+        "shell.bluetooth_model.no_device",
+        "Aucun appareil",
+        "No device",
+    ),
+    (
+        "shell.bluetooth_model.bluetooth_off",
+        "Bluetooth coupé",
+        "Bluetooth off",
+    ),
+    (
+        "shell.bluetooth_model.bluetooth_is_off",
+        "Le Bluetooth est coupé.",
+        "Bluetooth is off.",
+    ),
+    (
+        "shell.bluetooth_model.my_devices",
+        "MES APPAREILS",
+        "MY DEVICES",
+    ),
+    (
+        "shell.bluetooth_model.all_your_devices_are_connected",
+        "Tous tes appareils sont connectés.",
+        "All your devices are connected.",
+    ),
+    (
+        "shell.bluetooth_model.it_does_not_answer_check_that",
+        "Il ne répond pas. Vérifie qu'il est allumé et à portée.",
+        "It does not answer. Check that it is on and in range.",
+    ),
+    ("shell.bluetooth_model.nearby", "AUTOUR", "NEARBY"),
+    ("shell.bluetooth_model.pairing", "Association…", "Pairing…"),
+    (
+        "shell.bluetooth_model.pairing_failed_put_the_device_in",
+        "L'association a échoué. Mets l'appareil en mode association et réessaie.",
+        "Pairing failed. Put the device in pairing mode and try again.",
+    ),
+    (
+        "shell.bluetooth_model.searching_for_devices",
+        "Recherche des appareils…",
+        "Searching for devices…",
+    ),
+    (
+        "shell.bluetooth_model.bluetooth_settings",
+        "Réglages du Bluetooth…",
+        "Bluetooth settings…",
+    ),
+    (
+        "shell.bluetooth_model.no_new_device_found",
+        "Aucun nouvel appareil trouvé.",
+        "No new device found.",
+    ),
+    (
+        "shell.emoji.search_emoji",
+        "Chercher un emoji",
+        "Search emoji",
+    ),
+    ("shell.emoji.recent", "Récents", "Recent"),
+    (
+        "shell.emoji.enter_inserts",
+        "Entrée insère",
+        "Enter inserts",
+    ),
+    ("shell.emoji.skin_tone", "Teinte de peau", "Skin tone"),
+    (
+        "shell.emoji.emoji_enter_inserts_the_first_the",
+        "Emoji · Entrée insère le premier, les flèches choisissent",
+        "Emoji · Enter inserts the first, the arrows choose",
+    ),
+    ("shell.levels_model.muted", "muet", "muted"),
+    ("shell.levels_model.sound", "Son", "Sound"),
+    ("shell.levels_model.output", "SORTIE", "OUTPUT"),
+    ("shell.levels_model.microphone", "MICRO", "MICROPHONE"),
+    ("shell.levels_model.off", "coupé", "off"),
+    (
+        "shell.levels_model.sound_settings",
+        "Réglages du son…",
+        "Sound settings…",
+    ),
+    (
+        "shell.levels_model.no_application_is_playing_sound",
+        "Aucune application ne joue de son.",
+        "No application is playing sound.",
+    ),
+    ("shell.levels_model.brightness", "Luminosité", "Brightness"),
+    (
+        "shell.levels_model.built_in_screen",
+        "Écran du portable",
+        "Built-in screen",
+    ),
+    (
+        "shell.levels_model.power_mode",
+        "Mode d'énergie",
+        "Power mode",
+    ),
+    (
+        "shell.levels_model.power_mode_2",
+        "MODE D'ÉNERGIE",
+        "POWER MODE",
+    ),
+    (
+        "shell.levels_model.this_computer_has_no_performance_mode",
+        "Le mode performance n'existe pas sur cet ordinateur.",
+        "This computer has no performance mode.",
+    ),
+    (
+        "shell.levels_model.no_window",
+        "Aucune fenêtre.",
+        "No window.",
+    ),
+    (
+        "shell.levels_model.on_battery",
+        "Sur batterie",
+        "On battery",
+    ),
+    ("shell.levels_model.charging", "En charge", "Charging"),
+    (
+        "shell.levels_model.plugged_in_full",
+        "Branché, plein",
+        "Plugged in, full",
+    ),
+    (
+        "shell.levels_model.plugged_in_not_charging",
+        "Branché, ne charge pas",
+        "Plugged in, not charging",
+    ),
+    (
+        "shell.levels_model.plug_in_the_charger",
+        " · branche le chargeur",
+        " · plug in the charger",
+    ),
+    (
+        "shell.levels_model.on_battery_2",
+        "sur batterie",
+        "on battery",
+    ),
+    ("shell.levels_model.charging_2", "en charge", "charging"),
+    (
+        "shell.levels_model.plugged_in_full_2",
+        "branché, plein",
+        "plugged in, full",
+    ),
+    ("shell.levels_model.plugged_in", "branché", "plugged in"),
+    (
+        "shell.levels_model.plug_in_the_charger_2",
+        "branche le chargeur",
+        "plug in the charger",
+    ),
+    (
+        "shell.network_model.connecting",
+        "Connexion…",
+        "Connecting…",
+    ),
+    ("shell.network_model.offline", "Hors ligne", "Offline"),
+    ("shell.network_model.wi_fi_off", "Wi-Fi coupé", "Wi-Fi off"),
+    ("shell.network_model.wired", "Câble", "Wired"),
+    (
+        "shell.network_model.connected_by_cable",
+        "Connecté par câble",
+        "Connected by cable",
+    ),
+    (
+        "shell.network_model.airplane_mode",
+        "Mode avion",
+        "Airplane mode",
+    ),
+    (
+        "shell.network_model.airplane_mode_is_on",
+        "Le mode avion est activé.",
+        "Airplane mode is on.",
+    ),
+    (
+        "shell.network_model.wi_fi_settings",
+        "Réglages du Wi-Fi…",
+        "Wi-Fi settings…",
+    ),
+    (
+        "shell.network_model.wi_fi_is_off",
+        "Le Wi-Fi est coupé.",
+        "Wi-Fi is off.",
+    ),
+    (
+        "shell.network_model.no_wi_fi_adapter",
+        "Aucune carte Wi-Fi.",
+        "No Wi-Fi adapter.",
+    ),
+    ("shell.network_model.connected", "Connecté", "Connected"),
+    (
+        "shell.network_model.sign_in_page_to_open",
+        "Page de connexion à ouvrir",
+        "Sign-in page to open",
+    ),
+    (
+        "shell.network_model.disconnect",
+        "Déconnecter",
+        "Disconnect",
+    ),
+    (
+        "shell.network_model.open_the_sign_in_page",
+        "Ouvrir la page de connexion",
+        "Open the sign-in page",
+    ),
+    ("shell.network_model.networks", "RÉSEAUX", "NETWORKS"),
+    ("shell.network_model.searching", "Recherche…", "Searching…"),
+    (
+        "shell.network_model.searching_for_networks",
+        "Recherche des réseaux…",
+        "Searching for networks…",
+    ),
+    (
+        "shell.network_model.no_network_found",
+        "Aucun réseau trouvé.",
+        "No network found.",
+    ),
+    ("shell.network_model.saved", "enregistré", "saved"),
+    (
+        "shell.network_model.in_settings",
+        "dans les Réglages",
+        "in Settings",
+    ),
+    ("shell.network_model.failed", "échec", "failed"),
+    ("shell.network_model.password", "Mot de passe", "Password"),
+    ("shell.network_model.cancel", "Annuler", "Cancel"),
+    ("shell.network_model.connect", "Se connecter", "Connect"),
+    (
+        "shell.network_model.wrong_password_check_it_and_try",
+        "Mot de passe incorrect. Vérifie-le et réessaie.",
+        "Wrong password. Check it and try again.",
+    ),
+    (
+        "shell.network_model.could_not_connect_try_again",
+        "La connexion a échoué. Réessaie.",
+        "Could not connect. Try again.",
+    ),
+    (
+        "shell.popover_brightness.keyboard_backlight",
+        "Rétroéclairage du clavier",
+        "Keyboard backlight",
+    ),
+    (
+        "shell.popover_desktop.minimised",
+        ", réduite",
+        ", minimised",
+    ),
+    ("shell.popover_meeting.next", "Ensuite", "Next"),
+    (
+        "shell.agents_peek.laptop_screen",
+        "écran du portable",
+        "laptop screen",
+    ),
+    (
+        "shell.agents_peek.external_screen",
+        "écran externe",
+        "external screen",
+    ),
+    ("shell.agents_peek.n_1_other", "1 autre", "1 other"),
+    (
+        "shell.curtain.move_the_mouse_to_stay",
+        "Bouge la souris pour rester",
+        "Move the mouse to stay",
+    ),
+    ("shell.meeting.text", " :", ":"),
+    ("shell.notifications_draw.now", "· maintenant", "· now"),
+    ("shell.notifications_draw.close", "Fermer", "Close"),
+    ("shell.tasks.to_do", "À FAIRE", "TO DO"),
+    ("shell.tasks.to_do_2", "À faire", "To do"),
+    ("shell.tasks.add_a_task", "Ajouter une tâche", "Add a task"),
+    ("shell.tasks.new_task", "Nouvelle tâche…", "New task…"),
+    (
+        "shell.tasks.nothing_to_do",
+        "Rien à faire.",
+        "Nothing to do.",
+    ),
+    ("shell.tasks.not_saved", "Pas enregistré", "Not saved"),
+    ("shell.today.today", "AUJOURD'HUI", "TODAY"),
+    ("shell.today.video_call", ", visio", ", video call"),
 ];
 
 /// Every key the shell's surfaces moved to the catalogue says, byte for
 /// byte, what its pair said in the code before (#775).
 #[test]
 fn the_catalogue_says_what_the_code_said() {
-    use std::collections::HashMap;
-
-    use hocus_words::Lang;
-
-    let said = |lang| {
-        hocus_words::every(lang)
-            .into_iter()
-            .collect::<HashMap<_, _>>()
-    };
-    let (fr, en) = (said(Lang::French), said(Lang::English));
-    for (key, before_fr, before_en) in BEFORE {
-        assert_eq!(fr.get(*key).map(String::as_str), Some(*before_fr), "{key}");
-        assert_eq!(en.get(*key).map(String::as_str), Some(*before_en), "{key}");
-    }
+    hocus_words::check_before(BEFORE, FORMATS);
 }
+
+/// The format strings of arms moved, placeholders aside.
+pub const FORMATS: &[(&str, &str, &str)] = &[
+    (
+        "shell.a11y_words.connected_to",
+        "connecté à {name}, {signal}",
+        "connected to {name}, {signal}",
+    ),
+    (
+        "shell.a11y_words.mute_2",
+        "Couper le son de {app}",
+        "Mute {app}",
+    ),
+    (
+        "shell.actions.keyword",
+        "mot-clé\u{a0}: {word}",
+        "keyword: {word}",
+    ),
+    ("shell.agents.working", "{n} au travail", "{n} working"),
+    (
+        "shell.agents.resting_4",
+        "{resting} au repos",
+        "{resting} resting",
+    ),
+    (
+        "shell.agents.following",
+        "Suivis\u{a0}: {list}.",
+        "Following: {list}.",
+    ),
+    ("shell.agents.plug_in_2", "Brancher {}", "Plug in {}"),
+    (
+        "shell.auth.authorization_required_2",
+        "Autorisation nécessaire : {app}",
+        "Authorization required: {app}",
+    ),
+    (
+        "shell.capture.saved_2",
+        "Enregistrée : {name}",
+        "Saved: {name}",
+    ),
+    (
+        "shell.capture.annotated",
+        "{stem} (annotée).{extension}",
+        "{stem} (annotated).{extension}",
+    ),
+    (
+        "shell.curtain.locking_in_s",
+        "Verrouillage dans {seconds} s",
+        "Locking in {seconds} s",
+    ),
+    (
+        "shell.curtain.locking_in_seconds_move_the_mouse",
+        "Verrouillage dans {seconds} secondes. Bouge la souris pour rester.",
+        "Locking in {seconds} seconds. Move the mouse to stay.",
+    ),
+    ("shell.launcher.open", "Ouvrir {typed}", "Open {typed}"),
+    (
+        "shell.launcher.in_the_browser",
+        "{url} · dans le navigateur",
+        "{url} · in the browser",
+    ),
+    (
+        "shell.launcher.search_the_web_for",
+        "Chercher «\u{a0}{query}\u{a0}» sur le web",
+        "Search the web for \u{201c}{query}\u{201d}",
+    ),
+    (
+        "shell.launcher.copied",
+        "Copié\u{a0}: {value}",
+        "Copied: {value}",
+    ),
+    (
+        "shell.lock.too_many_attempts_try_again_in",
+        "Trop d’essais. Réessaie dans {seconds} s.",
+        "Too many attempts. Try again in {seconds} s.",
+    ),
+    (
+        "shell.lock.keyboard_layout_change",
+        "Disposition du clavier : {name}. Changer",
+        "Keyboard layout: {name}. Change",
+    ),
+    (
+        "shell.notifications_draw.waiting",
+        "+{n} en attente",
+        "+{n} waiting",
+    ),
+    (
+        "shell.popover_clipboard.nothing_for",
+        "Rien pour «\u{a0}{query}\u{a0}»",
+        "Nothing for \u{201c}{query}\u{201d}",
+    ),
+    (
+        "shell.popover_session_words.go_back_to",
+        "Revenir à {app}",
+        "Go back to {app}",
+    ),
+    (
+        "shell.reminder.started_at",
+        "{} · a commencé à {}",
+        "{} · started at {}",
+    ),
+    ("shell.windows.close", "Fermer {title}", "Close {title}"),
+    (
+        "shell.windows.this_desktop_s_windows",
+        "Fenêtres du bureau : {count}",
+        "This desktop's windows: {count}",
+    ),
+    (
+        "shell.agents_peek.inch_screen",
+        "écran externe {i} pouces",
+        "{i}-inch screen",
+    ),
+    (
+        "shell.agents_peek.the_left",
+        "L’{screen} est parti.",
+        "The {screen} left.",
+    ),
+    (
+        "shell.agents_peek.welcome_back",
+        "Re-bonjour, {screen}\u{a0}!",
+        "Welcome back, {screen}!",
+    ),
+    ("shell.agents_peek.others", "{k} autres", "{k} others"),
+    ("shell.agents_peek.windows", "{n} fenêtres", "{n} windows"),
+    (
+        "shell.agents_peek.windows_2",
+        "{n} fenêtres {one}",
+        "{n} {one} windows",
+    ),
+    (
+        "shell.bluetooth_model.battery",
+        "batterie\u{a0}{percent}\u{a0}%",
+        "battery\u{a0}{percent}\u{a0}%",
+    ),
+    (
+        "shell.emoji.no_emoji_for",
+        "Aucun emoji pour «\u{a0}{query}\u{a0}»",
+        "No emoji for \u{201c}{query}\u{201d}",
+    ),
+    (
+        "shell.levels_model.the_screen_is_set_with_its",
+        "L'écran {screen} se règle avec ses propres boutons.",
+        "The {screen} screen is set with its own buttons.",
+    ),
+    (
+        "shell.levels_model.battery_health_of_its_original_capacity",
+        "État de la batterie\u{a0}: {percent}\u{a0}% de sa capacité d'origine",
+        "Battery health: {percent}\u{a0}% of its original capacity",
+    ),
+    ("shell.levels_model.left", "{t} restantes", "{t} left"),
+    (
+        "shell.levels_model.charging_full_in",
+        "En charge · plein dans {t}",
+        "Charging · full in {t}",
+    ),
+    ("shell.levels_model.left", "{t} restantes", "{t} left"),
+    (
+        "shell.levels_model.full_in",
+        "plein dans {t}",
+        "full in {t}",
+    ),
+];

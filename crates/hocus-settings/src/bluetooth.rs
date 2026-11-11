@@ -171,10 +171,7 @@ pub fn not_connected(device: &Device, lang: Lang) -> String {
 
 /// " · batterie 82 %", after "Connecté".
 pub fn battery(percent: u8, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!(" · batterie\u{a0}{percent}\u{a0}%"),
-        Lang::English => format!(" · battery\u{a0}{percent}\u{a0}%"),
-    }
+    words::battery(lang, percent)
 }
 
 /// A device around's line: its kind, and that a code will be checked for
@@ -204,13 +201,10 @@ pub fn card(bt: Option<&hocus_bluetooth::Bluetooth>, lang: Lang) -> String {
     if !bt.powered {
         return w(words::OFF).get(lang).to_owned();
     }
-    match (lang, bt.connected.len()) {
-        (Lang::French, 0) => "Aucun appareil connecté".to_owned(),
-        (Lang::French, 1) => "1 appareil connecté".to_owned(),
-        (Lang::French, n) => format!("{n} appareils connectés"),
-        (Lang::English, 0) => "No device connected".to_owned(),
-        (Lang::English, 1) => "1 device connected".to_owned(),
-        (Lang::English, n) => format!("{n} devices connected"),
+    match bt.connected.len() {
+        0 => words::NO_DEVICE_CONNECTED.get(lang).to_owned(),
+        1 => words::N_1_DEVICE_CONNECTED.get(lang).to_owned(),
+        n => words::devices_connected(lang, n),
     }
 }
 

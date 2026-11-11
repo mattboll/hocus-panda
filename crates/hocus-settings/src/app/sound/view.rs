@@ -212,10 +212,7 @@ impl App {
         page = page.push(container(input).id("group:sound.input".to_owned()));
         // APPLICATIONS.
         let apps = self.sound.apps();
-        let count = (!apps.is_empty()).then(|| match lang {
-            Lang::French => format!("{} en cours", apps.len()),
-            Lang::English => format!("{} active", apps.len()),
-        });
+        let count = (!apps.is_empty()).then(|| words::active(lang, apps.len()));
         let mut group = column![group_head(w(words::APPLICATIONS).get(lang), count)].spacing(8);
         group = group.push(
             container(card_box(self.app_rows(&apps, &focused)))
@@ -311,18 +308,13 @@ impl App {
                         .and_then(|g| g.card(*card))
                         .map(|c| c.description.clone())
                         .unwrap_or_default();
-                    let line = match lang {
-                        Lang::French => format!("{device} · le passe en mode appel (HFP)"),
-                        Lang::English => format!("{device} · switches it to call mode (HFP)"),
-                    };
+                    let line = words::switches_it_to_call_mode_hfp(lang, &device);
                     (line, String::new(), HEADSET, format!("in:card:{card}"))
                 }
                 _ => (String::new(), String::new(), MICROPHONE, format!("in:{i}")),
             };
-            let using = (on && !users.is_empty()).then(|| match lang {
-                Lang::French => format!(" · {} l’utilise", users.join(", ")),
-                Lang::English => format!(" · {} is using it", users.join(", ")),
-            });
+            let using =
+                (on && !users.is_empty()).then(|| words::is_using_it(lang, users.join(", ")));
             let row = device_row(
                 path,
                 name,
@@ -868,21 +860,17 @@ impl App {
                 .or_else(|| self.sound.output());
             let mut line = String::new();
             if app.plays {
-                line = match (lang, on) {
-                    (Lang::French, Some(s)) => format!("Joue sur {}", s.description),
-                    (Lang::English, Some(s)) => format!("Playing on {}", s.description),
-                    (Lang::French, None) => "Joue".to_owned(),
-                    (Lang::English, None) => "Playing".to_owned(),
+                line = match on {
+                    Some(s) => words::playing_on(lang, &s.description),
+                    None => words::PLAYING.get(lang).to_owned(),
                 };
             }
             let records = app
                 .records
                 .and_then(|id| graph.and_then(|g| g.node(id)))
-                .map(|s| match (lang, app.plays) {
-                    (Lang::French, true) => format!(" · enregistre {}", s.description),
-                    (Lang::English, true) => format!(" · recording {}", s.description),
-                    (Lang::French, false) => format!("Enregistre {}", s.description),
-                    (Lang::English, false) => format!("Recording {}", s.description),
+                .map(|s| match app.plays {
+                    true => words::recording(lang, &s.description),
+                    false => words::recording_2(lang, &s.description),
                 });
             let muted = app.sound.is_some_and(|s| s.muted);
             let tile = app_tile(&app.name, muted);

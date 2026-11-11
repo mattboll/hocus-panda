@@ -26,7 +26,7 @@ use super::{
 };
 use crate::{
     desktops as model,
-    lang::{Lang, w},
+    lang::w,
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::{KeyEdit, Raw, Slot},
@@ -289,11 +289,9 @@ impl App {
         let count = self.desktop_count();
         let after = model::trimmed(model::renamed(&names, index, &text), count);
         let lang = self.lang;
-        let said = match (lang, text.is_empty()) {
-            (Lang::French, false) => format!("Nom du bureau {} : {text}", index + 1),
-            (Lang::French, true) => format!("Nom du bureau {} : aucun", index + 1),
-            (Lang::English, false) => format!("Desktop {}’s name: {text}", index + 1),
-            (Lang::English, true) => format!("Desktop {}’s name: none", index + 1),
+        let said = match text.is_empty() {
+            false => words::desktop_s_name(lang, index + 1, &text),
+            true => words::desktop_s_name_none(lang, index + 1),
         };
         if self.writable() {
             self.ask(
@@ -325,10 +323,7 @@ impl App {
         let Some(slot) = self.desktops_slot(model::COUNT) else {
             return;
         };
-        let said = match self.lang {
-            Lang::French => format!("Bureau {} ajouté, sur chaque écran", count + 1),
-            Lang::English => format!("Desktop {} added, on every screen", count + 1),
-        };
+        let said = words::desktop_added_on_every_screen(self.lang, count + 1);
         self.ask(
             slot,
             Raw::Set(Value::Int(i64::try_from(count + 1).unwrap_or(4))),
@@ -399,14 +394,8 @@ impl App {
         }
         let said = KeysSaid {
             done: model::removed_said(&name, moved.len(), &to, lang),
-            undone: match lang {
-                Lang::French => format!("Annulé : « {name} » revient."),
-                Lang::English => format!("Undone: “{name}” is back."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : « {name} » retiré."),
-                Lang::English => format!("Redone: “{name}” removed."),
-            },
+            undone: words::undone_is_back(lang, &name),
+            redone: words::redone_removed(lang, &name),
             row: model::COUNT,
         };
         tracing::info!(
@@ -675,11 +664,9 @@ impl App {
             column![head, card_box(body.into())].spacing(8).into()
         };
         let count = self.desktop_count();
-        let per_screen = match (lang, count) {
-            (Lang::French, 1) => "1 bureau par écran".to_owned(),
-            (Lang::French, n) => format!("{n} bureaux par écran"),
-            (Lang::English, 1) => "1 desktop per screen".to_owned(),
-            (Lang::English, n) => format!("{n} desktops per screen"),
+        let per_screen = match count {
+            1 => words::N_1_DESKTOP_PER_SCREEN.get(lang).to_owned(),
+            n => words::desktops_per_screen(lang, n),
         };
         page = page.push(group(
             head(model::DESKTOPS.label.get(lang), Some(per_screen)),

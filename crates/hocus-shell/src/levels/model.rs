@@ -2,6 +2,7 @@
 //! power profile as last read, and the words the bar says about them, in
 //! English and French.
 
+use hocus_words::shell::levels_model as txt;
 use std::time::Duration;
 
 use crate::clock::time::Lang;
@@ -234,24 +235,29 @@ impl Words {
         self.lang == Lang::French
     }
 
+    /// The language its words are said in.
+    pub(crate) fn lang(self) -> Lang {
+        self.lang
+    }
+
     /// In place of the volume, muted.
     pub fn muted(self) -> &'static str {
-        if self.fr() { "muet" } else { "muted" }
+        txt::MUTED.get(self.lang())
     }
 
     /// The sound popover's title.
     pub fn sound(self) -> &'static str {
-        if self.fr() { "Son" } else { "Sound" }
+        txt::SOUND.get(self.lang())
     }
 
     /// Over the outputs' list, in capitals.
     pub fn output(self) -> &'static str {
-        if self.fr() { "SORTIE" } else { "OUTPUT" }
+        txt::OUTPUT.get(self.lang())
     }
 
     /// Over the microphone, in capitals.
     pub fn microphone(self) -> &'static str {
-        if self.fr() { "MICRO" } else { "MICROPHONE" }
+        txt::MICROPHONE.get(self.lang())
     }
 
     /// Over the applications' volumes, in capitals.
@@ -261,25 +267,17 @@ impl Words {
 
     /// In place of the microphone's volume, muted.
     pub fn off(self) -> &'static str {
-        if self.fr() { "coupé" } else { "off" }
+        txt::OFF.get(self.lang())
     }
 
     /// The sound popover's last row: the Settings' Son page (6.5).
     pub fn sound_settings(self) -> &'static str {
-        if self.fr() {
-            "Réglages du son…"
-        } else {
-            "Sound settings…"
-        }
+        txt::SOUND_SETTINGS.get(self.lang())
     }
 
     /// In place of the applications' list.
     pub fn no_application(self) -> &'static str {
-        if self.fr() {
-            "Aucune application ne joue de son."
-        } else {
-            "No application is playing sound."
-        }
+        txt::NO_APPLICATION_IS_PLAYING_SOUND.get(self.lang())
     }
 
     /// Under the applications listed, the others' number.
@@ -304,28 +302,16 @@ impl Words {
 
     /// The brightness's popover's title, and what it sets.
     pub fn brightness(self) -> &'static str {
-        if self.fr() {
-            "Luminosité"
-        } else {
-            "Brightness"
-        }
+        txt::BRIGHTNESS.get(self.lang())
     }
 
     pub fn built_in(self) -> &'static str {
-        if self.fr() {
-            "Écran du portable"
-        } else {
-            "Built-in screen"
-        }
+        txt::BUILT_IN_SCREEN.get(self.lang())
     }
 
     /// Under the brightness, for each other screen.
     pub fn own_buttons(self, screen: &str) -> String {
-        if self.fr() {
-            format!("L'écran {screen} se règle avec ses propres boutons.")
-        } else {
-            format!("The {screen} screen is set with its own buttons.")
-        }
+        txt::the_screen_is_set_with_its(self.lang(), screen)
     }
 
     /// The keyboard's backlight's levels' names, from off: two, three or
@@ -364,19 +350,11 @@ impl Words {
     /// Over the modes, in capitals.
     /// The modes' label, as said rather than drawn in capitals.
     pub fn mode_label(self) -> &'static str {
-        if self.fr() {
-            "Mode d'énergie"
-        } else {
-            "Power mode"
-        }
+        txt::POWER_MODE.get(self.lang())
     }
 
     pub fn power_mode(self) -> &'static str {
-        if self.fr() {
-            "MODE D'ÉNERGIE"
-        } else {
-            "POWER MODE"
-        }
+        txt::POWER_MODE_2.get(self.lang())
     }
 
     /// A mode's tile.
@@ -391,11 +369,7 @@ impl Words {
     }
 
     pub fn no_performance(self) -> &'static str {
-        if self.fr() {
-            "Le mode performance n'existe pas sur cet ordinateur."
-        } else {
-            "This computer has no performance mode."
-        }
+        txt::THIS_COMPUTER_HAS_NO_PERFORMANCE_MODE.get(self.lang())
     }
 
     /// Why performance is held back.
@@ -412,11 +386,7 @@ impl Words {
 
     /// The battery's health; its number and its sign kept together.
     pub fn health(self, percent: u32) -> String {
-        if self.fr() {
-            format!("État de la batterie\u{a0}: {percent}\u{a0}% de sa capacité d'origine")
-        } else {
-            format!("Battery health: {percent}\u{a0}% of its original capacity")
-        }
+        txt::battery_health_of_its_original_capacity(self.lang(), percent)
     }
 
     /// A desktop's tile for screen readers (3.9): its name, else its
@@ -502,96 +472,43 @@ impl Words {
 
     /// An empty desktop's list.
     pub fn no_window(self) -> &'static str {
-        if self.fr() {
-            "Aucune fenêtre."
-        } else {
-            "No window."
-        }
+        txt::NO_WINDOW.get(self.lang())
     }
 
     /// The battery's popover's line under its level.
     pub fn battery_line(self, battery: &Battery) -> String {
-        let fr = self.fr();
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
         let mut text = match (battery.charge, left) {
-            (Charge::Discharging | Charge::Unknown, Some(t)) => {
-                if fr {
-                    format!("{t} restantes")
-                } else {
-                    format!("{t} left")
-                }
-            }
+            (Charge::Discharging | Charge::Unknown, Some(t)) => txt::left(self.lang(), &t),
             (Charge::Discharging | Charge::Unknown, None) => {
-                (if fr { "Sur batterie" } else { "On battery" }).into()
+                (txt::ON_BATTERY.get(self.lang())).into()
             }
-            (Charge::Charging, Some(t)) => {
-                if fr {
-                    format!("En charge · plein dans {t}")
-                } else {
-                    format!("Charging · full in {t}")
-                }
-            }
-            (Charge::Charging, None) => (if fr { "En charge" } else { "Charging" }).into(),
-            (Charge::Full, _) => (if fr {
-                "Branché, plein"
-            } else {
-                "Plugged in, full"
-            })
-            .into(),
-            (Charge::PluggedIn, _) => (if fr {
-                "Branché, ne charge pas"
-            } else {
-                "Plugged in, not charging"
-            })
-            .into(),
+            (Charge::Charging, Some(t)) => txt::charging_full_in(self.lang(), &t),
+            (Charge::Charging, None) => (txt::CHARGING.get(self.lang())).into(),
+            (Charge::Full, _) => (txt::PLUGGED_IN_FULL.get(self.lang())).into(),
+            (Charge::PluggedIn, _) => (txt::PLUGGED_IN_NOT_CHARGING.get(self.lang())).into(),
         };
         if battery.band() == Band::Critical {
-            text.push_str(if fr {
-                " · branche le chargeur"
-            } else {
-                " · plug in the charger"
-            });
+            text.push_str(txt::PLUG_IN_THE_CHARGER.get(self.lang()));
         }
         text
     }
 
     /// The battery's part of the status line, if any.
     fn battery(self, battery: &Battery) -> Option<String> {
-        let fr = self.fr();
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
         let mut text = match (battery.charge, left) {
-            (Charge::Discharging, Some(t)) => {
-                if fr {
-                    format!("{t} restantes")
-                } else {
-                    format!("{t} left")
-                }
-            }
-            (Charge::Discharging, None) => (if fr { "sur batterie" } else { "on battery" }).into(),
-            (Charge::Charging, Some(t)) => {
-                if fr {
-                    format!("plein dans {t}")
-                } else {
-                    format!("full in {t}")
-                }
-            }
-            (Charge::Charging, None) => (if fr { "en charge" } else { "charging" }).into(),
-            (Charge::Full, _) => (if fr {
-                "branché, plein"
-            } else {
-                "plugged in, full"
-            })
-            .into(),
-            (Charge::PluggedIn, _) => (if fr { "branché" } else { "plugged in" }).into(),
+            (Charge::Discharging, Some(t)) => txt::left(self.lang(), &t),
+            (Charge::Discharging, None) => (txt::ON_BATTERY_2.get(self.lang())).into(),
+            (Charge::Charging, Some(t)) => txt::full_in(self.lang(), &t),
+            (Charge::Charging, None) => (txt::CHARGING_2.get(self.lang())).into(),
+            (Charge::Full, _) => (txt::PLUGGED_IN_FULL_2.get(self.lang())).into(),
+            (Charge::PluggedIn, _) => (txt::PLUGGED_IN.get(self.lang())).into(),
             (Charge::Unknown, _) => return None,
         };
         if battery.band() == Band::Critical {
             text.push_str(" · ");
-            text.push_str(if fr {
-                "branche le chargeur"
-            } else {
-                "plug in the charger"
-            });
+            text.push_str(txt::PLUG_IN_THE_CHARGER_2.get(self.lang()));
         }
         Some(text)
     }

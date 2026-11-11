@@ -17,8 +17,6 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-# The desktop's languages and the words said in them.
-hocus-words.workspace = true
 hocus-agents.workspace = true
 # A panic said in the log before the program ends (#778).
 hocus-panic.workspace = true

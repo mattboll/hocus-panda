@@ -348,8 +348,12 @@ mod tests {
 
     use crate::levels::model::{Battery, Charge, Profile, Sound};
 
-    const FR: Words = Words { fr: true };
-    const EN: Words = Words { fr: false };
+    const FR: Words = Words {
+        lang: hocus_words::Lang::French,
+    };
+    const EN: Words = Words {
+        lang: hocus_words::Lang::English,
+    };
 
     fn agent(id: u64, name: &str, state: &str, since: u64) -> AgentShown {
         AgentShown {

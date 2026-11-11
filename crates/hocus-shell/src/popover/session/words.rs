@@ -2,36 +2,33 @@
 //! table gives them.
 
 use hocus_link::LeaveAction;
+use hocus_words::Lang;
 use hocus_words::shell::popover_session_words as txt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: crate::clock::time::Lang) -> Self {
-        Self {
-            fr: lang == crate::clock::time::Lang::French,
-        }
+        Self { lang }
     }
 
     #[cfg(test)]
     pub(crate) const fn french() -> Self {
-        Self { fr: true }
+        Self { lang: Lang::French }
     }
 
     #[cfg(test)]
     pub(crate) const fn english() -> Self {
-        Self { fr: false }
+        Self {
+            lang: Lang::English,
+        }
     }
 
     const fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn settings(self) -> &'static str {
@@ -65,7 +62,7 @@ impl Words {
 
     /// The countdown's sentence, `seconds` left.
     pub fn counting(self, action: LeaveAction, seconds: u32) -> String {
-        match (action, self.fr) {
+        match (action, (self.lang == Lang::French)) {
             (LeaveAction::LogOut, true) => format!("La session se ferme dans {seconds} s."),
             (LeaveAction::LogOut, false) => format!("The session ends in {seconds} s."),
             (LeaveAction::Restart, true) => format!("L’ordinateur redémarre dans {seconds} s."),
@@ -109,7 +106,7 @@ impl Words {
     /// The list's title: `app` alone, or `count` applications.
     pub fn held(self, action: LeaveAction, app: &str, count: usize) -> String {
         let what = self.held_what(action);
-        match (count, self.fr) {
+        match (count, (self.lang == Lang::French)) {
             (1, true) => format!("{app} retient {what}"),
             (1, false) => format!("{app} is holding back {what}"),
             (n, true) => format!("{n} applications retiennent {what}"),
@@ -122,11 +119,7 @@ impl Words {
     }
 
     pub fn back_to(self, app: &str) -> String {
-        if self.fr {
-            format!("Revenir à {app}")
-        } else {
-            format!("Go back to {app}")
-        }
+        txt::go_back_to(self.lang, app)
     }
 
     /// A window's button, when it does not close.
@@ -136,7 +129,7 @@ impl Words {
 
     /// What a window that did not close says, its title `title`.
     pub fn window_open(self, title: &str) -> String {
-        match (title.trim().is_empty(), self.fr) {
+        match (title.trim().is_empty(), (self.lang == Lang::French)) {
             (true, true) => "Sa fenêtre ne s’est pas fermée.".to_owned(),
             (true, false) => "Its window did not close.".to_owned(),
             (false, true) => format!("« {title} » ne s’est pas fermée."),

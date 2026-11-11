@@ -83,10 +83,7 @@ pub fn name_of(names: &[String], index: usize, lang: Lang) -> String {
 
 /// "Bureau 3" / "Desktop 3", for desktop `index` (from 0).
 pub fn placeholder(index: usize, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!("Bureau {}", index + 1),
-        Lang::English => format!("Desktop {}", index + 1),
-    }
+    words::desktop(lang, index + 1)
 }
 
 /// `names` as the file holds them for `count` desktops: those past the
@@ -134,28 +131,20 @@ pub fn toml_list(names: &[String]) -> String {
 
 /// "3 fenêtres", "1 fenêtre", "aucune fenêtre".
 pub fn windows_said(n: usize, lang: Lang) -> String {
-    match (lang, n) {
-        (Lang::French, 0) => "aucune fenêtre".to_owned(),
-        (Lang::French, 1) => "1 fenêtre".to_owned(),
-        (Lang::French, n) => format!("{n} fenêtres"),
-        (Lang::English, 0) => "no windows".to_owned(),
-        (Lang::English, 1) => "1 window".to_owned(),
-        (Lang::English, n) => format!("{n} windows"),
+    match n {
+        0 => words::NO_WINDOWS.get(lang).to_owned(),
+        1 => words::N_1_WINDOW.get(lang).to_owned(),
+        n => words::windows(lang, n),
     }
 }
 
 /// The toast of desktop `name` taken out, its `moved` windows going to
 /// `to`.
 pub fn removed_said(name: &str, moved: usize, to: &str, lang: Lang) -> String {
-    match (lang, moved) {
-        (Lang::French, 0) => format!("« {name} » retiré"),
-        (Lang::French, 1) => format!("« {name} » retiré : sa fenêtre passe sur « {to} »"),
-        (Lang::French, n) => {
-            format!("« {name} » retiré : ses {n} fenêtres passent sur « {to} »")
-        }
-        (Lang::English, 0) => format!("“{name}” removed"),
-        (Lang::English, 1) => format!("“{name}” removed: its window goes to “{to}”"),
-        (Lang::English, n) => format!("“{name}” removed: its {n} windows go to “{to}”"),
+    match moved {
+        0 => words::removed(lang, name),
+        1 => words::removed_its_window_goes_to(lang, name, to),
+        n => words::removed_its_windows_go_to(lang, name, to, n),
     }
 }
 
@@ -272,19 +261,13 @@ pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(d) = rule.desktop.and_then(|d| usize::try_from(d - 1).ok()) {
         let name = name_of(names, d, lang);
-        parts.push(match lang {
-            Lang::French => format!("Toujours sur « {name} »"),
-            Lang::English => format!("Always on “{name}”"),
-        });
+        parts.push(words::always_on(lang, &name));
     }
     if let Some(size) = &rule.size
         && let Some((_, said)) = SIZES.iter().find(|(word, _)| word == size)
     {
         let said = said.get(lang);
-        parts.push(match lang {
-            Lang::French => format!("s’ouvre {}", said.to_lowercase()),
-            Lang::English => format!("opens {}", said.to_lowercase()),
-        });
+        parts.push(words::opens(lang, said.to_lowercase()));
     }
     if rule.above {
         parts.push(w(words::ABOVE_THE_OTHERS).get(lang).to_owned());

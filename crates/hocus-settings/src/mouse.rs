@@ -9,7 +9,6 @@
 //! [`crate::devices`]). The page names the devices by their kind and where
 //! they are plugged, never by their vendor's name.
 
-use crate::lang::French as _;
 use hocus_words::settings::mouse as words;
 use std::sync::OnceLock;
 
@@ -405,7 +404,6 @@ pub fn device_default(setting: &str, devices: Option<&[InputDevice]>) -> Option<
 /// and where it is plugged, never the vendor's name.
 pub fn named(kind: DeviceKind, devices: &[InputDevice], lang: Lang) -> Option<String> {
     let of: Vec<&InputDevice> = devices.iter().filter(|d| d.kind == kind).collect();
-    let fr = lang.fr();
     match (kind, of.as_slice()) {
         (_, []) => None,
         (DeviceKind::Touchpad, [one, ..]) => Some(
@@ -428,11 +426,7 @@ pub fn named(kind: DeviceKind, devices: &[InputDevice], lang: Lang) -> Option<St
             .get(lang)
             .to_owned(),
         ),
-        (DeviceKind::Pointer, many) => Some(if fr {
-            format!("{} souris", many.len())
-        } else {
-            format!("{} mice", many.len())
-        }),
+        (DeviceKind::Pointer, many) => Some(words::mice(lang, many.len())),
     }
 }
 

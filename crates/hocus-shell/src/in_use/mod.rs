@@ -29,6 +29,7 @@
 pub mod cameras;
 pub mod draw;
 
+use hocus_words::Lang;
 use hocus_words::shell::in_use as txt;
 use std::{
     collections::HashMap,
@@ -563,14 +564,12 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The words of the sign's popover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: crate::clock::time::Lang) -> Self {
-        Self {
-            fr: lang == crate::clock::time::Lang::French,
-        }
+        Self { lang }
     }
 
     /// The words to pause or resume the recording, for screen readers.
@@ -583,11 +582,7 @@ impl Words {
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     /// The popover's title.
@@ -614,7 +609,7 @@ impl Words {
     pub fn since(self, time: Duration) -> String {
         let s = time.as_secs();
         let (m, h) = (s / 60, s / 3600);
-        match (self.fr, h, m) {
+        match ((self.lang == Lang::French), h, m) {
             (true, 0, 0) => format!("depuis {s} s"),
             (false, 0, 0) => format!("for {s} s"),
             (true, 0, m) => format!("depuis {m} min"),
@@ -638,7 +633,7 @@ impl Words {
 
     /// A share's detail: "partage la fenêtre « … »", or the screen.
     pub fn shares(self, thing: &SharedThing) -> String {
-        match (thing, self.fr) {
+        match (thing, (self.lang == Lang::French)) {
             (SharedThing::Window(title), true) => format!("partage la fenêtre « {title} »"),
             (SharedThing::Window(title), false) => {
                 format!("sharing the window \u{201c}{title}\u{201d}")
@@ -682,7 +677,7 @@ impl Words {
 
     /// How many notifications wait for the end of the sharing.
     pub fn held(self, n: usize) -> String {
-        match (n, self.fr) {
+        match (n, (self.lang == Lang::French)) {
             (0, true) => "Les notifications attendent la fin".to_owned(),
             (0, false) => "Notifications wait until the end".to_owned(),
             (1, true) => "1 notification en attente".to_owned(),
@@ -703,7 +698,7 @@ impl Words {
 
     /// A share's button; with several, each names its application.
     pub fn stop(self, app: Option<&str>) -> String {
-        match (app, self.fr) {
+        match (app, (self.lang == Lang::French)) {
             (None, true) => "Arrêter le partage".to_owned(),
             (None, false) => "Stop sharing".to_owned(),
             (Some(app), true) => format!("Arrêter le partage avec {app}"),

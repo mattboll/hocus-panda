@@ -41,7 +41,14 @@ pub fn popover(p: &Popover) -> Window {
 pub fn popover_title(item: Item, words: Words) -> String {
     let lang = words.lang();
     let levels = crate::levels::model::Words::new(lang);
-    let pick = |fr: &str, en: &str| if words.fr { fr } else { en }.to_owned();
+    let pick = |fr: &str, en: &str| {
+        if words.lang == hocus_words::Lang::French {
+            fr
+        } else {
+            en
+        }
+        .to_owned()
+    };
     match item {
         Item::Sound => levels.sound().to_owned(),
         Item::Wifi => "Wi-Fi".to_owned(),
@@ -115,7 +122,9 @@ pub fn bubble(b: &Bubble, words: Words) -> Window {
 mod tests {
     use super::*;
 
-    const FR: Words = Words { fr: true };
+    const FR: Words = Words {
+        lang: hocus_words::Lang::French,
+    };
 
     #[test]
     fn a_popover_is_a_dialog_named_by_its_title() {

@@ -560,7 +560,10 @@ fn field<'a>(palette: &'a Lent<Palette>, open: &Open, words: Words, width: f32) 
     let mut x = left;
     // In a step, the action's chip first.
     if let Some(step) = &open.step {
-        let chip = format!("{} ›", step.def.stem(words.fr));
+        let chip = format!(
+            "{} ›",
+            step.def.stem(words.lang == hocus_words::Lang::French)
+        );
         let w = kit::measure(&chip, STEP_CHIP_TEXT, MANROPE_BOLD) + 2.0 * STEP_CHIP_PAD.width;
         let h = STEP_CHIP_TEXT * LINE + 2.0 * STEP_CHIP_PAD.height;
         line = line
@@ -632,7 +635,10 @@ fn field<'a>(palette: &'a Lent<Palette>, open: &Open, words: Words, width: f32) 
     .node(|n| n.value(open.query.text().to_owned()))
     .typing();
     if let Some(step) = &open.step {
-        let stem = format!("{} ›", step.def.stem(words.fr));
+        let stem = format!(
+            "{} ›",
+            step.def.stem(words.lang == hocus_words::Lang::French)
+        );
         said_field = said_field.node(|n| n.describe(stem));
     }
     said_field.into()
@@ -737,7 +743,7 @@ fn row_view<'a>(open: &Open, words: Words, at: usize, row: &Row, width: f32) -> 
     let x = ROW_LEFT + lead_width + ROW_GAP_IN;
     // On the right: the shortcut, the switch's state, or the reason.
     let mut right = width - ROW_RIGHT;
-    let fr = words.fr;
+    let fr = words.lang == hocus_words::Lang::French;
     let (caps, state, reason): (Vec<String>, Option<bool>, Option<Inert>) = match row {
         Row::Action(a) => {
             let caps = open
@@ -1015,7 +1021,7 @@ fn runs(label: &str, marks: &[usize]) -> Vec<(String, bool)> {
 /// category, the keyword that found it, its shortcut, its state, or why it
 /// cannot run).
 pub fn spoken(open: &Open, row: &Row, words: Words) -> (String, String) {
-    let fr = words.fr;
+    let fr = words.lang == hocus_words::Lang::French;
     match row {
         Row::Action(a) => {
             let name = if a.def.step.is_some() && a.arg.is_none() {
@@ -1087,12 +1093,20 @@ pub fn shows(open: &Open, words: Words) -> String {
                         said.push_str(&format!(" = {}", words.state(on)));
                     }
                     if let Some(why) = a.inert {
-                        said.push_str(&format!(" ~ {}", why.said(words.fr)));
+                        said.push_str(&format!(
+                            " ~ {}",
+                            why.said(words.lang == hocus_words::Lang::French)
+                        ));
                     } else if let Some((chords, family)) = open.shown.chords(a.def) {
                         let caps = chords
                             .first()
                             .map(|c| {
-                                catalogue::caps(c, words.fr, family && a.arg.is_none()).join(" ")
+                                catalogue::caps(
+                                    c,
+                                    words.lang == hocus_words::Lang::French,
+                                    family && a.arg.is_none(),
+                                )
+                                .join(" ")
                             })
                             .unwrap_or_default();
                         said.push_str(&format!(" <{caps}>"));
@@ -1102,7 +1116,10 @@ pub fn shows(open: &Open, words: Words) -> String {
                 Row::Target(t) => {
                     let mut said = format!("{selected}{} · {}", t.label, t.sub);
                     if let Some(why) = t.inert {
-                        said.push_str(&format!(" ~ {}", why.said(words.fr)));
+                        said.push_str(&format!(
+                            " ~ {}",
+                            why.said(words.lang == hocus_words::Lang::French)
+                        ));
                     }
                     said
                 }

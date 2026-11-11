@@ -23,6 +23,7 @@ pub mod data;
 pub mod store;
 pub mod view;
 
+use hocus_words::shell::emoji as txt;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Instant,
@@ -65,15 +66,11 @@ impl Words {
     }
 
     pub fn placeholder(self) -> &'static str {
-        if self.fr() {
-            "Chercher un emoji"
-        } else {
-            "Search emoji"
-        }
+        txt::SEARCH_EMOJI.get(self.lang)
     }
 
     pub fn recent(self) -> &'static str {
-        if self.fr() { "Récents" } else { "Recent" }
+        txt::RECENT.get(self.lang)
     }
 
     pub fn heading(self, heading: Heading) -> &'static str {
@@ -84,28 +81,16 @@ impl Words {
     }
 
     pub fn inserts(self) -> &'static str {
-        if self.fr() {
-            "Entrée insère"
-        } else {
-            "Enter inserts"
-        }
+        txt::ENTER_INSERTS.get(self.lang)
     }
 
     pub fn none(self, query: &str) -> String {
-        if self.fr() {
-            format!("Aucun emoji pour «\u{a0}{query}\u{a0}»")
-        } else {
-            format!("No emoji for \u{201c}{query}\u{201d}")
-        }
+        txt::no_emoji_for(self.lang, query)
     }
 
     /// The skin tone's button.
     pub fn tones(self) -> &'static str {
-        if self.fr() {
-            "Teinte de peau"
-        } else {
-            "Skin tone"
-        }
+        txt::SKIN_TONE.get(self.lang)
     }
 
     /// Tone `i`'s name: yellow, then light to dark.
@@ -132,11 +117,7 @@ impl Words {
 
     /// The launcher's emoji row's heading (5.7).
     pub fn launcher_row(self) -> &'static str {
-        if self.fr() {
-            "Emoji · Entrée insère le premier, les flèches choisissent"
-        } else {
-            "Emoji · Enter inserts the first, the arrows choose"
-        }
+        txt::EMOJI_ENTER_INSERTS_THE_FIRST_THE.get(self.lang)
     }
 }
 

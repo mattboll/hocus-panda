@@ -43,22 +43,16 @@ use crate::{clock::time::Lang, popover::Effect};
 /// The toolbar's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn mode(self, mode: CaptureMode) -> &'static str {
@@ -182,21 +176,13 @@ impl Words {
 
     /// Where "Save as…" wrote it, under the image.
     pub fn saved_as(self, name: &str) -> String {
-        if self.fr {
-            format!("Enregistrée : {name}")
-        } else {
-            format!("Saved: {name}")
-        }
+        txt::saved_2(self.lang, name)
     }
 
     /// The name a copy saved without a file chooser takes, beside the
     /// capture, in its format: "Capture du … (annotée).png".
     pub fn annotated_name(self, stem: &str, extension: &str) -> String {
-        if self.fr {
-            format!("{stem} (annotée).{extension}")
-        } else {
-            format!("{stem} (annotated).{extension}")
-        }
+        txt::annotated(self.lang, extension, stem)
     }
 
     /// The capture in the notifications' history: its application's name.
@@ -229,7 +215,7 @@ impl Words {
     pub fn captured(self, captured: &Captured) -> String {
         let saved = !captured.folder.is_empty();
         let folder = &captured.folder;
-        if self.fr {
+        if self.lang == Lang::French {
             // Each its agreement: une zone, une fenêtre, un écran.
             let (what, copied, kept) = match captured.mode {
                 CaptureMode::Area => (

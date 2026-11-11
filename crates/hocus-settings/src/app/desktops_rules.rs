@@ -6,7 +6,6 @@
 //! those with a window open first. The rules are written whole, as an
 //! array of tables, each change with its toast and "Annuler".
 
-use crate::lang::French as _;
 use hocus_words::settings::app_desktops_rules as words;
 use std::time::Instant;
 
@@ -24,7 +23,7 @@ use super::{
 };
 use crate::{
     desktops::{self as model, Rule},
-    lang::{Lang, w},
+    lang::w,
     model::Icon,
     store::KeyEdit,
 };
@@ -251,18 +250,9 @@ impl App {
                 });
                 let lang = self.lang;
                 let said = KeysSaid {
-                    done: match lang {
-                        Lang::French => format!("Règle ajoutée : {name}"),
-                        Lang::English => format!("Rule added: {name}"),
-                    },
-                    undone: match lang {
-                        Lang::French => format!("Annulé : la règle de {name} est retirée."),
-                        Lang::English => format!("Undone: {name}’s rule is taken out."),
-                    },
-                    redone: match lang {
-                        Lang::French => format!("Rétabli : la règle de {name}."),
-                        Lang::English => format!("Redone: {name}’s rule."),
-                    },
+                    done: words::rule_added(lang, &name),
+                    undone: words::undone_s_rule_is_taken_out(lang, &name),
+                    redone: words::redone_s_rule(lang, &name),
                     row: model::RULES,
                 };
                 tracing::info!(app = id, "a rule added");
@@ -281,18 +271,9 @@ impl App {
         let name = Self::app_name(&gone.app_id);
         let lang = self.lang;
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Règle de {name} retirée"),
-                Lang::English => format!("{name}’s rule removed"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : la règle de {name} revient."),
-                Lang::English => format!("Undone: {name}’s rule is back."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : la règle de {name} retirée."),
-                Lang::English => format!("Redone: {name}’s rule removed."),
-            },
+            done: words::s_rule_removed(lang, &name),
+            undone: words::undone_s_rule_is_back(lang, &name),
+            redone: words::redone_s_rule_removed(lang, &name),
             row: model::RULES,
         };
         if self.desktops.rules.open.as_deref() == Some(gone.app_id.as_str()) {
@@ -313,18 +294,9 @@ impl App {
         let said_now = model::rule_said(now, &names, lang);
         let said_then = model::rule_said(then, &names, lang);
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Règle de {name} : {said_now}"),
-                Lang::English => format!("{name}’s rule: {said_now}"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : {said_then}"),
-                Lang::English => format!("Undone: {said_then}"),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {said_now}"),
-                Lang::English => format!("Redone: {said_now}"),
-            },
+            done: words::s_rule(lang, &name, &said_now),
+            undone: words::undone(lang, &said_then),
+            redone: words::redone(lang, &said_now),
             row: model::RULES,
         };
         self.rules_keys(&rules, said);
@@ -645,10 +617,7 @@ impl App {
         let bottom = self
             .places
             .at
-            .get(&format!(
-                "sidebar:{}",
-                if self.lang.fr() { "fr" } else { "en" }
-            ))
+            .get(&format!("sidebar:{}", words::EN.get(self.lang)))
             .map_or(f32::MAX, |s| s.y + s.height);
         let under = at.y + 38.0;
         let y = if under + height > bottom - 8.0 {

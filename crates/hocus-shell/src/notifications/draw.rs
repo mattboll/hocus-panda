@@ -18,6 +18,7 @@
 //! at a time (30 times a second at most), while it runs: nothing draws at
 //! rest, nor while the countdowns are paused.
 
+use hocus_words::shell::notifications_draw as txt;
 use std::time::{Duration, Instant};
 
 use iced::{
@@ -142,18 +143,18 @@ const CHIP_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
 
 #[derive(Debug, Clone, Copy)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn now() -> Self {
         Self {
-            fr: Lang::of_messages() == Lang::French,
+            lang: Lang::of_messages(),
         }
     }
 
     fn when(self) -> &'static str {
-        if self.fr { "· maintenant" } else { "· now" }
+        txt::NOW.get(self.lang)
     }
 
     fn urgent(self) -> &'static str {
@@ -162,15 +163,11 @@ impl Words {
 
     /// The ✕'s name, for screen readers.
     pub fn close(self) -> &'static str {
-        if self.fr { "Fermer" } else { "Close" }
+        txt::CLOSE.get(self.lang)
     }
 
     fn waiting(self, n: usize) -> String {
-        if self.fr {
-            format!("+{n} en attente")
-        } else {
-            format!("+{n} waiting")
-        }
+        txt::waiting(self.lang, n)
     }
 }
 

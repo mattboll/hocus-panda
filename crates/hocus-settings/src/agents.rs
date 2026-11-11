@@ -297,21 +297,15 @@ pub fn line(row: Row, tool: Tool, file: &str, declined: Option<&str>, lang: Lang
 
 /// "~/.claude/settings.json ne se lit pas : il n'est pas touché."
 pub fn broken(file: &str, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!("{file} ne se lit pas : il n’est pas touché."),
-        Lang::English => format!("{file} does not read: it is left alone."),
-    }
+    words::does_not_read_it_is_left(lang, file)
 }
 
 /// "2 suivis · 3 agents en cours".
 pub fn count_said(followed: usize, running: usize, lang: Lang) -> String {
-    let running = match (lang, running) {
-        (Lang::French, 0) => "aucun agent en cours".to_owned(),
-        (Lang::French, 1) => "1 agent en cours".to_owned(),
-        (Lang::French, n) => format!("{n} agents en cours"),
-        (Lang::English, 0) => "no agent running".to_owned(),
-        (Lang::English, 1) => "1 agent running".to_owned(),
-        (Lang::English, n) => format!("{n} agents running"),
+    let running = match running {
+        0 => words::NO_AGENT_RUNNING.get(lang).to_owned(),
+        1 => words::N_1_AGENT_RUNNING.get(lang).to_owned(),
+        n => words::agents_running(lang, n),
     };
     let followed = match (lang, followed) {
         (Lang::French, n) if n <= 1 => format!("{n} suivi"),

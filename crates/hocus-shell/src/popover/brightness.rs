@@ -17,6 +17,7 @@
 //! chooses; the wheel over the brightness's row moves it by 5 %; `Esc`
 //! closes.
 
+use hocus_words::shell::popover_brightness as txt;
 use std::{
     sync::{Mutex, PoisonError},
     time::{Duration, Instant},
@@ -314,7 +315,7 @@ fn content<'a>(words: Words, levels: &Snapshot, screens: Vec<String>, ui: &mut U
         );
     }
     ui.said = Some(said);
-    let a11y = crate::a11y::Words { fr: words.fr() };
+    let a11y = crate::a11y::Words::new(words.lang());
     let mut all: Vec<El<'a>> = vec![parts::header(
         words.brightness(),
         Some(said_in(words.built_in(), ASIDE, MANROPE, FAINT.get()).into()),
@@ -390,15 +391,11 @@ fn slider_row<'a>(icon: El<'a>, control: El<'a>, value: Option<f32>) -> El<'a> {
 
 /// The keyboard's row: its icon, then its levels or its slider.
 fn keyboard_row<'a>(words: Words, levels: &Snapshot, keyboard: Keyboard, ui: &Ui) -> El<'a> {
-    let a11y = crate::a11y::Words { fr: words.fr() };
+    let a11y = crate::a11y::Words::new(words.lang());
     let icon = drawn(SLOT, ROW, |f, _| {
         keys(f, Point::new((SLOT - ICON) / 2.0, (ROW - ICON) / 2.0));
     });
-    let name = if words.fr() {
-        "Rétroéclairage du clavier"
-    } else {
-        "Keyboard backlight"
-    };
+    let name = txt::KEYBOARD_BACKLIGHT.get(words.lang());
     let level = ui.level(levels).min(keyboard.max);
     if !keyboard.segmented() {
         let share = level as f32 / keyboard.max.max(1) as f32;

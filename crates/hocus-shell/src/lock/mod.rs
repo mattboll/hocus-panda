@@ -210,22 +210,16 @@ fn surfaces(lock: &mut Lock, screens: &Known) -> Vec<Effect> {
 /// The lock's words, in the shell's language (docs/design/lock.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn password(self) -> &'static str {
@@ -257,16 +251,12 @@ impl Words {
     }
 
     pub fn wait(self, seconds: u32) -> String {
-        if self.fr {
-            format!("Trop d’essais. Réessaie dans {seconds} s.")
-        } else {
-            format!("Too many attempts. Try again in {seconds} s.")
-        }
+        txt::too_many_attempts_try_again_in(self.lang, seconds)
     }
 
     /// The agents waiting for the user: a count, no name.
     pub fn agents(self, count: u32) -> String {
-        match (count, self.fr) {
+        match (count, (self.lang == Lang::French)) {
             (1, true) => "1 agent t’attend".to_owned(),
             (n, true) => format!("{n} agents t’attendent"),
             (1, false) => "1 agent is waiting for you".to_owned(),
@@ -277,11 +267,7 @@ impl Words {
     /// The layout's button's name, for a screen reader (11,
     /// accessibility).
     pub fn layout(self, name: &str) -> String {
-        if self.fr {
-            format!("Disposition du clavier : {name}. Changer")
-        } else {
-            format!("Keyboard layout: {name}. Change")
-        }
+        txt::keyboard_layout_change(self.lang, name)
     }
 }
 

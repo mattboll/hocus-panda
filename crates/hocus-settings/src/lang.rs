@@ -49,23 +49,11 @@ pub const fn pair(fr: &'static str, en: &'static str) -> Words {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use super::*;
 
     /// Every key the Settings moved to the catalogue says, byte for byte,
     /// what its pair said in the code before (#775).
     #[test]
     fn the_catalogue_says_what_the_code_said() {
-        let said = |lang| {
-            hocus_words::every(lang)
-                .into_iter()
-                .collect::<HashMap<_, _>>()
-        };
-        let (fr, en) = (said(Lang::French), said(Lang::English));
-        for (key, before_fr, before_en) in crate::words_before::BEFORE {
-            assert_eq!(fr.get(*key).map(String::as_str), Some(*before_fr), "{key}");
-            assert_eq!(en.get(*key).map(String::as_str), Some(*before_en), "{key}");
-        }
+        hocus_words::check_before(crate::words_before::BEFORE, crate::words_before::FORMATS);
     }
 }

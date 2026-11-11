@@ -82,11 +82,9 @@ impl Folder {
     /// The default folder's own name, in the pictures' or videos' folder
     /// (the compositor's).
     pub fn default_name(self, lang: Lang) -> &'static str {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => "Captures d'écran",
-            (Self::Captures, Lang::English) => "Screenshots",
-            (Self::Recordings, Lang::French) => "Enregistrements d'écran",
-            (Self::Recordings, Lang::English) => "Screen recordings",
+        match self {
+            Self::Captures => words::SCREENSHOTS_2.get(lang),
+            Self::Recordings => words::SCREEN_RECORDINGS.get(lang),
         }
     }
 
@@ -103,64 +101,38 @@ impl Folder {
     /// as the compositor names it, `stamp` (`2026-11-05`, `14-32-05`) and
     /// `extension` its.
     pub fn sample(self, (day, time): (&str, &str), extension: &str, lang: Lang) -> String {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => {
-                format!("« Capture du {day} à {time}.{extension} »")
-            }
-            (Self::Captures, Lang::English) => {
-                format!("“Screenshot from {day} {time}.{extension}”")
-            }
-            (Self::Recordings, Lang::French) => {
-                format!("« Enregistrement du {day} à {time}.{extension} »")
-            }
-            (Self::Recordings, Lang::English) => {
-                format!("“Screen recording from {day} {time}.{extension}”")
-            }
+        match self {
+            Self::Captures => words::screenshot_from(lang, day, extension, time),
+            Self::Recordings => words::screen_recording_from(lang, day, extension, time),
         }
     }
 
     /// "Dossier des captures : Bureau › Captures".
     pub fn toast(self, shown: &str, lang: Lang) -> String {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => format!("Dossier des captures : {shown}"),
-            (Self::Captures, Lang::English) => format!("Screenshots folder: {shown}"),
-            (Self::Recordings, Lang::French) => format!("Dossier des enregistrements : {shown}"),
-            (Self::Recordings, Lang::English) => format!("Recordings folder: {shown}"),
+        match self {
+            Self::Captures => words::screenshots_folder(lang, shown),
+            Self::Recordings => words::recordings_folder(lang, shown),
         }
     }
 
     /// The portal's title.
     pub fn title(self, lang: Lang) -> &'static str {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => "Choisir le dossier des captures",
-            (Self::Captures, Lang::English) => "Choose the screenshots folder",
-            (Self::Recordings, Lang::French) => "Choisir le dossier des enregistrements",
-            (Self::Recordings, Lang::English) => "Choose the recordings folder",
+        match self {
+            Self::Captures => words::CHOOSE_THE_SCREENSHOTS_FOLDER.get(lang),
+            Self::Recordings => words::CHOOSE_THE_RECORDINGS_FOLDER.get(lang),
         }
     }
 
     /// The row's warning when its folder cannot be written, `default` the
     /// one used meanwhile.
     pub fn unwritable(self, gone: bool, default: &str, lang: Lang) -> String {
-        let what = match (self, lang) {
-            (Self::Captures, Lang::French) => "les captures",
-            (Self::Captures, Lang::English) => "screenshots",
-            (Self::Recordings, Lang::French) => "les enregistrements",
-            (Self::Recordings, Lang::English) => "recordings",
+        let what = match self {
+            Self::Captures => words::SCREENSHOTS_3.get(lang),
+            Self::Recordings => words::RECORDINGS.get(lang),
         };
-        match (gone, lang) {
-            (true, Lang::French) => format!(
-                "Ce dossier n’existe plus (clé USB débranchée ?) : {what} vont dans {default}."
-            ),
-            (true, Lang::English) => format!(
-                "This folder no longer exists (USB key unplugged?): {what} go to {default}."
-            ),
-            (false, Lang::French) => {
-                format!("Ce dossier ne s’écrit pas : {what} vont dans {default}.")
-            }
-            (false, Lang::English) => {
-                format!("This folder cannot be written: {what} go to {default}.")
-            }
+        match gone {
+            true => words::this_folder_no_longer_exists_usb(lang, default, what),
+            false => words::this_folder_cannot_be_written_go(lang, default, what),
         }
     }
 }
@@ -270,22 +242,18 @@ pub fn count_said(items: u32, pinned: u32, lang: Lang) -> String {
         (n, Lang::French) => format!("{n} éléments"),
         (n, Lang::English) => format!("{n} items"),
     };
-    match (pinned, lang) {
-        (0, _) => items_word,
-        (1, Lang::French) => format!("{items_word} · 1 épinglé"),
-        (n, Lang::French) => format!("{items_word} · {n} épinglés"),
-        (1, Lang::English) => format!("{items_word} · 1 pinned"),
-        (n, Lang::English) => format!("{items_word} · {n} pinned"),
+    match pinned {
+        0 => items_word,
+        1 => words::n_1_pinned(lang, &items_word),
+        n => words::pinned(lang, &items_word, n),
     }
 }
 
 /// "140 éléments", what "Effacer…" and the history off erase.
 pub fn items_said(n: u32, lang: Lang) -> String {
-    match (n, lang) {
-        (1, Lang::French) => "1 élément".to_owned(),
-        (1, Lang::English) => "1 item".to_owned(),
-        (n, Lang::French) => format!("{n} éléments"),
-        (n, Lang::English) => format!("{n} items"),
+    match n {
+        1 => words::N_1_ITEM.get(lang).to_owned(),
+        n => words::items(lang, n),
     }
 }
 

@@ -640,14 +640,13 @@ impl App {
     pub(in crate::app) fn network_sheet(&self) -> Option<El<'_>> {
         let sheet = self.network.sheet.as_ref()?;
         let lang = self.lang;
-        let title = match (sheet.hidden, lang) {
+        let title = match sheet.hidden {
             _ if sheet.vpn.is_some() => match lang {
                 Lang::French => format!("VPN « {} »", sheet.name),
                 Lang::English => format!("VPN \u{201c}{}\u{201d}", sheet.name),
             },
-            (true, _) => w(words::JOIN_A_HIDDEN_NETWORK).get(lang).to_owned(),
-            (false, Lang::French) => format!("Se connecter à « {} »", sheet.name),
-            (false, Lang::English) => format!("Connect to \u{201c}{}\u{201d}", sheet.name),
+            true => w(words::JOIN_A_HIDDEN_NETWORK).get(lang).to_owned(),
+            false => words::connect_to(lang, &sheet.name),
         };
         let waiting = sheet.waiting();
         let mut body = column![

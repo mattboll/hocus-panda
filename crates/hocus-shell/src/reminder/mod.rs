@@ -395,14 +395,12 @@ pub enum Acted {
 /// The tab's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     pub fn now() -> Self {
@@ -410,17 +408,13 @@ impl Words {
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     /// "dans 5 min", "maintenant", "a commencé il y a 4 min".
     pub fn when(self, left: i64) -> String {
         let minutes = |m: i64| meeting::Words::minutes(m);
-        match (left, self.fr) {
+        match (left, (self.lang == Lang::French)) {
             (1.., true) => format!("dans {}", minutes(left)),
             (1.., false) => format!("in {}", minutes(left)),
             (0, _) => self.pick(txt::NOW).to_owned(),
@@ -495,7 +489,7 @@ impl Words {
                 format!("{m} minutes")
             }
         };
-        let when = match (tab.left, self.fr) {
+        let when = match (tab.left, (self.lang == Lang::French)) {
             (1.., true) => format!("dans {}", long(tab.left)),
             (1.., false) => format!("in {}", long(tab.left)),
             (0, _) => self.pick(txt::NOW).to_owned(),
@@ -516,11 +510,7 @@ impl Words {
 
     /// The history's line: "Revue de sprint · a commencé à 10:00".
     pub fn started(self, m: &Meeting) -> String {
-        if self.fr {
-            format!("{} · a commencé à {}", m.title, m.hhmm)
-        } else {
-            format!("{} · started at {}", m.title, m.hhmm)
-        }
+        txt::started_at(self.lang, &m.hhmm, &m.title)
     }
 
     /// The history's application.

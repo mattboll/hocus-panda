@@ -187,10 +187,7 @@ pub fn type_said(mime: &str, lang: Lang) -> String {
         "image/bmp" => ("Les images BMP", "BMP images"),
         "image/tiff" => ("Les images TIFF", "TIFF images"),
         other => {
-            return match lang {
-                Lang::French => format!("Le type {other}"),
-                Lang::English => format!("The type {other}"),
-            };
+            return words::the_type(lang, other);
         }
     };
     if lang.fr() { fr } else { en }.to_owned()
@@ -200,11 +197,9 @@ pub fn type_said(mime: &str, lang: Lang) -> String {
 pub fn differs_said(mime: &str, app: &str, lang: Lang) -> String {
     let what = type_said(mime, lang);
     let plural = !what.starts_with("Le type") && !what.starts_with("The type");
-    match (lang, plural) {
-        (Lang::French, true) => format!("{what} s’ouvrent avec {app}"),
-        (Lang::French, false) => format!("{what} s’ouvre avec {app}"),
-        (Lang::English, true) => format!("{what} open with {app}"),
-        (Lang::English, false) => format!("{what} opens with {app}"),
+    match plural {
+        true => words::open_with(lang, app, &what),
+        false => words::opens_with(lang, app, &what),
     }
 }
 

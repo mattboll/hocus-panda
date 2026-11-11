@@ -949,22 +949,16 @@ fn finish(choice: &Choice, token: Option<Token>) {
 /// The card's and the popover's words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn card_title(self) -> &'static str {
@@ -1100,7 +1094,7 @@ impl Words {
 
     /// "12 cartes", "1 carte".
     pub fn cards(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 0 | 1) => format!("{n} carte"),
             (true, n) => format!("{n} cartes"),
             (false, 1) => "1 card".to_owned(),
@@ -1155,8 +1149,12 @@ mod tests {
 
     #[test]
     fn its_words_in_french_and_english() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.card_title(), "Ta journée ici");
         assert_eq!(en.choose(), "Choose…");
         assert_eq!(fr.cards(12), "12 cartes");

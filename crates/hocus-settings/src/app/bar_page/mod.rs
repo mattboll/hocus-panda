@@ -130,10 +130,9 @@ impl FormRow {
 }
 
 fn form_word(form: Form, lang: Lang) -> &'static str {
-    match (form, lang) {
-        (Form::Full, Lang::French) => "pleine",
-        (Form::Full, Lang::English) => "full",
-        (Form::Mini, _) => "mini",
+    match form {
+        Form::Full => words::FULL_2.get(lang),
+        Form::Mini => "mini",
     }
 }
 
@@ -309,28 +308,18 @@ impl App {
             return;
         }
         let lang = self.lang;
-        let said = |f: &str| match (f, lang) {
-            ("full", Lang::French) => "Pleine",
-            ("full", Lang::English) => "Full",
-            ("mini", _) => "Mini",
+        let said = |f: &str| match f {
+            "full" => words::FULL.get(lang),
+            "mini" => "Mini",
             _ => "Auto",
         };
         let whose = crate::screens::lower_first(&row.title);
         let (now, then) = (said(form), said(row.asked));
-        let done = match lang {
-            Lang::French => format!("Forme de la barre, {whose} : {now}"),
-            Lang::English => format!("The bar’s form, {whose}: {now}"),
-        };
+        let done = words::the_bar_s_form(lang, now, &whose);
         let said = KeysSaid {
             done,
-            undone: match lang {
-                Lang::French => format!("Annulé : la forme revient à {then}."),
-                Lang::English => format!("Undone: the form is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {now}."),
-                Lang::English => format!("Redone: {now}."),
-            },
+            undone: words::undone_the_form_is_back_to(lang, then),
+            redone: words::redone(lang, now),
             row: model::FORM_ROW,
         };
         self.ask_keys(
@@ -354,18 +343,9 @@ impl App {
         let now = model::say_order(after, lang);
         let then = model::say_order(before, lang);
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Ordre de la barre : {now}"),
-                Lang::English => format!("The bar’s order: {now}"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : l’ordre revient à {then}."),
-                Lang::English => format!("Undone: the order is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {now}."),
-                Lang::English => format!("Redone: {now}."),
-            },
+            done: words::the_bar_s_order(lang, &now),
+            undone: words::undone_the_order_is_back_to(lang, &then),
+            redone: words::redone(lang, &now),
             row: model::group_setting(group),
         };
         let list = after
@@ -541,21 +521,10 @@ impl App {
                     .find(|s| s.primary)
                     .or_else(|| plugged.first())
                     .map(|s| crate::screens::lower_first(&s.title(lang)))?;
-                Some(match (plugged.len(), all, lang) {
-                    (1, _, Lang::French) => {
-                        format!("Un seul écran branché : la barre est sur l’{primary}.")
-                    }
-                    (1, _, Lang::English) => {
-                        format!("One screen plugged in: the bar is on the {primary}.")
-                    }
-                    (_, true, Lang::French) => "Une barre par écran, chacune avec les bureaux et les fenêtres de son écran.".to_owned(),
-                    (_, true, Lang::English) => "A bar per screen, each with its screen’s desktops and windows.".to_owned(),
-                    (_, false, Lang::French) => format!(
-                        "Aujourd’hui sur l’{primary} ; elle passe sur l’autre s’il s’éteint."
-                    ),
-                    (_, false, Lang::English) => format!(
-                        "On the {primary} now; it moves to the other if that one goes off."
-                    ),
+                Some(match (plugged.len(), all) {
+                    (1, _) => words::one_screen_plugged_in_the_bar(lang, &primary),
+                    (_, true) => words::A_BAR_PER_SCREEN_EACH_WITH.get(lang).to_owned(),
+                    (_, false) => words::on_the_now_it_moves_to(lang, &primary),
                 })
             }
             model::COLOR => {
@@ -566,16 +535,7 @@ impl App {
                     .map(|(_, name)| name.get(lang));
                 Some(match name {
                     Some(_) => w(words::THE_HOURS_AND_MINUTES).get(lang).to_owned(),
-                    None => match lang {
-                        Lang::French => format!(
-                            "Une couleur du fichier, {} ; elle reste jusqu’à ce qu’une autre soit choisie.",
-                            colour.to_uppercase()
-                        ),
-                        Lang::English => format!(
-                            "A colour from the file, {}; it stays until another is chosen.",
-                            colour.to_uppercase()
-                        ),
-                    },
+                    None => words::a_colour_from_the_file_it(lang, colour.to_uppercase()),
                 })
             }
             _ => None,
@@ -898,16 +858,7 @@ impl App {
             ("auto", None, _) => {
                 let form = form_word(Form::default_for(r.width), lang);
                 let from = hocus_link::FULL_FROM + Form::Full.width();
-                match lang {
-                    Lang::French => format!(
-                        "Automatique : {form}, l’écran fait {} px de large (pleine dès {from}).",
-                        r.width
-                    ),
-                    Lang::English => format!(
-                        "Automatic: {form}, the screen is {} px wide (full from {from}).",
-                        r.width
-                    ),
-                }
+                words::automatic_the_screen_is_px_wide(lang, form, from, r.width)
             }
             ("full", _, Lang::French) => {
                 "Toujours pleine ; un clic sur son bord change pour la session.".to_owned()
@@ -1138,12 +1089,10 @@ impl App {
                     Size::new(r.width as f32 * scale, r.height as f32 * scale),
                 );
                 let form = r.bar.map(|_| r.form());
-                let state = match (r.plugged, form, lang) {
-                    (false, _, Lang::French) => "débranché".to_owned(),
-                    (false, _, Lang::English) => "unplugged".to_owned(),
-                    (true, None, Lang::French) => "sans barre".to_owned(),
-                    (true, None, Lang::English) => "no bar".to_owned(),
-                    (true, Some(f), _) => form_word(f, lang).to_owned(),
+                let state = match (r.plugged, form) {
+                    (false, _) => words::UNPLUGGED.get(lang).to_owned(),
+                    (true, None) => words::NO_BAR.get(lang).to_owned(),
+                    (true, Some(f)) => form_word(f, lang).to_owned(),
                 };
                 Mini {
                     rect,

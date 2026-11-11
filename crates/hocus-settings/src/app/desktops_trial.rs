@@ -146,72 +146,30 @@ impl App {
         let lang = self.lang;
         let key = key_name(self.trial_key());
         let zone = |z: Zone| -> &'static str {
-            match (z, lang) {
-                (Zone::Left, Lang::French) => "la moitié gauche",
-                (Zone::Right, Lang::French) => "la moitié droite",
-                (Zone::Maximized, Lang::French) => "tout l’écran",
-                (Zone::TopLeft, Lang::French) => "le quart en haut à gauche",
-                (Zone::TopRight, Lang::French) => "le quart en haut à droite",
-                (Zone::BottomLeft, Lang::French) => "le quart en bas à gauche",
-                (Zone::BottomRight, Lang::French) => "le quart en bas à droite",
-                (Zone::Left, Lang::English) => "the left half",
-                (Zone::Right, Lang::English) => "the right half",
-                (Zone::Maximized, Lang::English) => "the whole screen",
-                (Zone::TopLeft, Lang::English) => "the top left quarter",
-                (Zone::TopRight, Lang::English) => "the top right quarter",
-                (Zone::BottomLeft, Lang::English) => "the bottom left quarter",
-                (Zone::BottomRight, Lang::English) => "the bottom right quarter",
+            match z {
+                Zone::Left => words::THE_LEFT_HALF.get(lang),
+                Zone::Right => words::THE_RIGHT_HALF.get(lang),
+                Zone::Maximized => words::THE_WHOLE_SCREEN.get(lang),
+                Zone::TopLeft => words::THE_TOP_LEFT_QUARTER.get(lang),
+                Zone::TopRight => words::THE_TOP_RIGHT_QUARTER.get(lang),
+                Zone::BottomLeft => words::THE_BOTTOM_LEFT_QUARTER.get(lang),
+                Zone::BottomRight => words::THE_BOTTOM_RIGHT_QUARTER.get(lang),
             }
         };
-        match (self.desktops.trial.trial.said, lang) {
-            (Said::Start, Lang::French) if key.is_empty() => {
-                "Glisse « Notes » par sa barre de titre.".to_owned()
+        match self.desktops.trial.trial.said {
+            Said::Start if key.is_empty() => {
+                words::DRAG_NOTES_BY_ITS_TITLE_BAR.get(lang).to_owned()
             }
-            (Said::Start, Lang::English) if key.is_empty() => {
-                "Drag “Notes” by its title bar.".to_owned()
+            Said::Start => words::drag_notes_by_its_title_bar_2(lang, key),
+            Said::NeedsKey if key.is_empty() => {
+                words::WITH_NO_KEY_CHOSEN_ONLY_ITS.get(lang).to_owned()
             }
-            (Said::Start, Lang::French) => {
-                format!(
-                    "Glisse « Notes » par sa barre de titre, ou par son contenu en tenant {key}."
-                )
-            }
-            (Said::Start, Lang::English) => {
-                format!("Drag “Notes” by its title bar, or by its content holding {key}.")
-            }
-            (Said::NeedsKey, Lang::French) if key.is_empty() => {
-                "Sans touche choisie, seule sa barre de titre la déplace.".to_owned()
-            }
-            (Said::NeedsKey, Lang::English) if key.is_empty() => {
-                "With no key chosen, only its title bar moves it.".to_owned()
-            }
-            (Said::NeedsKey, Lang::French) => format!(
-                "Sans {key}, le clic irait à l’application. Tiens {key} (le bouton au-dessus) pour la saisir ici."
-            ),
-            (Said::NeedsKey, Lang::English) => format!(
-                "Without {key}, the click would go to the application. Hold {key} (the button above) to grab it here."
-            ),
-            (Said::Stuck, Lang::French) => {
-                "Collée au Terminal, à 8 px : glisse encore pour la décoller.".to_owned()
-            }
-            (Said::Stuck, Lang::English) => {
-                "Stuck to the Terminal, 8 px away: drag on to free it.".to_owned()
-            }
-            (Said::Edge, Lang::French) => {
-                "Collée au bord de l’écran, à 8 px : glisse encore pour la décoller.".to_owned()
-            }
-            (Said::Edge, Lang::English) => {
-                "Stuck to the screen’s edge, 8 px in: drag on to free it.".to_owned()
-            }
-            (Said::Over(z), Lang::French) => format!("Lâche-la ici : {}.", zone(z)),
-            (Said::Over(z), Lang::English) => format!("Let go here: {}.", zone(z)),
-            (Said::Snapped(z), Lang::French) => {
-                format!("Ancrée : {}. Glisse-la pour lui rendre sa taille.", zone(z))
-            }
-            (Said::Snapped(z), Lang::English) => {
-                format!("Snapped: {}. Drag it to give it its size back.", zone(z))
-            }
-            (Said::Placed, Lang::French) => "Posée là où tu l’as lâchée.".to_owned(),
-            (Said::Placed, Lang::English) => "Left where you let it go.".to_owned(),
+            Said::NeedsKey => words::without_the_click_would_go_to(lang, key),
+            Said::Stuck => words::STUCK_TO_THE_TERMINAL_8_PX.get(lang).to_owned(),
+            Said::Edge => words::STUCK_TO_THE_SCREEN_S_EDGE.get(lang).to_owned(),
+            Said::Over(z) => words::let_go_here(lang, zone(z)),
+            Said::Snapped(z) => words::snapped_drag_it_to_give_it(lang, zone(z)),
+            Said::Placed => words::LEFT_WHERE_YOU_LET_IT_GO.get(lang).to_owned(),
         }
     }
 
@@ -279,14 +237,9 @@ impl App {
         if !none {
             hold = hold.on_press(Message::Desktops(Msg::Hold));
         }
-        let line = match (none, lang) {
-            (true, _) => w(words::WITH_NO_KEY_NOTES_MOVES_BY).get(lang).to_owned(),
-            (false, Lang::French) => {
-                format!("Comme si tu tenais {key} : glisse « Notes » par son contenu.")
-            }
-            (false, Lang::English) => {
-                format!("As if you held {key}: drag “Notes” by its content.")
-            }
+        let line = match none {
+            true => w(words::WITH_NO_KEY_NOTES_MOVES_BY).get(lang).to_owned(),
+            false => words::as_if_you_held_drag_notes(lang, key),
         };
         let now = self.desktops.trial.at(self.now);
         let trial = &self.desktops.trial.trial;
@@ -331,12 +284,10 @@ impl App {
         let lang = self.lang;
         let key = key_name(self.trial_key());
         let held = self.desktops.trial.held;
-        match (key.is_empty(), held, lang) {
-            (true, _, _) => w(words::NO_KEY).get(lang).to_owned(),
-            (false, true, Lang::French) => format!("{key} tenue"),
-            (false, true, Lang::English) => format!("{key} held"),
-            (false, false, Lang::French) => format!("Tenir {key}"),
-            (false, false, Lang::English) => format!("Hold {key}"),
+        match (key.is_empty(), held) {
+            (true, _) => w(words::NO_KEY).get(lang).to_owned(),
+            (false, true) => words::held(lang, key),
+            (false, false) => words::hold(lang, key),
         }
     }
 

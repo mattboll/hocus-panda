@@ -13,6 +13,7 @@
 //! and "ENSUITE" with the next event's time and title on one line. 14 px
 //! in, its parts 10 px apart.
 
+use hocus_words::shell::popover_meeting as txt;
 use std::sync::{Mutex, PoisonError};
 
 use hocus_a11y::Role;
@@ -315,7 +316,7 @@ fn content<'a>(words: Words, card: &Card, layout: &Layout, focus: Option<Target>
         let shown = kit::elide(title, (room - used).max(0.0), |t| {
             kit::measure(t, DETAIL, MANROPE)
         });
-        let then = if words.fr() { "Ensuite" } else { "Next" };
+        let then = txt::NEXT.get(words.lang());
         all = all.push(crate::ui::line(
             row![
                 label,

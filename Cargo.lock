@@ -1905,7 +1905,6 @@ dependencies = [
  "hocus-day",
  "hocus-panic",
  "hocus-perf",
- "hocus-words",
  "jiff",
  "serde_json",
  "tempfile",

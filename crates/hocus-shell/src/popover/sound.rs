@@ -449,7 +449,7 @@ fn arrows(pressed: &Pressed) -> Option<Msg> {
 }
 
 fn content<'a>(words: Words, shown: &Shown, ui: &Ui) -> El<'a> {
-    let a11y = crate::a11y::Words { fr: words.fr() };
+    let a11y = crate::a11y::Words::new(words.lang());
     let focus = ui.focus;
     let mixer = &shown.mixer;
     let master_muted = shown.sound.is_some_and(|s| s.muted);

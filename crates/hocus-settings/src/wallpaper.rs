@@ -634,16 +634,11 @@ fn list() -> Vec<Mine> {
 
 /// The file chooser, then the chosen picture checked and copied.
 fn pick(lock: bool, lang: Lang) -> Picked {
-    let title = match (lock, lang) {
-        (false, Lang::French) => "Choisir une image pour le fond",
-        (false, Lang::English) => "Choose a picture for the background",
-        (true, Lang::French) => "Choisir une image pour le verrouillage",
-        (true, Lang::English) => "Choose a picture for the lock screen",
+    let title = match lock {
+        false => words::CHOOSE_A_PICTURE_FOR_THE_BACKGROUND.get(lang),
+        true => words::CHOOSE_A_PICTURE_FOR_THE_LOCK.get(lang),
     };
-    let filter = match lang {
-        Lang::French => "Images (JPEG, PNG, WebP)",
-        Lang::English => "Pictures (JPEG, PNG, WebP)",
-    };
+    let filter = words::PICTURES_JPEG_PNG_WEBP.get(lang);
     let chosen = match crate::portal::open_file(title, filter, &pictures_folder()) {
         crate::portal::Chosen::Path(path) => path,
         crate::portal::Chosen::Cancelled => return Picked::Cancelled,

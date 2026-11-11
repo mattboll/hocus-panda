@@ -297,22 +297,16 @@ pub fn wake() {
 /// The dialog's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn title(self) -> &'static str {
@@ -321,11 +315,7 @@ impl Words {
 
     /// The dialog's name for screen readers.
     pub fn name(self, app: &str) -> String {
-        if self.fr {
-            format!("Autorisation nécessaire : {app}")
-        } else {
-            format!("Authorization required: {app}")
-        }
+        txt::authorization_required_2(self.lang, app)
     }
 
     pub fn administrator(self) -> &'static str {
@@ -342,7 +332,7 @@ impl Words {
 
     /// The field's name for screen readers.
     pub fn password_of(self, name: &str) -> String {
-        if self.fr {
+        if self.lang == Lang::French {
             let elided = name
                 .chars()
                 .next()
@@ -398,7 +388,7 @@ impl Words {
     /// The process's line: its id, and who started it.
     pub fn started(self, pid: Option<u32>, by: Option<&str>) -> String {
         let pid = pid.map_or_else(|| "?".to_owned(), |p| p.to_string());
-        match (by, self.fr) {
+        match (by, (self.lang == Lang::French)) {
             (Some(by), true) => format!("{pid}, lancé par {by}"),
             (Some(by), false) => format!("{pid}, started by {by}"),
             (None, _) => pid,
@@ -411,7 +401,7 @@ impl Words {
 
     /// The requests waiting behind it.
     pub fn waiting(self, n: usize) -> String {
-        match (n, self.fr) {
+        match (n, (self.lang == Lang::French)) {
             (0, _) => String::new(),
             (1, true) => "1 autre demande en attente".to_owned(),
             (n, true) => format!("{n} autres demandes en attente"),

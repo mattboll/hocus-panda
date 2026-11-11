@@ -6,6 +6,7 @@
 pub use hocus_network::model::*;
 
 use crate::levels::model::Words;
+use hocus_words::shell::network_model as txt;
 
 /// The words of the connections and the Wi-Fi's popover.
 impl Words {
@@ -14,181 +15,109 @@ impl Words {
     }
 
     pub fn connecting(self) -> &'static str {
-        if self.fr() {
-            "Connexion…"
-        } else {
-            "Connecting…"
-        }
+        txt::CONNECTING.get(self.lang())
     }
 
     pub fn offline(self) -> &'static str {
-        if self.fr() { "Hors ligne" } else { "Offline" }
+        txt::OFFLINE.get(self.lang())
     }
 
     pub fn wifi_off(self) -> &'static str {
-        if self.fr() {
-            "Wi-Fi coupé"
-        } else {
-            "Wi-Fi off"
-        }
+        txt::WI_FI_OFF.get(self.lang())
     }
 
     pub fn wired(self) -> &'static str {
-        if self.fr() { "Câble" } else { "Wired" }
+        txt::WIRED.get(self.lang())
     }
 
     pub fn by_cable(self) -> &'static str {
-        if self.fr() {
-            "Connecté par câble"
-        } else {
-            "Connected by cable"
-        }
+        txt::CONNECTED_BY_CABLE.get(self.lang())
     }
 
     pub fn airplane_mode(self) -> &'static str {
-        if self.fr() {
-            "Mode avion"
-        } else {
-            "Airplane mode"
-        }
+        txt::AIRPLANE_MODE.get(self.lang())
     }
 
     pub fn airplane_is_on(self) -> &'static str {
-        if self.fr() {
-            "Le mode avion est activé."
-        } else {
-            "Airplane mode is on."
-        }
+        txt::AIRPLANE_MODE_IS_ON.get(self.lang())
     }
 
     pub fn wifi_settings(self) -> &'static str {
-        if self.fr() {
-            "Réglages du Wi-Fi…"
-        } else {
-            "Wi-Fi settings…"
-        }
+        txt::WI_FI_SETTINGS.get(self.lang())
     }
 
     pub fn wifi_is_off(self) -> &'static str {
-        if self.fr() {
-            "Le Wi-Fi est coupé."
-        } else {
-            "Wi-Fi is off."
-        }
+        txt::WI_FI_IS_OFF.get(self.lang())
     }
 
     pub fn no_adapter(self) -> &'static str {
-        if self.fr() {
-            "Aucune carte Wi-Fi."
-        } else {
-            "No Wi-Fi adapter."
-        }
+        txt::NO_WI_FI_ADAPTER.get(self.lang())
     }
 
     pub fn connected(self) -> &'static str {
-        if self.fr() { "Connecté" } else { "Connected" }
+        txt::CONNECTED.get(self.lang())
     }
 
     pub fn sign_in_waits(self) -> &'static str {
-        if self.fr() {
-            "Page de connexion à ouvrir"
-        } else {
-            "Sign-in page to open"
-        }
+        txt::SIGN_IN_PAGE_TO_OPEN.get(self.lang())
     }
 
     pub fn disconnect(self) -> &'static str {
-        if self.fr() {
-            "Déconnecter"
-        } else {
-            "Disconnect"
-        }
+        txt::DISCONNECT.get(self.lang())
     }
 
     pub fn open_sign_in(self) -> &'static str {
-        if self.fr() {
-            "Ouvrir la page de connexion"
-        } else {
-            "Open the sign-in page"
-        }
+        txt::OPEN_THE_SIGN_IN_PAGE.get(self.lang())
     }
 
     /// Over the networks, in capitals.
     pub fn networks(self) -> &'static str {
-        if self.fr() { "RÉSEAUX" } else { "NETWORKS" }
+        txt::NETWORKS.get(self.lang())
     }
 
     pub fn searching(self) -> &'static str {
-        if self.fr() {
-            "Recherche…"
-        } else {
-            "Searching…"
-        }
+        txt::SEARCHING.get(self.lang())
     }
 
     pub fn searching_networks(self) -> &'static str {
-        if self.fr() {
-            "Recherche des réseaux…"
-        } else {
-            "Searching for networks…"
-        }
+        txt::SEARCHING_FOR_NETWORKS.get(self.lang())
     }
 
     pub fn no_network(self) -> &'static str {
-        if self.fr() {
-            "Aucun réseau trouvé."
-        } else {
-            "No network found."
-        }
+        txt::NO_NETWORK_FOUND.get(self.lang())
     }
 
     pub fn saved(self) -> &'static str {
-        if self.fr() { "enregistré" } else { "saved" }
+        txt::SAVED.get(self.lang())
     }
 
     pub fn in_settings(self) -> &'static str {
-        if self.fr() {
-            "dans les Réglages"
-        } else {
-            "in Settings"
-        }
+        txt::IN_SETTINGS.get(self.lang())
     }
 
     /// A row whose connection failed, not for its password.
     pub fn failed(self) -> &'static str {
-        if self.fr() { "échec" } else { "failed" }
+        txt::FAILED.get(self.lang())
     }
 
     pub fn password(self) -> &'static str {
-        if self.fr() {
-            "Mot de passe"
-        } else {
-            "Password"
-        }
+        txt::PASSWORD.get(self.lang())
     }
 
     pub fn cancel(self) -> &'static str {
-        if self.fr() { "Annuler" } else { "Cancel" }
+        txt::CANCEL.get(self.lang())
     }
 
     pub fn join(self) -> &'static str {
-        if self.fr() { "Se connecter" } else { "Connect" }
+        txt::CONNECT.get(self.lang())
     }
 
     pub fn wrong_password(self) -> &'static str {
-        if self.fr() {
-            "Mot de passe incorrect. Vérifie-le et réessaie."
-        } else {
-            "Wrong password. Check it and try again."
-        }
+        txt::WRONG_PASSWORD_CHECK_IT_AND_TRY.get(self.lang())
     }
 
     pub fn could_not_connect(self) -> &'static str {
-        if self.fr() {
-            "La connexion a échoué. Réessaie."
-        } else {
-            "Could not connect. Try again."
-        }
+        txt::COULD_NOT_CONNECT_TRY_AGAIN.get(self.lang())
     }
 }
 

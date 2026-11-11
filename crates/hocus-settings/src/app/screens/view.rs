@@ -1,7 +1,6 @@
 //! The Screens page drawn: its groups, rows, menus and dialog.
 
 use super::*;
-use crate::lang::French as _;
 use hocus_words::settings::app_screens_view as words;
 // The widget macros by name: through the glob they would be ambiguous.
 use iced::widget::{column, row, stack};
@@ -534,16 +533,10 @@ impl App {
         }
         let mut facts = vec![screen.name.clone()];
         if let Some(i) = screen.inches() {
-            facts.push(match lang {
-                Lang::French => format!("{i} pouces"),
-                Lang::English => format!("{i} in"),
-            });
+            facts.push(words::r#in(lang, i));
         }
         if let Some(d) = screen.density() {
-            facts.push(match lang {
-                Lang::French => format!("{d} ppp"),
-                Lang::English => format!("{d} ppi"),
-            });
+            facts.push(words::ppi(lang, d));
         }
         head = head.push(Space::new().width(Length::Fill));
         head = head.push(text(facts.join(" · ")).size(11).font(MONO).color(FAINT));
@@ -560,16 +553,9 @@ impl App {
         let size = screen.mode.map(|m| (m.0, m.1));
         let resolution_line = match (native, size) {
             (Some(n), Some(s)) if n == s => self.say(w(words::ITS_NATIVE_RESOLUTION)).to_owned(),
-            (Some(n), _) => match lang {
-                Lang::French => format!(
-                    "Hors de sa définition native ({}), l’image est moins nette.",
-                    screens::say_size(n)
-                ),
-                Lang::English => format!(
-                    "Not its native resolution ({}): the picture is less sharp.",
-                    screens::say_size(n)
-                ),
-            },
+            (Some(n), _) => {
+                words::not_its_native_resolution_the_picture(lang, screens::say_size(n))
+            }
             _ => String::new(),
         };
         let resolution_warn = screen
@@ -577,30 +563,18 @@ impl App {
             .as_ref()
             .filter(|_| !screen.mode_offered)
             .map(|m| {
-                let applies = screen
-                    .mode
-                    .map(|m| say_mode3(m, lang))
-                    .unwrap_or_default();
-                match lang {
-                    Lang::French => format!("Dans le fichier : « {m} », que l’écran ne propose pas ; {applies} s’applique."),
-                    Lang::English => format!("In the file: “{m}”, which the screen does not offer; {applies} applies."),
-                }
+                let applies = screen.mode.map(|m| say_mode3(m, lang)).unwrap_or_default();
+                words::in_the_file_which_the_screen(lang, &applies, m)
             });
         let rates = size.map(|s| screen.rates(s)).unwrap_or_default();
         let rate_line =
             (rates.len() <= 1).then(|| self.say(w(words::ONLY_ONE_AT_THIS_RESOLUTION)).to_owned());
         let logical_size = screen.size;
-        let mut scale_line = match lang {
-            Lang::French => format!("Comme {}", screens::say_size(logical_size)),
-            Lang::English => format!("Like {}", screens::say_size(logical_size)),
-        };
+        let mut scale_line = words::like(lang, screens::say_size(logical_size));
         if screen.scale_auto
             && let Some(d) = screen.density()
         {
-            scale_line.push_str(&match lang {
-                Lang::French => format!(", choisie par sa densité ({d} ppp)"),
-                Lang::English => format!(", chosen by its density ({d} ppi)"),
-            });
+            scale_line.push_str(&words::chosen_by_its_density_ppi(lang, d));
         }
         if logical_size.0 < FULL_FROM {
             scale_line.push_str(self.say(w(words::THE_BAR_TAKES_ITS_MINI_FORM)));
@@ -685,14 +659,7 @@ impl App {
             let there = known.plugged().find(|s| s.primary)?;
             let named = self.say_primary(Some(&name));
             let there = screens::lower_first(&there.title(self.lang));
-            Some(match self.lang {
-                Lang::French => {
-                    format!("{named} n’est pas là : la barre est sur l’{there} en attendant.")
-                }
-                Lang::English => {
-                    format!("{named} is not there: the bar is on the {there} meanwhile.")
-                }
-            })
+            Some(words::is_not_there_the_bar_is(self.lang, &named, &there))
         });
         (line, warn)
     }
@@ -879,10 +846,7 @@ impl App {
         let bottom = self
             .places
             .at
-            .get(&format!(
-                "sidebar:{}",
-                if self.lang.fr() { "fr" } else { "en" }
-            ))
+            .get(&format!("sidebar:{}", words::EN.get(self.lang)))
             .map_or(f32::MAX, |s| s.y + s.height);
         let under = at.y + 38.0;
         let y = if under + height > bottom - 8.0 {
@@ -911,11 +875,9 @@ impl App {
         let now = say_mode_text(&trial.mode, lang);
         let then = say_mode_text(&trial.before, lang);
         let left = trial.left;
-        let question = match (trial.what, lang) {
-            (RATE, Lang::French) => "Garder cette fréquence ?",
-            (RATE, Lang::English) => "Keep this refresh rate?",
-            (_, Lang::French) => "Garder cette résolution ?",
-            (_, Lang::English) => "Keep this resolution?",
+        let question = match trial.what {
+            RATE => words::KEEP_THIS_REFRESH_RATE.get(lang),
+            _ => words::KEEP_THIS_RESOLUTION.get(lang),
         };
         let body = match lang {
             Lang::French => {
