@@ -133,6 +133,15 @@ a suite that hides it gets worse without anyone seeing. So:
   with the tests of its file beside it, so that the machine is loaded as
   in the suite). "It passed again" closes nothing.
 
+A laptop with many cores hides what CI's four shared ones show. To see a
+chance failure before CI does, run on few CPUs: the suite as CI runs it
+(`NEXTEST_TEST_THREADS=4 taskset -c 0-3 cargo nextest run --workspace
+--profile ci`), or one file's tests harder than CI does
+(`NEXTEST_TEST_THREADS=8 taskset -c 0-1 cargo nextest run --profile ci
+--stress-count 8 -E 'test(/^today::/)'`). A test that fails there and
+nowhere else often shows a race of the program's, not of the test: the
+shell started slowly reads its day before its bar has a size, say (#769).
+
 What made tests fail by chance so far, to look for first:
 
 - **A fixed wait, then a look**: `wait(hp, 2 s)` before reading what
@@ -152,8 +161,10 @@ What made tests fail by chance so far, to look for first:
   hold the compositor's clock and step it, `Headless::step`), its time
   zone and language (the tests and every program they start get `TZ=UTC`
   and `LANG=C.UTF-8` from `.cargo/config.toml`; a test of another
-  language gives it to the program it starts), its speed (times measured
-  on the wall clock: hold the clock).
+  language gives it to the program it starts), its minute (a program
+  showing the real time draws when it changes, whenever the test runs:
+  `common::clear_of_the_minute`), its speed (times measured on the wall
+  clock: hold the clock).
 - **A whole wait spent to see that nothing comes**: read what is shown
   once the shell rests instead.
 
