@@ -1505,3 +1505,23 @@ fn nothing_draws_at_rest_while_the_list_shows() -> anyhow::Result<()> {
     assert!(!bed.hp.popover_surfaces().is_empty(), "the list closed");
     Ok(())
 }
+
+/// A desktop's list in its main state, shot under `HOCUS_KIT_SHOTS`
+/// (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    let _beta = bed.open_titled("test.small", "Beta", (600, 400))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    bed.list()?;
+    bed.logged_after(mark, "rows=[\"Beta\", \"Alpha\"]")?;
+    common::popover_shot(&mut bed.hp, "desktop")
+}

@@ -1271,3 +1271,39 @@ fn the_radial_menu_opens_over_a_window_never_over_the_bar() -> anyhow::Result<()
     assert!(bed.hp.radial().is_none());
     Ok(())
 }
+
+/// The mini form's popover and a window's menu in their main state, shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine {
+        form: FormChoice::Mini,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.open("org.gnome.Nautilus", "Téléchargements")?;
+    bed.open("org.gnome.TextEditor", "Notes de réunion")?;
+    bed.last_is(AT_REST, &["form=mini", "item=Some(\"Notes de réunion\")"])?;
+    bed.click("Windows")?;
+    bed.last_is(
+        "the windows' popover shows it",
+        &["shows=«Notes de réunion»*"],
+    )?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "windows")?;
+    drop(bed);
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    bed.right_click(&format!("Window({id})"))?;
+    bed.last_is(MENU, &[&format!("window={id} ")])?;
+    bed.menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "window-menu")
+}

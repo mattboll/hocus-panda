@@ -947,3 +947,16 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// The menu, then a confirmation, shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Logind::default())? else {
+        return Ok(());
+    };
+    bed.open_menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "session")
+}
