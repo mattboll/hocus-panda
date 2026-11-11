@@ -14,3 +14,93 @@ weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 short_weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 short_months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+# How numbers are written.
+[number]
+decimal = "."
+percent = "{n}%"
+
+# hocus-perf: `hocus perf day`, the Settings' Performance page, a signal's
+# notification and its report.
+[perf]
+megabytes = "{mb} MB"
+fps = "{fps} frames/s"
+in_use = " · in use"
+untouched = " · untouched"
+more_events = { one = " · {n} more event", other = " · {n} more events" }
+locked = ", {long} of it locked"
+nothing_recorded = "Nothing recorded that day.\n"
+peaks = "Peaks\n"
+none = "  none\n"
+signals = "Signals\n"
+report = "— performance"
+
+[perf.who]
+compositor = "compositor"
+shell = "shell"
+settings = "Settings"
+
+[perf.event]
+window_opened = "window opened: {what}"
+window_closed = "window closed: {what}"
+screen_plugged = "screen {what} plugged in"
+screen_unplugged = "screen {what} unplugged"
+settings_page = "Settings › {what}"
+config = "configuration changed: {what}"
+wallpaper_moving = "moving wallpaper on: {what}"
+locked = "session locked"
+unlocked = "session unlocked"
+suspend = "going to sleep"
+resume = "woken from sleep"
+on_battery = "on battery"
+on_ac = "on AC"
+wallpaper_still = "moving wallpaper stopped"
+other = "something else"
+
+# What a peak was.
+[perf.peak]
+frames_at_rest = "Frames with nothing moving: {fps} a second"
+wallpaper = "The moving wallpaper running"
+windows_opened = "{n} windows opened"
+sustained_cpu = "Sustained CPU"
+wakeups = "The loop woken at rest"
+slow_moment = "A slow moment"
+in_use = "The desktop in use"
+windows_drawing = "Windows drawing"
+motion = "A motion of the desktop"
+nothing = "Nothing noted"
+
+# A signal's title and the line under it.
+[perf.signal]
+sustained_cpu = "{span}: sustained CPU"
+sustained_cpu_line = "Up to {percent} of a core for {long}. Signal: the compositor and the shell above {threshold} for 5 min."
+frames_at_rest = "{span}: frames with nothing moving"
+frames_at_rest_line = "{fps} frames a second for {long}, untouched, no window drawing. Signal: more than one frame a second at rest for 1 min."
+wakeups = "{span}: the loop woken at rest"
+wakeups_line = "{rate} wakeups a second for {long}, untouched. Signal: more than 5 wakeups a second on average over 10 min with no input."
+memory = "The {whose}'s memory only grows"
+memory_line = "{start} → {end}, +{rate} MB an hour since {since}, never coming back down. Signal: a steady rise over more than 3 hours."
+slow_moment = "{span}: a slow moment"
+slow_moment_line = "A turn of the loop or a frame of {ms} ms. Signal: a frame over 50 ms, or a loop turn over 16 ms."
+
+# A signal's notification, as it begins.
+[perf.notification]
+sustained_cpu = "The desktop took {percent} of a core for more than 5 minutes (since {at})."
+frames_at_rest = "The desktop drew {fps} frames a second with nothing moving (since {at})."
+wakeups = "The desktop woke {rate} times a second, untouched, for 10 minutes."
+memory = "The {whose}'s memory has been growing since {at}: +{rate} MB an hour."
+slow_moment = "A slow moment of the desktop at {at}: {ms} ms."
+
+# The day's totals, a line each.
+[perf.totals]
+cpu = "{percent} of a core on average · compositor {compositor} · shell {shell}"
+memory = "Memory"
+peak = "peak"
+at = "at"
+frames = "Frames"
+wakeups_at_rest = "wakeups at rest"
+motion_frames = "{count} frames in motion"
+moving_wallpaper = "moving wallpaper"
+motion = "Motion"
+battery = "Battery"
+on_average_over = "on average over"

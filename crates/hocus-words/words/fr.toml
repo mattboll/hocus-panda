@@ -12,3 +12,86 @@ weekdays = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanc
 short_weekdays = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
 months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 short_months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+
+[number]
+decimal = ","
+percent = "{n} %"
+
+[perf]
+megabytes = "{mb} Mo"
+fps = "{fps} images/s"
+in_use = " · en usage"
+untouched = " · sans geste"
+more_events = { one = " · {n} autre événement", other = " · {n} autres événements" }
+locked = ", dont {long} verrouillé"
+nothing_recorded = "Rien d’enregistré ce jour-là.\n"
+peaks = "Pics\n"
+none = "  aucun\n"
+signals = "Signaux\n"
+report = "— performances"
+
+[perf.who]
+compositor = "compositeur"
+shell = "shell"
+settings = "Réglages"
+
+[perf.event]
+window_opened = "fenêtre ouverte : {what}"
+window_closed = "fenêtre fermée : {what}"
+screen_plugged = "écran {what} branché"
+screen_unplugged = "écran {what} débranché"
+settings_page = "Réglages › {what}"
+config = "configuration changée : {what}"
+wallpaper_moving = "fond animé en marche : {what}"
+locked = "session verrouillée"
+unlocked = "session déverrouillée"
+suspend = "mise en veille"
+resume = "sortie de veille"
+on_battery = "sur batterie"
+on_ac = "sur secteur"
+wallpaper_still = "fond animé arrêté"
+other = "autre chose"
+
+[perf.peak]
+frames_at_rest = "Des images sans que rien ne bouge : {fps} par seconde"
+wallpaper = "Le fond animé en marche"
+windows_opened = "{n} fenêtres ouvertes"
+sustained_cpu = "Un CPU soutenu"
+wakeups = "La boucle réveillée au repos"
+slow_moment = "Un moment lent"
+in_use = "Le bureau en usage"
+windows_drawing = "Des fenêtres qui se dessinent"
+motion = "Une animation du bureau"
+nothing = "Rien de noté"
+
+[perf.signal]
+sustained_cpu = "{span} : un CPU soutenu"
+sustained_cpu_line = "Jusqu’à {percent} d’un cœur pendant {long}. Signal : le compositeur et le shell au-dessus de {threshold} pendant 5 min."
+frames_at_rest = "{span} : des images sans que rien ne bouge"
+frames_at_rest_line = "{fps} images par seconde pendant {long}, sans geste ni fenêtre qui se dessine. Signal : plus d’une image par seconde au repos pendant 1 min."
+wakeups = "{span} : la boucle réveillée au repos"
+wakeups_line = "{rate} réveils par seconde pendant {long}, sans geste. Signal : plus de 5 réveils par seconde en moyenne sur 10 min sans geste."
+memory = "La mémoire du {whose} ne fait que monter"
+memory_line = "{start} → {end}, +{rate} Mo par heure depuis {since}, sans jamais redescendre. Signal : une hausse continue sur plus de 3 heures."
+slow_moment = "{span} : un moment lent"
+slow_moment_line = "Un tour de la boucle ou une image de {ms} ms. Signal : une image de plus de 50 ms, ou un tour de boucle de plus de 16 ms."
+
+[perf.notification]
+sustained_cpu = "Le bureau a pris {percent} d’un cœur pendant plus de 5 minutes (depuis {at})."
+frames_at_rest = "Le bureau a dessiné {fps} images par seconde sans rien qui bouge (depuis {at})."
+wakeups = "Le bureau s’est réveillé {rate} fois par seconde sans geste pendant 10 minutes."
+memory = "La mémoire du {whose} monte depuis {at} : +{rate} Mo par heure."
+slow_moment = "Un moment lent du bureau à {at} : {ms} ms."
+
+[perf.totals]
+cpu = "{percent} d’un cœur en moyenne · compositeur {compositor} · shell {shell}"
+memory = "Mémoire"
+peak = "pic"
+at = "à"
+frames = "Images"
+wakeups_at_rest = "réveils au repos"
+motion_frames = "{count} images animées"
+moving_wallpaper = "fond animé"
+motion = "Mouvements"
+battery = "Batterie"
+on_average_over = "en moyenne sur"
