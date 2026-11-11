@@ -21,6 +21,7 @@ pub mod editor;
 pub mod marks;
 pub mod portal;
 pub mod thumb;
+pub mod toolbar;
 
 use std::{
     path::{Path, PathBuf},
@@ -129,6 +130,16 @@ impl Words {
     /// What the text's field shows while empty.
     pub fn text_hint(self) -> &'static str {
         self.pick("Texte", "Text")
+    }
+
+    /// The pointer's button, for screen readers.
+    pub fn pointer(self) -> &'static str {
+        self.pick("Afficher le pointeur", "Show the pointer")
+    }
+
+    /// The toolbar, for screen readers.
+    pub fn toolbar(self) -> &'static str {
+        self.pick("Capture d'écran", "Screenshot")
     }
 
     /// The editor's colours, for screen readers.
@@ -539,9 +550,6 @@ impl Button {
 pub struct Toolbar {
     pub id: window::Id,
     pub bar: CaptureBar,
-    /// The button under the pointer, and the one pressed.
-    pub hover: Option<Button>,
-    pub pressed: Option<Button>,
 }
 
 static TOOLBAR: Mutex<Option<Toolbar>> = Mutex::new(None);
@@ -565,6 +573,8 @@ pub fn set(bar: CaptureBar) {
             let resized = shown.bar.video != bar.video;
             let video = bar.video;
             shown.bar = bar;
+            // Its buttons are built again from it.
+            crate::ui::touch();
             let mut effects = vec![Effect::Wake(CAPTURE_TOOLBAR_NAMESPACE)];
             if resized {
                 let size = draw::Layout::of(words(), video).size;
@@ -589,12 +599,7 @@ pub fn set(bar: CaptureBar) {
                 output: bar.output.clone(),
                 size: (size.width.ceil() as u32, size.height.ceil() as u32),
             });
-            *toolbar = Some(Toolbar {
-                id,
-                bar,
-                hover: None,
-                pressed: None,
-            });
+            *toolbar = Some(Toolbar { id, bar });
             effects
         }
     });
@@ -664,7 +669,7 @@ fn toast(captured: &Captured) {
 }
 
 /// `button` clicked on the toolbar on `id`: the compositor is told.
-fn clicked(id: window::Id, button: Button) {
+pub fn clicked(id: window::Id, button: Button) {
     if !is_surface(id) {
         return;
     }

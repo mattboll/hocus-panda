@@ -298,6 +298,20 @@ impl Said {
             }
             windows.push(editor);
         }
+        if let Some(toolbar) = crate::capture::toolbar::a11y() {
+            for node in toolbar.all() {
+                if node.key.starts_with("toolbar:") {
+                    self.targets.insert(
+                        (toolbar.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::toolbar::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(toolbar);
+        }
         if let Some(chooser) = crate::share::a11y() {
             for node in chooser.all() {
                 if node.key.starts_with("share:") {

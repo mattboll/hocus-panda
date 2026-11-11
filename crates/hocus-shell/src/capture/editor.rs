@@ -392,6 +392,7 @@ pub fn paste() {
                 .is_some_and(|typing| typing.text.paste(pasted))
         });
         if pasted {
+            crate::ui::touch();
             crate::popover::send(vec![Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)]);
         }
     });
@@ -555,7 +556,10 @@ fn back_from_choosing(saved: Option<String>) {
                     output: editor.shot.output.clone(),
                 })
             }
-            Phase::Shown(_) => Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)),
+            Phase::Shown(_) => {
+                crate::ui::touch();
+                Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE))
+            }
         }
     });
     if let Some(effect) = reopen {

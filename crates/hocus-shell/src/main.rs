@@ -1831,16 +1831,11 @@ impl Shell {
         if !capture::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(capture::draw::View {
-                id,
-                words: capture::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(capture::toolbar::view(
+            id,
+            capture::Words::new(clock::time::Lang::of_messages()),
+            self.look.glass,
+        ))
     }
 
     /// The popover whose surface is `id`.
