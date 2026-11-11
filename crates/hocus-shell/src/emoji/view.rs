@@ -566,7 +566,7 @@ fn said_in<'a>(text: String, size: f32, colour: Color) -> iced::widget::Text<'a>
 fn top_line<'a>(open: &Open, words: Words, tone: usize, width: f32) -> El<'a> {
     let field_width = width - GAP - TONE_BUTTON;
     let typed = Field {
-        with: query,
+        with: Box::new(query),
         style: Style::one(QUERY, MANROPE),
         placeholder: words.placeholder().into(),
         look: Look::of(TEXT.get(), QUIET.get()),

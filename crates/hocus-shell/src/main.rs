@@ -413,6 +413,8 @@ struct Shell {
     share: surfaces::Lent<share::Share>,
     /// The lock (7.1).
     lock: surfaces::Lent<lock::Locked>,
+    /// The system's authentication dialog (7.5).
+    auth: surfaces::Lent<auth::Auth>,
 }
 
 #[to_layer_message(multi)]
@@ -478,6 +480,7 @@ impl Shell {
             curtain: curtain::Curtain::default(),
             share: surfaces::Lent::default(),
             lock: surfaces::Lent::default(),
+            auth: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -506,6 +509,7 @@ impl Shell {
         subscriptions.push(Subscription::run(outputs::changes).map(|()| Message::Screens));
         subscriptions.push(Subscription::run(zone_changes));
         subscriptions.push(Subscription::run(popover::effects));
+        subscriptions.push(Subscription::run(surfaces::inbox));
         subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(Subscription::run(tray::effects));
         subscriptions.push(Subscription::run(music::effects));
@@ -577,14 +581,15 @@ impl Shell {
                 music::tile::pressed(press);
                 Task::none()
             }
-            Message::Surface(asked) => {
-                let effects = match asked {
-                    surfaces::Asked::Share(act) => self
+            Message::Surface(asked) => match asked {
+                surfaces::Asked::Share(act) => {
+                    let effects = self
                         .share
-                        .update(share::Said::Act { on: None, act }, self.now),
-                };
-                Task::batch(popover::messages(effects).into_iter().map(Task::done))
-            }
+                        .update(share::Said::Act { on: None, act }, self.now);
+                    Task::batch(popover::messages(effects).into_iter().map(Task::done))
+                }
+                surfaces::Asked::Auth(come) => self.auth_told(auth::Told::Come(come)),
+            },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -878,14 +883,8 @@ impl Shell {
                 let effects = self.share.update(share::Said::End(request), self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
-            ToShell::AuthAt(at) => {
-                auth::placed(at);
-                Task::none()
-            }
-            ToShell::CapsLock(on) => {
-                auth::caps(on);
-                Task::none()
-            }
+            ToShell::AuthAt(at) => self.auth_told(auth::Told::Placed(at)),
+            ToShell::CapsLock(on) => self.auth_told(auth::Told::Caps(on)),
             ToShell::TrayToken { ask, token } => {
                 tray::token(ask, token);
                 Task::none()
@@ -1729,17 +1728,21 @@ impl Shell {
         ))
     }
 
-    /// The authentication dialog (7.5), if its surface is `id`.
-    fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !auth::is_surface(id) {
-            return None;
-        }
-        Some(auth::view::view(
-            id,
-            auth::words(),
-            self.look.glass,
-            self.look.motion,
-        ))
+    /// The authentication dialog told `told`: what it does, and its next
+    /// tick (a surface faded out, the next request), if one is due.
+    fn auth_told(&mut self, told: auth::Told) -> Task<Message> {
+        let effects = self.auth.update(told, self.now);
+        let tick = self.auth.get_mut().due().map_or_else(Task::none, |at| {
+            Task::perform(tokio::time::sleep_until(at.into()), |()| {
+                Message::Surface(surfaces::Asked::Auth(auth::Come::Tick))
+            })
+        });
+        Task::batch(
+            popover::messages(effects)
+                .into_iter()
+                .map(Task::done)
+                .chain([tick]),
+        )
     }
 
     /// The panda peeking out (4.5), if its surface is `id`.
@@ -1971,7 +1974,7 @@ impl Shell {
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
-                .or_else(|| self.auth_view(id))
+                .or_else(|| self.auth.view(id, &context))
                 .or_else(|| self.share.view(id, &context))
                 .or_else(|| self.lock.view(id, &context))
                 .or_else(|| self.curtain.view(id, &context))
@@ -2498,16 +2501,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::Captured(captured) => {
                             capture::captured(captured);
-                            continue;
-                        }
-                        // The authentication dialog (7.5): its place, and
-                        // Caps Lock.
-                        ToShell::AuthAt(at) => {
-                            auth::placed(at);
-                            continue;
-                        }
-                        ToShell::CapsLock(on) => {
-                            auth::caps(on);
                             continue;
                         }
                         ToShell::Shares(shares) => {

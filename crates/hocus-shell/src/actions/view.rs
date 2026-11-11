@@ -562,7 +562,7 @@ fn field<'a>(open: &Open, words: Words, width: f32) -> El<'a> {
         kit::measure(t, PLACEHOLDER, MANROPE)
     });
     let typed = Field {
-        with: query,
+        with: Box::new(query),
         style: Style {
             hint: (PLACEHOLDER, MANROPE),
             ..Style::one(QUERY, MANROPE)

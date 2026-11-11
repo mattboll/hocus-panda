@@ -619,7 +619,7 @@ pub fn a11y_click(key: &str) {
             None => return,
         },
     };
-    crate::popover::send(vec![Effect::Surface(Asked::Share(what))]);
+    crate::surfaces::ask(Asked::Share(what));
 }
 
 #[cfg(test)]

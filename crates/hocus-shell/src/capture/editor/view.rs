@@ -364,7 +364,7 @@ fn controls<'a>(e: &Editor, layout: &Layout, w: Words) -> El<'a> {
             draw::draw_field_box(f, field, colour, z);
         });
         let typed = Field {
-            with: entry,
+            with: Box::new(entry),
             style: Style::one(TEXT.0 * z, MANROPE_BOLD),
             placeholder: w.text_hint().to_owned(),
             look: Look::of(colour, draw::HINT.get()),

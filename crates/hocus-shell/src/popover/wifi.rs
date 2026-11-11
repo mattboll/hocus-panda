@@ -962,7 +962,9 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui, fr: bool) -> El<'a> {
     let error = ui.error;
     let focus = ui.focus;
     let typed = Field {
-        with: |with| self::ui(|ui| with(&mut ui.password)),
+        with: Box::new(|with: &mut dyn FnMut(&mut crate::field::Entry)| {
+            self::ui(|ui| with(&mut ui.password))
+        }),
         style: Style {
             reveal: ui.shown,
             ..Style::one(FIELD_TEXT, MANROPE)

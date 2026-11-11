@@ -622,8 +622,6 @@ pub enum Event {
 /// What the controller asks for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
-    /// Asked of a surface the loop owns, from another thread: a message.
-    Surface(crate::surfaces::Asked),
     /// A popover's surface for `item`, on `bar`'s output: `size`, and its
     /// layer-shell margins (top, right, bottom, left).
     Open {
@@ -2494,7 +2492,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
                 crate::tasks::deadline(),
-                crate::auth::deadline(),
             ]
             .into_iter()
             .flatten()
@@ -2515,7 +2512,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
                             due.extend(crate::tasks::tick(now));
-                            due.extend(crate::auth::tick(now));
                             Some(due)
                         }
                     }
@@ -2550,7 +2546,6 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
     use crate::Message;
     use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings, OutputOption};
     match effect {
-        Effect::Surface(asked) => vec![Message::Surface(asked)],
         Effect::Open {
             id,
             bar,
