@@ -1957,9 +1957,10 @@ own: the actions palette, the emoji picker, the launcher, the share's
 chooser, the authentication dialog, the notifications' bubbles and the
 lock's controls (`Around::own`: open while their model says, woken by
 their namespace, every key theirs; `Around::own_by` when a closure wakes
-them, a bubble's namespace being its serial's). The bar's items, the
-captures, the desktops' overview and the peek are still hand-drawn
-canvases (#772).
+them, a bubble's namespace being its serial's), the capture's toolbar,
+thumbnail and editor, the peek and a meeting's reminder. The bar's own
+items stay hand-drawn canvases with their hit-testing, ring and screen
+readers' rows (see "What stays drawn", below).
 
 **How to build a surface with it.**
 
@@ -2059,6 +2060,37 @@ translation, and its bounds cut a rim on a half pixel: a control draws
 in its own frame, a pixel past its bounds when its edge is on one. The
 dialog's field is the shared one, masked; the lock's dots stay the
 compositor's count, its keys the compositor's.
+Then the fifth batch: the capture's toolbar, its thumbnail, the peek and
+a reminder's tab, none; the capture's editor one pixel (a swatch's edge),
+but its file's name, whose time differs from a run to the next. The
+editor's image is a canvas of its own that takes the drags drawing a
+mark; the text being typed is the shared field (it scrolls inside its
+dashed box rather than running past it). The peek's and the reminder's
+controls are mouse areas over what is drawn as before (a part lit under
+the pointer, a press acting at once), the thumbnail's card a mouse area
+that holds it. iced hands every event of a batch the cursor as it is
+after the batch: a press and a release read with a move away (a slow
+frame) lost the click on a stock button. The kit's surface hands its
+widgets, with each mouse event, the pointer where that event has it.
+What changes outside a kit surface's messages (the compositor's
+capture line, a reminder's minute, a peek's words) calls `ui::touch`,
+else its controls stay as they were built.
+
+**What stays drawn** (#772): the bar's own items, on their surfaces: the
+clock's group (the bar's own surface's pointer), the levels, the
+connections, the desktops' tiles, the agents' group, Today, the tasks,
+the next meeting's card, the in-use sign, the windows, the tray's icons
+and the footer: twelve canvases, each with its hit-testing, its ring and
+its rows in `a11y::bar`. They are one keyboard ring across a dozen
+surfaces, which the popovers' controller walks (`Tab` from a surface to
+the next, the arrows along a row), and the pointer's every move feeds
+its cone and its 150 ms and 300 ms; the kit's ring and its
+declarations are a surface's. Moved as they are, each item's hover and
+press would be a message of the shell, which builds and draws every
+surface again, where a bar's surface now draws alone and nothing at
+rest. Moving them is moving that ring into the kit (a surface of the
+bar declaring its items, the controller stepping through declarations
+rather than rectangles): a change of its own, not this issue's.
 
 ### 3.9, the desktops (2026-10-30)
 
