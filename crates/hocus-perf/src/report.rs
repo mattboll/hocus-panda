@@ -156,7 +156,7 @@ fn median(mut values: Vec<f64>) -> f64 {
         return 0.0;
     }
     values.sort_by(f64::total_cmp);
-    values[values.len() / 2]
+    values.get(values.len() / 2).copied().unwrap_or(0.0)
 }
 
 /// A peak over `samples`, from `from` to `to`.

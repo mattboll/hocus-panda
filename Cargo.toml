@@ -26,6 +26,7 @@ hocus-geometry = { version = "1.0.0", path = "crates/hocus-geometry" }
 hocus-link = { version = "1.0.0", path = "crates/hocus-link" }
 hocus-network = { version = "1.0.0", path = "crates/hocus-network" }
 hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
+hocus-panic = { version = "1.0.0", path = "crates/hocus-panic" }
 hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
@@ -59,6 +60,7 @@ serde_json = "1.0.154"
 smithay = { version = "0.7.0", default-features = false }
 smithay-client-toolkit = { version = "0.19.2", default-features = false }
 tempfile = "3.27.0"
+thiserror = "2.0.21"
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 tokio = "1.54.1"
 toml = "1.1.8"
@@ -88,6 +90,11 @@ all = { level = "warn", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+# A panic ends the session, or the bar: what could panic is handled, or
+# says why it cannot (`#[expect(…, reason = "…")]`). Tests may (clippy.toml).
+expect_used = "warn"
+indexing_slicing = "warn"
+panic = "warn"
 
 [profile.dev]
 # Keep debug builds usable: the compositor draws every frame.

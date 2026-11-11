@@ -116,12 +116,19 @@ enum RendererArg {
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let filter = match hocus_panic::LOG.parse() {
+        Ok(panics) => filter.add_directive(panics),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         // A session's stderr goes to the journal, which shows no colours.
         .with_ansi(std::io::stderr().is_terminal())
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(filter)
         .init();
+    // A panic, of the loop or of a thread, is in the journal (#778).
+    hocus_panic::install();
     let backend = args.backend.unwrap_or_else(|| {
         let graphical = ["WAYLAND_DISPLAY", "DISPLAY"]
             .iter()

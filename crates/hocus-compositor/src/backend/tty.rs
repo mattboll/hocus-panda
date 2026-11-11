@@ -739,7 +739,7 @@ impl TtyBackend {
             serial: read.as_deref().and_then(serial),
         };
         let preferred_mode = preferred(info)
-            .map(|i| info.modes()[i])
+            .and_then(|i| info.modes().get(i).copied())
             .or_else(|| info.modes().first().copied())
             .context("no mode")?;
         let modes: Vec<crate::displays::Mode3> = crate::displays::sorted_modes(
@@ -1365,33 +1365,48 @@ fn edid(device: &DrmDevice, connector: connector::Handle) -> Option<Vec<u8>> {
 /// The screen's serial number, from its EDID: its serial descriptor's
 /// text, else the number in its header (none when 0).
 pub fn serial(edid: &[u8]) -> Option<String> {
-    const HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
-    if edid.len() < 128 || edid[..8] != HEADER {
-        return None;
-    }
-    let text = (0..4).find_map(|i| {
-        let d = &edid[54 + i * 18..72 + i * 18];
-        (d[..3] == [0, 0, 0] && d[3] == 0xff).then(|| {
-            String::from_utf8_lossy(&d[5..])
-                .split('\n')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_string()
-        })
-    });
-    text.filter(|t| !t.is_empty()).or_else(|| {
+    let edid = edid_base(edid)?;
+    descriptor_text(edid, 0xff).or_else(|| {
         let number = u32::from_le_bytes([edid[12], edid[13], edid[14], edid[15]]);
         (number != 0).then(|| number.to_string())
     })
 }
 
+/// An EDID's base block, its first 128 bytes, when it starts as one: a
+/// screen sends what it wants, shorter too.
+fn edid_base(edid: &[u8]) -> Option<&[u8; 128]> {
+    const HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
+    edid.first_chunk::<128>()
+        .filter(|base| base.starts_with(&HEADER))
+}
+
+/// The text of the base block's descriptor of this `tag` (0xff the
+/// serial, 0xfc the name), when it has one: four 18-byte descriptors, a
+/// text's ended by a newline.
+fn descriptor_text(edid: &[u8; 128], tag: u8) -> Option<String> {
+    edid[54..126]
+        .as_chunks::<18>()
+        .0
+        .iter()
+        .find_map(|d| match d {
+            [0, 0, 0, t, _, text @ ..] if *t == tag => Some(
+                String::from_utf8_lossy(text)
+                    .split('\n')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
+            ),
+            _ => None,
+        })
+        .filter(|text| !text.is_empty())
+}
+
 /// The maker's three-letter code and the screen's name, from its EDID.
 pub fn identity(edid: &[u8]) -> (Option<String>, Option<String>) {
-    const HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
-    if edid.len() < 128 || edid[..8] != HEADER {
+    let Some(edid) = edid_base(edid) else {
         return (None, None);
-    }
+    };
     // Three letters, five bits each, 1 for A.
     let code = u16::from_be_bytes([edid[8], edid[9]]);
     let letter = |shift: u16| char::from(b'A' - 1 + ((code >> shift) & 0x1f) as u8);
@@ -1400,19 +1415,7 @@ pub fn identity(edid: &[u8]) -> (Option<String>, Option<String>) {
         .iter()
         .all(char::is_ascii_uppercase)
         .then(|| letters.iter().collect());
-    // Four 18-byte descriptors; 0xfc holds the name, ended by a newline.
-    let model = (0..4).find_map(|i| {
-        let d = &edid[54 + i * 18..72 + i * 18];
-        (d[..3] == [0, 0, 0] && d[3] == 0xfc).then(|| {
-            String::from_utf8_lossy(&d[5..])
-                .split('\n')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_string()
-        })
-    });
-    (make, model.filter(|m| !m.is_empty()))
+    (make, descriptor_text(edid, 0xfc))
 }
 
 #[cfg(test)]

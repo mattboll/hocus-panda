@@ -62,9 +62,30 @@ pub struct Read {
     pub mode: Option<u32>,
 }
 
+/// Why the file was not read, changed or written.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The file is there and could not be read, or could not be written.
+    #[error("{}: {source}", path.display())]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Its text is not TOML: it is left as it is.
+    #[error("the configuration does not read: {0}")]
+    Syntax(#[from] toml_edit::TomlError),
+    /// The change could not be made in it, or the text to write was
+    /// refused: why, as the change or the check said it.
+    #[error("{0}")]
+    Refused(String),
+}
+
 /// `path`'s text, read through its links; no file yet is an empty text.
-pub fn read(path: &Path) -> Result<Read, String> {
-    let at = |err: std::io::Error| format!("{}: {err}", path.display());
+pub fn read(path: &Path) -> Result<Read, Error> {
+    let at = |source: std::io::Error| Error::Io {
+        path: path.to_path_buf(),
+        source,
+    };
     let real = real_path(path).map_err(at)?;
     match std::fs::read_to_string(&real) {
         Ok(text) => {
@@ -108,15 +129,16 @@ pub fn edit(
     path: &Path,
     change: impl FnOnce(&mut DocumentMut) -> Result<(), String>,
     check: impl FnOnce(&str) -> Result<(), String>,
-) -> Result<String, String> {
+) -> Result<String, Error> {
     let read = read(path)?;
-    let mut doc =
-        parse(&read.text).map_err(|err| format!("the configuration does not read: {err}"))?;
-    change(&mut doc)?;
+    let mut doc = parse(&read.text)?;
+    change(&mut doc).map_err(Error::Refused)?;
     let written = doc.to_string();
-    check(&written)?;
-    replace(&read.real, written.as_bytes(), read.mode)
-        .map_err(|err| format!("{}: {err}", read.real.display()))?;
+    check(&written).map_err(Error::Refused)?;
+    replace(&read.real, written.as_bytes(), read.mode).map_err(|source| Error::Io {
+        path: read.real.clone(),
+        source,
+    })?;
     Ok(written)
 }
 
@@ -206,9 +228,15 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let file = dir.path().join("config.toml");
         std::fs::write(&file, "[keyboard\n")?;
-        assert!(edit(&file, |_| Ok(()), |_| Ok(())).is_err());
+        assert!(matches!(
+            edit(&file, |_| Ok(()), |_| Ok(())),
+            Err(Error::Syntax(_))
+        ));
         std::fs::write(&file, "a = 1\n")?;
-        assert!(edit(&file, |_| Ok(()), |_| Err("no".to_owned())).is_err());
+        assert!(matches!(
+            edit(&file, |_| Ok(()), |_| Err("no".to_owned())),
+            Err(Error::Refused(why)) if why == "no"
+        ));
         assert_eq!(std::fs::read_to_string(&file)?, "a = 1\n");
         // No file yet: made.
         let new = dir.path().join("new/config.toml");

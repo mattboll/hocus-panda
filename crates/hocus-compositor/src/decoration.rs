@@ -443,13 +443,29 @@ impl Textures {
         }
         let shadow = shadow_texture(blur, scale, key.w, key.h);
         if shadows.len() >= SHADOWS_KEPT
-            && let Some(oldest) = (0..shadows.len()).min_by_key(|&i| shadows[i].2)
+            && let Some(oldest) = shadows
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, shadow)| shadow.2)
+                .map(|(i, _)| i)
         {
             shadows.swap_remove(oldest);
         }
         shadows.push((key, shadow.clone(), now));
         shadow
     }
+}
+
+/// Two premultiplied pixels that do not cover each other, added.
+fn over(rim: [u8; 4], fill: [u8; 4]) -> [u8; 4] {
+    let [b, g, r, a] = rim;
+    let [fb, fg, fr, fa] = fill;
+    [
+        b.saturating_add(fb),
+        g.saturating_add(fg),
+        r.saturating_add(fr),
+        a.saturating_add(fa),
+    ]
 }
 
 /// Premultiplied ARGB8888 pixels, as B, G, R, A bytes.
@@ -578,7 +594,13 @@ struct Shadow {
 
 impl Shadow {
     fn quarter(&self, mirrored_x: bool, mirrored_y: bool) -> &MemoryRenderBuffer {
-        &self.quarters[usize::from(mirrored_x) + 2 * usize::from(mirrored_y)]
+        let [plain, x, y, both] = &self.quarters;
+        match (mirrored_x, mirrored_y) {
+            (false, false) => plain,
+            (true, false) => x,
+            (false, true) => y,
+            (true, true) => both,
+        }
     }
 }
 
@@ -681,11 +703,7 @@ fn preview_texture(scale: f64) -> (MemoryRenderBuffer, i32) {
             // The rim over the fill, premultiplied.
             let fill = pixel(PREVIEW_FILL, inner);
             let rim = pixel(ACCENT, (outer - inner).max(0.0));
-            let mut out = [0u8; 4];
-            for k in 0..4 {
-                out[k] = rim[k].saturating_add(fill[k]);
-            }
-            out
+            over(rim, fill)
         })
         .collect();
     (buffer(&pixels, side, side), corner)
@@ -711,11 +729,7 @@ fn box_texture(style: BoxStyle, scale: f64) -> (MemoryRenderBuffer, i32) {
             };
             let fill = pixel(style.fill, inner);
             let rim = pixel(style.rim, (outer - inner).max(0.0));
-            let mut out = [0u8; 4];
-            for k in 0..4 {
-                out[k] = rim[k].saturating_add(fill[k]);
-            }
-            out
+            over(rim, fill)
         })
         .collect();
     (buffer(&pixels, side, side), corner)
@@ -927,7 +941,14 @@ where
     Placed::new(renderer, &texture, all, dst, alpha)
         .map_err(|err| tracing::warn!(?err, "could not draw a grip"))
         .ok()
-        .map(|e| Keyed::new(e, ids.grip[tone as usize].clone()))
+        .map(|e| {
+            let [light, dark] = &ids.grip;
+            let id = match tone {
+                Tone::Light => light,
+                Tone::Dark => dark,
+            };
+            Keyed::new(e, id.clone())
+        })
 }
 
 /// The handle of a seam centred on `centre` (logical, output-local),
@@ -1087,8 +1108,8 @@ struct Rects {
 
 impl Rects {
     fn push(&mut self, r: Rectangle<i32, Physical>) {
-        if self.len < self.few.len() {
-            self.few[self.len] = r;
+        if let Some(slot) = self.few.get_mut(self.len) {
+            *slot = r;
             self.len += 1;
         } else {
             if self.more.is_empty() {
@@ -1100,7 +1121,7 @@ impl Rects {
 
     fn as_slice(&self) -> &[Rectangle<i32, Physical>] {
         if self.more.is_empty() {
-            &self.few[..self.len]
+            self.few.get(..self.len).unwrap_or(&self.few)
         } else {
             &self.more
         }

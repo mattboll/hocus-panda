@@ -169,9 +169,10 @@ pub fn date(date: Date, lang: Lang) -> String {
     ];
     let month = usize::try_from(date.month() - 1).unwrap_or(0);
     let month = match lang {
-        Lang::French => FR[month],
-        Lang::English => EN[month],
+        Lang::French => FR.get(month),
+        Lang::English => EN.get(month),
     };
+    let month = month.copied().unwrap_or_default();
     format!("{day} {} {month}", date.day())
 }
 

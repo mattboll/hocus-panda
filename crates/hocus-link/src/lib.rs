@@ -983,8 +983,7 @@ impl Launch {
     /// a tab or a control character.
     pub fn fits(&self) -> bool {
         let clean = |s: &str| !s.chars().any(char::is_control);
-        !self.argv.is_empty()
-            && !self.argv[0].is_empty()
+        self.argv.first().is_some_and(|program| !program.is_empty())
             && clean(&self.id)
             && clean(&self.dir)
             && self.argv.iter().all(|a| clean(a))
@@ -1602,7 +1601,11 @@ impl BarGroup {
                 order.push(group);
             }
         }
-        [order[0], order[1], order[2]]
+        // The three are there: the default order was added.
+        match order.as_slice() {
+            [first, second, third, ..] => [*first, *second, *third],
+            _ => Self::DEFAULT,
+        }
     }
 }
 

@@ -384,14 +384,15 @@ fn blend(pixmap: &mut Pixmap, x: i32, y: i32, colour: [u8; 4], coverage: u8) {
         return;
     }
     let at = ((y * w + x) * 4) as usize;
-    let data = pixmap.data_mut();
-    for k in 0..3 {
-        let src = u32::from(colour[k]) * a / 255;
-        let dst = u32::from(data[at + k]);
-        data[at + k] = (src + dst * (255 - a) / 255).min(255) as u8;
-    }
-    let dst = u32::from(data[at + 3]);
-    data[at + 3] = (a + dst * (255 - a) / 255).min(255) as u8;
+    let Some([r, g, b, alpha]) = pixmap.data_mut().get_mut(at..at + 4) else {
+        return;
+    };
+    let over = |src: u32, dst: u8| (src + u32::from(dst) * (255 - a) / 255).min(255) as u8;
+    let [cr, cg, cb, _] = colour;
+    *r = over(u32::from(cr) * a / 255, *r);
+    *g = over(u32::from(cg) * a / 255, *g);
+    *b = over(u32::from(cb) * a / 255, *b);
+    *alpha = over(a, *alpha);
 }
 
 /// Writes `text` in `font`, `px` high, its baseline's left at `(x, y)`
@@ -472,7 +473,7 @@ pub(crate) fn letter_colour(app: &str) -> [u8; 4] {
         [0x6F, 0x9B, 0xFF, 0xFF],
     ];
     let sum: usize = app.bytes().map(usize::from).sum();
-    TILES[sum % TILES.len()]
+    TILES.get(sum % TILES.len()).copied().unwrap_or_default()
 }
 
 /// The letter an application's tile shows: its id's last part's first.
@@ -533,9 +534,7 @@ fn draw_main(fonts: &Fonts, key: &LookKey, scale: f64) -> Option<(Vec<u8>, i32)>
             None,
         );
     }
-    for sector in Sector::ALL {
-        let i = sector.index();
-        let enabled = key.enabled[i];
+    for ((sector, enabled), on) in Sector::ALL.into_iter().zip(key.enabled).zip(key.on) {
         let lit = key.lit == Some(sector) || key.picked == Some(sector);
         let close = sector == Sector::DownLeft;
         let middle = sector.angle().to_degrees();
@@ -553,7 +552,6 @@ fn draw_main(fonts: &Fonts, key: &LookKey, scale: f64) -> Option<(Vec<u8>, i32)>
         // The icon at mid-ring.
         let (sin, cos) = sector.angle().sin_cos();
         let (ix, iy) = (c + ICON_RADIUS * cos, c + ICON_RADIUS * sin);
-        let on = key.on[i];
         let ink = if !enabled {
             OFF_INK
         } else if close {

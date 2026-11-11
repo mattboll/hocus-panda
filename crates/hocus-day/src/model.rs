@@ -68,11 +68,16 @@ impl Colour {
     pub const DEFAULT: Self = Self([0x8F, 0xB3, 0xFF]);
 }
 
+/// A text that is not a colour.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?}: a colour is #RRGGBB or #RGB")]
+pub struct BadColour(pub String);
+
 impl FromStr for Colour {
-    type Err = String;
+    type Err = BadColour;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let bad = || format!("{text:?}: a colour is #RRGGBB or #RGB");
+        let bad = || BadColour(text.to_owned());
         let hex = text.trim().strip_prefix('#').ok_or_else(bad)?;
         let digit = |c: u8| char::from(c).to_digit(16).ok_or_else(bad);
         let bytes = hex.as_bytes();
@@ -86,8 +91,8 @@ impl FromStr for Colour {
             }
             6 => {
                 let mut rgb = [0; 3];
-                for (out, pair) in rgb.iter_mut().zip(bytes.chunks(2)) {
-                    *out = (digit(pair[0])? * 16 + digit(pair[1])?) as u8;
+                for (out, [high, low]) in rgb.iter_mut().zip(bytes.as_chunks::<2>().0) {
+                    *out = (digit(*high)? * 16 + digit(*low)?) as u8;
                 }
                 Ok(Self(rgb))
             }

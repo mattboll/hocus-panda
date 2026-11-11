@@ -26,6 +26,14 @@
 //! popover beside the bar ([`popover`]), opened from an item, and the panda
 //! peeking out of the bar's edge ([`agents::peek`]).
 
+// What is left of #778 here: 197 indexed places, most in drawing code
+// (pixels, glyphs, fixed tables). A panic ends the bar, which the
+// compositor starts again; the lint is on everywhere else.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "#778: the shell's 197 sites are still to be gone through"
+)]
+
 mod a11y;
 mod actions;
 mod agents;
@@ -139,10 +147,16 @@ fn main() -> ExitCode {
         Ok(quiet) => filter.add_directive(quiet),
         Err(_) => filter,
     };
+    let filter = match hocus_panic::LOG.parse() {
+        Ok(panics) => filter.add_directive(panics),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .init();
+    // A panic is in the log the compositor keeps of the shell (#778).
+    hocus_panic::install();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose(handed);
     // From here, SIGTERM ends it once what it keeps is written.

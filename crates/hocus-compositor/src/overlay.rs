@@ -302,8 +302,10 @@ fn text(
                         premultiply(colour[0]),
                         alpha as u8,
                     ];
-                    for k in 0..4 {
-                        pixels[at + k] = pixels[at + k].max(px[k]);
+                    if let Some(under) = pixels.get_mut(at..at + 4) {
+                        for (under, over) in under.iter_mut().zip(px) {
+                            *under = (*under).max(over);
+                        }
                     }
                 }
             }
@@ -375,7 +377,9 @@ impl State {
                 .into_iter()
                 .enumerate()
             {
-                let ids = &self.overlay.dots[(2 * d + k) % self.overlay.dots.len()];
+                let Some(ids) = self.overlay.dots.get(2 * d + k) else {
+                    continue;
+                };
                 out.extend(
                     box_elements(renderer, textures, ids, style, r, scale, alpha * a as f32)
                         .into_iter()

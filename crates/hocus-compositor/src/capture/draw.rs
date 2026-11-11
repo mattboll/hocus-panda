@@ -259,8 +259,10 @@ fn rasterize(font: &fontdue::Font, said: &str, px: f32) -> Option<(Vec<u8>, i32,
                     premultiply(TEXT[0]),
                     alpha as u8,
                 ];
-                for k in 0..4 {
-                    pixels[at + k] = pixels[at + k].max(px[k]);
+                if let Some(under) = pixels.get_mut(at..at + 4) {
+                    for (under, over) in under.iter_mut().zip(px) {
+                        *under = (*under).max(over);
+                    }
                 }
             }
         }
@@ -401,7 +403,7 @@ impl State {
                     if self.capture.mode == CaptureMode::Area {
                         let drawing = matches!(choosing.drag, Some(super::Drag::Draw { .. }));
                         if !drawing && whole.drawn() {
-                            for (i, (x, y)) in whole.handles().into_iter().enumerate() {
+                            for (ids, (x, y)) in drawn.handles.iter().zip(whole.handles()) {
                                 let dot = Rectangle::new(
                                     (x - HANDLE / 2.0, y - HANDLE / 2.0).into(),
                                     (HANDLE, HANDLE).into(),
@@ -410,7 +412,7 @@ impl State {
                                     box_elements(
                                         renderer,
                                         &self.textures,
-                                        &drawn.handles[i],
+                                        ids,
                                         DOT,
                                         dot,
                                         scale,

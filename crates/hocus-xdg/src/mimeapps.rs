@@ -168,10 +168,16 @@ pub fn edited(text: &str, edits: &[(String, Option<String>)]) -> String {
     };
     for (mime, value) in edits {
         let at = span(&lines).and_then(|(start, end)| {
-            (start + 1..end).find(|&i| key_of(&lines[i]).as_deref() == Some(mime.as_str()))
+            (start + 1..end).find(|&i| {
+                lines.get(i).and_then(|line| key_of(line)).as_deref() == Some(mime.as_str())
+            })
         });
         match (at, value) {
-            (Some(i), Some(value)) => lines[i] = format!("{mime}={value}"),
+            (Some(i), Some(value)) => {
+                if let Some(line) = lines.get_mut(i) {
+                    *line = format!("{mime}={value}");
+                }
+            }
             (Some(i), None) => {
                 lines.remove(i);
             }

@@ -23,6 +23,8 @@ hocus-config.workspace = true
 hocus-geometry.workspace = true
 hocus-link.workspace = true
 hocus-pandas.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
 hocus-agents.workspace = true
 # The session's start-up applications (6.15), read as the launcher reads
 # desktop entries.

@@ -1903,6 +1903,7 @@ dependencies = [
  "clap",
  "hocus-agents",
  "hocus-day",
+ "hocus-panic",
  "hocus-perf",
  "jiff",
  "serde_json",
@@ -1924,6 +1925,7 @@ dependencies = [
  "hocus-geometry",
  "hocus-link",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-perf",
  "hocus-xdg",
  "image",
@@ -1958,6 +1960,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "tempfile",
+ "thiserror 2.0.21",
  "toml_edit",
 ]
 
@@ -1973,6 +1976,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "toml",
  "toml_edit",
@@ -1991,6 +1995,7 @@ version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "image",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2010,6 +2015,13 @@ name = "hocus-pandas"
 version = "1.0.0"
 dependencies = [
  "resvg",
+]
+
+[[package]]
+name = "hocus-panic"
+version = "1.0.0"
+dependencies = [
+ "tracing",
 ]
 
 [[package]]
@@ -2036,6 +2048,7 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-perf",
  "hocus-sound",
  "hocus-xdg",
@@ -2070,6 +2083,7 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-sound",
  "hocus-xdg",
  "iced",

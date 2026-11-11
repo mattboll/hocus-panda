@@ -15,15 +15,19 @@ use hocus_settings::{
 use iced::window;
 
 fn main() -> ExitCode {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("hocus_settings=info,hocus_bluetooth=info")
+    });
+    let filter = match hocus_panic::LOG.parse() {
+        Ok(panics) => filter.add_directive(panics),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("hocus_settings=info,hocus_bluetooth=info")
-            }),
-        )
+        .with_env_filter(filter)
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_writer(std::io::stderr)
         .init();
+    hocus_panic::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let arg = args.first().filter(|a| !a.starts_with("--")).cloned();
     if args.iter().any(|a| a == "--help" || a == "-h") {

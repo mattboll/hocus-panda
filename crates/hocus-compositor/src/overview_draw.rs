@@ -482,10 +482,11 @@ fn draw_panda(
             );
         }
         let disc = argb(pixmap);
-        for (over, under) in pixels.chunks_mut(4).zip(disc.chunks(4)) {
+        let (over, under) = (pixels.as_chunks_mut::<4>().0, disc.as_chunks::<4>().0);
+        for (over, under) in over.iter_mut().zip(under) {
             let a = u16::from(over[3]);
-            for i in 0..4 {
-                over[i] = over[i].saturating_add(((u16::from(under[i]) * (255 - a)) / 255) as u8);
+            for (over, under) in over.iter_mut().zip(under) {
+                *over = over.saturating_add(((u16::from(*under) * (255 - a)) / 255) as u8);
             }
         }
     }

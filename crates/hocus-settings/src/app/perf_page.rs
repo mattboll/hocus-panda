@@ -203,18 +203,8 @@ impl App {
             Msg::Folder => {
                 if let Some(dir) = self.perf.dir.clone() {
                     tracing::info!(folder = %dir.display(), "the days' folder is opened");
-                    std::thread::spawn(move || {
-                        let _ = std::fs::create_dir_all(&dir);
-                        let opened = std::process::Command::new("xdg-open")
-                            .arg(&dir)
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .status();
-                        if let Err(err) = opened {
-                            tracing::warn!(%err, "xdg-open does not run");
-                        }
-                    });
+                    // Made first: no day may have been recorded yet.
+                    super::open_folder(dir, true);
                 }
             }
         }

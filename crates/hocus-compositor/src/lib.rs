@@ -324,9 +324,25 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         runtime_dir,
     } = start(options)?;
     stop_on_signals(&event_loop, signals)?;
-    event_loop
-        .run(None, &mut app, App::after_dispatch)
-        .context("the event loop failed")?;
+    // A panic on the loop ends the session (#778): nothing is recovered,
+    // and the state it left half changed is not read again, beyond what
+    // ending takes. The hook said where (hocus-panic); here the session
+    // ends as it does otherwise, by what is safe of it: the last save
+    // asked of the saving thread is written (the windows as they were
+    // then come back at the next log in), the sockets go, and dropping
+    // the backend gives the screens and the seat back.
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        event_loop.run(None, &mut app, App::after_dispatch)
+    }));
+    let Ok(ran) = ran else {
+        app.state.session_end_as_saved();
+        remove_sockets(&app.state);
+        drop(app);
+        drop(event_loop);
+        drop(runtime_dir);
+        anyhow::bail!("the compositor panicked: the session ends");
+    };
+    ran.context("the event loop failed")?;
     // The session as it ends, for the next log in (windows.md §14).
     app.state.session_end();
     remove_sockets(&app.state);

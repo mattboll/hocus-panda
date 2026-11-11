@@ -100,8 +100,8 @@ impl Counters {
         if let Some(i) = names.iter().position(|n| n.as_deref() == Some(name)) {
             return Some(i);
         }
-        let free = names.iter().position(Option::is_none)?;
-        names[free] = Some(name.to_owned());
+        let (free, slot) = names.iter_mut().enumerate().find(|(_, n)| n.is_none())?;
+        *slot = Some(name.to_owned());
         Some(free)
     }
 
@@ -182,13 +182,16 @@ impl Counters {
             allocations: self.allocations.load(Relaxed),
             longest_turn_us: self.longest_turn_us.swap(0, Relaxed),
             longest_frame_us: self.longest_frame_us.swap(0, Relaxed),
-            screens: std::array::from_fn(|i| {
-                (
-                    names[i].clone(),
-                    self.screens[i].frames.load(Relaxed),
-                    self.screens[i].scenes.load(Relaxed),
-                )
-            }),
+            screens: {
+                let mut screens = names.iter().zip(&self.screens).map(|(name, screen)| {
+                    (
+                        name.clone(),
+                        screen.frames.load(Relaxed),
+                        screen.scenes.load(Relaxed),
+                    )
+                });
+                std::array::from_fn(|_| screens.next().unwrap_or_default())
+            },
             events: std::mem::take(
                 &mut *self.events.lock().unwrap_or_else(PoisonError::into_inner),
             )
@@ -440,8 +443,8 @@ fn run(setup: Setup, mut before: Taken, stopped: &mpsc::Receiver<()>) {
     // The CPU each process has used so far: the first sample counts from
     // here.
     for (who, pid) in [(Who::Compositor, Some(me)), (Who::Shell, shell())] {
-        if let Some(pid) = pid {
-            seen[who.index()] = Seen {
+        if let (Some(pid), Some(seen)) = (pid, seen.get_mut(who.index())) {
+            *seen = Seen {
                 pid,
                 ticks: ticks(pid).unwrap_or(0),
             };
@@ -474,15 +477,15 @@ fn run(setup: Setup, mut before: Taken, stopped: &mpsc::Receiver<()>) {
         let pids = [Some(me), shell(), (settings != 0).then_some(settings)];
         let mut c = Vec::with_capacity(3);
         let mut m = Vec::with_capacity(3);
-        for who in Who::ALL {
-            let i = who.index();
-            let read = pids[i].and_then(|pid| Some((pid, ticks(pid)?, resident_kb(pid)?)));
+        // In `Who::ALL`'s order, which is `Who::index`'s.
+        for (who, (of, seen)) in Who::ALL.into_iter().zip(pids.into_iter().zip(&mut seen)) {
+            let read = of.and_then(|pid| Some((pid, ticks(pid)?, resident_kb(pid)?)));
             let (cpu, kb) = match read {
                 Some((pid, now_ticks, kb)) => {
                     // A process new since the last sample: all of its time
                     // is this interval's.
-                    let was = if seen[i].pid == pid { seen[i].ticks } else { 0 };
-                    seen[i] = Seen {
+                    let was = if seen.pid == pid { seen.ticks } else { 0 };
+                    *seen = Seen {
                         pid,
                         ticks: now_ticks,
                     };
@@ -491,12 +494,12 @@ fn run(setup: Setup, mut before: Taken, stopped: &mpsc::Receiver<()>) {
                 None => {
                     // The Settings closed: their process is not followed
                     // any more (another may take its number).
-                    if let (Who::Settings, Some(pid)) = (who, pids[i]) {
+                    if let (Who::Settings, Some(pid)) = (who, of) {
                         let _ = counters
                             .settings_pid
                             .compare_exchange(pid, 0, Relaxed, Relaxed);
                     }
-                    seen[i] = Seen::default();
+                    *seen = Seen::default();
                     (0, 0)
                 }
             };

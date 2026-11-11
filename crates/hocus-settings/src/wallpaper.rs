@@ -703,7 +703,7 @@ fn copy_into(chosen: &Path, folder: &Path) -> Picked {
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if let Err(why) = hocus_link::wallpaper::dimensions(chosen) {
-        tracing::info!(why, "the chosen file is not a picture");
+        tracing::info!(%why, "the chosen file is not a picture");
         return Picked::NotAPicture(name);
     }
     if let Err(err) = std::fs::create_dir_all(folder) {

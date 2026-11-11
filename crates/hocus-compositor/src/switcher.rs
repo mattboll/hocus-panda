@@ -323,7 +323,7 @@ impl State {
             })
             .collect();
         let focused = self.model.focused();
-        let first = usize::from(items.len() > 1 && Some(items[0].0) == focused);
+        let first = usize::from(items.len() > 1 && items.first().map(|item| item.0) == focused);
         let selected = if backward { items.len() - 1 } else { first };
         let now = self.now();
         tracing::debug!(windows = items.len(), selected, "switcher");

@@ -256,6 +256,8 @@ enum DayCommand {
 }
 
 fn main() -> ExitCode {
+    // `hocus` has no log: a panic is said on stderr, as by default.
+    hocus_panic::install();
     let args = Args::parse();
     match args.command {
         Command::Settings { section, join } => settings(section.as_deref(), join.as_deref()),
@@ -486,7 +488,8 @@ fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
             match stream.read(&mut buffer).map_err(place)? {
                 0 => return Ok(()),
                 n => {
-                    out.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+                    out.write_all(buffer.get(..n).unwrap_or(&buffer))
+                        .map_err(|e| e.to_string())?;
                     out.flush().map_err(|e| e.to_string())?;
                 }
             }

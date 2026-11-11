@@ -909,6 +909,8 @@ impl Controller {
             windows,
         };
         self.bars.insert(bar.to_owned(), place);
+        // The notifications' history waits for a bar's form (its icons).
+        crate::notifications::came();
     }
 
     /// Bar `bar`'s to-do list's surface is `tasks`.

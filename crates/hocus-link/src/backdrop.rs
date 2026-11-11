@@ -173,7 +173,11 @@ impl Backdrop {
 const STOPS: [f64; 3] = [0.0, 0.55, 1.0];
 
 fn mix(a: Rgba, b: Rgba, t: f64) -> Rgba {
-    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
+    let mut out = a;
+    for (out, b) in out.iter_mut().zip(b) {
+        *out += (b - *out) * t;
+    }
+    out
 }
 
 /// `top` painted over `under` (straight alpha, `under` opaque).
@@ -195,15 +199,15 @@ fn colour_at(palette: &Palette, x: f64, y: f64) -> Rgba {
     let (dx, dy) = (angle.sin(), -angle.cos());
     let length = (BOARD.0 * dx).abs() + (BOARD.1 * dy).abs();
     let t = (((x - BOARD.0 / 2.0) * dx + (y - BOARD.1 / 2.0) * dy) / length + 0.5).clamp(0.0, 1.0);
-    let mut colour = palette.stops[0];
-    for i in 0..2 {
-        let (a, b) = (STOPS[i], STOPS[i + 1]);
+    let [top, middle, bottom] = palette.stops;
+    let [at_top, at_middle, at_bottom] = STOPS;
+    let mut colour = top;
+    for ((from, to), (a, b)) in [
+        ((top, middle), (at_top, at_middle)),
+        ((middle, bottom), (at_middle, at_bottom)),
+    ] {
         if t >= a {
-            colour = mix(
-                palette.stops[i],
-                palette.stops[i + 1],
-                ((t - a) / (b - a)).clamp(0.0, 1.0),
-            );
+            colour = mix(from, to, ((t - a) / (b - a)).clamp(0.0, 1.0));
         }
     }
     for (&(at, (rx, ry)), &glow) in GLOWS.iter().zip(&palette.glows) {

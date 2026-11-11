@@ -651,7 +651,7 @@ impl State {
                             app.state.shell_gone();
                             return Ok(PostAction::Remove);
                         }
-                        Ok(n) => pending.extend_from_slice(&buffer[..n]),
+                        Ok(n) => pending.extend_from_slice(buffer.get(..n).unwrap_or(&buffer)),
                         Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                         Err(err) if err.kind() == ErrorKind::Interrupted => {}
                         Err(err) => {
@@ -953,7 +953,8 @@ impl State {
         if written == line.len() {
             return;
         }
-        link.unsent.extend_from_slice(&line.as_bytes()[written..]);
+        link.unsent
+            .extend_from_slice(line.as_bytes().get(written..).unwrap_or_default());
         let flushing = link.writer.try_clone().map(|writer| {
             self.loop_handle.insert_source(
                 Generic::new(writer, Interest::WRITE, Mode::Level),
@@ -1028,7 +1029,7 @@ fn hand_socket(command: &mut std::process::Command, socket: &UnixStream) {
 fn write_some(writer: &UnixStream, bytes: &[u8]) -> std::io::Result<usize> {
     let mut written = 0;
     while written < bytes.len() {
-        match (&*writer).write(&bytes[written..]) {
+        match (&*writer).write(bytes.get(written..).unwrap_or_default()) {
             Ok(0) => return Err(ErrorKind::WriteZero.into()),
             Ok(n) => written += n,
             Err(err) if err.kind() == ErrorKind::WouldBlock => break,

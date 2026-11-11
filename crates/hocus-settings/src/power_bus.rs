@@ -274,12 +274,9 @@ async fn read(connection: &Connection) -> Now {
     let modes = get_all(connection, PROFILES, PROFILES_PATH, PROFILES)
         .await
         .and_then(|p| modes(&p));
-    let logind = match DBusProxy::new(connection).await {
-        Ok(proxy) => proxy
-            .name_has_owner(LOGIN.try_into().expect("a bus name"))
-            .await
-            .unwrap_or(false),
-        Err(_) => false,
+    let logind = match (DBusProxy::new(connection).await, LOGIN.try_into()) {
+        (Ok(proxy), Ok(name)) => proxy.name_has_owner(name).await.unwrap_or(false),
+        _ => false,
     };
     Now {
         upower: root.is_some(),

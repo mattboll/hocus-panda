@@ -62,8 +62,9 @@ impl Tone {
     pub fn over(self, under: [f64; 3]) -> [f64; 3] {
         let [r, g, b, a] = self.rgba();
         let a = f64::from(a) / 255.0;
-        let pill = [r, g, b].map(f64::from);
-        std::array::from_fn(|i| pill[i] * a + under[i] * (1.0 - a))
+        let [ur, ug, ub] = under;
+        let mix = |pill: u8, under: f64| f64::from(pill) * a + under * (1.0 - a);
+        [mix(r, ur), mix(g, ug), mix(b, ub)]
     }
 
     /// The tone that stands out more from `under`, staying `self` unless

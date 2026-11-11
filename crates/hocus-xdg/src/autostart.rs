@@ -251,12 +251,17 @@ pub fn with_hidden(text: &str, hidden: Option<bool>) -> String {
         }
     };
     let at = (start + 1..end).find(|&i| {
-        lines[i]
-            .split_once('=')
+        lines
+            .get(i)
+            .and_then(|line| line.split_once('='))
             .is_some_and(|(k, _)| k.trim() == "Hidden")
     });
     match (at, hidden) {
-        (Some(i), Some(h)) => lines[i] = format!("Hidden={h}"),
+        (Some(i), Some(h)) => {
+            if let Some(line) = lines.get_mut(i) {
+                *line = format!("Hidden={h}");
+            }
+        }
         (Some(i), None) => {
             lines.remove(i);
         }

@@ -244,17 +244,13 @@ impl Frosted {
             pass(renderer, down, &source, level, self.offset, 1.0)?;
             source = level.clone();
         }
-        for i in (0..self.levels.len().saturating_sub(1)).rev() {
-            let from = self.levels[i + 1].clone();
+        // Back up, each level drawn from the one under it.
+        let mut from = self.levels.last().cloned();
+        for (i, level) in self.levels.iter_mut().enumerate().rev().skip(1) {
+            let Some(under) = from else { break };
             let saturation = if i == 0 { self.frost.saturation } else { 1.0 };
-            pass(
-                renderer,
-                up,
-                &from,
-                &mut self.levels[i],
-                self.offset,
-                saturation,
-            )?;
+            pass(renderer, up, &under, level, self.offset, saturation)?;
+            from = Some(level.clone());
         }
         Ok(())
     }

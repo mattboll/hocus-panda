@@ -1223,8 +1223,12 @@ impl State {
                 }
             }
         }
-        let mut glass = self.glass_element(renderer, output, now, &elements[bar_glass_at..]);
-        let popovers = self.popover_glass(renderer, output, now, &elements[glass_at..]);
+        // What is behind a pane: the elements from its place on.
+        fn behind<T>(elements: &[T], at: usize) -> &[T] {
+            elements.get(at..).unwrap_or_default()
+        }
+        let mut glass = self.glass_element(renderer, output, now, behind(&elements, bar_glass_at));
+        let popovers = self.popover_glass(renderer, output, now, behind(&elements, glass_at));
         // From the back, so that the places before stay right.
         if bar_glass_at > glass_at
             && let Some(pane) = glass.take()
@@ -1235,27 +1239,29 @@ impl State {
             elements.insert(glass_at, pane);
         }
         if let Some((at, alpha)) = launcher
-            && let Some(pane) = self.launcher_glass(renderer, output, alpha, &elements[at..])
+            && let Some(pane) = self.launcher_glass(renderer, output, alpha, behind(&elements, at))
         {
             elements.insert(at, pane);
         }
         // In front of the launcher's: inserted after it.
         if let Some((at, alpha)) = editor_glass
-            && let Some(pane) = self.capture_editor_glass(renderer, output, alpha, &elements[at..])
+            && let Some(pane) =
+                self.capture_editor_glass(renderer, output, alpha, behind(&elements, at))
         {
             elements.insert(at, pane);
         }
         if let Some(glass) = capture_glass
-            && let Some(pane) = self.capture_glass(renderer, output, glass, &elements[glass.at..])
+            && let Some(pane) =
+                self.capture_glass(renderer, output, glass, behind(&elements, glass.at))
         {
             elements.insert(glass.at, pane);
         }
         if let Some((moving, _)) = wall
-            && let Some(at) = elements
-                .iter()
-                .rposition(|e| matches!(e, OutputElements::Wall(_)))
+            && let Some(still) = elements
+                .iter_mut()
+                .rfind(|e| matches!(e, OutputElements::Wall(_)))
         {
-            elements[at] = OutputElements::Wall(moving);
+            *still = OutputElements::Wall(moving);
         }
         elements
     }

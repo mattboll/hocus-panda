@@ -474,7 +474,8 @@ impl Mixer {
             queue.drain(..extra - extra % channels);
             let wanted = (n - silent) * channels;
             let have = queue.len().min(wanted);
-            for (slot, sample) in out[silent * channels..].iter_mut().zip(queue.drain(..have)) {
+            let late = out.iter_mut().skip(silent * channels);
+            for (slot, sample) in late.zip(queue.drain(..have)) {
                 *slot += sample;
             }
         }

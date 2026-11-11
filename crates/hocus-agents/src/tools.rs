@@ -170,8 +170,9 @@ pub fn is_ours(command: &str, tool: Tool) -> bool {
     let words: Vec<&str> = command.split_whitespace().collect();
     program_of(command).as_deref() == Some("hocus")
         && words
-            .windows(2)
-            .any(|w| w[0] == "agent-hook" && w[1] == tool.word())
+            .iter()
+            .zip(words.iter().skip(1))
+            .any(|(first, second)| *first == "agent-hook" && *second == tool.word())
 }
 
 // --- Whether a tool is there ---------------------------------------------------------

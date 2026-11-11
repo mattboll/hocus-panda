@@ -487,7 +487,10 @@ impl State {
                     .iter()
                     .position(|d| *d == self.capture.delay)
                     .unwrap_or(0);
-                self.capture.delay = CAPTURE_DELAYS[(at + 1) % CAPTURE_DELAYS.len()];
+                // The next one, around.
+                if let Some(next) = CAPTURE_DELAYS.iter().cycle().nth(at + 1) {
+                    self.capture.delay = *next;
+                }
             }
             CaptureAsk::Pointer => self.capture.pointer = !self.capture.pointer,
             CaptureAsk::Video(video) => {

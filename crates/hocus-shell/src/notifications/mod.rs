@@ -32,7 +32,7 @@ pub mod stack;
 
 use std::{
     path::PathBuf,
-    sync::{Mutex, PoisonError, mpsc},
+    sync::{Condvar, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
 };
 
@@ -276,6 +276,19 @@ fn keep() {
     }
 }
 
+/// How many times something the restored history's icons wait for came
+/// ([`came`]), and what wakes the thread that waits for it.
+static CAME: (Mutex<u64>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// The launcher's applications were read, or a bar's form is known: the
+/// history being restored looks again whether it has both. Called with
+/// the caller's own locks held: it takes none of theirs.
+pub fn came() {
+    let (count, woken) = &CAME;
+    *count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+    woken.notify_all();
+}
+
 /// The history in `file`, younger than 7 days, its icons found again (once
 /// the launcher's applications and the bars' scales are known, a few
 /// seconds at most).
@@ -300,9 +313,22 @@ fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sig
         !crate::launcher::apps::catalog().apps.is_empty()
             && !crate::popover::with(|c| c.bar_forms()).is_empty()
     };
-    let start = Instant::now();
-    while !ready() && start.elapsed() < Duration::from_secs(3) {
-        std::thread::sleep(Duration::from_millis(50));
+    // Woken when one of the two comes ([`came`]), not on a timer.
+    let (count, woken) = &CAME;
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        // Read before looking: what comes after the look changes it.
+        let seen = *count.lock().unwrap_or_else(PoisonError::into_inner);
+        let left = until.saturating_duration_since(Instant::now());
+        if ready() || left.is_zero() {
+            break;
+        }
+        let waiting = count.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(
+            woken
+                .wait_timeout_while(waiting, left, |now| *now == seen)
+                .unwrap_or_else(PoisonError::into_inner),
+        );
     }
     let scale = server::screens_scale();
     records
