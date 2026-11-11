@@ -613,6 +613,7 @@ impl Shell {
         }
     }
 
+    // Over 200 lines: one arm per kind of message from the compositor.
     fn compositor_says(&mut self, message: ToShell) -> Task<Message> {
         match message {
             ToShell::Look {
@@ -1519,6 +1520,8 @@ fn instant_of(monotonic_us: u64) -> Instant {
 /// shell says goes through the sender handed over first.
 // `Subscription::run_with` hands its data back as given: a `&String`.
 #[allow(clippy::ptr_arg)]
+// Over 200 lines: its loop dispatches each kind of line the compositor
+// says outside of iced's messages.
 fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
     let socket = socket.clone();
     iced::stream::channel(16, async move |mut output| {

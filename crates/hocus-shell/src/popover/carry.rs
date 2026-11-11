@@ -67,6 +67,7 @@ pub(super) const EVERYWHERE: i32 = 1 << 20;
 pub(super) type WlRegion = wayland_client::protocol::wl_region::WlRegion;
 
 /// An effect as messages for iced, or a line to the compositor.
+// Over 200 lines: one arm per kind of effect.
 pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
     use crate::Message;
     use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings, OutputOption};
