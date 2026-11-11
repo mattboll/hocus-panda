@@ -675,7 +675,7 @@ fn content<'a>(laid: &Laid, words: Words, ui: &Ui, keyboard: bool) -> El<'a> {
     let typed = Field {
         with: query,
         style: Style::one(QUERY, MANROPE),
-        placeholder: words.placeholder(),
+        placeholder: words.placeholder().into(),
         look: Look::of(TEXT.get(), QUIET.get()),
         focused: keyboard,
         left: BORDER + FIELD_PAD + MAGNIFIER + FIELD_GAP,

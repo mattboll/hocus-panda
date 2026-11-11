@@ -97,11 +97,16 @@ pub fn hovered(fill: Color, radius: f32) -> button::Style {
 
 /// A list's scrollbar: a thumb `width` wide, no rail.
 pub fn scrollbar(width: f32) -> scrollable::Style {
+    scrollbar_in(width, THUMB.get())
+}
+
+/// A list's scrollbar: a thumb `width` wide in `colour`, no rail.
+pub fn scrollbar_in(width: f32, colour: Color) -> scrollable::Style {
     let rail = scrollable::Rail {
         background: None,
         border: Border::default(),
         scroller: scrollable::Scroller {
-            background: Background::Color(THUMB.get()),
+            background: Background::Color(colour),
             border: round(width / 2.0),
         },
     };

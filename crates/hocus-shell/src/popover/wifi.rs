@@ -967,7 +967,7 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui, fr: bool) -> El<'a> {
             reveal: ui.shown,
             ..Style::one(FIELD_TEXT, MANROPE)
         },
-        placeholder: words.password(),
+        placeholder: words.password().into(),
         look: Look::of(TEXT.get(), FAINT.get()),
         focused: focus == Some(Target::Field),
         left: FIELD_PAD,

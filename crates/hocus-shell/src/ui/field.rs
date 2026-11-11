@@ -22,7 +22,7 @@ pub type With = fn(&mut dyn FnMut(&mut Entry));
 pub struct Field<M> {
     pub with: With,
     pub style: Style,
-    pub placeholder: &'static str,
+    pub placeholder: String,
     pub look: Look,
     /// It holds the ring: its caret shows, the keys are its.
     pub focused: bool,
@@ -138,7 +138,7 @@ impl<M: Clone + 'static> canvas::Program<M> for Field<M> {
         // from there.
         (self.with)(&mut |entry| {
             f.with_clip(room, |f| {
-                entry.draw(f, place, self.placeholder, &self.look, self.focused);
+                entry.draw(f, place, &self.placeholder, &self.look, self.focused);
             });
         });
         vec![f.into_geometry()]

@@ -1238,7 +1238,7 @@ fn part_of<'a>(
             let typed = ui::field::Field {
                 with,
                 style: Style::one(FIELD_TEXT, MANROPE),
-                placeholder,
+                placeholder: placeholder.into(),
                 look: field::view::Look::of(TEXT.get(), FAINT.get()),
                 focused,
                 left: FIELD_PAD,
