@@ -1751,7 +1751,7 @@ impl Headless {
     /// centre, the sector lit, whether Close is armed.
     pub fn radial(&self) -> Option<crate::radial::Seen> {
         let state = &self.app.state;
-        let radial = state.radial.as_ref()?;
+        let radial = state.radial_menu.open.as_ref()?;
         Some(crate::radial::Seen {
             window: radial.window,
             centre: radial.centre,
@@ -1855,7 +1855,7 @@ impl Headless {
 
     /// Whether the radial menu is still drawn going.
     pub fn radial_going(&self) -> bool {
-        self.app.state.radial_out.is_some()
+        self.app.state.radial_menu.out.is_some()
     }
 
     /// The windows on all desktops (#723).
@@ -1902,7 +1902,7 @@ impl Headless {
     /// whether its panel shows.
     pub fn switcher(&self) -> Option<(Vec<WindowId>, usize, bool)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         Some((
             switcher.items.iter().map(|i| i.0).collect(),
             switcher.selected,
@@ -1913,7 +1913,7 @@ impl Headless {
     /// The centre of Alt+Tab's item `at`, global, once its panel shows.
     pub fn switcher_item(&self, at: usize) -> Option<(f64, f64)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (_, items) = state.switcher_layout(switcher)?;
         let (x, y) = items.get(at)?.item.centre();
@@ -1924,7 +1924,7 @@ impl Headless {
     /// once its panel shows.
     pub fn switcher_thumb(&self, at: usize) -> Option<(f64, f64, f64, f64)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (_, items) = state.switcher_layout(switcher)?;
         let thumb = items.get(at)?.thumb;
@@ -1940,7 +1940,7 @@ impl Headless {
     /// (x, y, width, height), once its panel shows.
     pub fn switcher_label(&self, at: usize) -> Option<[(f64, f64, f64, f64); 2]> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (panel, items) = state.switcher_layout(switcher)?;
         let global = |a: crate::switcher::Area| {

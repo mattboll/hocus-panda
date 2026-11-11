@@ -12,13 +12,10 @@ use anyhow::Context;
 use smithay::{
     backend::session::{Session, libseat::LibSeatSession},
     desktop::{PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
-    input::{
-        Seat, SeatState,
-        keyboard::{Keycode, XkbConfig},
-    },
+    input::{Seat, SeatState, keyboard::XkbConfig},
     output::Output,
     reexports::{
-        calloop::{LoopHandle, LoopSignal, RegistrationToken},
+        calloop::{LoopHandle, LoopSignal},
         wayland_server::{
             DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -34,10 +31,12 @@ use smithay::{
 };
 
 mod input;
+mod menus;
 mod protocols;
 mod windows;
 
 pub use input::{Gestures, Keyboard, Pointer};
+pub use menus::{RadialMenu, Switching};
 pub use protocols::Protocols;
 pub use windows::{Arrivals, Departures, Snap};
 
@@ -47,11 +46,9 @@ use crate::{
     decoration::Textures,
     desktops::Strip,
     model::{self, Model, Rect, WindowId},
-    motion::Tween,
     overlay::Overlay,
     programs::Programs,
     shortcuts::Ending,
-    switcher::Switcher,
     windows::{Managed, rect_of},
     wobble::Jelly,
 };
@@ -140,17 +137,8 @@ pub struct State {
     /// The strokes, the arrows and the laser drawn on the screens
     /// (docs/design/ink.md).
     pub ink: crate::ink::Ink,
-    /// Alt+Tab, while it is held, and its panel vanishing (§11).
-    pub switcher: Option<Switcher>,
-    pub switcher_out: Option<(Switcher, Tween)>,
-    /// A window's radial menu while it is open, and as it goes (#723);
-    /// the right press that may open it; what draws it.
-    pub radial: Option<crate::radial::Radial>,
     /// The actions palette's target and what draws it (#736).
     pub actions: crate::actions::Palette,
-    pub radial_out: Option<crate::radial::Going>,
-    pub radial_press: Option<crate::radial::Press>,
-    pub radial_paint: crate::radial_draw::RadialPaint,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
@@ -164,9 +152,6 @@ pub struct State {
     pub overview_paint: crate::overview_draw::OverviewPaint,
     /// The windows' states last told the shell (#723).
     pub told_window_states: Option<hocus_link::WindowStates>,
-    /// The switcher's key held down, stepping at the keyboard's repeat
-    /// delay and rate: its keycode and its timer (§11).
-    pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
     /// A level key held down (volume, brightness), and the presses kept
     /// for the shell while it is away.
     pub levels: crate::levels::Levels,
@@ -230,6 +215,10 @@ pub struct State {
     pub keyboard: Keyboard,
     /// The touchpad's swipes.
     pub gestures: Gestures,
+    /// Alt+Tab, while it is held, and its panel vanishing (§11).
+    pub switching: Switching,
+    /// A window's radial menu while it is open, and as it goes (#723).
+    pub radial_menu: RadialMenu,
 }
 
 impl State {
@@ -330,7 +319,6 @@ impl State {
             perf: crate::perf::Perf::default(),
             foreign: crate::foreign::Foreign::default(),
             textures: Textures::default(),
-            switcher_repeat: None,
             levels: crate::levels::Levels::default(),
             moving: None,
             wobble: None,
@@ -352,13 +340,7 @@ impl State {
             auth: crate::auth::Auth::default(),
             record: crate::record::Recording::default(),
             ink: crate::ink::Ink::default(),
-            switcher: None,
-            switcher_out: None,
-            radial: None,
             actions: crate::actions::Palette::default(),
-            radial_out: None,
-            radial_press: None,
-            radial_paint: crate::radial_draw::RadialPaint::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             magnifier: crate::magnifier::Magnifier::default(),
@@ -389,6 +371,8 @@ impl State {
             away: crate::away::Away::default(),
             leave: crate::leave::Leave::default(),
             ending: None,
+            radial_menu: RadialMenu::default(),
+            switching: Switching::default(),
             gestures: Gestures::default(),
             keyboard: Keyboard::new(layout_codes),
             pointer: Pointer::new(cursor_images),

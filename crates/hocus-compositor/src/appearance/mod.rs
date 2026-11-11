@@ -35,7 +35,7 @@ impl State {
         if (now.high_contrast, now.theme, now.accent) != (old.high_contrast, old.theme, old.accent)
         {
             // What the compositor draws itself, drawn again in its colours.
-            self.radial_paint = crate::radial_draw::RadialPaint::default();
+            self.radial_menu.paint = crate::radial_draw::RadialPaint::default();
             self.overview_paint = crate::overview_draw::OverviewPaint::default();
             self.magnifier.paint = crate::magnifier::draw::Paint::default();
         }

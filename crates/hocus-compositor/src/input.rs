@@ -267,7 +267,7 @@ impl State {
                 let auth = this.auth_holds();
                 // A window's radial menu open (#723): its keys are its
                 // own, the modifiers go on.
-                if this.radial.is_some() && !auth {
+                if this.radial_menu.open.is_some() && !auth {
                     let sym = keysym.modified_sym();
                     if is_modifier(sym) {
                         return FilterResult::Forward;
@@ -311,7 +311,12 @@ impl State {
                         sym, mods.shift, action,
                     )));
                 }
-                if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key).filter(|_| !auth)
+                if let Some(switcher_key) = this
+                    .switching
+                    .open
+                    .as_ref()
+                    .map(|s| s.key)
+                    .filter(|_| !auth)
                 {
                     // Alt+Tab held: its keys are its own, the modifiers
                     // go on to the application.
@@ -410,7 +415,7 @@ impl State {
                 }
                 FilterResult::Forward
             });
-        if state == KeyState::Released && self.switcher_repeat.is_some_and(|(c, _)| c == code) {
+        if state == KeyState::Released && self.switching.repeat.is_some_and(|(c, _)| c == code) {
             self.stop_switcher_repeat();
         }
         if state == KeyState::Released {
@@ -460,7 +465,7 @@ impl State {
         // `Super`+`Alt` held: the laser.
         self.ink_modifiers(&mods);
         // Alt let go: Alt+Tab goes to its selection.
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             let mods = keyboard.modifier_state();
             self.switcher_modifiers(&mods);
         }
@@ -583,10 +588,11 @@ impl State {
         // A right press that moved: Super and a drag resizes, as it always
         // did, from where it was pressed; from the grip, nothing (#723).
         if let Some(press) = self
-            .radial_press
+            .radial_menu
+            .press
             .filter(|p| (location.x - p.at.x).hypot(location.y - p.at.y) >= RADIAL_SLOP)
         {
-            self.radial_press = None;
+            self.radial_menu.press = None;
             if press.resizes
                 && let Some(rect) = self.rect_of(press.window)
             {
@@ -601,7 +607,7 @@ impl State {
             }
         }
         // A window's radial menu open: no client sees the pointer.
-        if self.radial.is_some() {
+        if self.radial_menu.open.is_some() {
             pointer.motion(
                 self,
                 None,
@@ -807,7 +813,7 @@ impl State {
             return;
         };
         let at = pointer.current_location();
-        if self.radial.is_some()
+        if self.radial_menu.open.is_some()
             || self.overview_takes(at)
             || self.capture_choosing()
             || self.auth_keeps_pointer(at)
@@ -880,14 +886,14 @@ impl State {
         // where it was; then the menu takes every press, no client seeing
         // them.
         if state == ButtonState::Released
-            && let Some(press) = self.radial_press.filter(|p| p.button == button)
+            && let Some(press) = self.radial_menu.press.filter(|p| p.button == button)
         {
-            self.radial_press = None;
+            self.radial_menu.press = None;
             self.pointer.kept_buttons.remove(&button);
             self.open_radial(press.window, pointer.current_location());
             return;
         }
-        if self.radial.is_some() && !self.auth_holds() {
+        if self.radial_menu.open.is_some() && !self.auth_holds() {
             if state == ButtonState::Pressed {
                 self.pointer.kept_buttons.insert(button);
                 if matches!(button, BTN_LEFT | BTN_RIGHT) {
@@ -1007,7 +1013,7 @@ impl State {
                     // A right click on the grip: the window's radial menu,
                     // as it is let go (#723).
                     if button == BTN_RIGHT {
-                        self.radial_press = Some(crate::radial::Press {
+                        self.radial_menu.press = Some(crate::radial::Press {
                             window: id,
                             at,
                             button,
@@ -1028,7 +1034,7 @@ impl State {
                 // `Super` and the right button: a click opens the window's
                 // radial menu, a drag resizes it (#723).
                 if button == BTN_RIGHT && modifiers.is_some_and(|m| self.resize_modifier(&m)) {
-                    self.radial_press = Some(crate::radial::Press {
+                    self.radial_menu.press = Some(crate::radial::Press {
                         window: id,
                         at,
                         button,

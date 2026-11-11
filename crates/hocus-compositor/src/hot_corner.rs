@@ -87,7 +87,7 @@ impl State {
         self.config.overview.hot_corner
             && !self.locked()
             && !self.auth_holds()
-            && self.radial.is_none()
+            && self.radial_menu.open.is_none()
             && !self.capture_open()
             && !self.seat.get_pointer().is_some_and(|p| p.is_grabbed())
             && !self.fullscreen_in_front(output)

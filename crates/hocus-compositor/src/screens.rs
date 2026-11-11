@@ -578,23 +578,34 @@ impl State {
         {
             self.snap.preview = None;
         }
-        if self.switcher.as_ref().is_some_and(|s| s.output == *output) {
+        if self
+            .switching
+            .open
+            .as_ref()
+            .is_some_and(|s| s.output == *output)
+        {
             self.end_switcher(false);
         }
         if self
-            .switcher_out
+            .switching
+            .out
             .as_ref()
             .is_some_and(|(s, _)| s.output == *output)
         {
-            self.switcher_out = None;
+            self.switching.out = None;
         }
         if self.gestures.swiping.as_ref() == Some(output) {
             self.gestures.swiping = None;
         }
-        if self.radial.as_ref().is_some_and(|r| r.output == *output) {
+        if self
+            .radial_menu
+            .open
+            .as_ref()
+            .is_some_and(|r| r.output == *output)
+        {
             self.close_radial(None);
         }
-        self.radial_out = None;
+        self.radial_menu.out = None;
         self.snap.seam_handle = None;
     }
 

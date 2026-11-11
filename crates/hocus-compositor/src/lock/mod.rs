@@ -443,11 +443,11 @@ impl State {
     fn lock_closes_everything(&mut self) {
         self.end_popup_grab();
         self.bar_keyboard_away();
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             self.end_switcher(false);
         }
         self.close_radial(None);
-        self.radial_press = None;
+        self.radial_menu.press = None;
         self.drop_overview();
         self.capture_away();
         if self.ink.shows() {
