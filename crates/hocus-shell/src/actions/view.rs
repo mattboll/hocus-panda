@@ -1,6 +1,5 @@
-//! The actions palette's surface (#736, docs/design/actions.md §2): the
-//! mockup's sizes, logical pixels, and what the pointer and the wheel do
-//! on it.
+//! The actions palette's surface (#736, docs/design/actions.md §2), on
+//! the widget kit (#772): the mockup's sizes, logical pixels.
 //!
 //! 720 wide (narrower screens: the work area less 32), radius 16, the
 //! popovers' glass, a 1 px rim, 10 px in. The field (56 tall, radius 12,
@@ -8,38 +7,64 @@
 //! target's chip and "Échap" on its right; in a step, the action's chip
 //! before the query. 8 px under it, the list: headings 24 tall (11 px 800
 //! capitals spaced 0.09 em), rows 44 tall (radius 10), 2 px apart, nine
-//! rows' room at most, then the footer under a line.
+//! rows' room at most, scrolling past it, then the footer under a line.
+//!
+//! The field holds the keyboard throughout: every key goes to the palette
+//! ([`super::key_on`]), which moves the selection, runs it, or edits the
+//! field. The pointer over a row selects it, a click runs it; the wheel
+//! scrolls the list a row a notch. What it shows is said in the log
+//! ("the actions palette shows it") and to screen readers, from its
+//! controls' declarations.
 
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
 };
 
-use hocus_link::actions::{self as catalogue, Glyph, Inert, Side4, Step};
+use hocus_a11y::Role;
+use hocus_link::{
+    ACTIONS_NAMESPACE,
+    actions::{self as catalogue, Glyph, Inert, Side4, Step},
+};
 use iced::{
-    Color, Font, Point, Rectangle, Renderer, Size, Theme,
+    Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
-    alignment, mouse,
+    alignment::{Horizontal, Vertical},
+    mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::{Alignment, LineHeight, Shaping},
+        Space, Stack, button,
+        canvas::{self, Frame, Path, Stroke},
+        column, container, mouse_area, pin, row, scrollable, space,
+        text::LineHeight,
     },
     window,
 };
 
 use super::{
-    Open, Words,
+    Open, Phase, Words,
     list::{Elsewhere, Row, Target},
 };
 use crate::theme::Ink;
 use crate::{
     field::{
-        Place,
+        Entry, Took,
         view::{Look, Style},
     },
     levels::draw::{LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
-    popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
+    popover::{
+        Pressed,
+        kit::{self, MANROPE_SEMIBOLD},
+    },
+    ui::{
+        self, Around, Later, control,
+        field::Field,
+        notched::Notched,
+        parts::{drawn, drawn_out, gap, spaced_by},
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 const WIDTH: f32 = hocus_link::ACTIONS_WIDTH as f32;
 const RADIUS: f32 = hocus_link::ACTIONS_RADIUS as f32;
@@ -181,208 +206,742 @@ fn height_of(row: &Row) -> f32 {
     }
 }
 
-/// The row after the last one shown from `offset`, within nine rows'
+/// The list's height: its whole rows from the first, within nine rows'
 /// room.
-fn end_of(rows: &[Row], offset: usize) -> usize {
+fn list_height(rows: &[Row]) -> f32 {
     let mut used = 0.0;
-    let mut end = offset;
-    while let Some(row) = rows.get(end) {
-        let h = height_of(row) + if end > offset { ROW_GAP } else { 0.0 };
+    for (i, row) in rows.iter().enumerate() {
+        let h = height_of(row) + if i > 0 { ROW_GAP } else { 0.0 };
         if used + h > MOST_LIST + 0.01 {
             break;
         }
         used += h;
-        end += 1;
     }
-    end
+    used
 }
 
-/// The list's height from `offset`.
-fn list_height(rows: &[Row], offset: usize) -> f32 {
-    let end = end_of(rows, offset);
-    let shown = &rows[offset.min(rows.len())..end];
-    let gaps = shown.len().saturating_sub(1) as f32 * ROW_GAP;
-    shown.iter().map(height_of).sum::<f32>() + gaps
-}
-
-/// The surface's size for `rows` from `offset`, `width` wide: as tall as
-/// the whole rows shown, nine rows' room at most.
-pub fn size(rows: &[Row], offset: usize, width: f32) -> (u32, u32) {
-    let list = list_height(rows, offset);
+/// The surface's size for `rows`, `width` wide: as tall as the whole rows
+/// shown from the first, nine rows' room at most.
+pub fn size(rows: &[Row], width: f32) -> (u32, u32) {
+    let list = list_height(rows);
     let height = IN + FIELD + LIST_GAP + list + FOOT_GAP + 1.0 + FOOT_GAP + FOOT_LINE + 2.0 + IN;
     (width.round() as u32, height.ceil() as u32)
 }
 
-/// The last row it may be scrolled to.
-fn most_offset(rows: &[Row]) -> usize {
-    let mut offset = rows.len();
-    let mut used = 0.0;
-    while offset > 0 {
-        let h = height_of(&rows[offset - 1]) + if offset < rows.len() { ROW_GAP } else { 0.0 };
-        if used + h > MOST_LIST + 0.01 {
-            break;
-        }
-        used += h;
-        offset -= 1;
+/// Where row `at` is in the list, and how tall, with its heading when it
+/// comes right after one: what is scrolled into view.
+fn span(rows: &[Row], at: usize) -> (f32, f32) {
+    let mut top = 0.0;
+    let mut tops = Vec::with_capacity(rows.len());
+    for row in rows {
+        tops.push(top);
+        top += height_of(row) + ROW_GAP;
     }
-    offset
+    let Some(row) = rows.get(at) else {
+        return (0.0, 0.0);
+    };
+    let bottom = tops[at] + height_of(row);
+    let from = match at.checked_sub(1) {
+        Some(before) if matches!(rows[before], Row::Head(_)) => tops[before],
+        _ => tops[at],
+    };
+    (from, bottom - from)
 }
 
-/// The first row to show so that row `selected` shows, from `offset`: with
-/// its heading when it comes right after it.
-pub fn keep_in_view(rows: &[Row], selected: usize, offset: usize) -> usize {
-    let mut offset = offset.min(most_offset(rows));
-    if selected < offset {
-        offset = if selected > 0 && matches!(rows[selected - 1], Row::Head(_)) {
-            selected - 1
-        } else {
-            selected
-        };
-    }
-    while end_of(rows, offset) <= selected && offset < selected {
-        offset += 1;
-    }
-    offset
+/// How far the list scrolls at most.
+fn most_scroll(rows: &[Row]) -> f32 {
+    let content: f32 =
+        rows.iter().map(height_of).sum::<f32>() + rows.len().saturating_sub(1) as f32 * ROW_GAP;
+    (content - list_height(rows)).max(0.0)
 }
 
-/// Where everything is.
-#[derive(Debug)]
-pub struct Layout {
-    pub field: Rectangle,
-    pub list: Rectangle,
-    /// The rows shown, by their index, and where.
-    pub rows: Vec<(usize, Rectangle)>,
-    pub footer: f32,
-    pub width: f32,
+/// The list's scrollable.
+const LIST_ID: &str = "actions:list";
+
+/// What waits for the tree built after a key: the list scrolled to the
+/// selection.
+static LATER: Later = Later::new();
+
+/// The list scrolled so that the selected row shows, with its heading
+/// when it is the first under it.
+pub fn reveal(open: &mut Open) {
+    let span = span(&open.rows, open.selected);
+    let to = kit::reveal(
+        span,
+        list_height(&open.rows),
+        open.scroll,
+        most_scroll(&open.rows),
+    );
+    if (to - open.scroll).abs() < 0.5 {
+        return;
+    }
+    open.scroll = to;
+    LATER.push(iced::advanced::widget::operation::scrollable::scroll_to(
+        iced::widget::Id::new(LIST_ID),
+        iced::advanced::widget::operation::scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(to),
+        },
+    ));
 }
 
-impl Layout {
-    pub fn of(open: &Open) -> Self {
-        let width = open.size.0 as f32;
-        let right = width - IN;
-        let field = Rectangle::new(Point::new(IN, IN), Size::new(right - IN, FIELD));
-        let top = IN + FIELD + LIST_GAP;
-        let height = list_height(&open.rows, open.offset);
-        let list = Rectangle::new(Point::new(IN, top), Size::new(right - IN, height));
-        let mut y = top;
-        let mut rows = Vec::new();
-        let offset = open.offset.min(open.rows.len());
-        for (i, row) in open.rows[offset..end_of(&open.rows, offset)]
-            .iter()
-            .enumerate()
-        {
-            let h = height_of(row);
-            rows.push((
-                offset + i,
-                Rectangle::new(Point::new(IN, y), Size::new(right - IN, h)),
-            ));
-            y += h + ROW_GAP;
-        }
-        Self {
-            field,
-            list,
-            rows,
-            footer: top + height + FOOT_GAP,
-            width,
-        }
+/// The list back at its top, as its rows change.
+pub fn to_top(open: &mut Open) {
+    if open.scroll.abs() < 0.5 {
+        return;
     }
-
-    /// The row under `at`, if one can be chosen there.
-    pub fn row_at(&self, open: &Open, at: Point) -> Option<usize> {
-        self.rows
-            .iter()
-            .find(|(i, r)| r.contains(at) && open.rows.get(*i).is_some_and(Row::selectable))
-            .map(|(i, _)| *i)
-    }
+    open.scroll = 0.0;
+    LATER.push(iced::advanced::widget::operation::scrollable::scroll_to(
+        iced::widget::Id::new(LIST_ID),
+        iced::advanced::widget::operation::scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(0.0),
+        },
+    ));
 }
 
-/// The palette on its surface.
+/// A row's control: what tests and screen readers know it by.
+fn row_id(at: usize) -> String {
+    format!("actions:Row({at})")
+}
+
+/// The field's.
+const FIELD_ID: &str = "actions:Field";
+
+/// Row `key`'s place in the list, from its control's id.
+pub fn row_of_id(key: &str) -> Option<usize> {
+    key.strip_prefix("actions:Row(")?
+        .strip_suffix(')')?
+        .parse()
+        .ok()
+}
+
+/// What a widget asks.
 #[derive(Debug, Clone)]
-pub struct View {
-    pub id: window::Id,
-    pub words: Words,
-    /// The compositor blurs behind: the tint over it, else opaque.
-    pub glass: bool,
+pub enum Msg {
+    /// A row clicked.
+    Act(usize),
+    /// The pointer came over a row: it is selected.
+    Hover(usize),
+    /// What the field took of an input method, or a press.
+    Took(Took),
+    /// The list scrolled to there.
+    Scrolled(f32),
+    /// A key: every one is the palette's.
+    Key(Pressed),
+    /// What it shows changed under the view.
+    Stale,
 }
 
-/// What the surface keeps between draws.
-#[derive(Debug, Default)]
-pub struct State {
-    wheel: Wheel,
-    logged: String,
+/// The palette on its surface `id`, on the glass (else opaque).
+pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
+    Around::new(
+        id,
+        build(id, words),
+        move |m| handle(id, words, m),
+        Msg::Stale,
+    )
+    .own(ACTIONS_NAMESPACE, move || {
+        super::with(|p| p.open_on(id).is_some())
+    })
+    .rebuild(move || build(id, words))
+    .keys(|pressed| Some(Msg::Key(pressed.clone())))
+    .later(&LATER)
+    .on(iced::widget::canvas(Tint(glass))
+        .width(Length::Fill)
+        .height(Length::Fill))
 }
 
-impl<Message> canvas::Program<Message> for View {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                self.prepare(state);
-                None
+fn handle(id: window::Id, words: Words, message: Msg) {
+    match message {
+        Msg::Act(at) => super::act(id, at),
+        Msg::Hover(at) => super::with(|p| {
+            if let Some(open) = p.open_mut(id)
+                && open.rows.get(at).is_some_and(Row::selectable)
+            {
+                open.selected = at;
             }
-            iced::Event::Mouse(seen) => {
-                let at = crate::levels::draw::pointer(
-                    seen,
-                    bounds,
-                    cursor,
-                    super::with(|p| p.open_on(self.id).and_then(|o| o.pointer)),
-                );
-                self.mouse(state, seen, at)
+        }),
+        Msg::Took(took) => super::took(id, took, words),
+        Msg::Scrolled(y) => super::with(|p| {
+            if let Some(open) = p.open_mut(id) {
+                open.scroll = y;
             }
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => super::key_on(self.id, key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            iced::Event::InputMethod(event) => super::input_method(self.id, event)
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+        }),
+        Msg::Key(pressed) => {
+            super::key_on(id, &pressed.key, pressed.modifiers, pressed.text.as_deref());
         }
+        Msg::Stale => {}
     }
+}
+
+/// The field, to the kit's field.
+fn query(with: &mut dyn FnMut(&mut Entry)) {
+    super::with(|p| {
+        if let Phase::Open(open) = &mut p.phase {
+            with(&mut open.query);
+        }
+    });
+}
+
+/// Its content, as the palette is now; said in the log when it changed.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    super::with(|p| {
+        let Some(open) = p.open_mut(id) else {
+            return Space::new().into();
+        };
+        let now = shows(open, words);
+        if now != open.logged {
+            tracing::debug!(said = %now, "the actions palette shows it");
+            open.logged = now;
+        }
+        content(open, words)
+    })
+}
+
+fn content<'a>(open: &Open, words: Words) -> El<'a> {
+    let width = open.size.0 as f32;
+    let inner = width - 2.0 * IN;
+    let list = list_height(&open.rows);
+    let mut rows = column![].spacing(ROW_GAP).width(inner);
+    for (at, row) in open.rows.iter().enumerate() {
+        rows = rows.push(row_view(open, words, at, row, inner));
+    }
+    // In a container: a scrollable lays its content out as wide as its
+    // viewport at least. Its scrollbar where the mockup's mark is, 5 px
+    // in from the rim, past the rows.
+    let scrolled = scrollable(container(rows))
+        .id(iced::widget::Id::new(LIST_ID))
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(MARK_WIDTH)
+                .scroller_width(MARK_WIDTH)
+                .margin(0)
+                .spacing(0),
+        ))
+        .style(|_, _| style::scrollbar_in(MARK_WIDTH, MARK.get()))
+        .on_scroll(|v| Msg::Scrolled(v.absolute_offset().y))
+        .width(width - BORDER - 2.0 - IN)
+        .height(list);
+    let matched = if open.query.text().trim().is_empty() && open.step.is_none() {
+        super::all()
+    } else {
+        open.matched()
+    };
+    let footer = words.footer(
+        matched,
+        open.step.is_some(),
+        open.query.text().trim().is_empty(),
+    );
+    let footer = kit::elide(&footer, inner - 2.0 * FOOT_LEFT, |t| {
+        kit::measure(t, FOOT, MANROPE)
+    });
+    let all = column![
+        field(open, words, inner),
+        Space::new().height(LIST_GAP),
+        Notched::new(scrolled, ROW + ROW_GAP),
+        Space::new().height(FOOT_GAP),
+        container(Space::new().width(inner).height(1.0)).style(|_| style::boxed(RULE.get(), 0.0)),
+        // Its line a pixel taller, from a pixel higher: centred in it,
+        // the text's top falls where the canvas drew it (iced rounds it).
+        Space::new().height(FOOT_GAP - 1.0),
+        ui::line(
+            container(said(footer.clone(), FOOT, MANROPE, QUIET.get()))
+                .padding([0.0, FOOT_LEFT])
+                .height(FOOT_LINE + 1.0)
+                .align_y(Vertical::Center),
+            footer,
+        ),
+    ];
+    container(all)
+        .padding(Padding {
+            top: IN,
+            right: 0.0,
+            bottom: 0.0,
+            left: IN,
+        })
+        .into()
+}
+
+/// The field, `width` wide: the prompt, the step's chip, what is typed,
+/// the target's chip, "Échap".
+fn field<'a>(open: &Open, words: Words, width: f32) -> El<'a> {
+    let hint = words.escape();
+    let hint_width = kit::measure(hint, HINT, MANROPE_SEMIBOLD) + 2.0 * HINT_PAD.width;
+    let hint_height = HINT + 2.0 * HINT_PAD.height + 2.0;
+    let hint = container(said(hint, HINT, MANROPE_SEMIBOLD, QUIET.get()))
+        .center_x(hint_width)
+        .center_y(hint_height)
+        .style(|_| container::Style {
+            border: iced::Border {
+                color: HINT_RIM.get(),
+                width: 1.0,
+                radius: (HINT_RADIUS + 0.5).into(),
+            },
+            ..container::Style::default()
+        });
+    let left = FIELD_LEFT + PROMPT + FIELD_GAP;
+    let mut right = width - FIELD_RIGHT - hint_width - FIELD_GAP;
+    // The target's chip: a window's glyph and its title.
+    let chip: Option<El<'a>> = (!open.shown.title.is_empty()).then(|| {
+        let room = ((right - left) * 0.45).max(60.0);
+        let title = kit::elide(&open.shown.title, room - 2.0 * CHIP_PAD.width - 19.0, |t| {
+            kit::measure(t, CHIP_TEXT, MANROPE_SEMIBOLD)
+        });
+        let w = kit::measure(&title, CHIP_TEXT, MANROPE_SEMIBOLD) + 2.0 * CHIP_PAD.width + 19.0;
+        let h = CHIP_TEXT * LINE + 2.0 * CHIP_PAD.height + 2.0;
+        right -= w + FIELD_GAP;
+        // A window's glyph: 12 × 9, a 1.6 px green rim.
+        let mark = drawn_out(12.0, 9.0, 1.0, |f, size| {
+            f.stroke(
+                &kit::rounded(Rectangle::new(Point::ORIGIN, size), 2.0),
+                Stroke::default().with_color(GREEN.get()).with_width(1.6),
+            );
+        });
+        container(
+            row![
+                mark,
+                gap(7.0),
+                said(title, CHIP_TEXT, MANROPE_SEMIBOLD, CHIP_INK.get())
+            ]
+            .align_y(Vertical::Center),
+        )
+        .padding([0.0, CHIP_PAD.width])
+        .width(w)
+        .center_y(h)
+        .style(|_| container::Style {
+            background: Some(CHIP_FILL.get().into()),
+            border: iced::Border {
+                color: CHIP_RIM.get(),
+                width: 1.0,
+                radius: CHIP_RADIUS.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+    });
+    let mut line = row![
+        gap(FIELD_LEFT),
+        drawn(PROMPT, PROMPT, |f, _| {
+            glyph_path(
+                f,
+                "M5 7 L10 12 L5 17 M12 17 H19",
+                Point::ORIGIN,
+                PROMPT,
+                2.2,
+                PROMPT_INK.get(),
+            );
+        }),
+        gap(FIELD_GAP),
+    ]
+    .align_y(Vertical::Center);
+    let mut x = left;
+    // In a step, the action's chip first.
+    if let Some(step) = &open.step {
+        let chip = format!("{} ›", step.def.stem(words.fr));
+        let w = kit::measure(&chip, STEP_CHIP_TEXT, MANROPE_BOLD) + 2.0 * STEP_CHIP_PAD.width;
+        let h = STEP_CHIP_TEXT * LINE + 2.0 * STEP_CHIP_PAD.height;
+        line = line
+            .push(
+                container(said(chip, STEP_CHIP_TEXT, MANROPE_BOLD, ON_GREEN.get()))
+                    .center_x(w)
+                    .center_y(h)
+                    .style(|_| style::boxed(GREEN.get(), CHIP_RADIUS)),
+            )
+            .push(gap(8.0));
+        x += w + 8.0;
+    }
+    let room = (right - x).max(0.0);
+    // What is typed, its selection and its green caret; the placeholder
+    // smaller while it is empty.
+    let placeholder = match &open.step {
+        Some(step) => words.step_placeholder(step.def.step.unwrap_or(Step::Desktop)),
+        None => words.placeholder(),
+    };
+    let placeholder = kit::elide(placeholder, room - 8.0, |t| {
+        kit::measure(t, PLACEHOLDER, MANROPE)
+    });
+    let typed = Field {
+        with: query,
+        style: Style {
+            hint: (PLACEHOLDER, MANROPE),
+            ..Style::one(QUERY, MANROPE)
+        },
+        placeholder,
+        look: Look {
+            caret: GREEN.get(),
+            ..Look::of(TEXT.get(), QUIET.get())
+        },
+        focused: true,
+        left: 2.0,
+        right: 4.0,
+        on_focus: Msg::Stale,
+        on_took: Msg::Took,
+    }
+    .view(FIELD);
+    line = line.push(container(typed).width(room)).push(gap(FIELD_GAP));
+    if let Some(chip) = chip {
+        line = line.push(chip).push(gap(FIELD_GAP));
+    }
+    line = line.push(hint).push(gap(FIELD_RIGHT));
+    let mut said_field = control(
+        container(line)
+            .width(width)
+            .height(FIELD)
+            .style(|_| container::Style {
+                background: Some(FIELD_FILL.get().into()),
+                border: iced::Border {
+                    color: FIELD_RIM.get(),
+                    width: 1.0,
+                    radius: FIELD_RADIUS.into(),
+                },
+                ..container::Style::default()
+            }),
+        FIELD_ID,
+        Role::TextField,
+        words.search(),
+    )
+    .node(|n| n.value(open.query.text().to_owned()))
+    .typing();
+    if let Some(step) = &open.step {
+        let stem = format!("{} ›", step.def.stem(words.fr));
+        said_field = said_field.node(|n| n.describe(stem));
+    }
+    said_field.into()
+}
+
+/// Row `at`, `width` wide: a heading, the line saying nothing matches, or
+/// a row the pointer selects and a click runs.
+fn row_view<'a>(open: &Open, words: Words, at: usize, row: &Row, width: f32) -> El<'a> {
+    match row {
+        Row::Head(label) => {
+            return ui::line(
+                container(spaced_by(
+                    &label.to_uppercase(),
+                    HEAD_TEXT,
+                    MANROPE_EXTRABOLD,
+                    QUIET.get(),
+                    HEAD_SPACING / HEAD_TEXT,
+                ))
+                .padding(Padding {
+                    left: HEAD_LEFT,
+                    bottom: 4.0,
+                    ..Padding::ZERO
+                })
+                .width(width)
+                .height(HEAD)
+                .align_y(Vertical::Bottom),
+                label.clone(),
+            )
+            .into();
+        }
+        Row::Nothing(line) => {
+            return ui::line(
+                container(said(line.clone(), NOTHING, MANROPE, FAINT.get()))
+                    .width(width)
+                    .height(NOTHING_ROW)
+                    .align_x(Horizontal::Center)
+                    .align_y(Vertical::Center),
+                line.clone(),
+            )
+            .into();
+        }
+        Row::Action(_) | Row::Target(_) | Row::Elsewhere(_) => {}
+    }
+    let selected = at == open.selected;
+    let inert = row.inert().is_some();
+    let alpha = if inert { INERT } else { 1.0 };
+    let ink = move |ink: Ink| ink.scale_alpha(alpha);
+    // The lead: a tile with a glyph, a desktop's sketch, a panda.
+    let (lead, lead_width): (El<'a>, f32) = match row {
+        Row::Target(t) => match &t.target {
+            Target::Desktop { windows, index } => {
+                // The desktop its screen shows, ringed.
+                let current = desks_current(open) == Some(*index);
+                let windows = windows.clone();
+                (
+                    drawn_out(SKETCH.width, SKETCH.height, 2.0, move |f, _| {
+                        sketch(f, Point::ORIGIN, &windows, current, alpha);
+                    }),
+                    SKETCH.width,
+                )
+            }
+            Target::Agent { state, .. } => {
+                let state = state.clone();
+                (
+                    drawn(TILE, TILE, move |f, _| {
+                        let tile = Rectangle::new(Point::ORIGIN, Size::new(TILE, TILE));
+                        let fill = if state == "waiting" {
+                            WAITING_TILE
+                        } else {
+                            TILE_FILL
+                        };
+                        f.fill(&kit::rounded(tile, TILE_RADIUS), fill.scale_alpha(alpha));
+                        let p = Rectangle::new(
+                            Point::new((TILE - PANDA) / 2.0, (TILE - PANDA) / 2.0),
+                            Size::new(PANDA, PANDA),
+                        );
+                        f.draw_svg(p, svg::Svg::new(panda(&state)).opacity(alpha));
+                    }),
+                    TILE,
+                )
+            }
+        },
+        Row::Action(a) => {
+            let glyph = a.def.glyph;
+            (
+                drawn(TILE, TILE, move |f, _| tile(f, Point::ORIGIN, glyph, alpha)),
+                TILE,
+            )
+        }
+        Row::Elsewhere(to) => {
+            let glyph = match to {
+                Elsewhere::Launcher => Glyph::Search,
+                Elsewhere::Settings => Glyph::Gear,
+            };
+            (
+                drawn(TILE, TILE, move |f, _| tile(f, Point::ORIGIN, glyph, alpha)),
+                TILE,
+            )
+        }
+        Row::Head(_) | Row::Nothing(_) => (Space::new().into(), 0.0),
+    };
+    let x = ROW_LEFT + lead_width + ROW_GAP_IN;
+    // On the right: the shortcut, the switch's state, or the reason.
+    let mut right = width - ROW_RIGHT;
+    let fr = words.fr;
+    let (caps, state, reason): (Vec<String>, Option<bool>, Option<Inert>) = match row {
+        Row::Action(a) => {
+            let caps = open
+                .shown
+                .chords(a.def)
+                .and_then(|(chords, family)| {
+                    let chord = chords.first()?;
+                    Some(catalogue::caps(chord, fr, family && a.arg.is_none()))
+                })
+                .unwrap_or_default();
+            if let Some(why) = a.inert {
+                (Vec::new(), None, Some(why))
+            } else if a.on.is_some() {
+                (Vec::new(), a.on, None)
+            } else {
+                (caps, None, None)
+            }
+        }
+        Row::Target(t) => match t.inert {
+            Some(why) => (Vec::new(), None, Some(why)),
+            None => (
+                t.digit.map(|d| vec![d.to_string()]).unwrap_or_default(),
+                None,
+                None,
+            ),
+        },
+        Row::Elsewhere(Elsewhere::Launcher) => (
+            catalogue::find("launcher")
+                .and_then(|d| open.shown.chords(d))
+                .and_then(|(c, _)| c.first().map(|c| catalogue::caps(c, fr, false)))
+                .unwrap_or_default(),
+            None,
+            None,
+        ),
+        _ => (Vec::new(), None, None),
+    };
+    let aside_right: El<'a> = if let Some(why) = reason {
+        let said_why = why.said(fr);
+        right -= kit::measure(said_why, REASON, MANROPE_ITALIC) + ROW_GAP_IN;
+        said(said_why, REASON, MANROPE_ITALIC, ink(REASON_INK)).into()
+    } else if let Some(on) = state {
+        let word = words.state(on);
+        let w = kit::measure(word, STATE, MANROPE_BOLD) + 2.0 * STATE_PAD.width;
+        let h = STATE * LINE + 2.0 * STATE_PAD.height;
+        right -= w + ROW_GAP_IN;
+        container(said(
+            word,
+            STATE,
+            MANROPE_BOLD,
+            if on { ink(GREEN) } else { ink(STATE_OFF) },
+        ))
+        .center_x(w)
+        .center_y(h)
+        .style(move |_| style::boxed(STATE_FILL.scale_alpha(alpha), 6.0))
+        .into()
+    } else if !caps.is_empty() {
+        let widths: Vec<f32> = caps
+            .iter()
+            .map(|c| (kit::measure(c, CAP, MONO) + 2.0 * CAP_PAD).max(CAP_LEAST))
+            .collect();
+        right -= widths.iter().sum::<f32>() + CAP_GAP * (widths.len() - 1) as f32 + ROW_GAP_IN;
+        let mut keys = row![].spacing(CAP_GAP).align_y(Vertical::Center);
+        for (cap, w) in caps.into_iter().zip(widths) {
+            keys = keys.push(keycap(cap, w, alpha));
+        }
+        keys.into()
+    } else {
+        Space::new().into()
+    };
+    // The name, its marks, "›" for a step, the keyword; then its category
+    // in what is left.
+    let (label, marks, step, keyword, aside) = match row {
+        Row::Action(a) => (
+            a.label.clone(),
+            a.marks.clone(),
+            a.def.step.is_some() && a.arg.is_none(),
+            a.keyword.as_deref().map(|k| words.keyword(k)),
+            a.def.category.name(fr).to_owned(),
+        ),
+        Row::Target(t) => (t.label.clone(), Vec::new(), false, None, t.sub.clone()),
+        Row::Elsewhere(to) => (
+            words.elsewhere(*to, open.query.text().trim()),
+            Vec::new(),
+            false,
+            None,
+            words.elsewhere_line(*to).to_owned(),
+        ),
+        Row::Head(_) | Row::Nothing(_) => (String::new(), Vec::new(), false, None, String::new()),
+    };
+    let room = (right - x).max(0.0);
+    let step_w = if step {
+        8.0 + kit::measure("›", LABEL, MANROPE_BOLD)
+    } else {
+        0.0
+    };
+    let keyword_w = keyword
+        .as_deref()
+        .map_or(0.0, |k| 8.0 + kit::measure(k, SUB, MANROPE));
+    let label_room = (room * 0.72 - step_w - keyword_w).max(room * 0.4);
+    let full = kit::measure(&label, LABEL, MANROPE_SEMIBOLD);
+    let cut = full > label_room;
+    let shown = if cut {
+        kit::elide(&label, label_room, |t| {
+            kit::measure(t, LABEL, MANROPE_SEMIBOLD)
+        })
+    } else {
+        label
+    };
+    let marks = if cut { Vec::new() } else { marks };
+    let mut line = row![gap(ROW_LEFT), lead, gap(ROW_GAP_IN)].align_y(Vertical::Center);
+    let mut lx = x;
+    for (run, marked) in runs(&shown, &marks) {
+        let (font, colour) = if marked {
+            (MANROPE_EXTRABOLD, ink(GREEN))
+        } else {
+            (MANROPE_SEMIBOLD, ink(TEXT))
+        };
+        lx += kit::measure(&run, LABEL, font);
+        line = line.push(said(run, LABEL, font, colour));
+    }
+    if step {
+        lx += 8.0 + kit::measure("›", LABEL, MANROPE_BOLD);
+        line = line
+            .push(gap(8.0))
+            .push(said("›", LABEL, MANROPE_BOLD, ink(QUIET)));
+    }
+    if let Some(keyword) = keyword {
+        lx += 8.0 + kit::measure(&keyword, SUB, MANROPE);
+        line = line
+            .push(gap(8.0))
+            .push(said(keyword, SUB, MANROPE, ink(QUIET)));
+    }
+    let aside_room = right - (lx + ROW_GAP_IN);
+    if aside_room > 24.0 && !aside.is_empty() {
+        line = line.push(gap(ROW_GAP_IN)).push(said(
+            kit::elide(&aside, aside_room, |t| kit::measure(t, CATEGORY, MANROPE)),
+            CATEGORY,
+            MANROPE,
+            ink(QUIET),
+        ));
+    }
+    line = line
+        .push(space::horizontal())
+        .push(aside_right)
+        .push(gap(ROW_RIGHT));
+    let pressed = button(line.height(ROW))
+        .padding(0)
+        .width(width)
+        .height(ROW)
+        .style(move |_, status| {
+            if selected {
+                iced::widget::button::Style {
+                    background: Some(SELECTED_FILL.scale_alpha(alpha).into()),
+                    border: iced::Border {
+                        color: SELECTED_RIM.scale_alpha(alpha),
+                        width: 1.0,
+                        radius: ROW_RADIUS.into(),
+                    },
+                    ..style::clear()
+                }
+            } else if style::lit(status) {
+                style::filled(HOVER.scale_alpha(alpha), ROW_RADIUS, TEXT.get())
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(at));
+    let (name, describe) = spoken(open, row, words);
+    let selectable: Vec<usize> = (0..open.rows.len())
+        .filter(|i| open.rows[*i].selectable())
+        .collect();
+    let n = selectable.iter().position(|i| *i == at).unwrap_or(0);
+    let item = control(pressed, row_id(at), Role::ListItem, name).node(|node| {
+        node.describe(describe)
+            .selected(selected)
+            .disabled(inert)
+            .set(n + 1, selectable.len())
+    });
+    mouse_area(item).on_enter(Msg::Hover(at)).into()
+}
+
+/// A keycap `width` wide: Martian Mono, its bottom edge drawn 2 px up.
+fn keycap<'a>(cap: String, width: f32, alpha: f32) -> El<'a> {
+    let face = container(
+        iced::widget::text(cap)
+            .size(CAP)
+            .font(MONO)
+            .line_height(LineHeight::Relative(1.0))
+            .shaping(iced::widget::text::Shaping::Advanced)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(CAP_INK.scale_alpha(alpha)),
+    )
+    .center_x(width)
+    .center_y(CAP_HEIGHT)
+    .style(move |_| container::Style {
+        background: Some(CAP_FILL.scale_alpha(alpha).into()),
+        border: iced::Border {
+            color: CAP_RIM.scale_alpha(alpha),
+            width: 1.0,
+            radius: CAP_RADIUS.into(),
+        },
+        ..container::Style::default()
+    });
+    let edge = container(Space::new().width(width - CAP_RADIUS).height(1.0))
+        .style(move |_| style::boxed(CAP_RIM.scale_alpha(alpha), 0.0));
+    Stack::with_children([
+        face.into(),
+        pin(edge).x(CAP_RADIUS / 2.0).y(CAP_HEIGHT - 2.0).into(),
+    ])
+    .width(width)
+    .height(CAP_HEIGHT)
+    .into()
+}
+
+/// Its background: the popovers' glass (opaque without it) and its rim.
+#[derive(Debug, Clone, Copy)]
+struct Tint(bool);
+
+impl<M> canvas::Program<M> for Tint {
+    type State = ();
 
     fn draw(
         &self,
-        _state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        self.background(&mut frame, bounds.size());
-        super::with(|p| {
-            if let Some(open) = p.open_on(self.id) {
-                self.draw_open(&mut frame, open);
-            }
-        });
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        super::with(|p| match p.open_on(self.id).and_then(|o| o.hover) {
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        })
-    }
-}
-
-impl View {
-    fn background(&self, f: &mut Frame, size: Size) {
-        let (top, bottom) = if self.glass {
+    ) -> Vec<canvas::Geometry> {
+        let size = bounds.size();
+        let mut f = Frame::new(renderer, size);
+        let (top, bottom) = if self.0 {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
@@ -402,565 +961,7 @@ impl View {
             ),
             Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
-    }
-
-    /// Before it draws: what it shows logged when it changed, and said to
-    /// screen readers.
-    fn prepare(&self, state: &mut State) {
-        let said = super::with(|p| p.open_on(self.id).map(|o| said(o, self.words)));
-        let Some(said) = said else {
-            return;
-        };
-        if said != state.logged {
-            tracing::debug!(said = %said, "the actions palette shows it");
-            state.logged = said;
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        enum Then {
-            Nothing,
-            Draw,
-            Act(usize),
-        }
-        let then = super::with(|p| {
-            let open = p.open_mut(self.id)?;
-            open.pointer = at;
-            let layout = Layout::of(open);
-            let target = at.and_then(|at| layout.row_at(open, at));
-            Some(match seen {
-                mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                    // A press held in the field selects as it drags.
-                    if open.query.pressed() {
-                        return Some(match at {
-                            Some(at) if open.query.drag(at) => Then::Draw,
-                            _ => Then::Nothing,
-                        });
-                    }
-                    hovered(open, target)
-                }
-                mouse::Event::CursorLeft => {
-                    open.hover = None;
-                    Then::Draw
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    open.pressed = target;
-                    match at.filter(|at| layout.field.contains(*at)) {
-                        Some(at) => {
-                            open.query.press(at);
-                            Then::Draw
-                        }
-                        None => Then::Nothing,
-                    }
-                }
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    open.query.release();
-                    match open.pressed.take().filter(|p| Some(*p) == target) {
-                        Some(row) => Then::Act(row),
-                        None => Then::Nothing,
-                    }
-                }
-                mouse::Event::WheelScrolled { delta } => {
-                    let notches = state.wheel.notches(delta, open.scale);
-                    if notches == 0 {
-                        return Some(Then::Nothing);
-                    }
-                    let most = most_offset(&open.rows) as i64;
-                    open.offset = (open.offset as i64 - i64::from(notches)).clamp(0, most) as usize;
-                    let layout = Layout::of(open);
-                    let target = open.pointer.and_then(|at| layout.row_at(open, at));
-                    hovered(open, target);
-                    if let Some(resize) = open.refit() {
-                        crate::popover::send(vec![resize]);
-                    }
-                    Then::Draw
-                }
-                _ => Then::Nothing,
-            })
-        });
-        /// The pointer over row `target`: it is selected.
-        fn hovered(open: &mut Open, target: Option<usize>) -> Then {
-            if open.hover == target {
-                return Then::Nothing;
-            }
-            open.hover = target;
-            if let Some(row) = target {
-                open.selected = row;
-            }
-            Then::Draw
-        }
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match then? {
-            Then::Nothing => None,
-            Then::Draw => redraw,
-            Then::Act(row) => {
-                super::act(self.id, row);
-                redraw
-            }
-        }
-    }
-
-    fn draw_open(&self, f: &mut Frame, open: &Open) {
-        let layout = Layout::of(open);
-        self.field(f, open, &layout);
-        for (i, rect) in &layout.rows {
-            let Some(row) = open.rows.get(*i) else {
-                continue;
-            };
-            let selected = *i == open.selected && row.selectable();
-            self.row(f, open, row, *rect, selected);
-        }
-        // The scroll mark, when the rows are more than shown.
-        let total = open.rows.len();
-        let shown = layout.rows.len();
-        if shown < total {
-            let list = layout.list;
-            let share = shown as f32 / total as f32;
-            let start = open.offset as f32 / total as f32;
-            f.fill(
-                &kit::rounded(
-                    Rectangle::new(
-                        Point::new(layout.width - BORDER - 5.0, list.y + start * list.height),
-                        Size::new(MARK_WIDTH, (share * list.height).max(12.0)),
-                    ),
-                    MARK_WIDTH / 2.0,
-                ),
-                MARK.get(),
-            );
-        }
-        // The footer: a line, then what matches and the keys.
-        f.fill_rectangle(
-            Point::new(IN, layout.footer),
-            Size::new(layout.width - 2.0 * IN, 1.0),
-            RULE.get(),
-        );
-        let matched = if open.query.text().trim().is_empty() && open.step.is_none() {
-            super::all()
-        } else {
-            open.matched()
-        };
-        let text = self.words.footer(
-            matched,
-            open.step.is_some(),
-            open.query.text().trim().is_empty(),
-        );
-        f.fill_text(kit::text(
-            kit::elide(&text, layout.width - 2.0 * IN - 2.0 * FOOT_LEFT, |t| {
-                kit::measure(t, FOOT, MANROPE)
-            }),
-            Point::new(
-                IN + FOOT_LEFT,
-                layout.footer + 1.0 + FOOT_GAP + FOOT_LINE / 2.0,
-            ),
-            FOOT,
-            QUIET.get(),
-            Alignment::Left,
-        ));
-    }
-
-    fn field(&self, f: &mut Frame, open: &Open, layout: &Layout) {
-        let field = layout.field;
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
-        f.stroke(
-            &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default()
-                .with_color(FIELD_RIM.get())
-                .with_width(1.0),
-        );
-        let middle = field.center_y();
-        glyph_path(
-            f,
-            "M5 7 L10 12 L5 17 M12 17 H19",
-            Point::new(field.x + FIELD_LEFT, middle - PROMPT / 2.0),
-            PROMPT,
-            2.2,
-            PROMPT_INK.get(),
-        );
-        // On the right: "Échap", and before it the target's chip.
-        let mut right = field.x + field.width - FIELD_RIGHT;
-        let hint = self.words.escape();
-        let hint_width = kit::measure(hint, HINT, MANROPE_SEMIBOLD) + 2.0 * HINT_PAD.width;
-        let hint_rect = Rectangle::new(
-            Point::new(
-                right - hint_width,
-                middle - (HINT + 2.0 * HINT_PAD.height + 2.0) / 2.0,
-            ),
-            Size::new(hint_width, HINT + 2.0 * HINT_PAD.height + 2.0),
-        );
-        f.stroke(
-            &kit::rounded(inset(hint_rect, 0.5), HINT_RADIUS),
-            Stroke::default().with_color(HINT_RIM.get()).with_width(1.0),
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_SEMIBOLD,
-            kit::text(
-                hint.to_owned(),
-                hint_rect.center(),
-                HINT,
-                QUIET.get(),
-                Alignment::Center,
-            ),
-        ));
-        right = hint_rect.x - FIELD_GAP;
-        let left = field.x + FIELD_LEFT + PROMPT + FIELD_GAP;
-        if !open.shown.title.is_empty() {
-            let room = ((right - left) * 0.45).max(60.0);
-            let title = kit::elide(&open.shown.title, room - 2.0 * CHIP_PAD.width - 19.0, |t| {
-                kit::measure(t, CHIP_TEXT, MANROPE_SEMIBOLD)
-            });
-            let w = kit::measure(&title, CHIP_TEXT, MANROPE_SEMIBOLD) + 2.0 * CHIP_PAD.width + 19.0;
-            let h = CHIP_TEXT * LINE + 2.0 * CHIP_PAD.height + 2.0;
-            let chip = Rectangle::new(Point::new(right - w, middle - h / 2.0), Size::new(w, h));
-            f.fill(&kit::rounded(chip, CHIP_RADIUS), CHIP_FILL.get());
-            f.stroke(
-                &kit::rounded(inset(chip, 0.5), CHIP_RADIUS - 0.5),
-                Stroke::default().with_color(CHIP_RIM.get()).with_width(1.0),
-            );
-            // A window's glyph: 12 × 9, a 1.6 px green rim.
-            let mark = Rectangle::new(
-                Point::new(chip.x + CHIP_PAD.width, middle - 4.5),
-                Size::new(12.0, 9.0),
-            );
-            f.stroke(
-                &kit::rounded(mark, 2.0),
-                Stroke::default().with_color(GREEN.get()).with_width(1.6),
-            );
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                kit::text(
-                    title,
-                    Point::new(mark.x + 12.0 + 7.0, middle),
-                    CHIP_TEXT,
-                    CHIP_INK.get(),
-                    Alignment::Left,
-                ),
-            ));
-            right = chip.x - FIELD_GAP;
-        }
-        let mut x = left;
-        // In a step, the action's chip first.
-        if let Some(step) = &open.step {
-            let said = format!("{} ›", step.def.stem(self.words.fr));
-            let w = kit::measure(&said, STEP_CHIP_TEXT, MANROPE_BOLD) + 2.0 * STEP_CHIP_PAD.width;
-            let h = STEP_CHIP_TEXT * LINE + 2.0 * STEP_CHIP_PAD.height;
-            let chip = Rectangle::new(Point::new(x, middle - h / 2.0), Size::new(w, h));
-            f.fill(&kit::rounded(chip, CHIP_RADIUS), GREEN.get());
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                kit::text(
-                    said,
-                    chip.center(),
-                    STEP_CHIP_TEXT,
-                    ON_GREEN.get(),
-                    Alignment::Center,
-                ),
-            ));
-            x = chip.x + w + 8.0;
-        }
-        let room = (right - x).max(0.0);
-        // What is typed, its selection and its green caret; the
-        // placeholder smaller while it is empty.
-        let placeholder = match &open.step {
-            Some(step) => self
-                .words
-                .step_placeholder(step.def.step.unwrap_or(Step::Desktop)),
-            None => self.words.placeholder(),
-        };
-        let placeholder = kit::elide(placeholder, room - 8.0, |t| {
-            kit::measure(t, PLACEHOLDER, MANROPE)
-        });
-        open.query.draw(
-            f,
-            Place {
-                left: x + 2.0,
-                middle,
-                width: room - 6.0,
-                style: Style {
-                    hint: (PLACEHOLDER, MANROPE),
-                    ..Style::one(QUERY, MANROPE)
-                },
-            },
-            &placeholder,
-            &Look {
-                caret: GREEN.get(),
-                ..Look::of(TEXT.get(), QUIET.get())
-            },
-            true,
-        );
-    }
-
-    fn row(&self, f: &mut Frame, open: &Open, row: &Row, rect: Rectangle, selected: bool) {
-        let words = self.words;
-        match row {
-            Row::Head(label) => {
-                head(f, label, rect);
-                return;
-            }
-            Row::Nothing(said) => {
-                f.fill_text(kit::text(
-                    said.clone(),
-                    rect.center(),
-                    NOTHING,
-                    FAINT.get(),
-                    Alignment::Center,
-                ));
-                return;
-            }
-            _ => {}
-        }
-        let alpha = if row.inert().is_some() { INERT } else { 1.0 };
-        let ink = |ink: Ink| ink.scale_alpha(alpha);
-        if selected {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), ink(SELECTED_FILL));
-            f.stroke(
-                &kit::rounded(inset(rect, 0.5), ROW_RADIUS - 0.5),
-                Stroke::default()
-                    .with_color(ink(SELECTED_RIM))
-                    .with_width(1.0),
-            );
-        } else if open.hover.is_some_and(|h| open.rows.get(h) == Some(row)) {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), ink(HOVER));
-        }
-        let middle = rect.center_y();
-        let mut x = rect.x + ROW_LEFT;
-        // The lead: a tile with a glyph, a desktop's sketch, a panda.
-        match row {
-            Row::Target(t) => match &t.target {
-                Target::Desktop { windows, index } => {
-                    // The desktop its screen shows, ringed.
-                    let current = desks_current(open) == Some(*index);
-                    sketch(
-                        f,
-                        Point::new(x, middle - SKETCH.height / 2.0),
-                        windows,
-                        current,
-                        alpha,
-                    );
-                    x += SKETCH.width;
-                }
-                Target::Agent { state, .. } => {
-                    let tile =
-                        Rectangle::new(Point::new(x, middle - TILE / 2.0), Size::new(TILE, TILE));
-                    let fill = if state == "waiting" {
-                        WAITING_TILE
-                    } else {
-                        TILE_FILL
-                    };
-                    f.fill(&kit::rounded(tile, TILE_RADIUS), ink(fill));
-                    let p = Rectangle::new(
-                        Point::new(tile.center_x() - PANDA / 2.0, tile.center_y() - PANDA / 2.0),
-                        Size::new(PANDA, PANDA),
-                    );
-                    f.draw_svg(p, svg::Svg::new(panda(state)).opacity(alpha));
-                    x += TILE;
-                }
-            },
-            Row::Action(a) => {
-                tile(f, Point::new(x, middle - TILE / 2.0), a.def.glyph, alpha);
-                x += TILE;
-            }
-            Row::Elsewhere(to) => {
-                let glyph = match to {
-                    Elsewhere::Launcher => Glyph::Search,
-                    Elsewhere::Settings => Glyph::Gear,
-                };
-                tile(f, Point::new(x, middle - TILE / 2.0), glyph, alpha);
-                x += TILE;
-            }
-            Row::Head(_) | Row::Nothing(_) => {}
-        }
-        x += ROW_GAP_IN;
-        // On the right: the shortcut, the switch's state, or the reason.
-        let mut right = rect.x + rect.width - ROW_RIGHT;
-        let fr = words.fr;
-        let (caps, state, reason): (Vec<String>, Option<bool>, Option<Inert>) = match row {
-            Row::Action(a) => {
-                let caps = open
-                    .shown
-                    .chords(a.def)
-                    .and_then(|(chords, family)| {
-                        let chord = chords.first()?;
-                        Some(catalogue::caps(chord, fr, family && a.arg.is_none()))
-                    })
-                    .unwrap_or_default();
-                if let Some(why) = a.inert {
-                    (Vec::new(), None, Some(why))
-                } else if a.on.is_some() {
-                    (Vec::new(), a.on, None)
-                } else {
-                    (caps, None, None)
-                }
-            }
-            Row::Target(t) => match t.inert {
-                Some(why) => (Vec::new(), None, Some(why)),
-                None => (
-                    t.digit.map(|d| vec![d.to_string()]).unwrap_or_default(),
-                    None,
-                    None,
-                ),
-            },
-            Row::Elsewhere(Elsewhere::Launcher) => (
-                catalogue::find("launcher")
-                    .and_then(|d| open.shown.chords(d))
-                    .and_then(|(c, _)| c.first().map(|c| catalogue::caps(c, fr, false)))
-                    .unwrap_or_default(),
-                None,
-                None,
-            ),
-            _ => (Vec::new(), None, None),
-        };
-        if let Some(why) = reason {
-            let said = why.said(fr);
-            let w = kit::measure(said, REASON, MANROPE_ITALIC);
-            f.fill_text(kit::text_in(
-                MANROPE_ITALIC,
-                kit::text(
-                    said.to_owned(),
-                    Point::new(right, middle),
-                    REASON,
-                    REASON_INK.get(),
-                    Alignment::Right,
-                ),
-            ));
-            right -= w + ROW_GAP_IN;
-        } else if let Some(on) = state {
-            let said = words.state(on);
-            let w = kit::measure(said, STATE, MANROPE_BOLD) + 2.0 * STATE_PAD.width;
-            let h = STATE * LINE + 2.0 * STATE_PAD.height;
-            let chip = Rectangle::new(Point::new(right - w, middle - h / 2.0), Size::new(w, h));
-            f.fill(&kit::rounded(chip, 6.0), ink(STATE_FILL));
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                kit::text(
-                    said.to_owned(),
-                    chip.center(),
-                    STATE,
-                    if on { ink(GREEN) } else { ink(STATE_OFF) },
-                    Alignment::Center,
-                ),
-            ));
-            right = chip.x - ROW_GAP_IN;
-        } else if !caps.is_empty() {
-            let widths: Vec<f32> = caps
-                .iter()
-                .map(|c| (kit::measure(c, CAP, MONO) + 2.0 * CAP_PAD).max(CAP_LEAST))
-                .collect();
-            let total = widths.iter().sum::<f32>() + CAP_GAP * (widths.len() - 1) as f32;
-            let mut cx = right - total;
-            for (cap, w) in caps.iter().zip(&widths) {
-                keycap(
-                    f,
-                    cap,
-                    Rectangle::new(
-                        Point::new(cx, middle - CAP_HEIGHT / 2.0),
-                        Size::new(*w, CAP_HEIGHT),
-                    ),
-                    alpha,
-                );
-                cx += w + CAP_GAP;
-            }
-            right -= total + ROW_GAP_IN;
-        }
-        // The name, its marks, "›" for a step, the keyword; then its
-        // category in what is left.
-        let (label, marks, step, keyword, aside) = match row {
-            Row::Action(a) => (
-                a.label.clone(),
-                a.marks.clone(),
-                a.def.step.is_some() && a.arg.is_none(),
-                a.keyword.as_deref().map(|k| words.keyword(k)),
-                a.def.category.name(fr).to_owned(),
-            ),
-            Row::Target(t) => (t.label.clone(), Vec::new(), false, None, t.sub.clone()),
-            Row::Elsewhere(to) => (
-                words.elsewhere(*to, open.query.text().trim()),
-                Vec::new(),
-                false,
-                None,
-                words.elsewhere_line(*to).to_owned(),
-            ),
-            Row::Head(_) | Row::Nothing(_) => return,
-        };
-        let room = (right - x).max(0.0);
-        let step_w = if step {
-            8.0 + kit::measure("›", LABEL, MANROPE_BOLD)
-        } else {
-            0.0
-        };
-        let keyword_w = keyword
-            .as_deref()
-            .map_or(0.0, |k| 8.0 + kit::measure(k, SUB, MANROPE));
-        let label_room = (room * 0.72 - step_w - keyword_w).max(room * 0.4);
-        let full = kit::measure(&label, LABEL, MANROPE_SEMIBOLD);
-        let cut = full > label_room;
-        let label = if cut {
-            kit::elide(&label, label_room, |t| {
-                kit::measure(t, LABEL, MANROPE_SEMIBOLD)
-            })
-        } else {
-            label
-        };
-        let mut lx = x;
-        let marks = if cut { Vec::new() } else { marks };
-        for (run, marked) in runs(&label, &marks) {
-            let (font, colour) = if marked {
-                (MANROPE_EXTRABOLD, ink(GREEN))
-            } else {
-                (MANROPE_SEMIBOLD, ink(TEXT))
-            };
-            f.fill_text(kit::text_in(
-                font,
-                kit::text(
-                    run.clone(),
-                    Point::new(lx, middle),
-                    LABEL,
-                    colour,
-                    Alignment::Left,
-                ),
-            ));
-            lx += kit::measure(&run, LABEL, font);
-        }
-        if step {
-            lx += 8.0;
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                kit::text(
-                    "›".to_owned(),
-                    Point::new(lx, middle),
-                    LABEL,
-                    ink(QUIET),
-                    Alignment::Left,
-                ),
-            ));
-            lx += kit::measure("›", LABEL, MANROPE_BOLD);
-        }
-        if let Some(keyword) = keyword {
-            lx += 8.0;
-            f.fill_text(kit::text(
-                keyword.clone(),
-                Point::new(lx, middle),
-                SUB,
-                ink(QUIET),
-                Alignment::Left,
-            ));
-            lx += kit::measure(&keyword, SUB, MANROPE);
-        }
-        let aside_x = lx + ROW_GAP_IN;
-        let aside_room = right - aside_x;
-        if aside_room > 24.0 && !aside.is_empty() {
-            f.fill_text(kit::text(
-                kit::elide(&aside, aside_room, |t| kit::measure(t, CATEGORY, MANROPE)),
-                Point::new(aside_x, middle),
-                CATEGORY,
-                ink(QUIET),
-                Alignment::Left,
-            ));
-        }
+        vec![f.into_geometry()]
     }
 }
 
@@ -1026,7 +1027,7 @@ pub fn spoken(open: &Open, row: &Row, words: Words) -> (String, String) {
 }
 
 /// What the palette shows, in words, for the log (and the tests).
-pub fn said(open: &Open, words: Words) -> String {
+pub fn shows(open: &Open, words: Words) -> String {
     let rows: Vec<String> = open
         .rows
         .iter()
@@ -1097,56 +1098,6 @@ pub fn said(open: &Open, words: Words) -> String {
         open.size.0,
         open.size.1,
     )
-}
-
-/// A heading, its letters in capitals, spaced, in `rect`.
-fn head(f: &mut Frame, label: &str, rect: Rectangle) {
-    let mut x = rect.x + HEAD_LEFT;
-    let y = rect.y + rect.height - 4.0 - HEAD_TEXT * LINE / 2.0;
-    for ch in label.to_uppercase().chars() {
-        let letter = ch.to_string();
-        let width = kit::measure(&letter, HEAD_TEXT, MANROPE_EXTRABOLD);
-        f.fill_text(kit::text_in(
-            MANROPE_EXTRABOLD,
-            kit::text(
-                letter,
-                Point::new(x, y),
-                HEAD_TEXT,
-                QUIET.get(),
-                Alignment::Left,
-            ),
-        ));
-        x += width + HEAD_SPACING;
-    }
-}
-
-/// A keycap at `rect`.
-fn keycap(f: &mut Frame, cap: &str, rect: Rectangle, alpha: f32) {
-    f.fill(&kit::rounded(rect, CAP_RADIUS), CAP_FILL.scale_alpha(alpha));
-    f.stroke(
-        &kit::rounded(inset(rect, 0.5), CAP_RADIUS - 0.5),
-        Stroke::default()
-            .with_color(CAP_RIM.scale_alpha(alpha))
-            .with_width(1.0),
-    );
-    // Its bottom 2 px.
-    f.fill_rectangle(
-        Point::new(rect.x + CAP_RADIUS / 2.0, rect.y + rect.height - 2.0),
-        Size::new(rect.width - CAP_RADIUS, 1.0),
-        CAP_RIM.scale_alpha(alpha),
-    );
-    f.fill_text(canvas::Text {
-        content: cap.to_owned(),
-        position: Point::new(rect.center_x(), rect.center_y()),
-        max_width: f32::INFINITY,
-        color: CAP_INK.scale_alpha(alpha),
-        size: iced::Pixels(CAP),
-        line_height: LineHeight::Relative(1.0),
-        font: MONO,
-        align_x: Alignment::Center,
-        align_y: alignment::Vertical::Center,
-        shaping: Shaping::Advanced,
-    });
 }
 
 /// A row's tile with `glyph` at `at`.
@@ -1350,10 +1301,10 @@ mod tests {
     }
 
     #[test]
-    fn nine_rows_room_at_most_the_selection_kept_in_view() {
+    fn nine_rows_room_at_most_and_a_row_revealed_with_its_heading() {
         // A heading and three rows: as tall as they are.
         let short = rows(3);
-        let (w, h) = size(&short, 0, 720.0);
+        let (w, h) = size(&short, 720.0);
         assert_eq!(w, 720);
         let list = HEAD + 3.0 * ROW + 3.0 * ROW_GAP;
         assert_eq!(
@@ -1361,18 +1312,18 @@ mod tests {
             (2.0 * IN + FIELD + LIST_GAP + list + 2.0 * FOOT_GAP + 1.0 + FOOT_LINE + 2.0).ceil()
                 as u32
         );
+        // Many: the whole rows that fit in nine rows' room.
         let long = rows(40);
-        // Many: nine rows from wherever it is scrolled to.
-        let tall = size(&long, 1, 720.0);
-        assert_eq!(size(&long, 20, 720.0), tall);
         let most =
             (2.0 * IN + FIELD + LIST_GAP + MOST_LIST + 2.0 * FOOT_GAP + 1.0 + FOOT_LINE + 2.0)
                 .ceil() as u32;
-        assert_eq!(tall.1, most);
-        assert!(size(&long, 0, 720.0).1 <= most);
-        let offset = keep_in_view(&long, 30, 0);
-        assert!(end_of(&long, offset) > 30 && offset > 0, "{offset}");
-        assert_eq!(keep_in_view(&long, 1, offset), 0);
+        assert!(size(&long, 720.0).1 <= most);
+        // The first row with its heading; another alone.
+        assert_eq!(span(&long, 1), (0.0, HEAD + ROW_GAP + ROW));
+        assert_eq!(
+            span(&long, 3),
+            (HEAD + ROW_GAP + 2.0 * (ROW + ROW_GAP), ROW)
+        );
         // A narrow work area: 32 px less.
         assert_eq!(width(600.0), 568.0);
         assert_eq!(width(3440.0), 720.0);

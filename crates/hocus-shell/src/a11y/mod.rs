@@ -258,7 +258,7 @@ impl Said {
         windows.extend(self.popover(words));
         if let Some(palette) = crate::actions::a11y() {
             for node in palette.all() {
-                if node.key.starts_with("row:") {
+                if node.key.starts_with("actions:Row(") {
                     self.targets.insert(
                         (palette.key.clone(), node.key.clone()),
                         Target::Palette(node.key.clone()),

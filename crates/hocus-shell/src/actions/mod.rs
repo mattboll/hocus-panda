@@ -9,17 +9,17 @@
 //! in the overlay layer, 720 px wide, its top 64 px under the screen's,
 //! centred across the work area, holding the keyboard. The compositor
 //! dims the screen under it, rings the target, and moves it in and out as
-//! a popover. As for the launcher, nothing goes through iced's messages:
-//! keys and the pointer change its state and draw its surface alone.
+//! a popover. Its surface is the widget kit's ([`view`]): what its
+//! widgets ask is handled at once, and it alone draws again.
 //!
 //! The compositor's actions are asked for on the line once the palette
 //! has faded out (`action ID ARG WINDOW`); the shell's own (the bar's
 //! popovers, the Settings, the agents) are carried out here then. The
 //! recent ones are kept ([`store`]).
 
-pub mod draw;
 pub mod list;
 pub mod store;
+pub mod view;
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -183,22 +183,20 @@ pub struct StepOpen {
 pub struct Open {
     pub surface: window::Id,
     pub shown: ActionsShown,
-    pub scale: f32,
     /// The filter's field (#771).
     pub query: Entry,
     pub step: Option<StepOpen>,
     pub rows: Vec<Row>,
     /// The row selected, in [`Open::rows`].
     pub selected: usize,
-    /// The first row shown.
-    pub offset: usize,
-    pub hover: Option<usize>,
-    pub pressed: Option<usize>,
-    pub pointer: Option<iced::Point>,
+    /// How far its list is scrolled, as it said or was told.
+    pub scroll: f32,
     /// Its width, and its size and margins (top, left) as last asked.
     pub width: f32,
     pub size: (u32, u32),
     pub place: (i32, i32),
+    /// What it last said it shows, in the log.
+    pub logged: String,
 }
 
 impl Open {
@@ -224,8 +222,7 @@ impl Open {
             None => list::actions(self.query.text(), &seen),
         };
         self.selected = self.first();
-        self.offset = 0;
-        self.hover = None;
+        view::to_top(self);
     }
 
     /// The first row the selection goes to.
@@ -252,7 +249,7 @@ impl Open {
         };
         let to = (at as i64 + i64::from(by)).clamp(0, selectable.len() as i64 - 1) as usize;
         self.selected = selectable[to];
-        self.offset = draw::keep_in_view(&self.rows, self.selected, self.offset);
+        view::reveal(self);
     }
 
     /// How many actions the list shows.
@@ -266,7 +263,7 @@ impl Open {
     /// Its size and margins for its rows now; the effect to resize it if
     /// they changed.
     pub fn refit(&mut self) -> Option<Effect> {
-        let size = draw::size(&self.rows, self.offset, self.width);
+        let size = view::size(&self.rows, self.width);
         if size == self.size {
             return None;
         }
@@ -381,8 +378,9 @@ pub fn start() {
     store::start();
 }
 
-/// Its surface draws again.
+/// Its surface is built again and draws.
 pub fn wake() {
+    crate::ui::touch();
     crate::popover::send(vec![Effect::Wake(ACTIONS_NAMESPACE)]);
 }
 
@@ -433,25 +431,22 @@ pub fn toggle(shown: ActionsShown) {
         }
         let surface = window::Id::unique();
         let (area_x, area_width) = shown.area;
-        let width = draw::width(area_width as f32);
+        let width = view::width(area_width as f32);
         let mut open = Open {
             surface,
-            scale: (shown.scale as f32 / 120.0).max(0.5),
             shown,
             query: Entry::new(field::Kind::Line, QUERY_MOST),
             step: None,
             rows: Vec::new(),
             selected: 0,
-            offset: 0,
-            hover: None,
-            pressed: None,
-            pointer: None,
+            scroll: 0.0,
             width,
             size: (0, 0),
             place: (0, 0),
+            logged: String::new(),
         };
         open.relist(words);
-        open.size = draw::size(&open.rows, 0, width);
+        open.size = view::size(&open.rows, width);
         let left = area_x as f32 + (area_width as f32 - width) / 2.0;
         open.place = (hocus_link::ACTIONS_TOP as i32, left.round().max(0.0) as i32);
         tracing::debug!(
@@ -725,8 +720,8 @@ pub fn key_on(
             }
             Key::Named(Named::ArrowDown) => moved(open, 1),
             Key::Named(Named::ArrowUp) => moved(open, -1),
-            Key::Named(Named::PageDown) => moved(open, draw::MOST_ROWS as i32),
-            Key::Named(Named::PageUp) => moved(open, -(draw::MOST_ROWS as i32)),
+            Key::Named(Named::PageDown) => moved(open, view::MOST_ROWS as i32),
+            Key::Named(Named::PageUp) => moved(open, -(view::MOST_ROWS as i32)),
             // In a step's empty field: back to the actions.
             Key::Named(Named::Backspace) if open.query.is_empty() && open.step.is_some() => {
                 leave_step(open, words);
@@ -823,10 +818,23 @@ fn paste(id: window::Id) {
     });
 }
 
-/// An input method's preedit or commit in the field of the palette on
-/// `id`: whether it draws again.
-pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
-    edited(id, |entry| entry.input_method(event))
+/// What the field of the palette on `id` took of an input method or of
+/// the pointer: its list follows what was typed; a paste is asked for.
+pub fn took(id: window::Id, took: Took, words: Words) {
+    match took {
+        Took::Edited => {
+            let resize = with(|p| {
+                let open = p.open_mut(id)?;
+                open.relist(words);
+                open.refit()
+            });
+            if let Some(effect) = resize {
+                crate::popover::send(vec![effect]);
+            }
+        }
+        Took::Paste => paste(id),
+        Took::No | Took::Same | Took::Moved => {}
+    }
 }
 
 /// A key that reached another of the shell's surfaces while the palette
@@ -851,41 +859,19 @@ pub fn all() -> usize {
 }
 
 /// The open palette for screen readers (A.1): a dialog named "Actions",
-/// described by its target, its field, and its rows as a list whose
-/// selection the arrows move; an inert row is disabled, its reason in its
-/// description. Each row's key is `row:N`, for a click on it.
+/// described by its target, holding what its controls declared (its
+/// field, its rows as list items whose selection the arrows move; an
+/// inert row disabled, its reason in its description). A row's key is
+/// its control's id (`actions:Row(N)`), for a click on it.
 pub fn a11y() -> Option<hocus_a11y::Window> {
-    use hocus_a11y::{Act, Node, Role, Window};
+    use hocus_a11y::{Node, Role, Window};
     let words = words();
     with(|p| {
         let Phase::Open(open) = &p.phase else {
             return None;
         };
-        let layout = draw::Layout::of(open);
-        let mut field =
-            Node::new("field", Role::TextField, words.search()).value(open.query.text().to_owned());
-        if let Some(step) = &open.step {
-            field = field.describe(format!("{} ›", step.def.stem(words.fr)));
-        }
-        let selectable: Vec<usize> = (0..open.rows.len())
-            .filter(|i| open.rows[*i].selectable())
-            .collect();
-        let items = selectable.iter().enumerate().map(|(n, i)| {
-            let row = &open.rows[*i];
-            let (name, aside) = draw::spoken(open, row, words);
-            let mut node = Node::new(format!("row:{i}"), Role::ListItem, name)
-                .describe(aside)
-                .selected(*i == open.selected)
-                .disabled(row.inert().is_some())
-                .set(n + 1, selectable.len())
-                .act(Act::Click);
-            if let Some((_, rect)) = layout.rows.iter().find(|(r, _)| r == i) {
-                node = node.bounds(crate::a11y::rows::at(*rect));
-            }
-            node
-        });
-        let list = Node::new("list", Role::List, words.title()).children(items);
-        let mut dialog = Node::new("dialog", Role::Dialog, words.title()).children([field, list]);
+        let rows = crate::a11y::rows::of(open.surface)?;
+        let mut dialog = Node::new("dialog", Role::Dialog, words.title()).children(rows.nodes);
         if !open.shown.title.is_empty() {
             dialog = dialog.describe(open.shown.title.clone());
         }
@@ -894,9 +880,9 @@ pub fn a11y() -> Option<hocus_a11y::Window> {
         window.active = true;
         window.focus = Some(
             if open.rows.get(open.selected).is_some_and(Row::selectable) {
-                format!("row:{}", open.selected)
+                format!("actions:Row({})", open.selected)
             } else {
-                "field".to_owned()
+                "actions:Field".to_owned()
             },
         );
         window.size = Some((open.size.0 as f32, open.size.1 as f32));
@@ -904,12 +890,10 @@ pub fn a11y() -> Option<hocus_a11y::Window> {
     })
 }
 
-/// A screen reader clicks row `key` (`row:N`) of the open palette.
+/// A screen reader clicks row `key` (`actions:Row(N)`) of the open
+/// palette.
 pub fn a11y_click(key: &str) {
-    let Some(at) = key
-        .strip_prefix("row:")
-        .and_then(|n| n.parse::<usize>().ok())
-    else {
+    let Some(at) = view::row_of_id(key) else {
         return;
     };
     if let Some(id) = with(|p| match &p.phase {

@@ -1821,16 +1821,7 @@ impl Shell {
         if !actions::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(actions::draw::View {
-                id,
-                words: actions::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(actions::view::view(id, actions::words(), self.look.glass))
     }
 
     /// The emoji picker, if its surface is `id`.
