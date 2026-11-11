@@ -469,6 +469,59 @@ pub fn polyline(
     f.stroke(&path, stroke(width * scale, colour));
 }
 
+/// A canvas `width` × `height` drawn by `draw` at the moment it draws
+/// (its frame, its size, the moment), drawn again each frame while
+/// `playing` says so then (a panda playing its mood): its surface alone.
+pub fn moving<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    draw: impl Fn(&mut canvas::Frame, Size, Instant) + 'a,
+    playing: impl Fn(Instant) -> bool + 'a,
+) -> El<'a, M> {
+    canvas(Moving(Box::new(draw), Box::new(playing)))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// What draws a canvas at a moment, and whether it moves then.
+type DrawAt<'a> = Box<dyn Fn(&mut canvas::Frame, Size, Instant) + 'a>;
+type Playing<'a> = Box<dyn Fn(Instant) -> bool + 'a>;
+
+struct Moving<'a>(DrawAt<'a>, Playing<'a>);
+
+impl<M> canvas::Program<M> for Moving<'_> {
+    /// The moment of the frame it draws.
+    type State = Option<Instant>;
+
+    fn update(
+        &self,
+        state: &mut Option<Instant>,
+        event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        *state = Some(*now);
+        (self.1)(*now).then(canvas::Action::request_redraw)
+    }
+
+    fn draw(
+        &self,
+        state: &Option<Instant>,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        (self.0)(&mut f, bounds.size(), state.unwrap_or_else(Instant::now));
+        vec![f.into_geometry()]
+    }
+}
+
 /// A spinner, turning: its surface alone draws again each frame.
 pub fn spinner<'a, M: 'a>(colour: Color) -> El<'a, M> {
     canvas(Spinner(colour))

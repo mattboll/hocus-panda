@@ -518,37 +518,32 @@ impl Bed {
     }
 
     /// Where the briefing's `item` is (`Sources`, `Agent(3)`), global, as
-    /// the shell last logged its items' middles in the popover `popover`.
+    /// the kit's dump last placed it in the popover `popover`.
     fn briefing_item(&mut self, popover: Rect, item: &str) -> anyhow::Result<(f64, f64)> {
-        self.popover_item(popover, "the briefing's items", item)
+        self.popover_item(popover, "briefing", item)
     }
 
-    /// Where `item` of the popover `popover` is, global, as the shell last
-    /// logged its items' middles (on a line saying `items`).
+    /// Where the control `surface:item` of the popover `popover` is,
+    /// global, its middle as the kit's dump last placed it.
     fn popover_item(
         &mut self,
         popover: Rect,
-        items: &str,
+        surface: &str,
         item: &str,
     ) -> anyhow::Result<(f64, f64)> {
-        let wanted = format!("{item}@");
+        let id = format!("{surface}:{item}");
         let log = self.log.clone();
-        let found = |text: &str| {
-            text.lines()
-                .rev()
-                .find(|l| l.contains(items))
-                .and_then(|l| {
-                    let at = l.split(&wanted).nth(1)?;
-                    let at = at.split_whitespace().next()?;
-                    let (x, y) = at.split_once(',')?;
-                    Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
-                })
+        let found = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         };
-        let done = self
-            .hp
-            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
-        anyhow::ensure!(done, "no {item} in {items:?}");
-        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        let done = self.hp.dispatch_until(WAIT, |_| found(&log).is_some())?;
+        anyhow::ensure!(done, "no {id} in the kit's dump");
+        let (x, y) = found(&log).unwrap_or_default();
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
 
@@ -562,7 +557,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged("the briefing's items")?;
+        self.logged("\"briefing:Sources\"")?;
         let popover = self.hp.popover_surfaces();
         Ok(popover
             .iter()
@@ -3747,7 +3742,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged_after(from, &["the briefing's items"])?;
+        self.logged_after(from, &["\"briefing:Sources\""])?;
         Ok(self
             .hp
             .popover_surfaces()

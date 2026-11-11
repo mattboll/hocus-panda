@@ -1944,14 +1944,11 @@ impl Shell {
                 .height(Length::Fill)
                 .into()
             }
-            popover::Item::Secretary => canvas(popover::briefing::Panel {
+            popover::Item::Secretary => popover::briefing::view(&popover::briefing::Panel {
                 id,
                 words: agents::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Notifications => canvas(popover::history::Panel {
                 id,
                 glass: self.look.glass,

@@ -330,7 +330,8 @@ impl Item {
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
             Self::Desktop { .. } | Self::WindowsMore => desktop::opening(),
-            Self::Keyboard | Self::Agent(_) | Self::Secretary => {}
+            Self::Secretary => briefing::opening(),
+            Self::Keyboard | Self::Agent(_) => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),

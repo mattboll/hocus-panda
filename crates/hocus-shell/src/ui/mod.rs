@@ -30,8 +30,10 @@ pub mod parts;
 pub mod slider;
 pub mod style;
 pub mod surface;
+pub mod unsaid;
 pub mod walk;
 
 pub use control::{control, line, ring};
 pub use surface::{Around, Later, touch};
+pub use unsaid::unsaid;
 pub use walk::reveal;
