@@ -289,11 +289,9 @@ impl App {
                 groups = groups.push(self.perf_tiles(&read.report));
                 let count = read.report.signals.len();
                 let today = read.date == today(&self.perf.tz);
-                let right = match (lang, today) {
-                    (Lang::French, true) => format!("{count} aujourd’hui"),
-                    (Lang::French, false) => format!("{count} ce jour-là"),
-                    (Lang::English, true) => format!("{count} today"),
-                    (Lang::English, false) => format!("{count} that day"),
+                let right = match today {
+                    true => words::today(lang, count),
+                    false => words::that_day(lang, count),
                 };
                 groups = groups.push(
                     column![
@@ -529,11 +527,7 @@ impl App {
                     )
                     .font(SEMIBOLD),
                     t(
-                        match lang {
-                            Lang::French => format!("Sous les seuils : {}.", calm.join(", ")),
-                            Lang::English =>
-                                format!("Under their thresholds: {}.", calm.join(", ")),
-                        },
+                        words::under_their_thresholds(lang, calm.join(", ")),
                         12.0,
                         DIM.get()
                     ),
@@ -682,10 +676,7 @@ impl App {
             .as_deref()
             .map(super::view::tilde)
             .unwrap_or_default();
-        let line = match lang {
-            Lang::French => format!("{place} · 14 jours · moins de 1 Mo par jour"),
-            Lang::English => format!("{place} · 14 days · under 1 MB a day"),
-        };
+        let line = words::n_14_days_under_1_mb_a(lang, &place);
         row![
             column![
                 t(w(words::THE_FILES).get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
@@ -861,10 +852,7 @@ impl Chart {
         for s in &read.day.samples {
             for e in &s.e {
                 let said = match e.kind {
-                    EventKind::ScreenPlugged => match lang {
-                        Lang::French => format!("écran {}", e.what),
-                        Lang::English => format!("screen {}", e.what),
-                    },
+                    EventKind::ScreenPlugged => words::screen(lang, &e.what),
                     EventKind::SettingsPage => w(words::SETTINGS).get(lang).to_owned(),
                     EventKind::Locked => w(words::LOCKED).get(lang).to_owned(),
                     EventKind::Resume => w(words::WOKE).get(lang).to_owned(),
@@ -882,13 +870,7 @@ impl Chart {
                 .filter(|e| e.kind == EventKind::WindowOpened)
                 .count();
             if opened > 4 {
-                labels.push((
-                    (p.from + p.to) / 2,
-                    match lang {
-                        Lang::French => format!("{opened} fenêtres"),
-                        Lang::English => format!("{opened} windows"),
-                    },
-                ));
+                labels.push(((p.from + p.to) / 2, words::windows(lang, opened)));
             }
         }
         labels.sort_by_key(|l| l.0);
@@ -1186,10 +1168,7 @@ impl canvas::Program<Message> for Chart {
                     let [_, s0] = self.memory_start;
                     write(
                         &mut f,
-                        match lang {
-                            Lang::French => format!("compositeur · {} Mo", c1.round()),
-                            Lang::English => format!("compositor · {} MB", c1.round()),
-                        },
+                        words::compositor_mb(lang, c1.round()),
                         Point::new(LEFT + 6.0, bottom - c1 / max * h - 16.0),
                         10.5,
                         COMPOSITOR,
@@ -1197,10 +1176,7 @@ impl canvas::Program<Message> for Chart {
                     );
                     write(
                         &mut f,
-                        match lang {
-                            Lang::French => format!("shell · {} → {} Mo", s0.round(), s1.round()),
-                            Lang::English => format!("shell · {} → {} MB", s0.round(), s1.round()),
-                        },
+                        words::shell_mb(lang, s0.round(), s1.round()),
                         Point::new(LEFT + 6.0, (bottom - s0 / max * h + 3.0).min(bottom - 13.0)),
                         10.5,
                         SHELL,
@@ -1231,10 +1207,7 @@ impl canvas::Program<Message> for Chart {
                         let whose = text::who(who, lang);
                         write(
                             &mut f,
-                            match lang {
-                                Lang::French => format!("{whose} : ne fait que monter ⚠"),
-                                Lang::English => format!("{whose}: only grows ⚠"),
-                            },
+                            words::only_grows(lang, whose),
                             Point::new(width, yb + offset + 4.0),
                             10.5,
                             THRESHOLD,

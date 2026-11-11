@@ -254,11 +254,9 @@ pub fn next_change(tz: &TimeZone, now: Timestamp, lang: Lang) -> String {
     if at.duration_since(now).as_secs() > 365 * 86_400 {
         said = format!("{said} {}", day.year());
     }
-    match (lang, dst) {
-        (Lang::French, false) => format!("heure d’hiver jusqu’au {said}"),
-        (Lang::French, true) => format!("heure d’été jusqu’au {said}"),
-        (Lang::English, false) => format!("standard time until {said}"),
-        (Lang::English, true) => format!("summer time until {said}"),
+    match dst {
+        false => words::standard_time_until(lang, &said),
+        true => words::summer_time_until(lang, &said),
     }
 }
 

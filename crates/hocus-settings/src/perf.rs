@@ -229,20 +229,12 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
     let memory = Tile {
         label: w(words::MEMORY).get(lang).to_owned(),
         value: text::megabytes(kb(r.memory.end_kb), l),
-        line: match lang {
-            Lang::French => format!(
-                "au début {} · pic {} à {}",
-                mb(kb(r.memory.start_kb)),
-                mb(r.memory.peak_kb),
-                text::clock(r.memory.peak_at, tz)
-            ),
-            Lang::English => format!(
-                "at the start {} · peak {} at {}",
-                mb(kb(r.memory.start_kb)),
-                mb(r.memory.peak_kb),
-                text::clock(r.memory.peak_at, tz)
-            ),
-        },
+        line: words::at_the_start_peak_at(
+            lang,
+            mb(kb(r.memory.start_kb)),
+            mb(r.memory.peak_kb),
+            text::clock(r.memory.peak_at, tz),
+        ),
         sub: format!(
             "{} {} · shell {}",
             w(words::COMPOSITOR).get(lang),
@@ -254,34 +246,18 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         label: w(words::FRAMES).get(lang).to_owned(),
         value: text::count(r.drawing.frames, l),
         line: if r.locked_s > 0 {
-            match lang {
-                Lang::French => format!(
-                    "{} pendant {} verrouillé",
-                    r.drawing.locked_frames,
-                    text::duration(r.locked_s as i64)
-                ),
-                Lang::English => format!(
-                    "{} in {} locked",
-                    r.drawing.locked_frames,
-                    text::duration(r.locked_s as i64)
-                ),
-            }
+            words::in_locked(
+                lang,
+                r.drawing.locked_frames,
+                text::duration(r.locked_s as i64),
+            )
         } else {
-            match lang {
-                Lang::French => format!("{} scènes", text::count(r.drawing.scenes, l)),
-                Lang::English => format!("{} scenes", text::count(r.drawing.scenes, l)),
-            }
+            words::scenes(lang, text::count(r.drawing.scenes, l))
         },
-        sub: match lang {
-            Lang::French => format!(
-                "réveils au repos : {} par seconde",
-                text::number(r.drawing.rest_wakeups_per_s, 1, l)
-            ),
-            Lang::English => format!(
-                "wakeups at rest: {} a second",
-                text::number(r.drawing.rest_wakeups_per_s, 1, l)
-            ),
-        },
+        sub: words::wakeups_at_rest_a_second(
+            lang,
+            text::number(r.drawing.rest_wakeups_per_s, 1, l),
+        ),
     };
     let motion = Tile {
         label: w(words::MOTION).get(lang).to_owned(),
@@ -291,31 +267,21 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
             text::count(r.drawing.motion_frames, l)
         },
         line: if r.moving_wallpaper_s > 0 {
-            match lang {
-                Lang::French => format!(
-                    "de fond animé · {} images animées",
-                    text::count(r.drawing.motion_frames, l)
-                ),
-                Lang::English => format!(
-                    "of moving wallpaper · {} frames in motion",
-                    text::count(r.drawing.motion_frames, l)
-                ),
-            }
+            words::of_moving_wallpaper_frames_in_motion(
+                lang,
+                text::count(r.drawing.motion_frames, l),
+            )
         } else {
             w(words::FRAMES_OF_THE_DESKTOP_S_MOTIONS)
                 .get(lang)
                 .to_owned()
         },
-        sub: match (&r.power, lang) {
-            (Some(p), Lang::French) => format!(
-                "sur batterie : {} W en moyenne",
-                text::number(f64::from(p.average_mw) / 1000.0, 1, l)
+        sub: match &r.power {
+            Some(p) => words::on_battery_w_on_average(
+                lang,
+                text::number(f64::from(p.average_mw) / 1000.0, 1, l),
             ),
-            (Some(p), Lang::English) => format!(
-                "on battery: {} W on average",
-                text::number(f64::from(p.average_mw) / 1000.0, 1, l)
-            ),
-            (None, _) => w(words::ON_AC_POWER_NOT_MEASURED).get(lang).to_owned(),
+            None => w(words::ON_AC_POWER_NOT_MEASURED).get(lang).to_owned(),
         },
     };
     [cpu, memory, frames, motion]
@@ -337,11 +303,9 @@ pub fn session(r: &Report, lang: Lang, tz: &TimeZone) -> String {
 pub fn date_title(date: Date, today: Date, lang: Lang) -> String {
     let said = text::date(date, lang);
     let yesterday = today.checked_sub(jiff::Span::new().days(1)).ok();
-    match (date == today, Some(date) == yesterday, lang) {
-        (true, _, Lang::French) => format!("Aujourd’hui, {said}"),
-        (true, _, Lang::English) => format!("Today, {said}"),
-        (_, true, Lang::French) => format!("Hier, {said}"),
-        (_, true, Lang::English) => format!("Yesterday, {said}"),
+    match (date == today, Some(date) == yesterday) {
+        (true, _) => words::today(lang, &said),
+        (_, true) => words::yesterday(lang, &said),
         _ => {
             let mut chars = said.chars();
             chars

@@ -100,14 +100,8 @@ impl App {
         let then = self.said_value(slot);
         let done = said.join(" · ");
         let keys_said = KeysSaid {
-            undone: match lang {
-                Lang::French => format!("Annulé : {theme_name} revient à {then}."),
-                Lang::English => format!("Undone: {theme_name} is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {done}."),
-                Lang::English => format!("Redone: {done}."),
-            },
+            undone: words::undone_is_back_to(lang, theme_name, &then),
+            redone: words::redone(lang, &done),
             done,
             row: appearance::THEME_ID,
         };
@@ -122,10 +116,7 @@ impl App {
         };
         let name = setting.name.get(self.lang);
         let now = setting.say(value, self.lang);
-        match self.lang {
-            Lang::French => format!("{name} : {now}"),
-            Lang::English => format!("{name}: {now}"),
-        }
+        words::text(self.lang, name, &now)
     }
 
     /// What a theme's toast says of `key` set to `word` (`None`: its
@@ -137,10 +128,7 @@ impl App {
                 .and_then(|w| hocus_link::wallpaper::Picture::of(w).ok())
                 .unwrap_or_default();
             let name = crate::wallpaper::name_of(&picture, lang);
-            return match lang {
-                Lang::French => format!("Fond d’écran : {name}"),
-                Lang::English => format!("Wallpaper: {name}"),
-            };
+            return words::wallpaper(lang, &name);
         }
         let id = if key == appearance::ACCENT_KEY {
             appearance::ACCENT_ID

@@ -863,20 +863,19 @@ impl Setting {
             let (fr, en) = accent.names();
             return if lang.fr() { fr } else { en }.to_owned();
         }
-        let fr = lang.fr();
         match value {
-            Value::Bool(true) => if fr { "oui" } else { "on" }.to_owned(),
-            Value::Bool(false) => if fr { "non" } else { "off" }.to_owned(),
+            Value::Bool(true) => words::ON.get(lang).to_owned(),
+            Value::Bool(false) => words::OFF.get(lang).to_owned(),
             Value::Int(n) => match &self.kind {
                 Kind::Slider { unit, .. } => format!("{n}{unit}"),
                 Kind::Speed { .. } => say_speed(*n, lang).to_owned(),
                 _ => n.to_string(),
             },
-            Value::Seconds(None) => if fr { "Jamais" } else { "Never" }.to_owned(),
+            Value::Seconds(None) => words::NEVER.get(lang).to_owned(),
             Value::Seconds(Some(s)) => say_seconds(*s, lang),
             Value::Word(word) => (*word).to_owned(),
             Value::Text(text) => text.clone(),
-            Value::List(list) if list.is_empty() => if fr { "aucun" } else { "none" }.to_owned(),
+            Value::List(list) if list.is_empty() => words::NONE.get(lang).to_owned(),
             Value::List(list) => match self.kind {
                 Kind::Shortcut => list
                     .iter()
@@ -891,50 +890,19 @@ impl Setting {
 
 /// A speed in tenths from -10 to 10, as a word: très lente to très rapide.
 pub fn say_speed(tenths: i64, lang: Lang) -> &'static str {
-    let fr = lang.fr();
     match tenths {
-        n if n <= -7 => {
-            if fr {
-                "très lente"
-            } else {
-                "very slow"
-            }
-        }
-        n if n <= -3 => {
-            if fr {
-                "lente"
-            } else {
-                "slow"
-            }
-        }
-        n if n < 3 => {
-            if fr {
-                "moyenne"
-            } else {
-                "medium"
-            }
-        }
-        n if n < 7 => {
-            if fr {
-                "rapide"
-            } else {
-                "fast"
-            }
-        }
-        _ => {
-            if fr {
-                "très rapide"
-            } else {
-                "very fast"
-            }
-        }
+        n if n <= -7 => words::VERY_SLOW.get(lang),
+        n if n <= -3 => words::SLOW.get(lang),
+        n if n < 3 => words::MEDIUM.get(lang),
+        n if n < 7 => words::FAST.get(lang),
+        _ => words::VERY_FAST.get(lang),
     }
 }
 
 /// `90 s`, `7 min`, `1 h 30`.
 pub fn say_seconds(s: u64, lang: Lang) -> String {
     match s {
-        0 => if lang.fr() { "Aussitôt" } else { "At once" }.to_owned(),
+        0 => words::AT_ONCE.get(lang).to_owned(),
         s if s < 60 => format!("{s} s"),
         s if s % 3600 == 0 => format!("{} h", s / 3600),
         s if s < 3600 => format!("{} min", s / 60),

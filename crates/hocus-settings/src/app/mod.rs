@@ -1082,11 +1082,10 @@ impl App {
             Doing::New => {
                 self.undo.push(Undo::File(change));
                 self.redo.clear();
-                let text = match (pending.say, self.lang) {
-                    (Some(said), _) if said.is_empty() => return Task::none(),
-                    (Some(said), _) => said,
-                    (None, Lang::French) => format!("{name} : {now}"),
-                    (None, Lang::English) => format!("{name}: {now}"),
+                let text = match pending.say {
+                    Some(said) if said.is_empty() => return Task::none(),
+                    Some(said) => said,
+                    None => words::text(self.lang, &name, &now),
                 };
                 self.toast(text, ToastAction::Undo, TOAST)
             }
@@ -1100,15 +1099,9 @@ impl App {
                 if let Some(source) = slot.source {
                     self.source = source;
                 }
-                let text = match self.lang {
-                    Lang::French => format!("Annulé : {name} revient à {now}."),
-                    Lang::English => format!("Undone: {name} is back to {now}."),
-                };
+                let text = words::undone_is_back_to(self.lang, &name, &now);
                 let text = if pending.doing == Doing::Redo {
-                    match self.lang {
-                        Lang::French => format!("Rétabli : {name} : {now}."),
-                        Lang::English => format!("Redone: {name}: {now}."),
-                    }
+                    words::redone(self.lang, &name, &now)
                 } else {
                     text
                 };

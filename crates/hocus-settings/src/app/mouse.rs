@@ -16,7 +16,6 @@
 //! ([`crate::mouse`]); this module only lays them out and keeps the test
 //! area's state.
 
-use crate::lang::French as _;
 use hocus_words::settings::app_mouse as words;
 use std::time::{Duration, Instant};
 
@@ -36,7 +35,7 @@ use super::{
 };
 use crate::theme::Ink;
 use crate::{
-    lang::{Lang, w},
+    lang::w,
     model::{Icon, SectionId, Setting, Value, settings_of},
     mouse as model,
     store::Slot,
@@ -314,11 +313,7 @@ impl App {
         // Gestes: hidden with no touchpad.
         if !self.mouse.none(DeviceKind::Touchpad) {
             let head: Option<El<'_>> = self.fingers().map(|n| {
-                let said = if lang.fr() {
-                    format!("Sur ce pavé : jusqu’à {n} doigts")
-                } else {
-                    format!("On this touchpad: up to {n} fingers")
-                };
+                let said = words::on_this_touchpad_up_to_fingers(lang, n);
                 t(said, 12.0, FAINT.get()).into()
             });
             let group = self.mouse_group(
@@ -449,10 +444,9 @@ impl App {
             Some(Press::Middle) => w(words::MIDDLE_CLICK),
         };
         let said = said.get(lang);
-        match (swapped, lang) {
-            (false, _) => said.to_owned(),
-            (true, Lang::French) => format!("{said} : boutons inversés pour un gaucher"),
-            (true, Lang::English) => format!("{said}: buttons swapped for a left-hander"),
+        match swapped {
+            false => said.to_owned(),
+            true => words::buttons_swapped_for_a_left_hander(lang, said),
         }
     }
 
@@ -483,14 +477,7 @@ impl App {
                 container(
                     row![
                         text(format!("{n:02}")).size(11).font(MONO).color(FAINT),
-                        t(
-                            match lang {
-                                Lang::French => format!("Ligne {n} de la liste"),
-                                Lang::English => format!("Line {n} of the list"),
-                            },
-                            13.0,
-                            SOFT.get(),
-                        ),
+                        t(words::line_of_the_list(lang, n), 13.0, SOFT.get(),),
                     ]
                     .spacing(10)
                     .align_y(Alignment::Center),

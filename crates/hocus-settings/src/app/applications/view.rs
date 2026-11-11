@@ -2,7 +2,6 @@
 //! default applications' rows and their menus, the terminal's field, the
 //! start-up rows, the line under them and the sheet to add one.
 
-use crate::lang::French as _;
 use hocus_words::settings::app_applications_view as words;
 use iced::{
     Alignment, Background, Color, Length, Padding, Shadow, Theme,
@@ -20,7 +19,7 @@ use crate::{
         view::{El, card_box, divided, icon, label, t},
     },
     applications::{self as model, ADDED, DEFAULTS_GROUP, Opens, STARTUP, STARTUP_GROUP, TERMINAL},
-    lang::{Lang, w},
+    lang::w,
     model::{Icon as Glyph, SectionId},
 };
 
@@ -309,13 +308,7 @@ impl App {
         let chosen = self.terminal_chosen();
         let other = self.apps.typing.is_some() || (self.apps.known.is_some() && chosen.is_none());
         let line = match &self.apps.missing {
-            Some(program) => (
-                match lang {
-                    Lang::French => format!("Introuvable dans PATH : {program}"),
-                    Lang::English => format!("Not found in PATH: {program}"),
-                },
-                AMBER.get(),
-            ),
+            Some(program) => (words::not_found_in_path(lang, program), AMBER.get()),
             None if other => (
                 w(words::RUN_AS_IT_IS_BY_SUPER).get(lang).to_owned(),
                 DIM.get(),
@@ -480,19 +473,9 @@ impl App {
             .unwrap_or_default();
         if !others.is_empty() {
             let n = others.len();
-            let said = match (lang, n) {
-                (Lang::French, 1) => {
-                    "1 autre est prévue pour d’autres bureaux et ne démarre pas ici ·".to_owned()
-                }
-                (Lang::French, n) => format!(
-                    "{n} autres sont prévues pour d’autres bureaux et ne démarrent pas ici ·"
-                ),
-                (Lang::English, 1) => {
-                    "1 other is for other desktops and does not start here ·".to_owned()
-                }
-                (Lang::English, n) => {
-                    format!("{n} others are for other desktops and do not start here ·")
-                }
+            let said = match n {
+                1 => words::N_1_OTHER_IS_FOR_OTHER_DESKTOPS.get(lang).to_owned(),
+                n => words::others_are_for_other_desktops_and(lang, n),
             };
             let focused = self.apps_focused(&Stop::Others);
             let link = button(
@@ -532,10 +515,7 @@ impl App {
                     w(words::NOT_FOR_THIS_DESKTOP).get(lang).to_owned()
                 } else {
                     let names = entry.only_in.join(", ");
-                    match lang {
-                        Lang::French => format!("Prévue pour {names}."),
-                        Lang::English => format!("For {names}."),
-                    }
+                    words::r#for(lang, &names)
                 };
                 let faint = fade(TEXT.get(), INERT);
                 list = list.push(divided(
@@ -790,7 +770,7 @@ impl App {
         let bottom = self
             .places
             .at
-            .get(&format!("sidebar:{}", if lang.fr() { "fr" } else { "en" }))
+            .get(&format!("sidebar:{}", words::EN.get(lang)))
             .map_or(f32::MAX, |s| s.y + s.height);
         let under = at.y + 38.0;
         let y = if under + height > bottom - 8.0 {

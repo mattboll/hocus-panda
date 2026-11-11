@@ -33,11 +33,7 @@ use iced::{
 };
 
 use super::{App, MENU_IN, Message, Page, TOAST, ToastAction, UNDONE};
-use crate::{
-    bluetooth as model,
-    lang::{Lang, w},
-    model::SectionId,
-};
+use crate::{bluetooth as model, lang::w, model::SectionId};
 
 /// The spinner's turn.
 const TURN: Duration = Duration::from_millis(900);
@@ -377,10 +373,7 @@ impl App {
                 };
                 self.bluetooth.ask(Ask::Forget(path));
                 // A pairing's key cannot be brought back: no "Annuler".
-                let text = match self.lang {
-                    Lang::French => format!("« {name} » oublié."),
-                    Lang::English => format!("“{name}” forgotten."),
-                };
+                let text = words::forgotten(self.lang, &name);
                 self.toast(text, ToastAction::None, TOAST)
             }
             Msg::ForgetCancel => {
@@ -518,11 +511,9 @@ impl App {
             Choice::Power { on } => {
                 let on = on ^ back;
                 self.bluetooth.ask(Ask::Power(on));
-                match (lang, on) {
-                    (Lang::French, true) => "le Bluetooth est rallumé",
-                    (Lang::English, true) => "Bluetooth is back on",
-                    (Lang::French, false) => "le Bluetooth est coupé",
-                    (Lang::English, false) => "Bluetooth is off again",
+                match on {
+                    true => words::BLUETOOTH_IS_BACK_ON.get(lang),
+                    false => words::BLUETOOTH_IS_OFF_AGAIN.get(lang),
                 }
                 .to_owned()
             }
@@ -537,26 +528,19 @@ impl App {
                 let said = if name.is_empty() {
                     w(words::ITS_OWN_NAME).get(lang).to_owned()
                 } else {
-                    match lang {
-                        Lang::French => format!("« {name} »"),
-                        Lang::English => format!("“{name}”"),
-                    }
+                    words::text(lang, name)
                 };
-                match (lang, undoing) {
-                    (Lang::French, false) => format!("Renommé : {said}"),
-                    (Lang::English, false) => format!("Renamed: {said}"),
-                    (Lang::French, true) => format!("le nom revient à {said}"),
-                    (Lang::English, true) => format!("the name is back to {said}"),
+                match undoing {
+                    false => words::renamed(lang, &said),
+                    true => words::the_name_is_back_to(lang, &said),
                 }
             }
             Choice::Trust { path, name, on } => {
                 let on = on ^ back;
                 self.bluetooth.ask(Ask::Trust(path.clone(), on));
-                match (lang, on) {
-                    (Lang::French, true) => format!("« {name} » se connecte seul"),
-                    (Lang::English, true) => format!("“{name}” connects automatically"),
-                    (Lang::French, false) => format!("« {name} » ne se connecte plus seul"),
-                    (Lang::English, false) => format!("“{name}” no longer connects automatically"),
+                match on {
+                    true => words::connects_automatically(lang, name),
+                    false => words::no_longer_connects_automatically(lang, name),
                 }
             }
         }
@@ -571,11 +555,9 @@ impl App {
             self.redo.push(super::Undo::Bluetooth(choice));
         }
         self.go(Page::Section(SectionId::Bluetooth));
-        let text = match (self.lang, redo) {
-            (Lang::French, false) => format!("Annulé : {said}."),
-            (Lang::English, false) => format!("Undone: {said}."),
-            (Lang::French, true) => format!("Rétabli : {said}."),
-            (Lang::English, true) => format!("Redone: {said}."),
+        let text = match redo {
+            false => words::undone(self.lang, &said),
+            true => words::redone(self.lang, &said),
         };
         self.toast(text, ToastAction::None, UNDONE)
     }

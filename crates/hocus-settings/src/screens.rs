@@ -130,24 +130,19 @@ impl Screen {
 
     /// "Écran du portable", "Écran externe 34 pouces", "Écran 2".
     pub fn title(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "Écran du portable".to_owned(),
-            (true, _, Lang::English) => "Laptop screen".to_owned(),
-            (false, Some(i), Lang::French) => format!("Écran externe {i} pouces"),
-            (false, Some(i), Lang::English) => format!("{i}-inch external screen"),
-            (false, None, Lang::French) => format!("Écran {}", self.number),
-            (false, None, Lang::English) => format!("Screen {}", self.number),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP_SCREEN.get(lang).to_owned(),
+            (false, Some(i)) => words::inch_external_screen(lang, i),
+            (false, None) => words::screen(lang, self.number),
         }
     }
 
     /// The name in a small rectangle: "Portable", "Écran externe".
     pub fn short(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "Portable".to_owned(),
-            (true, _, Lang::English) => "Laptop".to_owned(),
-            (false, Some(_), Lang::French) => "Écran externe".to_owned(),
-            (false, Some(_), Lang::English) => "External".to_owned(),
-            (false, None, _) => self.title(lang),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP.get(lang).to_owned(),
+            (false, Some(_)) => words::EXTERNAL.get(lang).to_owned(),
+            (false, None) => self.title(lang),
         }
     }
 
@@ -209,13 +204,10 @@ impl SetScreen {
 
     /// "portable", "écran 27 pouces", "écran externe".
     fn named(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "portable".to_owned(),
-            (true, _, Lang::English) => "laptop".to_owned(),
-            (false, Some(i), Lang::French) => format!("écran {i} pouces"),
-            (false, Some(i), Lang::English) => format!("{i}-inch screen"),
-            (false, None, Lang::French) => "écran externe".to_owned(),
-            (false, None, Lang::English) => "external screen".to_owned(),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP_2.get(lang).to_owned(),
+            (false, Some(i)) => words::inch_screen(lang, i),
+            (false, None) => words::EXTERNAL_SCREEN.get(lang).to_owned(),
         }
     }
 }
@@ -233,10 +225,9 @@ impl KnownSet {
     /// seul"; the laptop first, then the largest.
     pub fn title(&self, lang: Lang) -> String {
         let names: Vec<String> = self.in_order().iter().map(|s| s.named(lang)).collect();
-        let text = match (names.as_slice(), lang) {
-            ([one], Lang::French) => format!("{one} seul"),
-            ([one], Lang::English) => format!("{one} alone"),
-            (many, _) => many.join(" + "),
+        let text = match names.as_slice() {
+            [one] => words::alone(lang, one),
+            many => many.join(" + "),
         };
         upper_first(&text)
     }
@@ -248,16 +239,9 @@ impl KnownSet {
         let fr = lang == Lang::French;
         let mut parts: Vec<String> = Vec::new();
         if self.current {
-            parts.push(if fr { "Maintenant" } else { "Now" }.to_owned());
+            parts.push(words::NOW.get(lang).to_owned());
             if !self.in_file {
-                parts.push(
-                    if fr {
-                        "nouveau, sa disposition sera gardée"
-                    } else {
-                        "new, its arrangement will be kept"
-                    }
-                    .to_owned(),
-                );
+                parts.push(words::NEW_ITS_ARRANGEMENT_WILL_BE_KEPT.get(lang).to_owned());
             }
         } else if let Some(seen) = self.seen {
             parts.push(when(seen, now, lang, zone));

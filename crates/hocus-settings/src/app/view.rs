@@ -2,7 +2,6 @@
 //! with its search, the content's header, the home and the sections'
 //! pages, the menus, the toast and the unreadable file's banner.
 
-use crate::lang::French as _;
 use hocus_words::settings::app_view as words;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -251,7 +250,7 @@ impl App {
             background: Some(Background::Color(SIDEBAR.get())),
             ..container::Style::default()
         })
-        .id(format!("sidebar:{}", if lang.fr() { "fr" } else { "en" }));
+        .id(format!("sidebar:{}", words::EN.get(lang)));
         // A 1 px line on its right.
         row![
             sidebar,
@@ -348,22 +347,11 @@ impl App {
         let lang = self.lang;
         let count = self.results.len();
         let head = if count == 0 {
-            match lang {
-                Lang::French => format!(
-                    "Aucun réglage ne répond à « {} ». Essaie un autre mot : écran, veille, clavier…",
-                    self.query.trim()
-                ),
-                Lang::English => format!(
-                    "No setting matches “{}”. Try another word: screen, sleep, keyboard…",
-                    self.query.trim()
-                ),
-            }
+            words::no_setting_matches_try_another_word(lang, self.query.trim())
         } else {
-            match (lang, count) {
-                (Lang::French, 1) => "1 résultat · ↑ ↓ puis Entrée".to_owned(),
-                (Lang::French, n) => format!("{n} résultats · ↑ ↓ puis Entrée"),
-                (Lang::English, 1) => "1 result · ↑ ↓ then Enter".to_owned(),
-                (Lang::English, n) => format!("{n} results · ↑ ↓ then Enter"),
+            match count {
+                1 => words::N_1_RESULT_THEN_ENTER.get(lang).to_owned(),
+                n => words::results_then_enter(lang, n),
             }
         };
         let mut list = column![container(t(head, 11.5, FAINT.get())).padding([4, 10])].spacing(2);
@@ -412,10 +400,7 @@ impl App {
                 ),
             };
             if let Some(via) = &found.via {
-                path.push_str(&match lang {
-                    Lang::French => format!(" · par « {via} »"),
-                    Lang::English => format!(" · via “{via}”"),
-                });
+                path.push_str(&words::via(lang, via));
             }
             let opened = self.opened.as_deref() == Some(found.target.id().as_str());
             let fill = if opened {
@@ -618,10 +603,7 @@ impl App {
     pub(super) fn restore_label(&self) -> Option<String> {
         let at = self.last_good?;
         let time = local_time(at)?;
-        Some(match self.lang {
-            Lang::French => format!("Reprendre la version de {time}"),
-            Lang::English => format!("Take back the {time} version"),
-        })
+        Some(words::take_back_the_version(self.lang, &time))
     }
 
     // --- The home ---------------------------------------------------------------------
@@ -647,10 +629,7 @@ impl App {
                 border: border(26.0, 0.0, Color::TRANSPARENT),
                 ..container::Style::default()
             });
-        let hello = match lang {
-            Lang::French => format!("Bonjour {}", self.user),
-            Lang::English => format!("Hello {}", self.user),
-        };
+        let hello = words::hello(lang, &self.user);
         let greeting = row![
             avatar,
             column![
@@ -824,11 +803,9 @@ impl App {
                     Lang::English if suspend == "Never" => "never sleeps".to_owned(),
                     Lang::English => format!("sleeps after {suspend}"),
                 };
-                match (self.battery, lang) {
-                    (Some(b), Lang::French) => format!("Batterie {b} % · {suspend}"),
-                    (Some(b), Lang::English) => format!("Battery {b} % · {suspend}"),
-                    (None, Lang::French) => format!("Sur secteur · {suspend}"),
-                    (None, Lang::English) => format!("On AC · {suspend}"),
+                match self.battery {
+                    Some(b) => words::battery(lang, b, &suspend),
+                    None => words::on_ac(lang, &suspend),
                 }
             }
             SectionId::Sound => return self.sound_card(),
@@ -1114,12 +1091,9 @@ impl App {
             return None;
         };
         let applies = setting.say(&self.default_of(slot)?, self.lang);
-        Some(match self.lang {
-            Lang::French => {
-                format!("Dans le fichier : « {raw} », non compris ; {applies} s’applique.")
-            }
-            Lang::English => format!("In the file: “{raw}”, not understood; {applies} applies."),
-        })
+        Some(words::in_the_file_not_understood_applies(
+            self.lang, &applies, &raw,
+        ))
     }
 
     fn control(&self, setting: &'static Setting, slot: Slot, inert: bool, focused: bool) -> El<'_> {
@@ -1644,11 +1618,9 @@ pub(super) fn ease_out(t: Duration, over: Duration) -> f32 {
 
 /// "config.toml ne se lit plus, ligne 42".
 pub(super) fn banner_title(line: Option<usize>, lang: Lang) -> String {
-    match (line, lang) {
-        (Some(line), Lang::French) => format!("config.toml ne se lit plus, ligne {line}"),
-        (Some(line), Lang::English) => format!("config.toml no longer reads, line {line}"),
-        (None, Lang::French) => "config.toml ne se lit plus".to_owned(),
-        (None, Lang::English) => "config.toml no longer reads".to_owned(),
+    match line {
+        Some(line) => words::config_toml_no_longer_reads_line(lang, line),
+        None => words::CONFIG_TOML_NO_LONGER_READS.get(lang).to_owned(),
     }
 }
 
@@ -1665,17 +1637,12 @@ fn when(at: i64, lang: Lang) -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     let ago = now.saturating_sub(at);
-    let fr = lang.fr();
     if ago < 60 {
-        return if fr { "à l’instant" } else { "just now" }.to_owned();
+        return words::JUST_NOW.get(lang).to_owned();
     }
     if ago < 3600 {
         let m = ago / 60;
-        return if fr {
-            format!("il y a {m} min")
-        } else {
-            format!("{m} min ago")
-        };
+        return words::min_ago(lang, m);
     }
     let Ok(stamp) = jiff::Timestamp::from_second(at) else {
         return String::new();
@@ -1685,14 +1652,10 @@ fn when(at: i64, lang: Lang) -> String {
     let today = jiff::Timestamp::now().to_zoned(tz).date();
     if then.date() == today {
         let time = then.strftime("%H:%M").to_string();
-        return if fr {
-            format!("à {time}")
-        } else {
-            format!("at {time}")
-        };
+        return words::at(lang, &time);
     }
     if today.yesterday().is_ok_and(|y| y == then.date()) {
-        return if fr { "hier" } else { "yesterday" }.to_owned();
+        return words::YESTERDAY.get(lang).to_owned();
     }
     then.strftime("%d/%m").to_string()
 }
@@ -1830,7 +1793,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "toast_action": action,
         "file": file,
         "theme": crate::theme::now().scheme.word(),
-        "lang": if app.lang == Lang::French { "fr" } else { "en" },
+        "lang": words::EN.get(app.lang),
         "text_scale": app.text_scale,
         "accent": crate::theme::now().accent.word(),
         "banner": banner,

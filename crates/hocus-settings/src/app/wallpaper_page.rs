@@ -30,7 +30,7 @@ use super::{
     view::{El, card_box, divided, icon, label, t},
 };
 use crate::{
-    lang::{Lang, w},
+    lang::w,
     model::{Icon, SectionId, Value},
     store::{KeyEdit, Slot},
     wallpaper::{self as model, Heard, Mine, Picked, Thumb, Thumbs},
@@ -543,10 +543,7 @@ impl App {
                     .unwrap_or_default();
                 self.undo.push(Undo::Picture { path, bytes });
                 self.redo.clear();
-                let text = match self.lang {
-                    Lang::French => format!("{name} retirée de tes images"),
-                    Lang::English => format!("{name} removed from your pictures"),
-                };
+                let text = words::removed_from_your_pictures(self.lang, &name);
                 self.toast(text, ToastAction::Undo, super::TOAST)
             }
             Heard::PutBack(path) => {
@@ -554,10 +551,7 @@ impl App {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let text = match self.lang {
-                    Lang::French => format!("Annulé : {name} revient dans tes images."),
-                    Lang::English => format!("Undone: {name} is back in your pictures."),
-                };
+                let text = words::undone_is_back_in_your_pictures(self.lang, &name);
                 self.toast(text, ToastAction::None, super::UNDONE)
             }
             Heard::Failed(why) => {
@@ -606,18 +600,9 @@ impl App {
             (w(words::ALL_SCREENS), w(words::EACH_SCREEN))
         };
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Fond d’écran : {}", now.get(lang).to_lowercase()),
-                Lang::English => format!("Wallpaper: {}", now.get(lang).to_lowercase()),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : {}.", then.get(lang).to_lowercase()),
-                Lang::English => format!("Undone: {}.", then.get(lang).to_lowercase()),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {}.", now.get(lang).to_lowercase()),
-                Lang::English => format!("Redone: {}.", now.get(lang).to_lowercase()),
-            },
+            done: words::wallpaper(lang, now.get(lang).to_lowercase()),
+            undone: words::undone(lang, then.get(lang).to_lowercase()),
+            redone: words::redone(lang, now.get(lang).to_lowercase()),
             row: model::PER_SCREEN,
         };
         self.ask_keys(edits, said, Doing::New, None);
@@ -640,20 +625,12 @@ impl App {
         let then = model::name_of(&before, lang);
         let whose = target.map(|s| crate::screens::lower_first(&s.title));
         let said = KeysSaid {
-            done: match (lang, &whose) {
-                (Lang::French, None) => format!("Fond d’écran : {now}"),
-                (Lang::French, Some(s)) => format!("Fond de l’{s} : {now}"),
-                (Lang::English, None) => format!("Wallpaper: {now}"),
-                (Lang::English, Some(s)) => format!("Background of the {s}: {now}"),
+            done: match &whose {
+                None => words::wallpaper_2(lang, &now),
+                Some(s) => words::background_of_the(lang, &now, s),
             },
-            undone: match lang {
-                Lang::French => format!("Annulé : le fond revient à {then}."),
-                Lang::English => format!("Undone: the background is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {now}."),
-                Lang::English => format!("Redone: {now}."),
-            },
+            undone: words::undone_the_background_is_back_to(lang, &then),
+            redone: words::redone_2(lang, &now),
             row: model::PICTURE,
         };
         self.ask_keys(
@@ -675,18 +652,9 @@ impl App {
         let now = model::name_of(picture, lang);
         let then = model::name_of(&file.lock_picture(), lang);
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Image du verrouillage : {now}"),
-                Lang::English => format!("Lock screen picture: {now}"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : le verrouillage revient à {then}."),
-                Lang::English => format!("Undone: the lock screen is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {now}."),
-                Lang::English => format!("Redone: {now}."),
-            },
+            done: words::lock_screen_picture_2(lang, &now),
+            undone: words::undone_the_lock_screen_is_back(lang, &then),
+            redone: words::redone_2(lang, &now),
             row: model::LOCK_PICTURE,
         };
         let mut edits = vec![KeyEdit {
@@ -722,10 +690,7 @@ impl App {
             Picked::Copied { copy, name: _ } => {
                 let written = model::written(&copy);
                 tracing::info!(copy = written, "the chosen picture is the background");
-                self.wallpaper.copied = Some(match lang {
-                    Lang::French => format!("Copié dans {written}"),
-                    Lang::English => format!("Copied to {written}"),
-                });
+                self.wallpaper.copied = Some(words::copied_to(lang, &written));
                 let picture = Picture::File(written);
                 if lock {
                     self.wallpaper_lock_picture(&picture);
@@ -736,10 +701,7 @@ impl App {
             }
             Picked::Cancelled => iced::Task::none(),
             Picked::NotAPicture(name) => {
-                let text = match lang {
-                    Lang::French => format!("{name} ne s’ouvre pas comme une image."),
-                    Lang::English => format!("{name} does not open as a picture."),
-                };
+                let text = words::does_not_open_as_a_picture(lang, &name);
                 self.toast(text, ToastAction::None, super::TOAST)
             }
             Picked::NoPortal => {
@@ -767,12 +729,7 @@ impl App {
         let mut used = vec![file.picture(), file.lock_picture()];
         used.extend(file.outputs.iter().filter_map(|(_, p)| Picture::of(p).ok()));
         if used.iter().any(|p| same(p, &this)) {
-            let text = match self.lang {
-                Lang::French => format!("{name} sert encore : choisis d’abord un autre fond."),
-                Lang::English => {
-                    format!("{name} is still in use: choose another background first.")
-                }
-            };
+            let text = words::is_still_in_use_choose_another(self.lang, &name);
             return self.toast(text, ToastAction::None, super::TOAST);
         }
         if let Some(worker) = &self.wallpaper.worker {
@@ -837,27 +794,14 @@ impl App {
         let word = self.target_word()?;
         let lang = self.lang;
         let not_found = match Picture::of(&word) {
-            Err(_) => Some(match lang {
-                Lang::French => "non compris",
-                Lang::English => "not understood",
-            }),
+            Err(_) => Some(words::NOT_UNDERSTOOD.get(lang)),
             Ok(Picture::File(_)) => match self.wallpaper.thumbs.pictures.get(&word) {
-                Some(Err(_)) => Some(match lang {
-                    Lang::French => "introuvable",
-                    Lang::English => "not found",
-                }),
+                Some(Err(_)) => Some(words::NOT_FOUND.get(lang)),
                 _ => None,
             },
             Ok(_) => None,
         }?;
-        Some(match lang {
-            Lang::French => format!(
-                "Dans le fichier : « {word} », {not_found} ; Nuit s’affiche. Choisis un fond pour remplacer cette ligne."
-            ),
-            Lang::English => format!(
-                "In the file: “{word}”, {not_found}; Night is drawn. Choose a background to replace this line."
-            ),
-        })
+        Some(words::in_the_file_night_is_drawn(lang, not_found, &word))
     }
 
     // --- What it draws ----------------------------------------------------------------
@@ -1071,15 +1015,9 @@ impl App {
         let lang = self.lang;
         let inert = !self.writable();
         let target = self.wallpaper_target();
-        let whom = match (&target, lang) {
-            (None, Lang::French) => "Pour tous les écrans".to_owned(),
-            (None, Lang::English) => "For all screens".to_owned(),
-            (Some(s), Lang::French) => {
-                format!("Pour l’{}", crate::screens::lower_first(&s.title))
-            }
-            (Some(s), Lang::English) => {
-                format!("For the {}", crate::screens::lower_first(&s.title))
-            }
+        let whom = match &target {
+            None => words::FOR_ALL_SCREENS.get(lang).to_owned(),
+            Some(s) => words::for_the(lang, crate::screens::lower_first(&s.title)),
         };
         let head = row![
             label(w(words::BACKGROUNDS).get(lang)),

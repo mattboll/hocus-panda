@@ -116,10 +116,9 @@ pub(super) fn vpn_line(vpn: &Vpn, lang: Lang) -> (String, Color) {
     let kind = kind_name(&vpn.kind);
     match &vpn.state {
         VpnState::On { since, address } => {
-            let mut parts = vec![match (since.and_then(clock), lang) {
-                (Some(at), Lang::French) => format!("Connecté depuis {at}"),
-                (Some(at), Lang::English) => format!("Connected since {at}"),
-                (None, _) => w(words::CONNECTED).get(lang).to_owned(),
+            let mut parts = vec![match since.and_then(clock) {
+                Some(at) => words::connected_since(lang, &at),
+                None => w(words::CONNECTED).get(lang).to_owned(),
             }];
             parts.push(kind);
             parts.extend(address.clone());
@@ -128,10 +127,7 @@ pub(super) fn vpn_line(vpn: &Vpn, lang: Lang) -> (String, Color) {
         VpnState::Connecting => (w(words::CONNECTING).get(lang).to_owned(), DIM.get()),
         VpnState::Off => match vpn.failed {
             Some(code) => (
-                match lang {
-                    Lang::French => format!("La connexion a échoué : {}", reason(code).get(lang)),
-                    Lang::English => format!("The connection failed: {}", reason(code).get(lang)),
-                },
+                words::the_connection_failed(lang, reason(code).get(lang)),
                 PEACH.get(),
             ),
             None => (format!("{kind} · {}", w(words::OFF).get(lang)), DIM.get()),

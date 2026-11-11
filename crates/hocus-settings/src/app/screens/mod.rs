@@ -13,7 +13,6 @@
 mod drawing;
 mod view;
 
-use crate::lang::French as _;
 use drawing::*;
 use hocus_words::settings::app_screens as words;
 
@@ -471,18 +470,9 @@ impl App {
         let then = say_mode_text(&trial.before, lang);
         let title = screens::lower_first(&screen.title(lang));
         let said = super::KeysSaid {
-            done: match lang {
-                Lang::French => format!("Gardé : {now} sur l’{title}"),
-                Lang::English => format!("Kept: {now} on the {title}"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : l’{title} revient à {then}."),
-                Lang::English => format!("Undone: the {title} is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {now} sur l’{title}."),
-                Lang::English => format!("Redone: {now} on the {title}."),
-            },
+            done: words::kept_on_the(lang, &now, &title),
+            undone: words::undone_the_is_back_to(lang, &then, &title),
+            redone: words::redone_on_the(lang, &now, &title),
             row: if trial.what == RATE { RATE } else { RESOLUTION },
         };
         self.ask_keys(edits, said, Doing::New, None);
@@ -544,21 +534,13 @@ impl App {
                     key: self.file_key(&screen.name, "enabled"),
                     value: off.then(|| "false".to_owned()),
                 };
-                let done = match (off, lang) {
-                    (true, Lang::French) => {
-                        format!("L’{lower} éteint ; ses fenêtres passent sur l’autre")
-                    }
-                    (true, Lang::English) => {
-                        format!("The {lower} off; its windows go to the other")
-                    }
-                    (false, Lang::French) => format!("L’{lower} rallumé"),
-                    (false, Lang::English) => format!("The {lower} on again"),
+                let done = match off {
+                    true => words::the_off_its_windows_go_to(lang, &lower),
+                    false => words::the_on_again(lang, &lower),
                 };
-                let undone = match (off, lang) {
-                    (true, Lang::French) => format!("Annulé : l’{lower} se rallume."),
-                    (true, Lang::English) => format!("Undone: the {lower} is on again."),
-                    (false, Lang::French) => format!("Annulé : l’{lower} s’éteint."),
-                    (false, Lang::English) => format!("Undone: the {lower} is off again."),
+                let undone = match off {
+                    true => words::undone_the_is_on_again(lang, &lower),
+                    false => words::undone_the_is_off_again(lang, &lower),
                 };
                 (vec![edit], done, undone)
             }
@@ -568,25 +550,12 @@ impl App {
                     key: self.file_key(&screen.name, "vrr"),
                     value: on.then(|| "true".to_owned()),
                 };
-                let yes = |b: bool| match (b, lang) {
-                    (true, Lang::French) => "oui",
-                    (false, Lang::French) => "non",
-                    (true, Lang::English) => "on",
-                    (false, Lang::English) => "off",
+                let yes = |b: bool| match b {
+                    true => words::ON.get(lang),
+                    false => words::OFF.get(lang),
                 };
-                let done = match lang {
-                    Lang::French => format!("Fréquence variable de l’{lower} : {}", yes(on)),
-                    Lang::English => format!("Variable refresh rate of the {lower}: {}", yes(on)),
-                };
-                let undone = match lang {
-                    Lang::French => {
-                        format!("Annulé : fréquence variable de l’{lower} : {}.", yes(!on))
-                    }
-                    Lang::English => format!(
-                        "Undone: variable refresh rate of the {lower}: {}.",
-                        yes(!on)
-                    ),
-                };
+                let done = words::variable_refresh_rate_of_the(lang, &lower, yes(on));
+                let undone = words::undone_variable_refresh_rate_of_the(lang, &lower, yes(!on));
                 (vec![edit], done, undone)
             }
             _ => return iced::Task::none(),
@@ -643,20 +612,10 @@ impl App {
                 let said_now = self.say_scale_choice(scale, &screen);
                 let said_then =
                     self.say_scale_choice((!screen.scale_auto).then_some(screen.scale), &screen);
-                let done = match lang {
-                    Lang::French => format!("Échelle de l’{lower} : {said_now}"),
-                    Lang::English => format!("Scale of the {lower}: {said_now}"),
-                };
+                let done = words::scale_of_the(lang, &lower, &said_now);
                 let said = super::KeysSaid {
                     redone: redone_of(&done, lang),
-                    undone: match lang {
-                        Lang::French => {
-                            format!("Annulé : l’échelle de l’{lower} revient à {said_then}.")
-                        }
-                        Lang::English => {
-                            format!("Undone: the {lower}'s scale is back to {said_then}.")
-                        }
-                    },
+                    undone: words::undone_the_s_scale_is_back(lang, &lower, &said_then),
                     done,
                     row: SCALE,
                 };
@@ -682,20 +641,10 @@ impl App {
                         value: name.map(|n| toml_edit::Value::from(n).to_string()),
                     }],
                 };
-                let done = match lang {
-                    Lang::French => format!("Écran principal : {said_now}"),
-                    Lang::English => format!("Primary screen: {said_now}"),
-                };
+                let done = words::primary_screen(lang, &said_now);
                 let said = super::KeysSaid {
                     redone: redone_of(&done, lang),
-                    undone: match lang {
-                        Lang::French => {
-                            format!("Annulé : l’écran principal revient à {said_then}.")
-                        }
-                        Lang::English => {
-                            format!("Undone: the primary screen is back to {said_then}.")
-                        }
-                    },
+                    undone: words::undone_the_primary_screen_is_back(lang, &said_then),
                     done,
                     row: PRIMARY,
                 };
@@ -831,22 +780,13 @@ impl App {
         let lang = self.lang;
         let title = set.title(lang);
         if !set.in_file {
-            let text = match lang {
-                Lang::French => format!("Ensemble oublié : {title}"),
-                Lang::English => format!("Set forgotten: {title}"),
-            };
+            let text = words::set_forgotten(lang, &title);
             return self.toast(text, ToastAction::None, super::UNDONE);
         }
-        let done = match lang {
-            Lang::French => format!("Ensemble oublié : {title}"),
-            Lang::English => format!("Set forgotten: {title}"),
-        };
+        let done = words::set_forgotten(lang, &title);
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
-            undone: match lang {
-                Lang::French => format!("Annulé : la disposition de « {title} » est revenue."),
-                Lang::English => format!("Undone: the arrangement of “{title}” is back."),
-            },
+            undone: words::undone_the_arrangement_of_is_back(lang, &title),
             done,
             row: SETS,
         };
@@ -1077,10 +1017,7 @@ impl App {
     fn say_scale_choice(&self, scale: Option<f64>, screen: &Screen) -> String {
         match scale {
             Some(scale) => screens::say_scale(scale),
-            None => match self.lang {
-                Lang::French => format!("Automatique ({})", screens::say_scale(screen.auto_scale)),
-                Lang::English => format!("Automatic ({})", screens::say_scale(screen.auto_scale)),
-            },
+            None => words::automatic_2(self.lang, screens::say_scale(screen.auto_scale)),
         }
     }
 
@@ -1283,7 +1220,7 @@ fn say_mode_text(mode: &str, lang: Lang) -> String {
 }
 
 fn say_mode3(m: Mode3, lang: Lang) -> String {
-    let at = if lang.fr() { "à" } else { "at" };
+    let at = words::AT.get(lang);
     format!(
         "{} {at} {}",
         screens::say_size((m.0, m.1)),
@@ -1292,10 +1229,7 @@ fn say_mode3(m: Mode3, lang: Lang) -> String {
 }
 
 fn redone_of(done: &str, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!("Rétabli : {done}."),
-        Lang::English => format!("Redone: {done}."),
-    }
+    words::redone(lang, done)
 }
 
 /// How far two rectangles' centres are, squared.

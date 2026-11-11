@@ -179,12 +179,10 @@ pub fn balanced(sink: &Sink, balance: i32) -> Vec<f32> {
 
 /// "centre", "G 30", "D 30".
 pub fn say_balance(balance: i32, lang: Lang) -> String {
-    match (balance.signum(), lang) {
-        (0, _) => w(words::CENTRE).get(lang).to_owned(),
-        (-1, Lang::French) => format!("G {}", -balance),
-        (-1, Lang::English) => format!("L {}", -balance),
-        (_, Lang::French) => format!("D {balance}"),
-        (_, Lang::English) => format!("R {balance}"),
+    match balance.signum() {
+        0 => w(words::CENTRE).get(lang).to_owned(),
+        -1 => words::l(lang, -balance),
+        _ => words::r(lang, balance),
     }
 }
 

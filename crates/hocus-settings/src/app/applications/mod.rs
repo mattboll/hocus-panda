@@ -12,6 +12,7 @@
 
 mod view;
 
+use hocus_words::settings::app_applications as words;
 use std::{
     collections::{BTreeMap, HashMap},
     time::Instant,
@@ -436,14 +437,8 @@ impl App {
                 let row = opens.name().get(lang);
                 let said = Said {
                     done: format!("{row}{}{name}", sep(lang)),
-                    undone: match lang {
-                        Lang::French => format!("Annulé : {row} : {before}"),
-                        Lang::English => format!("Undone: {row}: {before}"),
-                    },
-                    redone: match lang {
-                        Lang::French => format!("Rétabli : {row} : {name}"),
-                        Lang::English => format!("Redone: {row}: {name}"),
-                    },
+                    undone: words::undone(lang, &before, row),
+                    redone: words::redone(lang, &name, row),
                     row: Row::Default(opens),
                 };
                 self.apps.ask(
@@ -660,10 +655,7 @@ impl App {
                     Ok(done) => done,
                     Err(why) => {
                         tracing::warn!(why, "an application's change not written");
-                        let text = match self.lang {
-                            Lang::French => format!("Pas écrit : {why}"),
-                            Lang::English => format!("Not written: {why}"),
-                        };
+                        let text = words::not_written(self.lang, &why);
                         return self.toast(text, ToastAction::None, TOAST);
                     }
                 };
@@ -1000,10 +992,7 @@ impl App {
 /// The separator of a toast's row and value: " : " in French, ": " in
 /// English.
 fn sep(lang: Lang) -> &'static str {
-    match lang {
-        Lang::French => " : ",
-        Lang::English => ": ",
-    }
+    words::TEXT.get(lang)
 }
 
 fn model_sheet() -> Sheet {

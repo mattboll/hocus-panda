@@ -10,7 +10,6 @@
 //! (`clipboard-clear`). Turned off, the history is erased by the shell once
 //! the toast is gone: "Annuler" within it brings everything back.
 
-use crate::lang::French as _;
 use hocus_words::settings::app_captures_page as words;
 use std::time::{Duration, Instant};
 
@@ -27,7 +26,7 @@ use super::{
 };
 use crate::{
     captures::{self as model, Folder, Writable},
-    lang::{Lang, pair, w},
+    lang::{pair, w},
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -222,10 +221,7 @@ impl App {
                     return iced::Task::none();
                 }
                 let gone = list.remove(i);
-                let said = match self.lang {
-                    Lang::French => format!("Retirée des mots de passe : {}", app_name(&gone)),
-                    Lang::English => format!("No longer left out: {}", app_name(&gone)),
-                };
+                let said = words::no_longer_left_out(self.lang, app_name(&gone));
                 match self.captures_slot(model::IGNORE) {
                     Some(slot) => self.change_saying(slot, Value::List(list), Some(said)),
                     None => iced::Task::none(),
@@ -250,10 +246,7 @@ impl App {
                 };
                 let mut list = self.ignored();
                 list.push(id);
-                let said = match self.lang {
-                    Lang::French => format!("Laissée de côté : {name}"),
-                    Lang::English => format!("Left out: {name}"),
-                };
+                let said = words::left_out(self.lang, &name);
                 match self.captures_slot(model::IGNORE) {
                     Some(slot) => self.change_saying(slot, Value::List(list), Some(said)),
                     None => iced::Task::none(),
@@ -338,10 +331,7 @@ impl App {
     pub(super) fn captures_toggle_toast(&self, slot: Slot, on: bool) -> Option<String> {
         (slot.setting == model::HISTORY && !on).then(|| {
             let n = model::items_said(self.erasable(), self.lang);
-            match self.lang {
-                Lang::French => format!("Historique coupé : {n} effacés"),
-                Lang::English => format!("History off: {n} erased"),
-            }
+            words::history_off_erased(self.lang, &n)
         })
     }
 
@@ -416,24 +406,13 @@ impl App {
                 false,
             ),
             model::SECRETS if !self.captures_bool(id) => {
-                let keep = match (self.captures_word(model::KEEP), lang) {
-                    (Some("session"), Lang::French) => "jusqu’à la fin de la session",
-                    (Some("session"), Lang::English) => "until the session ends",
-                    (Some("1d"), Lang::French) => "pendant 1 jour",
-                    (Some("1d"), Lang::English) => "for 1 day",
-                    (Some("7d"), Lang::French) => "pendant 7 jours",
-                    (Some("7d"), Lang::English) => "for 7 days",
-                    (_, Lang::French) => "pendant 30 jours",
-                    (_, Lang::English) => "for 30 days",
+                let keep = match self.captures_word(model::KEEP) {
+                    Some("session") => words::UNTIL_THE_SESSION_ENDS.get(lang),
+                    Some("1d") => words::FOR_1_DAY.get(lang),
+                    Some("7d") => words::FOR_7_DAYS.get(lang),
+                    _ => words::FOR_30_DAYS.get(lang),
                 };
-                let text = match lang {
-                    Lang::French => format!(
-                        "Coupé : un mot de passe copié sera gardé dans l’historique, chiffré, {keep}."
-                    ),
-                    Lang::English => format!(
-                        "Off: a copied password will be kept in the history, encrypted, {keep}."
-                    ),
-                };
+                let text = words::off_a_copied_password_will_be(lang, keep);
                 (text, true)
             }
             _ => return None,
@@ -797,13 +776,10 @@ impl App {
         let pinned = self.captures.count.map_or(0, |(_, p)| p);
         let line = if self.captures.confirming {
             let n = model::items_said(erasable, lang);
-            match (lang, pinned) {
-                (Lang::French, 0) => format!("{n}, sur cet ordinateur."),
-                (Lang::English, 0) => format!("{n}, on this computer."),
-                (Lang::French, 1) => format!("{n}, sauf l’épinglé."),
-                (Lang::English, 1) => format!("{n}, but the pinned one."),
-                (Lang::French, p) => format!("{n}, sauf les {p} épinglés."),
-                (Lang::English, p) => format!("{n}, but the {p} pinned."),
+            match pinned {
+                0 => words::on_this_computer(lang, &n),
+                1 => words::but_the_pinned_one(lang, &n),
+                p => words::but_the_pinned(lang, p, &n),
             }
         } else {
             w(words::EVERYTHING_BUT_THE_PINNED_ITEMS_ON)
@@ -855,14 +831,7 @@ impl App {
             let confirm = button(
                 container(
                     t(
-                        match lang {
-                            Lang::French => {
-                                format!("Effacer {}", model::items_said(erasable, lang))
-                            }
-                            Lang::English => {
-                                format!("Clear {}", model::items_said(erasable, lang))
-                            }
-                        },
+                        words::clear_2(lang, model::items_said(erasable, lang)),
                         13.0,
                         rgb(0xFFB3B6),
                     )
@@ -1005,10 +974,7 @@ impl App {
         let bottom = self
             .places
             .at
-            .get(&format!(
-                "sidebar:{}",
-                if self.lang.fr() { "fr" } else { "en" }
-            ))
+            .get(&format!("sidebar:{}", words::EN.get(self.lang)))
             .map_or(f32::MAX, |s| s.y + s.height);
         let under = at.y + at.height + 6.0;
         let y = if under + height > bottom - 8.0 {

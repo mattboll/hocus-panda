@@ -11,6 +11,7 @@
 
 mod view;
 
+use hocus_words::settings::app_account as words;
 use std::{path::PathBuf, sync::Arc};
 
 use iced::{
@@ -432,10 +433,7 @@ impl App {
                 }
                 if let Err(why) = result {
                     tracing::info!(why, ?ask, "AccountsService refused");
-                    let text = match self.lang {
-                        Lang::French => "Le système a refusé.".to_owned(),
-                        Lang::English => "The system refused.".to_owned(),
-                    };
+                    let text = words::THE_SYSTEM_REFUSED.get(self.lang).to_owned();
                     return self.toast(text, ToastAction::None, TOAST);
                 }
                 match asked {
@@ -610,10 +608,7 @@ impl App {
                 return operation::focus(FIELDS[1]);
             }
             Outcome::Failed(why) => {
-                sheet.failed = Some(match lang {
-                    Lang::French => format!("Le mot de passe n’a pas changé : {why}."),
-                    Lang::English => format!("The password has not changed: {why}."),
-                });
+                sheet.failed = Some(words::the_password_has_not_changed(lang, &why));
             }
             Outcome::NoAnswer => {
                 sheet.failed = Some(w_owned(
