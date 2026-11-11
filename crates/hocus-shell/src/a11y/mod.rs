@@ -621,9 +621,24 @@ fn gather(
     agents: &[hocus_link::AgentShown],
 ) -> bar::Facts {
     use crate::popover::Item as I;
-    let (shown, focused, open, height) = crate::popover::with(|c| {
+    let (shown, declared, groups, focused, open, height) = crate::popover::with(|c| {
+        let spots = c.ring.spots(bar);
+        let declared: Vec<(Item, Node, bool)> = spots
+            .iter()
+            .filter_map(|(_, s)| s.node.clone().map(|n| (s.item, n, s.part)))
+            .collect();
+        let mut groups: Vec<(&'static str, Node)> = Vec::new();
+        for (namespace, _) in &spots {
+            if !groups.iter().any(|(n, _)| n == namespace)
+                && let Some(group) = c.ring.group(bar, namespace)
+            {
+                groups.push((namespace, group.clone()));
+            }
+        }
         (
             c.items_of(bar),
+            declared,
+            groups,
             c.focused_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.open_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.bar_height(bar),
@@ -748,6 +763,8 @@ fn gather(
         size: Some((width, height)),
         items,
         frame,
+        nodes: declared,
+        groups,
         focused,
         open,
         clock: Some(crate::clock::time::Shown::at(
@@ -771,8 +788,6 @@ fn gather(
         bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
         layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),
         levels: crate::levels::snapshot(),
-        unseen: crate::notifications::with(|c| c.stack.badge()),
-        user: crate::user::name(),
         tray: crate::tray::shown()
             .into_iter()
             .map(|s| (s.key, s.name))

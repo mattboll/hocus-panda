@@ -1,14 +1,15 @@
 //! A bar as screen readers see it: its items, in the order and at the
-//! places its surfaces show them (the popovers' controller's items, which
-//! the keyboard steps through), named with what they draw, gathered in the
-//! groups they make (Today, To do, the agents, the windows, the desktops,
-//! the footer).
+//! places its surfaces show them (the kit's ring's declarations, which the
+//! keyboard steps through), gathered in the groups they make (Today, To
+//! do, the agents, the windows, the desktops, the footer). The surfaces on
+//! the kit ([`crate::ui::items`]) declare their nodes and groups
+//! themselves; the others' are named here with what they draw.
 
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
 use hocus_link::{
-    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, FOOTER_NAMESPACE, TASKS_NAMESPACE,
-    TODAY_NAMESPACE, TRAY_NAMESPACE, WINDOWS_NAMESPACE,
+    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, TODAY_NAMESPACE,
+    TRAY_NAMESPACE, WINDOWS_NAMESPACE,
 };
 use hocus_network::model::Link;
 
@@ -54,6 +55,11 @@ pub struct Facts {
     pub items: Vec<(&'static str, Item, Rect)>,
     /// The same in the bar's frame, as a click on them says it.
     pub frame: Vec<(Item, iced::Rectangle)>,
+    /// The nodes the kit's surfaces declare for their items, each a part
+    /// of the one before it or not.
+    pub nodes: Vec<(Item, Node, bool)>,
+    /// The groups the kit's surfaces declare, by namespace.
+    pub groups: Vec<(&'static str, Node)>,
     /// The item holding the keyboard (after `Esc` in its popover).
     pub focused: Option<Item>,
     /// The item whose popover is open.
@@ -78,8 +84,6 @@ pub struct Facts {
     pub bluetooth: Option<BluetoothRow>,
     pub layout: Option<String>,
     pub levels: Snapshot,
-    pub unseen: usize,
-    pub user: String,
     /// The tray's icons, by their key: their names.
     pub tray: Vec<(u32, String)>,
     /// What is said on its own now, and its number: a new number is a new
@@ -97,10 +101,27 @@ pub fn window(facts: &Facts, words: Words) -> Window {
     let mut window = Window::new(format!("bar:{}", facts.bar), words.bar(&facts.screen));
     let mut groups: Vec<(&'static str, Vec<Node>)> = Vec::new();
     for (namespace, item, rect) in &facts.items {
-        let Some(node) = item_node(*item, *rect, facts, words) else {
-            continue;
+        let (node, part) = match facts.nodes.iter().find(|(i, _, _)| i == item) {
+            Some((_, node, part)) => {
+                let node = node.clone().bounds(Some(*rect));
+                let node = if facts.open == Some(*item) {
+                    node.expanded(true)
+                } else {
+                    node
+                };
+                (node, *part)
+            }
+            None => match item_node(*item, *rect, facts, words) {
+                Some(node) => (node, false),
+                None => continue,
+            },
         };
         match groups.last_mut() {
+            // A line's ✕ is its child.
+            Some((last, nodes)) if last == namespace && part => match nodes.last_mut() {
+                Some(line) => line.children.push(node),
+                None => nodes.push(node),
+            },
             Some((last, nodes)) if last == namespace => nodes.push(node),
             _ => groups.push((namespace, vec![node])),
         }
@@ -119,8 +140,12 @@ pub fn window(facts: &Facts, words: Words) -> Window {
     window
 }
 
-/// A surface's items in the group they make, if they make one.
+/// A surface's items in the group they make, if they make one: the one
+/// a surface of the kit declares, else as said here.
 fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> Vec<Node> {
+    if let Some((_, group)) = facts.groups.iter().find(|(n, _)| *n == namespace) {
+        return vec![group.clone().children(nodes)];
+    }
     let full = nodes.len() > 1;
     let container = match namespace {
         TODAY_NAMESPACE if full => {
@@ -169,7 +194,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
             Some(Node::new("windows", Role::List, words.windows(n)))
         }
         DESKTOPS_NAMESPACE => Some(Node::new("desktops", Role::RadioGroup, words.desktops())),
-        FOOTER_NAMESPACE => Some(Node::new("footer", Role::Toolbar, words.footer())),
         TRAY_NAMESPACE => Some(Node::new("tray", Role::Toolbar, words.tray())),
         _ => None,
     };
@@ -324,9 +348,8 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
                 .act(Act::Click),
             None => button(words.power(&facts.levels)),
         },
-        Item::Notifications | Item::Clipboard | Item::Menu | Item::User => {
-            button(crate::footer::Words::new(lang).name(item, facts.unseen, &facts.user))
-        }
+        // Declared by their surfaces on the kit.
+        Item::Notifications | Item::Clipboard | Item::Menu | Item::User => return None,
         Item::Tray(tray) => {
             let name = facts.tray.iter().find(|(k, _)| *k == tray)?.1.clone();
             button(name).act(Act::Menu)
@@ -344,7 +367,7 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hocus_link::{CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, LEVELS_NAMESPACE};
+    use hocus_link::{CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, FOOTER_NAMESPACE, LEVELS_NAMESPACE};
 
     use crate::levels::model::{Battery, Charge, Profile, Sound};
 
@@ -457,8 +480,15 @@ mod tests {
                 profile: Some(Profile::Balanced),
                 ..Snapshot::default()
             },
-            unseen: 2,
-            user: "Matthieu".to_owned(),
+            nodes: vec![(
+                Item::Notifications,
+                Node::new("Notifications", Role::Button, "Notifications, 2 non vues"),
+                false,
+            )],
+            groups: vec![(
+                FOOTER_NAMESPACE,
+                Node::new("footer", Role::Toolbar, "Pied de la barre"),
+            )],
             ..Facts::default()
         }
     }
@@ -503,7 +533,6 @@ mod tests {
             "radio button \"Desktop 2, 1 window: Firefox\"",
             "button \"Wi-Fi, connected to Livebox-A3F2, strong signal\"",
             "progress bar \"Battery\" = \"82\u{a0}%, 3 h 10 left, balanced\"",
-            "button \"Notifications, 2 unseen\"",
         ] {
             assert!(dump.contains(line), "no {line:?} in\n{dump}");
         }

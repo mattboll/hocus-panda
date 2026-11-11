@@ -624,7 +624,10 @@ impl canvas::Program<Message> for Tray {
                         (false, false)
                     };
                     let hover = still && state.hover == Some(item.key);
-                    bell::lit(f, cell, open, hover, focused);
+                    bell::lit(f, cell, open, hover);
+                    if focused {
+                        crate::ui::ring::draw(f, cell, bell::RADIUS);
+                    }
                     let p = popped(item.since, now, self.motion);
                     let side = ICON * (POP_FROM + (1.0 - POP_FROM) * p);
                     let centre = cell.center();
