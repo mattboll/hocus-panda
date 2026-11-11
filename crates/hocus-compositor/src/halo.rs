@@ -589,7 +589,7 @@ impl State {
     /// How the halo moves here: drawn by a shader on GLES under a shell's
     /// bar, with or without motion; not drawn otherwise.
     pub fn halo_motion(&self) -> Motion {
-        if !self.blur || !self.shell_linked() {
+        if !self.graphics.blur || !self.shell_linked() {
             Motion::Still
         } else if self.reduced_motion() {
             Motion::Reduced

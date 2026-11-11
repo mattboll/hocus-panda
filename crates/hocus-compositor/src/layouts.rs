@@ -59,7 +59,12 @@ impl State {
             .into_iter()
             .enumerate()
             .map(|(group, name)| KeyLayout {
-                code: self.layout_codes.get(group).cloned().unwrap_or_default(),
+                code: self
+                    .keyboard
+                    .layout_codes
+                    .get(group)
+                    .cloned()
+                    .unwrap_or_default(),
                 name,
             })
             .collect()

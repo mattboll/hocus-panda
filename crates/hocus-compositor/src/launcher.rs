@@ -433,7 +433,7 @@ impl State {
             terminal = launch.terminal,
             "the launcher starts"
         );
-        self.spawned_at = Some(self.now());
+        self.arrivals.spawned_at = Some(self.now());
         let env = programs::Env::of(self).with_activation(self.activation_token());
         let terminal = launch
             .terminal

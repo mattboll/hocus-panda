@@ -706,7 +706,7 @@ impl State {
         if state == ButtonState::Released {
             if self.magnifier.held == Some(button) {
                 self.magnifier.held = None;
-                self.kept_buttons.remove(&button);
+                self.pointer.kept_buttons.remove(&button);
                 return true;
             }
             return false;
@@ -738,12 +738,12 @@ impl State {
             return pill.rect.contains(at) && {
                 // The pill itself takes the press, doing nothing.
                 self.magnifier.held = Some(button);
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 true
             };
         };
         self.magnifier.held = Some(button);
-        self.kept_buttons.insert(button);
+        self.pointer.kept_buttons.insert(button);
         self.magnifier_step(up);
         true
     }

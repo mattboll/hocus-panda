@@ -415,6 +415,7 @@ fn without_gles_the_still_picture_is_drawn_once() -> anyhow::Result<()> {
         // The thread's still picture shows.
         let drawn = hp.dispatch_until(common::WAIT, |hp| {
             hp.state()
+                .graphics
                 .backgrounds
                 .borrow()
                 .shown
@@ -425,12 +426,12 @@ fn without_gles_the_still_picture_is_drawn_once() -> anyhow::Result<()> {
         common::at_rest(&mut hp)?;
         hp.hold_clock();
         let before = hp.frames_on(0);
-        let draws = hp.state().backgrounds.borrow().draws;
+        let draws = hp.state().graphics.backgrounds.borrow().draws;
         for _ in 0..1200 {
             hp.step(Duration::from_millis(50))?;
         }
         assert_eq!(hp.frames_on(0), before, "{picture}: nothing moves");
-        assert_eq!(hp.state().backgrounds.borrow().draws, draws);
+        assert_eq!(hp.state().graphics.backgrounds.borrow().draws, draws);
         assert_eq!(hp.wall_ticks(OUTPUT), 0);
         let shot = hp.screenshot(0)?;
         let lit = shot
@@ -495,6 +496,7 @@ fn shots_of_the_wallpapers() -> anyhow::Result<()> {
         )?;
         still.dispatch_until(common::WAIT, |hp| {
             hp.state()
+                .graphics
                 .backgrounds
                 .borrow()
                 .shown
@@ -857,6 +859,7 @@ fn shots_of_the_aurora() -> anyhow::Result<()> {
     )?;
     still.dispatch_until(common::WAIT, |hp| {
         hp.state()
+            .graphics
             .backgrounds
             .borrow()
             .shown

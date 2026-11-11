@@ -11,7 +11,7 @@ use smithay::{
         PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{FilterResult, Keysym, ModifiersState},
+        keyboard::{FilterResult, Keycode, Keysym, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -19,7 +19,7 @@ use smithay::{
             MotionEvent, RelativeMotionEvent,
         },
     },
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{Logical, Point, SERIAL_COUNTER, Serial},
 };
 
 use crate::grabs::EdgesExt as _;
@@ -237,180 +237,9 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let kept =
             keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
-                // Locked (7.1): the lock decides first, every key.
-                if let Some(kept) =
-                    this.lock_key_filter(code, state == KeyState::Pressed, mods, &keysym)
-                {
-                    return kept;
-                }
-                // Another key than a modifier with `Super`+`Alt`: a
-                // shortcut's, not the laser.
-                if state == KeyState::Pressed
-                    && !is_modifier(keysym.modified_sym())
-                    && this.ink.other_key()
-                {
-                    this.redraw = true;
-                }
-                // The magnifier's keys work whatever is open (#424): the
-                // radial menu, the overview, Alt+Tab, the capture.
-                if state == KeyState::Pressed
-                    && !this.shortcuts_inhibited()
-                    && let Some((action, chord)) = this.magnifier_chord(mods, &keysym)
-                {
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
-                }
-                // The authentication dialog holds the keyboard (7.5): of
-                // the compositor's keys, only the virtual terminals', the
-                // levels' and the magnifier's work; everything else goes
-                // to the dialog.
-                let auth = this.auth_holds();
-                // A window's radial menu open (#723): its keys are its
-                // own, the modifiers go on.
-                if this.radial.is_some() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Radial(crate::radial::Key::of(
-                        sym, mods.shift,
-                    )));
-                }
-                // The overview open (8.5 A): its keys are its own, the
-                // modifiers go on.
-                if this.overview_open() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    this.kept_keys.insert(code);
-                    let shortcuts = &this.config.shortcuts;
-                    let action = keysym
-                        .raw_latin_sym_or_raw_current_sym()
-                        .and_then(|key| shortcuts.action(mods, key, this.nested))
-                        .or_else(|| {
-                            digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
-                        })
-                        .map(|(action, _)| action);
-                    return FilterResult::Intercept(Kept::Overview(crate::overview::Key::of(
-                        sym, mods.shift, action,
-                    )));
-                }
-                if let Some(switcher_key) = this.switcher.as_ref().map(|s| s.key).filter(|_| !auth)
-                {
-                    // Alt+Tab held: its keys are its own, the modifiers
-                    // go on to the application.
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Switch(switch_key(
-                        switcher_key,
-                        key,
-                        sym,
-                        mods.shift,
-                    )));
-                }
-                if state != KeyState::Pressed {
-                    return if this.kept_keys.remove(&code) {
-                        FilterResult::Intercept(Kept::Release)
-                    } else {
-                        FilterResult::Forward
-                    };
-                }
-                // The capture open keeps the keys (5.8), the modifiers
-                // going on, as Alt+Tab's.
-                if this.capture.choosing() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Capture(crate::capture::Key::of(
-                        sym, mods.shift,
-                    )));
-                }
-                // No key is logged, not even at trace level: what is typed
-                // may be a password (a terminal's, the Wi-Fi's).
-                let sym = keysym.modified_sym().raw();
-                if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym)
-                {
-                    let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
-                    return FilterResult::Intercept(Kept::Vt(vt));
-                }
-                // `Esc` clears the strokes while they show, with whatever
-                // modifiers are still held from drawing; otherwise it goes
-                // to the window.
-                // `Esc` while a window is moved puts it back (8.5 B).
-                if sym == Keysym::Escape.raw() && this.moving.is_some() && !auth {
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::CancelMove);
-                }
-                if sym == Keysym::Escape.raw() && this.ink.shows() && !auth {
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::InkClear);
-                }
-                // A client that takes every key (the Settings recording a
-                // shortcut, 6.8): none of the desktop's, the media keys too
-                // (they are shortcuts the user may record). The virtual
-                // terminal's switch above stays.
-                let inhibited = this.shortcuts_inhibited();
-                // The key of the layout's first level, Latin when the keyboard
-                // has a Latin layout: a shortcut stays on its key whatever the
-                // active layout.
-                let shortcuts = &this.config.shortcuts;
-                let action = keysym
-                    .raw_latin_sym_or_raw_current_sym()
-                    .and_then(|key| shortcuts.action(mods, key, this.nested))
-                    .or_else(|| {
-                        digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
-                    })
-                    .or_else(|| {
-                        // A key the layout types with Shift (`.` on
-                        // AZERTY): the chord without Shift, Shift held.
-                        let typed = keysym.modified_sym();
-                        let raw = keysym.raw_latin_sym_or_raw_current_sym()?;
-                        if !mods.shift || typed == raw || typed == Keysym::NoSymbol {
-                            return None;
-                        }
-                        let mut unshifted = *mods;
-                        unshifted.shift = false;
-                        shortcuts.action(&unshifted, typed, this.nested)
-                    });
-                let action = action.filter(|(a, _)| {
-                    !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
-                });
-                if let Some((action, chord)) = action {
-                    this.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
-                }
-                FilterResult::Forward
+                this.filter_key(code, state, mods, &keysym)
             });
-        if state == KeyState::Released && self.switcher_repeat.is_some_and(|(c, _)| c == code) {
+        if state == KeyState::Released && self.switching.repeat.is_some_and(|(c, _)| c == code) {
             self.stop_switcher_repeat();
         }
         if state == KeyState::Released {
@@ -460,7 +289,7 @@ impl State {
         // `Super`+`Alt` held: the laser.
         self.ink_modifiers(&mods);
         // Alt let go: Alt+Tab goes to its selection.
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             let mods = keyboard.modifier_state();
             self.switcher_modifiers(&mods);
         }
@@ -469,6 +298,203 @@ impl State {
         self.layout_maybe_changed();
         // Caps Lock, for the authentication dialog's sign (7.5).
         self.auth_caps(mods.caps_lock);
+    }
+
+    /// What becomes of a key before the focused client hears it: kept for
+    /// the desktop (`Intercept`), or forwarded.
+    fn filter_key(
+        &mut self,
+        code: Keycode,
+        state: KeyState,
+        mods: &ModifiersState,
+        keysym: &KeysymHandle<'_>,
+    ) -> FilterResult<Kept> {
+        if let Some(kept) = self.lock_key_filter(code, state == KeyState::Pressed, mods, keysym) {
+            return kept;
+        }
+        // Another key than a modifier with `Super`+`Alt`: a
+        // shortcut's, not the laser.
+        if state == KeyState::Pressed && !is_modifier(keysym.modified_sym()) && self.ink.other_key()
+        {
+            self.redraw = true;
+        }
+        // The magnifier's keys work whatever is open (#424): the
+        // radial menu, the overview, Alt+Tab, the capture.
+        if state == KeyState::Pressed
+            && !self.shortcuts_inhibited()
+            && let Some((action, chord)) = self.magnifier_chord(mods, keysym)
+        {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::Shortcut(action, chord));
+        }
+        // The authentication dialog holds the keyboard (7.5): of
+        // the compositor's keys, only the virtual terminals', the
+        // levels' and the magnifier's work; everything else goes
+        // to the dialog.
+        let auth = self.auth_holds();
+        if let Some(kept) = self.modal_key(code, state, mods, keysym, auth) {
+            return kept;
+        }
+        // No key is logged, not even at trace level: what is typed
+        // may be a password (a terminal's, the Wi-Fi's).
+        let sym = keysym.modified_sym().raw();
+        if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym) {
+            let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
+            return FilterResult::Intercept(Kept::Vt(vt));
+        }
+        // `Esc` clears the strokes while they show, with whatever
+        // modifiers are still held from drawing; otherwise it goes
+        // to the window.
+        // `Esc` while a window is moved puts it back (8.5 B).
+        if sym == Keysym::Escape.raw() && self.moving.is_some() && !auth {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::CancelMove);
+        }
+        if sym == Keysym::Escape.raw() && self.ink.shows() && !auth {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::InkClear);
+        }
+        // A client that takes every key (the Settings recording a
+        // shortcut, 6.8): none of the desktop's, the media keys too
+        // (they are shortcuts the user may record). The virtual
+        // terminal's switch above stays.
+        let inhibited = self.shortcuts_inhibited();
+        // The key of the layout's first level, Latin when the keyboard
+        // has a Latin layout: a shortcut stays on its key whatever the
+        // active layout.
+        let shortcuts = &self.config.shortcuts;
+        let action = keysym
+            .raw_latin_sym_or_raw_current_sym()
+            .and_then(|key| shortcuts.action(mods, key, self.nested))
+            .or_else(|| digit_key(code).and_then(|key| shortcuts.action(mods, key, self.nested)))
+            .or_else(|| {
+                // A key the layout types with Shift (`.` on
+                // AZERTY): the chord without Shift, Shift held.
+                let typed = keysym.modified_sym();
+                let raw = keysym.raw_latin_sym_or_raw_current_sym()?;
+                if !mods.shift || typed == raw || typed == Keysym::NoSymbol {
+                    return None;
+                }
+                let mut unshifted = *mods;
+                unshifted.shift = false;
+                shortcuts.action(&unshifted, typed, self.nested)
+            });
+        let action = action.filter(|(a, _)| {
+            !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
+        });
+        if let Some((action, chord)) = action {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::Shortcut(action, chord));
+        }
+        FilterResult::Forward
+    }
+
+    /// The keys of what holds the keyboard while it is open: the radial
+    /// menu, the overview, Alt+Tab, the capture; the release of a key kept.
+    /// `None`: on to the desktop's keys.
+    fn modal_key(
+        &mut self,
+        code: Keycode,
+        state: KeyState,
+        mods: &ModifiersState,
+        keysym: &KeysymHandle<'_>,
+        auth: bool,
+    ) -> Option<FilterResult<Kept>> {
+        // A window's radial menu open (#723): its keys are its
+        // own, the modifiers go on.
+        if self.radial_menu.open.is_some() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Radial(
+                crate::radial::Key::of(sym, mods.shift),
+            )));
+        }
+        // The overview open (8.5 A): its keys are its own, the
+        // modifiers go on.
+        if self.overview_open() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            self.keyboard.kept_keys.insert(code);
+            let shortcuts = &self.config.shortcuts;
+            let action = keysym
+                .raw_latin_sym_or_raw_current_sym()
+                .and_then(|key| shortcuts.action(mods, key, self.nested))
+                .or_else(|| {
+                    digit_key(code).and_then(|key| shortcuts.action(mods, key, self.nested))
+                })
+                .map(|(action, _)| action);
+            return Some(FilterResult::Intercept(Kept::Overview(
+                crate::overview::Key::of(sym, mods.shift, action),
+            )));
+        }
+        if let Some(switcher_key) = self
+            .switching
+            .open
+            .as_ref()
+            .map(|s| s.key)
+            .filter(|_| !auth)
+        {
+            // Alt+Tab held: its keys are its own, the modifiers
+            // go on to the application.
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Switch(switch_key(
+                switcher_key,
+                key,
+                sym,
+                mods.shift,
+            ))));
+        }
+        if state != KeyState::Pressed {
+            return Some(if self.keyboard.kept_keys.remove(&code) {
+                FilterResult::Intercept(Kept::Release)
+            } else {
+                FilterResult::Forward
+            });
+        }
+        // The capture open keeps the keys (5.8), the modifiers
+        // going on, as Alt+Tab's.
+        if self.capture.choosing() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Capture(
+                crate::capture::Key::of(sym, mods.shift),
+            )));
+        }
+        None
     }
 
     /// Whether the modifiers held move a window under the pointer with its
@@ -501,7 +527,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        self.pointer_placed = true;
+        self.pointer.placed = true;
         let from = pointer.current_location();
         let to = self.onto_outputs(from, from + event.delta());
         // Games and 3D tools read the motion itself (relative-pointer).
@@ -527,7 +553,7 @@ impl State {
         let Some(location) = self.absolute_location::<I>(event) else {
             return;
         };
-        self.pointer_placed = true;
+        self.pointer.placed = true;
         // Such a device cannot push the magnifier's edge (#424).
         self.magnifier_absolute(true);
         self.pointer_motion(location, event.time_msec());
@@ -583,14 +609,15 @@ impl State {
         // A right press that moved: Super and a drag resizes, as it always
         // did, from where it was pressed; from the grip, nothing (#723).
         if let Some(press) = self
-            .radial_press
+            .radial_menu
+            .press
             .filter(|p| (location.x - p.at.x).hypot(location.y - p.at.y) >= RADIAL_SLOP)
         {
-            self.radial_press = None;
+            self.radial_menu.press = None;
             if press.resizes
                 && let Some(rect) = self.rect_of(press.window)
             {
-                self.kept_buttons.remove(&press.button);
+                self.pointer.kept_buttons.remove(&press.button);
                 let edges = Edges::nearest_corner(rect, press.at.x, press.at.y);
                 let start = GrabStartData {
                     focus: None,
@@ -601,7 +628,7 @@ impl State {
             }
         }
         // A window's radial menu open: no client sees the pointer.
-        if self.radial.is_some() {
+        if self.radial_menu.open.is_some() {
             pointer.motion(
                 self,
                 None,
@@ -634,7 +661,7 @@ impl State {
                 },
             );
             pointer.frame(self);
-            self.frame_cursor = None;
+            self.pointer.frame_cursor = None;
             self.overview_motion(location);
             if !self.nested {
                 self.redraw = true;
@@ -658,7 +685,7 @@ impl State {
                 },
             );
             pointer.frame(self);
-            self.frame_cursor = None;
+            self.pointer.frame_cursor = None;
             self.redraw = true;
             return;
         }
@@ -685,8 +712,8 @@ impl State {
             if cursor.is_some() {
                 under = None;
             }
-            if cursor != self.frame_cursor {
-                self.frame_cursor = cursor;
+            if cursor != self.pointer.frame_cursor {
+                self.pointer.frame_cursor = cursor;
                 self.redraw = true;
             }
         }
@@ -807,7 +834,7 @@ impl State {
             return;
         };
         let at = pointer.current_location();
-        if self.radial.is_some()
+        if self.radial_menu.open.is_some()
             || self.overview_takes(at)
             || self.capture_choosing()
             || self.auth_keeps_pointer(at)
@@ -834,7 +861,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        if pointer.is_grabbed() || self.frame_cursor.is_some() {
+        if pointer.is_grabbed() || self.pointer.frame_cursor.is_some() {
             return;
         }
         let at = pointer.current_location();
@@ -861,7 +888,7 @@ impl State {
         // Locked (7.1): to the lock's surface under the pointer alone (its
         // focus), the desktop doing nothing with it.
         if self.locked() {
-            if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+            if state == ButtonState::Released && self.pointer.kept_buttons.remove(&button) {
                 return;
             }
             pointer.button(
@@ -880,21 +907,21 @@ impl State {
         // where it was; then the menu takes every press, no client seeing
         // them.
         if state == ButtonState::Released
-            && let Some(press) = self.radial_press.filter(|p| p.button == button)
+            && let Some(press) = self.radial_menu.press.filter(|p| p.button == button)
         {
-            self.radial_press = None;
-            self.kept_buttons.remove(&button);
+            self.radial_menu.press = None;
+            self.pointer.kept_buttons.remove(&button);
             self.open_radial(press.window, pointer.current_location());
             return;
         }
-        if self.radial.is_some() && !self.auth_holds() {
+        if self.radial_menu.open.is_some() && !self.auth_holds() {
             if state == ButtonState::Pressed {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 if matches!(button, BTN_LEFT | BTN_RIGHT) {
                     self.radial_press(pointer.current_location());
                 }
             } else {
-                self.kept_buttons.remove(&button);
+                self.pointer.kept_buttons.remove(&button);
             }
             return;
         }
@@ -902,11 +929,11 @@ impl State {
         if !self.auth_holds() && self.overview.is_some() {
             let at = pointer.current_location();
             if state == ButtonState::Released && self.overview_release(button, at) {
-                self.kept_buttons.remove(&button);
+                self.pointer.kept_buttons.remove(&button);
                 return;
             }
             if state == ButtonState::Pressed && self.overview_takes(at) {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 self.overview_press(button, at);
                 return;
             }
@@ -916,7 +943,7 @@ impl State {
         }
         // A press away from the authentication dialog does nothing (7.5).
         if state == ButtonState::Pressed && self.auth_keeps_pointer(pointer.current_location()) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // The capture open takes it, but over its toolbar (5.8).
@@ -925,17 +952,17 @@ impl State {
         }
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
-        if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+        if state == ButtonState::Released && self.pointer.kept_buttons.remove(&button) {
             return;
         }
         // The share's chooser keeps the presses off what it darkens.
         if state == ButtonState::Pressed && self.share_keeps_pointer(at) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // Alt+Tab's panel takes the click.
         if state == ButtonState::Pressed && self.switcher_click(at.x, at.y) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // `Super`+drag draws, wherever it starts: over a window, the bar
@@ -954,7 +981,7 @@ impl State {
         }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
             if self.dismiss_popups_at(at) || self.press_outside_shell(at) {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 return;
             }
             if button == BTN_LEFT
@@ -962,7 +989,7 @@ impl State {
             {
                 // The bar's edge switches its form; no client sees the press.
                 self.toggle_bar(&output);
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 return;
             }
             let seam = self.seam_near(at);
@@ -973,7 +1000,7 @@ impl State {
                 if button == BTN_LEFT {
                     self.start_pair_resize(seam.grab, seam.edges, button, serial);
                 } else {
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                 }
                 return;
             } else if let Some((id, edges)) = seam
@@ -984,38 +1011,11 @@ impl State {
                 if button == BTN_LEFT {
                     self.start_resize(id, edges, button, None, serial);
                 } else {
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                 }
                 return;
             } else if let Some(id) = self.grip_hit(at) {
-                self.focus(Some(id));
-                if button == BTN_LEFT {
-                    let now = self.now();
-                    let double = self
-                        .last_grip_press
-                        .take()
-                        .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
-                    if double {
-                        self.toggle_maximized(id);
-                        self.kept_buttons.insert(button);
-                    } else {
-                        self.last_grip_press = Some((id, now));
-                        self.start_move(id, button, None, serial);
-                    }
-                } else {
-                    // A right click on the grip: the window's radial menu,
-                    // as it is let go (#723).
-                    if button == BTN_RIGHT {
-                        self.radial_press = Some(crate::radial::Press {
-                            window: id,
-                            at,
-                            button,
-                            serial,
-                            resizes: false,
-                        });
-                    }
-                    self.kept_buttons.insert(button);
-                }
+                self.grip_press(id, button, at, serial);
                 return;
             } else if let Some(id) = self.window_under(at) {
                 self.focus(Some(id));
@@ -1027,14 +1027,14 @@ impl State {
                 // `Super` and the right button: a click opens the window's
                 // radial menu, a drag resizes it (#723).
                 if button == BTN_RIGHT && modifiers.is_some_and(|m| self.resize_modifier(&m)) {
-                    self.radial_press = Some(crate::radial::Press {
+                    self.radial_menu.press = Some(crate::radial::Press {
                         window: id,
                         at,
                         button,
                         serial,
                         resizes: true,
                     });
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                     return;
                 }
             }
@@ -1049,6 +1049,41 @@ impl State {
             },
         );
         pointer.frame(self);
+    }
+
+    /// A press on window `id`'s grip: the left button moves it, twice
+    /// quickly maximises it; the right one opens its radial menu as it is
+    /// let go.
+    fn grip_press(&mut self, id: WindowId, button: u32, at: Point<f64, Logical>, serial: Serial) {
+        self.focus(Some(id));
+        if button == BTN_LEFT {
+            let now = self.now();
+            let double = self
+                .pointer
+                .last_grip_press
+                .take()
+                .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
+            if double {
+                self.toggle_maximized(id);
+                self.pointer.kept_buttons.insert(button);
+            } else {
+                self.pointer.last_grip_press = Some((id, now));
+                self.start_move(id, button, None, serial);
+            }
+        } else {
+            // A right click on the grip: the window's radial menu,
+            // as it is let go (#723).
+            if button == BTN_RIGHT {
+                self.radial_menu.press = Some(crate::radial::Press {
+                    window: id,
+                    at,
+                    button,
+                    serial,
+                    resizes: false,
+                });
+            }
+            self.pointer.kept_buttons.insert(button);
+        }
     }
 
     fn on_pointer_axis<I: InputBackend>(&mut self, event: &I::PointerAxisEvent) {
@@ -1123,8 +1158,8 @@ impl State {
             return;
         };
         match gesture {
-            Gesture::SwipeBegin { .. } => self.swipes_given.0 += 1,
-            Gesture::SwipeUpdate { .. } => self.swipes_given.1 += 1,
+            Gesture::SwipeBegin { .. } => self.gestures.swipes_given.0 += 1,
+            Gesture::SwipeUpdate { .. } => self.gestures.swipes_given.1 += 1,
             _ => {}
         }
         let serial = SERIAL_COUNTER.next_serial();

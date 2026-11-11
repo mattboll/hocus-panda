@@ -186,7 +186,9 @@ impl State {
         // Over no window (the bar, the desktop), or with the overview, the
         // radial menu or Alt+Tab open: taken, and nothing changes, so that
         // nothing under scrolls by surprise.
-        let busy = self.overview.is_some() || self.radial.is_some() || self.switcher.is_some();
+        let busy = self.overview.is_some()
+            || self.radial_menu.open.is_some()
+            || self.switching.open.is_some();
         let Some(id) = self
             .window_under(pointer.current_location())
             .filter(|_| !busy)

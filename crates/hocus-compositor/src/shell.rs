@@ -383,7 +383,7 @@ impl State {
             self.shell_gone();
         }
         let env = programs::Env::of(self);
-        let gpu = self.gpu;
+        let gpu = self.graphics.gpu;
         let bus = self.shell.bus.clone();
         let auth_agent = self.shell.auth_agent;
         // Its Wayland connection, made here: the compositor knows it is the
@@ -1018,7 +1018,7 @@ impl State {
     /// is not reduced (high contrast reduces it too, #423), and the shell
     /// draws on a GPU.
     pub fn glass_on(&self) -> bool {
-        self.blur
+        self.graphics.blur
             && !self.config.appearance.reduce_transparency
             && !self.config.appearance.high_contrast
             && !self.shell.software

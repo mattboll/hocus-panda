@@ -149,7 +149,7 @@ impl State {
         self.close_layers_on(output);
         // Its bar goes to a screen still there, before its windows do.
         self.panel_refresh();
-        self.panes.borrow_mut().forget(&name);
+        self.graphics.panes.borrow_mut().forget(&name);
         if let Some(strip) = self.strips.get_mut(&name) {
             strip.still();
         }
@@ -530,7 +530,7 @@ impl State {
         };
         let at = pointer.current_location();
         let off = !self.on_a_screen(Rect::new(at.x.floor() as i32, at.y.floor() as i32, 0, 0));
-        if self.pointer_placed && !off {
+        if self.pointer.placed && !off {
             return;
         }
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
@@ -565,32 +565,48 @@ impl State {
             && pointer.is_grabbed()
         {
             // No snap where the preview was.
-            self.preview = None;
-            self.preview_out = None;
+            self.snap.preview = None;
+            self.snap.preview_out = None;
             let time = self.input_time();
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
         }
-        if self.preview.as_ref().is_some_and(|p| p.output == *output) {
-            self.preview = None;
+        if self
+            .snap
+            .preview
+            .as_ref()
+            .is_some_and(|p| p.output == *output)
+        {
+            self.snap.preview = None;
         }
-        if self.switcher.as_ref().is_some_and(|s| s.output == *output) {
+        if self
+            .switching
+            .open
+            .as_ref()
+            .is_some_and(|s| s.output == *output)
+        {
             self.end_switcher(false);
         }
         if self
-            .switcher_out
+            .switching
+            .out
             .as_ref()
             .is_some_and(|(s, _)| s.output == *output)
         {
-            self.switcher_out = None;
+            self.switching.out = None;
         }
-        if self.swiping.as_ref() == Some(output) {
-            self.swiping = None;
+        if self.gestures.swiping.as_ref() == Some(output) {
+            self.gestures.swiping = None;
         }
-        if self.radial.as_ref().is_some_and(|r| r.output == *output) {
+        if self
+            .radial_menu
+            .open
+            .as_ref()
+            .is_some_and(|r| r.output == *output)
+        {
             self.close_radial(None);
         }
-        self.radial_out = None;
-        self.seam_handle = None;
+        self.radial_menu.out = None;
+        self.snap.seam_handle = None;
     }
 
     /// The screen still there nearest to `geometry` (a screen gone).

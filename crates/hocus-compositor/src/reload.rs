@@ -357,7 +357,7 @@ impl State {
                         options = names.options,
                         "the keyboard's new keymap"
                     );
-                    self.layout_codes = crate::layouts::codes(&names);
+                    self.keyboard.layout_codes = crate::layouts::codes(&names);
                     if self.shell_linked() {
                         self.tell_layouts();
                     }

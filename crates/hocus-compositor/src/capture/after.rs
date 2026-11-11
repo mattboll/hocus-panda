@@ -182,7 +182,7 @@ impl State {
         if self.clipboard_holds(&taken.offered) {
             tracing::info!(id, "the clipboard lets the capture go");
             data_device::clear_data_device_selection(&self.display_handle, &self.seat);
-            if let Some(xwm) = self.xwm.as_mut()
+            if let Some(xwm) = self.xwayland.wm.as_mut()
                 && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, None)
             {
                 tracing::warn!(?err, "could not empty the X11 clipboard");
@@ -533,7 +533,7 @@ impl State {
         let region: Rectangle<i32, Physical> =
             Rectangle::<f64, Logical>::from_size(size.to_f64()).to_physical_precise_round(scale);
         let blurred = renderer.frost(
-            &mut self.panes.borrow_mut(),
+            &mut self.graphics.panes.borrow_mut(),
             &crate::glass::editor_pane(&output.name()),
             region,
             scale,

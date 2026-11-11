@@ -35,8 +35,8 @@ use crate::{
     decoration::{ACCENT, BoxStyle, Keyed, Placed, box_elements, buffer},
     model::WindowId,
     overview::{
-        AgentState, BREATHING, Badge, CLOSE_BUTTON, DIM, LABEL_GAP, LABEL_LINE, LABEL_SIZE,
-        MINIMIZED, NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, WAVE, close_button,
+        AgentState, BREATHING, CLOSE_BUTTON, DIM, LABEL_GAP, LABEL_LINE, LABEL_SIZE, MINIMIZED,
+        NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, WAVE, close_button,
     },
     radial_draw::{
         Fonts, advance, argb, fonts, letter_colour, letter_of, paint, rounded, stroke, write,
@@ -493,6 +493,32 @@ fn draw_panda(
     Some((pixels, (side as i32, side as i32)))
 }
 
+/// What the overview's pieces are drawn with and into: the renderer, the
+/// elements so far, the output's origin and scale, the time.
+struct Canvas<'a, R: Renderer> {
+    renderer: &'a mut R,
+    out: &'a mut Vec<OutputElement<R>>,
+    origin: Point<f64, Logical>,
+    scale: f64,
+    now: Duration,
+}
+
+/// The overview's windows laid out, front first, and their titles: each
+/// title's place, picture, where it goes and its alpha.
+type LaidOut = (
+    Vec<(Place, Pic, Point<f64, Logical>, f32)>,
+    Vec<(WindowId, crate::render::Look)>,
+);
+
+/// How a desktop's thumbnail is marked: a dragged window over it, the
+/// current one, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Over,
+    Current,
+    Other,
+}
+
 fn local(a: Area, origin: Point<f64, Logical>) -> Rectangle<f64, Logical> {
     Rectangle::new((a.x - origin.x, a.y - origin.y).into(), (a.w, a.h).into())
 }
@@ -500,22 +526,20 @@ fn local(a: Area, origin: Point<f64, Logical>) -> Rectangle<f64, Logical> {
 impl State {
     /// A picture's element at `at` (logical, output-local, its top-left),
     /// pixel for pixel; or stretched over `size` when given.
-    #[allow(clippy::too_many_arguments)]
     fn overview_picture<R>(
         &self,
-        renderer: &mut R,
+        c: &mut Canvas<'_, R>,
         place: Place,
         pic: &Pic,
         at: Point<f64, Logical>,
         size: Option<(f64, f64)>,
-        scale: f64,
         alpha: f32,
-        out: &mut Vec<OutputElement<R>>,
     ) -> Option<(f64, f64)>
     where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let scale = c.scale;
         let paint = &self.overview_paint;
         let (texture, (w, h), serial) = paint.picture(pic, scale)?;
         let logical = (f64::from(w) / scale, f64::from(h) / scale);
@@ -530,8 +554,8 @@ impl State {
             None => Rectangle::new(corner, (w, h).into()),
         };
         let all = Rectangle::from_size((f64::from(w), f64::from(h)).into());
-        match Placed::new(renderer, &texture, all, dst, alpha) {
-            Ok(e) => out.push(OutputElements::Frame(Keyed::new(
+        match Placed::new(c.renderer, &texture, all, dst, alpha) {
+            Ok(e) => c.out.push(OutputElements::Frame(Keyed::new(
                 e,
                 paint.id(&place, serial),
             ))),
@@ -541,16 +565,13 @@ impl State {
     }
 
     /// A box of `style` over `rect` (output-local).
-    #[allow(clippy::too_many_arguments)]
     fn overview_box<R>(
         &self,
-        renderer: &mut R,
+        c: &mut Canvas<'_, R>,
         place: Place,
         style: BoxStyle,
         rect: Rectangle<f64, Logical>,
-        scale: f64,
         alpha: f32,
-        out: &mut Vec<OutputElement<R>>,
     ) where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
@@ -562,10 +583,18 @@ impl State {
             rim: crate::contrast::rim(style.rim),
             ..style
         };
-        out.extend(
-            box_elements(renderer, &self.textures, &ids, style, rect, scale, alpha)
-                .into_iter()
-                .map(OutputElements::Frame),
+        c.out.extend(
+            box_elements(
+                c.renderer,
+                &self.textures,
+                &ids,
+                style,
+                rect,
+                c.scale,
+                alpha,
+            )
+            .into_iter()
+            .map(OutputElements::Frame),
         );
     }
 
@@ -597,23 +626,19 @@ impl State {
         let alpha = shown as f32;
         let reduced = overview.reduced;
         let french = self.radial_french();
+        let c = &mut Canvas {
+            renderer,
+            out: &mut out,
+            origin,
+            scale,
+            now,
+        };
         // The thumbnail a dragged window is over, lit, in front of it.
         if let Some((name, desktop)) = overview.drag.as_ref().and_then(|d| d.over.as_ref())
             && *name == output.name()
             && let Some(thumb) = screen.thumbs.get(*desktop)
         {
-            let current = self.strip(output).current();
-            self.overview_thumb_mark(
-                renderer,
-                name,
-                *desktop,
-                local(*thumb, origin),
-                true,
-                current,
-                scale,
-                alpha,
-                &mut out,
-            );
+            self.overview_thumb_mark(c, name, *desktop, local(*thumb, origin), Mark::Over, alpha);
         }
         // The window dragged, over everything but the bar, on whichever
         // screen it is over.
@@ -625,7 +650,7 @@ impl State {
                 && let Some(look) = self.look(drag.window, now)
             {
                 let look = look.placed(global, 1.0, true);
-                self.framed_window(renderer, drag.window, &look, origin, scale, &mut out);
+                self.framed_window(c.renderer, drag.window, &look, origin, scale, c.out);
             }
         }
         let strip = self.strip(output);
@@ -642,49 +667,28 @@ impl State {
         {
             let button = close_button(*rect);
             self.overview_picture(
-                renderer,
+                c,
                 Place::Close,
                 &Pic::Close {
                     scale: milli(scale),
                 },
                 local(button, origin).loc,
                 None,
-                scale,
                 1.0,
-                &mut out,
             );
         }
         // The agents' badges.
         for (id, rect) in &slots {
-            let Some(badge) = overview.badges.get(id) else {
+            if !overview.badges.contains_key(id) {
                 continue;
-            };
+            }
             let at = glide(self, *id, *rect, shown, reduced, now);
-            self.overview_badge(
-                renderer,
-                *id,
-                *badge,
-                at,
-                origin,
-                scale,
-                alpha,
-                french,
-                (now, overview.opened),
-                &mut out,
-            );
+            self.overview_badge(c, overview, *id, at, alpha, french);
         }
         // The rim of the window under the pointer, the keyboard's ring.
         if settled {
             if let Some((_, rect)) = hovered.and_then(|h| slots.iter().find(|(id, _)| *id == h)) {
-                self.overview_box(
-                    renderer,
-                    Place::Hover,
-                    HOVER,
-                    local(*rect, origin),
-                    scale,
-                    1.0,
-                    &mut out,
-                );
+                self.overview_box(c, Place::Hover, HOVER, local(*rect, origin), 1.0);
             }
             if overview.ring
                 && let Some((_, rect)) = overview
@@ -697,19 +701,69 @@ impl State {
                     w: rect.w + 2.0 * SELECTION_OUT,
                     h: rect.h + 2.0 * SELECTION_OUT,
                 };
-                self.overview_box(
-                    renderer,
-                    Place::Selection,
-                    SELECTION,
-                    local(around, origin),
-                    scale,
-                    1.0,
-                    &mut out,
-                );
+                self.overview_box(c, Place::Selection, SELECTION, local(around, origin), 1.0);
             }
         }
-        // The windows laid out, with their titles; while the strip
-        // slides (a thumbnail clicked), the desktops it passes.
+        let (titles, mut windows) =
+            self.overview_laid_out(overview, screen, &slots, origin, scale, now);
+        for (place, pic, at, a) in titles {
+            self.overview_picture(c, place, &pic, at, None, a);
+        }
+        // A window let go nowhere, on its way back: over the others.
+        if let Some((id, from, tween)) = overview.back
+            && let Some(to) = slots.iter().find(|(w, _)| *w == id).map(|(_, r)| *r)
+            && let Some(look) = self.look(id, now)
+        {
+            let r = from.lerp(to, tween.at(now));
+            let visual = Rectangle::<f64, Logical>::new((r.x, r.y).into(), (r.w, r.h).into());
+            let look = look.placed(visual, 1.0, true);
+            self.framed_window(c.renderer, id, &look, origin, scale, c.out);
+            windows.retain(|(w, _)| *w != id);
+        }
+        for (id, look) in &windows {
+            self.framed_window(c.renderer, *id, look, origin, scale, c.out);
+        }
+        // The desktops' thumbnails.
+        self.overview_thumbs(c, overview, screen, alpha);
+        // The wallpaper dimmed.
+        let whole: Rectangle<i32, Physical> = Rectangle::from_size(
+            geometry
+                .size
+                .to_f64()
+                .to_physical(scale)
+                .to_i32_round::<i32>(),
+        );
+        let a = DIM[3] * alpha;
+        c.out
+            .push(OutputElements::Solid(SolidColorRenderElement::new(
+                self.overview_paint.dim.clone(),
+                whole,
+                (a * 1000.0) as usize,
+                [DIM[0] * a, DIM[1] * a, DIM[2] * a, a],
+                Kind::Unspecified,
+            )));
+        out
+    }
+
+    /// The windows laid out on `screen`'s desktops, front first, with
+    /// their titles; while the strip slides (a thumbnail clicked), the
+    /// desktops it passes. `slots`: the current desktop's layout.
+    fn overview_laid_out(
+        &self,
+        overview: &Overview,
+        screen: &Screen,
+        slots: &[(WindowId, Area)],
+        origin: Point<f64, Logical>,
+        scale: f64,
+        now: Duration,
+    ) -> LaidOut {
+        let output = &screen.output;
+        let strip = self.strip(output);
+        let current = strip.current();
+        let shown = overview.shown(now);
+        let alpha = shown as f32;
+        let reduced = overview.reduced;
+
         let position = strip.position(now);
         let stride = self.strip_stride(output);
         let mut titles = Vec::new();
@@ -728,7 +782,7 @@ impl State {
                 continue;
             }
             let laid = if desktop == current {
-                slots.clone()
+                slots.to_vec()
             } else {
                 self.overview_slots(screen, desktop)
             };
@@ -784,65 +838,27 @@ impl State {
                 }
             }
         }
-        for (place, pic, at, a) in titles {
-            self.overview_picture(renderer, place, &pic, at, None, scale, a, &mut out);
-        }
-        // A window let go nowhere, on its way back: over the others.
-        if let Some((id, from, tween)) = overview.back
-            && let Some(to) = slots.iter().find(|(w, _)| *w == id).map(|(_, r)| *r)
-            && let Some(look) = self.look(id, now)
-        {
-            let r = from.lerp(to, tween.at(now));
-            let visual = Rectangle::<f64, Logical>::new((r.x, r.y).into(), (r.w, r.h).into());
-            let look = look.placed(visual, 1.0, true);
-            self.framed_window(renderer, id, &look, origin, scale, &mut out);
-            windows.retain(|(w, _)| *w != id);
-        }
-        for (id, look) in &windows {
-            self.framed_window(renderer, *id, look, origin, scale, &mut out);
-        }
-        // The desktops' thumbnails.
-        self.overview_thumbs(
-            renderer, overview, screen, origin, scale, alpha, now, &mut out,
-        );
-        // The wallpaper dimmed.
-        let whole: Rectangle<i32, Physical> = Rectangle::from_size(
-            geometry
-                .size
-                .to_f64()
-                .to_physical(scale)
-                .to_i32_round::<i32>(),
-        );
-        let a = DIM[3] * alpha;
-        out.push(OutputElements::Solid(SolidColorRenderElement::new(
-            self.overview_paint.dim.clone(),
-            whole,
-            (a * 1000.0) as usize,
-            [DIM[0] * a, DIM[1] * a, DIM[2] * a, a],
-            Kind::Unspecified,
-        )));
-        out
+        (titles, windows)
     }
 
-    /// A window's agents' badge: its pill at its top-left, the panda on
-    /// it, bobbing and waving while one waits.
-    #[allow(clippy::too_many_arguments)]
+    /// Window `id`'s agents' badge, if it has one: its pill at its
+    /// top-left, the panda on it, bobbing and waving while one waits.
     fn overview_badge<R>(
         &self,
-        renderer: &mut R,
+        c: &mut Canvas<'_, R>,
+        overview: &Overview,
         id: WindowId,
-        badge: Badge,
         at: Area,
-        origin: Point<f64, Logical>,
-        scale: f64,
         alpha: f32,
         french: bool,
-        (now, opened): (Duration, Duration),
-        out: &mut Vec<OutputElement<R>>,
     ) where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let Some(&badge) = overview.badges.get(&id) else {
+            return;
+        };
+        let (origin, scale, now, opened) = (c.origin, c.scale, c.now, overview.opened);
         let corner =
             Point::<f64, Logical>::from((at.x + BADGE_IN - origin.x, at.y + BADGE_IN - origin.y));
         let lively = self.pandas_lively();
@@ -868,7 +884,7 @@ impl State {
         let panda_at =
             Point::<f64, Logical>::from((corner.x + PILL_PAD, corner.y + PILL_PAD + bob));
         self.overview_picture(
-            renderer,
+            c,
             Place::Panda(id),
             &Pic::Panda {
                 mood,
@@ -878,12 +894,10 @@ impl State {
             },
             panda_at,
             Some((panda, panda)),
-            scale,
             alpha,
-            out,
         );
         self.overview_picture(
-            renderer,
+            c,
             Place::Pill(id),
             &Pic::Pill {
                 words: badge.words(french),
@@ -893,30 +907,26 @@ impl State {
             },
             corner - Point::from((1.0 / scale, 1.0 / scale)),
             None,
-            scale,
             alpha,
-            out,
         );
     }
 
     /// A thumbnail's number and its ring: the current one's accent, the
-    /// one a dragged window is `over` lit, "Lâcher : bureau N" under it.
-    #[allow(clippy::too_many_arguments)]
+    /// one a dragged window is over lit, "Lâcher : bureau N" under it.
     fn overview_thumb_mark<R>(
         &self,
-        renderer: &mut R,
+        c: &mut Canvas<'_, R>,
         name: &str,
         desktop: usize,
         rect: Rectangle<f64, Logical>,
-        over: bool,
-        current: usize,
-        scale: f64,
+        mark: Mark,
         alpha: f32,
-        out: &mut Vec<OutputElement<R>>,
     ) where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let scale = c.scale;
+        let over = mark == Mark::Over;
         let names = self.config.desktops.shown_names();
         let name = name.to_owned();
         // Under it: its number, or what letting go there does.
@@ -947,37 +957,19 @@ impl State {
                 rect.loc.y + rect.size.h + NUMBER_GAP,
             ));
             self.overview_picture(
-                renderer,
+                c,
                 Place::Number(name.clone(), desktop),
                 &pic,
                 at,
                 None,
-                scale,
                 alpha,
-                out,
             );
         }
         // Ringed or lit.
         if over {
-            self.overview_box(
-                renderer,
-                Place::Ring(name.clone(), desktop),
-                LIT,
-                rect,
-                scale,
-                alpha,
-                out,
-            );
-        } else if desktop == current {
-            self.overview_box(
-                renderer,
-                Place::Ring(name.clone(), desktop),
-                CURRENT,
-                rect,
-                scale,
-                alpha,
-                out,
-            );
+            self.overview_box(c, Place::Ring(name.clone(), desktop), LIT, rect, alpha);
+        } else if mark == Mark::Current {
+            self.overview_box(c, Place::Ring(name.clone(), desktop), CURRENT, rect, alpha);
         }
     }
 
@@ -985,27 +977,23 @@ impl State {
     /// wallpaper, its number under it; the current one ringed in the
     /// accent, the one a dragged window is over lit; an empty one's
     /// sleeping panda.
-    #[allow(clippy::too_many_arguments)]
     fn overview_thumbs<R>(
         &self,
-        renderer: &mut R,
+        c: &mut Canvas<'_, R>,
         overview: &Overview,
         screen: &Screen,
-        origin: Point<f64, Logical>,
-        scale: f64,
         alpha: f32,
-        now: Duration,
-        out: &mut Vec<OutputElement<R>>,
     ) where
         R: Renderer + ImportAll + ImportMem + crate::wobble::Bend + crate::going::Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let (origin, scale, now) = (c.origin, c.scale, c.now);
         let output = &screen.output;
         let name = output.name();
         let current = self.strip(output).current();
         let wall = (!self.config.plain_background)
             .then(|| {
-                let backgrounds = self.backgrounds.borrow();
+                let backgrounds = self.graphics.backgrounds.borrow();
                 backgrounds
                     .shown
                     .get(&name)
@@ -1028,18 +1016,19 @@ impl State {
             // that window.
             if !over {
                 self.overview_thumb_mark(
-                    renderer, &name, desktop, rect, false, current, scale, alpha, out,
+                    c,
+                    &name,
+                    desktop,
+                    rect,
+                    if desktop == current {
+                        Mark::Current
+                    } else {
+                        Mark::Other
+                    },
+                    alpha,
                 );
             }
-            self.overview_box(
-                renderer,
-                Place::Edge(name.clone(), desktop),
-                EDGE,
-                rect,
-                scale,
-                alpha,
-                out,
-            );
+            self.overview_box(c, Place::Edge(name.clone(), desktop), EDGE, rect, alpha);
             // Its windows, front first.
             let here = self.thumb_windows(output, desktop);
             if here.is_empty() {
@@ -1054,7 +1043,7 @@ impl State {
                     rect.loc.y + (rect.size.h - size) / 2.0,
                 ));
                 self.overview_picture(
-                    renderer,
+                    c,
                     Place::Sleep(name.clone(), desktop),
                     &Pic::Panda {
                         mood: hocus_pandas::Mood::Resting,
@@ -1064,9 +1053,7 @@ impl State {
                     },
                     at,
                     Some((size, size)),
-                    scale,
                     alpha,
-                    out,
                 );
             }
             for id in here {
@@ -1083,14 +1070,15 @@ impl State {
                 );
                 let look = crate::render::Look::thumbnail(visual, alpha, 2.0);
                 let mut parts = Vec::new();
-                self.window_parts(renderer, id, &look, origin, scale, &mut parts);
-                out.extend(parts.into_iter().enumerate().filter_map(|(j, e)| match e {
-                    OutputElements::Window(w) => Some(OutputElements::Thumbnail(Keyed::new(
-                        w,
-                        self.overview_paint.thumb_id(id, desktop, j),
-                    ))),
-                    _ => None,
-                }));
+                self.window_parts(c.renderer, id, &look, origin, scale, &mut parts);
+                c.out
+                    .extend(parts.into_iter().enumerate().filter_map(|(j, e)| match e {
+                        OutputElements::Window(w) => Some(OutputElements::Thumbnail(Keyed::new(
+                            w,
+                            self.overview_paint.thumb_id(id, desktop, j),
+                        ))),
+                        _ => None,
+                    }));
             }
             // Its ground: the screen's wallpaper, small.
             let dst: Rectangle<i32, Physical> = Rectangle::new(
@@ -1100,8 +1088,8 @@ impl State {
             match &wall {
                 Some((texture, (w, h))) => {
                     let all = Rectangle::from_size((f64::from(*w), f64::from(*h)).into());
-                    match Placed::new(renderer, texture, all, dst, alpha) {
-                        Ok(e) => out.push(OutputElements::Frame(Keyed::new(
+                    match Placed::new(c.renderer, texture, all, dst, alpha) {
+                        Ok(e) => c.out.push(OutputElements::Frame(Keyed::new(
                             e,
                             self.overview_paint
                                 .id(&Place::Wall(name.clone(), desktop), 0),
@@ -1109,15 +1097,9 @@ impl State {
                         Err(err) => tracing::warn!(?err, "could not draw a thumbnail's wallpaper"),
                     }
                 }
-                None => self.overview_box(
-                    renderer,
-                    Place::Ground(name.clone(), desktop),
-                    GROUND,
-                    rect,
-                    scale,
-                    alpha,
-                    out,
-                ),
+                None => {
+                    self.overview_box(c, Place::Ground(name.clone(), desktop), GROUND, rect, alpha)
+                }
             }
         }
     }

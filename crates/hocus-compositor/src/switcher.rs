@@ -295,7 +295,7 @@ impl State {
     /// selected.
     pub fn open_switcher(&mut self, backward: bool, hold: Hold, key: Keysym) {
         let now = self.now();
-        if let Some(switcher) = &mut self.switcher {
+        if let Some(switcher) = &mut self.switching.open {
             switcher.step(if backward { -1 } else { 1 }, now);
             self.redraw = true;
             return;
@@ -327,8 +327,8 @@ impl State {
         let selected = if backward { items.len() - 1 } else { first };
         let now = self.now();
         tracing::debug!(windows = items.len(), selected, "switcher");
-        self.switcher_out = None;
-        self.switcher = Some(Switcher {
+        self.switching.out = None;
+        self.switching.open = Some(Switcher {
             output,
             items,
             selected,
@@ -353,7 +353,7 @@ impl State {
             SwitchKey::Commit => return self.end_switcher(true),
             SwitchKey::Swallow => return,
         };
-        if let Some(switcher) = &mut self.switcher {
+        if let Some(switcher) = &mut self.switching.open {
             switcher.step(by, now);
             self.redraw = true;
         }
@@ -370,29 +370,29 @@ impl State {
         let Ok(rate) = u32::try_from(keyboard.repeat_rate) else {
             return;
         };
-        if rate == 0 || self.switcher.is_none() {
+        if rate == 0 || self.switching.open.is_none() {
             return;
         }
         let delay = Duration::from_millis(u64::try_from(keyboard.repeat_delay).unwrap_or(0));
         let every = Duration::from_secs(1) / rate;
         let timer = Timer::from_duration(delay);
         let inserted = self.loop_handle.insert_source(timer, move |_, _, app| {
-            if app.state.switcher.is_none() {
-                app.state.switcher_repeat = None;
+            if app.state.switching.open.is_none() {
+                app.state.switching.repeat = None;
                 return TimeoutAction::Drop;
             }
             app.state.switcher_key(key);
             TimeoutAction::ToDuration(every)
         });
         match inserted {
-            Ok(token) => self.switcher_repeat = Some((code, token)),
+            Ok(token) => self.switching.repeat = Some((code, token)),
             Err(err) => tracing::warn!(%err.error, "could not repeat the switcher's key"),
         }
     }
 
     /// The switcher's key stops stepping on.
     pub fn stop_switcher_repeat(&mut self) {
-        if let Some((_, token)) = self.switcher_repeat.take() {
+        if let Some((_, token)) = self.switching.repeat.take() {
             self.loop_handle.remove(token);
         }
     }
@@ -400,7 +400,12 @@ impl State {
     /// The modifiers changed: once the held ones are let go, the selected
     /// window comes forward.
     pub fn switcher_modifiers(&mut self, mods: &ModifiersState) {
-        if self.switcher.as_ref().is_some_and(|s| !s.hold.held(mods)) {
+        if self
+            .switching
+            .open
+            .as_ref()
+            .is_some_and(|s| !s.hold.held(mods))
+        {
             self.end_switcher(true);
         }
     }
@@ -409,13 +414,13 @@ impl State {
     /// on its desktop, back from minimised.
     pub fn end_switcher(&mut self, go: bool) {
         self.stop_switcher_repeat();
-        let Some(switcher) = self.switcher.take() else {
+        let Some(switcher) = self.switching.open.take() else {
             return;
         };
         let now = self.now();
         let target = switcher.items.get(switcher.selected).map(|i| i.0);
         if switcher.shown(now) {
-            self.switcher_out = Some((
+            self.switching.out = Some((
                 switcher,
                 Tween::new(now, motion::SWITCHER_OUT, Bezier::EASE_IN),
             ));
@@ -430,7 +435,7 @@ impl State {
     /// A window went: it leaves the switcher's list.
     pub fn switcher_forget(&mut self, id: WindowId) {
         let mut empty = false;
-        if let Some(switcher) = &mut self.switcher
+        if let Some(switcher) = &mut self.switching.open
             && let Some(at) = switcher.items.iter().position(|i| i.0 == id)
         {
             switcher.items.remove(at);
@@ -443,7 +448,7 @@ impl State {
         if empty {
             self.end_switcher(false);
         }
-        if let Some((switcher, _)) = &mut self.switcher_out {
+        if let Some((switcher, _)) = &mut self.switching.out {
             switcher.items.retain(|i| i.0 != id);
         }
     }
@@ -470,7 +475,7 @@ impl State {
     /// the switcher closes. Whether the press was the switcher's.
     pub fn switcher_click(&mut self, x: f64, y: f64) -> bool {
         let now = self.now();
-        let Some(switcher) = self.switcher.as_ref().filter(|s| s.shown(now)) else {
+        let Some(switcher) = self.switching.open.as_ref().filter(|s| s.shown(now)) else {
             return false;
         };
         let Some(geometry) = self.space.output_geometry(&switcher.output) else {
@@ -482,7 +487,7 @@ impl State {
             .and_then(|(_, items)| items.iter().position(|p| p.item.contains(lx, ly)));
         match hit {
             Some(at) => {
-                if let Some(switcher) = &mut self.switcher {
+                if let Some(switcher) = &mut self.switching.open {
                     switcher.selected = at;
                 }
                 self.end_switcher(true);
@@ -496,7 +501,7 @@ impl State {
     /// for a frame when the panel is due to show.
     pub fn tick_switcher(&mut self, now: Duration, wake: &mut impl FnMut(Duration)) -> bool {
         let mut moving = false;
-        if let Some(switcher) = &mut self.switcher {
+        if let Some(switcher) = &mut self.switching.open {
             if switcher.shown(now) {
                 moving |= switcher.appear(now) < 1.0;
                 if let Some((_, since)) = switcher.ring_from {
@@ -510,9 +515,9 @@ impl State {
                 wake(switcher.opened + motion::SWITCHER_DELAY);
             }
         }
-        if let Some((_, tween)) = &self.switcher_out {
+        if let Some((_, tween)) = &self.switching.out {
             if tween.done(now) {
-                self.switcher_out = None;
+                self.switching.out = None;
             } else {
                 moving = true;
             }

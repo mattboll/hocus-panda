@@ -307,7 +307,7 @@ impl State {
             micro: plan.micro,
             // The GPU the compositor draws on, if it does: ffmpeg may
             // encode there (VA-API).
-            gpu: self.gpu.and_then(|dev| {
+            gpu: self.graphics.gpu.and_then(|dev| {
                 smithay::backend::drm::DrmNode::from_dev_id(dev)
                     .ok()?
                     .node_with_type(smithay::backend::drm::NodeType::Render)?

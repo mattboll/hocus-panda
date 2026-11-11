@@ -150,12 +150,17 @@ impl State {
     /// The rains under way, opening and closing.
     pub fn rains(&self) -> usize {
         self.windows.values().filter(|m| m.rain.is_some()).count()
-            + self.leaving.iter().filter(|l| l.rain.is_some()).count()
+            + self
+                .departures
+                .leaving
+                .iter()
+                .filter(|l| l.rain.is_some())
+                .count()
     }
 
     fn rain_seed(&mut self) -> f32 {
-        self.rain_seeds = self.rain_seeds.wrapping_add(1);
-        (self.rain_seeds % 997) as f32 * 1.618
+        self.departures.rain_seeds = self.departures.rain_seeds.wrapping_add(1);
+        (self.departures.rain_seeds % 997) as f32 * 1.618
     }
 
     /// Window `id` of size `size` maps at `now`: its rain, if it rains.

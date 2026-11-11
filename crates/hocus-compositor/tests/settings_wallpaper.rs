@@ -672,7 +672,7 @@ fn at_rest_the_wallpaper_page_commits_nothing() -> anyhow::Result<()> {
         (
             hp.window_commits(),
             hp.bar_commits(),
-            hp.state().backgrounds.borrow().draws,
+            hp.state().graphics.backgrounds.borrow().draws,
         )
     };
     let before = counts(&bed.hp);

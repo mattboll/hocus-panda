@@ -538,8 +538,8 @@ fn a_layout_added_writes_the_list() -> anyhow::Result<()> {
     // The compositor's keymap takes it.
     let taken = bed
         .hp
-        .dispatch_until(WAIT, |hp| hp.state().layout_codes == ["us", "de"])?;
-    anyhow::ensure!(taken, "{:?}", bed.hp.state().layout_codes);
+        .dispatch_until(WAIT, |hp| hp.state().keyboard.layout_codes == ["us", "de"])?;
+    anyhow::ensure!(taken, "{:?}", bed.hp.state().keyboard.layout_codes);
     Ok(())
 }
 
@@ -584,18 +584,18 @@ fn the_keyboards_layouts_and_repeat_follow_the_file() -> anyhow::Result<()> {
         "[keyboard]\nlayouts = [\"us\", \"fr(bepo)\"]\nrepeat_delay = 300\nrepeat_rate = 40\n",
     )?;
     let followed = hp.dispatch_until(WAIT, |hp| {
-        hp.keyboard_repeat() == (40, 300) && hp.state().layout_codes == ["us", "fr(bepo)"]
+        hp.keyboard_repeat() == (40, 300) && hp.state().keyboard.layout_codes == ["us", "fr(bepo)"]
     })?;
     anyhow::ensure!(
         followed,
         "{:?} {:?}",
         hp.keyboard_repeat(),
-        hp.state().layout_codes
+        hp.state().keyboard.layout_codes
     );
     // Layouts XKB refuses: the keymap stays.
     std::fs::write(&file, "[keyboard]\nlayouts = [\"nowhere\"]\n")?;
     wait(&mut hp, Duration::from_millis(500))?;
-    assert_eq!(hp.state().layout_codes, ["us", "fr(bepo)"]);
+    assert_eq!(hp.state().keyboard.layout_codes, ["us", "fr(bepo)"]);
     Ok(())
 }
 

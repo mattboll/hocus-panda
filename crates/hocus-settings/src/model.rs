@@ -114,6 +114,7 @@ impl SectionId {
         Self::Performance,
     ];
 
+    // Over 200 lines: a table, one entry per section.
     pub fn section(self) -> Section {
         let s = |slug, group, name, line, icon, ticket| Section {
             id: self,

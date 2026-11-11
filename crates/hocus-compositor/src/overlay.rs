@@ -200,7 +200,7 @@ pub fn load_font(handle: &LoopHandle<'static, App>) {
         if let Event::Msg(font) = event {
             app.state.overlay.font = Some(font);
             app.state.overlay.labels.borrow_mut().clear();
-            if app.state.switcher.is_some() {
+            if app.state.switching.open.is_some() {
                 app.state.redraw = true;
             }
         }
@@ -402,7 +402,8 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let reduced = self.reduced_motion();
-        let (switcher, shown): (&Switcher, f64) = match (&self.switcher, &self.switcher_out) {
+        let (switcher, shown): (&Switcher, f64) = match (&self.switching.open, &self.switching.out)
+        {
             (Some(s), _) if s.shown(now) => (s, s.appear(now)),
             (_, Some((s, tween))) => (s, 1.0 - tween.at(now)),
             _ => return,

@@ -232,7 +232,7 @@ impl State {
                 data_device::request_data_device_client_selection(&self.seat, mime.to_owned(), fd)
                     .map_err(|e| format!("{e:?}"))
             }
-            Source::X11 => match self.xwm.as_mut() {
+            Source::X11 => match self.xwayland.wm.as_mut() {
                 Some(xwm) => xwm
                     .send_selection(
                         SelectionTarget::Clipboard,
@@ -374,7 +374,7 @@ impl State {
             Some(data.clone()),
         );
         // X11 clients see it offered too.
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, Some(types))
         {
             tracing::warn!(?err, "could not offer the clipboard to X11");

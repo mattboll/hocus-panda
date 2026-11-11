@@ -593,7 +593,7 @@ impl State {
             },
         );
         pointer.frame(self);
-        self.frame_cursor = None;
+        self.pointer.frame_cursor = None;
     }
 
     /// Closes the overview, `focus` brought forward: the windows glide

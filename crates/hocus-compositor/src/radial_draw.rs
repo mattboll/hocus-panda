@@ -762,7 +762,7 @@ impl State {
         let Some(geometry) = self.space.output_geometry(output) else {
             return;
         };
-        let paint = &self.radial_paint;
+        let paint = &self.radial_menu.paint;
         let Some(fonts) = paint.fonts.get_or_init(fonts) else {
             return;
         };

@@ -3,26 +3,18 @@
 //! them.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::PathBuf,
-    time::Duration,
 };
 
 use anyhow::Context;
 use smithay::{
-    backend::{
-        renderer::element::Id,
-        session::{Session, libseat::LibSeatSession},
-    },
+    backend::session::{Session, libseat::LibSeatSession},
     desktop::{PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
-    input::{
-        Seat, SeatState,
-        keyboard::{Keycode, XkbConfig},
-        pointer::{CursorIcon, CursorImageStatus},
-    },
+    input::{Seat, SeatState, keyboard::XkbConfig},
     output::Output,
     reexports::{
-        calloop::{LoopHandle, LoopSignal, RegistrationToken},
+        calloop::{LoopHandle, LoopSignal},
         wayland_server::{
             DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -31,29 +23,22 @@ use smithay::{
     },
     utils::{Clock, Logical, Monotonic, Point, Rectangle},
     wayland::{
-        compositor::{CompositorClientState, CompositorState},
-        cursor_shape::CursorShapeManagerState,
-        dmabuf::{DmabufGlobal, DmabufState},
-        fractional_scale::FractionalScaleManagerState,
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
-        output::OutputManagerState,
-        pointer_gestures::PointerGesturesState,
-        presentation::PresentationState,
-        relative_pointer::RelativePointerManagerState,
-        seat::WaylandFocus,
-        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
-        shell::{
-            kde::decoration::KdeDecorationState,
-            wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
-        },
-        shm::ShmState,
-        viewporter::ViewporterState,
-        xdg_activation::XdgActivationState,
-        xwayland_shell::XWaylandShellState,
+        compositor::CompositorClientState, seat::WaylandFocus,
+        selection::primary_selection::PrimarySelectionState,
     },
-    xwayland::X11Wm,
 };
+
+mod frames;
+mod input;
+mod menus;
+mod protocols;
+mod windows;
+
+pub use frames::{Frames, Graphics, XWayland};
+pub use input::{Gestures, Keyboard, Pointer};
+pub use menus::{RadialMenu, Switching};
+pub use protocols::Protocols;
+pub use windows::{Arrivals, Departures, Snap};
 
 use crate::{
     App, Config,
@@ -61,14 +46,10 @@ use crate::{
     decoration::Textures,
     desktops::Strip,
     model::{self, Model, Rect, WindowId},
-    motion::Tween,
     overlay::Overlay,
-    popups::PopupGrab,
     programs::Programs,
     shortcuts::Ending,
-    snapshot::{Grabber, Snapshot},
-    switcher::Switcher,
-    windows::{Leaving, Managed, Preview, rect_of},
+    windows::{Managed, rect_of},
     wobble::Jelly,
 };
 
@@ -80,13 +61,6 @@ pub struct State {
     pub loop_signal: LoopSignal,
     /// CLOCK_MONOTONIC, which frame callbacks and presentation times use.
     pub clock: Clock<Monotonic>,
-    /// The motions' time while a test holds it (`Headless::hold_clock`):
-    /// it moves only as the test steps it, so that a motion is seen at
-    /// the same moments however slowly a loaded machine draws.
-    pub held_clock: Option<Duration>,
-    /// How far ahead of `clock` the motions' time is since a test let it
-    /// go, having stepped it faster than it ran: it never goes back.
-    pub clock_ahead: Duration,
     pub socket_path: PathBuf,
     pub runtime_dir: PathBuf,
     pub config: Config,
@@ -95,32 +69,8 @@ pub struct State {
     /// (docs/design/windows.md §13).
     pub nested: bool,
 
-    pub compositor_state: CompositorState,
-    pub xdg_shell_state: XdgShellState,
-    pub xdg_decoration_state: XdgDecorationState,
-    /// KDE's server decoration protocol, which GTK 3 clients use, having
-    /// no xdg-decoration (#716).
-    pub kde_decoration_state: KdeDecorationState,
-    pub layer_shell_state: WlrLayerShellState,
-    pub shm_state: ShmState,
-    pub dmabuf_state: DmabufState,
-    /// The backend's linux-dmabuf global, made once it knows its renderer.
-    pub dmabuf_global: Option<DmabufGlobal>,
-    pub output_manager_state: OutputManagerState,
-    pub seat_state: SeatState<State>,
-    pub data_device_state: DataDeviceState,
-    pub primary_selection_state: PrimarySelectionState,
-    pub activation_state: XdgActivationState,
-    pub fractional_scale_state: FractionalScaleManagerState,
-    pub presentation_state: PresentationState,
-    pub xwayland_shell_state: XWaylandShellState,
-    _viewporter: ViewporterState,
-    _cursor_shape: CursorShapeManagerState,
-    _pointer_gestures: PointerGesturesState,
-    _relative_pointer: RelativePointerManagerState,
-    /// Clients that take every key, the desktop's shortcuts with them
-    /// (the Settings while they record one, 6.8).
-    pub shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
+    /// The Wayland protocols' states, which smithay's handlers ask for.
+    pub protocols: Protocols,
 
     pub seat: Seat<State>,
     pub space: Space<Window>,
@@ -130,74 +80,19 @@ pub struct State {
     /// The mapped windows (and the minimised ones), by their id in the
     /// model, with their motions.
     pub windows: BTreeMap<WindowId, Managed>,
-    /// Toplevels whose first buffer has not come: mapped once it does.
-    pub unmapped: Vec<Window>,
-    /// Activation tokens handed out, when, and whether they may focus a
-    /// window (made from the user's input, or by the desktop).
-    pub activation_tokens: HashMap<String, (Duration, bool)>,
-    /// The user started a program through the desktop then: its window
-    /// takes the focus.
-    pub spawned_at: Option<Duration>,
     /// Commits of the windows' surfaces so far, for tests: none at rest.
     pub window_commits: u64,
     /// The day's performance: what the loop counts, the recorder (#655).
     pub perf: crate::perf::Perf,
-    /// Windows not mapped yet that asked for the focus with a valid token.
-    pub activate_on_map: Vec<WlSurface>,
     /// xdg-foreign's handles and the dialogs made through them (#595).
     pub foreign: crate::foreign::Foreign,
-    /// The last click on a tray icon, while its application may still
-    /// focus a window with it (5.14b).
-    pub tray_click: Option<crate::tray::TrayClick>,
-    /// Windows not mapped yet that asked to open maximised or fullscreen
-    /// (§10): they show so from their first frame.
-    pub opens_as: Vec<(WlSurface, model::Mode)>,
     /// What draws windows' frames, and their pictures as they leave.
     pub textures: Textures,
-    pub grabber: Grabber,
-    /// Windows' pictures taken as their surfaces went.
-    pub pictures: HashMap<WindowId, Snapshot>,
-    pub leaving: Vec<Leaving>,
-    /// The windows' rains so far, for their seeds (#432).
-    pub rain_seeds: u32,
-    /// Where a dragged window would snap, and the one fading out.
-    pub preview: Option<Preview>,
-    pub preview_out: Option<(Rect, Tween)>,
-    pub preview_ids: [Id; 9],
-    /// The handle shown on the seam of a pair near the pointer,
-    /// fading like a grip (§8).
-    pub seam_handle: Option<(model::Seam, crate::windows::Grip)>,
-    pub seam_handle_id: Id,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
-    /// The pointer and the overview's hot corners (#727).
-    pub hot_corner: crate::hot_corner::HotCorner,
-    /// The user has moved the pointer (a device's motion; in a headless
-    /// compositor, from its start: tests put it where they want): screens
-    /// lit after no longer bring it to the primary screen's middle.
-    pub pointer_placed: bool,
     pub wobble: Option<(WindowId, Jelly)>,
-    /// The cursor over a window's frame or grip, or during a grab: it
-    /// wins over the client's.
-    pub frame_cursor: Option<CursorIcon>,
-    /// The last press on a grip, for a double click.
-    pub last_grip_press: Option<(WindowId, Duration)>,
-    /// Buttons whose press the desktop kept: their release too.
-    pub kept_buttons: HashSet<u32>,
-    pub popup_grab: Option<PopupGrab>,
-    /// A frame is asked for at this time, after a pause.
-    pub wake: Option<Duration>,
-    /// When the last frame was drawn: motions are judged as of then (see
-    /// `tick`). Set while drawing, which borrows the state shared.
-    pub drawn_at: std::cell::Cell<Option<Duration>>,
-    /// What the pointer shows, as the client under it sets it.
-    pub cursor: CursorImageStatus,
-    pub cursor_images: CursorImages,
     /// Something changed on screen since the last frame.
     pub redraw: bool,
-    /// Nothing moved as of the last frame drawn, as `tick` judged it then:
-    /// that frame shows every motion at its end (the tests' `at_rest`).
-    pub still: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
     /// The bar's tiles, and a window moved over them (8.5 B).
@@ -227,23 +122,8 @@ pub struct State {
     /// The strokes, the arrows and the laser drawn on the screens
     /// (docs/design/ink.md).
     pub ink: crate::ink::Ink,
-    /// The screen whose strip follows three fingers on the touchpad.
-    pub swiping: Option<Output>,
-    /// The touchpad's swipe, and whether the desktop takes it (6.13).
-    pub hold: crate::gestures::Hold,
-    /// Swipes given to clients so far, and their moves, for tests.
-    pub swipes_given: (u64, u64),
-    /// Alt+Tab, while it is held, and its panel vanishing (§11).
-    pub switcher: Option<Switcher>,
-    pub switcher_out: Option<(Switcher, Tween)>,
-    /// A window's radial menu while it is open, and as it goes (#723);
-    /// the right press that may open it; what draws it.
-    pub radial: Option<crate::radial::Radial>,
     /// The actions palette's target and what draws it (#736).
     pub actions: crate::actions::Palette,
-    pub radial_out: Option<crate::radial::Going>,
-    pub radial_press: Option<crate::radial::Press>,
-    pub radial_paint: crate::radial_draw::RadialPaint,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
@@ -257,18 +137,12 @@ pub struct State {
     pub overview_paint: crate::overview_draw::OverviewPaint,
     /// The windows' states last told the shell (#723).
     pub told_window_states: Option<hocus_link::WindowStates>,
-    /// The switcher's key held down, stepping at the keyboard's repeat
-    /// delay and rate: its keycode and its timer (§11).
-    pub switcher_repeat: Option<(Keycode, RegistrationToken)>,
     /// A level key held down (volume, brightness), and the presses kept
     /// for the shell while it is away.
     pub levels: crate::levels::Levels,
     /// What draws the switcher, the desktops' dots and their text.
     pub overlay: Overlay,
 
-    /// The X11 window manager once XWayland is ready, and its display.
-    pub xwm: Option<X11Wm>,
-    pub xdisplay: Option<u32>,
     pub programs: Programs,
     /// The session's start-up applications, once the bar shows (6.15).
     pub autostart: crate::session::autostart::Autostart,
@@ -288,25 +162,8 @@ pub struct State {
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
     pub idle: crate::idle::Idleness,
-    /// The render node of the GPU the compositor draws with, which the
-    /// shell draws with too; `None` without one.
-    pub gpu: Option<crate::backend::DevId>,
-    /// The renderer can blur what is behind the bars (GLES).
-    pub blur: bool,
-    /// The glass behind each bar, as last blurred.
-    pub panes: std::cell::RefCell<crate::glass::Panes>,
-    /// The screens' wallpapers (6.3), drawn on a thread of their own.
-    pub backgrounds: std::cell::RefCell<crate::wallpaper::Backgrounds>,
-    /// The screens' wallpapers that move (#433).
-    pub walls: std::cell::RefCell<crate::moving::Walls>,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
-    /// Keys whose press was a shortcut: their release is kept from the
-    /// clients too.
-    pub kept_keys: HashSet<Keycode>,
-    /// The keymap's layouts' XKB codes (`fr`, `fr(bepo)`), by group, for
-    /// the bar's row; empty when XKB refused them and took its defaults.
-    pub layout_codes: Vec<String>,
     /// The lock screen (7.1, docs/design/lock.md).
     pub lock: crate::lock::Lock,
     /// Locking on idle and before sleep, the curtain and the screens off
@@ -316,6 +173,29 @@ pub struct State {
     pub leave: crate::leave::Leave,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
+    /// Windows on their way in: before their first buffer, and whether
+    /// they may take the focus as they come.
+    pub arrivals: Arrivals,
+    /// The windows going: their pictures, taken as their surfaces went.
+    pub departures: Departures,
+    /// Where a dragged window would snap, and the seam's handle.
+    pub snap: Snap,
+    /// The pointer: what it shows, its grabs, the buttons kept.
+    pub pointer: Pointer,
+    /// The keyboard: the keys kept from clients, the layouts' codes.
+    pub keyboard: Keyboard,
+    /// The touchpad's swipes.
+    pub gestures: Gestures,
+    /// Alt+Tab, while it is held, and its panel vanishing (§11).
+    pub switching: Switching,
+    /// A window's radial menu while it is open, and as it goes (#723).
+    pub radial_menu: RadialMenu,
+    /// The GPU, the glass behind the bars and the wallpapers.
+    pub graphics: Graphics,
+    /// The motions' time, and the frames drawn by it.
+    pub frames: Frames,
+    /// The X11 window manager once XWayland is ready, and its display.
+    pub xwayland: XWayland,
 }
 
 impl State {
@@ -393,85 +273,30 @@ impl State {
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
         let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
         Self::foreign_globals(dh);
+        let protocols = Protocols::new(dh, seat_state, primary_selection_state);
 
         Ok(Self {
             display_handle: dh.clone(),
             loop_handle,
             loop_signal,
             clock: Clock::new(),
-            held_clock: None,
-            clock_ahead: Duration::ZERO,
             socket_path,
             runtime_dir,
             config,
             nested,
-            // Version 6: a surface is told the scale to draw at
-            // (`preferred_buffer_scale`), the largest of the screens it is
-            // on (docs/design/windows.md §12, #419).
-            compositor_state: CompositorState::new_v6::<Self>(dh),
-            xdg_shell_state: XdgShellState::new::<Self>(dh),
-            xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
-            kde_decoration_state: KdeDecorationState::new::<Self>(
-                dh,
-                smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode::Server,
-            ),
-            layer_shell_state: WlrLayerShellState::new::<Self>(dh),
-            shm_state: ShmState::new::<Self>(dh, vec![]),
-            dmabuf_state: DmabufState::new(),
-            dmabuf_global: None,
-            output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(dh),
-            seat_state,
-            data_device_state: DataDeviceState::new::<Self>(dh),
-            primary_selection_state,
-            activation_state: XdgActivationState::new::<Self>(dh),
-            fractional_scale_state: FractionalScaleManagerState::new::<Self>(dh),
-            // CLOCK_MONOTONIC, as the frame times.
-            presentation_state: PresentationState::new::<Self>(dh, 1),
-            xwayland_shell_state: XWaylandShellState::new::<Self>(dh),
-            _viewporter: ViewporterState::new::<Self>(dh),
-            _cursor_shape: CursorShapeManagerState::new::<Self>(dh),
-            _pointer_gestures: PointerGesturesState::new::<Self>(dh),
-            _relative_pointer: RelativePointerManagerState::new::<Self>(dh),
-            shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<Self>(dh),
+            protocols,
             seat,
             space: Space::default(),
             popups: PopupManager::default(),
             model: Model::default(),
             windows: BTreeMap::new(),
-            unmapped: Vec::new(),
-            activation_tokens: HashMap::new(),
-            spawned_at: None,
             window_commits: 0,
             perf: crate::perf::Perf::default(),
-            activate_on_map: Vec::new(),
             foreign: crate::foreign::Foreign::default(),
-            tray_click: None,
-            opens_as: Vec::new(),
             textures: Textures::default(),
-            grabber: Grabber::default(),
-            pictures: HashMap::new(),
-            leaving: Vec::new(),
-            rain_seeds: 0,
-            preview: None,
-            preview_out: None,
-            switcher_repeat: None,
             levels: crate::levels::Levels::default(),
-            preview_ids: std::array::from_fn(|_| Id::new()),
-            seam_handle: None,
-            seam_handle_id: Id::new(),
             moving: None,
-            hot_corner: crate::hot_corner::HotCorner::default(),
-            pointer_placed: false,
             wobble: None,
-            frame_cursor: None,
-            last_grip_press: None,
-            kept_buttons: HashSet::new(),
-            popup_grab: None,
-            wake: None,
-            drawn_at: std::cell::Cell::new(None),
-            still: false,
-            cursor: CursorImageStatus::default_named(),
-            cursor_images,
             redraw: true,
             strips: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
@@ -487,16 +312,7 @@ impl State {
             auth: crate::auth::Auth::default(),
             record: crate::record::Recording::default(),
             ink: crate::ink::Ink::default(),
-            swiping: None,
-            hold: crate::gestures::Hold::default(),
-            swipes_given: (0, 0),
-            switcher: None,
-            switcher_out: None,
-            radial: None,
             actions: crate::actions::Palette::default(),
-            radial_out: None,
-            radial_press: None,
-            radial_paint: crate::radial_draw::RadialPaint::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             magnifier: crate::magnifier::Magnifier::default(),
@@ -505,8 +321,6 @@ impl State {
             screen_reader: crate::screen_reader::ScreenReader::default(),
             told_window_states: None,
             overlay: Overlay::new(),
-            xwm: None,
-            xdisplay: None,
             programs: Programs::default(),
             autostart: crate::session::autostart::Autostart::default(),
             session_restore: crate::session::restore::Restore::default(),
@@ -517,18 +331,22 @@ impl State {
             screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
-            gpu: None,
-            blur: false,
-            panes: std::cell::RefCell::default(),
-            backgrounds: std::cell::RefCell::default(),
-            walls: std::cell::RefCell::default(),
             session: None,
-            kept_keys: HashSet::new(),
-            layout_codes,
             lock: crate::lock::Lock::new(dh),
             away: crate::away::Away::default(),
             leave: crate::leave::Leave::default(),
             ending: None,
+            xwayland: XWayland::default(),
+            frames: Frames::default(),
+            graphics: Graphics::default(),
+            radial_menu: RadialMenu::default(),
+            switching: Switching::default(),
+            gestures: Gestures::default(),
+            keyboard: Keyboard::new(layout_codes),
+            pointer: Pointer::new(cursor_images),
+            snap: Snap::default(),
+            departures: Departures::default(),
+            arrivals: Arrivals::default(),
         })
     }
 
@@ -578,7 +396,7 @@ impl State {
         self.windows
             .values()
             .map(|m| &m.window)
-            .chain(self.unmapped.iter())
+            .chain(self.arrivals.unmapped.iter())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
