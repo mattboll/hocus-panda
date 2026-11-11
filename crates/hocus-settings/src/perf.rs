@@ -17,7 +17,7 @@ use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
     lang::{Lang, w},
-    model::{Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Codec, Kind, RowGroup, SectionId, Setting, one},
 };
 
 /// The switch's row.
@@ -54,11 +54,7 @@ pub fn settings() -> &'static [Setting] {
                 &["performance", "cpu", "processor", "memory", "usage", "battery"],
             ),
             kind: Kind::Switch,
-            places: Places::One(Place {
-                key: &["perf", "record"],
-                codec: Codec::Bool,
-                default: Value::Bool(true),
-            }),
+            places: one(&["perf", "record"], Codec::Bool),
             needs: None,
         }]
     })
@@ -371,6 +367,7 @@ pub fn date_title(date: Date, today: Date, lang: Lang) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Places, Value};
     use hocus_perf::fixture;
 
     fn on() -> Date {

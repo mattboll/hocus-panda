@@ -15,7 +15,7 @@ use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOUCHPAD: RowGroup = RowGroup {
@@ -43,14 +43,6 @@ const PROFILES: &[&str] = &["adaptive", "flat"];
 /// A speed's slider: tenths from -1 to 1.
 const SPEED: Kind = Kind::Speed { min: -10, max: 10 };
 const TENTHS: Codec = Codec::Tenths { min: -10, max: 10 };
-
-fn place(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
@@ -103,7 +95,7 @@ pub fn settings() -> &'static [Setting] {
                     &["speed", "sensitivity", "touchpad", "trackpad"],
                 ),
                 SPEED,
-                place(&["touchpad", "speed"], TENTHS, Value::Int(0)),
+                one(&["touchpad", "speed"], TENTHS),
                 None,
             ),
             setting(
@@ -119,7 +111,7 @@ pub fn settings() -> &'static [Setting] {
                     &["tap", "touchpad", "click"],
                 ),
                 Kind::Switch,
-                place(&["touchpad", "tap-to-click"], Codec::Bool, Value::Bool(true)),
+                one(&["touchpad", "tap-to-click"], Codec::Bool),
                 None,
             ),
             setting(
@@ -135,7 +127,7 @@ pub fn settings() -> &'static [Setting] {
                     &["drag", "tap", "touchpad"],
                 ),
                 Kind::Switch,
-                place(&["touchpad", "tap-and-drag"], Codec::Bool, Value::Bool(true)),
+                one(&["touchpad", "tap-and-drag"], Codec::Bool),
                 Some("touchpad.tap-to-click"),
             ),
             setting(
@@ -156,11 +148,7 @@ pub fn settings() -> &'static [Setting] {
                 ]),
                 // Without the key, the touchpad's own (libinput's default
                 // for it): the window shows the device's.
-                place(
-                    &["touchpad", "right-click"],
-                    Codec::Word(CLICKS),
-                    Value::Word("two-fingers"),
-                ),
+                Places::One(Place::unset(&["touchpad", "right-click"], Codec::Word(CLICKS), Value::Word("two-fingers"))),
                 None,
             ),
             setting(
@@ -176,11 +164,7 @@ pub fn settings() -> &'static [Setting] {
                     &["palm", "typing", "keyboard", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "disable-while-typing"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "disable-while-typing"], Codec::Bool),
                 None,
             ),
             setting(
@@ -193,11 +177,7 @@ pub fn settings() -> &'static [Setting] {
                     &["natural", "scroll", "reverse", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "natural-scroll"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["touchpad", "natural-scroll"], Codec::Bool),
                 None,
             ),
             setting(
@@ -213,11 +193,7 @@ pub fn settings() -> &'static [Setting] {
                     word("À deux doigts", "With two fingers", "two-fingers"),
                     word("Sur le bord droit", "On the right edge", "edge"),
                 ]),
-                place(
-                    &["touchpad", "scroll"],
-                    Codec::Word(SCROLLS),
-                    Value::Word("two-fingers"),
-                ),
+                one(&["touchpad", "scroll"], Codec::Word(SCROLLS)),
                 None,
             ),
             setting(
@@ -236,11 +212,7 @@ pub fn settings() -> &'static [Setting] {
                     &["mouse", "disable", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "off-with-mouse"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["touchpad", "off-with-mouse"], Codec::Bool),
                 None,
             ),
             setting(
@@ -250,7 +222,7 @@ pub fn settings() -> &'static [Setting] {
                 None,
                 speed_words,
                 SPEED,
-                place(&["pointer", "speed"], TENTHS, Value::Int(0)),
+                one(&["pointer", "speed"], TENTHS),
                 None,
             ),
             setting(
@@ -269,11 +241,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Adaptative", "Adaptive", "adaptive"),
                     word("Aucune", "None", "flat"),
                 ]),
-                place(
-                    &["pointer", "acceleration"],
-                    Codec::Word(PROFILES),
-                    Value::Word("adaptive"),
-                ),
+                one(&["pointer", "acceleration"], Codec::Word(PROFILES)),
                 None,
             ),
             setting(
@@ -289,11 +257,7 @@ pub fn settings() -> &'static [Setting] {
                     &["natural", "scroll", "wheel", "reverse", "mouse"],
                 ),
                 Kind::Switch,
-                place(
-                    &["pointer", "natural-scroll"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["pointer", "natural-scroll"], Codec::Bool),
                 None,
             ),
             setting(
@@ -309,7 +273,7 @@ pub fn settings() -> &'static [Setting] {
                     &["left-handed", "buttons", "swap", "mouse"],
                 ),
                 Kind::Switch,
-                place(&["pointer", "left-handed"], Codec::Bool, Value::Bool(false)),
+                one(&["pointer", "left-handed"], Codec::Bool),
                 None,
             ),
             setting(
@@ -329,11 +293,7 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "swipe-desktops"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "swipe-desktops"], Codec::Bool),
                 None,
             ),
             setting(
@@ -367,11 +327,7 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "swipe-launcher"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "swipe-launcher"], Codec::Bool),
                 None,
             ),
             // Not a setting: what the desktop never takes.

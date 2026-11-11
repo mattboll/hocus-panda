@@ -18,7 +18,7 @@ use std::{
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const CAPTURES: RowGroup = RowGroup {
@@ -288,14 +288,6 @@ pub fn items_said(n: u32, lang: Lang) -> String {
     }
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
         label: w(fr, en),
@@ -344,7 +336,7 @@ pub fn settings() -> &'static [Setting] {
                     &["screenshot", "print", "image", "folder", "location"],
                 ),
                 Kind::Text,
-                one(&["capture", "folder"], Codec::Text, Value::Text(String::new())),
+                one(&["capture", "folder"], Codec::Text),
                 None,
             ),
             setting(
@@ -360,11 +352,7 @@ pub fn settings() -> &'static [Setting] {
                     word("PNG", "PNG", "png"),
                     word("JPEG", "JPEG", "jpeg"),
                 ]),
-                one(
-                    &["capture", "format"],
-                    Codec::Word(&["png", "jpeg"]),
-                    Value::Word("png"),
-                ),
+                one(&["capture", "format"], Codec::Word(&["png", "jpeg"])),
                 None,
             ),
             setting(
@@ -380,7 +368,7 @@ pub fn settings() -> &'static [Setting] {
                     &["sound", "shutter", "click", "screenshot"],
                 ),
                 Kind::Switch,
-                one(&["capture", "sound"], Codec::Bool, Value::Bool(true)),
+                one(&["capture", "sound"], Codec::Bool),
                 None,
             ),
             setting(
@@ -393,11 +381,7 @@ pub fn settings() -> &'static [Setting] {
                     &["recording", "video", "folder", "location"],
                 ),
                 Kind::Text,
-                one(
-                    &["recording", "folder"],
-                    Codec::Text,
-                    Value::Text(String::new()),
-                ),
+                one(&["recording", "folder"], Codec::Text),
                 None,
             ),
             setting(
@@ -413,11 +397,7 @@ pub fn settings() -> &'static [Setting] {
                     word("MP4", "MP4", "mp4"),
                     word("WebM", "WebM", "webm"),
                 ]),
-                one(
-                    &["recording", "format"],
-                    Codec::Word(&["mp4", "webm"]),
-                    Value::Word("mp4"),
-                ),
+                one(&["recording", "format"], Codec::Word(&["mp4", "webm"])),
                 None,
             ),
             setting(
@@ -433,7 +413,7 @@ pub fn settings() -> &'static [Setting] {
                     &["clipboard", "history", "super+v", "copy"],
                 ),
                 Kind::Switch,
-                one(&["clipboard", "history"], Codec::Bool, Value::Bool(true)),
+                one(&["clipboard", "history"], Codec::Bool),
                 None,
             ),
             setting(
@@ -458,11 +438,7 @@ pub fn settings() -> &'static [Setting] {
                     word("7 jours", "7 days", "7d"),
                     word("30 jours", "30 days", "30d"),
                 ]),
-                one(
-                    &["clipboard", "keep"],
-                    Codec::Word(&["session", "1d", "7d", "30d"]),
-                    Value::Word("30d"),
-                ),
+                one(&["clipboard", "keep"], Codec::Word(&["session", "1d", "7d", "30d"])),
                 Some(HISTORY),
             ),
             setting(
@@ -478,7 +454,7 @@ pub fn settings() -> &'static [Setting] {
                     &["passwords", "secret", "keepassxc", "bitwarden", "clipboard"],
                 ),
                 Kind::Switch,
-                one(&["clipboard", "skip-secrets"], Codec::Bool, Value::Bool(true)),
+                one(&["clipboard", "skip-secrets"], Codec::Bool),
                 Some(HISTORY),
             ),
             setting(
@@ -491,7 +467,7 @@ pub fn settings() -> &'static [Setting] {
                     &["ignore", "passwords", "application"],
                 ),
                 Kind::Text,
-                one(&["clipboard", "ignore"], Codec::Texts, Value::List(Vec::new())),
+                one(&["clipboard", "ignore"], Codec::Texts),
                 Some(HISTORY),
             ),
         ]

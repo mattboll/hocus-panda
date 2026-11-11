@@ -27,7 +27,7 @@ use std::{
 
 use crate::{
     lang::{Lang, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 /// A mode: width, height (pixels), refresh (mHz).
@@ -1040,13 +1040,6 @@ fn hours(list: &'static [&'static str]) -> Kind {
     )
 }
 
-fn night(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
 /// The sets of screens known (windows.md §12).
 pub const SETS: &str = "screens.sets";
 
@@ -1186,7 +1179,7 @@ pub fn settings() -> &'static [Setting] {
                     &["night light", "blue light", "warm", "evening", "eyes"],
                 ),
                 kind: Kind::Switch,
-                places: night(&["night-light", "enabled"], Codec::Bool, Value::Bool(false)),
+                places: one(&["night-light", "enabled"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -1203,11 +1196,7 @@ pub fn settings() -> &'static [Setting] {
                     &["night light", "schedule", "time", "evening"],
                 ),
                 kind: hours(EVENINGS),
-                places: night(
-                    &["night-light", "from"],
-                    Codec::Word(EVENINGS),
-                    Value::Word("21:00"),
-                ),
+                places: one(&["night-light", "from"], Codec::Word(EVENINGS)),
                 needs: Some(NIGHT_LIGHT),
             },
             Setting {
@@ -1224,11 +1213,7 @@ pub fn settings() -> &'static [Setting] {
                     &["night light", "schedule", "time", "morning"],
                 ),
                 kind: hours(MORNINGS),
-                places: night(
-                    &["night-light", "to"],
-                    Codec::Word(MORNINGS),
-                    Value::Word("07:00"),
-                ),
+                places: one(&["night-light", "to"], Codec::Word(MORNINGS)),
                 needs: Some(NIGHT_LIGHT),
             },
             Setting {
@@ -1250,13 +1235,12 @@ pub fn settings() -> &'static [Setting] {
                     step: 100,
                     unit: " K",
                 },
-                places: night(
+                places: one(
                     &["night-light", "temperature"],
                     Codec::Int {
                         min: 1500,
                         max: 6500,
                     },
-                    Value::Int(4000),
                 ),
                 needs: Some(NIGHT_LIGHT),
             },

@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use crate::{
     lang::w,
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 /// The magnifier's rows (#424).
@@ -54,14 +54,6 @@ fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     }
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
 /// The page's settings, in its order.
 // Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
@@ -82,7 +74,7 @@ pub fn settings() -> &'static [Setting] {
                     &["magnifier", "zoom", "magnify", "low vision", "accessibility"],
                 ),
                 kind: Kind::Switch,
-                places: one(&["magnifier", "enabled"], Codec::Bool, Value::Bool(false)),
+                places: one(&["magnifier", "enabled"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -96,11 +88,7 @@ pub fn settings() -> &'static [Setting] {
                 )),
                 keywords: (&["loupe", "grossissement"], &["magnifier", "magnification"]),
                 kind: Kind::Menu(ZOOMS.iter().map(|&z| zoom(z)).collect()),
-                places: one(
-                    &["magnifier", "zoom"],
-                    Codec::Hundredths { min: 100, max: 1600 },
-                    Value::Int(200),
-                ),
+                places: one(&["magnifier", "zoom"], Codec::Hundredths { min: 100, max: 1600 }),
                 needs: None,
             },
             Setting {
@@ -118,11 +106,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Au centre", "Centred", "centre"),
                     word("Proportionnellement", "Proportionally", "proportional"),
                 ]),
-                places: one(
-                    &["magnifier", "follow-pointer"],
-                    Codec::Word(FOLLOWS),
-                    Value::Word("edge"),
-                ),
+                places: one(&["magnifier", "follow-pointer"], Codec::Word(FOLLOWS)),
                 needs: None,
             },
             Setting {
@@ -136,11 +120,7 @@ pub fn settings() -> &'static [Setting] {
                 )),
                 keywords: (&["loupe", "focus", "curseur"], &["magnifier", "focus", "caret"]),
                 kind: Kind::Switch,
-                places: one(
-                    &["magnifier", "follow-keyboard"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                places: one(&["magnifier", "follow-keyboard"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -154,7 +134,7 @@ pub fn settings() -> &'static [Setting] {
                 )),
                 keywords: (&["loupe", "flou", "pixels"], &["magnifier", "smooth", "pixels"]),
                 kind: Kind::Switch,
-                places: one(&["magnifier", "smooth"], Codec::Bool, Value::Bool(true)),
+                places: one(&["magnifier", "smooth"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -171,11 +151,7 @@ pub fn settings() -> &'static [Setting] {
                     &["contrast", "low vision", "accessibility"],
                 ),
                 kind: Kind::Switch,
-                places: one(
-                    &["appearance", "high-contrast"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                places: one(&["appearance", "high-contrast"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -192,11 +168,7 @@ pub fn settings() -> &'static [Setting] {
                     &["glass", "blur", "opacity", "transparency"],
                 ),
                 kind: Kind::Switch,
-                places: one(
-                    &["appearance", "reduce-transparency"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                places: one(&["appearance", "reduce-transparency"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -213,11 +185,7 @@ pub fn settings() -> &'static [Setting] {
                     &["animation", "motion", "wobbly", "reduce motion"],
                 ),
                 kind: Kind::Switch,
-                places: one(
-                    &["appearance", "reduced-motion"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                places: one(&["appearance", "reduced-motion"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -255,11 +223,7 @@ pub fn settings() -> &'static [Setting] {
                     &["screen reader", "orca", "blind", "speech", "accessibility"],
                 ),
                 kind: Kind::Switch,
-                places: one(
-                    &["accessibility", "screen-reader"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                places: one(&["accessibility", "screen-reader"], Codec::Bool),
                 needs: None,
             },
             Setting {

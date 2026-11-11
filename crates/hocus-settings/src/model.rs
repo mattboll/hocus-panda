@@ -655,6 +655,20 @@ impl Codec {
         }
     }
 
+    /// A value this codec writes, for a key with no default to read.
+    fn neutral(self) -> Value {
+        match self {
+            Self::Bool => Value::Bool(false),
+            Self::Int { min, .. } | Self::Tenths { min, .. } | Self::Hundredths { min, .. } => {
+                Value::Int(min)
+            }
+            Self::IdleSeconds | Self::Delay => Value::Seconds(None),
+            Self::Word(words) | Self::XkbOption(words) => Value::Word(words.first().unwrap_or(&"")),
+            Self::Text | Self::Colour => Value::Text(String::new()),
+            Self::Chords | Self::Texts => Value::List(Vec::new()),
+        }
+    }
+
     /// `value` as the file says it; `None` when this codec cannot say it.
     pub fn write(self, value: &Value) -> Option<toml_edit::Value> {
         Some(match (self, value) {
@@ -728,6 +742,34 @@ pub struct Place {
 }
 
 impl Place {
+    /// The key at `key`, its default the one the configuration's defaults
+    /// list (`hocus_config::defaults`), as the compositor's.
+    pub fn new(key: &'static [&'static str], codec: Codec) -> Self {
+        let default = hocus_config::defaults::value(key)
+            .and_then(|value| codec.read(value))
+            .unwrap_or_else(|| {
+                // A test walks every row: never in a build that passed it.
+                tracing::error!(key = %key.join("."), "no default for this key");
+                codec.neutral()
+            });
+        Self {
+            key,
+            codec,
+            default,
+        }
+    }
+
+    /// A key the file leaves unset by default, the system's value applying
+    /// (`hocus_config::defaults::UNSET`): `shown` is what its row shows
+    /// then.
+    pub fn unset(key: &'static [&'static str], codec: Codec, shown: Value) -> Self {
+        Self {
+            key,
+            codec,
+            default: shown,
+        }
+    }
+
     /// `[power.battery] suspend-after`, as the file shows it.
     pub fn shown(&self) -> String {
         match self.key.split_last() {
@@ -741,6 +783,11 @@ impl Place {
     pub fn dotted(&self) -> String {
         self.key.join(".")
     }
+}
+
+/// The setting with one value at `key`, its default the configuration's.
+pub fn one(key: &'static [&'static str], codec: Codec) -> Places {
+    Places::One(Place::new(key, codec))
 }
 
 /// Where a setting is written.
@@ -1183,6 +1230,37 @@ mod tests {
         let written = |n| codec.write(&Value::Int(n)).map(|v| v.to_string());
         assert_eq!(written(110).as_deref(), Some("1.1"));
         assert_eq!(written(100).as_deref(), Some("1.0"));
+    }
+
+    /// Every row's key is one of the configuration's, with the default the
+    /// compositor reads (`hocus_config::defaults`), its codec reading it;
+    /// a key unset by default shows the system's. A page's own keys (a
+    /// screen's, by its name) are its code's.
+    #[test]
+    fn every_row_has_the_configuration_s_key_and_default() {
+        use hocus_config::defaults;
+        let mut rows = 0;
+        for setting in all_settings() {
+            if matches!(setting.places, Places::Page(_)) {
+                continue;
+            }
+            for place in setting.places.all() {
+                rows += 1;
+                let key = place.dotted();
+                assert!(defaults::known(place.key), "{}: {key} unknown", setting.id);
+                if defaults::UNSET.contains(&place.key) {
+                    continue;
+                }
+                let shipped = defaults::value(place.key).and_then(|v| place.codec.read(v));
+                assert_eq!(
+                    shipped.as_ref(),
+                    Some(&place.default),
+                    "{}: {key}'s default",
+                    setting.id
+                );
+            }
+        }
+        assert!(rows > 100, "{rows} rows");
     }
 
     #[test]

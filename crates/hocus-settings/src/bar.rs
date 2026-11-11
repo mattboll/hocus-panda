@@ -17,7 +17,7 @@ use toml_edit::{DocumentMut, Item};
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Outside, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const PLACE: RowGroup = RowGroup {
@@ -249,14 +249,6 @@ fn fonts() -> &'static [&'static str] {
     })
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
         label: w(fr, en),
@@ -280,7 +272,7 @@ fn switch(
         line: Some(line),
         keywords,
         kind: Kind::Switch,
-        places: one(key, Codec::Bool, Value::Bool(true)),
+        places: one(key, Codec::Bool),
         needs: None,
     }
 }
@@ -316,7 +308,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Droite", "Right", "right"),
                     word("Gauche", "Left", "left"),
                 ]),
-                places: one(&["panel", "side"], Codec::Word(SIDES), Value::Word("right")),
+                places: one(&["panel", "side"], Codec::Word(SIDES)),
                 needs: None,
             },
             Setting {
@@ -333,11 +325,7 @@ pub fn settings() -> &'static [Setting] {
                     word("L’écran principal", "The primary screen", "primary"),
                     word("Tous les écrans", "Every screen", "all"),
                 ]),
-                places: one(
-                    &["panel", "screens"],
-                    Codec::Word(SCREENS_WORDS),
-                    Value::Word("primary"),
-                ),
+                places: one(&["panel", "screens"], Codec::Word(SCREENS_WORDS)),
                 needs: None,
             },
             switch(
@@ -415,11 +403,7 @@ pub fn settings() -> &'static [Setting] {
                 )),
                 keywords: (&["secondes", "horloge", "heure"], &["seconds", "clock"]),
                 kind: Kind::Switch,
-                places: one(
-                    &["panel", "clock", "seconds"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                places: one(&["panel", "clock", "seconds"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -449,11 +433,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Néon", "Neon", "neon"),
                     word("Sans mouvement", "No motion", "none"),
                 ]),
-                places: one(
-                    &["panel", "clock", "transition"],
-                    Codec::Word(TRANSITIONS),
-                    Value::Word("odometer"),
-                ),
+                places: one(&["panel", "clock", "transition"], Codec::Word(TRANSITIONS)),
                 needs: None,
             },
             Setting {
@@ -470,11 +450,7 @@ pub fn settings() -> &'static [Setting] {
                     &["font", "typeface", "clock"],
                 ),
                 kind: Kind::Menu(fonts),
-                places: one(
-                    &["panel", "clock", "font"],
-                    Codec::Text,
-                    Value::Text(BUNDLED.to_owned()),
-                ),
+                places: one(&["panel", "clock", "font"], Codec::Text),
                 needs: None,
             },
             Setting {
@@ -496,11 +472,7 @@ pub fn settings() -> &'static [Setting] {
                         })
                         .collect(),
                 ),
-                places: one(
-                    &["panel", "clock", "color"],
-                    Codec::Colour,
-                    Value::Text(COLOURS[0].0.to_owned()),
-                ),
+                places: one(&["panel", "clock", "color"], Codec::Colour),
                 needs: None,
             },
         ]
