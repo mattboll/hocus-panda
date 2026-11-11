@@ -21,6 +21,7 @@ pub mod list;
 pub mod store;
 pub mod view;
 
+use hocus_words::shell::actions as txt;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Instant,
@@ -57,8 +58,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn title(self) -> &'static str {
@@ -66,25 +71,22 @@ impl Words {
     }
 
     pub fn placeholder(self) -> &'static str {
-        self.pick(
-            "Une action : fenêtre, bureau, réglage, session…",
-            "An action: window, desktop, setting, session…",
-        )
+        self.pick(txt::AN_ACTION_WINDOW_DESKTOP_SETTING_SESSION)
     }
 
     pub fn step_placeholder(self, step: Step) -> &'static str {
         match step {
-            Step::Desktop => self.pick("numéro ou nom du bureau", "number or name of the desktop"),
-            Step::Agent => self.pick("nom de l’agent", "name of the agent"),
+            Step::Desktop => self.pick(txt::NUMBER_OR_NAME_OF_THE_DESKTOP),
+            Step::Agent => self.pick(txt::NAME_OF_THE_AGENT),
         }
     }
 
     pub fn escape(self) -> &'static str {
-        self.pick("Échap", "Esc")
+        self.pick(txt::ESC)
     }
 
     pub fn search(self) -> &'static str {
-        self.pick("Chercher une action", "Search for an action")
+        self.pick(txt::SEARCH_FOR_AN_ACTION)
     }
 
     pub fn keyword(self, word: &str) -> String {
@@ -97,8 +99,8 @@ impl Words {
 
     pub fn state(self, on: bool) -> &'static str {
         match on {
-            true => self.pick("activé", "on"),
-            false => self.pick("désactivé", "off"),
+            true => self.pick(txt::ON),
+            false => self.pick(txt::OFF),
         }
     }
 
@@ -134,32 +136,18 @@ impl Words {
 
     pub fn elsewhere_line(self, to: Elsewhere) -> &'static str {
         match to {
-            Elsewhere::Launcher => self.pick(
-                "Applications, calcul, web",
-                "Applications, calculation, web",
-            ),
-            Elsewhere::Settings => self.pick("Réglages", "Settings"),
+            Elsewhere::Launcher => self.pick(txt::APPLICATIONS_CALCULATION_WEB),
+            Elsewhere::Settings => self.pick(txt::SETTINGS),
         }
     }
 
     /// The footer.
     pub fn footer(self, matched: usize, step: bool, empty: bool) -> String {
         if step {
-            return self
-                .pick(
-                    "Un chiffre choisit tout de suite · Retour arrière revient aux actions",
-                    "A digit picks at once · Backspace goes back to the actions",
-                )
-                .to_owned();
+            return self.pick(txt::A_DIGIT_PICKS_AT_ONCE_BACKSPACE).to_owned();
         }
-        let keys = self.pick(
-            "↑↓ choisir · Entrée lancer · Tab compléter",
-            "↑↓ choose · Enter runs · Tab completes",
-        );
-        let tie = self.pick(
-            "les récentes d’abord à score égal",
-            "the recent first on a tie",
-        );
+        let keys = self.pick(txt::CHOOSE_ENTER_RUNS_TAB_COMPLETES);
+        let tie = self.pick(txt::THE_RECENT_FIRST_ON_A_TIE);
         match (empty, matched) {
             (true, _) => format!("{matched} actions · {keys}"),
             (false, 0) => keys.to_owned(),

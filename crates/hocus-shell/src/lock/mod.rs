@@ -18,6 +18,7 @@ pub mod draw;
 pub mod view;
 pub mod wallpaper;
 
+use hocus_words::shell::lock as txt;
 use std::{collections::HashMap, time::Instant};
 
 use hocus_link::{LOCK_NAMESPACE, LockPhase, LockShown};
@@ -219,36 +220,37 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn password(self) -> &'static str {
-        self.pick("Mot de passe", "Password")
+        self.pick(txt::PASSWORD)
     }
 
     /// The arrow's name, for a screen reader (11, accessibility).
     pub fn unlock(self) -> &'static str {
-        self.pick("Déverrouiller", "Unlock")
+        self.pick(txt::UNLOCK)
     }
 
     pub fn caps(self) -> &'static str {
-        self.pick("Majuscules verrouillées", "Caps Lock is on")
+        self.pick(txt::CAPS_LOCK_IS_ON)
     }
 
     pub fn checking(self) -> &'static str {
-        self.pick("Vérification…", "Checking…")
+        self.pick(txt::CHECKING)
     }
 
     /// "Mot de passe incorrect.", with Caps Lock's sentence after it when
     /// it is on.
     pub fn wrong(self, caps: bool) -> String {
-        let wrong = self.pick("Mot de passe incorrect.", "Wrong password.");
+        let wrong = self.pick(txt::WRONG_PASSWORD);
         if caps {
-            format!(
-                "{wrong} {}",
-                self.pick("Les majuscules sont verrouillées.", "Caps Lock is on.")
-            )
+            format!("{wrong} {}", self.pick(txt::CAPS_LOCK_IS_ON_2))
         } else {
             wrong.to_owned()
         }

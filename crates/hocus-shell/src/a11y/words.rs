@@ -3,6 +3,7 @@
 
 use hocus_bluetooth::model::Row as BluetoothRow;
 use hocus_network::model::Link;
+use hocus_words::shell::a11y_words as txt;
 
 use crate::{
     clock::time::{Lang, Shown},
@@ -32,8 +33,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     /// `a`, `a et b`, `a, b et c`.
@@ -41,13 +46,13 @@ impl Words {
         match names {
             [] => String::new(),
             [one] => (*one).to_owned(),
-            [rest @ .., last] => format!("{} {} {last}", rest.join(", "), self.pick("et", "and")),
+            [rest @ .., last] => format!("{} {} {last}", rest.join(", "), self.pick(txt::AND)),
         }
     }
 
     /// A bar's window: "Barre — Écran du portable".
     pub fn bar(self, screen: &str) -> String {
-        format!("{} — {screen}", self.pick("Barre", "Bar"))
+        format!("{} — {screen}", self.pick(txt::BAR))
     }
 
     /// The time as said: "14 h 32" in French, "2:32 PM" or "14:32" else.
@@ -91,10 +96,10 @@ impl Words {
             (n, false) => parts.push(format!("{n} stuck")),
         }
         if to_see > 0 {
-            parts.push(format!("{to_see} {}", self.pick("à voir", "to see")));
+            parts.push(format!("{to_see} {}", self.pick(txt::TO_SEE)));
         }
-        parts.push(format!("{working} {}", self.pick("au travail", "working")));
-        let colon = self.pick(" :", ":");
+        parts.push(format!("{working} {}", self.pick(txt::WORKING)));
+        let colon = self.pick(txt::TEXT);
         format!("Agents{colon} {}", parts.join(", "))
     }
 
@@ -134,7 +139,7 @@ impl Words {
     /// "à l'instant", "1 minute", "12 minutes", "1 h 05".
     pub fn minutes(self, minutes: u64) -> String {
         match minutes {
-            0 => self.pick("à l'instant", "a moment").to_owned(),
+            0 => self.pick(txt::A_MOMENT).to_owned(),
             1 => "1 minute".to_owned(),
             m if m < 60 => format!("{m} minutes"),
             m if m % 60 == 0 => format!("{} h", m / 60),
@@ -190,11 +195,11 @@ impl Words {
 
     /// The windows' list: "Fenêtres, 3".
     pub fn windows(self, n: usize) -> String {
-        format!("{}, {n}", self.pick("Fenêtres", "Windows"))
+        format!("{}, {n}", self.pick(txt::WINDOWS))
     }
 
     pub fn desktops(self) -> &'static str {
-        self.pick("Bureaux", "Desktops")
+        self.pick(txt::DESKTOPS)
     }
 
     /// A desktop: "Bureau 2, 1 fenêtre : Firefox", the current one "Bureau
@@ -202,7 +207,7 @@ impl Words {
     pub fn desktop(self, title: &str, current: bool, windows: &[String]) -> String {
         let mut name = title.to_owned();
         if current {
-            name.push_str(self.pick(", actuel", ", current"));
+            name.push_str(self.pick(txt::CURRENT));
         }
         let count = match (self.fr, windows.len()) {
             (true, 0) => "aucune fenêtre".to_owned(),
@@ -215,7 +220,7 @@ impl Words {
         name.push_str(", ");
         name.push_str(&count);
         if !windows.is_empty() {
-            name.push_str(self.pick(" : ", ": "));
+            name.push_str(self.pick(txt::TEXT_2));
             name.push_str(&windows.join(", "));
         }
         name
@@ -277,10 +282,7 @@ impl Words {
             ) => {
                 let mut said = name.clone();
                 if let Some(battery) = battery {
-                    said.push_str(&format!(
-                        ", {} {battery}\u{a0}%",
-                        self.pick("batterie", "battery")
-                    ));
+                    said.push_str(&format!(", {} {battery}\u{a0}%", self.pick(txt::BATTERY)));
                 }
                 match (more, self.fr) {
                     (0, _) => {}
@@ -295,10 +297,7 @@ impl Words {
 
     /// The keyboard layout's button: "Disposition du clavier, Français".
     pub fn layout(self, name: &str) -> String {
-        format!(
-            "{}, {name}",
-            self.pick("Disposition du clavier", "Keyboard layout")
-        )
+        format!("{}, {name}", self.pick(txt::KEYBOARD_LAYOUT))
     }
 
     pub fn volume(self) -> &'static str {
@@ -311,11 +310,11 @@ impl Words {
     }
 
     pub fn muted(self) -> &'static str {
-        self.pick("muet", "muted")
+        self.pick(txt::MUTED)
     }
 
     pub fn battery(self) -> &'static str {
-        self.pick("Batterie", "Battery")
+        self.pick(txt::BATTERY_2)
     }
 
     /// The battery's value: "82 %, 3 h 10 restantes, équilibré".
@@ -333,7 +332,7 @@ impl Words {
     /// équilibré".
     pub fn power(self, levels: &Snapshot) -> String {
         let words = crate::levels::model::Words::new(self.lang());
-        let mode = self.pick("Mode d'énergie", "Power mode");
+        let mode = self.pick(txt::POWER_MODE);
         match levels.profile {
             Some(profile) => format!("{mode}, {}", words.profile(profile)),
             None => mode.to_owned(),
@@ -372,7 +371,7 @@ impl Words {
     }
 
     pub fn add_task(self) -> &'static str {
-        self.pick("Ajouter une tâche", "Add a task")
+        self.pick(txt::ADD_A_TASK)
     }
 
     /// "+ 4 autres": "4 autres tâches".
@@ -404,23 +403,23 @@ impl Words {
     }
 
     pub fn footer(self) -> &'static str {
-        self.pick("Pied de la barre", "Bar's footer")
+        self.pick(txt::BAR_S_FOOTER)
     }
 
     pub fn tray(self) -> &'static str {
-        self.pick("Icônes des applications", "Applications' icons")
+        self.pick(txt::APPLICATIONS_ICONS)
     }
 
     pub fn calendar(self) -> &'static str {
-        self.pick("Calendrier", "Calendar")
+        self.pick(txt::CALENDAR)
     }
 
     pub fn choose_sources(self) -> &'static str {
-        self.pick("Choisir…", "Choose…")
+        self.pick(txt::CHOOSE)
     }
 
     pub fn later(self) -> &'static str {
-        self.pick("Plus tard", "Later")
+        self.pick(txt::LATER)
     }
 
     /// A notification: "Slack : Léa Martin", ", urgent" when critical.
@@ -428,7 +427,7 @@ impl Words {
         let mut name = match (app.is_empty(), summary.is_empty()) {
             (true, _) => summary.to_owned(),
             (false, true) => app.to_owned(),
-            (false, false) => format!("{app}{} {summary}", self.pick(" :", ":")),
+            (false, false) => format!("{app}{} {summary}", self.pick(txt::TEXT)),
         };
         if urgent {
             name.push_str(", urgent");
@@ -437,11 +436,11 @@ impl Words {
     }
 
     pub fn lock(self) -> &'static str {
-        self.pick("Session verrouillée", "Session locked")
+        self.pick(txt::SESSION_LOCKED)
     }
 
     pub fn mute(self) -> &'static str {
-        self.pick("Couper le son", "Mute")
+        self.pick(txt::MUTE)
     }
 
     /// An application's tile: "Couper le son de Firefox".
@@ -454,11 +453,11 @@ impl Words {
     }
 
     pub fn mute_microphone(self) -> &'static str {
-        self.pick("Couper le micro", "Mute the microphone")
+        self.pick(txt::MUTE_THE_MICROPHONE)
     }
 
     pub fn microphone(self) -> &'static str {
-        self.pick("Micro", "Microphone")
+        self.pick(txt::MICROPHONE)
     }
 }
 

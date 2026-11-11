@@ -18,6 +18,7 @@
 mod mpris;
 pub mod tile;
 
+use hocus_words::shell::music as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -479,57 +480,61 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn music(self) -> &'static str {
-        self.pick("Musique", "Music")
+        self.pick(txt::MUSIC)
     }
 
     /// The tile's second line while paused.
     pub fn paused_line(self) -> &'static str {
-        self.pick("En pause", "Paused")
+        self.pick(txt::PAUSED)
     }
 
     pub fn paused(self) -> &'static str {
-        self.pick("en pause", "paused")
+        self.pick(txt::PAUSED_2)
     }
 
     pub fn playing(self) -> &'static str {
-        self.pick("en lecture", "playing")
+        self.pick(txt::PLAYING)
     }
 
     pub fn other_player(self, n: usize) -> &'static str {
         match n {
-            1 => self.pick("Autre lecteur", "Other player"),
-            _ => self.pick("Autres lecteurs", "Other players"),
+            1 => self.pick(txt::OTHER_PLAYER),
+            _ => self.pick(txt::OTHER_PLAYERS),
         }
     }
 
     pub fn shuffle(self) -> &'static str {
-        self.pick("Lecture aléatoire", "Shuffle")
+        self.pick(txt::SHUFFLE)
     }
 
     pub fn previous(self) -> &'static str {
-        self.pick("Piste précédente", "Previous track")
+        self.pick(txt::PREVIOUS_TRACK)
     }
 
     pub fn next(self) -> &'static str {
-        self.pick("Piste suivante", "Next track")
+        self.pick(txt::NEXT_TRACK)
     }
 
     /// The play button's name: what it does.
     pub fn play_pause(self, playing: bool) -> &'static str {
         if playing {
-            self.pick("Pause", "Pause")
+            self.pick(txt::PAUSE)
         } else {
-            self.pick("Lecture", "Play")
+            self.pick(txt::PLAY)
         }
     }
 
     pub fn open(self, app: &str) -> String {
-        format!("{} {app}", self.pick("Afficher", "Show"))
+        format!("{} {app}", self.pick(txt::SHOW))
     }
 
     /// The source in the popover's header: "Spotify", "Spotify · en pause".

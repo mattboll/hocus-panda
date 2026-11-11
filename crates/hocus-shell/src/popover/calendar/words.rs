@@ -2,6 +2,7 @@
 //! the days' letters, the day's line, the counts, the notes, the spans of
 //! days and the times, as the system's clock writes them.
 
+use hocus_words::shell::popover_calendar_words as txt;
 use jiff::civil::{Date, Time, Weekday};
 
 use crate::clock::time::Lang;
@@ -84,8 +85,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     fn month(self, month: i8) -> &'static str {
@@ -132,19 +137,19 @@ impl Words {
 
     /// Over the week numbers.
     pub fn week(self) -> &'static str {
-        self.pick("sem.", "wk")
+        self.pick(txt::WK)
     }
 
     pub fn today_button(self) -> &'static str {
-        self.pick("Aujourd'hui", "Today")
+        self.pick(txt::TODAY)
     }
 
     pub fn previous(self) -> &'static str {
-        self.pick("Mois précédent", "Previous month")
+        self.pick(txt::PREVIOUS_MONTH)
     }
 
     pub fn next(self) -> &'static str {
-        self.pick("Mois suivant", "Next month")
+        self.pick(txt::NEXT_MONTH)
     }
 
     /// The day's line: "Mercredi 4 novembre", "Wednesday 4 November", with
@@ -165,11 +170,11 @@ impl Words {
     /// After the day's name, when it is near `today`.
     pub fn relative(self, day: Date, today: Date) -> Option<&'static str> {
         if day == today {
-            Some(self.pick("aujourd'hui", "today"))
+            Some(self.pick(txt::TODAY_2))
         } else if today.tomorrow().ok() == Some(day) {
-            Some(self.pick("demain", "tomorrow"))
+            Some(self.pick(txt::TOMORROW))
         } else if today.yesterday().ok() == Some(day) {
-            Some(self.pick("hier", "yesterday"))
+            Some(self.pick(txt::YESTERDAY))
         } else {
             None
         }
@@ -179,13 +184,13 @@ impl Words {
     pub fn count(self, n: usize) -> Option<String> {
         match n {
             0 => None,
-            1 => Some(self.pick("1 événement", "1 event").to_owned()),
-            n => Some(format!("{n} {}", self.pick("événements", "events"))),
+            1 => Some(self.pick(txt::N_1_EVENT).to_owned()),
+            n => Some(format!("{n} {}", self.pick(txt::EVENTS))),
         }
     }
 
     pub fn all_day(self) -> &'static str {
-        self.pick("toute la journée", "all day")
+        self.pick(txt::ALL_DAY)
     }
 
     /// An event of several days: "7 – 8 nov.", "30 nov. – 2 déc.";
@@ -210,29 +215,29 @@ impl Words {
     }
 
     pub fn empty(self) -> &'static str {
-        self.pick("Rien de prévu ce jour-là.", "Nothing planned that day.")
+        self.pick(txt::NOTHING_PLANNED_THAT_DAY)
     }
 
     /// No calendar account in the configuration (Day.1 not set up).
     pub fn no_source(self) -> &'static str {
-        self.pick("Aucun agenda branché.", "No calendar connected.")
+        self.pick(txt::NO_CALENDAR_CONNECTED)
     }
 
     /// The button under it: Day.1's popover.
     pub fn choose_calendars(self) -> &'static str {
-        self.pick("Choisir des agendas…", "Choose calendars…")
+        self.pick(txt::CHOOSE_CALENDARS)
     }
 
     /// A day outside the window the shell keeps (2 months back to 12
     /// ahead), its month asked of the accounts, not answered yet.
     pub fn loading(self) -> &'static str {
-        self.pick("Chargement…", "Loading…")
+        self.pick(txt::LOADING)
     }
 
     /// A day outside the window the shell keeps, its month not given by
     /// an account (offline, say).
     pub fn not_loaded(self) -> &'static str {
-        self.pick("Ce jour n'est pas chargé.", "This day is not loaded.")
+        self.pick(txt::THIS_DAY_IS_NOT_LOADED)
     }
 
     /// A day's name for screen readers: "mercredi 4 novembre, 6
@@ -246,10 +251,10 @@ impl Words {
         );
         match self.count(events) {
             Some(count) => name.push_str(&format!(", {count}")),
-            None => name.push_str(self.pick(", rien de prévu", ", nothing planned")),
+            None => name.push_str(self.pick(txt::NOTHING_PLANNED)),
         }
         if day == today {
-            name.push_str(self.pick(", aujourd'hui", ", today"));
+            name.push_str(self.pick(txt::TODAY_3));
         }
         name
     }

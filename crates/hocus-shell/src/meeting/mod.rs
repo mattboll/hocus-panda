@@ -30,6 +30,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::meeting as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -534,8 +535,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub(crate) fn fr(self) -> bool {
@@ -563,27 +568,27 @@ impl Words {
 
     /// The join button's name.
     pub fn join_call(self) -> &'static str {
-        self.pick("Rejoindre la visio", "Join the video call")
+        self.pick(txt::JOIN_THE_VIDEO_CALL)
     }
 
     /// The mini popover's label.
     pub fn heading(self, phase: Phase) -> &'static str {
         match phase {
-            Phase::Ahead { .. } => self.pick("PROCHAINE RÉUNION", "NEXT MEETING"),
-            Phase::Under { .. } => self.pick("EN COURS", "NOW"),
+            Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING),
+            Phase::Under { .. } => self.pick(txt::NOW),
         }
     }
 
     pub fn then(self) -> &'static str {
-        self.pick("ENSUITE", "NEXT")
+        self.pick(txt::NEXT)
     }
 
     pub fn join(self) -> &'static str {
-        self.pick("Rejoindre", "Join")
+        self.pick(txt::JOIN)
     }
 
     pub fn show_in_calendar(self) -> &'static str {
-        self.pick("Voir dans le calendrier", "Show in the calendar")
+        self.pick(txt::SHOW_IN_THE_CALENDAR)
     }
 
     /// The card's name for screen readers: "Prochaine réunion : Point
@@ -599,7 +604,7 @@ impl Words {
                     (false, m) => format!("{h} h {m:02}"),
                 }
             } else if minutes == 1 {
-                self.pick("1 minute", "1 minute").to_owned()
+                self.pick(txt::N_1_MINUTE).to_owned()
             } else {
                 format!("{minutes} minutes")
             }
@@ -611,13 +616,13 @@ impl Words {
             (Phase::Under { left, .. }, false) => format!("ends in {}", long(left)),
         };
         let heading = match card.phase {
-            Phase::Ahead { .. } => self.pick("Prochaine réunion", "Next meeting"),
-            Phase::Under { .. } => self.pick("Réunion en cours", "Meeting now"),
+            Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING_2),
+            Phase::Under { .. } => self.pick(txt::MEETING_NOW),
         };
         let colon = if self.fr { " :" } else { ":" };
         let mut name = format!("{heading}{colon} {}, {}, {when}", card.title, card.start);
         if card.video.is_some() {
-            name.push_str(self.pick(", visio", ", video call"));
+            name.push_str(self.pick(txt::VIDEO_CALL));
         } else if let Some(place) = &card.place {
             name.push_str(", ");
             name.push_str(place);

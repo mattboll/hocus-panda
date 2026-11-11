@@ -16,6 +16,7 @@
 //! actions close the menu. `Tab` and the arrows go through it, `Enter` or
 //! `Space` acts, `Esc` closes it.
 
+use hocus_words::shell::popover_window_menu as txt;
 use std::sync::{Mutex, PoisonError};
 
 use hocus_a11y::Role;
@@ -119,19 +120,23 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.french { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.french {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn name(self, target: Target, maximized: bool) -> &'static str {
         match target {
-            Target::Maximize if maximized => self.pick("Restaurer", "Restore"),
-            Target::Maximize => self.pick("Agrandir", "Maximise"),
-            Target::Minimize => self.pick("Réduire", "Minimise"),
-            Target::Above => self.pick("Au premier plan", "Always on top"),
-            Target::AllDesktops => self.pick("Sur tous les bureaux", "On all desktops"),
+            Target::Maximize if maximized => self.pick(txt::RESTORE),
+            Target::Maximize => self.pick(txt::MAXIMISE),
+            Target::Minimize => self.pick(txt::MINIMISE),
+            Target::Above => self.pick(txt::ALWAYS_ON_TOP),
+            Target::AllDesktops => self.pick(txt::ON_ALL_DESKTOPS),
             Target::Tile { .. } => "",
-            Target::Close => self.pick("Fermer", "Close"),
+            Target::Close => self.pick(txt::CLOSE),
         }
     }
 
@@ -146,13 +151,13 @@ impl Words {
     }
 
     pub fn send_to(self) -> &'static str {
-        self.pick("ENVOYER SUR", "SEND TO")
+        self.pick(txt::SEND_TO)
     }
 
     /// A screen's caption: the built-in one is "this laptop".
     pub fn screen(self, screen: &hocus_link::MenuScreen) -> String {
         if screen.internal {
-            self.pick("ce portable", "this laptop").to_owned()
+            self.pick(txt::THIS_LAPTOP).to_owned()
         } else {
             screen.name.clone()
         }

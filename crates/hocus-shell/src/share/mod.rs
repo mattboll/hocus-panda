@@ -13,6 +13,7 @@
 
 pub mod view;
 
+use hocus_words::shell::share as txt;
 use std::time::{Duration, Instant};
 
 use hocus_link::{
@@ -44,8 +45,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     /// "Firefox veut voir ton écran", the application's name known or not.
@@ -60,7 +65,7 @@ impl Words {
 
     /// What it says of itself, then "choisis ce que tu partages".
     pub fn choose(self, detail: &str) -> String {
-        let choose = self.pick("choisis ce que tu partages", "choose what to share");
+        let choose = self.pick(txt::CHOOSE_WHAT_TO_SHARE);
         if detail.is_empty() {
             choose.to_owned()
         } else {
@@ -70,17 +75,17 @@ impl Words {
 
     pub fn tab(self, tab: Tab) -> &'static str {
         match tab {
-            Tab::Screens => self.pick("Écrans", "Screens"),
-            Tab::Windows => self.pick("Fenêtres", "Windows"),
+            Tab::Screens => self.pick(txt::SCREENS),
+            Tab::Windows => self.pick(txt::WINDOWS),
         }
     }
 
     /// A screen's name: the laptop's, its model's, or an external one.
     pub fn screen(self, builtin: bool, model: &str) -> String {
         if builtin {
-            self.pick("Écran du portable", "Laptop screen").to_owned()
+            self.pick(txt::LAPTOP_SCREEN).to_owned()
         } else if model.is_empty() {
-            self.pick("Écran externe", "External screen").to_owned()
+            self.pick(txt::EXTERNAL_SCREEN).to_owned()
         } else {
             model.to_owned()
         }
@@ -101,15 +106,15 @@ impl Words {
     }
 
     pub fn pointer(self) -> &'static str {
-        self.pick("Montrer le pointeur", "Show the pointer")
+        self.pick(txt::SHOW_THE_POINTER)
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn share(self) -> &'static str {
-        self.pick("Partager", "Share")
+        self.pick(txt::SHARE)
     }
 }
 
