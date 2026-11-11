@@ -22,9 +22,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::{Node, Role};
 use hocus_link::{Form, TODAY_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector, mouse,
     widget::{
         canvas::{self, Frame, Geometry, Path},
         text::Alignment,
@@ -36,9 +37,10 @@ use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
-    levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded, pointer, ring},
+    levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded},
     meeting::draw::MONO,
-    popover::{self, Item, kit},
+    popover::{Item, kit},
+    ui::items::{Control, Controls, Items, Press},
 };
 
 /// The surface's width: the bar inside its rim.
@@ -103,8 +105,6 @@ struct Moving {
 
 #[derive(Debug, Default)]
 pub struct State {
-    at: Option<Point>,
-    hover: Option<usize>,
     drawn: Option<Instant>,
     /// The rows as last drawn, to move from.
     seen: Vec<Row>,
@@ -169,14 +169,6 @@ impl View {
         )
     }
 
-    /// The bar's frame's `rect` (the surface's).
-    fn in_bar(&self, rect: Rectangle, size: Size, top: f32) -> Rectangle {
-        Rectangle::new(
-            Point::new(rect.x - size.width - 1.0, top - ROOM + rect.y),
-            rect.size(),
-        )
-    }
-
     /// The full form's opacity now (it fades with the bar's switch).
     fn alpha(&self) -> f32 {
         self.forms
@@ -186,85 +178,110 @@ impl View {
     }
 }
 
-impl canvas::Program<Message> for View {
+impl Items for View {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        TODAY_NAMESPACE
+    }
+
+    fn controls(&self, _state: &State, size: Size) -> Controls {
+        let (rows, top) = super::shown(&self.bar);
+        let to_bar = Vector::new(-size.width - 1.0, top - ROOM);
+        if self.forms.len() != 1 || self.alpha() <= 0.0 {
+            return Controls {
+                to_bar,
+                ..Controls::default()
+            };
+        }
+        let said = crate::a11y::Words::new(self.words.lang);
+        let controls: Vec<Control> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| {
+                let name = match row {
+                    Row::Event(line) => self.words.name(line),
+                    Row::More(n) => said.more_today(*n),
+                };
+                let item = item_of(&rows, i)?;
+                Some(Control::new(
+                    item,
+                    self.line_rect(size, i),
+                    Role::Button,
+                    name,
+                    RADIUS,
+                ))
+            })
+            .collect();
+        let events = rows
+            .iter()
+            .map(|r| match r {
+                Row::Event(_) => 1,
+                Row::More(n) => *n,
+            })
+            .sum();
+        Controls {
+            to_bar,
+            group: (controls.len() > 1).then(|| Node::new("today", Role::List, said.today(events))),
+            controls,
+        }
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
-        match event {
-            iced::Event::Window(iced::window::Event::RedrawRequested(now)) => {
-                state.drawn = Some(*now);
-                let (rows, _) = super::shown(&self.bar);
-                state.follow(&rows, *now, self.motion);
-                (!state.still(*now)).then(|| canvas::Action::request_redraw_at(*now + STEP))
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        state.drawn = Some(*now);
+        let (rows, _) = super::shown(&self.bar);
+        state.follow(&rows, *now, self.motion);
+        (!state.still(*now)).then(|| canvas::Action::request_redraw_at(*now + STEP))
+    }
+
+    /// A line under the pointer shows its times and its title whole.
+    fn hovered(&self, _state: &mut State, on: Option<(Item, Rectangle)>) {
+        let (rows, _) = super::shown(&self.bar);
+        let line = on.and_then(|(item, rect)| {
+            let i = (0..rows.len()).find(|i| item_of(&rows, *i) == Some(item))?;
+            match rows.get(i)? {
+                Row::Event(line) => Some((line, rect)),
+                Row::More(_) => None,
             }
-            iced::Event::Mouse(seen) => {
-                let at = pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let (rows, top) = super::shown(&self.bar);
-                let still = self.forms.len() == 1;
-                let over = at
-                    .filter(|_| still)
-                    .and_then(|at| (0..rows.len()).find(|i| self.line_rect(size, *i).contains(at)));
-                match seen {
-                    mouse::Event::CursorEntered
-                    | mouse::Event::CursorMoved { .. }
-                    | mouse::Event::CursorLeft => {
-                        if over == state.hover {
-                            return None;
-                        }
-                        state.hover = over;
-                        match over.and_then(|i| rows.get(i).map(|r| (i, r))) {
-                            Some((i, Row::Event(line))) => {
-                                let (name, tip) = Words::tip(line);
-                                let rect = self.in_bar(self.line_rect(size, i), size, top);
-                                crate::tray::tip::hover_text(&self.bar, rect, TIP, name, tip);
-                            }
-                            _ => crate::tray::tip::leave(),
-                        }
-                        Some(canvas::Action::request_redraw())
-                    }
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                        let i = over?;
-                        crate::tray::tip::leave();
-                        let item = match rows.get(i)? {
-                            Row::Event(_) => Item::TodayLine(i as u8),
-                            Row::More(_) => Item::TodayMore,
-                        };
-                        popover::event(popover::Event::ItemPress {
-                            bar: self.bar.clone(),
-                            item,
-                            rect: self.in_bar(self.line_rect(size, i), size, top),
-                        });
-                        Some(canvas::Action::request_redraw().and_capture())
-                    }
-                    _ => None,
-                }
+        });
+        match line {
+            Some((line, rect)) => {
+                let (name, tip) = Words::tip(line);
+                crate::tray::tip::hover_text(&self.bar, rect, TIP, name, tip);
             }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+            None => crate::tray::tip::leave(),
         }
+    }
+
+    fn pressed(
+        &self,
+        _state: &mut State,
+        _button: mouse::Button,
+        _on: Option<(Item, Rectangle)>,
+    ) -> Press {
+        crate::tray::tip::leave();
+        Press::Kit
     }
 
     fn draw(
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
@@ -275,27 +292,7 @@ impl canvas::Program<Message> for View {
             return crate::backdrop::over(under, frame);
         }
         let still = self.forms.len() == 1;
-        let items: Vec<(Item, Rectangle)> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, row)| {
-                let item = match row {
-                    Row::Event(_) => Item::TodayLine(i as u8),
-                    Row::More(_) => Item::TodayMore,
-                };
-                (item, self.in_bar(self.line_rect(size, i), size, top))
-            })
-            .collect();
-        let focused = if still {
-            popover::with(|c| {
-                c.set_items(&self.bar, TODAY_NAMESPACE, items.clone());
-                items
-                    .iter()
-                    .position(|(item, _)| c.focused(&self.bar, *item))
-            })
-        } else {
-            None
-        };
+        let hover = lit.and_then(|lit| (0..rows.len()).find(|i| item_of(&rows, *i) == Some(lit)));
         let f = &mut frame;
         let o = self.origin(size);
         let mut x = o.x;
@@ -344,11 +341,8 @@ impl canvas::Program<Message> for View {
                     }
                 }
             }
-            let lit = still && state.hover == Some(i);
+            let lit = still && hover == Some(i);
             draw_row(f, row, rect, self.words, a, lit);
-            if focused == Some(i) {
-                ring(f, rect, RADIUS);
-            }
         }
         if still && state.moving.is_empty() && state.going.is_empty() {
             let names: Vec<String> = rows
@@ -358,7 +352,7 @@ impl canvas::Program<Message> for View {
                     Row::More(n) => self.words.more(*n),
                 })
                 .collect();
-            let said = format!("{} lit={:?}", self.words.said(&rows), state.hover);
+            let said = format!("{} lit={:?}", self.words.said(&rows), hover);
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
                 tracing::debug!(
@@ -372,19 +366,14 @@ impl canvas::Program<Message> for View {
         }
         crate::backdrop::over(under, frame)
     }
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
-    }
+/// Row `i`'s item: an event's line, or the "+ N".
+fn item_of(rows: &[Row], i: usize) -> Option<Item> {
+    Some(match rows.get(i)? {
+        Row::Event(_) => Item::TodayLine(u8::try_from(i).ok()?),
+        Row::More(_) => Item::TodayMore,
+    })
 }
 
 /// Row `row` at `rect` (its line, 6 px past the group's sides).

@@ -8,8 +8,8 @@
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
 use hocus_link::{
-    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, TODAY_NAMESPACE,
-    TRAY_NAMESPACE, WINDOWS_NAMESPACE,
+    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, TRAY_NAMESPACE,
+    WINDOWS_NAMESPACE,
 };
 use hocus_network::model::Link;
 
@@ -65,7 +65,6 @@ pub struct Facts {
     /// The item whose popover is open.
     pub open: Option<Item>,
     pub clock: Option<Shown>,
-    pub today: Vec<crate::today::Row>,
     pub tasks: Vec<Task>,
     pub open_tasks: usize,
     pub more_tasks: usize,
@@ -145,17 +144,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
     }
     let full = nodes.len() > 1;
     let container = match namespace {
-        TODAY_NAMESPACE if full => {
-            let events = facts
-                .today
-                .iter()
-                .map(|r| match r {
-                    crate::today::Row::Event(_) => 1,
-                    crate::today::Row::More(n) => *n,
-                })
-                .sum();
-            Some(Node::new("today", Role::List, words.today(events)))
-        }
         TASKS_NAMESPACE if full => Some(Node::new(
             "tasks",
             Role::List,
@@ -211,24 +199,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
     let node = match item {
         Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
         Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
-        Item::TodayLine(i) => {
-            let line = facts
-                .today
-                .iter()
-                .filter_map(|r| match r {
-                    crate::today::Row::Event(line) => Some(line),
-                    crate::today::Row::More(_) => None,
-                })
-                .nth(usize::from(i))?;
-            button(crate::today::Words::new(lang).name(line))
-        }
-        Item::TodayMore => {
-            let more = facts.today.iter().find_map(|r| match r {
-                crate::today::Row::More(n) => Some(*n),
-                crate::today::Row::Event(_) => None,
-            })?;
-            button(words.more_today(more))
-        }
         Item::Tasks => button(words.tasks(facts.open_tasks)),
         Item::TasksMore => button(words.more_tasks(facts.more_tasks)),
         Item::TaskAdd => button(words.add_task().to_owned()),
@@ -348,7 +318,9 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
         | Item::InUse
         | Item::Meeting
         | Item::MeetingMark
-        | Item::Join => return None,
+        | Item::Join
+        | Item::TodayLine(_)
+        | Item::TodayMore => return None,
         Item::Tray(tray) => {
             let name = facts.tray.iter().find(|(k, _)| *k == tray)?.1.clone();
             button(name).act(Act::Menu)
