@@ -1914,14 +1914,11 @@ impl Shell {
             }),
             popover::Item::Brightness => popover::brightness::view(id, self.words, self.look.glass),
             popover::Item::Battery => popover::battery::view(id, self.words, self.look.glass),
-            popover::Item::Windows => canvas(popover::windows::Panel {
+            popover::Item::Windows => popover::windows::view(&popover::windows::Panel {
                 id,
                 words: windows::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
                 id,
                 window,

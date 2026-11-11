@@ -344,7 +344,8 @@ impl Item {
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),
-            Self::Window(_) | Self::WindowClose(_) | Self::Windows | Self::WindowMenu(_) => {}
+            Self::Windows => windows::opening(),
+            Self::Window(_) | Self::WindowClose(_) | Self::WindowMenu(_) => {}
         }
     }
 
