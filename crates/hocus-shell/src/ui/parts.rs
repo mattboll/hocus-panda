@@ -37,7 +37,6 @@ const BLOCK_FILL: Ink = Ink::Accent(0.10);
 const SMALL_BUTTON: f32 = 28.0;
 const RULE: f32 = 4.0;
 const RULE_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const LABEL_SPACING: f32 = 0.08 * LABEL;
 /// The Settings' link (6.5): its row, its tile, its words.
 const LINK: f32 = 36.0;
 const LINK_TILE: f32 = 24.0;
@@ -149,10 +148,7 @@ pub fn label_as<'a, M: 'static>(
     height: f32,
     aside: Option<El<'a, M>>,
 ) -> El<'a, M> {
-    let mut letters = row![].spacing(LABEL_SPACING);
-    for ch in word.chars() {
-        letters = letters.push(said(ch.to_string(), LABEL, MANROPE_BOLD, DIM.get()));
-    }
+    let letters = spaced(word, LABEL, DIM.get(), f32::INFINITY);
     let mut line = row![letters, space::horizontal()].align_y(Vertical::Center);
     if let Some(aside) = aside {
         line = line.push(aside);
@@ -162,6 +158,25 @@ pub fn label_as<'a, M: 'static>(
         said_as,
     )
     .into()
+}
+
+/// `word`'s capitals in bold at `size`, spaced 0.08 em (CSS's
+/// `letter-spacing`, which iced's text has not: a letter a widget), as
+/// many as fit in `room`.
+pub fn spaced<'a, M: 'a>(word: &str, size: f32, colour: Color, room: f32) -> El<'a, M> {
+    let spacing = 0.08 * size;
+    let mut letters = row![].spacing(spacing);
+    let mut x = 0.0;
+    for ch in word.chars() {
+        let ch = ch.to_string();
+        let width = kit::measure(&ch, size, MANROPE_BOLD);
+        if x + width > room {
+            break;
+        }
+        x += width + spacing;
+        letters = letters.push(said(ch, size, MANROPE_BOLD, colour));
+    }
+    letters.into()
 }
 
 /// A word in a button, in the middle of its height, in the button's

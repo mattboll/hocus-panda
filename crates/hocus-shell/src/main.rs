@@ -2021,14 +2021,11 @@ impl Shell {
             .height(Length::Fill)
             .into(),
             // They open none.
-            popover::Item::Tray(key) => canvas(popover::tray::Panel {
+            popover::Item::Tray(key) => popover::tray::view(&popover::tray::Panel {
                 id,
                 key,
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Keyboard
             | popover::Item::Decline
             | popover::Item::Agent(_)
