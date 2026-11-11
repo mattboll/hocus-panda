@@ -145,6 +145,39 @@ impl Uses {
         !self.kinds().is_empty()
     }
 
+    /// What is in use and by whom, as screen readers say it: each kind
+    /// still on, with its applications.
+    pub fn used(&self) -> Vec<(Kind, Vec<String>)> {
+        let apps = |media: &[Seen<Media>]| -> Vec<String> {
+            media
+                .iter()
+                .filter(|m| m.live())
+                .map(|m| m.what.app.clone())
+                .collect()
+        };
+        let mut used = Vec::new();
+        for (kind, apps) in [
+            (Kind::Microphone, apps(&self.microphone)),
+            (Kind::Camera, apps(&self.camera)),
+            (
+                Kind::Screen,
+                self.shares
+                    .iter()
+                    .filter(|s| s.live())
+                    .map(|s| s.what.app.clone())
+                    .collect(),
+            ),
+        ] {
+            if !apps.is_empty() {
+                used.push((kind, apps));
+            }
+        }
+        if self.recording.as_ref().is_some_and(|r| r.live()) {
+            used.push((Kind::Recording, Vec::new()));
+        }
+        used
+    }
+
     /// The shares still on (not lingering).
     pub fn live_shares(&self) -> impl Iterator<Item = &ShareShown> {
         self.shares.iter().filter(|s| s.live()).map(|s| &s.what)
@@ -564,7 +597,7 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The words of the sign's popover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

@@ -66,8 +66,6 @@ pub struct Facts {
     pub open: Option<Item>,
     pub clock: Option<Shown>,
     pub meeting: Option<crate::meeting::Card>,
-    pub uses: Vec<(crate::in_use::Kind, Vec<String>)>,
-    pub microphone_muted: bool,
     pub today: Vec<crate::today::Row>,
     pub tasks: Vec<Task>,
     pub open_tasks: usize,
@@ -213,7 +211,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
     };
     let node = match item {
         Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
-        Item::InUse => button(words.in_use(&facts.uses, facts.microphone_muted)),
         Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
         Item::Meeting | Item::MeetingMark => {
             button(crate::meeting::Words::new(lang).name(facts.meeting.as_ref()?))
@@ -349,7 +346,9 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
             None => button(words.power(&facts.levels)),
         },
         // Declared by their surfaces on the kit.
-        Item::Notifications | Item::Clipboard | Item::Menu | Item::User => return None,
+        Item::Notifications | Item::Clipboard | Item::Menu | Item::User | Item::InUse => {
+            return None;
+        }
         Item::Tray(tray) => {
             let name = facts.tray.iter().find(|(k, _)| *k == tray)?.1.clone();
             button(name).act(Act::Menu)

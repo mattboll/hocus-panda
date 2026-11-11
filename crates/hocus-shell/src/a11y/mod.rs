@@ -663,34 +663,6 @@ fn gather(
         || bar.to_owned(),
         |s| levels_words.screen(s.built_in, s.inches, s.number),
     );
-    let uses = crate::in_use::snapshot();
-    let mut used = Vec::new();
-    let apps = |media: &[crate::in_use::Seen<crate::in_use::Media>]| -> Vec<String> {
-        media
-            .iter()
-            .filter(|m| m.live())
-            .map(|m| m.what.app.clone())
-            .collect()
-    };
-    for (kind, apps) in [
-        (crate::in_use::Kind::Microphone, apps(&uses.microphone)),
-        (crate::in_use::Kind::Camera, apps(&uses.camera)),
-        (
-            crate::in_use::Kind::Screen,
-            uses.shares
-                .iter()
-                .filter(|s| s.live())
-                .map(|s| s.what.app.clone())
-                .collect(),
-        ),
-    ] {
-        if !apps.is_empty() {
-            used.push((kind, apps));
-        }
-    }
-    if uses.recording.as_ref().is_some_and(|r| r.live()) {
-        used.push((crate::in_use::Kind::Recording, Vec::new()));
-    }
     let lines = crate::tasks::lines();
     let tasks: Vec<bar::Task> = lines
         .lines
@@ -772,8 +744,6 @@ fn gather(
             lang,
         )),
         meeting: crate::meeting::snapshot(),
-        uses: used,
-        microphone_muted: uses.muted,
         today: crate::today::shown(bar).0,
         open_tasks: lines.open(),
         more_tasks: lines.open().saturating_sub(shown_boxes),
