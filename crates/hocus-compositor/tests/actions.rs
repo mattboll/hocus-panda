@@ -860,3 +860,17 @@ fn shots() -> anyhow::Result<()> {
     shoot(&mut bed, &out, "nothing")?;
     Ok(())
 }
+
+/// The palette in its main state (the empty field, a window targeted),
+/// for the widget kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::one_screen()? else {
+        return Ok(());
+    };
+    bed.window("kitty", "kitty · herdr")?;
+    bed.open()?;
+    bed.hp.pointer_move(1800.0, 900.0);
+    common::layer_shot(&mut bed.hp, hocus_link::ACTIONS_NAMESPACE, "actions")
+}

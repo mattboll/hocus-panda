@@ -1050,3 +1050,16 @@ fn field_shot() -> anyhow::Result<()> {
     eprintln!("{}", file.display());
     Ok(())
 }
+
+/// The launcher in its main state (the empty field), for the widget kit's
+/// side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.pointer_move(1900.0, 1070.0);
+    common::layer_shot(&mut bed.hp, hocus_link::LAUNCHER_NAMESPACE, "launcher")
+}
