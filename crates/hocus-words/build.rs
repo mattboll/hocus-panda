@@ -650,7 +650,14 @@ fn entry(
     let call = if named {
         let fields: String = ordered
             .iter()
-            .map(|p| format!("{}: {}, ", raw(p), value(p)))
+            .map(|p| {
+                let v = value(p);
+                if v == *p {
+                    format!("{v}, ")
+                } else {
+                    format!("{}: {v}, ", raw(p))
+                }
+            })
             .collect();
         format!(
             "{module}::{}(lang, {module}::{camel} {{ {fields} }})",

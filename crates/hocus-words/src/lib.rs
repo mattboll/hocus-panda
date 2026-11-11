@@ -57,6 +57,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
     clippy::useless_format,
     clippy::needless_borrows_for_generic_args,
     clippy::match_single_binding,
+    clippy::vec_init_then_push,
+    clippy::redundant_field_names,
     reason = "generated: one shape for every key"
 )]
 mod catalogue {
